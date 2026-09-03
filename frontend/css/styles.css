@@ -487,6 +487,10 @@ body.is-pre-play { overflow: hidden; }
     height: auto;
     min-height: 0;
     padding-top: 58px; /* جای ناوبری ثابت (کوچک‌شده در موبایل) */
+    background:
+      radial-gradient(ellipse 90% 60% at 25% 100%, rgba(79, 140, 255, 0.16), transparent 65%),
+      radial-gradient(ellipse 70% 50% at 85% 100%, rgba(255, 140, 66, 0.12), transparent 60%),
+      var(--color-bg-2);
   }
 
   /* ویدیو: بلوک عادی در بالای صفحه با نسبت ۱۶:۹ — نه تمام‌صفحه */
