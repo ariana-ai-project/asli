@@ -1,0 +1,1014 @@
+/* ============================================================
+   سامانه هوشمند آریانا — استایل اصلی (نسخهٔ بازطراحی‌شده)
+   پالت رنگی هماهنگ با ویدیوی آغازین: سحابی آبی/نارنجی فضایی
+   ============================================================ */
+
+:root {
+  --color-bg: #030814;
+  --color-bg-2: #071230;
+  --color-fg: #eef4ff;
+  --color-muted: #9fb2d8;
+  --color-accent: #4f8cff;      /* آبی سحابی ویدیو */
+  --color-accent-2: #ff8c42;    /* نارنجی گداختهٔ ویدیو */
+  --color-led: #ff4040;         /* چراغ قرمز کارت‌ها */
+  --color-border: rgba(158, 197, 255, 0.16);
+  --glass-bg: rgba(120, 165, 255, 0.06);
+  --glass-bg-strong: rgba(9, 20, 46, 0.62);
+  --radius: 18px;
+  --radius-sm: 12px;
+  --shadow-glass: 0 8px 32px rgba(0, 0, 0, 0.4);
+  --font: "Vazirmatn", -apple-system, "Segoe UI", Tahoma, sans-serif;
+  --step-0: clamp(1rem, 0.92rem + 0.4vw, 1.125rem);
+  --step-1: clamp(1.15rem, 1rem + 0.7vw, 1.4rem);
+  --step-2: clamp(1.4rem, 1.2rem + 1vw, 1.9rem);
+  --step-3: clamp(1.8rem, 1.4rem + 2vw, 2.6rem);
+  --step-4: clamp(2.2rem, 1.4rem + 4vw, 4rem);
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font);
+  background:
+    radial-gradient(ellipse 90% 55% at 78% -8%, rgba(79, 140, 255, 0.14), transparent 60%),
+    radial-gradient(ellipse 80% 45% at 12% 108%, rgba(255, 140, 66, 0.09), transparent 60%),
+    var(--color-bg);
+  color: var(--color-fg);
+  font-size: var(--step-0);
+  line-height: 1.7;
+  overflow-x: hidden;
+}
+
+img, video { max-width: 100%; display: block; }
+
+a { color: inherit; text-decoration: none; }
+
+.container {
+  max-width: 1280px;
+  margin-inline: auto;
+  padding-inline: clamp(16px, 5vw, 64px);
+}
+
+/* ---------- قفل تعامل هنگام پخش لوگوموشن ---------- */
+body.is-locked { overflow: hidden; }
+body.is-locked .interaction-shield {
+  pointer-events: all;
+  cursor: none;
+}
+body.is-pre-play { overflow: hidden; }
+
+.interaction-shield {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  pointer-events: none;
+}
+
+/* ---------- شیشه ---------- */
+.glass {
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  backdrop-filter: blur(18px) saturate(150%);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-glass), inset 0 1px 0 rgba(255, 255, 255, 0.09);
+}
+
+/* ============================================================
+   نشان لوگو — دایرهٔ شیشه‌ای با حلقهٔ نورانی چرخان
+   ============================================================ */
+.logo-badge {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  isolation: isolate;
+}
+
+/* حلقهٔ گرادیانی چرخان دور نشان */
+.logo-badge-ring {
+  position: absolute;
+  inset: -3px;
+  border-radius: 50%;
+  background: conic-gradient(
+    from 0deg,
+    var(--color-accent) 0%,
+    #9ec5ff 18%,
+    transparent 38%,
+    transparent 55%,
+    var(--color-accent-2) 72%,
+    transparent 90%,
+    var(--color-accent) 100%
+  );
+  animation: ring-spin 6s linear infinite;
+  z-index: -1;
+}
+
+/* هالهٔ نوری زیر نشان */
+.logo-badge::after {
+  content: "";
+  position: absolute;
+  inset: -10px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(79, 140, 255, 0.35), transparent 70%);
+  filter: blur(8px);
+  z-index: -2;
+  animation: badge-glow 4s ease-in-out infinite;
+}
+
+.logo-badge img {
+  width: calc(100% - 6px);
+  height: calc(100% - 6px);
+  object-fit: cover;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.92);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+}
+
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes badge-glow {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.logo-badge-lg {
+  width: 68px;
+  height: 68px;
+}
+
+/* ============================================================
+   ناوبری
+   ============================================================ */
+.site-header {
+  position: fixed;
+  top: 0;
+  inset-inline: 0;
+  z-index: 1000;
+  padding: 14px clamp(12px, 3vw, 32px);
+}
+
+.nav-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  max-width: 1280px;
+  margin-inline: auto;
+  padding: 10px 20px;
+  border-radius: 999px;
+  background: rgba(6, 14, 34, 0.5);
+}
+
+.nav-links {
+  display: flex;
+  align-items: center;
+  gap: clamp(16px, 3vw, 40px);
+  list-style: none;
+}
+
+.nav-links a {
+  position: relative;
+  font-weight: 500;
+  font-size: 1rem;
+  color: var(--color-fg);
+  padding: 8px 14px;
+  border-radius: 999px;
+  transition: background 0.25s ease, color 0.25s ease;
+}
+
+.nav-links a::after {
+  content: "";
+  position: absolute;
+  bottom: 2px;
+  right: 50%;
+  width: 0;
+  height: 2px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-accent-2));
+  transition: width 0.3s ease, right 0.3s ease;
+}
+
+.nav-links a:hover::after,
+.nav-links a:focus-visible::after { width: 55%; right: 22.5%; }
+
+.nav-links a:hover,
+.nav-links a:focus-visible {
+  background: rgba(158, 197, 255, 0.12);
+  color: #ffffff;
+}
+
+.nav-links a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.nav-toggle {
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  gap: 5px;
+  width: 46px;
+  height: 46px;
+  border-radius: 12px;
+  cursor: pointer;
+  padding: 12px;
+}
+
+.nav-toggle span {
+  display: block;
+  height: 2px;
+  background: var(--color-fg);
+  border-radius: 2px;
+}
+
+@media (max-width: 768px) {
+  .nav-toggle { display: flex; }
+  .nav-links {
+    position: absolute;
+    top: calc(100% + 8px);
+    inset-inline: 12px;
+    flex-direction: column;
+    padding: 18px;
+    border-radius: var(--radius);
+    background: var(--glass-bg-strong);
+    -webkit-backdrop-filter: blur(20px);
+    backdrop-filter: blur(20px);
+    border: 1px solid var(--color-border);
+    display: none;
+  }
+  .nav-links.open { display: flex; }
+}
+
+@media (max-width: 380px) {
+  .nav-pill { padding: 8px 12px; gap: 12px; }
+  .logo-badge { width: 44px; height: 44px; }
+}
+
+/* ============================================================
+   قهرمان — لوگوموشن
+   ============================================================ */
+.hero {
+  position: relative;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.hero-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* ---------- اورلی پایانی ---------- */
+.hero-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.9s ease;
+  background:
+    radial-gradient(ellipse at 50% 120%, rgba(3, 8, 20, 0.55), transparent 60%),
+    linear-gradient(to bottom, rgba(3, 8, 20, 0.5), transparent 30%, transparent 68%, rgba(3, 8, 20, 0.8));
+}
+
+.hero-overlay.visible {
+  opacity: 1;
+  visibility: visible;
+}
+
+.hero-title {
+  position: absolute;
+  top: clamp(84px, 12vh, 130px);
+  inset-inline: 0;
+  text-align: center;
+  font-size: var(--step-4);
+  font-weight: 900;
+  letter-spacing: -0.01em;
+  background: linear-gradient(105deg, #ffffff 30%, #9ec5ff 55%, #ffc49b 85%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  background-size: 220% 100%;
+  filter: drop-shadow(0 4px 40px rgba(0, 0, 0, 0.6)) drop-shadow(0 0 80px rgba(79, 140, 255, 0.35));
+  opacity: 0;
+  transform: translateY(24px);
+}
+
+.hero-overlay.visible .hero-title {
+  animation: rise-in 1s 0.15s cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    title-sheen 7s 1.4s ease-in-out infinite;
+}
+
+@keyframes rise-in {
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes title-sheen {
+  0%, 100% { background-position: 110% 0; }
+  50% { background-position: -10% 0; }
+}
+
+/* ============================================================
+   خطوط اتصال مدرن — پایهٔ محو + جریان نوری متحرک + ذرهٔ پویا
+   ============================================================ */
+.hero-lines {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+}
+
+/* لایهٔ پایه: خط نازک شیشه‌ای که رسم می‌شود */
+.hero-lines .line {
+  fill: none;
+  stroke: rgba(200, 220, 255, 0.4);
+  stroke-width: 1.4;
+  stroke-linecap: round;
+  stroke-dasharray: 520;
+  stroke-dashoffset: 520;
+}
+
+.hero-overlay.visible .hero-lines .line {
+  animation: draw-line 1.5s 0.4s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+.hero-overlay.visible .hero-lines .line:nth-child(2) { animation-delay: 0.55s; }
+.hero-overlay.visible .hero-lines .line:nth-child(3) { animation-delay: 0.7s; }
+.hero-overlay.visible .hero-lines .line:nth-child(4) { animation-delay: 0.5s; }
+.hero-overlay.visible .hero-lines .line:nth-child(5) { animation-delay: 0.65s; }
+.hero-overlay.visible .hero-lines .line:nth-child(6) { animation-delay: 0.8s; }
+.hero-overlay.visible .hero-lines .line:nth-child(7) { animation-delay: 0.95s; }
+
+@keyframes draw-line {
+  to { stroke-dashoffset: 0; }
+}
+
+/* لایهٔ جریان: داس‌های نوری که دائم روی خط سیر می‌کنند (موشن ریز دائم) */
+.hero-lines .line-flow {
+  fill: none;
+  stroke: url(#lineGrad);
+  stroke-width: 2.1;
+  stroke-linecap: round;
+  stroke-dasharray: 4 16;
+  stroke-dashoffset: 0;
+  opacity: 0;
+  animation:
+    flow-fade 0.8s 1.7s ease forwards,
+    flow-move 1.9s 1.7s linear infinite;
+}
+
+.hero-lines .line-flow.f2 { animation-delay: 1.85s, 2s; animation-duration: 0.8s, 2.2s; }
+.hero-lines .line-flow.f3 { animation-delay: 1.95s, 1.75s; animation-duration: 0.8s, 2.05s; }
+.hero-lines .line-flow.f4 { animation-delay: 1.8s, 1.95s; animation-duration: 0.8s, 2.3s; }
+.hero-lines .line-flow.f5 { animation-delay: 1.9s, 2.1s; animation-duration: 0.8s, 1.85s; }
+.hero-lines .line-flow.f6 { animation-delay: 2s, 1.9s; animation-duration: 0.8s, 2.15s; }
+.hero-lines .line-flow.f7 { animation-delay: 2.1s, 2.05s; animation-duration: 0.8s, 1.95s; }
+
+@keyframes flow-fade {
+  to { opacity: 0.95; }
+}
+
+@keyframes flow-move {
+  to { stroke-dashoffset: -20; }
+}
+
+/* ذرهٔ نورانی مسیرپویا */
+.hero-lines .particle {
+  fill: url(#particleGrad);
+  opacity: 0;
+  filter: drop-shadow(0 0 5px rgba(158, 197, 255, 0.95));
+  animation: particle-in 1s 2.1s ease forwards;
+}
+
+@keyframes particle-in {
+  to { opacity: 1; }
+}
+
+/* ---------- نقاط دقیق مبدأ روی کره زمین ---------- */
+.geo-dots .geo-dot {
+  fill: #ffffff;
+  filter: drop-shadow(0 0 6px rgba(79, 140, 255, 0.9));
+  opacity: 0;
+  transform-box: fill-box;
+  transform-origin: center;
+}
+
+.hero-overlay.visible .geo-dots .geo-dot {
+  animation: dot-in 0.5s 1.3s ease-out forwards, dot-pulse 2.2s 1.9s ease-in-out infinite;
+}
+
+@keyframes dot-in {
+  to { opacity: 1; }
+}
+
+@keyframes dot-pulse {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px rgba(79, 140, 255, 0.9)); }
+  50% { transform: scale(1.6); filter: drop-shadow(0 0 12px rgba(255, 140, 66, 1)); }
+}
+
+@media (max-width: 900px) {
+  .hero-lines, .geo-dots, .line-particles { display: none; }
+}
+
+/* ---------- تصاویر پروژه‌ها ---------- */
+.proj {
+  position: absolute;
+  width: clamp(110px, 13vw, 200px);
+  opacity: 0;
+  transform: scale(0.85) translateY(12px);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+  cursor: pointer;
+  z-index: 6;
+}
+
+.hero-overlay.visible .proj {
+  animation: proj-in 0.8s calc(0.9s + var(--d, 0s)) cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes proj-in {
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+.proj img {
+  width: 100%;
+  aspect-ratio: 3 / 2;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 2px solid rgba(255, 255, 255, 0.85);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(79, 140, 255, 0.12);
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.35s ease, border-color 0.35s ease;
+}
+
+/* بزرگ‌شدن با هاور */
+.proj:hover img,
+.proj:focus-visible img {
+  transform: scale(1.14);
+  border-color: #ffffff;
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.65), 0 0 34px rgba(79, 140, 255, 0.35);
+}
+
+.proj figcaption {
+  margin-top: 10px;
+  text-align: center;
+  font-size: clamp(0.72rem, 1vw, 0.95rem);
+  font-weight: 500;
+  color: #ffffff;
+  text-shadow: 0 2px 10px rgba(0, 0, 0, 0.9);
+  line-height: 1.6;
+}
+
+/* موقعیت‌ها — دقیقاً منطبق بر نقاط جغرافیایی (راست: منطقه، چپ: پروژه‌های داخلی ایران) */
+.p1 { right: 18%; top: 68%; }   /* سد و نیروگاه برق آبی راغون */
+.p2 { right: 12%; top: 22%; }   /* سیستم آبیاری و زهکشی ماختارال — قزاقستان */
+.p3 { right: 14%; top: 45%; }   /* کانال آبیاری توپولانگ کاراتاگسکی — ازبکستان */
+.p4 { left: 16%;  top: 21%; }   /* پل مرزی باگراتاشن — ارمنستان/گرجستان */
+.p5 { left: 14%;  top: 44%; }   /* معدن طلای زرشوران */
+.p6 { left: 18%;  top: 63%; }   /* باند دوم محور خمین-الیگودرز */
+.p7 { left: 38%;  top: 70%; }   /* مقاوم‌سازی پل‌های بافق-بندرعباس */
+
+/* ============================================================
+   چیدمان موبایل — ویدیو در بالای صفحه (غیرتمام‌صفحه)
+   و محتوا (عنوان + تصاویر پروژه‌ها) در جریان عادی صفحه زیر آن
+   ============================================================ */
+@media (max-width: 900px) {
+  .hero {
+    height: auto;
+    min-height: 0;
+    padding-top: 58px; /* جای ناوبری ثابت (کوچک‌شده در موبایل) */
+  }
+
+  /* ویدیو: بلوک عادی در بالای صفحه با نسبت ۱۶:۹ — نه تمام‌صفحه */
+  .hero-video {
+    position: relative;
+    inset: auto;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 16 / 9;
+    object-fit: cover;
+    background: var(--color-bg);
+    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  }
+
+  /* اورلی: در جریان عادی سند، زیر ویدیو (بدون تصاویر پروژه در موبایل) */
+  .hero-overlay {
+    position: static;
+    background: none;
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 16px;
+    align-content: start;
+    padding: 22px 16px 34px;
+  }
+
+  /* تصاویر پروژه‌ها در موبایل نمایش داده نمی‌شوند */
+  .proj { display: none; }
+
+  /* عنوان: اورلی روی ویدیو */
+  .hero-title {
+    position: absolute;
+    top: calc(58px + 19vw);
+    inset-inline: 0;
+    z-index: 5;
+    font-size: clamp(1.45rem, 6.2vw, 2.2rem);
+    margin: 0;
+    padding: 10px 16px;
+    animation: none;
+    opacity: 1;
+    transform: none;
+    text-shadow: 0 2px 22px rgba(0, 0, 0, 0.85), 0 0 46px rgba(3, 8, 20, 0.9);
+  }
+
+  .hero-title::before {
+    content: "";
+    position: absolute;
+    inset: -6px 0;
+    z-index: -1;
+    background: linear-gradient(180deg, rgba(3, 8, 20, 0.05), rgba(3, 8, 20, 0.45) 55%, rgba(3, 8, 20, 0.05));
+  }
+
+  .hero-lines, .geo-dots, .line-particles { display: none; }
+
+  .scroll-hint {
+    grid-column: 1 / -1;
+    position: static !important;
+    margin-inline: auto;
+  }
+
+  /* نوار شیشه‌ای ناوبری: کوچک‌تر در موبایل */
+  .site-header { padding: 6px 10px; }
+
+  .nav-pill { padding: 5px 10px; gap: 8px; }
+
+  .logo-badge { width: 32px; height: 32px; }
+
+  .logo-badge img { border-width: 1.5px; }
+
+  .nav-toggle { width: 32px; height: 32px; padding: 8px; gap: 3px; }
+
+  .nav-toggle span { height: 1.3px; }
+
+  /* کارت‌ها: ۴تا کنار هم */
+  .cards-grid {
+    grid-template-columns: repeat(4, 1fr);
+    gap: 10px;
+  }
+}
+
+/* ---------- اشارهٔ اسکرول ---------- */
+.scroll-hint {
+  position: absolute;
+  bottom: 28px;
+  inset-inline: 0;
+  margin-inline: auto;
+  width: fit-content;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 22px;
+  border-radius: 999px;
+  background: var(--glass-bg);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+  border: 1px solid var(--color-border);
+  font-size: 0.9rem;
+  font-weight: 500;
+  opacity: 0;
+  transition: background 0.25s ease;
+}
+
+.hero-overlay.visible .scroll-hint {
+  animation: rise-in 0.8s 2.2s ease forwards;
+}
+
+.scroll-hint:hover { background: rgba(158, 197, 255, 0.16); }
+
+.scroll-hint svg { animation: bounce-y 1.6s ease-in-out infinite; }
+
+@keyframes bounce-y {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(4px); }
+}
+
+/* ============================================================
+   بخش‌های سامانه — فضای سحابی + کارت‌های شیشه‌ای مدرن
+   ============================================================ */
+.departments {
+  position: relative;
+  padding-block: clamp(64px, 10vw, 128px);
+  background:
+    radial-gradient(ellipse at 20% 0%, rgba(79, 140, 255, 0.1), transparent 50%),
+    radial-gradient(ellipse at 80% 100%, rgba(255, 140, 66, 0.08), transparent 50%),
+    linear-gradient(180deg, var(--color-bg) 0%, var(--color-bg-2) 50%, var(--color-bg) 100%);
+  overflow: hidden;
+}
+
+/* سحابی‌های شناور رنگی پشت کارت‌ها (از پشت شیشه پیدا هستند) */
+.nebula {
+  position: absolute;
+  width: 46vw;
+  height: 46vw;
+  max-width: 640px;
+  max-height: 640px;
+  border-radius: 50%;
+  filter: blur(90px);
+  opacity: 0.35;
+  pointer-events: none;
+  z-index: 0;
+  animation: nebula-drift 16s ease-in-out infinite alternate;
+}
+
+.nebula-a {
+  top: -8%;
+  inset-inline-start: -10%;
+  background: radial-gradient(circle, rgba(79, 140, 255, 0.5), transparent 65%);
+}
+
+.nebula-b {
+  bottom: -12%;
+  inset-inline-end: -8%;
+  background: radial-gradient(circle, rgba(255, 140, 66, 0.38), transparent 65%);
+  animation-delay: -8s;
+}
+
+@keyframes nebula-drift {
+  from { transform: translate(0, 0) scale(1); }
+  to { transform: translate(6%, 8%) scale(1.12); }
+}
+
+.starfield {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.departments .container { position: relative; z-index: 2; }
+
+.section-head {
+  text-align: center;
+  margin-bottom: clamp(40px, 6vw, 72px);
+}
+
+.eyebrow {
+  display: inline-block;
+  padding: 8px 22px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--color-fg);
+  margin-bottom: 20px;
+  border-color: rgba(79, 140, 255, 0.35);
+  background: linear-gradient(120deg, rgba(79, 140, 255, 0.18), rgba(255, 140, 66, 0.14));
+}
+
+.section-head h2 {
+  font-size: var(--step-3);
+  font-weight: 900;
+  margin-bottom: 12px;
+}
+
+.section-sub {
+  color: var(--color-muted);
+  max-width: 46ch;
+  margin-inline: auto;
+}
+
+/* ---------- شبکهٔ کارت‌ها: ۸ کارت قرینه (۴×۲) + کارت ابزارها کشیده در پایین ---------- */
+.cards-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 20px;
+  perspective: 1200px;
+}
+
+/*
+   کارت شیشه‌ای یکدست — رنگ و شکل یکسان برای همهٔ بخش‌ها:
+   شیشهٔ کم‌رنگ که سحابی و ستاره‌های پشت آن پیدا هستند،
+   شکل یکسان، رنگ آبی سحابی، و چراغ قرمز چشمک‌زن در گوشه.
+*/
+.card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  min-height: 172px;
+  padding: 24px;
+  border-radius: 24px;
+  overflow: hidden;
+  isolation: isolate;
+  text-align: center;
+  background: linear-gradient(160deg, rgba(158, 197, 255, 0.11), rgba(79, 140, 255, 0.04) 45%, rgba(255, 255, 255, 0.03));
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  backdrop-filter: blur(10px) saturate(140%);
+  border: 1px solid rgba(158, 197, 255, 0.22);
+  box-shadow:
+    0 12px 36px rgba(0, 0, 0, 0.4),
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 -18px 34px rgba(79, 140, 255, 0.06);
+  transform-style: preserve-3d;
+  transition: border-color 0.4s ease, box-shadow 0.4s ease;
+  /* ورود با اسکرول + شناوری آرام دائم */
+  opacity: 0;
+  transform: translateY(28px) scale(0.96);
+}
+
+.card.in {
+  animation: card-enter 0.75s var(--enter-d, 0s) cubic-bezier(0.22, 1, 0.36, 1) forwards,
+    card-float 6.5s calc(var(--enter-d, 0s) + 0.75s) ease-in-out infinite;
+}
+
+@keyframes card-enter {
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes card-float {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -6px; }
+}
+
+/* براق عبوری روی شیشه هنگام هاور */
+.card::before {
+  content: "";
+  position: absolute;
+  inset: -60% -80%;
+  background: linear-gradient(115deg, transparent 35%, rgba(255, 255, 255, 0.32) 49%, rgba(255, 255, 255, 0.05) 58%, transparent 72%);
+  transform: translateX(-65%);
+  transition: transform 1s cubic-bezier(0.22, 1, 0.36, 1);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.card:hover::before,
+.card:focus-visible::before { transform: translateX(65%); }
+
+/* درخشش نرم دنبال‌کنندهٔ نشانگر (مختصات از جاوااسکریپت) */
+.card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgba(79, 140, 255, 0.16), transparent 55%);
+  opacity: 0;
+  transition: opacity 0.35s ease;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.card:hover::after { opacity: 1; }
+
+/* چراغ قرمز چشمک‌زن گوشهٔ کارت — روشن/خاموش آرام */
+.led {
+  position: absolute;
+  top: 14px;
+  inset-inline-end: 14px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #ffb3b3, var(--color-led) 60%, #b91c1c);
+  box-shadow:
+    0 0 6px 1px rgba(255, 64, 64, 0.9),
+    0 0 14px 4px rgba(255, 64, 64, 0.45);
+  animation: led-blink 2.6s ease-in-out infinite;
+  z-index: 2;
+}
+
+/* هالهٔ اطراف چراغ */
+.led::after {
+  content: "";
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 64, 64, 0.5), transparent 70%);
+  filter: blur(3px);
+  animation: led-blink 2.6s ease-in-out infinite;
+}
+
+@keyframes led-blink {
+  0%, 100% { opacity: 1; box-shadow: 0 0 6px 1px rgba(255, 64, 64, 0.9), 0 0 14px 4px rgba(255, 64, 64, 0.45); }
+  50% { opacity: 0.18; box-shadow: 0 0 2px 0 rgba(255, 64, 64, 0.35), 0 0 5px 1px rgba(255, 64, 64, 0.12); }
+}
+
+/* فاز متفاوت چشمک‌زن هر کارت تا هم‌زمان خاموش/روشن نشوند */
+.card:nth-child(3n) .led,
+.card:nth-child(3n) .led::after { animation-delay: -0.9s; }
+.card:nth-child(3n+1) .led,
+.card:nth-child(3n+1) .led::after { animation-delay: -1.7s; }
+
+/* آیکون خطی یکدست کارت‌ها */
+.card-icon {
+  display: grid;
+  place-items: center;
+  width: 58px;
+  height: 58px;
+  border-radius: 18px;
+  color: #bcd6ff;
+  background: linear-gradient(150deg, rgba(79, 140, 255, 0.22), rgba(79, 140, 255, 0.06));
+  border: 1px solid rgba(158, 197, 255, 0.3);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.15), 0 6px 18px rgba(79, 140, 255, 0.14);
+  transition: transform 0.4s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.4s ease, color 0.4s ease;
+  z-index: 1;
+}
+
+.card-icon svg {
+  width: 30px;
+  height: 30px;
+}
+
+.card:hover .card-icon,
+.card:focus-visible .card-icon {
+  transform: translateY(-4px) scale(1.08) rotate(-3deg);
+  color: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 10px 26px rgba(79, 140, 255, 0.35);
+}
+
+.card h3 {
+  position: relative;
+  z-index: 1;
+  font-size: clamp(1.2rem, 1rem + 1.1vw, 1.6rem);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  color: #ffffff;
+  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.45);
+}
+
+/* بلندشدن سه‌بعدی با هاور (چرخش توسط جاوااسکریپت تنظیم می‌شود) */
+.card:hover,
+.card:focus-visible {
+  border-color: rgba(158, 197, 255, 0.5);
+  box-shadow:
+    0 26px 60px rgba(0, 0, 0, 0.55),
+    0 0 0 1px rgba(79, 140, 255, 0.35),
+    0 0 42px rgba(79, 140, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.22);
+}
+
+.card:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 3px; }
+
+/* کارت کشیدهٔ ابزارها: تمام‌عرض، افقی و بلندتر برای تناسب با شبکهٔ ۴×۲ */
+.card-wide {
+  grid-column: 1 / -1;
+  flex-direction: row;
+  justify-content: center;
+  gap: 26px;
+  min-height: 108px;
+  padding: 24px 48px;
+}
+
+.card-wide .card-icon { width: 54px; height: 54px; border-radius: 16px; }
+
+.card-wide .card-icon svg { width: 28px; height: 28px; }
+
+.card-wide h3 { font-size: clamp(1.3rem, 1.05rem + 1.2vw, 1.75rem); }
+
+/* نشانگرهای نقطه‌چین دو طرف کارت ابزارها برای جلوهٔ بصری بیشتر */
+.card-wide-hint {
+  display: grid;
+  place-items: center;
+  color: rgba(158, 197, 255, 0.5);
+  transition: color 0.35s ease, transform 0.35s ease;
+}
+
+.card-wide-hint svg { width: 30px; height: 30px; }
+
+.card-wide:hover .card-wide-hint,
+.card-wide:focus-visible .card-wide-hint {
+  color: var(--color-accent-2);
+  transform: translateX(-6px);
+}
+
+@media (max-width: 900px) {
+  /* کارت ابزارها در موبایل: تمام‌عرض، افقی و بزرگ‌تر از بقیه */
+  .card-wide {
+    flex-direction: row;
+    gap: 18px;
+    padding: 20px 26px;
+    min-height: 96px;
+  }
+
+  .card-wide .card-icon { width: 50px; height: 50px; }
+
+  .card-wide .card-icon svg { width: 26px; height: 26px; }
+
+  .card-wide h3 { font-size: 1.15rem; }
+
+  .card-wide-hint { display: grid; }
+
+  .card-wide-hint svg { width: 24px; height: 24px; }
+
+  /* کارت‌ها: ۴تا کنار هم — فشرده و بدون سرریز متن */
+  .cards-grid { grid-template-columns: repeat(4, 1fr); gap: 9px; }
+
+  .card {
+    min-height: 104px;
+    padding: 12px 3px;
+    gap: 8px;
+    border-radius: 15px;
+  }
+
+  .card-icon { width: 36px; height: 36px; border-radius: 11px; }
+
+  .card-icon svg { width: 19px; height: 19px; }
+
+  .card h3 { font-size: clamp(0.68rem, 3.1vw, 0.95rem); }
+
+  .led { top: 8px; inset-inline-end: 8px; width: 7px; height: 7px; }
+}
+
+@media (max-width: 380px) {
+  .cards-grid { gap: 7px; }
+  .card { min-height: 96px; padding: 10px 2px; }
+  .card h3 { font-size: 0.66rem; }
+  .card-icon { width: 32px; height: 32px; }
+  .card-icon svg { width: 17px; height: 17px; }
+}
+
+/* ============================================================
+   پابرگ
+   ============================================================ */
+.site-footer {
+  border-top: 1px solid var(--color-border);
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(79, 140, 255, 0.08), transparent 55%),
+    var(--color-bg);
+}
+
+.footer-grid {
+  display: grid;
+  grid-template-columns: 2fr 1fr 1fr;
+  gap: clamp(32px, 5vw, 64px);
+  padding-block: clamp(48px, 7vw, 88px);
+}
+
+@media (max-width: 768px) {
+  .footer-grid { grid-template-columns: 1fr; }
+}
+
+.footer-brand .logo-badge { margin-bottom: 18px; }
+
+.footer-brand h4 {
+  font-size: var(--step-1);
+  font-weight: 700;
+  margin-bottom: 10px;
+}
+
+.footer-brand p {
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  max-width: 52ch;
+}
+
+.site-footer h5 {
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 16px;
+}
+
+.site-footer ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.site-footer ul a {
+  color: var(--color-muted);
+  font-size: 0.95rem;
+  transition: color 0.25s ease;
+}
+
+.site-footer ul a:hover,
+.site-footer ul a:focus-visible { color: var(--color-fg); }
+
+.footer-bar {
+  border-top: 1px solid var(--color-border);
+  padding: 20px;
+  text-align: center;
+  font-size: 0.85rem;
+  color: var(--color-muted);
+}
+
+/* ---------- کاهش حرکت ---------- */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    transition-duration: 0.01ms !important;
+  }
+  .card { opacity: 1; transform: none; }
+}

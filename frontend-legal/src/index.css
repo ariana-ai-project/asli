@@ -1,0 +1,226 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Chat page full-height: uses svh so input is always visible on mobile */
+.chat-screen {
+  height: 100vh;
+  height: 100svh;
+}
+
+* {
+  font-family: 'Vazirmatn', sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  direction: rtl;
+  background-color: #f8faff;
+  overflow-x: hidden;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #f0f5ff;
+}
+::-webkit-scrollbar-thumb {
+  background: #2557d6;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #1a3d9e;
+}
+
+/* Gradient text */
+.gradient-text {
+  background: linear-gradient(135deg, #1a3d9e 0%, #2557d6 50%, #0088f0 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+
+/* Hero background pattern */
+.hero-bg {
+  background-color: #0e1c45;
+  background-image:
+    radial-gradient(circle at 20% 50%, rgba(37, 87, 214, 0.3) 0%, transparent 50%),
+    radial-gradient(circle at 80% 20%, rgba(0, 136, 240, 0.2) 0%, transparent 40%),
+    radial-gradient(circle at 60% 80%, rgba(26, 61, 158, 0.25) 0%, transparent 45%);
+}
+
+/* Card hover glow */
+.card-glow {
+  transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.card-glow:hover {
+  box-shadow: 0 20px 60px rgba(37, 87, 214, 0.25), 0 8px 25px rgba(0, 0, 0, 0.08);
+  transform: translateY(-8px);
+}
+
+/* Glass morphism */
+.glass {
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.glass-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid rgba(255, 255, 255, 0.9);
+}
+
+/* Shimmer effect */
+.shimmer-bg {
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.15) 50%, transparent 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s linear infinite;
+}
+
+/* Particle dots animation */
+.particle {
+  position: absolute;
+  border-radius: 50%;
+  animation: float 6s ease-in-out infinite;
+}
+
+/* Animated border */
+.animated-border {
+  position: relative;
+  overflow: hidden;
+}
+.animated-border::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, #2557d6, transparent);
+  animation: borderSlide 3s linear infinite;
+}
+@keyframes borderSlide {
+  0% { left: -100%; }
+  100% { left: 100%; }
+}
+
+/* Nav link underline animation */
+.nav-link {
+  position: relative;
+}
+.nav-link::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  right: 0;
+  width: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #0088f0, #2557d6);
+  transition: width 0.3s ease;
+}
+.nav-link:hover::after {
+  width: 100%;
+}
+
+/* Icon background pulse */
+.icon-pulse {
+  animation: iconPulse 3s ease-in-out infinite;
+}
+@keyframes iconPulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.05); }
+}
+
+/* Stagger animation delays */
+.delay-100 { animation-delay: 0.1s; }
+.delay-200 { animation-delay: 0.2s; }
+.delay-300 { animation-delay: 0.3s; }
+.delay-400 { animation-delay: 0.4s; }
+.delay-500 { animation-delay: 0.5s; }
+.delay-600 { animation-delay: 0.6s; }
+.delay-700 { animation-delay: 0.7s; }
+.delay-800 { animation-delay: 0.8s; }
+
+/* Initially hidden for animation */
+.animate-on-load {
+  opacity: 0;
+}
+
+/* Mobile menu transition */
+.mobile-menu {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* Feature card icon */
+.feature-icon-wrap {
+  transition: all 0.4s ease;
+}
+.card-glow:hover .feature-icon-wrap {
+  transform: scale(1.1) rotate(5deg);
+}
+
+/* Section divider wave */
+.wave-divider {
+  overflow: hidden;
+  line-height: 0;
+}
+
+/* Custom button */
+.btn-primary {
+  background: linear-gradient(135deg, #2557d6, #0088f0);
+  transition: all 0.3s ease;
+  box-shadow: 0 4px 15px rgba(37, 87, 214, 0.35);
+}
+.btn-primary:hover {
+  background: linear-gradient(135deg, #1a3d9e, #006bce);
+  box-shadow: 0 6px 20px rgba(37, 87, 214, 0.5);
+  transform: translateY(-2px);
+}
+
+/* Orbiting ring */
+@keyframes orbit {
+  from { transform: rotate(0deg) translateX(60px) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(60px) rotate(-360deg); }
+}
+.orbit-dot {
+  animation: orbit 8s linear infinite;
+}
+
+/* Large orbit animations for hero rings */
+@keyframes orbitLarge {
+  from { transform: rotate(0deg) translateX(300px) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(300px) rotate(-360deg); }
+}
+@keyframes orbitMedium {
+  from { transform: rotate(0deg) translateX(400px) rotate(0deg); }
+  to { transform: rotate(360deg) translateX(400px) rotate(-360deg); }
+}
+@keyframes orbitLarge2 {
+  from { transform: rotate(180deg) translateX(500px) rotate(-180deg); }
+  to { transform: rotate(540deg) translateX(500px) rotate(-540deg); }
+}
+
+/* Background grid pattern */
+.grid-pattern {
+  background-image:
+    linear-gradient(rgba(37, 87, 214, 0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(37, 87, 214, 0.05) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* Typing cursor */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+.cursor-blink {
+  animation: blink 1s step-end infinite;
+}
