@@ -14,6 +14,9 @@
 
 html {
   scroll-behavior: smooth;
+  /* هاله‌های تزئینی (absolute + blur) از لبهٔ صفحه بیرون می‌زنند و در موبایل
+     باعث اسکرول افقی و لرزش صفحه می‌شوند؛ فقط روی body کافی نیست */
+  overflow-x: hidden;
 }
 
 body {

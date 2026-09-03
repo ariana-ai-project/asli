@@ -228,12 +228,18 @@
   );
   cards.forEach((card) => cardObserver.observe(card));
 
-  // چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر
-  if (!reduceMotion) {
+  /* چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر
+     فقط با ماوس اجرا می‌شود؛ در لمس، pointermove هنگام اسکرول هم شلیک می‌کند
+     و کارت‌ها را به‌صورت عرضی می‌لرزاند */
+  const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+
+  if (!reduceMotion && finePointer) {
     const MAX_TILT = 7; // درجه
 
     cards.forEach((card) => {
       card.addEventListener("pointermove", (e) => {
+        if (e.pointerType !== "mouse") return;
+
         const rect = card.getBoundingClientRect();
         const px = (e.clientX - rect.left) / rect.width;   // 0..1
         const py = (e.clientY - rect.top) / rect.height;   // 0..1
