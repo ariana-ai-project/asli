@@ -685,7 +685,7 @@ export default function Home() {
             <a href="#home" className="flex items-center gap-3 group">
               <div className="relative">
                 <img
-                  src="/tunnelsaddariana_logo.jpg"
+                  src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`}
                   alt="تونل سد آریانا"
                   className="h-9 w-9 rounded-lg object-contain shadow-md"
                 />
@@ -755,7 +755,7 @@ export default function Home() {
               <span className="absolute w-64 h-64 md:w-80 md:h-80 rounded-full bg-sky-300/10 blur-3xl" aria-hidden="true" />
               <div className="relative w-28 h-28 md:w-36 md:h-36 rounded-full bg-white/10 backdrop-blur-sm border border-white/25 flex items-center justify-center shadow-2xl">
                 <img
-                  src="/tunnelsaddariana_logo.jpg"
+                  src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`}
                   alt="لوگو تونل سد آریانا"
                   className="w-20 h-20 md:w-28 md:h-28 object-contain rounded-full"
                 />
@@ -893,7 +893,7 @@ export default function Home() {
                 <div className="w-full aspect-square max-w-md mx-auto">
                   <div className="absolute inset-0 flex items-center justify-center">
                     <div className="w-48 h-48 rounded-full glass-panel flex items-center justify-center shadow-2xl">
-                      <img src="/tunnelsaddariana_logo.jpg" alt="آریانا" className="w-28 h-28 object-contain rounded-xl" />
+                      <img src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`} alt="آریانا" className="w-28 h-28 object-contain rounded-xl" />
                     </div>
                   </div>
                   <div className="absolute inset-8 rounded-full border border-sky-400/25 spin-slow" />
@@ -997,7 +997,7 @@ export default function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10 pb-10 border-b border-white/10">
             <div>
               <div className="flex items-center gap-3 mb-4">
-                <img src="/tunnelsaddariana_logo.jpg" alt="تونل سد آریانا" className="w-10 h-10 rounded-xl object-contain" />
+                <img src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`} alt="تونل سد آریانا" className="w-10 h-10 rounded-xl object-contain" />
                 <div>
                   <p className="font-bold text-base text-white">دستیار حقوقی آریانا</p>
                   <p className="text-blue-300/60 text-xs nq-tech">Ariana Legal Assistant</p>

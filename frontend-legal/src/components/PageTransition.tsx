@@ -67,7 +67,7 @@ export default function PageTransition({ active, onDone, onNavigate }: Props) {
       <div className="pt-logo-wrap">
         <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-white/10 backdrop-blur-md border border-white/20 flex items-center justify-center">
           <img
-            src="/tunnelsaddariana_logo.jpg"
+            src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`}
             alt="لوگو"
             className="w-16 h-16 md:w-20 md:h-20 object-contain rounded-xl"
           />

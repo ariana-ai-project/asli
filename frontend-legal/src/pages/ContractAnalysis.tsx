@@ -391,7 +391,7 @@ export default function ContractAnalysis() {
             title="بازگشت به صفحه اول"
           >
             <img
-              src="/tunnelsaddariana_logo.jpg"
+              src={`${import.meta.env.BASE_URL}tunnelsaddariana_logo.jpg`}
               alt="لوگو"
               className="w-8 h-8 rounded-lg object-contain cursor-pointer"
             />
