@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ariana-frontend",
+      "runtimeExecutable": "powershell",
+      "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/static-server.ps1", "-Root", "frontend", "-Port", "8090"],
+      "port": 8090
+    }
+  ]
+}
