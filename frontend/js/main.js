@@ -116,8 +116,11 @@
   });
 
   const startEvents = ["wheel", "touchmove", "scroll"];
+  /* passive: شنوندهٔ غیرpassive روی touchmove مرورگر را وادار می‌کند پیش از
+     هر اسکرول منتظر اجرای هندلر بماند — منبع مستقیم کندی اسکرول در موبایل.
+     این هندلر هیچ‌وقت preventDefault نمی‌کند، پس passive درست است. */
   startEvents.forEach((ev) =>
-    window.addEventListener(ev, startMotion, { passive: false })
+    window.addEventListener(ev, startMotion, { passive: true })
   );
 
   video.addEventListener("ended", onVideoEnd);
@@ -269,7 +272,9 @@
 
   function resizeCanvas() {
     const rect = canvas.parentElement.getBoundingClientRect();
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    /* روی موبایل با dpr=3 بوم نُه برابر پیکسل دارد و هر فریم باید همان‌قدر
+       پاک و دوباره رسم شود؛ ۱٫۵ برای خطوط نازک شهاب‌ها به‌اندازهٔ کافی صاف است */
+    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
     canvas.width = rect.width * dpr;
     canvas.height = rect.height * dpr;
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -279,7 +284,7 @@
   }
 
   function initStars() {
-    const count = Math.floor((canvas._w * canvas._h) / 9000);
+    const count = Math.floor((canvas._w * canvas._h) / (isMobile ? 15000 : 9000));
     stars = Array.from({ length: count }, () => ({
       x: Math.random() * canvas._w,
       y: Math.random() * canvas._h,
@@ -314,9 +319,23 @@
   }
 
   let nextMeteorIn = 12;
-  const MAX_METEORS = 45;
+  /* هر شهاب در هر فریم یک گرادیان خطی می‌سازد؛ روی موبایل تعدادشان محدود می‌شود */
+  const MAX_METEORS = isMobile ? 14 : 45;
+  /* سقف نرخ فریم روی موبایل: ۳۰ فریم بر ثانیه، یعنی نصفِ کار برای چشمی که
+     تفاوتش را روی این انیمیشن آرام تشخیص نمی‌دهد */
+  const MIN_FRAME_MS = isMobile ? 1000 / 30 : 0;
+  let lastFrameAt = 0;
 
-  function drawFrame() {
+  function drawFrame(now) {
+    if (MIN_FRAME_MS) {
+      const t = now || performance.now();
+      if (t - lastFrameAt < MIN_FRAME_MS) {
+        rafId = requestAnimationFrame(drawFrame);
+        return;
+      }
+      lastFrameAt = t;
+    }
+
     ctx.clearRect(0, 0, canvas._w, canvas._h);
 
     // ستاره‌های چشمک‌زن
@@ -331,9 +350,9 @@
 
     // زمان‌بندی پرتراکم شهاب‌ها — دسته‌ای و مکرر برای جلوهٔ کهکشانی پرجنب‌وجوش‌تر
     if (--nextMeteorIn <= 0 && meteors.length < MAX_METEORS) {
-      const burst = 1 + Math.floor(Math.random() * 3); // ۱ تا ۳ شهاب هم‌زمان
+      const burst = isMobile ? 1 : 1 + Math.floor(Math.random() * 3); // ۱ تا ۳ شهاب هم‌زمان
       for (let i = 0; i < burst; i++) spawnMeteor();
-      nextMeteorIn = 10 + Math.random() * 30;
+      nextMeteorIn = (isMobile ? 14 : 10) + Math.random() * 30;
     }
 
     // شهاب‌ها
@@ -393,7 +412,21 @@
 
   resizeCanvas();
   observer.observe(deptSection);
-  window.addEventListener("resize", resizeCanvas);
+
+  /* در موبایل، پنهان/ظاهرشدن نوار آدرس هنگام اسکرول پشت‌سرهم resize می‌فرستد؛
+     هر بار بوم از نو ساخته و ستاره‌ها بازتولید می‌شوند. تغییرِ فقط‌ارتفاع را
+     نادیده می‌گیریم و بقیه را با تأخیر کوتاه جمع می‌بندیم. */
+  let lastCanvasWidth = window.innerWidth;
+  let resizeTimer = null;
+
+  window.addEventListener("resize", () => {
+    if (isMobile && Math.abs(window.innerWidth - lastCanvasWidth) < 2) return;
+    clearTimeout(resizeTimer);
+    resizeTimer = setTimeout(() => {
+      resizeCanvas();
+      lastCanvasWidth = window.innerWidth;
+    }, 200);
+  }, { passive: true });
 
   /* ============================================================
      ثبت سرویس‌ورکر PWA — فقط روی http/https (نه file://)
