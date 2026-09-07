@@ -532,6 +532,12 @@ body.is-pre-play { overflow: hidden; }
     opacity: 1;
     transform: translateY(-50%);
     text-shadow: 0 2px 22px rgba(0, 0, 0, 0.95), 0 0 46px rgba(3, 8, 20, 1);
+    /* رنگ سفید خالص — قانون پایه گرادیانِ متن (background-clip: text +
+       color: transparent) را برای دسکتاپ تعریف کرده که اینجا خنثی می‌شود */
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    color: #ffffff;
   }
 
   /* نوار تیرهٔ متقارن پشت عنوان — لوگوی شرکت هم وسط ویدیو است و بدون این
