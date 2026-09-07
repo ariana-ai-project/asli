@@ -517,29 +517,37 @@ body.is-pre-play { overflow: hidden; }
   /* تصاویر پروژه‌ها در موبایل نمایش داده نمی‌شوند */
   .proj { display: none; }
 
-  /* عنوان: نوار پایین ویدیو — وسطِ ویدیو جای لوگوی شرکت است و عنوان
-     روی آن می‌افتاد و هر دو را ناخوانا می‌کرد */
+  /* عنوان: وسط ویدیو. ویدیو با نسبت ۱۶:۹ از زیر ناوبری شروع می‌شود،
+     پس مرکز عمودی‌اش می‌شود ۵۸px + نصفِ ۵۶٫۲۵vw */
   .hero-title {
     position: absolute;
-    top: auto;
-    bottom: 10px;
+    top: calc(58px + 28.125vw);
+    bottom: auto;
     inset-inline: 0;
     z-index: 5;
-    font-size: clamp(1.3rem, 5.6vw, 2rem);
+    font-size: clamp(1.7rem, 8vw, 2.8rem);
     margin: 0;
-    padding: 8px 16px;
+    padding: 10px 16px;
     animation: none;
     opacity: 1;
-    transform: none;
-    text-shadow: 0 2px 22px rgba(0, 0, 0, 0.9), 0 0 46px rgba(3, 8, 20, 0.95);
+    transform: translateY(-50%);
+    text-shadow: 0 2px 22px rgba(0, 0, 0, 0.95), 0 0 46px rgba(3, 8, 20, 1);
   }
 
+  /* نوار تیرهٔ متقارن پشت عنوان — لوگوی شرکت هم وسط ویدیو است و بدون این
+     نوار، متن و لوگو روی هم می‌افتند و هر دو ناخوانا می‌شوند */
   .hero-title::before {
     content: "";
     position: absolute;
-    inset: -14px 0 -10px;
+    inset: -28px 0;
     z-index: -1;
-    background: linear-gradient(180deg, rgba(3, 8, 20, 0), rgba(3, 8, 20, 0.72) 55%, rgba(3, 8, 20, 0.9));
+    background: linear-gradient(
+      180deg,
+      rgba(3, 8, 20, 0),
+      rgba(3, 8, 20, 0.72) 34%,
+      rgba(3, 8, 20, 0.72) 66%,
+      rgba(3, 8, 20, 0)
+    );
   }
 
   .hero-lines, .geo-dots, .line-particles { display: none; }
@@ -556,9 +564,11 @@ body.is-pre-play { overflow: hidden; }
 
   .logo-badge img { border-width: 1.5px; }
 
-  .nav-toggle { width: 32px; height: 32px; padding: 8px; gap: 3px; }
+  /* دکمهٔ منو: ۳۲px با خط‌های ۱٫۳ پیکسلی روی گوشی به یک تار محو تبدیل می‌شد
+     و هدف لمسی هم کوچک بود */
+  .nav-toggle { width: 38px; height: 38px; padding: 10px; gap: 4px; }
 
-  .nav-toggle span { height: 1.3px; }
+  .nav-toggle span { height: 2px; }
 
   /* کارت‌ها: ۴تا کنار هم */
   .cards-grid {
@@ -1113,6 +1123,12 @@ body.is-pre-play { overflow: hidden; }
 
   /* چون بلور برداشته شد، پس‌زمینه‌ها کدرتر می‌شوند تا خوانا بمانند */
   .nav-pill { background: rgba(6, 14, 34, 0.9); }
+
+  /* پس‌زمینهٔ ۶٪ دکمهٔ منو بدون بلور، روی نوار ناوبری اصلاً دیده نمی‌شد */
+  .nav-toggle {
+    background: rgba(46, 78, 140, 0.55);
+    border-color: rgba(158, 197, 255, 0.34);
+  }
 
   .eyebrow { background: linear-gradient(120deg, rgba(79, 140, 255, 0.28), rgba(255, 140, 66, 0.22)); }
 
