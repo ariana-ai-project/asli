@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>تدارکات | سامانه هوشمند آریانا</title>
+  <meta name="description" content="سامانه پشتیبانی خرید و تدارکات — پنل مدیریتی و پنل کارشناسی" />
+  <meta name="theme-color" content="#030814" />
+  <link rel="icon" type="image/jpeg" href="../assets/logo-new.jpg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="../css/styles.css" />
+  <style>
+    /* این صفحه از انیمیشن ورود لوگوموشن سایت اصلی مستقل است */
+    body { overflow-x: hidden; overflow-y: auto; }
+    .tp-header { padding: 28px 0 8px; }
+    .tp-back { display: inline-flex; align-items: center; gap: 6px; color: var(--color-muted); font-size: 0.95rem; }
+    .tp-back:hover { color: var(--color-fg); }
+    .tp-hero { text-align: center; padding: 40px 0 8px; }
+    .tp-hero .eyebrow { display: inline-block; margin-bottom: 14px; }
+    .tp-hero h1 { font-size: var(--step-4); font-weight: 900; margin-bottom: 10px; }
+    .tp-hero p { color: var(--color-muted); max-width: 620px; margin-inline: auto; }
+    .tp-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 28px;
+      max-width: 980px; margin: 48px auto 80px; padding-inline: clamp(16px, 5vw, 64px);
+    }
+    @media (max-width: 720px) { .tp-grid { grid-template-columns: 1fr; } }
+    /* main.js (که این صفحه بارگذاری نمی‌کند) معمولاً opacity کارت‌ها را با IntersectionObserver به ۱ می‌رساند؛ اینجا مستقیم فعال است */
+    .tp-panel-card { min-height: 240px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 14px; padding: 40px 24px; opacity: 1 !important; transform: none !important; }
+    .tp-panel-card .card-icon { width: 64px; height: 64px; border-radius: 18px; }
+    .tp-panel-card .card-icon svg { width: 32px; height: 32px; }
+    .tp-panel-card h3 { font-size: var(--step-2); }
+    .tp-panel-card .tp-desc { color: var(--color-muted); font-size: 0.95rem; }
+  </style>
+</head>
+<body>
+  <div class="nebula nebula-a" aria-hidden="true"></div>
+  <div class="nebula nebula-b" aria-hidden="true"></div>
+
+  <div class="container tp-header">
+    <a class="tp-back" href="../index.html#services">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      بازگشت به بخش‌های سامانه
+    </a>
+  </div>
+
+  <header class="container tp-hero">
+    <p class="eyebrow glass">تدارکات</p>
+    <h1>سامانه پشتیبانی خرید</h1>
+    <p>مدیریت زنجیره تامین، ارجاع کارشناسی و پیگیری درخواست‌های خرید</p>
+  </header>
+
+  <main class="tp-grid">
+    <a class="card tp-panel-card" href="manager.html" data-dept="tamin-poshtibani-manager" data-status="active">
+      <span class="led" aria-hidden="true"></span>
+      <span class="card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 4v4"/></svg>
+      </span>
+      <h3>پنل مدیریتی</h3>
+      <span class="tp-desc">میز ارجاع، پایش SLA و تصمیم‌های مدیریتی</span>
+    </a>
+
+    <a class="card tp-panel-card" href="expert.html" data-dept="tamin-poshtibani-expert" data-status="active">
+      <span class="led" aria-hidden="true"></span>
+      <span class="card-icon" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M4.5 20c1-4 4-6.5 7.5-6.5s6.5 2.5 7.5 6.5"/></svg>
+      </span>
+      <h3>پنل کارشناسی</h3>
+      <span class="tp-desc">کارتابل، استعلام و پیگیری درخواست‌های ارجاع‌شده</span>
+    </a>
+  </main>
+</body>
+</html>
