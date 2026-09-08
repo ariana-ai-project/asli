@@ -7,7 +7,7 @@
    مرورگر فقط وقتی sw.js را کلمه‌به‌کلمه تغییر کرده ببیند مرحلهٔ نصب و
    پیش‌کشِ دوباره را اجرا می‌کند؛ بدون این، کاربرانی که قبلاً سایت را
    باز کرده‌اند تا مدت‌ها نسخهٔ کش‌شدهٔ قدیمی را می‌بینند */
-const CACHE_NAME = "ariana-pwa-v2";
+const CACHE_NAME = "ariana-pwa-v3";
 
 /* پوستهٔ اولیهٔ برنامه — بدون ویدیوها (ویدیوها در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -61,6 +61,12 @@ self.addEventListener("fetch", (event) => {
 
   // فقط GET هم‌مبدأ
   if (request.method !== "GET" || !request.url.startsWith(self.location.origin)) {
+    return;
+  }
+
+  /* پنل‌های تأمین و پشتیبانی و API آن‌ها هیچ‌وقت کش نمی‌شوند: داده‌شان زنده است و
+     کش‌اول باعث می‌شد مدیر بعد از ارجاع، میزِ قبلی را ببیند و کد پنل یک دیپلوی عقب بماند */
+  if (new URL(request.url).pathname.startsWith("/tamin-poshtibani/")) {
     return;
   }
 

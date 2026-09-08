@@ -3,38 +3,22 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>پنل مدیریتی تدارکات | سامانه هوشمند آریانا</title>
+  <title>میز ارجاع خرید | سامانه هوشمند آریانا</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#030814" />
   <link rel="icon" type="image/jpeg" href="../assets/logo-new.jpg" />
-  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="../css/styles.css" />
-  <style>
-    body { overflow-x: hidden; overflow-y: auto; }
-    .tp-soon { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 18px; padding: 24px; }
-    .tp-soon .glass { padding: 28px 36px; border-radius: var(--radius); max-width: 480px; }
-    .tp-soon h1 { font-size: var(--step-2); margin-bottom: 8px; }
-    .tp-soon p { color: var(--color-muted); }
-    .tp-soon a.back { display: inline-block; margin-top: 18px; color: var(--color-accent); }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="panel.css" />
 </head>
-<body>
-  <div id="tp-root">
-    <div class="tp-soon">
-      <div class="glass">
-        <h1>پنل مدیریتی — به‌زودی</h1>
-        <p>این پنل در حال استقرار است. نسخه‌ی زنده به محض آماده شدن، همین‌جا نمایش داده می‌شود.</p>
-        <a class="back" href="index.html">بازگشت به تدارکات</a>
-      </div>
-    </div>
-  </div>
+<body class="tp-body">
+  <div id="app" aria-live="polite"></div>
 
   <script src="config.js"></script>
-  <script>
-    // وقتی آدرس واقعی تنظیم شود، مستقیم به اپ زنده هدایت می‌کنیم (نه iframe)
-    // تا تجربه کاربر کامل باشد، نه محدود به قاب.
-    (function () {
-      var url = (window.TAMIN_POSHTIBANI_CONFIG || {}).managerUrl;
-      if (url) window.location.replace(url);
-    })();
-  </script>
+  <script src="vendor/xlsx.full.min.js"></script>
+  <script src="shared.js"></script>
+  <script src="import.js"></script>
+  <script src="manager.js"></script>
 </body>
 </html>

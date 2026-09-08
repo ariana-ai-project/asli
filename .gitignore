@@ -1,0 +1,5 @@
+.wrangler/
+.dev.vars
+node_modules/
+frontend/tamin-poshtibani/_test.xlsx
+frontend/tamin-poshtibani/_test2.xlsx

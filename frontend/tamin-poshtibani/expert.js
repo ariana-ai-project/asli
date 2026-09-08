@@ -1,0 +1,418 @@
+/* ============================================================
+   پنل کارشناس خرید
+   ورود با کد → کارتابل (ارجاع‌های ارسال‌شده به این کارشناس) → جزئیات درخواست
+   با چهار تب: بررسی سوابق · جستجوی هوشمند · استعلامات · جدول کمیسیون
+
+   استعلامات و جدول کمیسیون واقعی و ذخیره‌شده‌اند (D1). سوابق و جستجوی
+   هوشمند و ارسال پیام، زیرساخت‌شان (UI + endpoint) هست و تا اتصال منبع
+   داده، برچسب «در انتظار اتصال» دارند؛ کارشناس می‌تواند مرحله را دستی
+   «انجام‌شده» علامت بزند تا پایش مدیر کار کند.
+   ============================================================ */
+(function () {
+  "use strict";
+  const CFG = window.TAMIN_POSHTIBANI_CONFIG, TP = window.TP;
+  const esc = TP.esc, M = TP.M, DAY = TP.DAY;
+  const COMPANY = CFG.company || "تونل سد آریانا";
+  const PLATS = [["telegram", "تلگرام"], ["whatsapp", "واتساپ"], ["bale", "بله"], ["rubika", "روبیکا"]];
+  const PLACES = ["محل پروژه", "انبار شرکت", "سایر"], PAYS = ["نقدی", "اعتباری", "۵۰٪ پیش‌پرداخت", "سایر"], DEALS = ["کارگاه", "دفتر مرکزی"], INVT = ["رسمی", "غیر رسمی"];
+  const REQT = ["عادی", "فوری"], DEALT = ["خرید", "فروش"];
+  /* فیلدهای استعلام: [کلید, عنوان, عرض, نوع] */
+  const QF = [["spec", "جنس / مشخصات فنی", 170], ["unit", "واحد", 70], ["qty", "مقدار", 80, "num"], ["price", "قیمت واحد (ریال)", 130, "num"],
+              ["dtime", "زمان تحویل", 116, "date"], ["valid_days", "اعتبار پیش‌فاکتور (روز)", 100, "num"], ["ship", "روش حمل", 130]];
+
+  /* ---------- وضعیت ---------- */
+  const S = {
+    screen: "login", now: Date.now(), expert: TP.session.get(),
+    tray: [], settings: null, error: "",
+    d: null,               // جزئیات ارجاع باز: {assignment, request, items, quotes, proformas, pendingDecisions}
+    itemIdx: 0, tab: "history",
+    q: { id: "", date: "", party: "", item: "" },
+    weights: [20, 40, 15, 25], open: { 0: false, 1: false, 2: false, 3: false },
+    scope: "item", caps: { contact: true, cred: true, reviews: false, price: true },
+    srch: { brand: "", yMin: "", yMax: "", cond: "نو", maker: "", spec: "", origin: "", trade: "داخلی", place: "" },
+    f: { maxDelivery: "", priceOnly: false, adMin: 0, adMax: 365 },
+    templates: [], tpl: 0,
+    hist: {}, smart: {},   // پاسخ endpointها برای هر قلم (available:false تا اتصال)
+  };
+  const settings = () => S.settings || CFG.defaults;
+  const A = () => S.d && S.d.assignment;
+  const items = () => (S.d ? S.d.items : []);
+  const item = () => items()[S.itemIdx];
+  const openItems = () => items().filter((i) => i.state === "open");
+  const qCount = () => S.d.quotes.filter((q) => q.saved).length;
+  const pCount = () => S.d.proformas.length;
+
+  /* ---------- رنگ مراحل برای این ارجاع ---------- */
+  function flagsOf(a, its, quoteCount, proformaCount) {
+    return [!!a.viewed_at, its.some((i) => i.hist_done_at), its.some((i) => i.smart_done_at), quoteCount > 0, proformaCount > 0, !!a.commission_at];
+  }
+  function boxes(a, done, active, small) {
+    const st = { dispatchedAt: a.dispatched_at, days: a.days, done, active };
+    return `<div class="boxes">${TP.STAGES.map((s, i) => `<div class="box ${small ? "sm" : ""} b-${TP.stageColor(st, i, settings().thresholds, S.now)}" title="${s}">${i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : ""}</div>`).join("")}</div>`;
+  }
+
+  /* ---------- ورود و کارتابل ---------- */
+  function vLogin() {
+    return `<div class="tp-card tp-login"><h2>ورود کارشناس خرید</h2><p>کد کارشناسی خود را وارد کنید.</p>
+      <input id="code" class="tp-input" inputmode="numeric" maxlength="6" autocomplete="off" autofocus>
+      <button class="tp-btn primary" data-login style="width:100%;margin-top:14px">ورود</button>
+      <div class="err">${esc(S.error)}</div><a class="tp-back" href="index.html">← بازگشت به تدارکات</a></div>`;
+  }
+  const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
+  function trayRows() {
+    return S.tray.filter((a) => TP.hit(a.request_id, S.q.id) && (!dateList().length || dateList().includes(a.date)) && TP.hit(a.party, S.q.party));
+  }
+  function vList() {
+    const rows = trayRows();
+    return `<div class="tp-wrap" style="padding-bottom:20px"><div class="tp-card">
+      <div class="tp-filters" style="border-top:0;border-radius:16px 16px 0 0">
+        <span class="lab">شماره درخواست</span><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" style="width:120px">
+        <span class="lab">تاریخ</span><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="انتخاب تاریخ" readonly style="width:170px">
+        <span class="lab">طرف مقابل</span><input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" style="width:190px">
+        <button class="tp-btn sm" data-clr>پاک کردن</button>
+        <span class="end">${rows.length} از ${S.tray.length} · خاتمه‌یافته، معلق و متوقف در کارتابل نیستند</span></div>
+      <div class="tp-scroll" style="border:0;border-radius:0 0 16px 16px"><table class="tp-table" style="width:100%"><thead><tr>
+        <th>شماره درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>اقلام باز</th><th>مهلت</th><th>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th></tr></thead><tbody>
+        ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
+          const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
+          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
+            <td class="num">${a.open_count} از ${a.item_count}</td><td class="num">${a.days} روز</td>
+            <td class="num" style="${lf <= 0 ? "color:#fca5a5;font-weight:700" : ""}">${lf <= 0 ? "تمام شد" : lf.toFixed(1) + " ساعت کاری"}</td>
+            <td>${boxes(a, done, true, true)}</td><td class="num">${a.quote_count}</td></tr>`; }).join("")}
+        ${rows.length ? "" : `<tr><td colspan="8"><div class="empty">درخواستی در کارتابل شما نیست.</div></td></tr>`}
+      </tbody></table></div></div></div>`;
+  }
+
+  /* ---------- جزئیات ---------- */
+  function vEndBar() {
+    const a = A(), its = items(), n = its.length, k = its.filter((i) => i.commission_ok).length, o = openItems().length;
+    const pend = S.d.pendingDecisions.length;
+    return `<div class="endbar">
+      <span class="st ${o ? "st-run" : "st-cls"}">${o ? "در جریان" : "بدون قلم باز"}</span>
+      <span class="muted" style="font-size:.88rem">${k} از ${n} قلم را کمیسیون تأیید کرده${o < n ? ` · ${n - o} قلم بسته/متوقف` : ""}</span>
+      <span style="margin-inline-start:auto"></span>
+      ${pend ? `<span class="chip warn">در انتظار تأیید مدیر (${pend})</span>` : settings().approvalRequired ? `<span class="chip warn">تصمیم شما نیاز به تأیید مدیر دارد</span>` : ""}
+      <button class="tp-btn sm" data-tpl>قالب‌های پیام</button>
+      <button class="tp-btn sm warn" data-eact="hold" ${o ? "" : "disabled"}>تعلیق</button>
+      <button class="tp-btn sm danger" data-eact="stop" ${o ? "" : "disabled"}>توقف</button>
+      <button class="tp-btn sm primary" data-eact="end" ${k ? "" : "disabled"}>خاتمه (${k} قلم)</button>
+      ${a.commission_at ? "" : ""}</div>`;
+  }
+  function vDetail() {
+    const a = A(), r = S.d.request, its = items(), it = item();
+    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, Math.round(el / b * 100)) : 0;
+    const dl = TP.endN(a.dispatched_at, a.days || 1), left = Math.max(0, b - el), dd = new Date(dl);
+    const done = flagsOf(a, its, qCount(), pCount());
+    return `<div class="tp-wrap" style="padding-bottom:24px"><div class="tp-card">
+      <div class="head"><div><button class="tp-btn sm" data-back>→ کارتابل</button></div>
+        <div><h2>درخواست <span class="num">${esc(r.id)}</span></h2>
+          <div class="kpi" style="margin-top:8px"><div class="k" style="text-align:right;min-width:auto;max-width:360px"><b>طرف مقابل</b><span style="font-size:.9rem;font-weight:500">${esc(r.party)}</span></div>
+            <div class="k"><b>اقلام</b><span>${its.length}</span></div><div class="k"><b>تاریخ ثبت</b><span class="num" style="font-size:.95rem">${esc(r.date)}</span></div>
+            ${r.urgency ? `<div class="k"><b>فوریت</b><span style="font-size:.9rem;color:#fcd34d">${esc(r.urgency)}</span></div>` : ""}</div></div>
+        <div class="right"><div style="display:flex;justify-content:flex-end">${boxes({ ...a, quote_count: qCount(), proforma_count: pCount() }, done, openItems().length > 0)}</div>
+          <div class="kpi" style="margin-top:8px;justify-content:flex-end"><div class="k"><b>سپری‌شده</b><span>${pct}٪</span></div><div class="k"><b>ساعت کاری مانده</b><span>${left.toFixed(1)}</span></div>
+            <div class="k" style="background:rgba(79,140,255,.14);border-color:var(--tp-accent)"><b>مهلت تحویل</b><span style="font-size:.95rem">${TP.WD[dd.getDay()]} ${TP.fmtD(dl)}</span></div></div></div></div>
+      ${vEndBar()}
+      <div class="strip">${its.map((x, i) => `<div class="pill ${i === S.itemIdx ? "sel" : ""} ${x.state !== "open" ? "closed" : ""}">
+        <span class="t" data-item="${i}" title="${esc(x.title)}">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
+        ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : `<label><input type="checkbox" data-idone="${x.id}" ${x.commission_ok ? "checked" : ""}> تأیید کمیسیون</label>`}</div>`).join("")}</div>
+      <div class="tabs">
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">بررسی سوابق</button>
+        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">جستجوی هوشمند</button>
+        <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
+        <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button></div>
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : vComm()}
+    </div></div>`;
+  }
+
+  /* ---------- تب بررسی سوابق (زیرساخت: وزن‌ها + علامت دستی) ---------- */
+  function vHistory(it) {
+    const GRP = ["کل خرید", "خرید قلم", "خرید پروژه", "خرید قلم در پروژه"];
+    const h = S.hist[it.id];
+    return `<div class="pad">
+      <div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
+        ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}</div>
+      <div class="tp-note ${h && h.available === false ? "warn" : ""}">
+        ${h ? esc(h.message) : "سوابق تأمین این قلم از پایگاه دادهٔ خرید خوانده می‌شود (ضریب اهمیت چهار گروه زیر روی امتیاز و رتبهٔ تأمین‌کنندگان اثر می‌گذارد)."}
+        <span class="chip mock">در انتظار اتصال به پایگاه سوابق</span></div>
+      <div class="tp-grid6" style="grid-template-columns:repeat(4,1fr);max-width:700px">${GRP.map((g, i) => `<div class="cell"><b>${g}</b><input class="tp-input" data-w="${i}" value="${S.weights[i]}" inputmode="numeric" style="width:70px"> ٪</div>`).join("")}</div>
+      <div class="toolrow"><button class="tp-btn primary" data-run-hist>جستجوی سوابق این قلم</button>
+        ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">سوابق را بررسی کردم — علامت بزن</button>`}
+        <span class="dim" style="font-size:.85rem">علامت‌زدن، باکس «بررسی سوابق» را در پایش مدیر سبز می‌کند.</span></div></div>`;
+  }
+
+  /* ---------- تب جستجوی هوشمند (زیرساخت: پارامترها + علامت دستی) ---------- */
+  function vSmart(it) {
+    const sm = S.smart[it.id];
+    return `<div class="pad"><div class="two"><div class="main">
+      <div class="toolrow"><b style="font-size:1.02rem">ملاحظات جستجو برای «${esc(it.title)}»</b>${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}</div>
+      <textarea class="tp-textarea" id="notes" placeholder="مثلاً: تأمین‌کنندهٔ داخلی، ترجیحاً تولیدکننده نه واسطه">${esc(S.srch.notes || "تامین‌کننده داخلی، ترجیحاً تولیدکننده نه واسطه")}</textarea>
+      <div class="toolrow" style="margin-top:12px"><button class="tp-btn primary" data-run-smart>اجرای مدل ${S.scope === "all" ? "روی تمام اقلام" : "برای همین قلم"}</button>
+        ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart">جستجو را بیرون از سامانه انجام دادم — علامت بزن</button>`}</div>
+      <div class="tp-note ${sm && sm.available === false ? "warn" : ""}">${sm ? esc(sm.message) : "مدل با این ملاحظات و محدوده‌های ستون کنار، تأمین‌کنندگان تازه را پیدا و درگاه تماس، اعتبار و قیمت روزشان را استخراج می‌کند."} <span class="chip mock">در انتظار اتصال به مدل</span></div>
+      <div class="tp-note">پلتفرم‌های پیام (تلگرام، واتساپ، بله، روبیکا) و ارسال از اکانت خودتان، بعد از اتصال روی هر تأمین‌کننده فعال می‌شود. قالب‌های پیام از همین حالا ذخیره می‌شوند («قالب‌های پیام» در نوار بالا).</div>
+    </div>${vSide()}</div></div>`;
+  }
+  function vSide() {
+    const t = S.now;
+    return `<div class="side"><h4>محدوده جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها به‌علاوهٔ متن ملاحظات به مدل داده می‌شوند.</div>
+      <div class="grp"><b>دامنه اجرا</b><label><input type="radio" name="sc" data-scope="item" ${S.scope === "item" ? "checked" : ""}> فقط همین قلم</label><label><input type="radio" name="sc" data-scope="all" ${S.scope === "all" ? "checked" : ""}> تمام اقلام این درخواست</label></div>
+      <div class="grp"><b>قابلیت‌ها</b>${[["contact", "استخراج درگاه تماس"], ["cred", "بررسی سابقه و اعتبار"], ["reviews", "نظرات خریداران"], ["price", "استخراج قیمت روز"]].map(([k, l]) => `<label><input type="checkbox" data-cap="${k}" ${S.caps[k] ? "checked" : ""}> ${l}</label>`).join("")}</div>
+      <div class="grp"><b>مشخصات موردنظر (دستی)</b>
+        <div class="fld"><b>برند محصول</b><input class="tp-input" data-s="brand" value="${esc(S.srch.brand)}"></div>
+        <div class="fld"><b>شرکت سازنده</b><input class="tp-input" data-s="maker" value="${esc(S.srch.maker)}"></div>
+        <div class="fld"><b>سال ساخت</b><div class="two2"><input class="tp-input" data-s="yMin" value="${esc(S.srch.yMin)}" placeholder="از" inputmode="numeric"><input class="tp-input" data-s="yMax" value="${esc(S.srch.yMax)}" placeholder="تا" inputmode="numeric"></div></div>
+        <div class="fld"><b>وضعیت کالا</b><select class="tp-select" data-s="cond">${["نو", "دست دوم", "فرقی ندارد"].map((x) => `<option ${S.srch.cond === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+        <div class="fld"><b>مشخصات فنی</b><textarea class="tp-textarea" data-s="spec" style="min-height:52px">${esc(S.srch.spec)}</textarea></div>
+        <div class="fld"><b>محل تأمین</b><input class="tp-input" data-s="origin" value="${esc(S.srch.origin)}" placeholder="مثلاً تهران، اصفهان"></div></div>
+      <div class="grp"><b>نوع خرید</b><label><input type="radio" name="tr" data-tr="داخلی" ${S.srch.trade === "داخلی" ? "checked" : ""}> داخلی</label><label><input type="radio" name="tr" data-tr="خارجی" ${S.srch.trade === "خارجی" ? "checked" : ""}> خارجی</label>
+        <div class="fld" style="margin-top:6px"><b>محل دقیق تحویل</b><input class="tp-input" data-s="place" value="${esc(S.srch.place)}" placeholder="${S.srch.trade === "خارجی" ? "مثلاً بندر عباس، تحویل CFR" : "مثلاً انبار مرکزی کرج"}"></div></div>
+      <div class="grp"><b>محدودیت تاریخ تحویل</b><input class="tp-input date" data-date="maxDelivery" value="${esc(S.f.maxDelivery)}" placeholder="حداکثر تا …" readonly style="width:100%"></div>
+      <div class="grp"><b>قیمت</b><label><input type="checkbox" data-po ${S.f.priceOnly ? "checked" : ""}> فقط مواردی که قیمت اعلام کرده‌اند</label></div>
+      <div class="grp"><b>حداکثر سن آگهی (روز)</b><input type="range" min="0" max="365" value="${S.f.adMax}" data-admax style="width:100%;accent-color:#4f8cff"><div class="dim num" style="font-size:.8rem">از ${TP.fmtD(t - S.f.adMax * DAY)} تا امروز</div></div></div>`;
+  }
+
+  /* ---------- تب استعلامات (واقعی) ---------- */
+  function vQuotes() {
+    const r = S.d.request, its = items(), Q = S.d.quotes;
+    return `<div class="pad">
+      <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
+        <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
+        <span class="dim" style="font-size:.85rem">هر ویرایش، «ثبت موقت» را برمی‌دارد؛ فقط ردیف‌های ثبت‌شده در شمارنده و کمیسیون حساب می‌شوند.</span></div>
+      ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
+        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>محل معامله</th><th>محل تحویل</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
+        ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
+          <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""}></td>
+          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}</td>
+          <td><select class="tp-select" data-qf="${q.id}|item_id">${its.map((x) => `<option value="${x.id}" ${q.item_id === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></td>
+          ${QF.map(([k, , w, ty]) => `<td><input class="tp-input ${q[k] == null || q[k] === "" ? "bad" : ""} ${ty === "date" ? "date" : ""} ${ty === "num" ? "num" : ""}" data-qf="${q.id}|${k}" value="${esc(q[k] == null ? "" : q[k])}" style="width:${w}px" ${ty === "date" ? "readonly" : ""} ${ty === "num" ? 'inputmode="decimal"' : ""}></td>`).join("")}
+          <td><select class="tp-select ${q.invoice ? "" : "bad"}" data-qf="${q.id}|invoice"><option value="">—</option>${INVT.map((v) => `<option ${q.invoice === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td><select class="tp-select ${q.pay ? "" : "bad"}" data-qf="${q.id}|pay"><option value="">—</option>${PAYS.map((v) => `<option ${q.pay === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td><select class="tp-select ${q.deal ? "" : "bad"}" data-qf="${q.id}|deal" title="از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td style="min-width:170px"><select class="tp-select ${q.place ? "" : "bad"}" data-qf="${q.id}|place"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+            ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" style="margin-top:4px;width:100%">` : ""}</td>
+          <td class="num">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
+          <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<span class="chip ok" title="${esc(S.d.proformas.find((p) => p.supplier_name === q.supplier_name).filename || "")}">ثبت شد</span>` : `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`}</td>
+          <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<button class="tp-btn xs" data-extract="${q.id}">استخراج</button>` : `<span class="chip">—</span>`}</td>
+          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
+          <td><button class="tp-btn xs danger" data-del="${q.id}">حذف</button></td></tr>`).join("")}
+        </tbody></table></div>
+        ${vFormHead(r)}${vGuard()}`
+        : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید؛ بعد از اتصال سوابق و جستجوی هوشمند، از همان تب‌ها هم اضافه می‌شود.</div>`}
+      <div class="tp-note">«زمان تحویل»، «اعتبار پیش‌فاکتور» و «شرایط تسویه» بعد از اتصال از پیش‌فاکتور استخراج می‌شوند. «محل معامله» (کارگاه یا دفتر مرکزی) فقط دستی است. تاریخ از تقویم انتخاب می‌شود.</div></div>`;
+  }
+  function vFormHead(r) {
+    return `<div class="endbar" style="margin:16px 0 0;align-items:flex-end">
+      <div class="tp-field"><b>نوع درخواست</b><select class="tp-select" data-h="req_type">${REQT.map((x) => `<option ${(r.head_req_type || "عادی") === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div class="tp-field"><b>نوع معامله</b><select class="tp-select" data-h="deal_type">${DEALT.map((x) => `<option ${(r.head_deal_type || "خرید") === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
+      <div class="tp-field" style="flex:1;min-width:240px"><b>محل پروژه</b><input class="tp-input" data-h="site" value="${esc(r.head_site == null ? r.party : r.head_site)}" style="width:100%"></div>
+      <span class="dim" style="font-size:.8rem">این سه فیلد در سرآیند فرم کمیسیون چاپ می‌شوند.</span></div>`;
+  }
+  function guardCheck() {
+    const need = settings().minSuppliers || 1, miss = [];
+    openItems().forEach((it) => { const n = S.d.quotes.filter((q) => q.saved && q.item_id === it.id).length; if (n < need) miss.push({ t: it.title, n }); });
+    return { miss, need, fin: S.d.quotes.filter((q) => q.final && q.saved).length };
+  }
+  function vGuard() {
+    const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
+    return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
+      <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
+      ${g.miss.length ? `<div style="color:#fca5a5">مدیر حداقل <b>${g.need}</b> استعلام برای هر قلم باز را الزامی کرده. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${g.need})`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز حداقل ${g.need} استعلام دارند.</div>`}</div></div>`;
+  }
+
+  /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ---------- */
+  function commData() {
+    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice }; sup.push(g); } g.rows[q.item_id] = q; });
+    return { sup };
+  }
+  function vComm() {
+    const a = A(), r = S.d.request;
+    if (!a.commission_at) return `<div class="pad"><div class="empty"><b>جدول کمیسیون هنوز ساخته نشده.</b>از تب استعلامات، تأمین‌کنندگان منتخب را «تأیید نهایی» کنید و «تولید جدول کمیسیون» را بزنید.</div></div>`;
+    const d = commData();
+    if (!d.sup.length) return `<div class="pad"><div class="empty">هیچ استعلام تأییدنهایی‌شده‌ای نیست.</div></div>`;
+    return `<div class="pad"><div class="toolrow noprint"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().length} قلم</span>
+        <button class="tp-btn sm" data-xls style="margin-inline-start:auto">دانلود اکسل</button><button class="tp-btn sm" data-print>پرینت / PDF (برگه درخواست + جدول)</button></div>
+      <div class="tp-scroll" style="max-height:64vh;background:#fff"><div id="printarea">${reqForm(r)}${commForm(r, d)}</div></div>
+      <div class="tp-note noprint">قالب مطابق فرم <b>TSA-PS-FO-02</b> و راست‌به‌چپ: ردیف و شرح اقلام سمت راست، بلوک هر تأمین‌کننده به سمت چپ. ارزش افزوده ۱۰٪. مبلغ کل هر سطر = قیمت واحد × تعداد. <b>قالب برگهٔ درخواست موقت است</b> و با فرمت راهکاران جایگزین می‌شود.</div></div>`;
+  }
+  function commForm(r, d) {
+    const its = items(), N = d.sup.length, span = 4 + 3 * N;
+    const mAll = [], mVat = [], mTot = [];
+    d.sup.forEach((g) => { let t = 0; its.forEach((it) => { const q = g.rows[it.id]; if (q) t += (+q.price || 0) * (+q.qty || 0); }); mAll.push(t); mVat.push(Math.round(t * 0.1)); mTot.push(t + Math.round(t * 0.1)); });
+    const B = (fn) => d.sup.map((g, k) => fn(g, k)).join("");
+    const chk = (v, t) => v === t ? "☑" : "☐", dealChk = (v) => d.sup.some((g) => g.deal === v) ? "☑" : "☐";
+    return `<table class="cf">
+      <tr><td class="ttl" colspan="4">مقایسه استعلام بها</td><td class="lbl rt" colspan="${3 * N}">کد: TSA-PS-FO-02 &nbsp; شماره بازنگری: ۱ &nbsp; تاریخ تنظیم سند: ${TP.fmtD(S.now)}</td></tr>
+      <tr><td class="rt" colspan="${4 + Math.max(0, N - 2) * 3}">محل معامله: ${dealChk("کارگاه")} کارگاه &nbsp; ${dealChk("دفتر مرکزی")} دفتر مرکزی</td>
+          <td class="rt" colspan="${Math.min(3 * N, 3)}">نوع معامله: ${chk(r.head_deal_type || "خرید", "خرید")} خرید &nbsp; ${chk(r.head_deal_type, "فروش")} فروش</td>
+          <td class="rt" colspan="${Math.max(1, span - 4 - Math.max(0, N - 2) * 3 - Math.min(3 * N, 3))}">نوع درخواست: ${chk(r.head_req_type, "فوری")} فوری &nbsp; ${chk(r.head_req_type || "عادی", "عادی")} عادی</td></tr>
+      <tr><td class="rt" colspan="2">شماره درخواست: ${esc(r.id)}</td><td class="rt" colspan="2">تاریخ درخواست خرید: ${esc(r.date)}</td>
+          <td class="rt" colspan="${Math.max(1, Math.floor(3 * N / 2))}">محل پروژه: ${esc(r.head_site == null ? r.party : r.head_site)}</td><td class="rt" colspan="${Math.max(1, 3 * N - Math.max(1, Math.floor(3 * N / 2)))}">تاریخ نیاز: ${esc((its[0] || {}).need_date || "—")}</td></tr>
+      <tr><td class="lbl" colspan="4">خریدار: ${COMPANY}</td><td class="lbl" colspan="${3 * N}">فروشنده / ارائه‌دهنده خدمات</td></tr>
+      <tr><td class="lbl">ردیف</td><td class="lbl">شرح اقلام</td><td class="lbl">تعداد</td><td class="lbl">واحد</td>${B((g) => `<td class="sup" colspan="3">${esc(g.name)}</td>`)}</tr>
+      <tr><td colspan="4"></td>${B(() => `<td class="lbl">جنس</td><td class="lbl">مبلغ کل (ریال)</td><td class="lbl">مبلغ واحد (ریال)</td>`)}</tr>
+      ${its.map((it, i) => `<tr><td class="num">${i + 1}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td>${esc(it.unit)}</td>
+        ${B((g) => { const q = g.rows[it.id]; const tot = q ? (+q.price || 0) * (+q.qty || 0) : ""; return `<td>${q ? esc(q.spec) : ""}</td><td class="num">${q ? M(tot) : ""}</td><td class="num">${q ? M(q.price) : ""}</td>`; })}</tr>`).join("")}
+      <tr><td class="lbl rt" colspan="4">جمع کل بدون ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3">${M(mAll[k])}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">ارزش افزوده (۱۰٪):</td>${B((g, k) => `<td class="num" colspan="3">${M(mVat[k])}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">جمع کل با ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3" style="font-weight:700">${M(mTot[k])}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">نوع فاکتور و میزان مالیات و عوارض:</td>${B((g) => `<td colspan="3">${esc(g.invoice || "—")}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">مدت اعتبار پیش‌فاکتور:</td>${B((g) => `<td colspan="3">${g.valid ? esc(g.valid) + " روز" : "—"}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">شرایط تسویه:</td>${B((g) => `<td colspan="3">${esc(g.pay || "—")}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">زمان تحویل:</td>${B((g) => `<td colspan="3">${esc(g.dtime || "—")}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">تاییدیه فنی:</td>${B(() => `<td colspan="3">—</td>`)}</tr>
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر کارگاه:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">توضیحات تدارکات و پشتیبانی:</td></tr>
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر واحد فنی:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">نظر واحد حقوقی:</td></tr>
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">امضا کارشناس خرید: ${esc(S.expert.name)}</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">امضا مدیر پشتیبانی:</td></tr>
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${span - 2 * Math.ceil(span / 3)}">عضو کمیسیون</td></tr></table>`;
+  }
+  function reqForm(r) {
+    return `<table class="cf" style="margin-bottom:14px"><tr><td class="ttl" colspan="6">برگه درخواست خرید</td></tr>
+      <tr><td class="lbl rt" colspan="2">شماره درخواست: ${esc(r.id)}</td><td class="lbl rt" colspan="2">تاریخ درخواست: ${esc(r.date)}</td><td class="lbl rt" colspan="2">نوع درخواست: ${esc(r.head_req_type || "عادی")}</td></tr>
+      <tr><td class="lbl rt" colspan="3">طرف مقابل / مرکز هزینه: ${esc(r.party)}</td><td class="lbl rt" colspan="3">کارشناس خرید: ${esc(S.expert.name)}</td></tr>
+      <tr><td class="lbl">ردیف</td><td class="lbl">کد قلم</td><td class="lbl">شرح قلم</td><td class="lbl">تعداد</td><td class="lbl">واحد</td><td class="lbl">توضیحات</td></tr>
+      ${items().map((it, i) => `<tr><td class="num">${i + 1}</td><td class="num">${esc(it.code || "—")}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td>${esc(it.unit)}</td><td class="rt">${esc(it.note || it.spec || "")}</td></tr>`).join("")}
+      <tr class="tall"><td class="rt" colspan="3">امضا درخواست‌کننده:</td><td class="rt" colspan="3">امضا مدیر پشتیبانی:</td></tr></table>`;
+  }
+  function downloadXls() {
+    const r = S.d.request, d = commData();
+    const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>کمیسیون</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
+      <style>table,td,th{border:1px solid #666;border-collapse:collapse;font-family:Tahoma;font-size:11pt}td{padding:3px}</style></head><body dir="rtl">${reqForm(r)}<br>${commForm(r, d)}</body></html>`;
+    const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel;charset=utf-8" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `کمیسیون-${r.id}.xls`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  }
+
+  /* ---------- قالب‌های پیام (واقعی، ذخیره در D1) ---------- */
+  const DEFAULT_TPL = [
+    { title: "زمان تحویل", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\nبرای {عنوان قلم} به مقدار {مقدار} {واحد} استعلام قیمت نیاز داریم.\nلطفاً زودترین زمان تحویل ممکن را اعلام بفرمایید.\n{نام کارشناس}` },
+    { title: "مکان تحویل", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\nدرباره {عنوان قلم} ({مقدار} {واحد}) — امکان تحویل در محل پروژه را دارید یا تحویل درب انبار شماست؟\nهزینه حمل چقدر است؟\n{نام کارشناس}` },
+    { title: "رسمی", body: `با سلام و احترام\nشرکت ${COMPANY} در نظر دارد نسبت به تامین {عنوان قلم} به مقدار {مقدار} {واحد} با مشخصات {مشخصات فنی} اقدام نماید.\nخواهشمند است قیمت، شرایط پرداخت و زمان تحویل را اعلام فرمایید.\nبا تشکر — {نام کارشناس}` },
+  ];
+  async function loadTemplates() { try { S.templates = (await TP.api("/templates")).templates || []; } catch (_) { S.templates = []; } }
+  function fillTpl(body, supplier) {
+    const it = item() || {};
+    return String(body || "").replace(/\{عنوان قلم\}/g, it.title || "").replace(/\{مقدار\}/g, it.qty == null ? "" : M(it.qty)).replace(/\{واحد\}/g, it.unit || "")
+      .replace(/\{مشخصات فنی\}/g, it.spec || "—").replace(/\{تامین‌کننده\}/g, supplier || "").replace(/\{نام کارشناس\}/g, S.expert.name);
+  }
+  async function pickTemplate() {
+    await loadTemplates();
+    if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(); }
+    S.tpl = Math.min(S.tpl, S.templates.length - 1);
+    const d = TP.modal("قالب‌های پیام", `<p class="muted" style="margin:0 0 8px;font-size:.88rem">قالبی را انتخاب یا ویرایش کنید، یا قالب تازه بسازید. جای‌خالی‌ها هنگام ارسال با دادهٔ همین قلم پر می‌شوند.</p>
+      <div class="tplbar" id="tb"></div><div id="ed"></div>`, null, "بستن", "");
+    const paint = () => {
+      d.querySelector("#tb").innerHTML = S.templates.map((t, i) => `<button class="tplbtn ${i === S.tpl ? "on" : ""}" data-t="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("") + `<button class="tplbtn" data-add><i>&nbsp;</i><b>+ قالب جدید</b></button>`;
+      const t = S.templates[S.tpl]; const toks = ["عنوان قلم", "مقدار", "واحد", "مشخصات فنی", "تامین‌کننده", "نام کارشناس"];
+      d.querySelector("#ed").innerHTML = `<div class="tp-field" style="margin-bottom:8px"><b>عنوان قالب</b><input class="tp-input" id="tt" value="${esc(t.title)}" style="width:100%"></div>
+        <textarea class="tp-textarea" id="tb2">${esc(t.body)}</textarea>
+        <div class="tokens">${toks.map((x) => `<button class="tok" data-k="${x}">{${x}}</button>`).join("")}</div>
+        <div class="tp-note" style="margin:8px 0"><b>پیش‌نمایش برای قلم فعلی:</b><br><span style="white-space:pre-wrap">${esc(fillTpl(t.body, "«تأمین‌کننده»"))}</span></div>
+        <div class="tp-acts"><button class="tp-btn primary" data-save>ذخیره</button><button class="tp-btn" data-del ${S.templates.length < 2 ? "disabled" : ""}>حذف این قالب</button></div>`;
+      const ta = d.querySelector("#tb2");
+      d.querySelectorAll(".tok").forEach((b) => b.onclick = () => { const tk = "{" + b.dataset.k + "}", s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + tk + ta.value.slice(e); const pos = s + tk.length; ta.focus(); ta.setSelectionRange(pos, pos); });
+      d.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { S.tpl = +b.dataset.t; paint(); });
+      d.querySelector("[data-add]").onclick = async () => { await TP.api("/templates", { body: { title: "قالب جدید", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\n` } }); await loadTemplates(); S.tpl = S.templates.length - 1; paint(); };
+      d.querySelector("[data-save]").onclick = async () => { await TP.api(`/templates/${t.id}`, { method: "PUT", body: { title: d.querySelector("#tt").value || "بدون عنوان", body: ta.value } }); await loadTemplates(); paint(); };
+      d.querySelector("[data-del]").onclick = async () => { if (S.templates.length < 2) return; await TP.api(`/templates/${t.id}`, { method: "DELETE" }); await loadTemplates(); S.tpl = 0; paint(); };
+    };
+    paint();
+  }
+
+  /* ---------- بارگیری ---------- */
+  async function loadTray() {
+    try { const t = await TP.api("/tray"); S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; }
+    catch (e) { if (e.status === 401) { TP.session.clear(); S.expert = null; S.screen = "login"; } S.error = e.message; }
+    render();
+  }
+  async function openDetail(aid, keepTab) {
+    try { S.d = await TP.api(`/assignments/${aid}`); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail"; render();
+      if (!S.d.assignment.viewed_at) { await TP.api(`/assignments/${aid}/viewed`, { body: {} }); S.d.assignment.viewed_at = Date.now(); render(); } }
+    catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+  const reload = () => openDetail(A().id, true);
+
+  /* ---------- رندر ---------- */
+  function render() {
+    const app = document.getElementById("app");
+    if (!S.expert) S.screen = "login";
+    app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
+      <span class="spacer"></span>${S.expert ? `<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
+      ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
+    wire();
+  }
+
+  /* ---------- اتصال ---------- */
+  function wire() {
+    const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
+    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#code").value.trim(); if (!c) return; try { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } catch (e) { S.error = e.message; render(); } }; lg.onclick = go; G("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
+    const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
+    const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
+    Q("[data-req]").forEach((x) => x.onclick = () => openDetail(+x.dataset.req));
+    Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
+    const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
+    const bk = G("[data-back]"); if (bk) bk.onclick = () => { S.screen = "list"; S.d = null; loadTray(); };
+    Q("[data-item]").forEach((x) => x.onclick = () => { S.itemIdx = +x.dataset.item; render(); });
+    Q("[data-tab]").forEach((x) => x.onclick = () => { S.tab = x.dataset.tab; render(); });
+    Q("[data-idone]").forEach((c) => c.onchange = async (e) => { try { await TP.api(`/items/${e.target.dataset.idone}/commission`, { body: { ok: e.target.checked } }); await reload(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } });
+    Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
+    const tp = G("[data-tpl]"); if (tp) tp.onclick = pickTemplate;
+    /* سوابق / جستجو */
+    Q("[data-w]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); S.weights[+e.target.dataset.w] = +e.target.value || 0; });
+    const rh = G("[data-run-hist]"); if (rh) rh.onclick = async () => { const it = item(); S.hist[it.id] = await TP.api(`/suppliers/history?item=${encodeURIComponent(it.title)}&code=${encodeURIComponent(it.code || "")}`); render(); };
+    const rs = G("[data-run-smart]"); if (rs) rs.onclick = async () => { const it = item(); S.srch.notes = (G("#notes") || {}).value; S.smart[it.id] = await TP.api("/search/smart", { body: { item: it.title, code: it.code, notes: S.srch.notes, scope: S.scope, caps: S.caps, srch: S.srch, filters: S.f } }); render(); };
+    Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); const stage = b.dataset.mark; const ids = S.scope === "all" && stage === "smart" ? items().map((x) => x.id) : [it.id]; for (const id of ids) await TP.api(`/items/${id}/progress`, { body: { stage } }); await reload(); });
+    Q("[data-scope]").forEach((x) => x.onchange = (e) => { S.scope = e.target.dataset.scope; render(); });
+    Q("[data-cap]").forEach((x) => x.onchange = (e) => { S.caps[e.target.dataset.cap] = e.target.checked; });
+    Q("[data-s]").forEach((x) => x.oninput = x.onchange = (e) => { S.srch[e.target.dataset.s] = e.target.value; if (e.target.tagName === "SELECT") render(); });
+    Q("[data-tr]").forEach((x) => x.onchange = (e) => { S.srch.trade = e.target.dataset.tr; render(); });
+    const po = G("[data-po]"); if (po) po.onchange = (e) => { S.f.priceOnly = e.target.checked; };
+    const am = G("[data-admax]"); if (am) am.oninput = (e) => { S.f.adMax = +e.target.value; e.target.nextElementSibling.textContent = `از ${TP.fmtD(S.now - S.f.adMax * DAY)} تا امروز`; };
+    Q("[data-date]").forEach((i) => i.onclick = () => TP.openDatePicker(i, (v) => { S.f.maxDelivery = v; render(); }, { single: true }));
+    /* استعلامات */
+    const ar = G("[data-add-row]"); if (ar) ar.onclick = () => {
+      const d = TP.modal("افزودن تأمین‌کننده", `<div class="tp-field"><b>نام تأمین‌کننده</b><input class="tp-input" id="sup" style="width:100%" autofocus></div><div class="tp-field" style="margin-top:8px"><b>کد (اختیاری)</b><input class="tp-input" id="supc" style="width:160px"></div>
+        <div class="tp-field" style="margin-top:8px"><b>برای قلم</b><select class="tp-select" id="supi" style="width:100%">${items().map((x, i) => `<option value="${x.id}" ${i === S.itemIdx ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></div>`,
+        async () => { const n = d.querySelector("#sup").value.trim(); if (!n) return; try { await TP.api("/quotes", { body: { assignment_id: A().id, item_id: +d.querySelector("#supi").value, supplier_name: n, supplier_code: d.querySelector("#supc").value.trim() } }); S.tab = "quotes"; await reload(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "افزودن");
+    };
+    Q("[data-qf]").forEach((el) => {
+      const [id, f] = el.dataset.qf.split("|"); const q = S.d.quotes.find((x) => x.id === +id); if (!q) return;
+      if (el.classList.contains("date")) { el.onclick = () => TP.openDatePicker(el, async (v) => { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: v } }); await reload(); }, { single: true }); return; }
+      const commit = async () => { if (String(q[f] == null ? "" : q[f]) === el.value) return; try { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: f === "item_id" ? +el.value : el.value } }); await reload(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } };
+      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); const cell = el.closest("tr").children[3 + QF.length + 4]; if (cell) cell.textContent = v ? M(v) : "—"; } }; }
+    });
+    Q("[data-fin]").forEach((c) => c.onchange = async (e) => { await TP.api(`/quotes/${e.target.dataset.fin}`, { method: "PUT", body: { final: e.target.checked ? 1 : 0 } }); await reload(); });
+    Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); } catch (e) { const miss = (e.data && e.data.missing) || []; const LBL = { place: "محل تحویل", place_other: "محل تحویل (سایر)", pay: "شرایط تسویه", deal: "محل معامله", invoice: "نوع فاکتور" }; TP.modal("ثبت موقت انجام نشد", `این فیلدها خالی‌اند:<br><br><b>${miss.map((f) => LBL[f] || (QF.find((x) => x[0] === f) || [, f])[1]).join("، ")}</b><br><br>تا ثبت موقت انجام نشود، این ردیف در شمارنده و کمیسیون حساب نمی‌شود.`, null, "باشد", ""); } });
+    Q("[data-del]").forEach((b) => b.onclick = () => TP.modal("حذف استعلام", "این ردیف حذف شود؟", async () => { await TP.api(`/quotes/${b.dataset.del}`, { method: "DELETE" }); await reload(); }, "حذف"));
+    Q("[data-pf]").forEach((b) => b.onclick = () => {
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,.jpg,.jpeg,.png";
+      inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; const r = await TP.api("/proformas", { body: { assignment_id: A().id, supplier_name: b.dataset.pf, filename: f.name } }); await reload(); TP.modal("پیش‌فاکتور", `${esc(r.message || "ثبت شد.")} <span class="chip mock">ذخیرهٔ فایل — در انتظار اتصال R2</span>`, null, "باشد", ""); };
+      inp.click();
+    });
+    Q("[data-extract]").forEach((b) => b.onclick = async () => { const r = await TP.api(`/proformas/${b.dataset.extract}/extract`, { body: {} }); TP.modal("استخراج از پیش‌فاکتور", `${esc(r.message)} <span class="chip mock">در انتظار اتصال به مدل</span><br><br>تا آن زمان، فیلدهای زمان تحویل، اعتبار، تسویه و نوع فاکتور را دستی وارد کنید.`, null, "باشد", ""); });
+    Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; render(); });
+    const mc = G("[data-make-comm]"); if (mc) mc.onclick = async () => { try { await TP.api(`/assignments/${A().id}/commission`, { body: {} }); S.tab = "comm"; await reload(); } catch (e) { TP.modal("تولید جدول کمیسیون", esc(e.message) + (e.data && e.data.missing && e.data.missing.length ? `<br><br>${e.data.missing.map((m) => `• ${esc(m.title)} (${m.n} از ${e.data.need})`).join("<br>")}` : ""), null, "باشد", ""); } };
+    const dx = G("[data-xls]"); if (dx) dx.onclick = downloadXls;
+    const pr = G("[data-print]"); if (pr) pr.onclick = () => TP.modal("پرینت", "دو برگه با هم چاپ می‌شوند:<br><br>۱. برگه درخواست خرید<br>۲. جدول مقایسه استعلام بها (کمیسیون)<br><br>برای PDF، در پنجرهٔ چاپ «Save as PDF» را انتخاب کنید.", () => window.print(), "چاپ کن");
+  }
+
+  function doExpertAct(act) {
+    const its = items(), n = its.length, done = its.filter((i) => i.commission_ok && i.state === "open");
+    const lbl = { hold: "تعلیق", stop: "توقف", end: "خاتمه" }[act];
+    let body = "";
+    if (act === "end") body = done.length === openItems().length ? `هر <b>${done.length}</b> قلم باز را کمیسیون تأیید کرده است.<br><br>این اقلام <b>«بسته شده»</b> ثبت می‌شوند و درخواست از کارتابل شما خارج می‌شود.`
+      : `<b>${done.length}</b> قلم از <b>${n}</b> قلم تأیید شده است:<br><br>${done.map((i) => "• " + esc(i.title)).join("<br>")}<br><br>این اقلام بسته می‌شوند و از کارتابل خارج می‌شوند؛ باقی اقلام همچنان پیگیری می‌شوند (خاتمهٔ جزئی).`;
+    else body = `با این کار پایش و اعلان این درخواست متوقف می‌شود و از کارتابل شما خارج می‌شود.`;
+    body += `<br><br><div class="tp-note" style="margin:0">${settings().approvalRequired ? "چون مدیر گزینهٔ «تصمیم کارشناس منوط به تأیید من» را فعال کرده، این درخواست ابتدا برای <b>تأیید مدیر</b> می‌رود و تا تأیید او اعمال نمی‌شود." : "تصمیم بلافاصله اعمال می‌شود و برای مدیر ثبت می‌شود."} <span class="chip mock">اعلان تلگرام — در انتظار اتصال</span></div>`;
+    TP.modal(`${lbl} — درخواست ${esc(S.d.request.id)}`, body, async () => {
+      try { const r = await TP.api(`/assignments/${A().id}/decision`, { body: { action: act, item_ids: act === "end" ? done.map((i) => i.id) : null } });
+        if (r.pending) { TP.modal("ارسال شد", "درخواست شما برای تأیید مدیر ارسال شد. تا تأیید او وضعیت تغییر نمی‌کند.", null, "باشد", ""); await reload(); }
+        else { S.screen = "list"; S.d = null; await loadTray(); } }
+      catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+    }, `تأیید ${lbl}`);
+  }
+
+  /* ---------- شروع ---------- */
+  if (S.expert) { S.screen = "list"; loadTray(); } else render();
+  setInterval(() => { if (S.expert) { S.now = Date.now(); render(); } }, 60000);
+})();

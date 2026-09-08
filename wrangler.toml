@@ -1,0 +1,27 @@
+# ============================================================
+# Cloudflare Worker «asli» — سایت arianaai.website
+#
+# یک Worker با فایل‌های ثابت (frontend/) + کد سرور برای بخش تأمین و پشتیبانی:
+#   /tamin-poshtibani/api/*    → API روی D1 (worker/api.js)
+#   /tamin-poshtibani/panel/*  → پروکسی به سرور Render (worker/panel-proxy.js)
+#   هر مسیر دیگر               → فایل ثابت از frontend/
+#
+# استقرار:  wrangler deploy          (از ریشهٔ همین مخزن)
+# تست محلی: wrangler dev --var MANAGER_CODE:1234
+#
+# راز مدیر در مخزن نیست (مخزن عمومی است):  wrangler secret put MANAGER_CODE
+# ============================================================
+name = "asli"
+main = "worker.js"
+compatibility_date = "2026-09-03"
+
+[assets]
+directory = "./frontend"
+binding = "ASSETS"
+# فایل‌های ثابت جلوتر از Worker سرو می‌شوند؛ Worker فقط برای مسیرهایی اجرا می‌شود که فایل ندارند
+run_worker_first = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tamin-poshtibani"
+database_id = "e94d1472-9b2b-4882-ace0-9c3054696a33"

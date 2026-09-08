@@ -1,12 +1,12 @@
 /**
- * پروکسی Cloudflare Pages Function
+ * پروکسی داخل Worker سایت (worker.js آن را برای /tamin-poshtibani/panel/* صدا می‌زند)
  *
  * هر درخواستی به  arianaai.website/tamin-poshtibani/panel/*
  * پشت پرده به اپ FastAPI روی Render فرستاده می‌شود.
  * کاربر هیچ‌وقت آدرس Render را نمی‌بیند و همه‌چیز روی همین دامنه می‌ماند.
  *
  * چرا پروکسی و نه کپی کردن اپ داخل این مخزن:
- * Cloudflare Pages فقط فایل ثابت سرو می‌کند و نمی‌تواند پایتون اجرا کند،
+ * Worker نمی‌تواند پایتون اجرا کند،
  * ولی اپ برای پارس اکسل، دیتابیس و تلگرام به سرور واقعی نیاز دارد.
  * کد اپ در مخزن purchasing-support می‌ماند و اینجا تکرار نمی‌شود.
  */
@@ -14,8 +14,7 @@
 const UPSTREAM = "https://purchasing-support-staging.onrender.com";
 const PREFIX = "/tamin-poshtibani/panel";
 
-export async function onRequest(context) {
-  const req = context.request;
+export async function proxy(req) {
   const url = new URL(req.url);
 
   // مسیر بعد از پیشوند — همان چیزی که به Render فرستاده می‌شود
