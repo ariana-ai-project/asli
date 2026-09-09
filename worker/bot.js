@@ -259,24 +259,29 @@ async function onMessage(env, msg) {
   if (text === "/nameh" || text === "نامه") return startFlow(env, api, chat, ex, "letter");
   if (text === "/tahvil" || text === "تحویل") return startFlow(env, api, chat, ex, "deliver");
 
-  /* متن آزاد: ممکن است پاسخ یکی از گفت‌وگوهای نیمه‌کاره باشد */
+  /* متن آزاد: پاسخِ کدام گفت‌وگوی نیمه‌کاره است؟
+     کارشناس ممکن است هم‌زمان یک نامهٔ منتظرِ توضیح، یک فایلِ منتظرِ نام
+     تأمین‌کننده و یک فاکتور دستیِ نیمه‌کاره داشته باشد. قاعده ساده و قابل
+     پیش‌بینی است: **آخرین چیزی که شروع کرده، همان است که جواب می‌گیرد.**
+     (پیش از این، نامهٔ نیمه‌کاره متنِ فاکتور دستی را می‌بلعید.) */
   if (text && !text.startsWith("/")) {
-    /* منتظر توضیح نامه‌ایم — چه صوتی چه نوشته. اگر متنِ رونویسی‌شده را هم
-       اصلاح کند، همان را می‌گیریم؛ کارشناس نباید مجبور شود دوباره ضبط کند. */
-    const L = await env.DB.prepare(
-      "SELECT * FROM letters WHERE expert_id=? AND state IN ('need_voice','transcribed') ORDER BY id DESC LIMIT 1",
-    ).bind(ex.id).first();
-    if (L) return onLetterText(env, api, chat, ex, L, text);
-
-    const up = await env.DB.prepare(
-      "SELECT * FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1",
-    ).bind(ex.id, now()).first();
-    if (up) {
-      if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
-      return saveProforma(env, api, chat, up, text);
-    }
-    const f = await openFlow(env, ex.id);
-    if (f) return onFlowText(env, api, chat, f, text);
+    const t = now();
+    const [letter, upload, flow] = await Promise.all([
+      /* نامه: چه صوتی چه نوشتاری. اصلاح متنِ رونویسی‌شده هم همین‌جاست، تا
+         کارشناس برای یک غلط املایی مجبور به ضبط دوباره نشود. */
+      env.DB.prepare("SELECT * FROM letters WHERE expert_id=? AND state IN ('need_voice','transcribed') ORDER BY id DESC LIMIT 1").bind(ex.id).first(),
+      env.DB.prepare("SELECT * FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1").bind(ex.id, t).first(),
+      openFlow(env, ex.id),
+    ]);
+    const pick = [
+      letter && { at: letter.updated_at || letter.created_at, run: () => onLetterText(env, api, chat, ex, letter, text) },
+      upload && { at: upload.created_at, run: async () => {
+        if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
+        return saveProforma(env, api, chat, upload, text);
+      } },
+      flow && { at: flow.created_at, run: () => onFlowText(env, api, chat, flow, text) },
+    ].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+    if (pick) return pick.run();
   }
 
   if (text === "/stop") {
