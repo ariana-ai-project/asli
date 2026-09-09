@@ -11,6 +11,7 @@
  */
 
 const API = "https://api.telegram.org/bot";
+const FILE_API = "https://api.telegram.org/file/bot";
 
 /** خطای قابل‌تشخیصِ تلگرام تا صف بداند «دوباره تلاش کن» یا «هرگز» */
 export class TgError extends Error {
@@ -34,9 +35,13 @@ export class TgError extends Error {
 export function telegram(env) {
   const token = env.TG_BOT_TOKEN;
   if (!token) throw new TgError("init", 503, "TG_BOT_TOKEN روی این پروژه ست نشده است.");
+  /* فقط توسعهٔ محلی: مسیر «فایل رسید» بدون یک تلگرامِ بدلی اصلاً تست‌پذیر نبود.
+     در تولید ست نمی‌شود و همان آدرس واقعی می‌ماند. */
+  const api = env.TG_API_BASE || API;
+  const fileApi = env.TG_FILE_API_BASE || FILE_API;
 
   async function call(method, body) {
-    const r = await fetch(API + token + "/" + method, {
+    const r = await fetch(api + token + "/" + method, {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify(body || {}),
@@ -72,13 +77,13 @@ export function telegram(env) {
       form.append("chat_id", String(chat_id));
       if (caption) { form.append("caption", caption); form.append("parse_mode", "HTML"); }
       form.append("document", body instanceof Blob ? body : new Blob([body]), filename);
-      const r = await fetch(API + token + "/sendDocument", { method: "POST", body: form });
+      const r = await fetch(api + token + "/sendDocument", { method: "POST", body: form });
       const d = await r.json().catch(() => ({}));
       if (!d.ok) throw new TgError("sendDocument", d.error_code || r.status, d.description, d.parameters && d.parameters.retry_after);
       return d.result;
     },
     /** آدرس دانلود فایل. لینک حداقل یک ساعت معتبر است، پس دانلود باید فوری باشد (ADR-0008) */
-    fileUrl: (file_path) => `https://api.telegram.org/file/bot${token}/${file_path}`,
+    fileUrl: (file_path) => `${fileApi}${token}/${file_path}`,
     setWebhook: (url, secret_token) => call("setWebhook", {
       url, secret_token,
       allowed_updates: ["message", "callback_query", "my_chat_member"],

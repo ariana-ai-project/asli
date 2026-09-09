@@ -17,7 +17,7 @@ const API = "https://api.anthropic.com/v1/messages";
 const MAX_TOKENS = 8000;
 
 /** نسخهٔ دستور — در کنار خروجی ذخیره می‌شود تا بعداً بشود فهمید با چه چیزی استخراج شده (INV-15، PRV-05) */
-export const PROMPT_VERSION = "pf-extract/1.0";
+export const PROMPT_VERSION = "pf-extract/1.1";
 
 /* ------------------------------------------------------------------ */
 /* قرارداد خروجی                                                       */
@@ -31,7 +31,7 @@ const LINE = {
     spec: { type: ["string", "null"], description: "جنس یا مشخصات فنی، اگر جدا نوشته شده" },
     unit: { type: ["string", "null"], description: "واحد (عدد، متر، کیلوگرم…)" },
     qty: { type: ["number", "null"], description: "مقدار" },
-    unit_price: { type: ["number", "null"], description: "قیمت واحد، با همان واحد پولی که در سند نوشته شده. تبدیل نکن." },
+    unit_price: { type: ["number", "null"], description: "قیمت واحد، با همان واحد پولی که در سند نوشته شده. تبدیل نکن. اگر فقط مبلغ کل نوشته شده، null بگذار؛ سامانه خودش تقسیم می‌کند." },
     total_price: { type: ["number", "null"], description: "مبلغ کل سطر، اگر در سند آمده. حساب نکن؛ فقط اگر نوشته شده." },
     confidence: { type: "string", enum: ["high", "medium", "low"] },
     note: { type: ["string", "null"], description: "اگر چیزی در این سطر مبهم بود، این‌جا بنویس" },
@@ -49,11 +49,23 @@ export const SCHEMA = {
       enum: ["handwritten", "low_quality_scan", "unclear_structure", "not_a_proforma", "password_protected", "empty", null],
       description: "اگر extractable=false، دلیلش",
     },
-    supplier_name: { type: ["string", "null"], description: "نام فروشنده/تأمین‌کننده روی سربرگ" },
+    supplier_name: { type: ["string", "null"], description: "نام فروشنده/تأمین‌کننده روی سربرگ، دقیقاً همان‌طور که نوشته شده" },
+    supplier_code: { type: ["string", "null"], description: "کد اقتصادی یا شناسهٔ ملی فروشنده، اگر روی سند نوشته شده" },
     currency: { type: ["string", "null"], enum: ["ریال", "تومان", null], description: "واحد پولِ نوشته‌شده در سند. حدس نزن." },
     vat_included: { type: ["boolean", "null"], description: "آیا قیمت‌های نوشته‌شده ارزش افزوده را در خود دارند؟" },
     invoice_type: { type: ["string", "null"], enum: ["رسمی", "غیر رسمی", null] },
-    pay_terms: { type: ["string", "null"], description: "شرایط تسویه، عیناً" },
+    pay_terms: { type: ["string", "null"], description: "شرایط تسویه، عیناً همان‌طور که در سند نوشته شده" },
+    pay_class: {
+      type: ["string", "null"],
+      enum: ["نقدی", "اعتباری", "۵۰٪ پیش‌پرداخت", "سایر", null],
+      description: "همان شرایط تسویه، ریخته‌شده در فهرست ثابتِ جدول استعلام. فقط اگر از متن سند روشن است.",
+    },
+    place: {
+      type: ["string", "null"],
+      enum: ["محل پروژه", "انبار شرکت", "سایر", null],
+      description: "محل تحویل کالا طبق سند. اگر جایی غیر از این دو نوشته شده «سایر» بگذار؛ اگر اصلاً ننوشته null.",
+    },
+    place_other: { type: ["string", "null"], description: "اگر place=سایر، نام همان محل عیناً" },
     valid_days: { type: ["integer", "null"], description: "مدت اعتبار پیش‌فاکتور به روز" },
     delivery_date: { type: ["string", "null"], description: "زمان تحویل، عیناً همان‌طور که نوشته شده" },
     ship_method: { type: ["string", "null"], description: "روش حمل" },
@@ -80,6 +92,8 @@ export const SYSTEM = `تو دستیار استخراج اطلاعات از پی
 
 اصل دوم — فقط آنچه نوشته شده.
 • هیچ عددی را حساب نکن. اگر «مبلغ کل» در سند نیست، total_price را null بگذار؛ خودت ضرب نکن.
+  برعکسش هم همین است: اگر فقط مبلغ کل نوشته شده و قیمت واحد نه، unit_price را null بگذار و qty و total_price
+  همان سطر را بنویس — تقسیم را سامانه انجام می‌دهد، تو نه.
 • هیچ فیلدی را از روی فیلد دیگر استنتاج نکن.
 • متن‌ها (شرایط تسویه، زمان تحویل، روش حمل) را عیناً بنویس؛ خلاصه و بازنویسی نکن.
 
@@ -105,6 +119,13 @@ low یعنی حدس نزدیک است. هر فیلدی که در سند بود �
 اصل هفتم — جهت صفحه.
 اسکن ممکن است ۹۰ یا ۱۸۰ درجه چرخیده باشد. اگر چنین است، در ذهنت بچرخانش و بخوانش؛ چرخیدگی
 به‌تنهایی دلیل ناخوانا بودن نیست. فقط در فیلد orientation بنویس صفحه چطور بوده تا کاربر بداند.
+
+اصل هشتم — فهرست‌های ثابتِ جدول.
+سه فیلد invoice_type و pay_class و place باید از فهرست ثابتِ خودشان انتخاب شوند، چون مستقیم در جدول استعلام می‌نشینند.
+این «ریختنِ متنِ سند در فهرست» است، نه حدس زدن: اگر نوشته «تسویه نقدی» ← pay_class=نقدی؛ اگر نوشته «۵۰٪ پیش‌پرداخت،
+مابقی هنگام تحویل» ← pay_class=«۵۰٪ پیش‌پرداخت» و متن کاملش در pay_terms؛ اگر شرطی نوشته شده که در فهرست نیست ← «سایر».
+اگر اصلاً چیزی ننوشته ← null، نه «سایر».
+«محل معامله» (کارگاه / دفتر مرکزی) تصمیم داخلی شرکت است و در پیش‌فاکتور نوشته نمی‌شود؛ سراغش نرو.
 
 زبان همهٔ متن‌های خروجی فارسی است، مگر آنکه در خود سند لاتین نوشته شده باشد.`;
 

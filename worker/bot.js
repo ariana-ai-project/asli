@@ -15,10 +15,12 @@ import { telegram, esc, TgError } from "./telegram.js";
 import { fmtFa, workHours } from "./time.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import { REFUSAL_FA } from "./extract.js";
-import { runExtraction, applyExtraction } from "./proforma.js";
+import { runExtraction, extractFor, saveExtraction, applyExtraction } from "./proforma.js";
 import { transcribe, writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { bundleData, buildFiles, readiness } from "./bundle.js";
+import { commissionHtml } from "./sheets.js";
+import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
 
 const now = () => Date.now();
@@ -91,12 +93,23 @@ export async function drainOutbox(env, limit = 20) {
 
 const SIGN = "\n\n<i>ارجاع از سوی مدیر واحد پشتیبانی</i>";
 
+/**
+ * پیام «ارجاع جدید». اقلام هم ردیف‌به‌ردیف می‌آیند — با مقدار و واحد — تا کارشناس
+ * بی‌آنکه پنل را باز کند بداند این درخواست چقدر کار است و اولویتش را بسنجد.
+ * سقف ۲۰ قلم: پیام تلگرام ۴۰۹۶ نویسه جا دارد و درخواست‌های بزرگ‌تر در پنل خوانده می‌شوند.
+ */
+const DISPATCH_MAX_ITEMS = 20;
 export function dispatchText(a) {
+  const its = a.items || [];
+  const list = its.slice(0, DISPATCH_MAX_ITEMS).map((i, k) =>
+    `${M(k + 1)}. ${esc(short(i.title, 48))}${i.qty != null ? ` — <b>${M(i.qty)}</b> ${esc(i.unit || "")}` : ""}`).join("\n");
   return `🔔 <b>ارجاع جدید</b>\n\n`
     + `درخواست <b>${esc(a.request_id)}</b>\n`
     + `${esc(a.party || "")}\n\n`
-    + `${M(a.item_count)} قلم · مهلت ${M(a.days)} روز کاری\n`
+    + `<b>${M(a.item_count)} قلم</b> · مهلت ${M(a.days)} روز کاری\n`
     + `تا <b>${esc(fmtFa(a.deadline_at))}</b>`
+    + (list ? `\n\n<b>اقلام:</b>\n${list}` : "")
+    + (its.length > DISPATCH_MAX_ITEMS ? `\n<i>و ${M(its.length - DISPATCH_MAX_ITEMS)} قلم دیگر — در پنل</i>` : "")
     + SIGN;
 }
 
@@ -140,7 +153,7 @@ const panelButton = [[{ text: "باز کردن پنل", url: PANEL_URL }]];
  */
 export async function runAlerts(env, limit = 20) {
   const rows = (await env.DB.prepare(
-    `SELECT al.id AS alert_id, al.kind, al.stage,
+    `SELECT al.id AS alert_id, al.kind, al.stage, al.fire_at,
             a.id AS aid, a.request_id, a.days, a.deadline_at, a.viewed_at, a.commission_at,
             e.id AS expert_id, e.name, e.label, e.telegram_chat,
             r.party,
@@ -168,15 +181,17 @@ export async function runAlerts(env, limit = 20) {
     const done = [!!row.viewed_at, row.hist_count > 0, row.smart_count > 0, row.quote_count > 0, row.proforma_count > 0, !!row.commission_at];
     if (!row.open_count || (row.kind === "stage" && done[row.stage])) { skipped++; continue; }
 
+    /* کلید یکتایی صف، زمانِ هشدار را هم دارد: شناسهٔ ارجاع بعد از پاک‌کردن میز
+       دوباره استفاده می‌شود و ردیفِ قدیمیِ صف، هشدارِ ارجاعِ تازه را بی‌صدا می‌خورد. */
     if (row.kind === "stage") {
       if (!row.telegram_chat) { skipped++; continue; }
-      stmts.push(queueStmt(env, `stage:${row.aid}:${row.stage}`, row.telegram_chat,
+      stmts.push(queueStmt(env, `stage:${row.aid}:${row.stage}:${row.fire_at}`, row.telegram_chat,
         stageAlertText(row, row.stage), row.stage === 0 ? seenButton(row.aid) : panelButton));
       queued++;
     } else {
       /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر (SLA-05، TG-04) */
-      if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}`, row.telegram_chat, overdueText(row), panelButton)); queued++; }
-      if (managerChat) { stmts.push(queueStmt(env, `over-mgr:${row.aid}`, managerChat, managerOverdueText(row))); queued++; }
+      if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), panelButton)); queued++; }
+      if (managerChat) { stmts.push(queueStmt(env, `over-mgr:${row.aid}:${row.fire_at}`, managerChat, managerOverdueText(row))); queued++; }
     }
   }
   await env.DB.batch(stmts);
@@ -307,6 +322,8 @@ async function onMessage(env, msg) {
 /** پاسخ متنی کاربر در یکی از گام‌های گفت‌وگو */
 async function onFlowText(env, api, chat, f, text) {
   const d = flowData(f);
+
+  if (f.kind === "field" && f.step === "need_value") return onFieldText(env, api, chat, f, text);
 
   if (f.step === "need_supplier") {
     if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
@@ -459,7 +476,7 @@ async function onDocument(env, msg, ex) {
   const uid = ins.meta.last_row_id;
 
   /* اگر فقط یک ارجاع باز دارد، پرسیدن «کدام درخواست؟» بی‌معنی است */
-  if (open.length === 1) return askSupplier(env, api, chat, uid, open[0], filename, null);
+  if (open.length === 1) return askQuote(env, api, chat, uid, open[0], filename, null);
 
   const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `pf:${uid}:r:${a.id}` }]);
   kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
@@ -491,23 +508,50 @@ async function ownOpenAssignment(env, expertId, aid) {
 const short = (s, n = 28) => { const x = String(s || "").trim(); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
 
 /**
- * گام دوم: کدام تأمین‌کننده؟ فهرست از استعلام‌های همان درخواست می‌آید.
+ * گام دوم: این پیش‌فاکتور برای کدام استعلام است؟
+ *
+ * ملاکِ دیده‌شدن، **باز بودنِ خط استعلام** است، نه «ثبت موقت». ثبت موقت خودش
+ * می‌خواهد همهٔ فیلدها از قبل دستی پر شده باشند — و اگر شرطش می‌کردیم، خواندنِ
+ * خودکار بی‌معنی می‌شد: کارشناس باید همان چیزی را تایپ می‌کرد که قرار است مدل
+ * از روی سند بخواند.
+ *
  * نام تأمین‌کننده می‌تواند بلند باشد و `callback_data` سقف ۶۴ بایت دارد، پس
- * نام‌ها در خود ردیف آپلود ذخیره و با اندیس ارجاع داده می‌شوند.
+ * گزینه‌ها در خود ردیف آپلود ذخیره و با اندیس ارجاع داده می‌شوند.
  */
-async function askSupplier(env, api, chat, uid, asg, filename, messageId) {
-  const sups = ((await env.DB.prepare(
-    "SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name",
-  ).bind(asg.id).all()).results || []).map((r) => r.supplier_name).filter(Boolean);
+async function askQuote(env, api, chat, uid, asg, filename, messageId) {
+  const rows = (await env.DB.prepare(
+    `SELECT q.supplier_name, q.saved FROM quotes q WHERE q.assignment_id=? ORDER BY q.supplier_name, q.id LIMIT 60`,
+  ).bind(asg.id).all()).results || [];
+
+  /* خط‌های یک تأمین‌کننده یک گزینه‌اند: پیش‌فاکتور به تأمین‌کننده می‌چسبد، نه به قلم */
+  const groups = [];
+  for (const r of rows) {
+    const name = T(r.supplier_name);
+    if (!name) continue;
+    let g = groups.find((x) => x.n === name);
+    if (!g) { g = { n: name, c: 0, s: 0 }; groups.push(g); }
+    g.c++; if (r.saved) g.s++;
+  }
 
   await env.DB.prepare("UPDATE tg_uploads SET assignment_id=?, state='need_supplier', options_json=? WHERE id=?")
-    .bind(asg.id, JSON.stringify(sups), uid).run();
+    .bind(asg.id, JSON.stringify(groups), uid).run();
 
-  const kb = sups.map((s, i) => [{ text: short(s, 34), callback_data: `pf:${uid}:s:${i}` }]);
-  kb.push([{ text: "➕ تأمین‌کنندهٔ تازه (نامش را می‌نویسم)", callback_data: `pf:${uid}:n:0` }]);
+  const kb = groups.map((g, i) => [{
+    /* ⚪ یعنی هنوز ثبت موقت نشده — همین‌ها بودند که قبلاً از قلم می‌افتادند */
+    text: `${g.s === g.c ? "✅" : "⚪"} ${short(g.n, 26)} · ${M(g.c)} قلم`,
+    callback_data: `pf:${uid}:s:${i}`,
+  }]);
+  const ai = !!(env.ANTHROPIC_API_KEY && (storage(env) || {}).signedUrl);
+  if (ai) kb.push([{ text: "➕ استعلام جدید (از روی همین فایل)", callback_data: `pf:${uid}:a:0` }]);
+  kb.push([{ text: "✍️ نام تأمین‌کننده را خودم می‌نویسم", callback_data: `pf:${uid}:n:0` }]);
   kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
+
   const text = `📎 <b>${esc(filename)}</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
-    + (sups.length ? "این پیش‌فاکتور از کدام تأمین‌کننده است؟" : "برای این درخواست هنوز استعلامی ثبت نشده. نام تأمین‌کننده را بنویسید:");
+    + (groups.length
+      ? "این پیش‌فاکتور برای کدام استعلام است؟\n<i>⚪ یعنی هنوز ثبت موقت نشده؛ فرقی نمی‌کند، انتخابش کنید.</i>"
+      : ai
+        ? "برای این درخواست هنوز استعلامی باز نشده.\n«استعلام جدید» را بزنید تا خودم سند را بخوانم و خط استعلام را با نام همان تأمین‌کننده بسازم."
+        : "برای این درخواست هنوز استعلامی باز نشده. نام تأمین‌کننده را بنویسید:");
 
   if (messageId) { await api.editMessageText(chat, messageId, text, kb); return { ok: true }; }
   const sent = await api.sendMessage(chat, text, kb);
@@ -515,8 +559,52 @@ async function askSupplier(env, api, chat, uid, asg, filename, messageId) {
   return { ok: true };
 }
 
-/** گام آخر: ثبت پیش‌فاکتور روی استعلام آن تأمین‌کننده */
-async function saveProforma(env, api, chat, up, supplier) {
+/**
+ * «استعلام جدید +» — سند خوانده می‌شود تا **نام تأمین‌کننده از خود پیش‌فاکتور**
+ * دربیاید و خط استعلام با همان نام ساخته شود.
+ *
+ * ترتیب اجباری است: کلیدِ ردیف پیش‌فاکتور همان نام تأمین‌کننده است، پس تا سند
+ * خوانده نشود ردیفی هم نمی‌شود ساخت. برای همین این‌جا extractFor صدا زده می‌شود
+ * که چیزی در دیتابیس نمی‌نویسد.
+ */
+async function newQuoteFromFile(env, api, chat, ex, up) {
+  const store = storage(env);
+  const fallback = async (msg) => {
+    await env.DB.prepare("UPDATE tg_uploads SET state='need_name' WHERE id=?").bind(up.id).run();
+    await api.sendMessage(chat, msg + "\n\nنام تأمین‌کننده را بنویسید تا فایل را همان‌جا ثبت کنم:");
+    return { ok: true };
+  };
+  if (!env.ANTHROPIC_API_KEY || !store || !store.signedUrl) return fallback("خواندن خودکار روی این نصب فعال نیست.");
+
+  const asg = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
+  if (!asg) return fallback("این ارجاع پیدا نشد.");
+
+  await api.sendMessage(chat, "⏳ دارم سند را می‌خوانم تا خط استعلام را خودم بسازم…").catch(() => {});
+  let out;
+  try {
+    out = await extractFor(env, store, {
+      assignment_id: up.assignment_id, request_id: asg.request_id, storage_key: up.storage_key, mime: up.mime,
+    });
+  } catch (e) { return fallback(`خواندن نشد: ${esc(e.message)}`); }
+
+  const r = out.result;
+  const supplier = T(r.supplier_name);
+  if (!r.extractable) {
+    return fallback(`⚠️ نتوانستم مطمئن بخوانم — <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>.`
+      + "\nقیمت‌ها را بعداً با /faktor دستی وارد کنید.");
+  }
+  /* بدون نام تأمین‌کننده، خط استعلام کلید ندارد */
+  if (!supplier) return fallback("⚠️ سند را خواندم ولی نام تأمین‌کننده روی سربرگش پیدا نشد.");
+
+  return saveProforma(env, api, chat, up, supplier, out);
+}
+
+/**
+ * گام آخر: ثبت پیش‌فاکتور روی استعلام آن تأمین‌کننده.
+ * اگر سند از پیش خوانده شده (مسیر «استعلام جدید»)، همان خروجی روی ردیف تازه
+ * می‌نشیند تا دو بار به مدل پول ندهیم.
+ */
+async function saveProforma(env, api, chat, up, supplier, out) {
   const t = now();
   await env.DB.batch([
     env.DB.prepare(
@@ -532,6 +620,16 @@ async function saveProforma(env, api, chat, up, supplier) {
   const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
   const pf = await env.DB.prepare("SELECT id FROM proformas WHERE assignment_id=? AND supplier_name=?").bind(up.assignment_id, supplier).first();
   await sendProgress(env, api, chat, up.assignment_id);
+
+  if (out && pf) {
+    await saveExtraction(env, pf.id, out);
+    if (up.message_id) {
+      await api.editMessageText(chat, up.message_id,
+        `✅ فایل زیر نام <b>${esc(supplier)}</b> ثبت شد.\n📎 ${esc(up.filename)}`, panelButton).catch(() => {});
+    }
+    return presentExtraction(env, api, chat, pf.id, out.result, up.assignment_id);
+  }
+
   const text = `✅ ثبت شد.\n\n📎 <b>${esc(up.filename)}</b>\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(supplier)}</b>`;
   const kb = pf && env.ANTHROPIC_API_KEY
     ? [[{ text: "🤖 خواندن خودکار قیمت‌ها", callback_data: `ai:${pf.id}:go:0` }], [{ text: "باز کردن پنل", url: PANEL_URL }]]
@@ -544,6 +642,276 @@ async function saveProforma(env, api, chat, up, supplier) {
 /* ------------------------------------------------------------------ */
 /* استخراج خودکار (AI-06) — خواندن، نمایش، و ثبت فقط با تأیید کارشناس    */
 /* ------------------------------------------------------------------ */
+
+/* ------------------------------------------------------------------ */
+/* کارت استعلام — چه خوانده شد، چه نه؛ پرکردن دستی؛ ثبت موقت           */
+/*                                                                      */
+/* بعد از خواندنِ خودکار یا فاکتور دستی، کارشناس همین‌جا می‌بیند کدام     */
+/* فیلدها پر شده و کدام نه. هر خالی یک دکمه است: اجباری‌ها با ❌ و        */
+/* اختیاری‌ها با ⚪. اختیاریِ خالی مانع ثبت نیست؛ اجباریِ خالی هست.       */
+/* ------------------------------------------------------------------ */
+
+/** خط‌های یک تأمین‌کننده در یک ارجاع، به ترتیب قلم */
+async function supplierLines(env, aid, supplier) {
+  return (await env.DB.prepare(
+    `SELECT q.*, i.title AS item_title FROM quotes q JOIN items i ON i.id=q.item_id
+     WHERE q.assignment_id=? AND q.supplier_name=? ORDER BY i.line_no, q.id`,
+  ).bind(aid, supplier).all()).results || [];
+}
+
+/** یک خط استعلام، فقط اگر مال همین کارشناس باشد (INV-11) */
+async function ownQuote(env, expertId, qid) {
+  return env.DB.prepare(
+    `SELECT q.*, a.request_id, i.title AS item_title FROM quotes q
+     JOIN assignments a ON a.id=q.assignment_id JOIN items i ON i.id=q.item_id WHERE q.id=? AND a.expert_id=?`,
+  ).bind(qid, expertId).first();
+}
+
+const filled = (v) => T(v) !== "";
+const fieldLabel = (f) => (LABELS[f] || f).replace(" (ریال)", "").replace(" (روز)", "");
+
+/**
+ * کارت یک تأمین‌کننده. `messageId` اگر باشد همان پیام ویرایش می‌شود تا گفت‌وگو
+ * پر از کارت‌های تکراری نشود؛ `head` یک خط خبر بالای کارت است («✅ ثبت شد»).
+ */
+async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
+  const lines = await supplierLines(env, aid, supplier);
+  if (!lines.length) { await api.sendMessage(chat, "برای این تأمین‌کننده خط استعلامی نمانده."); return { ok: true }; }
+  const q0 = lines[0];
+  const a = await env.DB.prepare(
+    "SELECT request_id, (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=assignments.id AND q.saved=1) AS saved_all FROM assignments WHERE id=?",
+  ).bind(aid).first();
+
+  const read = [], missReq = [], missOpt = [], kbReq = [], kbOpt = [];
+  /* شرایط فاکتور — یک بار برای همهٔ خط‌ها */
+  for (const f of PER_SUPPLIER) {
+    if (f === "place_other") continue;
+    const ok = filled(q0[f]) && !(f === "place" && q0.place === "سایر" && !filled(q0.place_other));
+    const req = REQUIRED.includes(f);
+    const shown = f === "place" && q0.place === "سایر" && filled(q0.place_other) ? q0.place_other : q0[f];
+    if (ok) read.push(`${fieldLabel(f)}: ${esc(short(String(shown), 22))}`);
+    else if (req) { missReq.push(fieldLabel(f)); kbReq.push({ text: `❌ ${fieldLabel(f)}`, callback_data: `qf:${q0.id}:${f}` }); }
+    else { missOpt.push(fieldLabel(f)); kbOpt.push({ text: `⚪ ${fieldLabel(f)}`, callback_data: `qf:${q0.id}:${f}` }); }
+  }
+  /* فیلدهای هر قلم — خلاصه‌شده، و برای خالی‌ها دکمه با نام قلم */
+  for (const f of PER_LINE) {
+    const n = lines.filter((q) => filled(q[f])).length;
+    if (n) read.push(`${fieldLabel(f)} ${M(n)}/${M(lines.length)}`);
+  }
+  for (const q of lines) {
+    for (const f of PER_LINE) {
+      if (filled(q[f])) continue;
+      const req = REQUIRED.includes(f);
+      if (!req && lines.length > 5) continue; /* اختیاریِ هر قلم در فهرست‌های بلند، در پنل */
+      const lbl = `${fieldLabel(f)} — ${short(q.item_title, 18)}`;
+      if (req) { missReq.push(lbl); kbReq.push({ text: `❌ ${lbl}`, callback_data: `qf:${q.id}:${f}` }); }
+      else { missOpt.push(lbl); kbOpt.push({ text: `⚪ ${lbl}`, callback_data: `qf:${q.id}:${f}` }); }
+    }
+  }
+
+  const savedN = lines.filter((q) => q.saved).length;
+  const allSaved = savedN === lines.length;
+  const lowN = lines.filter((q) => q.low_conf).length;
+
+  /* اجباری‌ها هر کدام یک ردیف؛ اختیاری‌ها دوتا-دوتا تا کارت بلند نشود */
+  const kb = kbReq.map((b) => [b]);
+  for (let i = 0; i < kbOpt.length; i += 2) kb.push(kbOpt.slice(i, i + 2));
+  kb.push([{ text: "✏️ اصلاح یک فیلد پرشده", callback_data: `qe:${q0.id}:0` }]);
+  if (!allSaved) kb.push([{ text: missReq.length ? "✅ ثبت موقت (اول ❌ها را پر کنید)" : "✅ ثبت موقت", callback_data: `qs:${q0.id}:0` }]);
+  if (a && a.saved_all > 0) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
+  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+
+  const state = allSaved
+    ? `✅ <b>همهٔ خط‌ها ثبت موقت شده‌اند.</b> حالا می‌توانید جدول کمیسیون را بسازید.`
+    : missReq.length
+      ? `⛔ برای ثبت موقت، فیلدهای ❌ باید پر شوند. روی هر کدام بزنید و مقدارش را بدهید.`
+      : `همهٔ اجباری‌ها هستند؛ «ثبت موقت» را بزنید.${missOpt.length ? " اختیاری‌های خالی مانع نیستند." : ""}`;
+
+  const text = `${head ? head + "\n\n" : ""}📋 <b>استعلام «${esc(supplier)}»</b> — درخواست <b>${esc(a ? a.request_id : "")}</b>\n`
+    + `${M(lines.length)} قلم · ثبت‌شده ${M(savedN)} از ${M(lines.length)}${lowN ? ` · ${M(lowN)} قیمتِ کم‌اطمینان ⚠️` : ""}\n\n`
+    + (read.length ? `✅ <b>پر شده:</b> ${read.join(" · ")}\n` : "")
+    + (missReq.length ? `❌ <b>اجباری و خالی:</b> ${esc(missReq.join("، "))}\n` : "")
+    + (missOpt.length ? `⚪ <b>اختیاری و خالی:</b> ${esc(missOpt.join("، "))}\n` : "")
+    + `\n${state}`;
+
+  if (messageId) {
+    const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null);
+    if (r) return { ok: true };
+  }
+  await api.sendMessage(chat, text, kb);
+  return { ok: true };
+}
+
+/** نوشتنِ یک فیلد: شرایط فاکتور روی همهٔ خط‌های تأمین‌کننده، فیلد قلم فقط روی همان خط. هر ویرایش «ثبت موقت» را برمی‌دارد — همان قاعدهٔ پنل. */
+async function setField(env, q, field, value) {
+  if (!LABELS[field]) throw new Error("فیلد ناشناخته");
+  const v = value == null || value === "" ? null : (field === "qty" || field === "price" ? Number(value) : String(value));
+  const t = now();
+  if (PER_SUPPLIER.includes(field)) {
+    await env.DB.prepare(`UPDATE quotes SET ${field}=?, saved=0, updated_at=? WHERE assignment_id=? AND supplier_name=?`)
+      .bind(v, t, q.assignment_id, q.supplier_name).run();
+  } else {
+    await env.DB.prepare(`UPDATE quotes SET ${field}=?, saved=0, updated_at=? WHERE id=?`).bind(v, t, q.id).run();
+  }
+}
+
+/** فیلد فهرستی: گزینه‌ها همان‌هایی که پنل دارد */
+async function askEnum(api, chat, q, field, messageId) {
+  const kb = ENUMS[field].map((v, i) => [{ text: v, callback_data: `qv:${q.id}:${field}:${i}` }]);
+  kb.push([{ text: "↩️ برگشت", callback_data: `qc:${q.id}:0` }]);
+  const text = `<b>${esc(fieldLabel(field))}</b> برای «${esc(q.supplier_name)}» را انتخاب کنید:`;
+  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
+  await api.sendMessage(chat, text, kb);
+  return { ok: true };
+}
+
+const FIELD_HINTS = {
+  price: "قیمت واحد را به <b>ریال</b> بنویسید — مثلاً <code>5605961</code>",
+  qty: "مقدار را با عدد بنویسید — مثلاً <code>4</code>",
+  unit: "واحد را بنویسید — مثلاً عدد، متر، کیلوگرم، شاخه",
+  spec: "جنس یا مشخصات فنی را بنویسید",
+  dtime: "زمان تحویل را بنویسید — مثلاً «۱۰ روز کاری» یا «۱۴۰۵/۰۷/۱۰»",
+  valid_days: "اعتبار پیش‌فاکتور را به روز بنویسید — مثلاً <code>15</code>",
+  ship: "روش حمل را بنویسید — مثلاً «با باربری، هزینه با خریدار»",
+  place_other: "محل تحویل را بنویسید",
+  supplier_code: "کد تأمین‌کننده را بنویسید",
+};
+
+/** فیلد متنی/عددی: یک گفت‌وگوی کوتاه؛ پاسخِ بعدیِ کارشناس همین را پر می‌کند */
+async function askFieldText(env, api, chat, ex, q, field, messageId) {
+  await closeFlows(env, ex.id);
+  const t = now();
+  const ins = await env.DB.prepare(
+    "INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'field','need_value',?,?,?,?)",
+  ).bind(ex.id, String(chat), q.assignment_id, JSON.stringify({ qid: q.id, field, mid: messageId || null }), t, t + FLOW_TTL).run();
+  const scope = PER_LINE.includes(field) ? ` — ${esc(short(q.item_title, 40))}` : ` — همهٔ اقلام «${esc(short(q.supplier_name, 30))}»`;
+  await api.sendMessage(chat, `✏️ <b>${esc(fieldLabel(field))}</b>${scope}\n\n${FIELD_HINTS[field] || "مقدار را بنویسید:"}`,
+    [[{ text: "✖️ بی‌خیال", callback_data: `fl:${ins.meta.last_row_id}:x:0` }]]);
+  return { ok: true };
+}
+
+/** پاسخ متنیِ کارشناس به یک فیلد */
+async function onFieldText(env, api, chat, f, text) {
+  const d = flowData(f);
+  const q = await ownQuote(env, f.expert_id, d.qid);
+  if (!q) { await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run(); await api.sendMessage(chat, "این خط استعلام دیگر وجود ندارد."); return { ok: true }; }
+  let v = text;
+  if (d.field === "price" || d.field === "qty" || d.field === "valid_days") {
+    const n = parsePrice(text);
+    if (n == null) { await api.sendMessage(chat, "عدد را نفهمیدم. فقط رقم بنویسید — مثلاً <code>2500000</code>."); return { ok: true }; }
+    v = d.field === "valid_days" ? String(Math.round(n)) : n;
+  } else if (text.length > 200) { await api.sendMessage(chat, "خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
+  await setField(env, q, d.field, v);
+  await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+  return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, null, `✅ ${esc(fieldLabel(d.field))} ثبت شد.`);
+}
+
+/** فهرست همهٔ فیلدها برای اصلاحِ چیزی که مدل غلط خوانده */
+async function editMenu(env, api, chat, q, messageId) {
+  const lines = await supplierLines(env, q.assignment_id, q.supplier_name);
+  const kb = [];
+  const sup = PER_SUPPLIER.filter((f) => f !== "place_other");
+  for (let i = 0; i < sup.length; i += 2) kb.push(sup.slice(i, i + 2).map((f) => ({ text: fieldLabel(f), callback_data: `qf:${q.id}:${f}` })));
+  for (const l of lines.slice(0, 12)) kb.push([{ text: `قیمت — ${short(l.item_title, 22)}`, callback_data: `qf:${l.id}:price` }, { text: `مقدار`, callback_data: `qf:${l.id}:qty` }]);
+  kb.push([{ text: "↩️ برگشت", callback_data: `qc:${q.id}:0` }]);
+  const text = `✏️ کدام فیلد از «${esc(q.supplier_name)}» اصلاح شود؟`;
+  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
+  await api.sendMessage(chat, text, kb);
+  return { ok: true };
+}
+
+/** ثبت موقتِ همهٔ خط‌های تأمین‌کننده — فقط اگر اجباری‌ها پرند (همان قاعدهٔ پنل) */
+async function saveSupplier(env, api, chat, ex, q, messageId) {
+  const lines = await supplierLines(env, q.assignment_id, q.supplier_name);
+  const problems = [];
+  for (const l of lines) {
+    const miss = missingRequired(l);
+    if (miss.length) problems.push(`• ${esc(short(l.item_title, 24))}: ${esc(miss.map(fieldLabel).join("، "))}`);
+  }
+  if (problems.length) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `⛔ <b>ثبت موقت نشد</b> — این‌ها خالی‌اند:\n${problems.join("\n")}`);
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE quotes SET saved=1, updated_at=? WHERE assignment_id=? AND supplier_name=?").bind(t, q.assignment_id, q.supplier_name),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "quote_saved", q.request_id, JSON.stringify({ assignment_id: q.assignment_id, supplier: q.supplier_name, lines: lines.length, channel: "telegram" })),
+  ]);
+  await quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `✅ ${M(lines.length)} خط استعلام «${esc(q.supplier_name)}» ثبت موقت شد.`);
+  return sendProgress(env, api, chat, q.assignment_id);
+}
+
+/* ------------------------------------------------------------------ */
+/* جدول کمیسیون از بات — انتخاب خط‌ها، ساختِ مکانیکی، بدون مدل           */
+/* ------------------------------------------------------------------ */
+
+/**
+ * کدام خط‌ها در جدول بیایند؟ همان «تأیید نهایی» پنل است؛ هر بار زدن روی یک خط،
+ * پرچمِ final همان خط را برمی‌گرداند و در پنل هم دیده می‌شود.
+ */
+async function tableSelect(env, api, chat, ex, aid, messageId, head) {
+  const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+  if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const lines = (await env.DB.prepare(
+    `SELECT q.id, q.supplier_name, q.price, q.final, i.title FROM quotes q JOIN items i ON i.id=q.item_id
+     WHERE q.assignment_id=? AND q.saved=1 ORDER BY q.supplier_name, i.line_no LIMIT 60`,
+  ).bind(aid).all()).results || [];
+  if (!lines.length) {
+    await api.sendMessage(chat, "هنوز هیچ خط استعلامِ ثبت‌موقت‌شده‌ای ندارید. اول خط‌ها را ثبت موقت کنید.", panelButton);
+    return { ok: true };
+  }
+  const n = lines.filter((l) => l.final).length;
+  const kb = lines.map((l) => [{
+    text: `${l.final ? "☑" : "☐"} ${short(l.supplier_name, 14)} — ${short(l.title, 16)} — ${money(l.price)}`,
+    callback_data: `ct:${aid}:t:${l.id}`,
+  }]);
+  kb.push([{ text: "☑ همه", callback_data: `ct:${aid}:all:0` }, { text: "☐ هیچ", callback_data: `ct:${aid}:none:0` }]);
+  kb.push([{ text: `📊 تولید جدول کمیسیون (${M(n)} خط)`, callback_data: `ct:${aid}:go:0` }]);
+  kb.push([{ text: "✖️ بی‌خیال", callback_data: `ct:${aid}:x:0` }]);
+  const text = `${head ? head + "\n\n" : ""}📊 <b>جدول کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
+    + `کدام استعلام‌ها در جدول بیایند؟ روی هر خط بزنید تا انتخاب یا لغو شود (همان «تأیید نهایی» پنل).\n\n`
+    + `<b>${M(n)}</b> از ${M(lines.length)} خط انتخاب شده.`;
+  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
+  await api.sendMessage(chat, text, kb);
+  return { ok: true };
+}
+
+const XLS_MIME = "application/vnd.ms-excel";
+
+/**
+ * ساختن و فرستادن جدول کمیسیون. هیچ مدلی در کار نیست — همان کدِ مکانیکیِ
+ * sheets.js که پنل هم استفاده می‌کند، از روی خط‌های تأییدنهایی‌شده.
+ * مرحلهٔ «تحویل» (commission_at) این‌جا زده نمی‌شود؛ آن با /tahvil و بستهٔ
+ * کامل است، تا ارجاع برای پیش‌فاکتور و نامهٔ بعدی باز بماند.
+ */
+async function makeTable(env, api, chat, ex, aid, messageId) {
+  const settings = await getSettings(env);
+  const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
+  if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const st = readiness(d);
+  const finals = d.quotes.filter((q) => q.final && q.saved);
+  if (!finals.length) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
+
+  const body = commissionHtml({ ...d, notes: d.assignment.notes });
+  const t = now();
+  await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+    .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, channel: "telegram" })).run();
+  if (messageId) await api.editMessageText(chat, messageId, `📊 جدول کمیسیون با <b>${M(finals.length)}</b> خط ساخته شد.`).catch(() => {});
+
+  let sent = true;
+  try {
+    await api.sendDocument(chat, `کمیسیون-${d.request.id}.xls`, new Blob([body], { type: XLS_MIME }),
+      `📊 <b>جدول مقایسه استعلام بها — ${esc(d.request.id)}</b>\n${M(finals.length)} خط · ${M(st.suppliers)} تأمین‌کننده`);
+  } catch (e) { sent = false; }
+
+  const warn = [];
+  if (!sent) warn.push("⚠️ فایل به تلگرام نرسید؛ در پنل با «تولید جدول کمیسیون» همین را می‌گیرید.");
+  if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدشده ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
+  if (!st.hasNotes) warn.push("📝 توضیحات پای برگه خالی است — با /tozihat می‌نویسید.");
+  await api.sendMessage(chat,
+    (warn.length ? warn.join("\n") + "\n\n" : "")
+    + `<b>برای این خرید نامهٔ پیوست هم لازم دارید؟</b>\nاگر چالشی داشتید یا چیزی هست که کمیسیون باید بداند، یک پیام صوتی بدهید یا تایپ کنید تا نامه‌اش را بنویسم.`,
+    letterOffer(aid));
+  return { ok: true };
+}
 
 /** خلاصهٔ خوانا از خروجی مدل، تا کارشناس پیش از ثبت ببیند چه چیزی قرار است بنشیند */
 function extractSummary(r, itemTitles) {
@@ -569,6 +937,9 @@ function extractSummary(r, itemTitles) {
     + (r.valid_days ? `\nاعتبار: ${M(r.valid_days)} روز` : "")
     + (r.delivery_date ? `\nتحویل: ${esc(r.delivery_date)}` : "")
     + (r.pay_terms ? `\nتسویه: ${esc(r.pay_terms)}` : "")
+    + (r.ship_method ? `\nحمل: ${esc(r.ship_method)}` : "")
+    + (r.invoice_type ? `\nنوع فاکتور: ${esc(r.invoice_type)}` : "")
+    + (r.place ? `\nمحل تحویل: ${esc(r.place === "سایر" && r.place_other ? r.place_other : r.place)}` : "")
     + ((r.unreadable_fields || []).length ? `\n\n⚠️ خوانا نبود: ${esc(r.unreadable_fields.join("، "))}` : "")
     + (r.notes ? `\n\n${esc(r.notes)}` : "")
     + `
@@ -577,14 +948,44 @@ function extractSummary(r, itemTitles) {
 قیمت‌ها در پنل قابل اصلاح‌اند.`;
 }
 
+/**
+ * خلاصهٔ خوانده‌شده را نشان می‌دهد و دکمهٔ ثبت می‌گذارد.
+ *
+ * دکمه فقط وقتی می‌آید که واقعاً چیزی برای نوشتن باشد؛ همان شرطی که
+ * applyExtraction هم دارد — از جمله ته‌مانده‌ی «یک قلم، یک سطر» که خودش وصل
+ * می‌شود. وگرنه کارشناس دکمه‌ای می‌زد که ته‌اش خطا بود.
+ */
+async function presentExtraction(env, api, chat, pid, r, aid) {
+  const items = (await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=?").bind(aid).all()).results || [];
+  const titles = new Map(items.map((i) => [i.id, i.title]));
+  const priced = (r.lines || []).filter((l) => l.unit_price != null);
+  const sole = titles.size === 1 && priced.length === 1 && !priced[0].matched_item_id;
+  const canApply = r.extractable && (priced.some((l) => l.matched_item_id && titles.has(l.matched_item_id)) || sole);
+
+  const has = await env.DB.prepare("SELECT COUNT(*) AS n FROM quotes q JOIN proformas p ON p.assignment_id=q.assignment_id AND p.supplier_name=q.supplier_name WHERE p.id=?").bind(pid).first();
+  const label = has && has.n ? "ثبت در جدول" : "ساختن خط استعلام";
+
+  const kb = [];
+  if (canApply) {
+    if (r.currency) kb.push([{ text: `✅ ${label} (${r.currency})`, callback_data: `ai:${pid}:ok:0` }]);
+    else {
+      /* مدل واحد پول را نفهمیده — کارشناس باید صریح بگوید، وگرنه خطای ده‌برابری */
+      kb.push([{ text: `${label} — ریال`, callback_data: `ai:${pid}:r:0` },
+        { text: `${label} — تومان`, callback_data: `ai:${pid}:t:0` }]);
+    }
+  }
+  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+  await api.sendMessage(chat, extractSummary(r, titles)
+    + (sole ? "\n\n<i>این سند یک سطر قیمت دارد و این درخواست هم یک قلم؛ به همان وصل می‌شود.</i>" : "")
+    + (r.extractable ? `\n\n<i>تا وقتی «${label}» را نزنید، چیزی در جدول کمیسیون نمی‌نشیند.</i>` : ""), kb);
+  return { ok: true };
+}
+
 async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
   const p = await env.DB.prepare(
     "SELECT p.*, a.expert_id, a.request_id FROM proformas p JOIN assignments a ON a.id=p.assignment_id WHERE p.id=?",
   ).bind(pid).first();
   if (!p || p.expert_id !== ex.id) { await api.sendMessage(chat, "این پیش‌فاکتور متعلق به شما نیست."); return { ok: true }; }
-
-  const titles = new Map(((await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=?").bind(p.assignment_id).all()).results || [])
-    .map((i) => [i.id, i.title]));
 
   if (step === "go") {
     const store = storage(env);
@@ -593,32 +994,18 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
     let out;
     try { out = await runExtraction(env, store, p); }
     catch (e) { await api.sendMessage(chat, `خواندن نشد: ${esc(e.message)}\n\nمی‌توانید با /faktor دستی وارد کنید.`); return { ok: true }; }
-
-    const r = out.result;
-    const kb = [];
-    if (r.extractable && (r.lines || []).some((l) => l.matched_item_id && l.unit_price != null)) {
-      if (r.currency) kb.push([{ text: `✅ ثبت در جدول (${r.currency})`, callback_data: `ai:${pid}:ok:0` }]);
-      else {
-        /* مدل واحد پول را نفهمیده — کارشناس باید صریح بگوید، وگرنه خطای ده‌برابری */
-        kb.push([{ text: "ثبت به ریال", callback_data: `ai:${pid}:r:0` }, { text: "ثبت به تومان", callback_data: `ai:${pid}:t:0` }]);
-      }
-    }
-    kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
-    await api.sendMessage(chat, extractSummary(r, titles)
-      + (r.extractable ? "\n\n<i>تا وقتی «ثبت» را نزنید، چیزی در جدول کمیسیون نمی‌نشیند.</i>" : ""), kb);
-    return { ok: true };
+    return presentExtraction(env, api, chat, pid, out.result, p.assignment_id);
   }
 
   if (step === "ok" || step === "r" || step === "t") {
     const currency = step === "r" ? "ریال" : step === "t" ? "تومان" : null;
     try {
       const res = await applyExtraction(env, p, currency ? { currency } : {});
-      await api.sendMessage(chat,
-        `✅ ${M(res.applied)} قلم در جدول کمیسیون ثبت شد.`
+      const head = `✅ ${M(res.applied)} قلم از پیش‌فاکتور در جدول نشست.`
+        + (res.created ? `\n${M(res.created)} خط استعلام تازه به نام <b>${esc(res.supplier)}</b> ساخته شد.` : "")
         + (res.skipped ? `\n${M(res.skipped)} سطر تطبیق نخورد و ثبت نشد.` : "")
-        + `\n\nقلم‌هایی که با اطمینان پایین خوانده شدند در پنل علامت دارند؛ قبل از تولید جدول یک نگاه بیندازید.`
-        + `\n\n<b>برای این خرید نیاز به نامهٔ پیوست دارید؟</b>\nاگر چالشی داشتید یا چیزی هست که کمیسیون باید بداند، یک پیام صوتی بدهید تا نامه‌اش را بنویسم.`,
-        letterOffer(p.assignment_id));
+        + (res.unsaved ? `\n${M(res.unsaved)} خط هنوز ثبت موقت نشده — چیزی کم دارد.` : "");
+      return quoteCard(env, api, chat, p.assignment_id, res.supplier, null, head);
     } catch (e) { await api.sendMessage(chat, `ثبت نشد: ${esc(e.message)}`); }
     return { ok: true };
   }
@@ -816,6 +1203,7 @@ async function sendProgress(env, api, chat, aid, prefix) {
   const kb = [];
   if (!done[1]) kb.push([{ text: "✅ سوابق را بررسی کردم", callback_data: `st:${aid}:hist:0` }]);
   if (!done[2]) kb.push([{ text: "✅ جستجو را انجام دادم", callback_data: `st:${aid}:smart:0` }]);
+  if (done[3]) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `st:${aid}:table:0` }]);
   if (done[3] && done[4] && !done[5]) kb.push([{ text: "📦 گرفتن فایل‌ها و بستن کار", callback_data: `st:${aid}:deliver:0` }]);
   kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
   await api.sendMessage(chat,
@@ -1004,13 +1392,16 @@ async function saveManual(env, api, chat, f) {
     if (price == null) continue;
     n++;
     const qid = existing.get(it.id);
+    /* ثبت موقت این‌جا زده نمی‌شود: زمان تحویل و شرایط تسویه اجباری‌اند و فاکتور
+       دستی فقط قیمت می‌گیرد. کارتِ بعدی همان دو-سه فیلد را می‌پرسد و «ثبت موقت»
+       را همان‌جا می‌گذارد. */
     stmts.push(qid
-      ? env.DB.prepare("UPDATE quotes SET price=?, qty=?, unit=COALESCE(unit,?), saved=1, final=1, source='manual', updated_at=? WHERE id=?")
-        .bind(price, it.qty, it.unit || null, t, qid)
+      ? env.DB.prepare("UPDATE quotes SET price=?, qty=?, unit=COALESCE(unit,?), invoice=COALESCE(invoice,?), saved=0, source='manual', updated_at=? WHERE id=?")
+        .bind(price, it.qty, it.unit || null, INVOICE_DEFAULT, t, qid)
       : env.DB.prepare(
-        `INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,saved,final,source,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,1,1,'manual',?,?)`,
-      ).bind(f.assignment_id, it.id, d.supplier, it.spec || null, it.unit || null, it.qty, price, t, t));
+        `INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,invoice,saved,final,source,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,0,0,'manual',?,?)`,
+      ).bind(f.assignment_id, it.id, d.supplier, it.spec || null, it.unit || null, it.qty, price, INVOICE_DEFAULT, t, t));
   }
   if (d.notes) stmts.push(env.DB.prepare("UPDATE assignments SET notes=? WHERE id=?").bind(d.notes, f.assignment_id));
   stmts.push(env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id));
@@ -1018,13 +1409,8 @@ async function saveManual(env, api, chat, f) {
     .bind(t, `expert:${f.expert_id}`, "manual_quote", null, JSON.stringify({ assignment_id: f.assignment_id, supplier: d.supplier, items: n, channel: "telegram" })));
   await env.DB.batch(stmts);
 
-  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(f.assignment_id).first();
-  await api.sendMessage(chat,
-    `✅ ثبت شد.\n\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(d.supplier)}</b>\n${M(n)} قلم قیمت‌گذاری شد`
-    + `${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\n\nاین قیمت‌ها در جدول کمیسیون کنار پیش‌فاکتورهای تایپی می‌نشینند.`
-    + `\n\n<b>نیاز به نامهٔ پیوست دارید؟</b>`,
-    letterOffer(f.assignment_id));
-  return { ok: true };
+  return quoteCard(env, api, chat, f.assignment_id, d.supplier, null,
+    `✅ ${M(n)} قلم قیمت‌گذاری شد.${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\nبرای ثبت موقت، شرایط فاکتور (زمان تحویل و شرایط تسویه) هم لازم است:`);
 }
 
 async function onCallback(env, cq) {
@@ -1059,6 +1445,60 @@ async function onCallback(env, cq) {
     return { ok: true };
   }
 
+  /* کارت استعلام: qf (کدام فیلد؟) · qv (گزینهٔ فهرستی) · qc (کارت) · qe (اصلاح) · qs (ثبت موقت) */
+  if (action === "qf" || action === "qv" || action === "qc" || action === "qe" || action === "qs") {
+    const [, qidRaw, field, valRaw] = T(cq.data).split(":");
+    const q = await ownQuote(env, ex.id, parseInt(qidRaw, 10));
+    if (!q) { await ack("این خط استعلام پیدا نشد.", true); return { ok: true }; }
+    const mid = cq.message && cq.message.message_id;
+    if (action === "qc") { await ack(); return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid); }
+    if (action === "qe") { await ack(); return editMenu(env, api, chat, q, mid); }
+    if (action === "qs") { await ack(); return saveSupplier(env, api, chat, ex, q, mid); }
+    if (!LABELS[field]) { await ack("فیلد ناشناخته.", true); return { ok: true }; }
+    if (action === "qf") {
+      await ack();
+      if (ENUMS[field]) return askEnum(api, chat, q, field, mid);
+      return askFieldText(env, api, chat, ex, q, field, mid);
+    }
+    /* qv */
+    const v = (ENUMS[field] || [])[parseInt(valRaw, 10)];
+    if (!v) { await ack("این گزینه معتبر نیست.", true); return { ok: true }; }
+    await ack();
+    await setField(env, q, field, v);
+    if (field === "place" && v === "سایر") return askFieldText(env, api, chat, ex, q, "place_other", mid);
+    return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid, `✅ ${esc(fieldLabel(field))}: ${esc(v)}`);
+  }
+
+  /* جدول کمیسیون: ct:<aid>:<step>:<value> */
+  if (action === "ct") {
+    const [, aidRaw, step, valRaw] = T(cq.data).split(":");
+    const aid = parseInt(aidRaw, 10);
+    const mid = cq.message && cq.message.message_id;
+    if (step === "x") {
+      await ack("بی‌خیال");
+      if (mid) await api.editMessageText(chat, mid, "باشد. هر وقت خواستید، از کارت استعلام یا /pishraft جدول را بسازید.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "t") {
+      await env.DB.prepare(
+        `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1
+         AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
+      ).bind(now(), parseInt(valRaw, 10), aid, ex.id).run();
+      await ack();
+      return tableSelect(env, api, chat, ex, aid, mid);
+    }
+    if (step === "all" || step === "none") {
+      await env.DB.prepare(
+        "UPDATE quotes SET final=?, updated_at=? WHERE assignment_id=? AND saved=1 AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)",
+      ).bind(step === "all" ? 1 : 0, now(), aid, ex.id).run();
+      await ack();
+      return tableSelect(env, api, chat, ex, aid, mid);
+    }
+    if (step === "go") { await ack("در حال ساختن…"); return makeTable(env, api, chat, ex, aid, mid); }
+    await ack();
+    return tableSelect(env, api, chat, ex, aid, null);
+  }
+
   /* جریان پیش‌فاکتور: pf:<uploadId>:<step>:<value> */
   if (action === "pf") {
     const [, uidRaw, step, valRaw] = T(cq.data).split(":");
@@ -1078,14 +1518,21 @@ async function onCallback(env, cq) {
       const asg = await ownOpenAssignment(env, ex.id, parseInt(valRaw, 10));
       if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
       await ack();
-      return askSupplier(env, api, chat, up.id, asg, up.filename, cq.message && cq.message.message_id);
+      return askQuote(env, api, chat, up.id, asg, up.filename, cq.message && cq.message.message_id);
     }
     if (step === "s") {
       const opts = JSON.parse(up.options_json || "[]");
-      const name = opts[parseInt(valRaw, 10)];
+      const o = opts[parseInt(valRaw, 10)];
+      /* گزینه‌های قدیمی رشتهٔ خالی‌اند، تازه‌ها شیء — هر دو باید کار کنند */
+      const name = typeof o === "string" ? o : o && o.n;
       if (!name) { await ack("این گزینه دیگر معتبر نیست.", true); return { ok: true }; }
       await ack();
       return saveProforma(env, api, chat, up, name);
+    }
+    if (step === "a") {
+      if (!up.assignment_id) { await ack("اول باید درخواست را انتخاب کنید.", true); return { ok: true }; }
+      await ack("در حال خواندن…");
+      return newQuoteFromFile(env, api, chat, ex, up);
     }
     if (step === "n") {
       await env.DB.prepare("UPDATE tg_uploads SET state='need_name' WHERE id=?").bind(up.id).run();
@@ -1193,7 +1640,7 @@ async function onCallback(env, cq) {
     await ack();
     if (step === "ask") return startLetter(env, api, chat, ex, n);
     if (step === "no") {
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "باشد. اگر بعداً لازم شد /nameh را بزنید.", panelButton).catch(() => {});
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "باشد. اگر بعداً لازم شد /nameh را بزنید.\nبرای گرفتن بستهٔ کامل فایل‌ها (برگهٔ درخواست + جدول کمیسیون) و بستن کار، /tahvil را بزنید.", panelButton).catch(() => {});
       return { ok: true };
     }
     if (step === "x") {
@@ -1212,6 +1659,7 @@ async function onCallback(env, cq) {
     await ack();
     if (stage === "hist" || stage === "smart") return markStage(env, api, chat, ex, aid, stage);
     if (stage === "deliver") return deliver(env, api, chat, ex, aid);
+    if (stage === "table") return tableSelect(env, api, chat, ex, aid, null);
     return sendProgress(env, api, chat, aid);
   }
 

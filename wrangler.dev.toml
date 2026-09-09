@@ -28,6 +28,9 @@ id = "local-dev-only-not-a-real-namespace"
 
 [vars]
 TG_BOT_USERNAME = "ArianaSupplyBot"
+# تلگرامِ بدلی برای تست محلی (scratchpad/tg-stub.mjs). در تولید وجود ندارد.
+TG_API_BASE = "http://127.0.0.1:8799/bot"
+TG_FILE_API_BASE = "http://127.0.0.1:8799/file/bot"
 
 [triggers]
 crons = ["*/5 * * * *"]

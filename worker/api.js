@@ -27,6 +27,7 @@ import { requestHtml, commissionHtml } from "./sheets.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
+import { missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -254,6 +255,11 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM alerts WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM tg_uploads WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM tg_flows WHERE assignment_id IN (${inAsg})`).bind(...args),
+    /* اعلان‌های در صف برای ارجاع‌های حذف‌شده نباید بعداً فرستاده شوند؛ فرستاده‌شده‌ها تاریخچه‌اند و می‌مانند */
+    env.DB.prepare(`DELETE FROM outbox WHERE status='pending' AND EXISTS (SELECT 1 FROM assignments a WHERE a.request_id ${where}
+      AND (outbox.idem LIKE 'dispatch:' || a.id || ':%' OR outbox.idem LIKE 'stage:' || a.id || ':%'
+        OR outbox.idem LIKE 'over:' || a.id || ':%' OR outbox.idem LIKE 'over-mgr:' || a.id || ':%'
+        OR outbox.idem = 'dispatch:' || a.id OR outbox.idem = 'over:' || a.id OR outbox.idem = 'over-mgr:' || a.id))`).bind(...args),
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
@@ -502,6 +508,16 @@ async function dispatch(env, body) {
   const t = now(); const stmts = []; let notified = 0;
   /* آستانه‌ها و تعطیلات یک بار خوانده می‌شوند و برای همهٔ ارجاع‌های این دسته به کار می‌روند */
   const [settings, isHoliday] = rows.length ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
+  /* اقلامِ همهٔ ارجاع‌های این دسته با یک کوئری — پیام ارجاع باید خودِ اقلام را
+     بگوید تا کارشناس بتواند سبک‌سنگین کند، و سقف ۵۰ زیردرخواست هم اجازهٔ یک
+     کوئری برای هر ارجاع نمی‌داد. */
+  const itemsBy = new Map();
+  if (rows.length) {
+    const aids = rows.map((a) => a.id);
+    const its = (await env.DB.prepare(`SELECT assignment_id, title, qty, unit FROM items
+      WHERE assignment_id IN (${aids.map(() => "?").join(",")}) AND state='open' ORDER BY assignment_id, line_no`).bind(...aids).all()).results || [];
+    for (const i of its) { if (!itemsBy.has(i.assignment_id)) itemsBy.set(i.assignment_id, []); itemsBy.get(i.assignment_id).push(i); }
+  }
   for (const a of rows) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
     const sched = alertStatements(env, a, settings.thresholds, isHoliday, t);
@@ -509,8 +525,11 @@ async function dispatch(env, body) {
     /* اعلان «ارجاع جدید» (TG-06). مهلت را از همان زمان‌بندیِ تازه‌ساخته برمی‌داریم
        چون ستون deadline_at هنوز در همین batch نوشته نشده است. */
     if (a.telegram_chat) {
-      stmts.push(queueStmt(env, `dispatch:${a.id}`, a.telegram_chat,
-        dispatchText({ ...a, dispatched_at: t, deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt }),
+      /* کلیدِ یکتایی باید زمان را هم داشته باشد: شناسهٔ ارجاع بعد از پاک‌کردن میز
+         دوباره از ۱ شروع می‌شود و ردیفِ قدیمیِ «dispatch:3» اعلانِ ارجاعِ تازه را
+         بی‌صدا می‌خورد (ON CONFLICT DO NOTHING) — همین در تست محلی اتفاق افتاد. */
+      stmts.push(queueStmt(env, `dispatch:${a.id}:${t}`, a.telegram_chat,
+        dispatchText({ ...a, items: itemsBy.get(a.id) || [], dispatched_at: t, deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt }),
         [[{ text: "✅ مشاهده کردم", callback_data: `seen:a:${a.id}` }], [{ text: "باز کردن پنل", url: "https://arianaai.website/tamin-poshtibani/expert" }]]));
       notified++;
     }
@@ -604,21 +623,36 @@ async function markProgress(env, ex, itemId, stage) {
 
 /* استعلام‌ها */
 const QUOTE_FIELDS = ["supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "deal", "place", "place_other", "final", "low_conf", "item_id"];
-const QUOTE_REQUIRED = ["spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "pay", "deal", "invoice", "place"];
 async function ownAssignment(env, ex, aid) {
   const a = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
 }
+/**
+ * ساختن خط استعلام. یک تأمین‌کننده معمولاً چند قلم را با هم قیمت می‌دهد، پس
+ * `item_ids` چند قلم را در یک درخواست می‌گیرد؛ `item_id` تکی هم برای سازگاری می‌ماند.
+ * قلمی که برای همین تأمین‌کننده از قبل خط دارد رد می‌شود، نه اینکه کل درخواست شکست بخورد.
+ */
 async function quoteCreate(env, ex, body) {
-  const aid = int(body.assignment_id), item = int(body.item_id); await ownAssignment(env, ex, aid);
-  if (!item) throw new HttpError("item_id لازم است.");
-  const dup = await env.DB.prepare("SELECT id FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=?").bind(aid, item, T(body.supplier_name)).first();
-  if (dup) throw new HttpError("این تأمین‌کننده برای همین قلم قبلاً اضافه شده است.", 409);
-  const it = await env.DB.prepare("SELECT unit,qty FROM items WHERE id=?").bind(item).first();
+  const aid = int(body.assignment_id); await ownAssignment(env, ex, aid);
+  const supplier = T(body.supplier_name);
+  if (!supplier) throw new HttpError("نام تأمین‌کننده لازم است.");
+  const wanted = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : [body.item_id]).map((x) => int(x)).filter(Boolean))];
+  if (!wanted.length) throw new HttpError("دست‌کم یک قلم را انتخاب کنید.");
+  const its = new Map(((await env.DB.prepare(`SELECT id, unit, qty FROM items WHERE assignment_id=? AND id IN (${wanted.map(() => "?").join(",")})`)
+    .bind(aid, ...wanted).all()).results || []).map((i) => [i.id, i]));
+  const have = new Set(((await env.DB.prepare("SELECT item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(aid, supplier).all()).results || []).map((q) => q.item_id));
+  const fresh = wanted.filter((id) => its.has(id) && !have.has(id));
+  if (!fresh.length) throw new HttpError("این تأمین‌کننده برای همین قلم قبلاً اضافه شده است.", 409);
   const t = now();
-  const r = await env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .bind(aid, item, T(body.supplier_name), T(body.supplier_code) || null, T(body.spec) || null, T(body.unit) || (it && it.unit) || null, num(body.qty) ?? (it && it.qty) ?? null, num(body.price), t, t).run();
-  return { ok: true, id: r.meta.last_row_id };
+  const stmts = fresh.map((item) => {
+    const it = its.get(item);
+    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .bind(aid, item, supplier, T(body.supplier_code) || null, T(body.spec) || null, T(body.unit) || it.unit || null,
+        num(body.qty) ?? it.qty ?? null, num(body.price), INVOICE_DEFAULT, t, t);
+  });
+  const res = await env.DB.batch(stmts);
+  const ids = res.map((r) => r.meta.last_row_id);
+  return { ok: true, id: ids[0], ids, skipped: wanted.length - fresh.length };
 }
 async function quoteUpdate(env, ex, id, body) {
   const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
@@ -628,8 +662,7 @@ async function quoteUpdate(env, ex, id, body) {
   /* هر ویرایشِ فیلد، «ثبت موقت» را برمی‌دارد؛ save صریح آن را می‌گذارد */
   if (body.save === true) {
     const merged = { ...q, ...body };
-    const miss = QUOTE_REQUIRED.filter((f) => !T(merged[f]));
-    if (T(merged.place) === "سایر" && !T(merged.place_other)) miss.push("place_other");
+    const miss = missingRequired(merged);
     if (miss.length) throw new HttpError("این فیلدها خالی‌اند و ثبت موقت انجام نشد.", 422, { missing: miss });
     sets.push("saved=1");
   } else if (sets.length) sets.push("saved=0");
@@ -804,7 +837,7 @@ async function route(request, env, ctx) {
            WHERE f.done_at IS NULL AND f.expires_at>? ORDER BY f.id DESC LIMIT 50`,
         ).bind(now()).all()).results || [],
         uploads: (await env.DB.prepare(
-          `SELECT u.id, u.state, u.filename, u.assignment_id, u.created_at, e.name AS expert
+          `SELECT u.id, u.state, u.filename, u.assignment_id, u.options_json, u.created_at, e.name AS expert
            FROM tg_uploads u JOIN experts e ON e.id=u.expert_id
            WHERE u.done_at IS NULL AND u.expires_at>? ORDER BY u.id DESC LIMIT 50`,
         ).bind(now()).all()).results || [],

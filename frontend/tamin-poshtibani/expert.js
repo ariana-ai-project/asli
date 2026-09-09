@@ -16,9 +16,14 @@
   const PLATS = [["telegram", "تلگرام"], ["whatsapp", "واتساپ"], ["bale", "بله"], ["rubika", "روبیکا"]];
   const PLACES = ["محل پروژه", "انبار شرکت", "سایر"], PAYS = ["نقدی", "اعتباری", "۵۰٪ پیش‌پرداخت", "سایر"], DEALS = ["کارگاه", "دفتر مرکزی"], INVT = ["رسمی", "غیر رسمی"];
   const REQT = ["عادی", "فوری"], DEALT = ["خرید", "فروش"];
-  /* فیلدهای استعلام: [کلید, عنوان, عرض, نوع] */
-  const QF = [["spec", "جنس / مشخصات فنی", 170], ["unit", "واحد", 70], ["qty", "مقدار", 80, "num"], ["price", "قیمت واحد (ریال)", 130, "num"],
-              ["dtime", "زمان تحویل", 116, "date"], ["valid_days", "اعتبار پیش‌فاکتور (روز)", 100, "num"], ["ship", "روش حمل", 130]];
+  /* فیلدهای استعلام: [کلید, عنوان, عرض, نوع, اختیاری؟]
+     اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی).
+     اختیاری: مشخصات فنی، اعتبار، روش حمل، محل معامله، محل تحویل — خالی بودنشان مانع ثبت موقت نیست. */
+  const QF = [["spec", "جنس / مشخصات فنی", 170, "", true], ["unit", "واحد", 70], ["qty", "مقدار", 80, "num"], ["price", "قیمت واحد (ریال)", 130, "num"],
+              ["dtime", "زمان تحویل", 116, "date"], ["valid_days", "اعتبار پیش‌فاکتور (روز)", 100, "num", true], ["ship", "روش حمل", 130, "", true]];
+  const OPTL = ' <span class="dim" style="font-weight:400;font-size:.75rem">(اختیاری)</span>';
+  const LBL = { spec: "جنس / مشخصات فنی", unit: "واحد", qty: "مقدار", price: "قیمت واحد", dtime: "زمان تحویل", valid_days: "اعتبار پیش‌فاکتور", ship: "روش حمل",
+    place: "محل تحویل", place_other: "محل تحویل (سایر)", pay: "شرایط تسویه", deal: "محل معامله", invoice: "نوع فاکتور" };
 
   /* ---------- وضعیت ---------- */
   const S = {
@@ -179,18 +184,18 @@
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">هر ویرایش، «ثبت موقت» را برمی‌دارد؛ فقط ردیف‌های ثبت‌شده در شمارنده و کمیسیون حساب می‌شوند.</span></div>
+        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
-        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>محل معامله</th><th>محل تحویل</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
+        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""}></td>
           <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}</td>
           <td><select class="tp-select" data-qf="${q.id}|item_id">${its.map((x) => `<option value="${x.id}" ${q.item_id === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></td>
-          ${QF.map(([k, , w, ty]) => `<td><input class="tp-input ${q[k] == null || q[k] === "" ? "bad" : ""} ${ty === "date" ? "date" : ""} ${ty === "num" ? "num" : ""}" data-qf="${q.id}|${k}" value="${esc(q[k] == null ? "" : q[k])}" style="width:${w}px" ${ty === "date" ? "readonly" : ""} ${ty === "num" ? 'inputmode="decimal"' : ""}></td>`).join("")}
+          ${QF.map(([k, , w, ty, opt]) => `<td><input class="tp-input ${!opt && (q[k] == null || q[k] === "") ? "bad" : ""} ${ty === "date" ? "date" : ""} ${ty === "num" ? "num" : ""}" data-qf="${q.id}|${k}" ${opt ? 'data-opt="1"' : ""} value="${esc(q[k] == null ? "" : q[k])}" style="width:${w}px" ${ty === "date" ? "readonly" : ""} ${ty === "num" ? 'inputmode="decimal"' : ""}></td>`).join("")}
           <td><select class="tp-select ${q.invoice ? "" : "bad"}" data-qf="${q.id}|invoice"><option value="">—</option>${INVT.map((v) => `<option ${q.invoice === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td><select class="tp-select ${q.pay ? "" : "bad"}" data-qf="${q.id}|pay"><option value="">—</option>${PAYS.map((v) => `<option ${q.pay === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td><select class="tp-select ${q.deal ? "" : "bad"}" data-qf="${q.id}|deal" title="از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td style="min-width:170px"><select class="tp-select ${q.place ? "" : "bad"}" data-qf="${q.id}|place"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+          <td><select class="tp-select" data-qf="${q.id}|deal" title="اختیاری — تصمیم داخلی؛ از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td style="min-width:170px"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
             ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" style="margin-top:4px;width:100%">` : ""}</td>
           <td class="num">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
           <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<span class="chip ok" title="${esc(S.d.proformas.find((p) => p.supplier_name === q.supplier_name).filename || "")}">ثبت شد</span>` : `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`}</td>
@@ -366,11 +371,13 @@
   function render() {
     const app = document.getElementById("app");
     if (!S.expert) S.screen = "login";
+    const restore = TP.snapScroll();
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
       <span class="spacer"></span>${S.expert ? `${S.tg && S.tg.botConfigured ? `<button class="tp-btn sm ${S.tg.connected ? "" : "primary"}" data-tg title="${S.tg.connected ? "اعلان‌های تلگرام فعال است" : "دریافت ارجاع‌ها و یادآوری مهلت در تلگرام"}">${S.tg.connected ? "✅ تلگرام" : "اتصال به تلگرام"}</button>` : ""}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
+    restore();
   }
 
   /* ---------- اتصال ---------- */
@@ -403,18 +410,28 @@
     Q("[data-date]").forEach((i) => i.onclick = () => TP.openDatePicker(i, (v) => { S.f.maxDelivery = v; render(); }, { single: true }));
     /* استعلامات */
     const ar = G("[data-add-row]"); if (ar) ar.onclick = () => {
+      /* یک تأمین‌کننده معمولاً چند قلم را با هم قیمت می‌دهد، پس اقلام چندانتخابی‌اند؛ برای هر قلم یک خط ساخته می‌شود */
       const d = TP.modal("افزودن تأمین‌کننده", `<div class="tp-field"><b>نام تأمین‌کننده</b><input class="tp-input" id="sup" style="width:100%" autofocus></div><div class="tp-field" style="margin-top:8px"><b>کد (اختیاری)</b><input class="tp-input" id="supc" style="width:160px"></div>
-        <div class="tp-field" style="margin-top:8px"><b>برای قلم</b><select class="tp-select" id="supi" style="width:100%">${items().map((x, i) => `<option value="${x.id}" ${i === S.itemIdx ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></div>`,
-        async () => { const n = d.querySelector("#sup").value.trim(); if (!n) return; try { await TP.api("/quotes", { body: { assignment_id: A().id, item_id: +d.querySelector("#supi").value, supplier_name: n, supplier_code: d.querySelector("#supc").value.trim() } }); S.tab = "quotes"; await reload(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "افزودن");
+        <div class="tp-field" style="margin-top:10px"><b>برای کدام اقلام؟</b> <span class="dim" style="font-size:.82rem">هر قلمی که این تأمین‌کننده قیمت داده را تیک بزنید</span>
+          <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px;max-height:40vh;overflow:auto">${items().map((x, i) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-supi="${x.id}" ${i === S.itemIdx ? "checked" : ""}><span>${esc(x.title)}</span>${x.qty != null ? `<span class="dim" style="font-size:.8rem">— ${M(x.qty)} ${esc(x.unit || "")}</span>` : ""}</label>`).join("")}</div>
+          <label style="display:inline-flex;gap:6px;margin-top:8px;cursor:pointer"><input type="checkbox" id="supall"> همهٔ اقلام</label></div>`,
+        async () => {
+          const n = d.querySelector("#sup").value.trim(); if (!n) return;
+          const ids = [...d.querySelectorAll("[data-supi]:checked")].map((c) => +c.dataset.supi);
+          if (!ids.length) { TP.modal("قلمی انتخاب نشد", "دست‌کم یک قلم را تیک بزنید.", null, "باشد", ""); return; }
+          try { const r = await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: ids, supplier_name: n, supplier_code: d.querySelector("#supc").value.trim() } }); S.tab = "quotes"; await reload(); if (r.skipped) TP.modal("توجه", `${M(r.skipped)} قلم برای این تأمین‌کننده از قبل خط داشت و دوباره ساخته نشد.`, null, "باشد", ""); }
+          catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+        }, "افزودن");
+      const all = d.querySelector("#supall"); if (all) all.onchange = () => d.querySelectorAll("[data-supi]").forEach((c) => { c.checked = all.checked; });
     };
     Q("[data-qf]").forEach((el) => {
       const [id, f] = el.dataset.qf.split("|"); const q = S.d.quotes.find((x) => x.id === +id); if (!q) return;
       if (el.classList.contains("date")) { el.onclick = () => TP.openDatePicker(el, async (v) => { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: v } }); await reload(); }, { single: true }); return; }
       const commit = async () => { if (String(q[f] == null ? "" : q[f]) === el.value) return; try { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: f === "item_id" ? +el.value : el.value } }); await reload(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } };
-      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); const cell = el.closest("tr").children[3 + QF.length + 4]; if (cell) cell.textContent = v ? M(v) : "—"; } }; }
+      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { if (!el.dataset.opt) el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); const cell = el.closest("tr").children[3 + QF.length + 4]; if (cell) cell.textContent = v ? M(v) : "—"; } }; }
     });
     Q("[data-fin]").forEach((c) => c.onchange = async (e) => { await TP.api(`/quotes/${e.target.dataset.fin}`, { method: "PUT", body: { final: e.target.checked ? 1 : 0 } }); await reload(); });
-    Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); } catch (e) { const miss = (e.data && e.data.missing) || []; const LBL = { place: "محل تحویل", place_other: "محل تحویل (سایر)", pay: "شرایط تسویه", deal: "محل معامله", invoice: "نوع فاکتور" }; TP.modal("ثبت موقت انجام نشد", `این فیلدها خالی‌اند:<br><br><b>${miss.map((f) => LBL[f] || (QF.find((x) => x[0] === f) || [, f])[1]).join("، ")}</b><br><br>تا ثبت موقت انجام نشود، این ردیف در شمارنده و کمیسیون حساب نمی‌شود.`, null, "باشد", ""); } });
+    Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); } catch (e) { const miss = (e.data && e.data.missing) || []; TP.modal("ثبت موقت انجام نشد", `این فیلدهای اجباری خالی‌اند:<br><br><b>${miss.map((f) => LBL[f] || f).join("، ")}</b><br><br>تا ثبت موقت انجام نشود، این ردیف در شمارنده و کمیسیون حساب نمی‌شود.`, null, "باشد", ""); } });
     Q("[data-del]").forEach((b) => b.onclick = () => TP.modal("حذف استعلام", "این ردیف حذف شود؟", async () => { await TP.api(`/quotes/${b.dataset.del}`, { method: "DELETE" }); await reload(); }, "حذف"));
     Q("[data-pf]").forEach((b) => b.onclick = () => {
       const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,.jpg,.jpeg,.png";

@@ -279,13 +279,20 @@
   };
 
   /* ---------- کوچک‌های UI ---------- */
+  /* جای اسکرولِ جدول‌ها را پیش از بازرندر نگه می‌دارد و تابعِ برگرداندنش را می‌دهد.
+     بدون این، هر ذخیرهٔ یک فیلد در تب استعلامات (که کل صفحه را از نو می‌سازد)
+     نوار افقی جدول را به اول می‌پراند — همان چیزی که کاربر می‌دید. */
+  TP.snapScroll = function () {
+    const wraps = [...document.querySelectorAll("[data-keep-scroll]")].map((w) => [w.scrollTop, w.scrollLeft]);
+    return () => document.querySelectorAll("[data-keep-scroll]").forEach((w, i) => { if (wraps[i]) { w.scrollTop = wraps[i][0]; w.scrollLeft = wraps[i][1]; } });
+  };
   /* بازرندر با حفظ فوکوس و مکان‌نما روی همان فیلد */
   TP.keepFocus = function (el, attr, render) {
     const key = el.dataset[attr], pos = el.selectionStart;
-    const wraps = [...document.querySelectorAll("[data-keep-scroll]")].map((w) => [w.scrollTop, w.scrollLeft]);
+    const restore = TP.snapScroll();
     render();
     const n = document.querySelector(`[data-${attr}="${CSS.escape(key)}"]`);
-    document.querySelectorAll("[data-keep-scroll]").forEach((w, i) => { if (wraps[i]) { w.scrollTop = wraps[i][0]; w.scrollLeft = wraps[i][1]; } });
+    restore();
     if (n) { n.focus(); try { n.setSelectionRange(pos, pos); } catch (_) { /* غیرمتنی */ } }
   };
   /* سرآیند چسبان چندطبقه: top هر ردیف = مجموع ارتفاع ردیف‌های بالاتر */

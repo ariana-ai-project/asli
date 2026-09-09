@@ -165,7 +165,7 @@
       const w = WINDOWS.find((x) => x[0] === S.filter.window);
       return `<div class="empty"><b>در بازهٔ «${esc(w ? w[1] : "")}» درخواست بازی نیست.</b>${M(S.data.all_total)} درخواست باز با تاریخ قدیمی‌تر در سامانه هست.<br><br><button class="tp-btn primary" data-win-all>نمایش همه تاریخ‌ها</button></div>`;
     }
-    if (!S.data.requests.length) return `<div class="empty"><b>هنوز فایلی بارگذاری نشده است.</b>با دکمه «بارگذاری درخواست‌های روزانه» فایل خروجی راهکاران (.xlsx) را انتخاب کنید.</div>`;
+    if (!S.data.requests.length) return `<div class="empty"><b>هنوز فایلی بارگذاری نشده است.</b>با دکمه «بارگذاری درخواست‌های روزانه» فایل خروجی راهکاران (.xlsx) را انتخاب کنید — یا فایل را همین‌جا روی صفحه رها کنید.</div>`;
     const rows = visible();
     if (!rows.length) return `<div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
       ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div>`;
@@ -345,12 +345,14 @@
   function render() {
     const app = document.getElementById("app");
     if (!TP.manager.get()) { app.innerHTML = vLogin(); wire(); return; }
+    const restore = TP.snapScroll();
     app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
         : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : vLog()}</div>`);
     wire();
     TP.stickHeader(app.querySelector("table.tp-table"));
+    restore();
   }
 
   /* ---------- اتصال رویدادها ---------- */
@@ -362,6 +364,17 @@
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
     const im = G("[data-import]"); if (im) im.onclick = pickAndImport;
+    /* رها کردن فایل اکسل روی صفحه = همان بارگذاری. روی body است تا افتادنِ فایل
+       بیرونِ #app هم به‌جای بازشدنِ فایل در مرورگر، بارگذاری شود. */
+    const body = document.body;
+    body.ondragover = (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { e.preventDefault(); body.classList.add("tp-drop-over"); } };
+    body.ondragleave = (e) => { if (!e.relatedTarget || e.relatedTarget === document.documentElement) body.classList.remove("tp-drop-over"); };
+    body.ondrop = (e) => {
+      e.preventDefault(); body.classList.remove("tp-drop-over");
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
+      if (!/\.xlsx$/i.test(f.name)) { TP.modal("فایل نامناسب", `فقط خروجی اکسل راهکاران (.xlsx) پذیرفته می‌شود؛ «${esc(f.name)}» نیست.`, null, "باشد", ""); return; }
+      importFile(f);
+    };
     Q("[data-f]").forEach((s) => s.onchange = (e) => { S.filter[e.target.dataset.f] = e.target.value; if (e.target.dataset.f === "window") { S.page.offset = 0; refresh(); } else render(); });
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
     Q("[data-del]").forEach((b) => b.onclick = () => askDelete([b.dataset.del]));
@@ -472,8 +485,12 @@
   /* ---------- بارگذاری اکسل: خواندن در مرورگر → ارسال دسته‌ای → تعارض‌ها → اعمال ---------- */
   function pickAndImport() {
     const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx";
-    inp.onchange = async () => {
-      const f = inp.files && inp.files[0]; if (!f) return;
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) importFile(f); };
+    inp.click();
+  }
+  /* یک فایل اکسل، از هر راهی که رسیده باشد — دکمه یا رها کردن روی صفحه */
+  async function importFile(f) {
+    {
       const busy = TP.busy("در حال خواندن فایل…", `${esc(f.name)} — ${(f.size / 1024 / 1024).toFixed(1)} مگابایت`);
       try {
         const parsed = await TP.importExcel(f, (t) => busy.set(esc(t)));
@@ -500,8 +517,7 @@
         if (!nConf) return TP.modal("فایل بارگذاری شد", summary, null, "باشد", "");
         showConflicts(summary, fin);
       } catch (e) { busy.close(); TP.modal("خطا در بارگذاری", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); }
-    };
-    inp.click();
+    }
   }
   function showConflicts(summary, fin) {
     const rows = [

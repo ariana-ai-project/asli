@@ -232,6 +232,8 @@ tr.drawer td { background: rgba(3,8,20,.45) !important; padding: 0 !important; }
 
 /* ---------- خالی ---------- */
 .empty { padding: 48px 20px; text-align: center; color: var(--tp-muted); }
+/* رها کردن فایل اکسل روی صفحهٔ مدیر */
+body.tp-drop-over::after { content: "فایل اکسل را همین‌جا رها کنید"; position: fixed; inset: 0; display: grid; place-items: center; font-size: 1.4rem; font-weight: 700; color: #fff; background: rgba(6,14,34,.62); border: 3px dashed rgba(158,197,255,.75); pointer-events: none; z-index: 60; }
 .empty b { display: block; font-size: 1.05rem; color: var(--tp-fg); margin-bottom: 6px; }
 
 /* ---------- موبایل ---------- */
