@@ -21,6 +21,12 @@ compatibility_date = "2026-09-03"
 # نام کاربری بات؛ راز نیست و برای ساختن لینک t.me لازم است
 TG_BOT_USERNAME = "ArianaSupplyBot"
 
+# انبار فایل پیش‌فاکتور — سطل خصوصی روی Supabase. آدرس راز نیست؛ کلید سرویس
+# با wrangler secret put SUPABASE_SERVICE_KEY ست می‌شود. تا وقتی کلید نباشد،
+# مسیرهای فایل با پیام «هنوز وصل نشده» جواب می‌دهند و چیزی نمی‌شکند.
+SUPABASE_URL = "https://oonuuddkzgfchlmvhsel.supabase.co"
+SUPABASE_BUCKET = "proformas"
+
 [triggers]
 # چرخهٔ هشدار مهلت و ارسال صف. هر ۵ دقیقه کافی است: خودِ آستانه‌ها فقط در ساعات
 # کاری می‌افتند (SLA-06) و ارسال فوریِ «ارجاع جدید» جدا با waitUntil انجام می‌شود.
