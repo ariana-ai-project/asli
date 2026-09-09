@@ -522,11 +522,20 @@ function extractSummary(r, itemTitles) {
   const other = (r.lines || []).filter((l) => !l.matched_item_id);
   const cur = r.currency || "نامشخص";
   const body = matched.map((l) => {
-    const mark = l.confidence === "high" ? "" : l.confidence === "medium" ? " ⚠️" : " ⚠️⚠️";
-    return `• ${esc(itemTitles.get(l.matched_item_id) || l.title)}\n   ${money(l.unit_price)} ${esc(cur)}${mark}`;
+    const title = esc(itemTitles.get(l.matched_item_id) || l.title);
+    /* سطری که دو خوانش روی آن اختلاف داشتند، عددِ دوم را هم نشان می‌دهیم تا
+       کارشناس بداند دقیقاً کجای سند را باید نگاه کند */
+    if (l.unit_price_alt != null && l.unit_price_alt !== l.unit_price) {
+      return `• ${title}\n   ⚠️ <b>${money(l.unit_price)}</b> یا <b>${money(l.unit_price_alt)}</b> — دو بار متفاوت خواندم`;
+    }
+    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? " ✓" : " ⚠️"}`;
   }).join("\n");
 
+  const ag = r.agreement;
+  const rotated = r.orientation && r.orientation !== "upright";
+
   return `🤖 <b>خوانده شد</b>\n\n`
+    + (rotated ? `⚠️ <b>این اسکن چرخیده است.</b> خواندمش، ولی اگر صاف بفرستید دقتش خیلی بیشتر می‌شود.\n\n` : "")
     + `${r.supplier_name ? `تأمین‌کننده: <b>${esc(r.supplier_name)}</b>\n` : ""}`
     + `واحد پول: <b>${esc(cur)}</b>\n\n${body || "<i>هیچ سطری با اقلام درخواست تطبیق نخورد.</i>"}\n`
     + (other.length ? `\n<i>${M(other.length)} سطر دیگر در فاکتور بود که به اقلام این درخواست نمی‌خورد و ثبت نمی‌شود.</i>\n` : "")
@@ -534,7 +543,11 @@ function extractSummary(r, itemTitles) {
     + (r.delivery_date ? `\nتحویل: ${esc(r.delivery_date)}` : "")
     + (r.pay_terms ? `\nتسویه: ${esc(r.pay_terms)}` : "")
     + ((r.unreadable_fields || []).length ? `\n\n⚠️ خوانا نبود: ${esc(r.unreadable_fields.join("، "))}` : "")
-    + (r.notes ? `\n\n${esc(r.notes)}` : "");
+    + (r.notes ? `\n\n${esc(r.notes)}` : "")
+    + (ag && ag.disputed
+      ? `\n\n⚠️ <b>سند را دو بار خواندم و روی ${M(ag.disputed)} قیمت به نتیجهٔ یکسان نرسیدم.</b>`
+        + `\nآن‌ها را با علامت ⚠️ می‌بینید — حتماً خودتان از روی فاکتور بخوانید و در پنل اصلاح کنید.`
+      : ag && ag.agreed ? `\n\n✓ هر ${M(ag.agreed)} قیمت را دو بار خواندم و هر دو بار یکی درآمد.` : "");
 }
 
 async function onExtract(env, api, chat, ex, pid, step, val, messageId) {

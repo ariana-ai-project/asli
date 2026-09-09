@@ -57,6 +57,7 @@ export const SCHEMA = {
     valid_days: { type: ["integer", "null"], description: "مدت اعتبار پیش‌فاکتور به روز" },
     delivery_date: { type: ["string", "null"], description: "زمان تحویل، عیناً همان‌طور که نوشته شده" },
     ship_method: { type: ["string", "null"], description: "روش حمل" },
+    orientation: { type: ["string", "null"], enum: ["upright", "rotated_90", "rotated_180", "rotated_270", null], description: "جهت اسکن؛ اگر چرخیده بود بگو" },
     lines: { type: "array", items: LINE },
     unreadable_fields: { type: "array", items: { type: "string" }, description: "نام فیلدهایی که در سند بودند ولی خوانا نبودند" },
     notes: { type: ["string", "null"], description: "هر چیز مهمی که کارشناس باید بداند" },
@@ -96,6 +97,15 @@ export const SYSTEM = `تو دستیار استخراج اطلاعات از پی
 confidence هر سطر: high یعنی عدد و شرح هر دو واضح خوانده شدند. medium یعنی خوانده شد ولی جای تردید هست.
 low یعنی حدس نزدیک است. هر فیلدی که در سند بود ولی نتوانستی بخوانی را در unreadable_fields بیاور.
 
+اصل ششم — عددها را رقم‌به‌رقم بخوان.
+این سندها معمولاً اسکن‌اند و ارقام فارسی در اسکن بد به هم شبیه می‌شوند: ۵ و ۶، ۱ و ۲، ۳ و ۴، ۷ و ۹.
+هر قیمت را رقم‌به‌رقم و با دقت بخوان، نه با یک نگاه کلی. اگر یک رقم قطعی نیست، confidence آن سطر
+را حداکثر medium بگذار و در note بنویس کدام رقم مشکوک بود. عددِ نزدیک، عددِ درست نیست.
+
+اصل هفتم — جهت صفحه.
+اسکن ممکن است ۹۰ یا ۱۸۰ درجه چرخیده باشد. اگر چنین است، در ذهنت بچرخانش و بخوانش؛ چرخیدگی
+به‌تنهایی دلیل ناخوانا بودن نیست. فقط در فیلد orientation بنویس صفحه چطور بوده تا کاربر بداند.
+
 زبان همهٔ متن‌های خروجی فارسی است، مگر آنکه در خود سند لاتین نوشته شده باشد.`;
 
 /** پیام کاربر: فهرست اقلام درخواست + خود سند */
@@ -129,10 +139,74 @@ export class ExtractError extends Error {
 /**
  * یک پیش‌فاکتور را به مدل می‌دهد و خروجی ساختاریافته می‌گیرد.
  * هیچ چیزی در دیتابیس نمی‌نویسد — تصمیمِ ثبت با کارشناس است (INV-07).
+ *
+ * سند **دو بار مستقل** خوانده می‌شود و فقط قیمت‌هایی که هر دو خوانش روی آن‌ها
+ * توافق دارند «تأییدشده» حساب می‌شوند.
+ *
+ * چرا: روی یک اسکن واقعی CamScanner، مدل ۲ از ۶ قیمت را اشتباه خواند و در هر دو
+ * مورد هم «اطمینان بالا» اعلام کرد — یعنی خودِ confidence مدل برای عدد قابل اتکا
+ * نیست. ولی در همان آزمون، **هر قیمتی که دو خوانش روی آن توافق داشتند درست بود و
+ * همهٔ خطاها در جاهایی افتاد که دو خوانش اختلاف داشتند.** پس توافق دو خوانش،
+ * سنجه‌ای است که خودِ مدل نمی‌تواند بدهد.
+ *
+ * با AI_PASSES=1 می‌شود خاموشش کرد (نصفِ هزینه، بدون این محافظ).
  */
 export async function extractProforma(env, { fileUrl, mime, items, request }) {
   if (!env.ANTHROPIC_API_KEY) throw new ExtractError("کلید مدل روی این پروژه ست نشده است.", 503);
+  const passes = Math.max(1, Math.min(2, parseInt(env.AI_PASSES, 10) || 2));
 
+  const first = await onePass(env, { fileUrl, mime, items, request });
+  if (passes === 1 || !first.result.extractable) return first;
+
+  const second = await onePass(env, { fileUrl, mime, items, request });
+  return {
+    result: reconcile(first.result, second.result),
+    meta: { ...first.meta, passes: 2, second: { tokens_in: second.meta.tokens_in, tokens_out: second.meta.tokens_out } },
+  };
+}
+
+/**
+ * دو خوانش را کنار هم می‌گذارد.
+ * سطرها با قلمِ تطبیق‌خورده جفت می‌شوند (و اگر نبود، با عنوان نرمال‌شده).
+ * قیمتی که دو خوانش روی آن اختلاف دارند، هرچقدر هم مدل مطمئن باشد، low می‌شود
+ * و هر دو خوانش در note می‌آید تا کارشناس بداند دقیقاً چه چیزی را باید چک کند.
+ */
+export function reconcile(a, b) {
+  const key = (l) => (l.matched_item_id != null ? `i${l.matched_item_id}` : `t${String(l.title || "").replace(/\s+/g, "").slice(0, 30)}`);
+  const bByKey = new Map((b.lines || []).map((l) => [key(l), l]));
+  let agreed = 0, disputed = 0;
+
+  const lines = (a.lines || []).map((l) => {
+    const o = bByKey.get(key(l));
+    if (!o) return { ...l, confidence: "low", note: [l.note, "این سطر فقط در یکی از دو خوانش دیده شد"].filter(Boolean).join(" · ") };
+    const same = l.unit_price === o.unit_price;
+    if (same) { agreed++; return l; }
+    disputed++;
+    return {
+      ...l,
+      confidence: "low",
+      unit_price_alt: o.unit_price,
+      note: [l.note, `دو بار متفاوت خوانده شد: ${l.unit_price} و ${o.unit_price} — خودتان از روی سند بخوانید`].filter(Boolean).join(" · "),
+    };
+  });
+  /* سطرهایی که فقط در خوانش دوم بودند هم بیایند، با علامت */
+  const aKeys = new Set((a.lines || []).map(key));
+  for (const l of b.lines || []) {
+    if (!aKeys.has(key(l))) lines.push({ ...l, confidence: "low", note: [l.note, "این سطر فقط در یکی از دو خوانش دیده شد"].filter(Boolean).join(" · ") });
+  }
+
+  const merged = { ...a, lines, agreement: { agreed, disputed } };
+  /* فیلدهای سرآیندی که دو خوانش روی آن‌ها توافق ندارند، حذف نمی‌شوند ولی علامت می‌خورند */
+  for (const f of ["currency", "supplier_name", "invoice_type", "valid_days"]) {
+    if (a[f] != null && b[f] != null && a[f] !== b[f]) {
+      merged.notes = [merged.notes, `«${f}» در دو خوانش متفاوت بود: ${a[f]} / ${b[f]}`].filter(Boolean).join(" · ");
+      if (f === "currency") merged.currency = null; /* واحد پول مشکوک = کارشناس باید صریح بگوید */
+    }
+  }
+  return merged;
+}
+
+async function onePass(env, { fileUrl, mime, items, request }) {
   const body = {
     model: env.AI_MODEL || MODEL,
     max_tokens: MAX_TOKENS,
