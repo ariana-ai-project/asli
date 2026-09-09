@@ -65,8 +65,17 @@
   }
 
   /* فایل → ArrayBuffer → سطرها (آرایهٔ آرایه). سنگین‌ترین مرحله؛ روی ۸۴ هزار سطر چند ثانیه. */
+  /* سقف حجم: کل فایل باید در حافظهٔ مرورگر باز شود و xlsx فشرده است، پس فایل
+     ۴۰ مگابایتی می‌تواند صدها مگابایت رم بگیرد و تب را قفل کند. بزرگ‌ترین خروجی
+     واقعی راهکاران (۷ سال، ۸۴ هزار سطر) حدود ۶ مگابایت است. */
+  const MAX_BYTES = 40 * 1024 * 1024;
+
   async function readRows(file, onProgress) {
     if (!window.XLSX) throw new Error("کتابخانهٔ خواندن اکسل بارگذاری نشده است (vendor/xlsx.full.min.js).");
+    if (!/\.xlsx?$/i.test(file.name || "")) throw new Error("فقط فایل اکسل (.xlsx) پذیرفته می‌شود.");
+    if (file.size > MAX_BYTES) {
+      throw new Error(`حجم فایل ${(file.size / 1048576).toFixed(1)} مگابایت است و از سقف ${MAX_BYTES / 1048576} مگابایت بیشتر است.`);
+    }
     onProgress && onProgress("خواندن فایل…");
     const buf = await file.arrayBuffer();
     onProgress && onProgress("تجزیهٔ کاربرگ…");
@@ -98,6 +107,9 @@
     const stats = {
       rows: 0, requests: 0, itemRows: 0, parties: 0, maxItems: 0, multiItem: 0,
       openRequests: 0, closedRequests: 0, unassignedOpen: 0,
+      /* تفکیک غیرفعال‌ها — IMP-05 پیام «n درخواست بسته شده» را جدا از «متوقف شده» می‌خواهد.
+         closedRequests = مجموع این سه (یعنی هر درخواستی که هیچ قلم باز/معلق ندارد). */
+      closedOnly: 0, stoppedOnly: 0, mixedInactive: 0,
       expertConflictAuto: 0, expertConflictDecision: 0, statusMixed: 0,
       partyConflicts: 0, dateConflicts: 0, badQty: 0,
       unknownStatuses: {}, statusCounts: {}, dateMin: null, dateMax: null,
@@ -159,7 +171,12 @@
       if (states.size > 1) stats.statusMixed++;
       req.anyOpen = req.items.some((i) => i.state === "open" || i.state === "hold");
       if (req.anyOpen) { stats.openRequests++; if (!req.experts.length) stats.unassignedOpen++; }
-      else stats.closedRequests++;
+      else {
+        stats.closedRequests++;
+        if (states.size === 1 && states.has("closed")) stats.closedOnly++;
+        else if (states.size === 1 && states.has("stop")) stats.stoppedOnly++;
+        else stats.mixedInactive++;
+      }
 
       if (req.date) { if (!stats.dateMin || req.date < stats.dateMin) stats.dateMin = req.date; if (!stats.dateMax || req.date > stats.dateMax) stats.dateMax = req.date; }
       requests.push(req);

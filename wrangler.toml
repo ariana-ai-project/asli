@@ -3,7 +3,6 @@
 #
 # یک Worker با فایل‌های ثابت (frontend/) + کد سرور برای بخش تأمین و پشتیبانی:
 #   /tamin-poshtibani/api/*    → API روی D1 (worker/api.js)
-#   /tamin-poshtibani/panel/*  → پروکسی به سرور Render (worker/panel-proxy.js)
 #   هر مسیر دیگر               → فایل ثابت از frontend/
 #
 # استقرار:  wrangler deploy          (از ریشهٔ همین مخزن)
