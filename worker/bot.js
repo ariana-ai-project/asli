@@ -258,6 +258,7 @@ async function onMessage(env, msg) {
   if (text === "/tozihat" || text === "توضیحات") return startFlow(env, api, chat, ex, "notes");
   if (text === "/nameh" || text === "نامه") return startFlow(env, api, chat, ex, "letter");
   if (text === "/tahvil" || text === "تحویل") return startFlow(env, api, chat, ex, "deliver");
+  if (text === "/pishraft" || text === "پیشرفت") return startFlow(env, api, chat, ex, "progress");
 
   /* متن آزاد: پاسخِ کدام گفت‌وگوی نیمه‌کاره است؟
      کارشناس ممکن است هم‌زمان یک نامهٔ منتظرِ توضیح، یک فایلِ منتظرِ نام
@@ -530,6 +531,7 @@ async function saveProforma(env, api, chat, up, supplier) {
   ]);
   const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
   const pf = await env.DB.prepare("SELECT id FROM proformas WHERE assignment_id=? AND supplier_name=?").bind(up.assignment_id, supplier).first();
+  await sendProgress(env, api, chat, up.assignment_id);
   const text = `✅ ثبت شد.\n\n📎 <b>${esc(up.filename)}</b>\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(supplier)}</b>`;
   const kb = pf && env.ANTHROPIC_API_KEY
     ? [[{ text: "🤖 خواندن خودکار قیمت‌ها", callback_data: `ai:${pf.id}:go:0` }], [{ text: "باز کردن پنل", url: PANEL_URL }]]
@@ -780,6 +782,64 @@ async function makeLetter(env, api, chat, ex, letterId) {
 }
 
 /* ------------------------------------------------------------------ */
+/* پایش شش مرحله — همان باکس‌های رنگیِ میز مدیر                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * وضعیت شش مرحلهٔ یک ارجاع، دقیقاً با همان قاعده‌ای که پنل و میز مدیر
+ * حساب می‌کنند — تا آنچه کارشناس در تلگرام می‌بیند با آنچه مدیر می‌بیند یکی باشد.
+ */
+async function stageState(env, aid) {
+  return env.DB.prepare(
+    `SELECT a.id, a.request_id, a.viewed_at, a.commission_at,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart,
+            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
+            (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
+     FROM assignments a WHERE a.id=?`,
+  ).bind(aid).first();
+}
+
+const stageFlags = (s) => [!!s.viewed_at, s.hist > 0, s.smart > 0, s.quotes > 0, s.proformas > 0, !!s.commission_at];
+
+/** نوار پیشرفت: ✅ برای انجام‌شده، ⬜ برای مانده */
+function progressBar(s) {
+  const done = stageFlags(s);
+  return STAGE_NAMES.map((n, i) => `${done[i] ? "✅" : "⬜"} ${n}`).join("\n");
+}
+
+/** پیام پیشرفت + دکمهٔ مرحله‌هایی که هنوز سبز نشده‌اند */
+async function sendProgress(env, api, chat, aid, prefix) {
+  const s = await stageState(env, aid);
+  if (!s) return { ok: true };
+  const done = stageFlags(s);
+  const kb = [];
+  if (!done[1]) kb.push([{ text: "✅ سوابق را بررسی کردم", callback_data: `st:${aid}:hist:0` }]);
+  if (!done[2]) kb.push([{ text: "✅ جستجو را انجام دادم", callback_data: `st:${aid}:smart:0` }]);
+  if (done[3] && done[4] && !done[5]) kb.push([{ text: "📦 گرفتن فایل‌ها و بستن کار", callback_data: `st:${aid}:deliver:0` }]);
+  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+  await api.sendMessage(chat,
+    `${prefix ? prefix + "\n\n" : ""}📊 <b>پیشرفت درخواست ${esc(s.request_id)}</b>\n\n${progressBar(s)}`, kb).catch(() => {});
+  return { ok: true };
+}
+
+/** علامت‌زدن مرحلهٔ «بررسی سوابق» یا «جستجوی هوشمند» روی همهٔ اقلام باز */
+async function markStage(env, api, chat, ex, aid, stage) {
+  const col = stage === "hist" ? "hist_done_at" : "smart_done_at";
+  const own = await ownOpenAssignment(env, ex.id, aid);
+  if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE items SET ${col}=COALESCE(${col},?) WHERE assignment_id=? AND state='open'`).bind(t, aid),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=? AND fired_at IS NULL")
+      .bind(t, aid, stage === "hist" ? 1 : 2),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, stage, own.request_id, JSON.stringify({ assignment_id: aid, channel: "telegram" })),
+  ]);
+  return sendProgress(env, api, chat, aid, `✅ مرحلهٔ «${stage === "hist" ? "بررسی سوابق" : "جستجوی هوشمند"}» سبز شد.`);
+}
+
+/* ------------------------------------------------------------------ */
 /* تحویل بسته                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -802,9 +862,29 @@ async function deliver(env, api, chat, ex, aid) {
   }
 
   const files = buildFiles(d, letterBytes);
+
+  /* اول ثبت، بعد ارسال.
+     تولید جدول کمیسیون یعنی مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند.
+     اگر اول می‌فرستادیم و تلگرام یک لحظه در دسترس نبود، کارِ تمام‌شده در میز
+     مدیر ناتمام می‌ماند و هشدارهایش هم می‌رفت. ارسال، تحویل است نه تولید. */
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "commission", d.request.id, JSON.stringify({ assignment_id: aid, files: files.length, channel: "telegram" })),
+  ]);
+
   await api.sendMessage(chat, `📦 در حال آماده کردن ${M(files.length)} فایل برای درخواست <b>${esc(d.request.id)}</b>…`).catch(() => {});
+  const failed = [];
   for (const f of files) {
-    await api.sendDocument(chat, f.name, new Blob([f.body], { type: f.type }));
+    try { await api.sendDocument(chat, f.name, new Blob([f.body], { type: f.type })); }
+    catch (e) { failed.push(f.name); }
+  }
+  if (failed.length) {
+    await api.sendMessage(chat,
+      `⚠️ ${M(failed.length)} فایل فرستاده نشد: ${esc(failed.join("، "))}\nهمه‌شان در پنل هستند و از آن‌جا می‌توانید بگیرید.`,
+      panelButton).catch(() => {});
   }
 
   const warn = [];
@@ -812,8 +892,8 @@ async function deliver(env, api, chat, ex, aid) {
   if (!st.hasNotes) warn.push("📝 توضیحات برگهٔ کمیسیون خالی است — با /tozihat می‌نویسید.");
   if (!st.hasLetter) warn.push("✉️ نامهٔ پیوست ندارید — اگر لازم است /nameh را بزنید.");
   await api.sendMessage(chat,
-    `✅ فایل‌ها فرستاده شد. همین‌ها در پنل هم هست.` + (warn.length ? `\n\n${warn.join("\n")}` : ""), panelButton);
-  return { ok: true };
+    `✅ فایل‌ها فرستاده شد. همین‌ها در پنل هم هست.` + (warn.length ? `\n\n${warn.join("\n")}` : ""), panelButton).catch(() => {});
+  return sendProgress(env, api, chat, aid);
 }
 
 /* ------------------------------------------------------------------ */
@@ -846,7 +926,8 @@ async function startFlow(env, api, chat, ex, kind) {
   const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `fl:${fid}:r:${a.id}` }]);
   kb.push([{ text: "✖️ بی‌خیال", callback_data: `fl:${fid}:x:0` }]);
   const title = { manual: "🧾 <b>فاکتور دستی</b>", notes: "📝 <b>توضیحات برگهٔ کمیسیون</b>",
-    letter: "✉️ <b>نامهٔ پیوست کمیسیون</b>", deliver: "📦 <b>گرفتن فایل‌های آماده</b>" }[kind];
+    letter: "✉️ <b>نامهٔ پیوست کمیسیون</b>", deliver: "📦 <b>گرفتن فایل‌های آماده</b>",
+    progress: "📊 <b>پیشرفت کار</b>" }[kind];
   const sent = await api.sendMessage(chat, `${title}\n\nبرای کدام درخواست است؟`, kb);
   await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(sent.message_id, fid).run();
   return { ok: true };
@@ -1035,6 +1116,11 @@ async function onCallback(env, cq) {
       if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
       await ack();
 
+      if (f.kind === "progress") {
+        await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='done', done_at=? WHERE id=?").bind(aid, now(), f.id).run();
+        if (cq.message) await api.editMessageText(chat, cq.message.message_id, `درخواست <b>${esc(asg.request_id)}</b>`).catch(() => {});
+        return sendProgress(env, api, chat, aid);
+      }
       if (f.kind === "letter" || f.kind === "deliver") {
         await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='done', done_at=? WHERE id=?").bind(aid, now(), f.id).run();
         if (cq.message) await api.editMessageText(chat, cq.message.message_id, `درخواست <b>${esc(asg.request_id)}</b> انتخاب شد.`).catch(() => {});
@@ -1117,6 +1203,16 @@ async function onCallback(env, cq) {
       return { ok: true };
     }
     if (step === "go") return makeLetter(env, api, chat, ex, n);
+  }
+
+  /* پایش مراحل: st:<assignmentId>:<stage>:0 */
+  if (action === "st") {
+    const [, aidRaw, stage] = T(cq.data).split(":");
+    const aid = parseInt(aidRaw, 10);
+    await ack();
+    if (stage === "hist" || stage === "smart") return markStage(env, api, chat, ex, aid, stage);
+    if (stage === "deliver") return deliver(env, api, chat, ex, aid);
+    return sendProgress(env, api, chat, aid);
   }
 
   await ack("این دکمه دیگر کار نمی‌کند.");
