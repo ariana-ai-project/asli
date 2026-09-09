@@ -17,6 +17,8 @@
  */
 
 import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
+import { telegram } from "./telegram.js";
+import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -422,17 +424,29 @@ async function setDays(env, body) {
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
   if (!ids.length) throw new HttpError("هیچ ارجاعی انتخاب نشده.");
-  const rows = (await env.DB.prepare(`SELECT a.*, e.name FROM assignments a JOIN experts e ON e.id=a.expert_id WHERE a.id IN (${ids.map(() => "?").join(",")}) AND a.dispatched_at IS NULL AND a.days>0`).bind(...ids).all()).results || [];
-  const t = now(); const stmts = [];
+  const rows = (await env.DB.prepare(`SELECT a.*, e.name, e.label, e.telegram_chat, r.party,
+      (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count
+    FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
+    WHERE a.id IN (${ids.map(() => "?").join(",")}) AND a.dispatched_at IS NULL AND a.days>0`).bind(...ids).all()).results || [];
+  const t = now(); const stmts = []; let notified = 0;
   /* آستانه‌ها و تعطیلات یک بار خوانده می‌شوند و برای همهٔ ارجاع‌های این دسته به کار می‌روند */
   const [settings, isHoliday] = rows.length ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
   for (const a of rows) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
-    stmts.push(...alertStatements(env, a, settings.thresholds, isHoliday, t));
-    stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: "telegram" }));
+    const sched = alertStatements(env, a, settings.thresholds, isHoliday, t);
+    stmts.push(...sched);
+    /* اعلان «ارجاع جدید» (TG-06). مهلت را از همان زمان‌بندیِ تازه‌ساخته برمی‌داریم
+       چون ستون deadline_at هنوز در همین batch نوشته نشده است. */
+    if (a.telegram_chat) {
+      stmts.push(queueStmt(env, `dispatch:${a.id}`, a.telegram_chat,
+        dispatchText({ ...a, dispatched_at: t, deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt }),
+        [[{ text: "✅ مشاهده کردم", callback_data: `seen:a:${a.id}` }], [{ text: "باز کردن پنل", url: "https://arianaai.website/tamin-poshtibani/expert" }]]));
+      notified++;
+    }
+    stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: a.telegram_chat ? "telegram" : "none" }));
   }
   if (stmts.length) await env.DB.batch(stmts);
-  return { ok: true, dispatched: rows.length };
+  return { ok: true, dispatched: rows.length, notified };
 }
 
 /* تغییر کارشناس: ارجاع جدید، انتقال اقلام و کارهای انجام‌شده، ساعت‌شمار از نو */
@@ -641,7 +655,7 @@ const NOT_CONNECTED = (what) => json({ available: false, message: `${what} هن�
 /* ------------------------------------------------------------------ */
 /* روتر                                                                 */
 /* ------------------------------------------------------------------ */
-async function route(request, env) {
+async function route(request, env, ctx) {
   const url = new URL(request.url);
   let path = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) : url.pathname;
   if (!path.startsWith("/")) path = "/" + path;
@@ -653,7 +667,63 @@ async function route(request, env) {
   try {
     await ensureSchema(env);
 
-    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!env.MANAGER_CODE });
+    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!env.MANAGER_CODE, botConfigured: !!env.TG_BOT_TOKEN });
+
+    /* ---------- بات تلگرام ---------- */
+
+    /* وبهوک: تلگرام صدا می‌زند، نه کاربر. احراز هویت با هدر رازِ setWebhook انجام
+       می‌شود و بس. همیشه ۲۰۰ برمی‌گردد — هر چیز دیگری باعث می‌شود تلگرام همان
+       آپدیت را بارها دوباره بفرستد. */
+    if (path === "/tg/webhook" && m === "POST") {
+      if (!env.TG_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TG_WEBHOOK_SECRET) {
+        return new Response("forbidden", { status: 403 });
+      }
+      const u = await request.json().catch(() => null);
+      if (!u || !u.update_id) return json({ ok: true });
+      /* آپدیت تکراری (تلگرام در صورت نگرفتن ۲۰۰ دوباره می‌فرستد) دوبار اجرا نشود */
+      const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(u.update_id, now()).run();
+      if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
+      await handleUpdate(env, u);
+      return json({ ok: true });
+    }
+
+    /* کارشناس لینک اتصال می‌گیرد (TG-03) */
+    if (path === "/tg/link" && m === "POST") {
+      const ex = await requireExpert(request, env);
+      if (!env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
+      return json(await makeLink(env, ex.id));
+    }
+    if (path === "/tg/status" && m === "GET") {
+      const who = await requireAny(request, env);
+      if (who.expert) {
+        const e = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(who.expert.id).first();
+        return json({ connected: !!(e && e.telegram_chat), botConfigured: !!env.TG_BOT_TOKEN, bot: env.TG_BOT_USERNAME || null });
+      }
+      const rows = (await env.DB.prepare("SELECT id,name,label,telegram_chat FROM experts WHERE active=1 ORDER BY name").all()).results || [];
+      const mgr = await env.DB.prepare("SELECT value FROM settings WHERE key='managerChat'").first();
+      return json({
+        botConfigured: !!env.TG_BOT_TOKEN, bot: env.TG_BOT_USERNAME || null,
+        managerChannel: mgr ? JSON.parse(mgr.value) : null,
+        experts: rows.map((r) => ({ id: r.id, name: r.name, label: r.label, connected: !!r.telegram_chat })),
+        outbox: (await env.DB.prepare("SELECT status, COUNT(*) AS n FROM outbox GROUP BY status").all()).results || [],
+      });
+    }
+    /* مدیر: ثبت/بررسی وبهوک روی تلگرام */
+    if (path === "/tg/setup" && m === "POST") {
+      requireManager(request, env);
+      if (!env.TG_BOT_TOKEN || !env.TG_WEBHOOK_SECRET) return NOT_CONNECTED("بات تلگرام");
+      const api = telegram(env);
+      await api.setWebhook(`${url.origin}${PREFIX}/tg/webhook`, env.TG_WEBHOOK_SECRET);
+      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo() });
+    }
+    if (path === "/tg/setup" && m === "GET") {
+      requireManager(request, env);
+      if (!env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
+      const api = telegram(env);
+      return json({ me: await api.getMe(), webhook: await api.getWebhookInfo() });
+    }
+    /* اجرای دستی چرخهٔ هشدار — برای تست؛ همان کاری که Cron می‌کند */
+    if (path === "/tg/tick" && m === "POST") { requireManager(request, env); return json(await scheduled(env)); }
 
     /* --- ورود --- */
     if (path === "/login" && m === "POST") {
@@ -712,7 +782,7 @@ async function route(request, env) {
     if (path === "/desk" && m === "GET") { requireManager(request, env); return json(await desk(env, url)); }
     if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
-    if (path === "/dispatch" && m === "POST") { requireManager(request, env); return json(await dispatch(env, await readJson(request))); }
+    if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { requireManager(request, env); return json(await reassign(env, await readJson(request))); }
     if (path === "/items/state" && m === "POST") { requireManager(request, env); return json(await setState(env, await readJson(request), "manager")); }
     if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
@@ -776,6 +846,14 @@ async function route(request, env) {
     if (e instanceof HttpError) return err(e.message, e.status, e.extra);
     return err("خطای داخلی: " + (e && e.message ? e.message : String(e)), 500);
   }
+}
+
+/* پیام‌های تازه‌به‌صف‌رفته را همان لحظه می‌فرستد تا کارشناس منتظر تیکِ بعدی Cron نماند.
+   بیرون از پاسخ اجرا می‌شود، پس اگر تلگرام کند بود مدیر معطل نمی‌ماند؛ اگر هم
+   شکست بخورد، Cron دوباره سراغش می‌رود (صف پابرجاست). */
+function flush(env, ctx, when) {
+  if (!when || !ctx || !env.TG_BOT_TOKEN) return;
+  ctx.waitUntil(drainOutbox(env, 20).catch((e) => console.error("outbox flush", e && e.message)));
 }
 
 export { route };

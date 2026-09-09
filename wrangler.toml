@@ -8,11 +8,23 @@
 # استقرار:  wrangler deploy          (از ریشهٔ همین مخزن)
 # تست محلی: wrangler dev --var MANAGER_CODE:1234
 #
-# راز مدیر در مخزن نیست (مخزن عمومی است):  wrangler secret put MANAGER_CODE
+# رازها در مخزن نیستند (مخزن عمومی است) و با wrangler secret put ست می‌شوند:
+#   MANAGER_CODE       کد ورود مدیر
+#   TG_BOT_TOKEN       توکن بات تلگرام (@ArianaSupplyBot)
+#   TG_WEBHOOK_SECRET  رازی که تلگرام در هدر X-Telegram-Bot-Api-Secret-Token برمی‌گرداند
 # ============================================================
 name = "asli"
 main = "worker.js"
 compatibility_date = "2026-09-03"
+
+[vars]
+# نام کاربری بات؛ راز نیست و برای ساختن لینک t.me لازم است
+TG_BOT_USERNAME = "ArianaSupplyBot"
+
+[triggers]
+# چرخهٔ هشدار مهلت و ارسال صف. هر ۵ دقیقه کافی است: خودِ آستانه‌ها فقط در ساعات
+# کاری می‌افتند (SLA-06) و ارسال فوریِ «ارجاع جدید» جدا با waitUntil انجام می‌شود.
+crons = ["*/5 * * * *"]
 
 [assets]
 directory = "./frontend"

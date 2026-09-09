@@ -33,6 +33,7 @@
     f: { maxDelivery: "", priceOnly: false, adMin: 0, adMax: 365 },
     templates: [], tpl: 0,
     hist: {}, smart: {},   // پاسخ endpointها برای هر قلم (available:false تا اتصال)
+    tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
   };
   const settings = () => S.settings || CFG.defaults;
   const A = () => S.d && S.d.assignment;
@@ -319,8 +320,31 @@
   }
 
   /* ---------- بارگیری ---------- */
+  /* ---------- اتصال به تلگرام (TG-03) ----------
+     بات نمی‌تواند گفت‌وگو را شروع کند؛ کارشناس باید یک بار /start بزند. سرور یک
+     توکن یک‌بارمصرف می‌سازد و ما لینک t.me را نشان می‌دهیم. لینک را باز نمی‌کنیم
+     که مرورگر بلاکش نکند — خودِ کارشناس روی دکمه می‌زند. */
+  async function tgConnect() {
+    if (S.tg && S.tg.connected) {
+      TP.modal("اعلان تلگرام", `اعلان‌های شما فعال است.<br><br>ارجاع‌های تازه و یادآوری مهلت‌ها در تلگرام برای شما فرستاده می‌شود.
+        <br><br>برای قطع اتصال، در گفت‌وگوی بات دستور <code>/stop</code> را بفرستید.`, null, "باشد", "");
+      return;
+    }
+    try {
+      const r = await TP.api("/tg/link", { method: "POST" });
+      if (r.available === false) return TP.modal("اعلان تلگرام", esc(r.message), null, "باشد", "");
+      TP.modal("اتصال به تلگرام", `روی دکمهٔ زیر بزنید و در تلگرام <b>START</b> را لمس کنید.
+        <br><br><a class="tp-btn primary" href="${esc(r.url)}" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">باز کردن بات در تلگرام</a>
+        <br><br><span class="dim" style="font-size:.85rem">این لینک ۱۵ دقیقه اعتبار دارد و فقط یک بار کار می‌کند. بعد از اتصال، دکمهٔ ↻ را بزنید.</span>`,
+        null, "بستم", "");
+    } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+
   async function loadTray() {
-    try { const t = await TP.api("/tray"); S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; }
+    try {
+      const [t, tg] = await Promise.all([TP.api("/tray"), TP.api("/tg/status").catch(() => null)]);
+      S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = tg;
+    }
     catch (e) { if (e.status === 401) { TP.session.clear(); S.expert = null; S.screen = "login"; } S.error = e.message; }
     render();
   }
@@ -336,7 +360,7 @@
     const app = document.getElementById("app");
     if (!S.expert) S.screen = "login";
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${S.expert ? `<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      <span class="spacer"></span>${S.expert ? `${S.tg && S.tg.botConfigured ? `<button class="tp-btn sm ${S.tg.connected ? "" : "primary"}" data-tg title="${S.tg.connected ? "اعلان‌های تلگرام فعال است" : "دریافت ارجاع‌ها و یادآوری مهلت در تلگرام"}">${S.tg.connected ? "✅ تلگرام" : "اتصال به تلگرام"}</button>` : ""}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
@@ -348,6 +372,7 @@
     const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#code").value.trim(); if (!c) return; try { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } catch (e) { S.error = e.message; render(); } }; lg.onclick = go; G("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
+    const tg = G("[data-tg]"); if (tg) tg.onclick = tgConnect;
     Q("[data-req]").forEach((x) => x.onclick = () => openDetail(+x.dataset.req));
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
