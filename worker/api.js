@@ -24,6 +24,7 @@ import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
 import { requestHtml, commissionHtml } from "./sheets.js";
+import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
 
@@ -778,6 +779,23 @@ async function route(request, env, ctx) {
     if (path === "/settings" && m === "GET") { await requireAny(request, env); return json(await getSettings(env)); }
     if (path === "/settings" && m === "PUT") { requireManager(request, env); return json(await putSettings(env, await readJson(request))); }
     if (path === "/experts" && m === "GET") { await requireAny(request, env); return json({ experts: await listExperts(env) }); }
+    /* افزودن کارشناس — کارکنان عوض می‌شوند و نباید برای هر نفر تازه استقرار لازم باشد */
+    if (path === "/experts" && m === "POST") {
+      requireManager(request, env);
+      const b = await readJson(request);
+      const name = T(b.name), code = T(b.code);
+      if (!name || !code) throw new HttpError("نام و کد کارشناسی لازم است.");
+      if (!/^\d{3,8}$/.test(code)) throw new HttpError("کد کارشناسی باید فقط رقم باشد.");
+      const dup = await env.DB.prepare("SELECT id FROM experts WHERE code=? OR name=?").bind(code, nrm(name)).first();
+      if (dup) throw new HttpError("کارشناسی با همین کد یا نام از قبل هست.", 409);
+      const r = await env.DB.prepare(
+        "INSERT INTO experts (name,label,code,active,speed,created_at) VALUES (?,?,?,1,1.0,?)",
+      ).bind(nrm(name), T(b.label) || name, code, now()).run();
+      return json({ ok: true, id: r.meta.last_row_id, name, code });
+    }
+
+    /* خودآزمون سرویس‌های بیرونی — تلگرام، انبار فایل، تبدیل صوت، مدل، دیتابیس */
+    if (path === "/selftest" && m === "GET") { requireManager(request, env); return json(await selfTest(env)); }
 
     /* تعطیلات رسمی (SLA-01) — بدون این، مهلت‌ها وسط نوروز هم می‌شمارند */
     if (path === "/holidays" && m === "GET") { await requireAny(request, env); return json({ holidays: (await env.DB.prepare("SELECT * FROM holidays ORDER BY date_j").all()).results || [] }); }
