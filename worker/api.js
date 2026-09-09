@@ -19,6 +19,9 @@
 import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
 import { telegram } from "./telegram.js";
 import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
+import { extractProforma, toRial } from "./extract.js";
+import { HttpError } from "./http.js";
+import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -39,7 +42,7 @@ const int = (v, d = null) => { const n = parseInt(v, 10); return isNaN(n) ? d : 
 async function readJson(request) {
   try { return await request.json(); } catch (_) { throw new HttpError("بدنهٔ درخواست JSON معتبر نیست.", 400); }
 }
-class HttpError extends Error { constructor(m, status = 400, extra) { super(m); this.status = status; this.extra = extra; } }
+/* تعریف در worker/http.js است تا bot.js هم بدون حلقهٔ ایمپورت از آن استفاده کند */
 
 /* ------------------------------------------------------------------ */
 /* احراز هویت                                                            */
@@ -98,6 +101,8 @@ CREATE TABLE IF NOT EXISTS tg_tokens (token TEXT PRIMARY KEY, expert_id INTEGER 
 CREATE TABLE IF NOT EXISTS tg_seen (update_id INTEGER PRIMARY KEY, seen_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS tg_uploads (id INTEGER PRIMARY KEY, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, message_id INTEGER, file_id TEXT, storage_key TEXT, filename TEXT, mime TEXT, size_bytes INTEGER, state TEXT NOT NULL DEFAULT 'need_request', assignment_id INTEGER, options_json TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, reminded_at INTEGER, done_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_uploads_open ON tg_uploads(expires_at) WHERE done_at IS NULL;
+CREATE TABLE IF NOT EXISTS tg_flows (id INTEGER PRIMARY KEY, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, kind TEXT NOT NULL, step TEXT NOT NULL, assignment_id INTEGER, message_id INTEGER, data_json TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, done_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_flows_open ON tg_flows(expert_id) WHERE done_at IS NULL;
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -110,6 +115,11 @@ const COLUMN_MIGRATIONS = [
   ["proformas", "mime", "TEXT"],
   ["proformas", "size_bytes", "INTEGER"],
   ["proformas", "source", "TEXT"],            /* panel | telegram */
+  ["assignments", "notes", "TEXT"],           /* توضیحات کارشناس، پای برگهٔ کمیسیون (CM-03) */
+  ["quotes", "source", "TEXT"],               /* panel | telegram | ai — قیمت از کجا آمده */
+  ["proformas", "extracted_json", "TEXT"],    /* خروجی خام استخراج مدل (INV-15) */
+  ["proformas", "extract_state", "TEXT"],     /* pending | ok | refused | failed */
+  ["proformas", "extract_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -210,6 +220,10 @@ function alertStatements(env, a, thresholds, isHoliday, at) {
     .bind(a.id, s.deadlineAt));
   return st;
 }
+
+/* ------------------------------------------------------------------ */
+/* استخراج پیش‌فاکتور                                                    */
+/* ------------------------------------------------------------------ */
 
 async function getSettings(env) {
   const rows = (await env.DB.prepare("SELECT key,value FROM settings").all()).results || [];
@@ -737,6 +751,23 @@ async function route(request, env, ctx) {
       const api = telegram(env);
       return json({ me: await api.getMe(), webhook: await api.getWebhookInfo() });
     }
+    /* گفت‌وگوهای نیمه‌کارهٔ بات — برای پشتیبانی: وقتی کارشناس می‌گوید «بات گیر کرده»،
+       مدیر می‌تواند ببیند کجای کار مانده است. */
+    if (path === "/tg/flows" && m === "GET") {
+      requireManager(request, env);
+      return json({
+        flows: (await env.DB.prepare(
+          `SELECT f.id, f.kind, f.step, f.assignment_id, f.created_at, f.expires_at, e.name AS expert
+           FROM tg_flows f JOIN experts e ON e.id=f.expert_id
+           WHERE f.done_at IS NULL AND f.expires_at>? ORDER BY f.id DESC LIMIT 50`,
+        ).bind(now()).all()).results || [],
+        uploads: (await env.DB.prepare(
+          `SELECT u.id, u.state, u.filename, u.assignment_id, u.created_at, e.name AS expert
+           FROM tg_uploads u JOIN experts e ON e.id=u.expert_id
+           WHERE u.done_at IS NULL AND u.expires_at>? ORDER BY u.id DESC LIMIT 50`,
+        ).bind(now()).all()).results || [],
+      });
+    }
     /* اجرای دستی چرخهٔ هشدار — برای تست؛ همان کاری که Cron می‌کند */
     if (path === "/tg/tick" && m === "POST") { requireManager(request, env); return json(await scheduled(env)); }
 
@@ -838,6 +869,39 @@ async function route(request, env, ctx) {
       await env.DB.prepare("INSERT INTO proformas (assignment_id,supplier_name,filename,uploaded_at) VALUES (?,?,?,?) ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, uploaded_at=excluded.uploaded_at")
         .bind(int(b.assignment_id), T(b.supplier_name), T(b.filename) || null, now()).run();
       return json({ ok: true, stored: false, message: "نام فایل ثبت شد؛ ذخیرهٔ خود فایل (R2) در مرحلهٔ بعد فعال می‌شود." });
+    }
+
+    /* استخراج خودکار اطلاعات پیش‌فاکتور (AI-06).
+       فایل از داخل Worker رد نمی‌شود: یک لینک امضاشدهٔ کوتاه‌عمر ساخته می‌شود و
+       خود مدل سند را می‌گیرد. هیچ چیزی در جدول استعلام‌ها نوشته نمی‌شود —
+       نتیجه فقط ذخیره می‌شود تا کارشناس ببیند و تأیید کند (INV-07). */
+    if ((mm = /^\/proformas\/(\d+)\/extract$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const p = await proformaOf(env, int(mm[1]), ex);
+      const store = storage(env);
+      if (!store || !p.storage_key) return NOT_CONNECTED("انبار فایل");
+      if (!store.signedUrl) throw new HttpError("انبار فعلی لینک امضاشده نمی‌سازد؛ استخراج فقط با Supabase کار می‌کند.", 503);
+      if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("استخراج هوشمند");
+      return json(await runExtraction(env, store, p));
+    }
+    /* ثبت نتیجهٔ استخراج در جدول استعلام‌ها — با تأیید صریح کارشناس */
+    if ((mm = /^\/proformas\/(\d+)\/apply$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const p = await proformaOf(env, int(mm[1]), ex);
+      return json(await applyExtraction(env, p, await readJson(request)));
+    }
+
+    /* توضیحات کارشناس — پای برگهٔ کمیسیون، خانهٔ «توضیحات تدارکات و پشتیبانی» (CM-03).
+       از پنل و از بات هر دو نوشته می‌شود و یک جا ذخیره است. */
+    if ((mm = /^\/assignments\/(\d+)\/notes$/.exec(path)) && m === "PUT") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]);
+      await ownAssignment(env, ex, aid);
+      const b = await readJson(request);
+      const notes = T(b.notes);
+      if (notes.length > 1500) throw new HttpError("توضیحات نباید از ۱۵۰۰ نویسه بیشتر باشد.");
+      await env.DB.prepare("UPDATE assignments SET notes=? WHERE id=?").bind(notes || null, aid).run();
+      return json({ ok: true, notes });
     }
 
     /* بارگذاری فایل پیش‌فاکتور از پنل — همان مسیری که بات هم می‌رود (ADR-0008:

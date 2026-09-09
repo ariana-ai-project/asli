@@ -233,6 +233,13 @@
     if (!d.sup.length) return `<div class="pad"><div class="empty">هیچ استعلام تأییدنهایی‌شده‌ای نیست.</div></div>`;
     return `<div class="pad"><div class="toolrow noprint"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().length} قلم</span>
         <button class="tp-btn sm" data-xls style="margin-inline-start:auto">دانلود اکسل</button><button class="tp-btn sm" data-print>پرینت / PDF (برگه درخواست + جدول)</button></div>
+      <div class="tp-note noprint" style="display:block;margin-bottom:10px">
+        <b>توضیحات تدارکات و پشتیبانی</b> — این متن پای برگهٔ کمیسیون چاپ می‌شود. از بات تلگرام هم با <code>/tozihat</code> می‌توانید بنویسید.
+        <textarea class="tp-input" data-notes rows="3" maxlength="1500" placeholder="مثلاً: تأمین‌کندهٔ دوم زمان تحویل بهتری داشت ولی قیمتش بالاتر است…"
+          style="width:100%;margin-top:8px;resize:vertical;font-family:inherit">${esc(a.notes || "")}</textarea>
+        <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
+          <button class="tp-btn sm primary" data-save-notes>ذخیرهٔ توضیحات</button><span class="dim" data-notes-msg style="font-size:.85rem"></span></div>
+      </div>
       <div class="tp-scroll" style="max-height:64vh;background:#fff"><div id="printarea">${reqForm(r)}${commForm(r, d)}</div></div>
       <div class="tp-note noprint">قالب مطابق فرم <b>TSA-PS-FO-02</b> و راست‌به‌چپ: ردیف و شرح اقلام سمت راست، بلوک هر تأمین‌کننده به سمت چپ. ارزش افزوده ۱۰٪. مبلغ کل هر سطر = قیمت واحد × تعداد. <b>قالب برگهٔ درخواست موقت است</b> و با فرمت راهکاران جایگزین می‌شود.</div></div>`;
   }
@@ -262,7 +269,7 @@
       <tr><td class="lbl rt" colspan="4">شرایط تسویه:</td>${B((g) => `<td colspan="3">${esc(g.pay || "—")}</td>`)}</tr>
       <tr><td class="lbl rt" colspan="4">زمان تحویل:</td>${B((g) => `<td colspan="3">${esc(g.dtime || "—")}</td>`)}</tr>
       <tr><td class="lbl rt" colspan="4">تاییدیه فنی:</td>${B(() => `<td colspan="3">—</td>`)}</tr>
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر کارگاه:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">توضیحات تدارکات و پشتیبانی:</td></tr>
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر کارگاه:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">توضیحات تدارکات و پشتیبانی:${A().notes ? `<div style="font-weight:400;padding-top:4px;white-space:pre-wrap">${esc(A().notes)}</div>` : ""}</td></tr>
       <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر واحد فنی:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">نظر واحد حقوقی:</td></tr>
       <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">امضا کارشناس خرید: ${esc(S.expert.name)}</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">امضا مدیر پشتیبانی:</td></tr>
       <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${span - 2 * Math.ceil(span / 3)}">عضو کمیسیون</td></tr></table>`;
@@ -418,6 +425,16 @@
     Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; render(); });
     const mc = G("[data-make-comm]"); if (mc) mc.onclick = async () => { try { await TP.api(`/assignments/${A().id}/commission`, { body: {} }); S.tab = "comm"; await reload(); } catch (e) { TP.modal("تولید جدول کمیسیون", esc(e.message) + (e.data && e.data.missing && e.data.missing.length ? `<br><br>${e.data.missing.map((m) => `• ${esc(m.title)} (${m.n} از ${e.data.need})`).join("<br>")}` : ""), null, "باشد", ""); } };
     const dx = G("[data-xls]"); if (dx) dx.onclick = downloadXls;
+    const sn = G("[data-save-notes]");
+    if (sn) sn.onclick = async () => {
+      const box = G("[data-notes]"), msg = G("[data-notes-msg]");
+      try {
+        await TP.api(`/assignments/${A().id}/notes`, { method: "PUT", body: { notes: box.value } });
+        A().notes = box.value;            /* تا بدون بارگذاری دوباره، در خود فرم دیده شود */
+        msg.textContent = "ذخیره شد ✅";
+        render();
+      } catch (e) { msg.textContent = e.message; }
+    };
     const pr = G("[data-print]"); if (pr) pr.onclick = () => TP.modal("پرینت", "دو برگه با هم چاپ می‌شوند:<br><br>۱. برگه درخواست خرید<br>۲. جدول مقایسه استعلام بها (کمیسیون)<br><br>برای PDF، در پنجرهٔ چاپ «Save as PDF» را انتخاب کنید.", () => window.print(), "چاپ کن");
   }
 

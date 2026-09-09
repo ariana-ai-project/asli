@@ -80,6 +80,23 @@ function supabaseStore(env) {
     async remove(key) {
       await fetch(`${base}/${bucket}/${encodeURI(key)}`, { method: "DELETE", headers: auth });
     },
+    /**
+     * لینک موقت و امضاشده به فایل.
+     * برای این است که مدل زبانی خودش سند را بگیرد؛ این‌طور فایل اصلاً از داخل
+     * Worker رد نمی‌شود و محدودیت ۱۰ میلی‌ثانیه CPU پلن رایگان مسئله نیست.
+     */
+    async signedUrl(key, seconds = 900) {
+      const r = await fetch(`${String(env.SUPABASE_URL).replace(/\/+$/, "")}/storage/v1/object/sign/${bucket}/${encodeURI(key)}`, {
+        method: "POST",
+        headers: { ...auth, "content-type": "application/json" },
+        body: JSON.stringify({ expiresIn: seconds }),
+      });
+      if (!r.ok) throw new Error(`ساخت لینک امضاشده نشد (${r.status}): ${(await r.text()).slice(0, 200)}`);
+      const d = await r.json();
+      const p = d.signedURL || d.signedUrl;
+      if (!p) throw new Error("پاسخ Supabase لینک امضاشده نداشت.");
+      return `${String(env.SUPABASE_URL).replace(/\/+$/, "")}/storage/v1${p.startsWith("/") ? p : "/" + p}`;
+    },
   };
 }
 
