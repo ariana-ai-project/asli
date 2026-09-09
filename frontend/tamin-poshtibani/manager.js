@@ -146,6 +146,7 @@
         <option value="sent" ${S.filter.state === "sent" ? "selected" : ""}>ارسال‌شده</option><option value="closed" ${S.filter.state === "closed" ? "selected" : ""}>بسته/متوقف</option></select>
       <span class="lab">بازه</span><select class="tp-select" data-f="window">${WINDOWS.map(([k, l]) => `<option value="${k}" ${S.filter.window === k ? "selected" : ""}>${l}</option>`).join("")}</select>
       <button class="tp-btn sm" data-clear>پاک کردن فیلترها</button>
+      ${S.page.total ? `<button class="tp-btn sm danger" data-purge title="همهٔ درخواست‌ها را از سامانه پاک می‌کند">پاک کردن میز</button>` : ""}
       <span class="end">${visible().length} از ${S.data.requests.length} درخواست${S.page.total > S.page.limit ? ` · صفحهٔ ${Math.floor(S.page.offset / S.page.limit) + 1} از ${Math.ceil(S.page.total / S.page.limit)}
         <button class="tp-btn xs" data-page="-1" ${S.page.offset ? "" : "disabled"}>قبلی</button><button class="tp-btn xs" data-page="1" ${S.page.offset + S.page.limit < S.page.total ? "" : "disabled"}>بعدی</button>` : ""}</span></div>`;
   }
@@ -192,7 +193,8 @@
       units.forEach((u, k) => {
         h += `<tr>`;
         if (k === 0) {
-          h += `<td class="stick"${rs}><button class="tp-btn xs" data-toggle="${esc(r.id)}" title="اقلام">${S.open[r.id] ? "▾" : "◂"} ${r.items.length}</button></td>
+          h += `<td class="stick"${rs}><button class="tp-btn xs" data-toggle="${esc(r.id)}" title="اقلام">${S.open[r.id] ? "▾" : "◂"} ${r.items.length}</button>
+              <button class="tp-btn xs danger" data-del="${esc(r.id)}" title="حذف این درخواست از سامانه">✕</button></td>
             <td class="id num"${rs}>${esc(r.id)}</td><td class="num"${rs}>${esc(r.date)}</td>
             <td class="party"${rs}>${esc(r.party)}${r.center ? `<div class="dim" style="font-size:.75rem">${esc(r.center)}</div>` : ""}</td>
             <td class="item"${rs}><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.items.map((i) => i.title).join(" · "))}">${esc(r.items[0] ? r.items[0].title : "")}</div>${r.items.length > 1 ? `<div class="dim" style="font-size:.75rem">و ${r.items.length - 1} قلم دیگر</div>` : ""}</td>
@@ -362,6 +364,8 @@
     const im = G("[data-import]"); if (im) im.onclick = pickAndImport;
     Q("[data-f]").forEach((s) => s.onchange = (e) => { S.filter[e.target.dataset.f] = e.target.value; if (e.target.dataset.f === "window") { S.page.offset = 0; refresh(); } else render(); });
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
+    Q("[data-del]").forEach((b) => b.onclick = () => askDelete([b.dataset.del]));
+    const pg = G("[data-purge]"); if (pg) pg.onclick = () => askDelete(null);
     Q("[data-page]").forEach((b) => b.onclick = () => { S.page.offset = Math.max(0, S.page.offset + (+b.dataset.page) * S.page.limit); refresh(); });
     Q("[data-lookup]").forEach((b) => b.onclick = async () => {
       try { const d = await TP.api(`/desk?id=${encodeURIComponent(b.dataset.lookup)}`);
@@ -513,6 +517,29 @@
         const body = { closeRequests: chosen.filter((k) => k.startsWith("close|")).map((k) => k.split("|")[1]), items: chosen.filter((k) => k.startsWith("item|")).map((k) => { const [, id, state] = k.split("|"); return { id: +id, state }; }) };
         try { await TP.api("/import/apply", { body }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
       }, "اعمال موارد تیک‌دار", "بدون اعمال");
+  }
+
+  /* ---------- حذف درخواست ----------
+     حذف برگشت‌ناپذیر است و پیش‌فاکتورها و نامه‌ها را هم می‌برد، پس هم می‌گوید
+     دقیقاً چه چیزی پاک می‌شود و هم برای «همه» تأیید نوشتاری می‌خواهد. */
+  async function askDelete(ids) {
+    const all = !ids;
+    const body = all
+      ? `<b style="color:#fca5a5">همهٔ ${M(S.page.total)} درخواست</b> با اقلام، ارجاع‌ها، استعلام‌ها، پیش‌فاکتورها و نامه‌هایشان پاک می‌شوند.
+         فایل‌های ذخیره‌شده هم از انبار حذف می‌شوند.<br><br>این کار برگشت ندارد.<br><br>
+         برای تأیید، عبارت <b>پاک کن</b> را بنویسید:<br>
+         <input class="tp-input" id="del-ok" style="width:140px;margin-top:6px" autocomplete="off">`
+      : `درخواست <b>${esc(ids[0])}</b> با همهٔ اقلام، ارجاع‌ها، استعلام‌ها، پیش‌فاکتورها و نامه‌هایش پاک می‌شود.<br><br>این کار برگشت ندارد.`;
+    const d = TP.modal(all ? "پاک کردن کل میز" : "حذف درخواست", body, async () => {
+      const confirm = all ? (d.querySelector("#del-ok") || {}).value : null;
+      try {
+        const r = await TP.api("/requests/delete", { body: all ? { all: true, confirm: (confirm || "").trim() } : { ids } });
+        S.page.offset = 0;
+        await refresh();
+        TP.modal("پاک شد", `${M(r.requests)} درخواست حذف شد${r.files ? ` و ${M(r.files)} فایل از انبار پاک شد` : ""}.`, null, "باشد", "");
+      } catch (e) { TP.modal("حذف نشد", esc(e.message), null, "باشد", ""); }
+    }, all ? "پاک کن" : "حذف کن");
+    return d;
   }
 
   /* ---------- شروع ---------- */

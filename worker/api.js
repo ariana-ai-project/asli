@@ -221,6 +221,54 @@ function alertStatements(env, a, thresholds, isHoliday, at) {
   return st;
 }
 
+/**
+ * حذف درخواست‌ها و هر چیزی که به آن‌ها آویزان است.
+ *
+ * `ids = null` یعنی همه — میز از نو.
+ *
+ * ترتیب مهم است: اول کلیدهای فایل جمع می‌شوند (پیش‌فاکتورها و نامه‌ها)، بعد
+ * ردیف‌های دیتابیس می‌روند، و در آخر فایل‌ها از انبار پاک می‌شوند. اگر حذفِ
+ * فایل شکست بخورد، دیتابیس تمیز است و فقط چند فایل یتیم می‌ماند — که از
+ * حالتِ عکسش (ردیفی که به فایلِ نبوده اشاره می‌کند) خیلی بهتر است.
+ */
+async function deleteRequests(env, ids) {
+  const where = ids ? `IN (${ids.map(() => "?").join(",")})` : "IS NOT NULL";
+  const args = ids || [];
+  const inAsg = `SELECT id FROM assignments WHERE request_id ${where}`;
+
+  const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM requests WHERE id ${where}`).bind(...args).first();
+  if (!before || !before.n) return { ok: true, requests: 0, files: 0 };
+
+  const keys = [
+    ...((await env.DB.prepare(`SELECT storage_key AS k FROM proformas WHERE assignment_id IN (${inAsg}) AND storage_key IS NOT NULL`).bind(...args).all()).results || []),
+    ...((await env.DB.prepare(`SELECT docx_key AS k FROM letters WHERE assignment_id IN (${inAsg}) AND docx_key IS NOT NULL`).bind(...args).all()).results || []),
+    ...((await env.DB.prepare(`SELECT voice_key AS k FROM letters WHERE assignment_id IN (${inAsg}) AND voice_key IS NOT NULL`).bind(...args).all()).results || []),
+  ].map((r) => r.k).filter(Boolean);
+
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM quotes WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM proformas WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM letters WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM decisions WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM alerts WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM tg_uploads WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM tg_flows WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
+    env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
+    env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
+    env.DB.prepare(`DELETE FROM requests WHERE id ${where}`).bind(...args),
+    /* پاک‌کردن میز خودش یک رویداد است و باید در تاریخچه بماند */
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, "manager", "delete", null, JSON.stringify({ requests: before.n, all: !ids, ids: ids ? ids.slice(0, 20) : null })),
+  ]);
+
+  const store = storage(env);
+  let files = 0;
+  if (store) for (const k of keys) { try { await store.remove(k); files++; } catch (_) { /* یتیم می‌ماند، ولی دیتابیس تمیز است */ } }
+  return { ok: true, requests: before.n, files };
+}
+
 /* ------------------------------------------------------------------ */
 /* استخراج پیش‌فاکتور                                                    */
 /* ------------------------------------------------------------------ */
@@ -796,6 +844,19 @@ async function route(request, env, ctx) {
 
     /* خودآزمون سرویس‌های بیرونی — تلگرام، انبار فایل، تبدیل صوت، مدل، دیتابیس */
     if (path === "/selftest" && m === "GET") { requireManager(request, env); return json(await selfTest(env)); }
+
+    /* حذف درخواست — با همهٔ چیزهایی که به آن آویزان‌اند.
+       فایل‌های ذخیره‌شده هم پاک می‌شوند، وگرنه در انبار یتیم می‌مانند و
+       فضای رایگان را بی‌دلیل پر می‌کنند. */
+    if (path === "/requests/delete" && m === "POST") {
+      requireManager(request, env);
+      const b = await readJson(request);
+      const all = b.all === true;
+      const ids = Array.isArray(b.ids) ? b.ids.map((x) => T(x)).filter(Boolean) : [];
+      if (all && T(b.confirm) !== "پاک کن") throw new HttpError("برای پاک کردن همهٔ درخواست‌ها باید عبارت «پاک کن» را تأیید کنید.", 422);
+      if (!all && !ids.length) throw new HttpError("هیچ درخواستی انتخاب نشده است.");
+      return json(await deleteRequests(env, all ? null : ids));
+    }
 
     /* تعطیلات رسمی (SLA-01) — بدون این، مهلت‌ها وسط نوروز هم می‌شمارند */
     if (path === "/holidays" && m === "GET") { await requireAny(request, env); return json({ holidays: (await env.DB.prepare("SELECT * FROM holidays ORDER BY date_j").all()).results || [] }); }
