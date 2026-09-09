@@ -62,6 +62,21 @@ export function telegram(env) {
     answerCallback: (callback_query_id, text, alert) =>
       call("answerCallbackQuery", { callback_query_id, ...(text ? { text } : {}), ...(alert ? { show_alert: true } : {}) }),
     getFile: (file_id) => call("getFile", { file_id }),
+    /**
+     * فرستادن فایل به کارشناس.
+     * برخلاف بقیهٔ متدها، این یکی multipart است — تلگرام فایل را در بدنهٔ JSON
+     * نمی‌پذیرد. `body` می‌تواند Blob یا Uint8Array باشد.
+     */
+    async sendDocument(chat_id, filename, body, caption) {
+      const form = new FormData();
+      form.append("chat_id", String(chat_id));
+      if (caption) { form.append("caption", caption); form.append("parse_mode", "HTML"); }
+      form.append("document", body instanceof Blob ? body : new Blob([body]), filename);
+      const r = await fetch(API + token + "/sendDocument", { method: "POST", body: form });
+      const d = await r.json().catch(() => ({}));
+      if (!d.ok) throw new TgError("sendDocument", d.error_code || r.status, d.description, d.parameters && d.parameters.retry_after);
+      return d.result;
+    },
     /** آدرس دانلود فایل. لینک حداقل یک ساعت معتبر است، پس دانلود باید فوری باشد (ADR-0008) */
     fileUrl: (file_path) => `https://api.telegram.org/file/bot${token}/${file_path}`,
     setWebhook: (url, secret_token) => call("setWebhook", {

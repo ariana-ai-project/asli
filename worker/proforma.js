@@ -68,10 +68,11 @@ export async function applyExtraction(env, p, body) {
     if (!itemId || !its.has(itemId) || line.unit_price == null) { skipped++; continue; }
     const it = its.get(itemId);
     const price = toRial(line.unit_price, currency);
-    /* همیشه ۱: استخراج پیش‌نویس است نه منبع حقیقت. روی یک سند واقعی، مدل قیمتی
-       را اشتباه خواند و «اطمینان بالا» اعلام کرد — پس ادعای خودش ملاک نیست و
-       هر عددی که از این مسیر می‌آید باید با چشم کارشناس مقایسه شود. */
-    const low = 1;
+    /* فقط سطرهایی که مدل خودش مطمئن نبوده علامت می‌خورند.
+       (روی یک اسکن بسیار بی‌کیفیت و وارونه، مدل جایی هم که مطمئن بود اشتباه
+       خواند؛ ولی آن سند نمونهٔ کارِ واقعی نیست — کارشناس فایل درست بارگذاری
+       می‌کند. برای همین ملاک، همان اطمینانِ اعلام‌شدهٔ مدل است.) */
+    const low = line.confidence !== "high" ? 1 : 0;
     n++;
     const qid = existing.get(itemId);
     stmts.push(qid

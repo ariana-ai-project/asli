@@ -21,6 +21,9 @@ import { telegram } from "./telegram.js";
 import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
+import { DEFAULTS, getSettings } from "./settings.js";
+import { bundleData, readiness } from "./bundle.js";
+import { requestHtml, commissionHtml } from "./sheets.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
 
@@ -103,6 +106,8 @@ CREATE TABLE IF NOT EXISTS tg_uploads (id INTEGER PRIMARY KEY, expert_id INTEGER
 CREATE INDEX IF NOT EXISTS ix_uploads_open ON tg_uploads(expires_at) WHERE done_at IS NULL;
 CREATE TABLE IF NOT EXISTS tg_flows (id INTEGER PRIMARY KEY, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, kind TEXT NOT NULL, step TEXT NOT NULL, assignment_id INTEGER, message_id INTEGER, data_json TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, done_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_flows_open ON tg_flows(expert_id) WHERE done_at IS NULL;
+CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, expert_id INTEGER NOT NULL, voice_key TEXT, voice_secs REAL, transcript TEXT, letter_json TEXT, docx_key TEXT, state TEXT NOT NULL DEFAULT 'need_voice', meta_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -140,12 +145,6 @@ const SEED_EXPERTS = [
   ["1155", "محمدهادی درجزی دولق", "آقای درجزی"], ["1156", "بهروز سهرابی", "آقای سهرابی"],
 ];
 
-const DEFAULTS = {
-  thresholds: [10, 30, 50, 70, 90, 100], dispatchDays: 2, minSuppliers: 1, approvalRequired: false,
-  assign: { a: 40, b: 30, c: 30, op1: "+", op2: "−" },
-  deadline: { base: 3, we: 1, wp: 1, wi: 1, op1: "×", op2: "×", op3: "×" },
-  capacity: 8, window: "3d",
-};
 
 let schemaReady = false;
 async function ensureSchema(env) {
@@ -225,12 +224,6 @@ function alertStatements(env, a, thresholds, isHoliday, at) {
 /* استخراج پیش‌فاکتور                                                    */
 /* ------------------------------------------------------------------ */
 
-async function getSettings(env) {
-  const rows = (await env.DB.prepare("SELECT key,value FROM settings").all()).results || [];
-  const s = JSON.parse(JSON.stringify(DEFAULTS));
-  for (const r of rows) { try { s[r.key] = JSON.parse(r.value); } catch (_) { /* مقدار خراب — پیش‌فرض می‌ماند */ } }
-  return s;
-}
 async function putSettings(env, patch) {
   const t = now(); const stmts = [];
   for (const [k, v] of Object.entries(patch || {})) {
@@ -889,6 +882,52 @@ async function route(request, env, ctx) {
       const ex = await requireExpert(request, env);
       const p = await proformaOf(env, int(mm[1]), ex);
       return json(await applyExtraction(env, p, await readJson(request)));
+    }
+
+    /* نامهٔ پیوست کمیسیون — متن و فایل Word */
+    if ((mm = /^\/assignments\/(\d+)\/letter$/.exec(path)) && m === "GET") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? ORDER BY id DESC LIMIT 1").bind(aid).first();
+      if (!L) return json({ letter: null });
+      return json({ letter: { id: L.id, state: L.state, transcript: L.transcript, body: L.letter_json ? JSON.parse(L.letter_json) : null, hasFile: !!L.docx_key, updated_at: L.updated_at } });
+    }
+    if ((mm = /^\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") {
+      const who = await requireAny(request, env);
+      const aid = int(mm[1]);
+      if (who.expert) await ownAssignment(env, who.expert, aid);
+      const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? AND docx_key IS NOT NULL ORDER BY id DESC LIMIT 1").bind(aid).first();
+      const store = storage(env);
+      if (!L || !store) throw new HttpError("نامه‌ای برای این ارجاع ساخته نشده است.", 404);
+      const f = await store.get(L.docx_key);
+      if (!f) throw new HttpError("فایل نامه در انبار نیست.", 404);
+      return new Response(f.body, { headers: {
+        "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent("نامه.docx")}`,
+        "cache-control": "private, no-store",
+      } });
+    }
+
+    /* بستهٔ برگه‌ها — همان فایل‌هایی که بات می‌فرستد، برای دانلود از پنل.
+       kind: request | commission */
+    if ((mm = /^\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") {
+      const who = await requireAny(request, env);
+      const aid = int(mm[1]); const kind = mm[2];
+      if (who.expert) await ownAssignment(env, who.expert, aid);
+      const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
+      const html = kind === "request" ? requestHtml(d) : commissionHtml({ ...d, notes: d.assignment.notes });
+      const name = `${kind === "request" ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.xls`;
+      return new Response(html, { headers: {
+        "content-type": "application/vnd.ms-excel; charset=utf-8",
+        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+      } });
+    }
+    /* وضعیت آمادگی بسته — پنل با آن می‌گوید چه چیزی هنوز مانده */
+    if ((mm = /^\/assignments\/(\d+)\/bundle$/.exec(path)) && m === "GET") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
+      return json(readiness(d));
     }
 
     /* توضیحات کارشناس — پای برگهٔ کمیسیون، خانهٔ «توضیحات تدارکات و پشتیبانی» (CM-03).

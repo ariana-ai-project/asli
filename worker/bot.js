@@ -16,6 +16,10 @@ import { fmtFa, workHours } from "./time.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import { REFUSAL_FA } from "./extract.js";
 import { runExtraction, applyExtraction } from "./proforma.js";
+import { transcribe, writeLetter } from "./letter.js";
+import { renderLetter } from "./docx.js";
+import { bundleData, buildFiles, readiness } from "./bundle.js";
+import { getSettings } from "./settings.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -247,10 +251,13 @@ async function onMessage(env, msg) {
   const ex = await expertOfChat(env, chat);
   if (!ex) { await api.sendMessage(chat, "این گفت‌وگو به هیچ کارشناسی وصل نیست. از پنل کارشناس «اتصال به تلگرام» را بزنید."); return { ok: true }; }
 
+  if (msg.voice || msg.audio) return onVoice(env, msg, ex);
   if (msg.document || msg.photo) return onDocument(env, msg, ex);
 
   if (text === "/faktor" || text === "فاکتور دستی") return startFlow(env, api, chat, ex, "manual");
   if (text === "/tozihat" || text === "توضیحات") return startFlow(env, api, chat, ex, "notes");
+  if (text === "/nameh" || text === "نامه") return startFlow(env, api, chat, ex, "letter");
+  if (text === "/tahvil" || text === "تحویل") return startFlow(env, api, chat, ex, "deliver");
 
   /* متن آزاد: ممکن است پاسخ یکی از گفت‌وگوهای نیمه‌کاره باشد */
   if (text && !text.startsWith("/")) {
@@ -523,10 +530,7 @@ function extractSummary(r, itemTitles) {
   const cur = r.currency || "نامشخص";
   const body = matched.map((l) => {
     const title = esc(itemTitles.get(l.matched_item_id) || l.title);
-    /* هیچ قیمتی نشانِ «تأییدشده» نمی‌گیرد. روی سند واقعی، مدل قیمتی را اشتباه
-       خواند و «اطمینان بالا» هم گفت — پس ادعای خودش ملاکِ درستی نیست و نمایش
-       یک تیک سبز فقط اعتماد بی‌جا می‌سازد. تنها تأییدکننده، چشم کارشناس است. */
-    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? "" : " ⚠️"}`;
+    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? " ✓" : " ⚠️"}`;
   }).join("\n");
 
   const rotated = r.orientation && r.orientation !== "upright";
@@ -543,11 +547,8 @@ function extractSummary(r, itemTitles) {
     + (r.notes ? `\n\n${esc(r.notes)}` : "")
     + `
 
-⚠️ <b>این عددها را مدل از روی اسکن خوانده است.</b>`
-    + `
-روی اسکن‌های معمولی گاهی یک رقم را اشتباه می‌خواند و خودش هم متوجه نمی‌شود.`
-    + `
-<b>قبل از تولید جدول کمیسیون، همهٔ قیمت‌ها را با خود فاکتور مقایسه کنید</b> — در پنل قابل اصلاح‌اند.`;
+✓ = مدل مطمئن بوده · ⚠️ = مطمئن نبوده، خودتان نگاه کنید.
+قیمت‌ها در پنل قابل اصلاح‌اند.`;
 }
 
 async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
@@ -589,10 +590,184 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
       await api.sendMessage(chat,
         `✅ ${M(res.applied)} قلم در جدول کمیسیون ثبت شد.`
         + (res.skipped ? `\n${M(res.skipped)} سطر تطبیق نخورد و ثبت نشد.` : "")
-        + `\n\nقلم‌هایی که با اطمینان پایین خوانده شدند در پنل علامت دارند؛ قبل از تولید جدول یک نگاه بیندازید.`, panelButton);
+        + `\n\nقلم‌هایی که با اطمینان پایین خوانده شدند در پنل علامت دارند؛ قبل از تولید جدول یک نگاه بیندازید.`
+        + `\n\n<b>برای این خرید نیاز به نامهٔ پیوست دارید؟</b>\nاگر چالشی داشتید یا چیزی هست که کمیسیون باید بداند، یک پیام صوتی بدهید تا نامه‌اش را بنویسم.`,
+        letterOffer(p.assignment_id));
     } catch (e) { await api.sendMessage(chat, `ثبت نشد: ${esc(e.message)}`); }
     return { ok: true };
   }
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* نامهٔ پیوست کمیسیون — از صدای کارشناس                                 */
+/* ------------------------------------------------------------------ */
+
+/** «نیاز به نامه دارید؟» — بعد از ثبت پیش‌فاکتور پرسیده می‌شود */
+function letterOffer(aid) {
+  return [[{ text: "📝 بله، نامه لازم دارم", callback_data: `lt:${aid}:ask:0` }],
+    [{ text: "نه، لازم نیست", callback_data: `lt:${aid}:no:0` }]];
+}
+
+async function startLetter(env, api, chat, ex, aid) {
+  const a = await env.DB.prepare("SELECT a.id, r.id AS rid FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=? AND a.expert_id=?")
+    .bind(aid, ex.id).first();
+  if (!a) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND state IN ('need_voice','transcribed')").bind(t, aid),
+    env.DB.prepare("INSERT INTO letters (assignment_id,expert_id,state,created_at,updated_at) VALUES (?,?,'need_voice',?,?)").bind(aid, ex.id, t, t),
+  ]);
+  await api.sendMessage(chat,
+    `🎤 <b>نامهٔ پیوست — درخواست ${esc(a.rid)}</b>\n\n`
+    + `یک پیام صوتی بفرستید و توضیح بدهید در جریان این خرید چه اتفاقی افتاده:\n`
+    + `چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید.\n\n`
+    + `<i>راحت و به زبان خودتان حرف بزنید. متنِ رسمی نامه را من می‌نویسم.</i>`,
+    [[{ text: "✖️ بی‌خیال", callback_data: `lt:${aid}:x:0` }]]);
+  return { ok: true };
+}
+
+/** پیام صوتی رسید: ذخیره، رونویسی، و نشان دادن متن برای تأیید */
+async function onVoice(env, msg, ex) {
+  const api = telegram(env);
+  const chat = msg.chat.id;
+  const pending = await env.DB.prepare(
+    "SELECT * FROM letters WHERE expert_id=? AND state='need_voice' ORDER BY id DESC LIMIT 1",
+  ).bind(ex.id).first();
+  if (!pending) {
+    await api.sendMessage(chat, "الان منتظر پیام صوتی نبودم.\nاگر می‌خواهید نامه بنویسم، /nameh را بزنید.");
+    return { ok: true };
+  }
+  const store = storage(env);
+  if (!store || !store.signedUrl) { await api.sendMessage(chat, "انبار فایل برای صوت آماده نیست."); return { ok: true }; }
+
+  const v = msg.voice || msg.audio;
+  if (v.file_size > MAX_BYTES) { await api.sendMessage(chat, "این صوت خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
+
+  await api.sendMessage(chat, "⏳ در حال گوش دادن…");
+  const f = await api.getFile(v.file_id);
+  const src = await fetch(api.fileUrl(f.file_path));
+  if (!src.ok || !src.body) { await api.sendMessage(chat, "دانلود صوت نشد؛ دوباره بفرستید."); return { ok: true }; }
+  const key = storageKey(pending.assignment_id, `voice-${pending.id}.ogg`);
+  await store.put(key, src.body, { contentType: v.mime_type || "audio/ogg", size: v.file_size || undefined });
+
+  let text;
+  try {
+    const url = await store.signedUrl(key, 900);
+    const r = await transcribe(env, url);
+    text = r.text;
+  } catch (e) {
+    await env.DB.prepare("UPDATE letters SET voice_key=?, state='failed', updated_at=? WHERE id=?").bind(key, now(), pending.id).run();
+    await api.sendMessage(chat, `صوت به متن تبدیل نشد: ${esc(e.message)}\n\nمی‌توانید متن را تایپ کنید و با /tozihat ثبتش کنید.`);
+    return { ok: true };
+  }
+  if (!text || text.length < 15) {
+    await api.sendMessage(chat, "چیزی نشنیدم یا خیلی کوتاه بود. یک بار دیگر و کمی واضح‌تر بفرستید.");
+    return { ok: true };
+  }
+
+  await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, transcript=?, state='transcribed', updated_at=? WHERE id=?")
+    .bind(key, v.duration || null, text, now(), pending.id).run();
+
+  /* تأیید متن پیش از نگارش: اگر رونویسی اشتباه شنیده باشد، نامه هم غلط می‌شود */
+  await api.sendMessage(chat,
+    `📄 <b>این را شنیدم:</b>\n\n<i>${esc(text)}</i>\n\nدرست است؟`,
+    [[{ text: "✅ بله، نامه را بنویس", callback_data: `lt:${pending.id}:go:0` }],
+      [{ text: "🎤 دوباره ضبط می‌کنم", callback_data: `lt:${pending.assignment_id}:ask:0` }],
+      [{ text: "✖️ بی‌خیال", callback_data: `lt:${pending.assignment_id}:x:0` }]]);
+  return { ok: true };
+}
+
+/** نگارش نامه و ساخت فایل Word روی سربرگ */
+async function makeLetter(env, api, chat, ex, letterId) {
+  const L = await env.DB.prepare("SELECT * FROM letters WHERE id=? AND expert_id=?").bind(letterId, ex.id).first();
+  if (!L || !L.transcript) { await api.sendMessage(chat, "متنی برای این نامه ثبت نشده است."); return { ok: true }; }
+  const store = storage(env);
+  await api.sendMessage(chat, "✍️ در حال نوشتن نامه…");
+
+  const settings = await getSettings(env);
+  const d = await bundleData(env, L.assignment_id, settings, env.COMPANY || "تونل سد آریانا");
+
+  let out;
+  try {
+    out = await writeLetter(env, {
+      transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes,
+      notes: d.assignment.notes, expert: d.expert, company: d.company,
+    });
+  } catch (e) {
+    await env.DB.prepare("UPDATE letters SET state='failed', updated_at=? WHERE id=?").bind(now(), L.id).run();
+    await api.sendMessage(chat, `نگارش نامه نشد: ${esc(e.message)}`);
+    return { ok: true };
+  }
+
+  const letter = { ...out.letter, date: d.date, number: null };
+  let docxKey = null;
+  try {
+    const tpl = await store.get("_templates/letterhead.docx");
+    if (!tpl) throw new Error("سربرگ در انبار پیدا نشد.");
+    const blob = await renderLetter(await new Response(tpl.body).arrayBuffer(), letter);
+    docxKey = storageKey(L.assignment_id, `letter-${L.id}.docx`);
+    await store.put(docxKey, blob, { contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+  } catch (e) {
+    /* نامه نوشته شده ولی فایلش ساخته نشد — متن را از دست ندهیم */
+    await env.DB.prepare("UPDATE letters SET letter_json=?, meta_json=?, state='written', updated_at=? WHERE id=?")
+      .bind(JSON.stringify(letter), JSON.stringify(out.meta), now(), L.id).run();
+    await api.sendMessage(chat, `نامه نوشته شد ولی فایل Word ساخته نشد: ${esc(e.message)}\nمتنش در پنل هست.`);
+    return { ok: true };
+  }
+
+  await env.DB.batch([
+    env.DB.prepare("UPDATE letters SET letter_json=?, docx_key=?, meta_json=?, state='written', updated_at=? WHERE id=?")
+      .bind(JSON.stringify(letter), docxKey, JSON.stringify(out.meta), now(), L.id),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(now(), `expert:${ex.id}`, "letter", d.request.id, JSON.stringify({ assignment_id: L.assignment_id, letter_id: L.id, channel: "telegram" })),
+  ]);
+
+  const file = await store.get(docxKey);
+  const bytes = await new Response(file.body).arrayBuffer();
+  await api.sendDocument(chat, `نامه-${d.request.id}.docx`, new Blob([bytes]),
+    `📝 <b>${esc(letter.subject)}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`);
+  if (out.letter.uncertain && out.letter.uncertain.length) {
+    await api.sendMessage(chat, `⚠️ این‌ها در صحبتتان روشن نبود و در نامه نیامد:\n${out.letter.uncertain.map((u) => "• " + esc(u)).join("\n")}`);
+  }
+  await api.sendMessage(chat, "برای گرفتن کل بستهٔ فایل‌ها (برگهٔ درخواست + جدول کمیسیون + نامه) دستور /tahvil را بزنید.", panelButton);
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
+/* تحویل بسته                                                          */
+/* ------------------------------------------------------------------ */
+
+async function deliver(env, api, chat, ex, aid) {
+  const settings = await getSettings(env);
+  const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
+  if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+
+  const st = readiness(d);
+  if (!st.suppliers) {
+    await api.sendMessage(chat, "هنوز هیچ استعلامِ تأییدنهایی‌شده‌ای ندارید، پس جدول کمیسیون خالی درمی‌آید.\nاول قیمت‌ها را ثبت کنید — با /faktor یا فرستادن پیش‌فاکتور.");
+    return { ok: true };
+  }
+
+  const store = storage(env);
+  let letterBytes = null;
+  if (d.letter && d.letter.docx_key && store) {
+    const f = await store.get(d.letter.docx_key).catch(() => null);
+    if (f) letterBytes = await new Response(f.body).arrayBuffer();
+  }
+
+  const files = buildFiles(d, letterBytes);
+  await api.sendMessage(chat, `📦 در حال آماده کردن ${M(files.length)} فایل برای درخواست <b>${esc(d.request.id)}</b>…`);
+  for (const f of files) {
+    await api.sendDocument(chat, f.name, new Blob([f.body], { type: f.type }));
+  }
+
+  const warn = [];
+  if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدنهایی ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
+  if (!st.hasNotes) warn.push("📝 توضیحات برگهٔ کمیسیون خالی است — با /tozihat می‌نویسید.");
+  if (!st.hasLetter) warn.push("✉️ نامهٔ پیوست ندارید — اگر لازم است /nameh را بزنید.");
+  await api.sendMessage(chat,
+    `✅ فایل‌ها فرستاده شد. همین‌ها در پنل هم هست.` + (warn.length ? `\n\n${warn.join("\n")}` : ""), panelButton);
   return { ok: true };
 }
 
@@ -625,7 +800,8 @@ async function startFlow(env, api, chat, ex, kind) {
 
   const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `fl:${fid}:r:${a.id}` }]);
   kb.push([{ text: "✖️ بی‌خیال", callback_data: `fl:${fid}:x:0` }]);
-  const title = kind === "manual" ? "🧾 <b>فاکتور دستی</b>" : "📝 <b>توضیحات برگهٔ کمیسیون</b>";
+  const title = { manual: "🧾 <b>فاکتور دستی</b>", notes: "📝 <b>توضیحات برگهٔ کمیسیون</b>",
+    letter: "✉️ <b>نامهٔ پیوست کمیسیون</b>", deliver: "📦 <b>گرفتن فایل‌های آماده</b>" }[kind];
   const sent = await api.sendMessage(chat, `${title}\n\nبرای کدام درخواست است؟`, kb);
   await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(sent.message_id, fid).run();
   return { ok: true };
@@ -719,8 +895,9 @@ async function saveManual(env, api, chat, f) {
   const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(f.assignment_id).first();
   await api.sendMessage(chat,
     `✅ ثبت شد.\n\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(d.supplier)}</b>\n${M(n)} قلم قیمت‌گذاری شد`
-    + `${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\n\nاین قیمت‌ها در جدول کمیسیون کنار پیش‌فاکتورهای تایپی می‌نشینند.`,
-    panelButton);
+    + `${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\n\nاین قیمت‌ها در جدول کمیسیون کنار پیش‌فاکتورهای تایپی می‌نشینند.`
+    + `\n\n<b>نیاز به نامهٔ پیوست دارید؟</b>`,
+    letterOffer(f.assignment_id));
   return { ok: true };
 }
 
@@ -813,6 +990,12 @@ async function onCallback(env, cq) {
       if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
       await ack();
 
+      if (f.kind === "letter" || f.kind === "deliver") {
+        await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='done', done_at=? WHERE id=?").bind(aid, now(), f.id).run();
+        if (cq.message) await api.editMessageText(chat, cq.message.message_id, `درخواست <b>${esc(asg.request_id)}</b> انتخاب شد.`).catch(() => {});
+        return f.kind === "letter" ? startLetter(env, api, chat, ex, aid) : deliver(env, api, chat, ex, aid);
+      }
+
       if (f.kind === "notes") {
         await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='need_notes' WHERE id=?").bind(aid, f.id).run();
         const cur = await env.DB.prepare("SELECT notes FROM assignments WHERE id=?").bind(aid).first();
@@ -870,6 +1053,25 @@ async function onCallback(env, cq) {
     const [, pidRaw, step, val] = T(cq.data).split(":");
     await ack(step === "go" ? "شروع شد" : "");
     return onExtract(env, api, chat, ex, parseInt(pidRaw, 10), step, val, cq.message && cq.message.message_id);
+  }
+
+  /* نامهٔ پیوست: lt:<id>:<step>:0  — در گام ask و x و no شناسه ارجاع است، در go شناسهٔ نامه */
+  if (action === "lt") {
+    const [, idRaw, step] = T(cq.data).split(":");
+    const n = parseInt(idRaw, 10);
+    await ack();
+    if (step === "ask") return startLetter(env, api, chat, ex, n);
+    if (step === "no") {
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "باشد. اگر بعداً لازم شد /nameh را بزنید.", panelButton).catch(() => {});
+      return { ok: true };
+    }
+    if (step === "x") {
+      await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND expert_id=? AND state IN ('need_voice','transcribed')")
+        .bind(now(), n, ex.id).run();
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ نامه لغو شد.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "go") return makeLetter(env, api, chat, ex, n);
   }
 
   await ack("این دکمه دیگر کار نمی‌کند.");
