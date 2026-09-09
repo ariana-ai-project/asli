@@ -31,10 +31,18 @@ export function storage(env) {
   return null;
 }
 
-/** توضیح وضعیت برای نمایش در پنل مدیر */
+/**
+ * توضیح وضعیت برای پنل مدیر و برای عیب‌یابی راه‌اندازی.
+ * `missing` می‌گوید دقیقاً چه چیزی ست نشده — وگرنه «وصل نیست» هیچ سرنخی نمی‌دهد.
+ */
 export function storageInfo(env) {
   const s = storage(env);
-  return { configured: !!s, backend: s ? s.backend : null, maxBytes: MAX_BYTES };
+  const missing = [];
+  if (!s) {
+    if (env.SUPABASE_URL && !env.SUPABASE_SERVICE_KEY) missing.push("SUPABASE_SERVICE_KEY");
+    else if (!env.SUPABASE_URL && !env.FILES) missing.push("SUPABASE_URL + SUPABASE_SERVICE_KEY یا بایندینگ FILES");
+  }
+  return { configured: !!s, backend: s ? s.backend : null, maxBytes: MAX_BYTES, ...(missing.length ? { missing } : {}) };
 }
 
 /* ------------------------------------------------------------------ */
