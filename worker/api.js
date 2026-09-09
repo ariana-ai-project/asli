@@ -16,6 +16,8 @@
  * نقطهٔ ورود: worker.js تابع route(request, env) را برای /tamin-poshtibani/api/* صدا می‌زند.
  */
 
+import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
+
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
 
@@ -84,7 +86,23 @@ CREATE TABLE IF NOT EXISTS weights (kind TEXT NOT NULL, key TEXT NOT NULL, w REA
 CREATE TABLE IF NOT EXISTS decisions (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, expert_id INTEGER NOT NULL, action TEXT NOT NULL, payload_json TEXT, requested_at INTEGER NOT NULL, approved_at INTEGER, rejected_at INTEGER);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, actor TEXT NOT NULL, kind TEXT NOT NULL, request_id TEXT, item_id INTEGER, payload_json TEXT, delivered_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_events_at ON events(at);
+CREATE TABLE IF NOT EXISTS holidays (date_j TEXT PRIMARY KEY, title TEXT, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS alerts (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, kind TEXT NOT NULL, stage INTEGER NOT NULL DEFAULT -1, fire_at INTEGER NOT NULL, fired_at INTEGER, canceled_at INTEGER, UNIQUE(assignment_id, kind, stage));
+CREATE INDEX IF NOT EXISTS ix_alerts_due ON alerts(fire_at) WHERE fired_at IS NULL AND canceled_at IS NULL;
+CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY, idem TEXT NOT NULL UNIQUE, channel TEXT NOT NULL, target TEXT NOT NULL, payload_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, next_at INTEGER NOT NULL, last_error TEXT, created_at INTEGER NOT NULL, sent_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_outbox_due ON outbox(next_at) WHERE status='pending';
+CREATE TABLE IF NOT EXISTS tg_tokens (token TEXT PRIMARY KEY, expert_id INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
+CREATE TABLE IF NOT EXISTS tg_seen (update_id INTEGER PRIMARY KEY, seen_at INTEGER NOT NULL);
 `;
+
+/* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
+   SCHEMA فقط CREATE TABLE IF NOT EXISTS دارد و روی جدول موجود اثری ندارد،
+   پس افزودن ستون جدید باید صریح و یک‌بار انجام شود. */
+const COLUMN_MIGRATIONS = [
+  ["assignments", "deadline_at", "INTEGER"],  /* لحظهٔ پایان مهلت (SLA-02) */
+  ["assignments", "budget_h", "REAL"],        /* بودجهٔ مهلت به ساعت کاری */
+  ["assignments", "thr_snapshot", "TEXT"],    /* آستانه‌ها در لحظهٔ ارسال (SLA-04) */
+];
 
 /* کارشناسان اولیه — همان config.js؛ اینجا تکرار شده تا سرور به فایل استاتیک وابسته نباشد.
    بعد از اولین اجرا، منبعِ حقیقت جدول experts است (مدیر می‌تواند فعال/غیرفعال کند). */
@@ -111,6 +129,7 @@ async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
+  await migrateColumns(env);
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();
   if (!c || !c.n) {
     const t = now();
@@ -123,6 +142,58 @@ async function ensureSchema(env) {
 /* ------------------------------------------------------------------ */
 /* تنظیمات                                                              */
 /* ------------------------------------------------------------------ */
+/* ستون‌های افزوده‌شده را روی جدول‌های موجود اعمال می‌کند. یک PRAGMA برای هر جدول
+   و فقط در صورت نبودِ ستون یک ALTER — پس روی دیتابیس به‌روز عملاً یک کوئری است. */
+async function migrateColumns(env) {
+  const byTable = new Map();
+  for (const [t, c, ty] of COLUMN_MIGRATIONS) { if (!byTable.has(t)) byTable.set(t, []); byTable.get(t).push([c, ty]); }
+  for (const [table, cols] of byTable) {
+    const have = new Set(((await env.DB.prepare(`PRAGMA table_info(${table})`).all()).results || []).map((r) => r.name));
+    const missing = cols.filter(([c]) => !have.has(c));
+    if (missing.length) await env.DB.batch(missing.map(([c, ty]) => env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${c} ${ty}`)));
+  }
+}
+
+/* تعطیلات رسمی — در هر isolate کش می‌شود؛ خیلی کم تغییر می‌کند و
+   Cron در پلن رایگان فقط ۵۰ subrequest دارد، پس هر کوئری اضافه مهم است. */
+let holidayCache = null;
+async function holidayFn(env) {
+  if (!holidayCache || now() - holidayCache.at > 5 * 60000) {
+    const rows = (await env.DB.prepare("SELECT date_j FROM holidays").all()).results || [];
+    holidayCache = { at: now(), set: new Set(rows.map((r) => r.date_j)) };
+  }
+  const s = holidayCache.set;
+  return (d) => s.has(d);
+}
+
+/**
+ * زمان‌بندی هشدارهای یک ارجاعِ ارسال‌شده را می‌سازد.
+ *
+ * چرا در لحظهٔ ارسال و نه در لحظهٔ هشدار: `SLA-04` می‌گوید تغییر آستانه‌ها نباید
+ * ارجاع‌های در جریان را تکان بدهد، و Cron پلن رایگان (۱۰ms CPU) توان محاسبهٔ
+ * ساعات کاری برای ده‌ها ارجاع را ندارد. این‌جا یک بار حساب، بعد فقط SELECT.
+ *
+ * خروجی: آرایه‌ای از statement ها تا در همان batchِ صدازننده اجرا شوند.
+ */
+function alertStatements(env, a, thresholds, isHoliday, at) {
+  const s = alertSchedule(at, a.days, thresholds, isHoliday);
+  const st = [
+    env.DB.prepare("UPDATE assignments SET deadline_at=?, budget_h=?, thr_snapshot=? WHERE id=?")
+      .bind(s.deadlineAt, s.budget, JSON.stringify(thresholds), a.id),
+    /* هشدارهای قبلیِ همین ارجاع (مثلاً بعد از تغییر کارشناس) بی‌اثر می‌شوند */
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(at, a.id),
+  ];
+  for (const r of s.rows) {
+    st.push(env.DB.prepare(`INSERT INTO alerts (assignment_id,kind,stage,fire_at) VALUES (?,'stage',?,?)
+      ON CONFLICT(assignment_id,kind,stage) DO UPDATE SET fire_at=excluded.fire_at, fired_at=NULL, canceled_at=NULL`)
+      .bind(a.id, r.stage, r.fireAt));
+  }
+  st.push(env.DB.prepare(`INSERT INTO alerts (assignment_id,kind,stage,fire_at) VALUES (?,'over',-1,?)
+    ON CONFLICT(assignment_id,kind,stage) DO UPDATE SET fire_at=excluded.fire_at, fired_at=NULL, canceled_at=NULL`)
+    .bind(a.id, s.deadlineAt));
+  return st;
+}
+
 async function getSettings(env) {
   const rows = (await env.DB.prepare("SELECT key,value FROM settings").all()).results || [];
   const s = JSON.parse(JSON.stringify(DEFAULTS));
@@ -353,8 +424,11 @@ async function dispatch(env, body) {
   if (!ids.length) throw new HttpError("هیچ ارجاعی انتخاب نشده.");
   const rows = (await env.DB.prepare(`SELECT a.*, e.name FROM assignments a JOIN experts e ON e.id=a.expert_id WHERE a.id IN (${ids.map(() => "?").join(",")}) AND a.dispatched_at IS NULL AND a.days>0`).bind(...ids).all()).results || [];
   const t = now(); const stmts = [];
+  /* آستانه‌ها و تعطیلات یک بار خوانده می‌شوند و برای همهٔ ارجاع‌های این دسته به کار می‌روند */
+  const [settings, isHoliday] = rows.length ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
   for (const a of rows) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
+    stmts.push(...alertStatements(env, a, settings.thresholds, isHoliday, t));
     stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: "telegram" }));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -369,13 +443,19 @@ async function reassign(env, body) {
   if (a.expert_id === eid) return { ok: true, assignment_id: aid };
   const t = now();
   let b = await env.DB.prepare("SELECT * FROM assignments WHERE request_id=? AND expert_id=?").bind(a.request_id, eid).first();
-  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, int(body.days, a.days), a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id }; }
+  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, int(body.days, a.days), a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days: int(body.days, a.days) }; }
+  /* ساعت‌شمار کارشناس جدید از نو شروع می‌شود، پس زمان‌بندی هشدارها هم از نو ساخته می‌شود */
+  const fresh = a.dispatched_at
+    ? alertStatements(env, { id: b.id, days: int(body.days, b.days || a.days) }, (await getSettings(env)).thresholds, await holidayFn(env), t)
+    : [];
   await env.DB.batch([
     env.DB.prepare("UPDATE items SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE quotes SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE proformas SET assignment_id=? WHERE assignment_id=? AND supplier_name NOT IN (SELECT supplier_name FROM proformas WHERE assignment_id=?)").bind(b.id, aid, b.id),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
     env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(aid),
     ev(env, "manager", "reassign", a.request_id, null, { from_expert_id: a.expert_id, to_expert_id: eid, notify: "telegram" }),
+    ...fresh,
   ]);
   return { ok: true, assignment_id: b.id };
 }
@@ -589,6 +669,26 @@ async function route(request, env) {
     if (path === "/settings" && m === "GET") { await requireAny(request, env); return json(await getSettings(env)); }
     if (path === "/settings" && m === "PUT") { requireManager(request, env); return json(await putSettings(env, await readJson(request))); }
     if (path === "/experts" && m === "GET") { await requireAny(request, env); return json({ experts: await listExperts(env) }); }
+
+    /* تعطیلات رسمی (SLA-01) — بدون این، مهلت‌ها وسط نوروز هم می‌شمارند */
+    if (path === "/holidays" && m === "GET") { await requireAny(request, env); return json({ holidays: (await env.DB.prepare("SELECT * FROM holidays ORDER BY date_j").all()).results || [] }); }
+    if (path === "/holidays" && m === "PUT") {
+      requireManager(request, env);
+      const b = await readJson(request); const list = Array.isArray(b.holidays) ? b.holidays : [];
+      const t = now(); const bad = [];
+      const rows = list.map((h) => {
+        const raw = typeof h === "string" ? h : h && h.date_j;
+        const d = jNorm(raw);
+        if (!jValid(d)) { bad.push(raw); return null; }
+        return [d, T(typeof h === "string" ? "" : h.title) || null];
+      }).filter(Boolean);
+      if (bad.length) throw new HttpError(`تاریخ نامعتبر: ${bad.slice(0, 5).join("، ")}`);
+      const stmts = [env.DB.prepare("DELETE FROM holidays")];
+      for (const [d, title] of rows) stmts.push(env.DB.prepare("INSERT OR REPLACE INTO holidays (date_j,title,updated_at) VALUES (?,?,?)").bind(d, title, t));
+      await env.DB.batch(stmts);
+      holidayCache = null; /* کش این isolate باطل می‌شود؛ بقیه حداکثر ۵ دقیقه بعد تازه می‌شوند */
+      return json({ ok: true, count: rows.length });
+    }
     let mm;
     if ((mm = /^\/experts\/(\d+)$/.exec(path)) && m === "PUT") {
       requireManager(request, env); const b = await readJson(request); const sets = [], args = [];

@@ -10,12 +10,29 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
 import { loadTP, fileFrom } from "./run.mjs";
 
+const HERE = dirname(fileURLToPath(import.meta.url));
+
 /* فایل نمونهٔ واقعی. در مخزن asli نگه داشته نمی‌شود (داده واقعی شرکت است و این
-   مخزن عمومی است) — از مخزن خصوصی purchasing-support خوانده می‌شود. */
-const FIXTURE = "D:/Poshtibani/5 Github/purchasing-support/tests/fixtures/rahkaran-export-sample.xlsx";
+   مخزن عمومی است) — از چک‌اوت مخزن purchasing-support خوانده می‌شود.
+   مسیر ثابت نیست چون هر دستگاه مخزن را جای دیگری دارد؛ یک مسیر مطلقِ سخت‌کدشده
+   باعث می‌شد این یازده تستِ طلایی روی هر دستگاه دیگری بی‌صدا SKIP شوند. */
+const CANDIDATES = [
+  process.env.RAHKARAN_FIXTURE,
+  resolve(HERE, "../../../../purchasing-support/tests/fixtures/rahkaran-export-sample.xlsx"),
+  resolve(HERE, "../../../../../purchasing-support/tests/fixtures/rahkaran-export-sample.xlsx"),
+  "D:/Poshtibani/5 Github/purchasing-support/tests/fixtures/rahkaran-export-sample.xlsx",
+].filter(Boolean);
+const FIXTURE = CANDIDATES.find((p) => existsSync(p)) || CANDIDATES[1];
 const HAVE_FIXTURE = existsSync(FIXTURE);
+if (!HAVE_FIXTURE) {
+  console.log(`فایل نمونه پیدا نشد؛ تست‌های طلایی رد می‌شوند.
+مسیرهای بررسی‌شده:\n  ${CANDIDATES.join("\n  ")}
+برای اجرای آن‌ها: RAHKARAN_FIXTURE=<مسیر فایل> node --test backend/tamin-poshtibani/tests/*.test.mjs`);
+}
 
 /* اعداد الزام‌آور IMP-08 */
 const GOLDEN = {
