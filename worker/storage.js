@@ -20,8 +20,11 @@
  * اصلاً نمی‌تواند دانلود کند (ADR-0008).
  */
 
-/* هر چیزی جز حرف (فارسی یا لاتین)، رقم، نقطه، خط تیره و زیرخط */
-const RE_UNSAFE = /[^\p{L}\p{N}._-]+/gu;
+/* کلید فقط ASCII: حرف و رقم لاتین، نقطه، خط تیره و زیرخط.
+   Supabase Storage کلید غیر‌ASCII را با InvalidKey رد می‌کند و نام فارسی فایل
+   اصلاً لازم نیست در کلید باشد — در ستون `filename` نگه داشته می‌شود و هنگام
+   دانلود از همان‌جا به مرورگر داده می‌شود. */
+const RE_UNSAFE = /[^A-Za-z0-9._-]+/g;
 
 export const MAX_BYTES = 20 * 1024 * 1024;
 
@@ -99,17 +102,24 @@ function kvStore(env) {
 }
 
 /**
- * کلید فایل: تاریخ + شناسهٔ ارجاع + نام تمیزشده.
- * نام اصلی حفظ می‌شود چون کارشناس با همان نام می‌شناسدش، ولی هر چیزی که
- * می‌تواند مسیر بسازد یا در URL بشکند حذف می‌شود.
+ * کلید فایل: تاریخ / شناسهٔ ارجاع / زمان-تصادفی-نام.
+ *
+ * کلید فقط یک نشانی است، نه چیزی که کاربر ببیند: نام اصلی فایل (که معمولاً
+ * فارسی است) در ستون `filename` می‌ماند و هنگام دانلود به مرورگر داده می‌شود.
+ * این‌جا فقط پسوند و بخش ASCII نام نگه داشته می‌شود تا در داشبورد انبار هم
+ * بشود فایل را شناخت.
+ *
+ * پسوند تصادفی برای برخورد نیست — دو فایل در یک میلی‌ثانیه بعید است — بلکه
+ * برای این است که کلیدها حدس‌زدنی نباشند.
  */
 export function storageKey(assignmentId, filename) {
-  const clean = String(filename || "file")
-    .normalize("NFC")
-    /* حروف فارسی و لاتین و رقم و نقطه و خط تیره می‌مانند؛ هر چیز دیگری — اسلش،
-       بک‌اسلش، فاصله و نویسه‌های کنترلی — زیرخط می‌شود تا نه مسیر بسازد نه در URL بشکند. */
-    .replace(RE_UNSAFE, "_")
-    .replace(/^_+|_+$/g, "")
-    .slice(-80) || "file";
-  return `${new Date().toISOString().slice(0, 10)}/${assignmentId || "unassigned"}/${Date.now()}-${clean}`;
+  const name = String(filename || "");
+  const m = /\.([A-Za-z0-9]{1,8})$/.exec(name);
+  const ext = m ? "." + m[1].toLowerCase() : "";
+  const base = (m ? name.slice(0, -m[0].length) : name)
+    .replace(RE_UNSAFE, "-")
+    .replace(/^[-.]+|[-.]+$/g, "")
+    .slice(0, 40);
+  const rand = Math.random().toString(36).slice(2, 8);
+  return `${new Date().toISOString().slice(0, 10)}/${assignmentId || "unassigned"}/${Date.now()}-${rand}${base ? "-" + base : ""}${ext}`;
 }
