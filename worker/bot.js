@@ -13,6 +13,7 @@
  */
 import { telegram, esc, TgError } from "./telegram.js";
 import { fmtFa, workHours } from "./time.js";
+import { storage, storageKey, MAX_BYTES } from "./storage.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -244,6 +245,19 @@ async function onMessage(env, msg) {
   const ex = await expertOfChat(env, chat);
   if (!ex) { await api.sendMessage(chat, "این گفت‌وگو به هیچ کارشناسی وصل نیست. از پنل کارشناس «اتصال به تلگرام» را بزنید."); return { ok: true }; }
 
+  if (msg.document || msg.photo) return onDocument(env, msg, ex);
+
+  /* اگر منتظر نام تأمین‌کننده‌ایم، این پیام همان نام است */
+  if (text && !text.startsWith("/")) {
+    const up = await env.DB.prepare(
+      "SELECT * FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1",
+    ).bind(ex.id, now()).first();
+    if (up) {
+      if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
+      return saveProforma(env, api, chat, up, text);
+    }
+  }
+
   if (text === "/stop") {
     await env.DB.prepare("UPDATE experts SET telegram_chat=NULL WHERE id=?").bind(ex.id).run();
     await api.sendMessage(chat, "اتصال قطع شد. دیگر اعلانی فرستاده نمی‌شود.\nبرای وصل شدن دوباره، از پنل لینک تازه بگیرید.");
@@ -296,6 +310,124 @@ async function sendTray(env, api, chat, ex) {
   return { ok: true };
 }
 
+/* ------------------------------------------------------------------ */
+/* دریافت پیش‌فاکتور از بات (ADR-0008، TG-11)                            */
+/* ------------------------------------------------------------------ */
+
+const UPLOAD_TTL = 24 * 3600000;
+
+/**
+ * فایل رسیده را **بلافاصله** دانلود و ذخیره می‌کند، بعد می‌پرسد مال کدام درخواست است.
+ *
+ * ترتیب مهم است: لینک دانلود تلگرام فقط حدود یک ساعت معتبر است. اگر اول سؤال
+ * می‌پرسیدیم و کارشناس جواب را فردا می‌داد، فایل از دست می‌رفت (ADR-0008).
+ */
+async function onDocument(env, msg, ex) {
+  const api = telegram(env);
+  const chat = msg.chat.id;
+  const store = storage(env);
+  if (!store) { await api.sendMessage(chat, "انبار فایل هنوز به سامانه وصل نشده است. فعلاً پیش‌فاکتور را از پنل بارگذاری کنید."); return { ok: true }; }
+
+  /* سند یا عکس؛ از عکس، بزرگ‌ترین اندازه برداشته می‌شود */
+  const doc = msg.document;
+  const photo = !doc && Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
+  const fileId = doc ? doc.file_id : photo && photo.file_id;
+  if (!fileId) return { ok: true };
+  const size = (doc && doc.file_size) || (photo && photo.file_size) || 0;
+  const filename = (doc && doc.file_name) || `عکس-${new Date().toISOString().slice(0, 10)}.jpg`;
+  const mime = (doc && doc.mime_type) || (photo ? "image/jpeg" : "application/octet-stream");
+
+  if (size > MAX_BYTES) {
+    await api.sendMessage(chat, `این فایل ${M((size / 1048576).toFixed(1))} مگابایت است.\nبات تلگرام فقط تا ${M(20)} مگابایت را می‌تواند بگیرد؛ لطفاً از پنل بارگذاری کنید یا فشرده‌ترش کنید.`, panelButton);
+    return { ok: true };
+  }
+
+  const open = await openAssignments(env, ex.id);
+  if (!open.length) { await api.sendMessage(chat, "الان هیچ ارجاع بازی ندارید که این پیش‌فاکتور به آن بخورد."); return { ok: true }; }
+
+  /* دانلود فوری و جریانی — بایت‌ها از حافظهٔ Worker رد نمی‌شوند */
+  const f = await api.getFile(fileId);
+  const src = await fetch(api.fileUrl(f.file_path));
+  if (!src.ok || !src.body) { await api.sendMessage(chat, "دانلود فایل از تلگرام نشد. یک بار دیگر بفرستید."); return { ok: true }; }
+  const key = storageKey(open.length === 1 ? open[0].id : null, filename);
+  await store.put(key, src.body, { contentType: mime, size: size || undefined });
+
+  const t = now();
+  const ins = await env.DB.prepare(
+    `INSERT INTO tg_uploads (expert_id,chat_id,file_id,storage_key,filename,mime,size_bytes,state,created_at,expires_at)
+     VALUES (?,?,?,?,?,?,?,'need_request',?,?)`,
+  ).bind(ex.id, String(chat), fileId, key, filename, mime, size || null, t, t + UPLOAD_TTL).run();
+  const uid = ins.meta.last_row_id;
+
+  /* اگر فقط یک ارجاع باز دارد، پرسیدن «کدام درخواست؟» بی‌معنی است */
+  if (open.length === 1) return askSupplier(env, api, chat, uid, open[0], filename, null);
+
+  const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `pf:${uid}:r:${a.id}` }]);
+  kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
+  const sent = await api.sendMessage(chat, `📎 <b>${esc(filename)}</b> گرفته شد.\n\nاین پیش‌فاکتور برای کدام درخواست است؟`, kb);
+  await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(sent.message_id, uid).run();
+  return { ok: true };
+}
+
+/** ارجاع‌های باز همین کارشناس (INV-11) */
+async function openAssignments(env, expertId) {
+  return (await env.DB.prepare(
+    `SELECT a.id, a.request_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
+     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL
+       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
+     ORDER BY a.deadline_at LIMIT 12`,
+  ).bind(expertId).all()).results || [];
+}
+
+const short = (s, n = 28) => { const x = String(s || "").trim(); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
+
+/**
+ * گام دوم: کدام تأمین‌کننده؟ فهرست از استعلام‌های همان درخواست می‌آید.
+ * نام تأمین‌کننده می‌تواند بلند باشد و `callback_data` سقف ۶۴ بایت دارد، پس
+ * نام‌ها در خود ردیف آپلود ذخیره و با اندیس ارجاع داده می‌شوند.
+ */
+async function askSupplier(env, api, chat, uid, asg, filename, messageId) {
+  const sups = ((await env.DB.prepare(
+    "SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name",
+  ).bind(asg.id).all()).results || []).map((r) => r.supplier_name).filter(Boolean);
+
+  await env.DB.prepare("UPDATE tg_uploads SET assignment_id=?, state='need_supplier', options_json=? WHERE id=?")
+    .bind(asg.id, JSON.stringify(sups), uid).run();
+
+  const kb = sups.map((s, i) => [{ text: short(s, 34), callback_data: `pf:${uid}:s:${i}` }]);
+  kb.push([{ text: "➕ تأمین‌کنندهٔ تازه (نامش را می‌نویسم)", callback_data: `pf:${uid}:n:0` }]);
+  kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
+  const text = `📎 <b>${esc(filename)}</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
+    + (sups.length ? "این پیش‌فاکتور از کدام تأمین‌کننده است؟" : "برای این درخواست هنوز استعلامی ثبت نشده. نام تأمین‌کننده را بنویسید:");
+
+  if (messageId) { await api.editMessageText(chat, messageId, text, kb); return { ok: true }; }
+  const sent = await api.sendMessage(chat, text, kb);
+  await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(sent.message_id, uid).run();
+  return { ok: true };
+}
+
+/** گام آخر: ثبت پیش‌فاکتور روی استعلام آن تأمین‌کننده */
+async function saveProforma(env, api, chat, up, supplier) {
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at)
+       VALUES (?,?,?,?,?,?,'telegram',?)
+       ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
+         mime=excluded.mime, size_bytes=excluded.size_bytes, source='telegram', uploaded_at=excluded.uploaded_at`,
+    ).bind(up.assignment_id, supplier, up.filename, up.storage_key, up.mime, up.size_bytes, t),
+    env.DB.prepare("UPDATE tg_uploads SET state='done', done_at=? WHERE id=?").bind(t, up.id),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${up.expert_id}`, "proforma", null, JSON.stringify({ assignment_id: up.assignment_id, supplier, filename: up.filename, channel: "telegram" })),
+  ]);
+  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
+  const text = `✅ ثبت شد.\n\n📎 <b>${esc(up.filename)}</b>\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(supplier)}</b>\n\n`
+    + `<i>استخراج خودکار اطلاعات پیش‌فاکتور در مرحلهٔ بعد فعال می‌شود.</i>`;
+  if (up.message_id) await api.editMessageText(chat, up.message_id, text, panelButton).catch(() => api.sendMessage(chat, text, panelButton));
+  else await api.sendMessage(chat, text, panelButton);
+  return { ok: true };
+}
+
 async function onCallback(env, cq) {
   const api = telegram(env);
   const chat = cq.message && cq.message.chat && cq.message.chat.id;
@@ -323,6 +455,42 @@ async function onCallback(env, cq) {
         ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", panelButton).catch(() => {});
     }
     return { ok: true };
+  }
+
+  /* جریان پیش‌فاکتور: pf:<uploadId>:<step>:<value> */
+  if (action === "pf") {
+    const [, uidRaw, step, valRaw] = T(cq.data).split(":");
+    const up = await env.DB.prepare("SELECT * FROM tg_uploads WHERE id=? AND expert_id=?").bind(parseInt(uidRaw, 10), ex.id).first();
+    if (!up) { await api.answerCallback(cq.id, "این بارگذاری پیدا نشد.", true); return { ok: true }; }
+    if (up.done_at) { await api.answerCallback(cq.id, "این فایل قبلاً ثبت شده است."); return { ok: true }; }
+
+    if (step === "x") {
+      const store = storage(env);
+      if (store && up.storage_key) await store.remove(up.storage_key).catch(() => {});
+      await env.DB.prepare("UPDATE tg_uploads SET state='canceled', done_at=? WHERE id=?").bind(now(), up.id).run();
+      await api.answerCallback(cq.id, "لغو شد");
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ لغو شد و فایل حذف شد.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "r") {
+      const asg = (await openAssignments(env, ex.id)).find((a) => a.id === parseInt(valRaw, 10));
+      if (!asg) { await api.answerCallback(cq.id, "این ارجاع دیگر باز نیست.", true); return { ok: true }; }
+      await api.answerCallback(cq.id);
+      return askSupplier(env, api, chat, up.id, asg, up.filename, cq.message && cq.message.message_id);
+    }
+    if (step === "s") {
+      const opts = JSON.parse(up.options_json || "[]");
+      const name = opts[parseInt(valRaw, 10)];
+      if (!name) { await api.answerCallback(cq.id, "این گزینه دیگر معتبر نیست.", true); return { ok: true }; }
+      await api.answerCallback(cq.id);
+      return saveProforma(env, api, chat, up, name);
+    }
+    if (step === "n") {
+      await env.DB.prepare("UPDATE tg_uploads SET state='need_name' WHERE id=?").bind(up.id).run();
+      await api.answerCallback(cq.id);
+      await api.sendMessage(chat, "نام تأمین‌کننده را بنویسید و بفرستید:");
+      return { ok: true };
+    }
   }
 
   await api.answerCallback(cq.id, "این دکمه دیگر کار نمی‌کند.");

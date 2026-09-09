@@ -18,6 +18,7 @@
 
 import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
 import { telegram } from "./telegram.js";
+import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -95,6 +96,8 @@ CREATE TABLE IF NOT EXISTS outbox (id INTEGER PRIMARY KEY, idem TEXT NOT NULL UN
 CREATE INDEX IF NOT EXISTS ix_outbox_due ON outbox(next_at) WHERE status='pending';
 CREATE TABLE IF NOT EXISTS tg_tokens (token TEXT PRIMARY KEY, expert_id INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER);
 CREATE TABLE IF NOT EXISTS tg_seen (update_id INTEGER PRIMARY KEY, seen_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS tg_uploads (id INTEGER PRIMARY KEY, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, message_id INTEGER, file_id TEXT, storage_key TEXT, filename TEXT, mime TEXT, size_bytes INTEGER, state TEXT NOT NULL DEFAULT 'need_request', assignment_id INTEGER, options_json TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, reminded_at INTEGER, done_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_uploads_open ON tg_uploads(expires_at) WHERE done_at IS NULL;
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -104,7 +107,15 @@ const COLUMN_MIGRATIONS = [
   ["assignments", "deadline_at", "INTEGER"],  /* لحظهٔ پایان مهلت (SLA-02) */
   ["assignments", "budget_h", "REAL"],        /* بودجهٔ مهلت به ساعت کاری */
   ["assignments", "thr_snapshot", "TEXT"],    /* آستانه‌ها در لحظهٔ ارسال (SLA-04) */
+  ["proformas", "mime", "TEXT"],
+  ["proformas", "size_bytes", "INTEGER"],
+  ["proformas", "source", "TEXT"],            /* panel | telegram */
 ];
+
+/* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
+   R2 روی این حساب فعال نیست و انبار فایل پشت یک آداپتور رفت، پس نام عمومی‌تر
+   درست‌تر است. جدول هنوز خالی است، پس تغییر نام بی‌خطر است. */
+const COLUMN_RENAMES = [["proformas", "r2_key", "storage_key"]];
 
 /* کارشناسان اولیه — همان config.js؛ اینجا تکرار شده تا سرور به فایل استاتیک وابسته نباشد.
    بعد از اولین اجرا، منبعِ حقیقت جدول experts است (مدیر می‌تواند فعال/غیرفعال کند). */
@@ -149,10 +160,14 @@ async function ensureSchema(env) {
 async function migrateColumns(env) {
   const byTable = new Map();
   for (const [t, c, ty] of COLUMN_MIGRATIONS) { if (!byTable.has(t)) byTable.set(t, []); byTable.get(t).push([c, ty]); }
+  for (const [t] of COLUMN_RENAMES) if (!byTable.has(t)) byTable.set(t, []);
   for (const [table, cols] of byTable) {
     const have = new Set(((await env.DB.prepare(`PRAGMA table_info(${table})`).all()).results || []).map((r) => r.name));
-    const missing = cols.filter(([c]) => !have.has(c));
-    if (missing.length) await env.DB.batch(missing.map(([c, ty]) => env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${c} ${ty}`)));
+    const work = cols.filter(([c]) => !have.has(c)).map(([c, ty]) => env.DB.prepare(`ALTER TABLE ${table} ADD COLUMN ${c} ${ty}`));
+    for (const [t, from, to] of COLUMN_RENAMES) {
+      if (t === table && have.has(from) && !have.has(to)) work.push(env.DB.prepare(`ALTER TABLE ${table} RENAME COLUMN ${from} TO ${to}`));
+    }
+    if (work.length) await env.DB.batch(work);
   }
 }
 
@@ -667,7 +682,7 @@ async function route(request, env, ctx) {
   try {
     await ensureSchema(env);
 
-    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!env.MANAGER_CODE, botConfigured: !!env.TG_BOT_TOKEN });
+    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!env.MANAGER_CODE, botConfigured: !!env.TG_BOT_TOKEN, storage: storageInfo(env) });
 
     /* ---------- بات تلگرام ---------- */
 
@@ -823,6 +838,48 @@ async function route(request, env, ctx) {
       await env.DB.prepare("INSERT INTO proformas (assignment_id,supplier_name,filename,uploaded_at) VALUES (?,?,?,?) ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, uploaded_at=excluded.uploaded_at")
         .bind(int(b.assignment_id), T(b.supplier_name), T(b.filename) || null, now()).run();
       return json({ ok: true, stored: false, message: "نام فایل ثبت شد؛ ذخیرهٔ خود فایل (R2) در مرحلهٔ بعد فعال می‌شود." });
+    }
+
+    /* بارگذاری فایل پیش‌فاکتور از پنل — همان مسیری که بات هم می‌رود (ADR-0008:
+       هر دو ورودی باید یک اعتبارسنجی و یک قاعدهٔ «یک پیش‌فاکتور به ازای هر
+       استعلام» را رعایت کنند). بدنه خام و جریانی است تا CPU صرف کدگذاری نشود. */
+    if (path === "/proformas/upload" && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const aid = int(url.searchParams.get("assignment_id"));
+      const supplier = T(url.searchParams.get("supplier_name"));
+      const filename = T(url.searchParams.get("filename")) || "proforma";
+      if (!aid || !supplier) throw new HttpError("assignment_id و supplier_name لازم است.");
+      await ownAssignment(env, ex, aid);
+      const store = storage(env);
+      if (!store) return NOT_CONNECTED("انبار فایل");
+      const size = int(request.headers.get("content-length"), 0);
+      if (size > MAX_BYTES) throw new HttpError(`حجم فایل بیشتر از ${Math.round(MAX_BYTES / 1048576)} مگابایت است.`, 413);
+      const key = storageKey(aid, filename);
+      await store.put(key, request.body, { contentType: request.headers.get("content-type") || "application/octet-stream", size: size || undefined });
+      const t = now();
+      await env.DB.prepare(
+        `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at)
+         VALUES (?,?,?,?,?,?,'panel',?)
+         ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
+           mime=excluded.mime, size_bytes=excluded.size_bytes, source='panel', uploaded_at=excluded.uploaded_at`,
+      ).bind(aid, supplier, filename, key, request.headers.get("content-type") || null, size || null, t).run();
+      return json({ ok: true, stored: true, backend: store.backend });
+    }
+    /* دانلود فایل — فقط کارشناسِ همان ارجاع یا مدیر (INV-11) */
+    if ((mm = /^\/proformas\/(\d+)\/file$/.exec(path)) && m === "GET") {
+      const who = await requireAny(request, env);
+      const p = await env.DB.prepare("SELECT p.*, a.expert_id FROM proformas p JOIN assignments a ON a.id=p.assignment_id WHERE p.id=?").bind(int(mm[1])).first();
+      if (!p) throw new HttpError("پیش‌فاکتور پیدا نشد.", 404);
+      if (who.expert && p.expert_id !== who.expert.id) throw new HttpError("این پیش‌فاکتور متعلق به شما نیست.", 403);
+      const store = storage(env);
+      if (!store || !p.storage_key) return NOT_CONNECTED("انبار فایل");
+      const f = await store.get(p.storage_key);
+      if (!f) throw new HttpError("فایل در انبار پیدا نشد.", 404);
+      return new Response(f.body, { headers: {
+        "content-type": p.mime || f.contentType || "application/octet-stream",
+        "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(p.filename || "proforma")}`,
+        "cache-control": "private, no-store",
+      } });
     }
 
     /* --- مشترک --- */

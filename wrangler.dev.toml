@@ -1,0 +1,33 @@
+# ============================================================
+# پیکربندی «فقط توسعهٔ محلی» —  wrangler dev -c wrangler.dev.toml
+#
+# چرا جداست: تست‌های محلی به یک انبار فایل نیاز دارند، ولی نباید برای اجرای تست
+# کلید ابری یا حساب فعال لازم باشد. این‌جا انبار روی Workers KV است که
+# `wrangler dev` به‌صورت محلی و در حافظه شبیه‌سازی می‌کند؛ شناسهٔ زیر ساختگی است
+# و هیچ‌وقت به کلودفلیر نمی‌رود.
+#
+# استقرار همیشه با wrangler.toml انجام می‌شود، نه این فایل.
+# ============================================================
+name = "asli"
+main = "worker.js"
+compatibility_date = "2026-09-03"
+
+[assets]
+directory = "./frontend"
+binding = "ASSETS"
+run_worker_first = false
+
+[[d1_databases]]
+binding = "DB"
+database_name = "tamin-poshtibani"
+database_id = "e94d1472-9b2b-4882-ace0-9c3054696a33"
+
+[[kv_namespaces]]
+binding = "FILES"
+id = "local-dev-only-not-a-real-namespace"
+
+[vars]
+TG_BOT_USERNAME = "ArianaSupplyBot"
+
+[triggers]
+crons = ["*/5 * * * *"]
