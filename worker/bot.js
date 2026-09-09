@@ -261,6 +261,13 @@ async function onMessage(env, msg) {
 
   /* متن آزاد: ممکن است پاسخ یکی از گفت‌وگوهای نیمه‌کاره باشد */
   if (text && !text.startsWith("/")) {
+    /* منتظر توضیح نامه‌ایم — چه صوتی چه نوشته. اگر متنِ رونویسی‌شده را هم
+       اصلاح کند، همان را می‌گیریم؛ کارشناس نباید مجبور شود دوباره ضبط کند. */
+    const L = await env.DB.prepare(
+      "SELECT * FROM letters WHERE expert_id=? AND state IN ('need_voice','transcribed') ORDER BY id DESC LIMIT 1",
+    ).bind(ex.id).first();
+    if (L) return onLetterText(env, api, chat, ex, L, text);
+
     const up = await env.DB.prepare(
       "SELECT * FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1",
     ).bind(ex.id, now()).first();
@@ -284,8 +291,10 @@ async function onMessage(env, msg) {
     + "/kartabl — ارجاع‌های باز شما\n"
     + "/faktor — فاکتور دستی (قیمت‌ها را خودتان وارد کنید)\n"
     + "/tozihat — توضیحات برگهٔ کمیسیون\n"
+    + "/nameh — نامهٔ پیوست کمیسیون (صوتی یا نوشتاری)\n"
+    + "/tahvil — گرفتن فایل‌های آماده\n"
     + "/stop — قطع اتصال\n\n"
-    + "<i>برای پیش‌فاکتور تایپی، فقط فایلش را همین‌جا بفرستید.</i>");
+    + "<i>برای پیش‌فاکتور، فقط فایلش را همین‌جا بفرستید.</i>");
   return { ok: true };
 }
 
@@ -453,14 +462,24 @@ async function onDocument(env, msg, ex) {
   return { ok: true };
 }
 
-/** ارجاع‌های باز همین کارشناس (INV-11) */
+const OPEN_ASSIGNMENT = `SELECT a.id, a.request_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
+  WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL
+    AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')`;
+
+/** ارجاع‌های باز همین کارشناس، برای ساختن دکمه‌ها (INV-11) */
 async function openAssignments(env, expertId) {
-  return (await env.DB.prepare(
-    `SELECT a.id, a.request_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
-     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL
-       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
-     ORDER BY a.deadline_at LIMIT 12`,
-  ).bind(expertId).all()).results || [];
+  return (await env.DB.prepare(`${OPEN_ASSIGNMENT} ORDER BY a.deadline_at LIMIT 24`).bind(expertId).all()).results || [];
+}
+
+/**
+ * یک ارجاعِ باز و متعلق به همین کارشناس.
+ *
+ * مستقیم پرسیده می‌شود، نه با جست‌وجو در فهرستِ دکمه‌ها: آن فهرست سقف دارد و
+ * اگر کارشناس ارجاع‌های بیشتری داشته باشد، انتخابِ ارجاعِ خارج از سقف بی‌صدا
+ * شکست می‌خورد — که یک بار همین‌جا اتفاق افتاد.
+ */
+async function ownOpenAssignment(env, expertId, aid) {
+  return env.DB.prepare(`${OPEN_ASSIGNMENT} AND a.id=?`).bind(expertId, aid).first();
 }
 
 const short = (s, n = 28) => { const x = String(s || "").trim(); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
@@ -563,7 +582,7 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
   if (step === "go") {
     const store = storage(env);
     if (!store || !store.signedUrl) { await api.sendMessage(chat, "انبار فایل فعلی از استخراج خودکار پشتیبانی نمی‌کند."); return { ok: true }; }
-    await api.sendMessage(chat, "⏳ در حال خواندن پیش‌فاکتور…");
+    await api.sendMessage(chat, "⏳ در حال خواندن پیش‌فاکتور…").catch(() => {});
     let out;
     try { out = await runExtraction(env, store, p); }
     catch (e) { await api.sendMessage(chat, `خواندن نشد: ${esc(e.message)}\n\nمی‌توانید با /faktor دستی وارد کنید.`); return { ok: true }; }
@@ -600,7 +619,7 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
 }
 
 /* ------------------------------------------------------------------ */
-/* نامهٔ پیوست کمیسیون — از صدای کارشناس                                 */
+/* نامهٔ پیوست کمیسیون — از صدا یا نوشتهٔ کارشناس                                 */
 /* ------------------------------------------------------------------ */
 
 /** «نیاز به نامه دارید؟» — بعد از ثبت پیش‌فاکتور پرسیده می‌شود */
@@ -619,11 +638,31 @@ async function startLetter(env, api, chat, ex, aid) {
     env.DB.prepare("INSERT INTO letters (assignment_id,expert_id,state,created_at,updated_at) VALUES (?,?,'need_voice',?,?)").bind(aid, ex.id, t, t),
   ]);
   await api.sendMessage(chat,
-    `🎤 <b>نامهٔ پیوست — درخواست ${esc(a.rid)}</b>\n\n`
-    + `یک پیام صوتی بفرستید و توضیح بدهید در جریان این خرید چه اتفاقی افتاده:\n`
-    + `چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید.\n\n`
-    + `<i>راحت و به زبان خودتان حرف بزنید. متنِ رسمی نامه را من می‌نویسم.</i>`,
+    `✉️ <b>نامهٔ پیوست — درخواست ${esc(a.rid)}</b>\n\n`
+    + `توضیح بدهید در جریان این خرید چه اتفاقی افتاده: چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید.\n\n`
+    + `🎤 <b>یک پیام صوتی بفرستید</b> — یا اگر راحت‌تر است، <b>همین‌جا تایپ کنید</b>.\n\n`
+    + `<i>محاوره‌ای و به زبان خودتان بگویید؛ متنِ رسمی نامه را من می‌نویسم.</i>`,
     [[{ text: "✖️ بی‌خیال", callback_data: `lt:${aid}:x:0` }]]);
+  return { ok: true };
+}
+
+/**
+ * همان جای صوت، ولی نوشته.
+ * بعضی کارشناس‌ها جایی هستند که نمی‌شود حرف زد، یا ترجیح می‌دهند بنویسند.
+ * ورودی هرچه باشد، از این نقطه به بعد مسیر یکی است.
+ */
+async function onLetterText(env, api, chat, ex, L, text) {
+  if (text.length < 15) {
+    await api.sendMessage(chat, "کمی بیشتر توضیح بدهید تا بشود از آن نامه ساخت.");
+    return { ok: true };
+  }
+  if (text.length > 4000) { await api.sendMessage(chat, "متن خیلی بلند است؛ خلاصه‌ترش کنید."); return { ok: true }; }
+  await env.DB.prepare("UPDATE letters SET transcript=?, state='transcribed', updated_at=? WHERE id=?")
+    .bind(text, now(), L.id).run();
+  await api.sendMessage(chat, `📄 <b>این را می‌نویسم:</b>\n\n<i>${esc(text)}</i>\n\nنامه را بسازم؟`,
+    [[{ text: "✅ بله، نامه را بنویس", callback_data: `lt:${L.id}:go:0` }],
+      [{ text: "✏️ متن را عوض می‌کنم", callback_data: `lt:${L.assignment_id}:ask:0` }],
+      [{ text: "✖️ بی‌خیال", callback_data: `lt:${L.assignment_id}:x:0` }]]);
   return { ok: true };
 }
 
@@ -644,7 +683,8 @@ async function onVoice(env, msg, ex) {
   const v = msg.voice || msg.audio;
   if (v.file_size > MAX_BYTES) { await api.sendMessage(chat, "این صوت خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
 
-  await api.sendMessage(chat, "⏳ در حال گوش دادن…");
+  /* پیام‌های «در حال انجام» تزئینی‌اند؛ شکستشان نباید کار را متوقف کند */
+  await api.sendMessage(chat, "⏳ در حال گوش دادن…").catch(() => {});
   const f = await api.getFile(v.file_id);
   const src = await fetch(api.fileUrl(f.file_path));
   if (!src.ok || !src.body) { await api.sendMessage(chat, "دانلود صوت نشد؛ دوباره بفرستید."); return { ok: true }; }
@@ -683,7 +723,7 @@ async function makeLetter(env, api, chat, ex, letterId) {
   const L = await env.DB.prepare("SELECT * FROM letters WHERE id=? AND expert_id=?").bind(letterId, ex.id).first();
   if (!L || !L.transcript) { await api.sendMessage(chat, "متنی برای این نامه ثبت نشده است."); return { ok: true }; }
   const store = storage(env);
-  await api.sendMessage(chat, "✍️ در حال نوشتن نامه…");
+  await api.sendMessage(chat, "✍️ در حال نوشتن نامه…").catch(() => {});
 
   const settings = await getSettings(env);
   const d = await bundleData(env, L.assignment_id, settings, env.COMPANY || "تونل سد آریانا");
@@ -757,7 +797,7 @@ async function deliver(env, api, chat, ex, aid) {
   }
 
   const files = buildFiles(d, letterBytes);
-  await api.sendMessage(chat, `📦 در حال آماده کردن ${M(files.length)} فایل برای درخواست <b>${esc(d.request.id)}</b>…`);
+  await api.sendMessage(chat, `📦 در حال آماده کردن ${M(files.length)} فایل برای درخواست <b>${esc(d.request.id)}</b>…`).catch(() => {});
   for (const f of files) {
     await api.sendDocument(chat, f.name, new Blob([f.body], { type: f.type }));
   }
@@ -949,7 +989,7 @@ async function onCallback(env, cq) {
       return { ok: true };
     }
     if (step === "r") {
-      const asg = (await openAssignments(env, ex.id)).find((a) => a.id === parseInt(valRaw, 10));
+      const asg = await ownOpenAssignment(env, ex.id, parseInt(valRaw, 10));
       if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
       await ack();
       return askSupplier(env, api, chat, up.id, asg, up.filename, cq.message && cq.message.message_id);
@@ -986,7 +1026,7 @@ async function onCallback(env, cq) {
 
     if (step === "r") {
       const aid = parseInt(valRaw, 10);
-      const asg = (await openAssignments(env, ex.id)).find((a) => a.id === aid);
+      const asg = await ownOpenAssignment(env, ex.id, aid);
       if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
       await ack();
 
