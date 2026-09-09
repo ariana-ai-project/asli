@@ -523,15 +523,12 @@ function extractSummary(r, itemTitles) {
   const cur = r.currency || "نامشخص";
   const body = matched.map((l) => {
     const title = esc(itemTitles.get(l.matched_item_id) || l.title);
-    /* سطری که دو خوانش روی آن اختلاف داشتند، عددِ دوم را هم نشان می‌دهیم تا
-       کارشناس بداند دقیقاً کجای سند را باید نگاه کند */
-    if (l.unit_price_alt != null && l.unit_price_alt !== l.unit_price) {
-      return `• ${title}\n   ⚠️ <b>${money(l.unit_price)}</b> یا <b>${money(l.unit_price_alt)}</b> — دو بار متفاوت خواندم`;
-    }
-    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? " ✓" : " ⚠️"}`;
+    /* هیچ قیمتی نشانِ «تأییدشده» نمی‌گیرد. روی سند واقعی، مدل قیمتی را اشتباه
+       خواند و «اطمینان بالا» هم گفت — پس ادعای خودش ملاکِ درستی نیست و نمایش
+       یک تیک سبز فقط اعتماد بی‌جا می‌سازد. تنها تأییدکننده، چشم کارشناس است. */
+    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? "" : " ⚠️"}`;
   }).join("\n");
 
-  const ag = r.agreement;
   const rotated = r.orientation && r.orientation !== "upright";
 
   return `🤖 <b>خوانده شد</b>\n\n`
@@ -544,10 +541,13 @@ function extractSummary(r, itemTitles) {
     + (r.pay_terms ? `\nتسویه: ${esc(r.pay_terms)}` : "")
     + ((r.unreadable_fields || []).length ? `\n\n⚠️ خوانا نبود: ${esc(r.unreadable_fields.join("، "))}` : "")
     + (r.notes ? `\n\n${esc(r.notes)}` : "")
-    + (ag && ag.disputed
-      ? `\n\n⚠️ <b>سند را دو بار خواندم و روی ${M(ag.disputed)} قیمت به نتیجهٔ یکسان نرسیدم.</b>`
-        + `\nآن‌ها را با علامت ⚠️ می‌بینید — حتماً خودتان از روی فاکتور بخوانید و در پنل اصلاح کنید.`
-      : ag && ag.agreed ? `\n\n✓ هر ${M(ag.agreed)} قیمت را دو بار خواندم و هر دو بار یکی درآمد.` : "");
+    + `
+
+⚠️ <b>این عددها را مدل از روی اسکن خوانده است.</b>`
+    + `
+روی اسکن‌های معمولی گاهی یک رقم را اشتباه می‌خواند و خودش هم متوجه نمی‌شود.`
+    + `
+<b>قبل از تولید جدول کمیسیون، همهٔ قیمت‌ها را با خود فاکتور مقایسه کنید</b> — در پنل قابل اصلاح‌اند.`;
 }
 
 async function onExtract(env, api, chat, ex, pid, step, val, messageId) {

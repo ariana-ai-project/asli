@@ -140,70 +140,25 @@ export class ExtractError extends Error {
  * یک پیش‌فاکتور را به مدل می‌دهد و خروجی ساختاریافته می‌گیرد.
  * هیچ چیزی در دیتابیس نمی‌نویسد — تصمیمِ ثبت با کارشناس است (INV-07).
  *
- * سند **دو بار مستقل** خوانده می‌شود و فقط قیمت‌هایی که هر دو خوانش روی آن‌ها
- * توافق دارند «تأییدشده» حساب می‌شوند.
+ * ⚠️ چیزی که روی سند واقعی سنجیده شد و باید بدانید:
+ * روی یک اسکن CamScanner واقعی (۶ قلم)، مدل ۲ قیمت را اشتباه خواند —
+ * ۵٬۶۰۵٬۹۶۱ را ۶٬۶۰۵٬۹۶۱ — و «اطمینان بالا» هم اعلام کرد.
  *
- * چرا: روی یک اسکن واقعی CamScanner، مدل ۲ از ۶ قیمت را اشتباه خواند و در هر دو
- * مورد هم «اطمینان بالا» اعلام کرد — یعنی خودِ confidence مدل برای عدد قابل اتکا
- * نیست. ولی در همان آزمون، **هر قیمتی که دو خوانش روی آن توافق داشتند درست بود و
- * همهٔ خطاها در جاهایی افتاد که دو خوانش اختلاف داشتند.** پس توافق دو خوانش،
- * سنجه‌ای است که خودِ مدل نمی‌تواند بدهد.
+ * سه راه برای گرفتنِ خودکار این خطا آزموده شد و هر سه شکست خوردند:
+ *   ۱. خواندن دوباره با همان ورودی → همان خطا تکرار شد (agreed 6، disputed 0)
+ *   ۲. یک پاس «بازبینی» که عددها را جدا چک کند → عددهای غلط را «درست» تأیید کرد
+ *   ۳. اتکا به confidence خودِ مدل → روی هر دو خطا high گفت
+ * تنها چیزی که خطاها را ناهمبسته کرد، دادنِ **ورودی تصویریِ متفاوت** بود
+ * (تصویر کامل در برابر تصویر برش‌خورده) — که برش‌زدن تصویر می‌خواهد و در
+ * Worker با ۱۰ms CPU و بدون کتابخانهٔ تصویر شدنی نیست.
  *
- * با AI_PASSES=1 می‌شود خاموشش کرد (نصفِ هزینه، بدون این محافظ).
+ * نتیجه: استخراج یک **پیش‌نویس** است، نه منبع حقیقت. هر قیمتی که از این‌جا
+ * می‌آید low_conf می‌گیرد و کارشناس باید با خود فاکتور مقایسه‌اش کند. ارزشش
+ * این است که جدول را در چند ثانیه پر می‌کند، نه اینکه تایپ را حذف می‌کند.
  */
 export async function extractProforma(env, { fileUrl, mime, items, request }) {
   if (!env.ANTHROPIC_API_KEY) throw new ExtractError("کلید مدل روی این پروژه ست نشده است.", 503);
-  const passes = Math.max(1, Math.min(2, parseInt(env.AI_PASSES, 10) || 2));
-
-  const first = await onePass(env, { fileUrl, mime, items, request });
-  if (passes === 1 || !first.result.extractable) return first;
-
-  const second = await onePass(env, { fileUrl, mime, items, request });
-  return {
-    result: reconcile(first.result, second.result),
-    meta: { ...first.meta, passes: 2, second: { tokens_in: second.meta.tokens_in, tokens_out: second.meta.tokens_out } },
-  };
-}
-
-/**
- * دو خوانش را کنار هم می‌گذارد.
- * سطرها با قلمِ تطبیق‌خورده جفت می‌شوند (و اگر نبود، با عنوان نرمال‌شده).
- * قیمتی که دو خوانش روی آن اختلاف دارند، هرچقدر هم مدل مطمئن باشد، low می‌شود
- * و هر دو خوانش در note می‌آید تا کارشناس بداند دقیقاً چه چیزی را باید چک کند.
- */
-export function reconcile(a, b) {
-  const key = (l) => (l.matched_item_id != null ? `i${l.matched_item_id}` : `t${String(l.title || "").replace(/\s+/g, "").slice(0, 30)}`);
-  const bByKey = new Map((b.lines || []).map((l) => [key(l), l]));
-  let agreed = 0, disputed = 0;
-
-  const lines = (a.lines || []).map((l) => {
-    const o = bByKey.get(key(l));
-    if (!o) return { ...l, confidence: "low", note: [l.note, "این سطر فقط در یکی از دو خوانش دیده شد"].filter(Boolean).join(" · ") };
-    const same = l.unit_price === o.unit_price;
-    if (same) { agreed++; return l; }
-    disputed++;
-    return {
-      ...l,
-      confidence: "low",
-      unit_price_alt: o.unit_price,
-      note: [l.note, `دو بار متفاوت خوانده شد: ${l.unit_price} و ${o.unit_price} — خودتان از روی سند بخوانید`].filter(Boolean).join(" · "),
-    };
-  });
-  /* سطرهایی که فقط در خوانش دوم بودند هم بیایند، با علامت */
-  const aKeys = new Set((a.lines || []).map(key));
-  for (const l of b.lines || []) {
-    if (!aKeys.has(key(l))) lines.push({ ...l, confidence: "low", note: [l.note, "این سطر فقط در یکی از دو خوانش دیده شد"].filter(Boolean).join(" · ") });
-  }
-
-  const merged = { ...a, lines, agreement: { agreed, disputed } };
-  /* فیلدهای سرآیندی که دو خوانش روی آن‌ها توافق ندارند، حذف نمی‌شوند ولی علامت می‌خورند */
-  for (const f of ["currency", "supplier_name", "invoice_type", "valid_days"]) {
-    if (a[f] != null && b[f] != null && a[f] !== b[f]) {
-      merged.notes = [merged.notes, `«${f}» در دو خوانش متفاوت بود: ${a[f]} / ${b[f]}`].filter(Boolean).join(" · ");
-      if (f === "currency") merged.currency = null; /* واحد پول مشکوک = کارشناس باید صریح بگوید */
-    }
-  }
-  return merged;
+  return onePass(env, { fileUrl, mime, items, request });
 }
 
 async function onePass(env, { fileUrl, mime, items, request }) {
