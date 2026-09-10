@@ -111,6 +111,7 @@
          closedRequests = مجموع این سه (یعنی هر درخواستی که هیچ قلم باز/معلق ندارد). */
       closedOnly: 0, stoppedOnly: 0, mixedInactive: 0,
       expertConflictAuto: 0, expertConflictDecision: 0, statusMixed: 0,
+      closedItemsSkipped: 0, partlyClosed: 0, liveItemRows: 0,
       partyConflicts: 0, dateConflicts: 0, badQty: 0,
       unknownStatuses: {}, statusCounts: {}, dateMin: null, dateMax: null,
     };
@@ -155,13 +156,23 @@
       if (req._dates.size > 1) stats.dateConflicts++;
       delete req._parties; delete req._dates;
 
+      /* itemRows/maxItems/multiItem همان «سطرهای فایل»‌اند و عددهای طلایی
+         IMP-08 روی همین‌ها بسته شده؛ دست نمی‌خورند.
+         قلمِ «بسته شده» وارد پنل نمی‌شود، پس شمارشِ کارِ واقعی جداگانه می‌آید. */
+      const closed = req.items.filter((i) => i.state === "closed").length;
+      req.liveItems = req.items.length - closed;
+      stats.closedItemsSkipped += closed;
+      if (closed && req.liveItems) stats.partlyClosed++;
+      stats.liveItemRows += req.liveItems;
+
       const n = req.items.length;
       stats.itemRows += n; if (n > stats.maxItems) stats.maxItems = n; if (n > 1) stats.multiItem++;
 
       /* کارشناس در سطح درخواست */
-      const names = [...new Set(req.items.map((i) => TP.nrm(i.srcExpert)).filter(Boolean))];
-      const blanks = req.items.some((i) => !T(i.srcExpert));
-      req.experts = [...new Set(req.items.map((i) => T(i.srcExpert)).filter(Boolean))];
+      const live = req.items.filter((i) => i.state !== "closed");
+      const names = [...new Set(live.map((i) => TP.nrm(i.srcExpert)).filter(Boolean))];
+      const blanks = live.some((i) => !T(i.srcExpert));
+      req.experts = [...new Set(live.map((i) => T(i.srcExpert)).filter(Boolean))];
       req.expertConflict = names.length > 1;
       if (req.expertConflict) stats.expertConflictDecision++;
       else if (names.length === 1 && blanks) stats.expertConflictAuto++;

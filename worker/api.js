@@ -315,7 +315,7 @@ async function importChunk(env, body) {
   const reqs = Array.isArray(body.requests) ? body.requests : [];
   const t = now();
   const stmts = [];
-  let newRequests = 0, newItems = 0;
+  let newRequests = 0, newItems = 0, closedSkipped = 0;
   const ids = reqs.map((r) => T(r.id)).filter(Boolean);
   const existing = new Set();
   for (let i = 0; i < ids.length; i += 90) {
@@ -339,6 +339,19 @@ async function importChunk(env, body) {
       const base = nrm(it.title) || ("line" + int(it.lineNo, 1));
       const n = seen.get(base) || 0; seen.set(base, n + 1);
       const key = n ? `${base}#${n}` : base;
+
+      /* قلمی که در راهکاران «بسته شده» است وارد پنل نمی‌شود.
+         اگر سامانه از قبل داردش، فقط وضعیتِ فایل روی همان ردیف می‌نشیند تا در
+         گام finish به مدیر پیشنهادِ بستن برود؛ اگر ندارد، اصلاً ساخته نمی‌شود.
+         (کلید همچنان برای همهٔ سطرها ساخته می‌شود — ترتیبِ فایل باید حفظ شود،
+         وگرنه با افتادنِ یک سطر، کلیدِ قلم‌های هم‌نامِ بعدی جابه‌جا می‌شود.) */
+      if (it.state === "closed") {
+        stmts.push(env.DB.prepare("UPDATE items SET src_status=? WHERE request_id=? AND item_key=?")
+          .bind(T(it.srcStatus) || null, id, key));
+        closedSkipped++;
+        continue;
+      }
+
       /* وضعیت راهکاران فقط برای قلمِ تازه اعمال می‌شود؛ برای قلم موجود، state سامانه دست‌نخورده می‌ماند
          و اختلاف در مرحلهٔ finish به‌عنوان پیشنهاد به مدیر برمی‌گردد (ملاک فایل جدید است، اعمال با تأیید).
          ستون‌هایی که فایل روزانه ندارد (کد، مشخصه، تاریخ نیاز، …) با COALESCE از فایل کامل قبلی حفظ می‌شوند. */
@@ -354,7 +367,7 @@ async function importChunk(env, body) {
     }
   }
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
-  return { ok: true, requests: reqs.length, newRequests, itemsUpserted: newItems };
+  return { ok: true, requests: reqs.length, newRequests, itemsUpserted: newItems, closedSkipped };
 }
 
 /* پایان بارگذاری: پیشنهادها برای تأیید مدیر */

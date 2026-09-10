@@ -506,7 +506,7 @@
         S.filter = { expert: "", status: "", state: "", window: "3d" }; S.q = { id: "", date: "", party: "", item: "" }; S.page.offset = 0; S.tab = "desk";
         await refresh();
         const unknown = Object.entries(st.unknownStatuses || {});
-        const summary = `<b>${M(st.requests)}</b> درخواست · <b>${M(st.itemRows)}</b> سطر قلم · <b>${st.parties}</b> طرف مقابل · بازه ${esc(st.dateMin)} تا ${esc(st.dateMax)}<br>
+        const summary = `<b>${M(st.requests)}</b> درخواست · <b>${M(st.itemRows)}</b> سطر قلم · <b>${st.parties}</b> طرف مقابل · بازه ${esc(st.dateMin)} تا ${esc(st.dateMax)}<br>${st.closedItemsSkipped ? `<span class="dim"><b>${M(st.closedItemsSkipped)}</b> قلم «بسته شده» وارد نمی‌شود${st.partlyClosed ? ` (${M(st.partlyClosed)} درخواست فقط بخشی از اقلامش بسته است)` : ""} — <b>${M(st.liveItemRows)}</b> قلم وارد پنل می‌شود.</span><br>` : ""}
           <b>${M(st.openRequests)}</b> درخواست با قلم باز به سامانه فرستاده شد (${M(newR)} تازه) · <b>${M(st.closedRequests)}</b> درخواست کاملاً بسته/متوقف فقط برای همگام‌سازی.<br>
           <b>${M(st.unassignedOpen)}</b> درخواست باز بدون کارشناس · تعارض کارشناس: ${st.expertConflictAuto} مورد خودکار حل شد، <b>${st.expertConflictDecision}</b> مورد دو نام متفاوت (⚠).<br>
           ${st.statusMixed} درخواست وضعیت مختلط دارند (وضعیت روی قلم نگه داشته می‌شود). بزرگ‌ترین درخواست: ${st.maxItems} قلم.
