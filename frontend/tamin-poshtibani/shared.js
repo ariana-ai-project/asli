@@ -102,14 +102,16 @@
   TP.jNorm = (s) => { const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(String(s || "").trim()); return m ? `${m[1]}/${p2(+m[2])}/${p2(+m[3])}` : String(s || "").trim(); };
   TP.todayJ = (ms) => { const d = new Date(ms == null ? Date.now() : ms); return g2j(d.getFullYear(), d.getMonth() + 1, d.getDate()); };
 
-  /* ---------- ساعات کاری: شنبه–چهارشنبه ۸–۱۷ · پنجشنبه ۸–۱۳ · جمعه تعطیل ---------- */
-  function win(d) { const g = d.getDay(); if (g === 5) return null; if (g === 4) return [8, 13]; return [8, 17]; }
+  /* ---------- ساعات کاری: شنبه–چهارشنبه ۷:۳۰–۱۷ · پنجشنبه ۷:۳۰–۱۲:۳۰ · جمعه تعطیل ---------- */
+  function win(d) { const g = d.getDay(); if (g === 5) return null; if (g === 4) return [7.5, 12.5]; return [7.5, 17]; }
+  /* setHours ساعتِ صحیح می‌خواهد، ولی پنجره نیم‌ساعت هم دارد */
+  function at(d, h) { const x = new Date(d); x.setHours(Math.floor(h), Math.round((h % 1) * 60), 0, 0); return x; }
   /* ساعات کاری بین دو لحظه */
   TP.wh = function (a, b) {
     if (b <= a) return 0; let t = 0; const c = new Date(a); c.setHours(0, 0, 0, 0);
     while (c.getTime() < b) {
       const w = win(c);
-      if (w) { const s = new Date(c); s.setHours(w[0], 0, 0, 0); const e = new Date(c); e.setHours(w[1], 0, 0, 0);
+      if (w) { const s = at(c, w[0]), e = at(c, w[1]);
         const f = Math.max(s.getTime(), a), o = Math.min(e.getTime(), b); if (o > f) t += (o - f) / TP.HOUR; }
       c.setDate(c.getDate() + 1);
     }
@@ -120,7 +122,7 @@
     const c = new Date(st); let k = 0;
     for (;;) {
       const w = win(c);
-      if (w) { const e = new Date(c); e.setHours(w[1], 0, 0, 0); if (e.getTime() > st) { k++; if (k >= n) return e.getTime(); } }
+      if (w) { const e = at(c, w[1]); if (e.getTime() > st) { k++; if (k >= n) return e.getTime(); } }
       c.setDate(c.getDate() + 1); c.setHours(0, 0, 0, 0);
     }
   };

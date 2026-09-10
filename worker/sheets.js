@@ -42,12 +42,14 @@ export function commissionHtml({ request, items, quotes, notes, expert, company,
   const groups = [];
   for (const q of quotes.filter((x) => x.final && x.saved)) {
     let g = groups.find((x) => x.name === q.supplier_name);
-    if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice }; groups.push(g); }
+    if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat }; groups.push(g); }
     g.rows[q.item_id] = q;
   }
   const N = groups.length, span = 4 + 3 * N;
   const sums = groups.map((g) => items.reduce((n, it) => n + ((g.rows[it.id] ? (+g.rows[it.id].price || 0) * (+g.rows[it.id].qty || 0) : 0)), 0));
-  const vat = sums.map((s) => Math.round(s * vatRate));
+  /* قیمتِ ردیف‌ها همیشه بدون ارزش افزوده است؛ ارزش افزوده فقط این‌جا و فقط
+     برای تأمین‌کننده‌ای که گفته «دارد» حساب می‌شود. */
+  const vat = sums.map((s, k) => (groups[k].vat === "ندارد" ? 0 : Math.round(s * vatRate)));
   const B = (fn) => groups.map(fn).join("");
   const chk = (v, t) => (v === t ? "☑" : "☐");
   const dealChk = (v) => (groups.some((g) => g.deal === v) ? "☑" : "☐");
@@ -65,7 +67,7 @@ export function commissionHtml({ request, items, quotes, notes, expert, company,
     ${items.map((it, i) => `<tr><td class="num">${M(i + 1)}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td class="num">${esc(it.unit)}</td>
       ${B((g) => { const q = g.rows[it.id]; return `<td>${q ? esc(q.spec) : ""}</td><td class="num">${q ? money((+q.price || 0) * (+q.qty || 0)) : ""}</td><td class="num">${q ? money(q.price) : ""}</td>`; })}</tr>`).join("")}
     <tr><td class="lbl rt" colspan="4">جمع کل بدون ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3">${money(sums[k])}</td>`)}</tr>
-    <tr><td class="lbl rt" colspan="4">ارزش افزوده (${M(Math.round(vatRate * 100))}٪):</td>${B((g, k) => `<td class="num" colspan="3">${money(vat[k])}</td>`)}</tr>
+    <tr><td class="lbl rt" colspan="4">ارزش افزوده (${M(Math.round(vatRate * 100))}٪):</td>${B((g, k) => `<td class="num" colspan="3">${g.vat === "ندارد" ? "ندارد" : money(vat[k])}</td>`)}</tr>
     <tr><td class="lbl rt" colspan="4">جمع کل با ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3"><b>${money(sums[k] + vat[k])}</b></td>`)}</tr>
     <tr><td class="lbl rt" colspan="4">نوع فاکتور و میزان مالیات و عوارض:</td>${B((g) => `<td colspan="3">${esc(g.invoice || "—")}</td>`)}</tr>
     <tr><td class="lbl rt" colspan="4">مدت اعتبار پیش‌فاکتور:</td>${B((g) => `<td colspan="3">${g.valid ? M(g.valid) + " روز" : "—"}</td>`)}</tr>

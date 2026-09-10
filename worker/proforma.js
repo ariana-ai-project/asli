@@ -6,7 +6,7 @@
  */
 import { HttpError } from "./http.js";
 import { extractProforma, toRial } from "./extract.js";
-import { missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
+import { VAT_RATE, netOf, ENUMS, missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -102,7 +102,15 @@ export async function applyExtraction(env, p, body) {
     pay: r.pay_class || r.pay_terms || null,
     place: r.place || null,
     place_other: r.place === "سایر" ? (r.place_other || null) : null,
+    vat: ENUMS.vat.includes(r.vat_status) ? r.vat_status : null,
   };
+
+  /* اگر عددهای سند ارزش افزوده را در خود داشته‌اند، این‌جا از قیمت بیرون کشیده
+     می‌شود: جدول کمیسیون خودش یک سطر جدا برای ارزش افزوده دارد و اگر قیمت ردیف
+     هم آن را داشته باشد، دو بار حساب می‌شود. تقسیم را کد انجام می‌دهد نه مدل —
+     مثل تبدیل تومان به ریال، یک کارِ قطعی است. */
+  const stripVat = r.vat_included === true;
+  const vatRate = stripVat && r.vat_rate > 0 && r.vat_rate < 100 ? r.vat_rate / 100 : VAT_RATE;
 
   const t = now(); const stmts = []; let n = 0, created = 0, skipped = 0, savedN = 0;
   const missingAll = new Set();
@@ -116,12 +124,12 @@ export async function applyExtraction(env, p, body) {
     /* قیمتِ حاصل از تقسیمِ مبلغ کل باید رُند شود؛ اگر رُند نبود یعنی رابطهٔ کل و
        مقدار آن‌قدرها هم روشن نبوده — کم‌اطمینان علامت می‌خورد. */
     const derived = line.unit_price == null;
-    const price = Math.round(raw);
+    const price = stripVat ? netOf(raw, vatRate) : Math.round(raw);
     /* فقط سطرهایی که مدل خودش مطمئن نبوده علامت می‌خورند.
        (روی یک اسکن بسیار بی‌کیفیت و وارونه، مدل جایی هم که مطمئن بود اشتباه
        خواند؛ ولی آن سند نمونهٔ کارِ واقعی نیست — کارشناس فایل درست بارگذاری
        می‌کند. برای همین ملاک، همان اطمینانِ اعلام‌شدهٔ مدل است.) */
-    const low = line.confidence !== "high" || (derived && price !== raw) ? 1 : 0;
+    const low = line.confidence !== "high" || stripVat || (derived && price !== raw) ? 1 : 0;
     n++;
     const old = existing.get(itemId);
     if (!old) created++;
@@ -131,7 +139,7 @@ export async function applyExtraction(env, p, body) {
       ? { ...old, spec: line.spec || old.spec, unit: old.unit || line.unit || it.unit, qty: old.qty ?? line.qty ?? it.qty, price,
           supplier_code: old.supplier_code || terms.supplier_code, dtime: terms.dtime || old.dtime, valid_days: terms.valid_days || old.valid_days,
           ship: terms.ship || old.ship, invoice: r.invoice_type || old.invoice || INVOICE_DEFAULT, pay: terms.pay || old.pay,
-          place: terms.place || old.place, place_other: terms.place_other || old.place_other }
+          place: terms.place || old.place, place_other: terms.place_other || old.place_other, vat: terms.vat || old.vat }
       : { spec: line.spec || null, unit: line.unit || it.unit, qty: line.qty == null ? it.qty : line.qty, price, ...terms };
     /* ثبت موقت فقط وقتی همهٔ اجباری‌ها هستند؛ وگرنه خط می‌ماند تا کارشناس در بات یا پنل پرش کند */
     const miss = missingRequired(merged);
@@ -140,21 +148,21 @@ export async function applyExtraction(env, p, body) {
 
     stmts.push(old
       ? env.DB.prepare(`UPDATE quotes SET supplier_code=?, spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?,
-           pay=?, place=?, place_other=?, low_conf=?, saved=?, source='ai', updated_at=? WHERE id=?`)
+           pay=?, vat=?, place=?, place_other=?, low_conf=?, saved=?, source='ai', updated_at=? WHERE id=?`)
         .bind(merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime, merged.valid_days, merged.ship, merged.invoice,
-          merged.pay, merged.place, merged.place_other, low, saved, t, old.id)
-      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,place,place_other,saved,final,low_conf,source,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'ai',?,?)`)
+          merged.pay, merged.vat, merged.place, merged.place_other, low, saved, t, old.id)
+      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'ai',?,?)`)
         .bind(p.assignment_id, itemId, supplier, merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime,
-          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.place, merged.place_other, saved, low, t, t));
+          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, low, t, t));
   }
   if (!n) throw new HttpError("هیچ سطری از این پیش‌فاکتور به اقلام درخواست وصل نشده بود.", 422);
 
   stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
     .bind(t, `expert:${p.expert_id}`, "extract_applied", p.request_id,
-      JSON.stringify({ proforma_id: p.id, supplier, lines: n, created, skipped, saved: savedN, currency, prompt_version: (stored.meta || {}).prompt_version })));
+      JSON.stringify({ proforma_id: p.id, supplier, lines: n, created, skipped, saved: savedN, currency, vat_stripped: stripVat, prompt_version: (stored.meta || {}).prompt_version })));
   await env.DB.batch(stmts);
-  return { ok: true, applied: n, created, skipped, saved: savedN, unsaved: n - savedN, missing: [...missingAll], currency, supplier };
+  return { ok: true, applied: n, created, skipped, saved: savedN, unsaved: n - savedN, missing: [...missingAll], currency, supplier, vatStripped: stripVat };
 }
 
 /**

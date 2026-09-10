@@ -127,6 +127,7 @@ const COLUMN_MIGRATIONS = [
   ["proformas", "extracted_json", "TEXT"],    /* خروجی خام استخراج مدل (INV-15) */
   ["proformas", "extract_state", "TEXT"],     /* pending | ok | refused | failed */
   ["proformas", "extract_at", "INTEGER"],
+  ["quotes", "vat", "TEXT"],                  /* ارزش افزوده: دارد | ندارد (اجباری، انتخابی) */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -622,7 +623,7 @@ async function markProgress(env, ex, itemId, stage) {
 }
 
 /* استعلام‌ها */
-const QUOTE_FIELDS = ["supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "deal", "place", "place_other", "final", "low_conf", "item_id"];
+const QUOTE_FIELDS = ["supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "vat", "deal", "place", "place_other", "final", "low_conf", "item_id"];
 async function ownAssignment(env, ex, aid) {
   const a = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);

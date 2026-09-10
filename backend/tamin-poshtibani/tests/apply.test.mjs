@@ -17,7 +17,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { applyExtraction, lineUnitPrice } from "../../../worker/proforma.js";
-import { REQUIRED, missingRequired } from "../../../worker/quote-rules.js";
+import { REQUIRED, missingRequired, netOf, VAT_RATE } from "../../../worker/quote-rules.js";
 
 /* ---------- دیتابیس بدلی ---------- */
 function fakeDb({ items, quotes }) {
@@ -48,6 +48,8 @@ const READ = {
   supplier_code: "411322334455",
   currency: "ریال",
   invoice_type: "رسمی",
+  vat_status: "دارد",
+  vat_included: false,
   pay_terms: "۵۰٪ پیش‌پرداخت، مابقی هنگام تحویل",
   pay_class: "۵۰٪ پیش‌پرداخت",
   valid_days: 15,
@@ -70,7 +72,7 @@ const ITEMS = [{ id: 1, qty: 4, unit: "عدد" }, { id: 2, qty: 10, unit: "شا�
 
 /* ستون‌های INSERT، به همان ترتیبِ دستور — تا تست با اندیس خام کار نکند */
 const COLS = ["assignment_id", "item_id", "supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship",
-  "invoice", "pay", "place", "place_other", "saved", "low_conf", "created_at", "updated_at"];
+  "invoice", "pay", "vat", "place", "place_other", "saved", "low_conf", "created_at", "updated_at"];
 const rowOf = (stmt) => Object.fromEntries(COLS.map((c, i) => [c, stmt.args[i]]));
 const inserts = (db) => db.batches[0].filter((x) => x.sql.includes("INSERT INTO quotes")).map(rowOf);
 
@@ -98,6 +100,7 @@ test("همهٔ فیلدهای تب استعلامات از خروجی مدل پ�
   assert.equal(a.ship, "با باربری، هزینه با خریدار", "روش حمل");
   assert.equal(a.invoice, "رسمی", "نوع فاکتور");
   assert.equal(a.pay, "۵۰٪ پیش‌پرداخت", "شرایط تسویه، از فهرست ثابت");
+  assert.equal(a.vat, "دارد", "ارزش افزوده");
   assert.equal(a.place, "سایر", "محل تحویل");
   assert.equal(a.place_other, "درب انبار فروشنده — کرج", "متن محل تحویل");
 });
@@ -117,12 +120,62 @@ test("اگر اجباری‌ای خوانده نشده، خط ساخته می‌
   assert.equal(res.created, 2, "خط‌ها ساخته می‌شوند");
   assert.deepEqual(inserts(DB).map((r) => r.saved), [0, 0]);
   assert.deepEqual(res.missing.sort(), ["dtime", "pay"]);
+  assert.equal(inserts(DB)[0].vat, "دارد", "بقیهٔ فیلدها همچنان پر می‌شوند");
 });
 
 test("فیلدهای اختیاریِ خالی مانع ثبت نیستند", async () => {
   const DB = fakeDb({ items: ITEMS, quotes: [] });
   const res = await applyExtraction({ DB }, proforma({ ship_method: null, place: null, place_other: null, valid_days: null, supplier_code: null }), {});
   assert.equal(res.saved, 2);
+});
+
+/* ---------- ارزش افزوده ---------- */
+test("ارزش افزوده اجباری است: اگر سند چیزی نگفته، خط ثبت‌شده نمی‌شود", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  const res = await applyExtraction({ DB }, proforma({ vat_status: null }), {});
+  assert.equal(res.created, 2, "خط ساخته می‌شود");
+  assert.deepEqual(inserts(DB).map((r) => r.vat), [null, null]);
+  assert.deepEqual(res.missing, ["vat"]);
+  assert.equal(res.saved, 0);
+});
+
+test("مقدار خارج از فهرست پذیرفته نمی‌شود", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  await applyExtraction({ DB }, proforma({ vat_status: "شاید" }), {});
+  assert.equal(inserts(DB)[0].vat, null);
+});
+
+test("«ندارد» هم یک پاسخ کامل است", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  const res = await applyExtraction({ DB }, proforma({ vat_status: "ندارد" }), {});
+  assert.equal(inserts(DB)[0].vat, "ندارد");
+  assert.equal(res.saved, 2, "ثبت را نمی‌بندد");
+});
+
+test("قیمتی که ارزش افزوده در خود دارد، خالص می‌شود تا کمیسیون دوبار حسابش نکند", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  const res = await applyExtraction({ DB }, proforma({ vat_status: "دارد", vat_included: true }), {});
+  const a = inserts(DB)[0];
+  assert.equal(a.price, netOf(5605961), "قیمت خالص");
+  assert.equal(a.price, Math.round(5605961 / 1.1));
+  assert.ok(a.price < 5605961);
+  assert.equal(a.vat, "دارد", "ارزش افزوده همچنان «دارد» است");
+  assert.equal(a.low_conf, 1, "عددی که سامانه تقسیمش کرده باید بازبینی شود");
+  assert.equal(res.vatStripped, true);
+});
+
+test("نرخِ نوشته‌شده در سند بر نرخ پیش‌فرض مقدم است", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  await applyExtraction({ DB }, proforma({ vat_included: true, vat_rate: 9 }), {});
+  assert.equal(inserts(DB)[0].price, Math.round(5605961 / 1.09));
+  assert.equal(VAT_RATE, 0.1, "پیش‌فرض همان ۱۰٪ فرم کمیسیون است");
+});
+
+test("وقتی ارزش افزوده ته فاکتور آمده، قیمت ردیف دست نمی‌خورد", async () => {
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  const res = await applyExtraction({ DB }, proforma({ vat_status: "دارد", vat_included: false }), {});
+  assert.equal(inserts(DB)[0].price, 5605961);
+  assert.equal(res.vatStripped, false);
 });
 
 test("نوع فاکتور اگر در سند نبود «رسمی» است", async () => {
@@ -224,10 +277,10 @@ test("«محل معامله» از سند درنمی‌آید و در دستور
 
 /* ---------- قاعدهٔ مشترک ---------- */
 test("قاعدهٔ اجباری‌ها همان است که کاربر خواسته", () => {
-  assert.deepEqual(REQUIRED, ["unit", "qty", "price", "dtime", "pay", "invoice"]);
-  assert.deepEqual(missingRequired({ unit: "عدد", qty: 1, price: 5, dtime: "فوری", pay: "نقدی", invoice: "رسمی" }), []);
-  assert.deepEqual(missingRequired({ unit: "عدد", qty: 1, price: 5, dtime: "فوری", pay: "نقدی", invoice: "رسمی", place: "سایر" }), ["place_other"],
-    "«سایر» بدون متن خالی است");
-  assert.deepEqual(missingRequired({ unit: "عدد", qty: 1, price: 5, dtime: "فوری", pay: "نقدی", invoice: "رسمی", ship: null, deal: null, place: null }), [],
-    "اختیاری‌ها به حساب نمی‌آیند");
+  assert.deepEqual(REQUIRED, ["unit", "qty", "price", "dtime", "pay", "invoice", "vat"]);
+  const full = { unit: "عدد", qty: 1, price: 5, dtime: "فوری", pay: "نقدی", invoice: "رسمی", vat: "دارد" };
+  assert.deepEqual(missingRequired(full), []);
+  assert.deepEqual(missingRequired({ ...full, vat: "" }), ["vat"], "ارزش افزوده اجباری است");
+  assert.deepEqual(missingRequired({ ...full, place: "سایر" }), ["place_other"], "«سایر» بدون متن خالی است");
+  assert.deepEqual(missingRequired({ ...full, ship: null, deal: null, place: null }), [], "اختیاری‌ها به حساب نمی‌آیند");
 });

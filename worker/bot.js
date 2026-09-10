@@ -12,7 +12,7 @@
  * ارجاع‌های همان کارشناسی است که chat_id‌اش گره خورده. هیچ مسیری این را دور نمی‌زند.
  */
 import { telegram, esc, TgError } from "./telegram.js";
-import { fmtFa, workHours } from "./time.js";
+import { fmtFa, workHours, nextWorkMoment, inWorkHours } from "./time.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import { REFUSAL_FA } from "./extract.js";
 import { runExtraction, extractFor, saveExtraction, applyExtraction } from "./proforma.js";
@@ -57,9 +57,20 @@ export function queueStmt(env, idem, chat, text, keyboard) {
  * شکست موقت → تلاش دوباره با عقب‌نشینی نمایی؛ شکست دائمی (بلاک شدن بات) → dead.
  */
 export async function drainOutbox(env, limit = 20) {
+  /* بیرون از ساعت اداری هیچ اعلانی نمی‌رود.
+     صف عقب انداخته می‌شود، نه دور ریخته: پیام سرِ ساعت ۷:۳۰ اولین روز کاری
+     می‌رسد. (پاسخِ خودِ گفت‌وگو از این مسیر رد نمی‌شود؛ اگر کارشناس شب چیزی
+     برای بات بفرستد، همان لحظه جواب می‌گیرد.) */
+  const t = now();
+  if (!inWorkHours(t)) {
+    const at = nextWorkMoment(t);
+    const r = await env.DB.prepare("UPDATE outbox SET next_at=? WHERE status='pending' AND next_at<?").bind(at, at).run();
+    return { sent: 0, failed: 0, deferred: (r.meta && r.meta.changes) || 0, until: at };
+  }
+
   const rows = (await env.DB.prepare(
     `SELECT * FROM outbox WHERE status='pending' AND next_at<=? ORDER BY next_at LIMIT ?`,
-  ).bind(now(), limit).all()).results || [];
+  ).bind(t, limit).all()).results || [];
   if (!rows.length) return { sent: 0, failed: 0 };
 
   const api = telegram(env);
@@ -79,7 +90,7 @@ export async function drainOutbox(env, limit = 20) {
       const wait = e instanceof TgError && e.retryAfter ? e.retryAfter * 1000 : Math.min(30 * 60000, 60000 * 2 ** (attempts - 1));
       done.push(permanent || attempts >= 6
         ? env.DB.prepare("UPDATE outbox SET status='dead', attempts=?, last_error=? WHERE id=?").bind(attempts, String(e.message).slice(0, 300), row.id)
-        : env.DB.prepare("UPDATE outbox SET attempts=?, next_at=?, last_error=? WHERE id=?").bind(attempts, now() + wait, String(e.message).slice(0, 300), row.id));
+        : env.DB.prepare("UPDATE outbox SET attempts=?, next_at=?, last_error=? WHERE id=?").bind(attempts, nextWorkMoment(now() + wait), String(e.message).slice(0, 300), row.id));
       if (e instanceof TgError && e.retryAfter) break; /* بقیه هم رد می‌شوند؛ اجرای بعدی ادامه می‌دهد */
     }
   }

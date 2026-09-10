@@ -119,12 +119,36 @@ function dayStart(ms) { return Math.floor((ms + TEHRAN_OFFSET) / DAY) * DAY - TE
  * شنبه–چهارشنبه ۸–۱۷ · پنجشنبه ۸–۱۳ · جمعه تعطیل (SLA-01)
  * `isHoliday(jalaliDate)` تعطیلات رسمی را هم تعطیل می‌کند.
  */
+/**
+ * پنجرهٔ کاری یک روز، به ساعتِ اعشاریِ تهران.
+ * شنبه–چهارشنبه ۷:۳۰ تا ۱۷:۰۰ · پنجشنبه ۷:۳۰ تا ۱۲:۳۰ · جمعه و تعطیل رسمی: هیچ.
+ */
 function windowOf(dayStartMs, isHoliday) {
   const p = tehranParts(dayStartMs + 12 * HOUR); /* ظهر، تا مرز نیمه‌شب دردسر نسازد */
   if (p.dow === 5) return null;
   if (isHoliday && isHoliday(`${p.jy}/${p2(p.jm)}/${p2(p.jd)}`)) return null;
-  return p.dow === 4 ? [8, 13] : [8, 17];
+  return p.dow === 4 ? [7.5, 12.5] : [7.5, 17];
 }
+
+/**
+ * نزدیک‌ترین لحظه‌ای که می‌شود اعلان فرستاد.
+ *
+ * اگر همین حالا وسط ساعت اداری است، همین حالا؛ وگرنه شروعِ اولین روز کاریِ
+ * بعدی. کارشناس نباید نیمه‌شب یا جمعه با اعلان سامانه بیدار شود — و اعلانی که
+ * سرِ کار خوانده نشود، عملاً فرستاده نشده است.
+ */
+export function nextWorkMoment(ms, isHoliday) {
+  for (let day = dayStart(ms), guard = 0; guard < 400; day += DAY, guard++) {
+    const w = windowOf(day, isHoliday); if (!w) continue;
+    const open = day + w[0] * HOUR, close = day + w[1] * HOUR;
+    if (ms < open) return open;
+    if (ms < close) return ms;
+  }
+  return ms;
+}
+
+/** آیا این لحظه داخل ساعت اداری است؟ */
+export const inWorkHours = (ms, isHoliday) => nextWorkMoment(ms, isHoliday) === ms;
 
 /** ساعات کاری بین دو لحظه */
 export function workHours(a, b, isHoliday) {

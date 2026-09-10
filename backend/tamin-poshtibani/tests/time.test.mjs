@@ -11,9 +11,10 @@
       (بدون این، کارشناس در پنل یک مهلت می‌بیند و بات چیز دیگری می‌گوید.)
 
    ۲) قواعد الزام‌آور `docs/01-domain/sla-policy.md` بند SLA-01 و SLA-02:
-      شنبه–چهارشنبه ۸–۱۷ · پنجشنبه ۸–۱۳ · جمعه تعطیل · هفته = ۵۰ ساعت کاری.
+      شنبه–چهارشنبه ۷:۳۰–۱۷ · پنجشنبه ۷:۳۰–۱۲:۳۰ · جمعه تعطیل · هفته = ۵۲٫۵ ساعت کاری.
    ============================================================ */
 process.env.TZ = "Asia/Tehran"; /* باید پیش از ساختِ هر Date اجرا شود */
+const DAY_MS = 24 * 3600000;
 
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -25,6 +26,7 @@ import vm from "node:vm";
 import {
   HOUR, TEHRAN_OFFSET, workHours, endOfNthWorkingDay, budgetHours,
   addWorkingHours, alertSchedule, jStr, jStr2ms, tehranParts, jValid, jLen,
+  nextWorkMoment, inWorkHours,
 } from "../../../worker/time.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -88,21 +90,50 @@ test("تطابق تبدیل تاریخ شمسی با مرورگر", () => {
   }
 });
 
-test("SLA-01: هفتهٔ کاری ۵۰ ساعت است و جمعه تعطیل", () => {
+test("SLA-01: هفتهٔ کاری ۵۲٫۵ ساعت است و جمعه تعطیل", () => {
   /* شنبه ۱۴۰۵/۰۶/۲۱ ساعت ۰۰:۰۰ تهران تا شنبهٔ بعد */
   const sat = jStr2ms("1405/06/21");
   assert.equal(tehranParts(sat).dow, 6, "روز مبنا باید شنبه باشد");
-  assert.equal(workHours(sat, sat + 7 * 24 * HOUR), 50);
+  assert.equal(workHours(sat, sat + 7 * 24 * HOUR), 5 * 9.5 + 5);
 
   /* جمعه هیچ ساعت کاری ندارد */
   const fri = jStr2ms("1405/06/27");
   assert.equal(tehranParts(fri).dow, 5, "روز مبنا باید جمعه باشد");
   assert.equal(workHours(fri, fri + 24 * HOUR), 0);
 
-  /* پنجشنبه ۵ ساعت */
+  /* پنجشنبه ۵ ساعت: ۷:۳۰ تا ۱۲:۳۰ */
   const thu = jStr2ms("1405/06/26");
   assert.equal(tehranParts(thu).dow, 4, "روز مبنا باید پنجشنبه باشد");
   assert.equal(workHours(thu, thu + 24 * HOUR), 5);
+
+  /* روز عادی ۹٫۵ ساعت */
+  assert.equal(workHours(sat, sat + 24 * HOUR), 9.5);
+});
+
+test("اعلان بیرون از ساعت اداری به اولین لحظهٔ کاری می‌افتد", () => {
+  const sat = jStr2ms("1405/06/21");                 /* شنبه ۰۰:۰۰ */
+  const open = sat + 7.5 * HOUR, close = sat + 17 * HOUR;
+
+  assert.equal(nextWorkMoment(sat + 3 * HOUR), open, "نیمه‌شب → ۷:۳۰ همان روز");
+  assert.equal(nextWorkMoment(sat + 7.4 * HOUR), open, "کمی پیش از باز شدن");
+  assert.equal(nextWorkMoment(sat + 10 * HOUR), sat + 10 * HOUR, "وسط روز، همان لحظه");
+  assert.equal(nextWorkMoment(close), sat + DAY_MS + 7.5 * HOUR, "لحظهٔ بسته‌شدن → فردا");
+  assert.equal(nextWorkMoment(sat + 20 * HOUR), sat + DAY_MS + 7.5 * HOUR, "شب → فردا ۷:۳۰");
+
+  /* پنجشنبه بعدازظهر و جمعه، هر دو به شنبه می‌افتند */
+  const thu = jStr2ms("1405/06/26");
+  const nextSat = jStr2ms("1405/06/28");
+  assert.equal(tehranParts(nextSat).dow, 6);
+  assert.equal(nextWorkMoment(thu + 14 * HOUR), nextSat + 7.5 * HOUR, "پنجشنبه بعدازظهر");
+  assert.equal(nextWorkMoment(jStr2ms("1405/06/27") + 10 * HOUR), nextSat + 7.5 * HOUR, "جمعه");
+
+  assert.equal(inWorkHours(sat + 10 * HOUR), true);
+  assert.equal(inWorkHours(sat + 20 * HOUR), false);
+  assert.equal(inWorkHours(thu + 14 * HOUR), false);
+
+  /* تعطیل رسمی هم مثل جمعه است */
+  const isHol = (d) => d === "1405/06/28";
+  assert.equal(nextWorkMoment(nextSat + 3 * HOUR, isHol), jStr2ms("1405/06/29") + 7.5 * HOUR);
 });
 
 test("SLA-02: مهلت روی پایان ساعت کاری می‌نشیند، نه ۲۴ ساعت بعد", () => {
@@ -111,10 +142,12 @@ test("SLA-02: مهلت روی پایان ساعت کاری می‌نشیند، �
   assert.equal(tehranParts(end1).hour, 17, "پایان روز کاری عادی ۱۷:۰۰ است");
   assert.equal(jStr(end1), "1405/06/21");
 
-  /* پنجشنبه باید ۱۳:۰۰ تمام شود */
+  /* پنجشنبه باید ۱۲:۳۰ تمام شود */
   const wedNoon = jStr2ms("1405/06/25") + 12 * HOUR;
   const end2 = endOfNthWorkingDay(wedNoon, 2);
-  assert.equal(tehranParts(end2).hour, 13);
+  const p2 = tehranParts(end2);
+  assert.equal(p2.hour, 12);
+  assert.equal(p2.minute, 30);
   assert.equal(jStr(end2), "1405/06/26");
 });
 
@@ -143,8 +176,8 @@ test("addWorkingHours وارونِ workHours است", () => {
 test("تعطیلات رسمی از ساعات کاری حذف می‌شوند", () => {
   const sat = jStr2ms("1405/06/21");
   const holiday = (d) => d === "1405/06/22"; /* یکشنبه تعطیل رسمی */
-  assert.equal(workHours(sat, sat + 3 * 24 * HOUR), 27, "سه روز کاری عادی = ۲۷ ساعت");
-  assert.equal(workHours(sat, sat + 3 * 24 * HOUR, holiday), 18, "با یک روز تعطیل = ۱۸ ساعت");
+  assert.equal(workHours(sat, sat + 3 * 24 * HOUR), 3 * 9.5, "سه روز کاری عادی");
+  assert.equal(workHours(sat, sat + 3 * 24 * HOUR, holiday), 2 * 9.5, "با یک روز تعطیل");
 
   /* روز تعطیل در شمارش روز کاری هم رد می‌شود */
   const e = endOfNthWorkingDay(sat + 9 * HOUR, 2, holiday);
@@ -165,11 +198,11 @@ test("SLA-04: زمان‌بندی هشدارها در لحظهٔ ارسال سا
   }
   /* هیچ هشداری بعد از مهلت نمی‌افتد */
   assert.ok(s.rows.every((x) => x.fireAt < s.deadlineAt));
-  /* هیچ هشداری خارج از ساعت کاری نمی‌افتد (SLA-06) */
+  /* هیچ هشداری خارج از ساعت اداری نمی‌افتد (SLA-06) */
   for (const x of s.rows) {
     const p = tehranParts(x.fireAt);
     assert.notEqual(p.dow, 5, "هشدار نباید روز جمعه بیفتد");
-    assert.ok(p.hour >= 8 && p.hour <= 17, `هشدار در ساعت ${p.hour} افتاده`);
+    assert.ok(inWorkHours(x.fireAt), `هشدار در ${p.hour}:${p.minute} افتاده`);
   }
 });
 

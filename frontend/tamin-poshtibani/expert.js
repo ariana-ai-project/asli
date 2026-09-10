@@ -15,6 +15,9 @@
   const COMPANY = CFG.company || "تونل سد آریانا";
   const PLATS = [["telegram", "تلگرام"], ["whatsapp", "واتساپ"], ["bale", "بله"], ["rubika", "روبیکا"]];
   const PLACES = ["محل پروژه", "انبار شرکت", "سایر"], PAYS = ["نقدی", "اعتباری", "۵۰٪ پیش‌پرداخت", "سایر"], DEALS = ["کارگاه", "دفتر مرکزی"], INVT = ["رسمی", "غیر رسمی"];
+  /* ارزش افزوده: انتخابی و اجباری. قیمتِ ردیف همیشه بدون ارزش افزوده است و
+     ارزش افزوده جداگانه ته جدول کمیسیون حساب می‌شود. */
+  const VATS = ["دارد", "ندارد"], VAT_RATE = 0.1;
   const REQT = ["عادی", "فوری"], DEALT = ["خرید", "فروش"];
   /* فیلدهای استعلام: [کلید, عنوان, عرض, نوع, اختیاری؟]
      اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی).
@@ -23,7 +26,7 @@
               ["dtime", "زمان تحویل", 116, "date"], ["valid_days", "اعتبار پیش‌فاکتور (روز)", 100, "num", true], ["ship", "روش حمل", 130, "", true]];
   const OPTL = ' <span class="dim" style="font-weight:400;font-size:.75rem">(اختیاری)</span>';
   const LBL = { spec: "جنس / مشخصات فنی", unit: "واحد", qty: "مقدار", price: "قیمت واحد", dtime: "زمان تحویل", valid_days: "اعتبار پیش‌فاکتور", ship: "روش حمل",
-    place: "محل تحویل", place_other: "محل تحویل (سایر)", pay: "شرایط تسویه", deal: "محل معامله", invoice: "نوع فاکتور" };
+    place: "محل تحویل", place_other: "محل تحویل (سایر)", pay: "شرایط تسویه", vat: "ارزش افزوده", deal: "محل معامله", invoice: "نوع فاکتور" };
 
   /* ---------- وضعیت ---------- */
   const S = {
@@ -186,7 +189,7 @@
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
         <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
-        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
+        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""}></td>
           <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}</td>
@@ -194,6 +197,7 @@
           ${QF.map(([k, , w, ty, opt]) => `<td><input class="tp-input ${!opt && (q[k] == null || q[k] === "") ? "bad" : ""} ${ty === "date" ? "date" : ""} ${ty === "num" ? "num" : ""}" data-qf="${q.id}|${k}" ${opt ? 'data-opt="1"' : ""} value="${esc(q[k] == null ? "" : q[k])}" style="width:${w}px" ${ty === "date" ? "readonly" : ""} ${ty === "num" ? 'inputmode="decimal"' : ""}></td>`).join("")}
           <td><select class="tp-select ${q.invoice ? "" : "bad"}" data-qf="${q.id}|invoice"><option value="">—</option>${INVT.map((v) => `<option ${q.invoice === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td><select class="tp-select ${q.pay ? "" : "bad"}" data-qf="${q.id}|pay"><option value="">—</option>${PAYS.map((v) => `<option ${q.pay === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
+          <td><select class="tp-select ${q.vat ? "" : "bad"}" data-qf="${q.id}|vat" title="اجباری — قیمتِ ردیف باید بدون ارزش افزوده باشد؛ ارزش افزوده ته جدول جدا حساب می‌شود"><option value="">—</option>${VATS.map((v) => `<option ${q.vat === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td><select class="tp-select" data-qf="${q.id}|deal" title="اختیاری — تصمیم داخلی؛ از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td style="min-width:170px"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
             ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" style="margin-top:4px;width:100%">` : ""}</td>
@@ -228,7 +232,7 @@
 
   /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ---------- */
   function commData() {
-    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice }; sup.push(g); } g.rows[q.item_id] = q; });
+    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat }; sup.push(g); } g.rows[q.item_id] = q; });
     return { sup };
   }
   function vComm() {
@@ -251,7 +255,8 @@
   function commForm(r, d) {
     const its = items(), N = d.sup.length, span = 4 + 3 * N;
     const mAll = [], mVat = [], mTot = [];
-    d.sup.forEach((g) => { let t = 0; its.forEach((it) => { const q = g.rows[it.id]; if (q) t += (+q.price || 0) * (+q.qty || 0); }); mAll.push(t); mVat.push(Math.round(t * 0.1)); mTot.push(t + Math.round(t * 0.1)); });
+    /* تأمین‌کننده‌ای که گفته ارزش افزوده ندارد، سطر ارزش افزوده‌اش صفر است */
+    d.sup.forEach((g) => { let t = 0; its.forEach((it) => { const q = g.rows[it.id]; if (q) t += (+q.price || 0) * (+q.qty || 0); }); const v = g.vat === "ندارد" ? 0 : Math.round(t * VAT_RATE); mAll.push(t); mVat.push(v); mTot.push(t + v); });
     const B = (fn) => d.sup.map((g, k) => fn(g, k)).join("");
     const chk = (v, t) => v === t ? "☑" : "☐", dealChk = (v) => d.sup.some((g) => g.deal === v) ? "☑" : "☐";
     return `<table class="cf">
@@ -267,7 +272,7 @@
       ${its.map((it, i) => `<tr><td class="num">${i + 1}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td>${esc(it.unit)}</td>
         ${B((g) => { const q = g.rows[it.id]; const tot = q ? (+q.price || 0) * (+q.qty || 0) : ""; return `<td>${q ? esc(q.spec) : ""}</td><td class="num">${q ? M(tot) : ""}</td><td class="num">${q ? M(q.price) : ""}</td>`; })}</tr>`).join("")}
       <tr><td class="lbl rt" colspan="4">جمع کل بدون ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3">${M(mAll[k])}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">ارزش افزوده (۱۰٪):</td>${B((g, k) => `<td class="num" colspan="3">${M(mVat[k])}</td>`)}</tr>
+      <tr><td class="lbl rt" colspan="4">ارزش افزوده (۱۰٪):</td>${B((g, k) => `<td class="num" colspan="3">${g.vat === "ندارد" ? "ندارد" : M(mVat[k])}</td>`)}</tr>
       <tr><td class="lbl rt" colspan="4">جمع کل با ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3" style="font-weight:700">${M(mTot[k])}</td>`)}</tr>
       <tr><td class="lbl rt" colspan="4">نوع فاکتور و میزان مالیات و عوارض:</td>${B((g) => `<td colspan="3">${esc(g.invoice || "—")}</td>`)}</tr>
       <tr><td class="lbl rt" colspan="4">مدت اعتبار پیش‌فاکتور:</td>${B((g) => `<td colspan="3">${g.valid ? esc(g.valid) + " روز" : "—"}</td>`)}</tr>
