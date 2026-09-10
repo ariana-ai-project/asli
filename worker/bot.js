@@ -1690,10 +1690,23 @@ async function onChatMember(env, m) {
   const status = m.new_chat_member && m.new_chat_member.status;
   if (!["channel", "supergroup", "group"].includes(chat.type)) return { ok: true };
 
-  if (status === "administrator") {
+  /* در کانال، بات برای فرستادن پیام باید ادمین باشد؛ در گروه، عضو بودن کافی
+     است و افزودنش هم همان «member» را می‌فرستد. اگر فقط administrator را قبول
+     می‌کردیم، مدیری که بات را به گروهش اضافه کرده و ادمین نکرده، هیچ اعلانی
+     نمی‌گرفت و جایی هم نمی‌دید چرا. */
+  const joined = status === "administrator" || (status === "member" && chat.type !== "channel");
+  if (joined) {
     await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
       .bind(JSON.stringify(String(chat.id)), now()).run();
-    try { await telegram(env).sendMessage(chat.id, "✅ این کانال به‌عنوان کانال هشدار مدیر واحد پشتیبانی ثبت شد.\nاز این پس عبور از مهلت‌ها این‌جا اعلام می‌شود."); } catch (_) { /* شاید هنوز اجازهٔ ارسال ندارد */ }
+    try {
+      await telegram(env).sendMessage(chat.id,
+        "✅ این‌جا به‌عنوان کانال اعلان مدیر واحد پشتیبانی ثبت شد.\n\n"
+        + "از این پس این‌ها اعلام می‌شود:\n"
+        + "• هر تغییر وضعیت در باکس‌های پایش هر درخواست\n"
+        + "• عبور از مهلت\n"
+        + "• بسته شدن درخواست، با دکمهٔ «مشاهده کردم»\n\n"
+        + "<i>اعلان‌ها فقط در ساعت اداری فرستاده می‌شوند.</i>");
+    } catch (_) { /* شاید هنوز اجازهٔ ارسال ندارد */ }
   } else if (["left", "kicked"].includes(status)) {
     const cur = await settingValue(env, "managerChat");
     if (cur === String(chat.id)) await env.DB.prepare("DELETE FROM settings WHERE key='managerChat'").run();
