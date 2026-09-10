@@ -22,11 +22,13 @@ import { bundleData, buildFiles, readiness } from "./bundle.js";
 import { commissionHtml } from "./sheets.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
+import { STAGE_NAMES, queueStmt } from "./queue.js";
+import { stageWatch, markManagerSeen } from "./manager.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
 
-export const STAGE_NAMES = ["مشاهده", "بررسی سوابق", "جستجوی هوشمند", "استعلامات", "پیش‌فاکتور", "جدول کمیسیون"];
+export { STAGE_NAMES, queueStmt } from "./queue.js";
 const PANEL_URL = "https://arianaai.website/tamin-poshtibani/expert";
 
 /* عددهای فارسی، چون بقیهٔ سامانه هم فارسی نشان می‌دهد. ممیز هم فارسی می‌شود
@@ -37,20 +39,6 @@ const M = (n) => String(n == null ? "" : n).replace(/\d/g, (d) => FA[+d]).replac
 /* ------------------------------------------------------------------ */
 /* صف پیام (TG-05، INV-10)                                             */
 /* ------------------------------------------------------------------ */
-
-/**
- * پیام را برای ارسال در صف می‌گذارد و statement آن را برمی‌گرداند تا در همان
- * batchِ صدازننده اجرا شود (هر کوئری D1 یک subrequest است و پلن رایگان ۵۰ تا دارد).
- *
- * `idem` کلید یکتای رویداد است: اگر همان رویداد دوبار به صف برود — مثلاً چون
- * تلگرام آپدیت را دوباره فرستاد یا Cron همزمان دوبار اجرا شد — فقط یکی می‌ماند.
- */
-export function queueStmt(env, idem, chat, text, keyboard) {
-  return env.DB.prepare(
-    `INSERT INTO outbox (idem,channel,target,payload_json,status,next_at,created_at)
-     VALUES (?,'telegram',?,?,'pending',?,?) ON CONFLICT(idem) DO NOTHING`,
-  ).bind(idem, String(chat), JSON.stringify({ text, keyboard: keyboard || null }), now(), now());
-}
 
 /**
  * صف را می‌فرستد. هر ارسال یک subrequest است، پس سقف دارد.
@@ -1432,6 +1420,21 @@ async function onCallback(env, cq) {
   const chat = cq.message && cq.message.chat && cq.message.chat.id;
   const [action, , idRaw] = T(cq.data).split(":");
   const id = parseInt(idRaw, 10);
+  /* دکمهٔ مدیر پیش از احراز کارشناس می‌آید: از کانال مدیر زده می‌شود، نه از
+     گفت‌وگوی یک کارشناس. mseen:<assignmentId> */
+  if (action === "mseen") {
+    const mgr = await settingValue(env, "managerChat");
+    if (!mgr || String(chat) !== String(mgr)) { await ack("این دکمه فقط از کانال مدیر کار می‌کند.", true); return { ok: true }; }
+    await markManagerSeen(env, parseInt(T(cq.data).split(":")[1], 10));
+    await ack("از میز کار برداشته شد ✅");
+    if (cq.message) {
+      await api.editMessageText(chat, cq.message.message_id,
+        (cq.message.text ? esc(cq.message.text) : "✅ درخواست بسته شد")
+        + "\n\n<i>✅ مدیر مشاهده کرد — از میز کار برداشته شد.</i>").catch(() => {});
+    }
+    return { ok: true };
+  }
+
   const ex = chat ? await expertOfChat(env, chat) : null;
 
   if (!ex) { await ack("این گفت‌وگو به کارشناسی وصل نیست.", true); return { ok: true }; }
@@ -1708,6 +1711,13 @@ async function onChatMember(env, m) {
  */
 export async function scheduled(env) {
   const a = await runAlerts(env, 15);
+  /* رنگ‌های پایش را می‌سنجد و تغییرها را برای مدیر به صف می‌گذارد. پیش از
+     drain است تا اگر چیزی تازه به صف آمد، در همین اجرا برود. */
+  let w = { checked: 0, changed: 0 };
+  try {
+    const [settings, managerChat] = await Promise.all([getSettings(env), settingValue(env, "managerChat")]);
+    w = await stageWatch(env, settings, managerChat, 40);
+  } catch (e) { console.error("stageWatch failed", e && e.message); }
   const d = await drainOutbox(env, 20);
-  return { ...a, ...d };
+  return { ...a, ...d, watched: w.checked, colorChanges: w.changed };
 }

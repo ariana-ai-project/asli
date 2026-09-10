@@ -150,6 +150,34 @@ export function nextWorkMoment(ms, isHoliday) {
 /** آیا این لحظه داخل ساعت اداری است؟ */
 export const inWorkHours = (ms, isHoliday) => nextWorkMoment(ms, isHoliday) === ms;
 
+/**
+ * رنگ یکی از شش باکس پایش — همان تابعِ `TP.stageColor` در shared.js.
+ *
+ * چرا این‌جا هم لازم است: مدیر باید در تلگرام همان رنگی را ببیند که در میز کار
+ * می‌بیند. اگر دو پیاده‌سازی واگرا شوند، اعلانی می‌رسد که با صفحه نمی‌خواند —
+ * و آن بدتر از نبودِ اعلان است. تست تطابق (time.test.mjs) این دو را قفل می‌کند.
+ *
+ *   idle  ارسال‌نشده        done  انجام‌شده       muted  هشدار خاموش / خارج از کارتابل
+ *   empty در مهلت           warn  از آستانه گذشت  late   از آستانهٔ بعدی هم گذشت
+ *   over  مهلت تمام شد
+ */
+export function stageColor(a, i, thr, nowMs, isHoliday) {
+  if (!a.dispatchedAt) return "idle";
+  if (!a.active) return a.done[i] ? "done" : "muted";
+  if (a.done[i]) return "done";
+  const act = thr.map((p, k) => ({ i: k, p })).filter((t) => t.p !== "" && t.p != null && !isNaN(t.p));
+  const mine = act.find((t) => t.i === i); if (!mine) return "muted";
+  const b = budgetHours(a.dispatchedAt, a.days, isHoliday); if (b <= 0) return "empty";
+  const el = workHours(a.dispatchedAt, nowMs, isHoliday); if (el >= b) return "over";
+  const t = Math.max(mine.p / 100 * b, 1), nx = act.find((t2) => t2.i > i);
+  if (nx && el >= Math.max(nx.p / 100 * b, 1)) return "late";
+  return el >= t ? "warn" : "empty";
+}
+
+/** رنگ هر شش باکس، یک‌جا */
+export const stageColors = (a, thr, nowMs, isHoliday) =>
+  [0, 1, 2, 3, 4, 5].map((i) => stageColor(a, i, thr, nowMs, isHoliday));
+
 /** ساعات کاری بین دو لحظه */
 export function workHours(a, b, isHoliday) {
   if (!(b > a)) return 0;

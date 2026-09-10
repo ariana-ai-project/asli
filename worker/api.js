@@ -23,11 +23,13 @@ import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
+import { notifyClosed } from "./manager.js";
 import { commissionHtml } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
-import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
+import { handleUpdate, makeLink, scheduled, dispatchText, drainOutbox } from "./bot.js";
+import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -129,6 +131,8 @@ const COLUMN_MIGRATIONS = [
   ["proformas", "extract_state", "TEXT"],     /* pending | ok | refused | failed */
   ["proformas", "extract_at", "INTEGER"],
   ["quotes", "vat", "TEXT"],                  /* ارزش افزوده: دارد | ندارد (اجباری، انتخابی) */
+  ["assignments", "mgr_colors", "TEXT"],      /* عکسِ شش رنگِ پایش، برای تشخیص تغییر (اعلان مدیر) */
+  ["assignments", "mgr_seen_at", "INTEGER"],  /* مدیر خاتمه را دید — از میز کارش می‌رود */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -432,7 +436,10 @@ async function desk(env, url) {
   const limit = Math.min(1000, Math.max(20, int(url.searchParams.get("limit"), 300)));
   const offset = Math.max(0, int(url.searchParams.get("offset"), 0));
   const conds = [], args = [];
-  const scopeSql = "r.id IN (SELECT request_id FROM items WHERE state IN ('open','hold') UNION SELECT request_id FROM assignments WHERE dispatched_at > ?)";
+  /* درخواستِ زنده همیشه هست؛ درخواستِ بسته تا وقتی مدیر «مشاهده کردم» را
+     نزده (یا سی روز نگذشته) از میز کار بیرون نمی‌رود. */
+  const scopeSql = "r.id IN (SELECT request_id FROM items WHERE state IN ('open','hold')"
+    + " UNION SELECT request_id FROM assignments WHERE dispatched_at > ? AND mgr_seen_at IS NULL)";
   if (id) { conds.push("r.id=?"); args.push(id); }
   else {
     if (scope !== "all") { conds.push(scopeSql); args.push(now() - 30 * DAY); }
@@ -733,6 +740,17 @@ async function applyDecision(env, actor, aid, action, payload) {
   }
   const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(aid).first();
   await env.DB.batch([ev(env, actor, action === "end" ? "close" : action, a && a.request_id, null, { assignment_id: aid, notify: "telegram" })]);
+  /* بسته شدن یک خبر است، نه چیزی که بی‌صدا از جلوی چشم مدیر برداشته شود.
+     مگر آنکه خودِ مدیر خاتمه را تأیید کرده باشد — تأیید، همان مشاهده است. */
+  if (action === "end") {
+    if (!actor.startsWith("expert:")) {
+      await env.DB.prepare("UPDATE assignments SET mgr_seen_at=COALESCE(mgr_seen_at,?) WHERE id=?").bind(t, aid).run();
+      return;
+    }
+    const chat = await env.DB.prepare("SELECT value FROM settings WHERE key='managerChat'").first();
+    let mgr = null; if (chat) { try { mgr = JSON.parse(chat.value); } catch (_) { mgr = null; } }
+    await notifyClosed(env, aid, mgr, "کارشناس").catch(() => {});
+  }
 }
 
 /* ------------------------------------------------------------------ */

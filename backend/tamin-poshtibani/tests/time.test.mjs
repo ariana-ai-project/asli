@@ -26,7 +26,7 @@ import vm from "node:vm";
 import {
   HOUR, TEHRAN_OFFSET, workHours, endOfNthWorkingDay, budgetHours,
   addWorkingHours, alertSchedule, jStr, jStr2ms, tehranParts, jValid, jLen,
-  nextWorkMoment, inWorkHours,
+  nextWorkMoment, inWorkHours, stageColor, stageColors,
 } from "../../../worker/time.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -76,6 +76,35 @@ test("تطابق پایان n‌اُمین روز کاری و بودجهٔ مه�
       Math.round(TP.budget(a, n) * 1e6) / 1e6,
       `بودجه برای ${n} روز از ${new Date(a).toISOString()}`,
     );
+  }
+});
+
+test("تطابق رنگ باکس‌های پایش با مرورگر", () => {
+  /* مدیر باید در تلگرام همان رنگی را ببیند که در میز کار می‌بیند. اگر این دو
+     واگرا شوند، اعلانی می‌رسد که با صفحه نمی‌خواند — بدتر از نبودِ اعلان. */
+  const r = rng(31337);
+  const THRS = [[10, 30, 50, 70, 90, 100], [20, 40, 60, 80, "", 100], [5, "", null, 70, 95, 100]];
+  let seen = new Set();
+  for (let k = 0; k < 500; k++) {
+    const dispatchedAt = randomMoment(r);
+    const a = {
+      dispatchedAt: r() < 0.05 ? null : dispatchedAt,
+      days: 1 + Math.floor(r() * 6),
+      active: r() > 0.15,
+      done: [0, 1, 2, 3, 4, 5].map(() => r() > 0.6),
+    };
+    const thr = THRS[Math.floor(r() * THRS.length)];
+    const nowMs = dispatchedAt + Math.floor(r() * 12 * 24 * HOUR);
+    for (let i = 0; i < 6; i++) {
+      const mine = stageColor(a, i, thr, nowMs);
+      seen.add(mine);
+      assert.equal(mine, TP.stageColor(a, i, thr, nowMs), `باکس ${i} در ${new Date(nowMs).toISOString()}`);
+    }
+    assert.deepEqual(stageColors(a, thr, nowMs), [0, 1, 2, 3, 4, 5].map((i) => stageColor(a, i, thr, nowMs)));
+  }
+  /* اگر نمونه‌ها فقط یک رنگ بدهند، تست عملاً چیزی نسنجیده است */
+  for (const c of ["idle", "done", "muted", "empty", "warn", "late", "over"]) {
+    assert.ok(seen.has(c), `رنگ «${c}» در نمونه‌ها نیامد — تست پوشش ندارد`);
   }
 });
 
