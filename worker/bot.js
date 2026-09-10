@@ -1123,8 +1123,9 @@ async function makeLetter(env, api, chat, ex, letterId) {
 
   let out;
   try {
+    /* همان قاعدهٔ جدول کمیسیون: فقط استعلام‌های تیک‌خورده و قلم‌هایی که آن‌ها قیمت داده‌اند */
     out = await writeLetter(env, {
-      transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes,
+      transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes, allItems: d.items,
       notes: d.assignment.notes, expert: d.expert, company: d.company,
     });
   } catch (e) {
@@ -1162,6 +1163,14 @@ async function makeLetter(env, api, chat, ex, letterId) {
     `📝 <b>${esc(letter.subject)}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`);
   if (out.letter.uncertain && out.letter.uncertain.length) {
     await api.sendMessage(chat, `⚠️ این‌ها در صحبتتان روشن نبود و در نامه نیامد:\n${out.letter.uncertain.map((u) => "• " + esc(u)).join("\n")}`);
+  }
+  /* عددی که مدل خودش نوشته و در دادهٔ سامانه نیست، پیش از پیوست کردن باید دیده شود */
+  const mt = out.meta || {};
+  if ((mt.suspicious || []).length || (mt.unresolved || []).length) {
+    await api.sendMessage(chat, "⚠️ <b>پیش از پیوست کردن، این‌ها را در نامه چک کنید:</b>\n"
+      + ((mt.suspicious || []).length ? `• عددهایی که از دادهٔ سامانه نیامده‌اند: <b>${esc(mt.suspicious.join("، "))}</b>\n` : "")
+      + ((mt.unresolved || []).length ? `• جای‌خالیِ حل‌نشده (با «—» پر شد): ${esc(mt.unresolved.join("، "))}\n` : "")
+      + `\nنامه بر پایهٔ ${M(mt.items || 0)} قلمِ تیک‌خورده و ${M(mt.suppliers || 0)} تأمین‌کننده نوشته شده — همان جدول کمیسیون.`).catch(() => {});
   }
   await api.sendMessage(chat, "برای گرفتن کل بستهٔ فایل‌ها (برگهٔ درخواست + جدول کمیسیون + نامه) دستور /tahvil را بزنید.", panelButton);
   return { ok: true };

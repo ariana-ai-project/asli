@@ -240,7 +240,7 @@
     if (!a.commission_at) return `<div class="pad"><div class="empty"><b>جدول کمیسیون هنوز ساخته نشده.</b>از تب استعلامات، تأمین‌کنندگان منتخب را «تأیید نهایی» کنید و «تولید جدول کمیسیون» را بزنید.</div></div>`;
     const d = commData();
     if (!d.sup.length) return `<div class="pad"><div class="empty">هیچ استعلام تأییدنهایی‌شده‌ای نیست.</div></div>`;
-    return `<div class="pad"><div class="toolrow noprint"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().length} قلم</span>
+    return `<div class="pad"><div class="toolrow noprint"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
         <button class="tp-btn sm" data-xls style="margin-inline-start:auto">دانلود اکسل</button><button class="tp-btn sm" data-print>پرینت / PDF (برگه درخواست + جدول)</button></div>
       <div class="tp-note noprint" style="display:block;margin-bottom:10px">
         <b>توضیحات تدارکات و پشتیبانی</b> — این متن پای برگهٔ کمیسیون چاپ می‌شود. از بات تلگرام هم با <code>/tozihat</code> می‌توانید بنویسید.
@@ -253,7 +253,8 @@
       <div class="tp-note noprint">قالب مطابق فرم <b>TSA-PS-FO-02</b> و راست‌به‌چپ: ردیف و شرح اقلام سمت راست، بلوک هر تأمین‌کننده به سمت چپ. ارزش افزوده ۱۰٪. مبلغ کل هر سطر = قیمت واحد × تعداد. <b>قالب برگهٔ درخواست موقت است</b> و با فرمت راهکاران جایگزین می‌شود.</div></div>`;
   }
   function commForm(r, d) {
-    const its = items(), N = d.sup.length, span = 4 + 3 * N;
+    /* فقط قلم‌هایی که تأمین‌کنندهٔ تیک‌خورده برایشان قیمت داده — همان قاعدهٔ سرور */
+    const its = items().filter((it) => d.sup.some((g) => g.rows[it.id])), N = d.sup.length, span = 4 + 3 * N;
     const mAll = [], mVat = [], mTot = [];
     /* تأمین‌کننده‌ای که گفته ارزش افزوده ندارد، سطر ارزش افزوده‌اش صفر است */
     d.sup.forEach((g) => { let t = 0; its.forEach((it) => { const q = g.rows[it.id]; if (q) t += (+q.price || 0) * (+q.qty || 0); }); const v = g.vat === "ندارد" ? 0 : Math.round(t * VAT_RATE); mAll.push(t); mVat.push(v); mTot.push(t + v); });

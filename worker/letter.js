@@ -15,7 +15,7 @@ import { ExtractError } from "./extract.js";
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const AI_URL = "https://api.anthropic.com/v1/messages";
 
-export const LETTER_PROMPT_VERSION = "letter/1.0";
+export const LETTER_PROMPT_VERSION = "letter/2.0";
 
 /**
  * صوت را به متن فارسی تبدیل می‌کند.
@@ -94,35 +94,131 @@ const LETTER_SYSTEM = `تو نامه‌های اداری یک شرکت پیما�
    عددها از چپ خوانده می‌شوند و ترتیبِ وارونه، تاریخ را وارونه نشان می‌دهد.
    کلمه‌های مرکب را هم با نیم‌فاصله بنویس: «تأمین‌کننده»، «پیش‌فاکتور»، «قیمت‌ها»، «می‌شود».
 
-۱۰. تاریخ و شمارهٔ نامه را خودت در متن نیاور؛ جای آن‌ها فیلدهای بالای سربرگ است و سامانه پرشان می‌کند.`;
+۱۰. تاریخ و شمارهٔ نامه را خودت در متن نیاور؛ جای آن‌ها فیلدهای بالای سربرگ است و سامانه پرشان می‌کند.
+
+۱۱. **هیچ عدد مالی یا شمارشی را خودت ننویس.** جمع مبلغ، قیمت، تعداد اقلام، شمارهٔ درخواست و تاریخ درخواست
+   را با جای‌خالی بگذار؛ سامانه از دادهٔ خودش پرشان می‌کند. جای‌خالی‌های مجاز (دقیقاً همین شکل، با همان
+   نام تأمین‌کننده و قلمی که در «اطلاعات درخواست» آمده):
+     {{شماره_درخواست}}  {{تاریخ_درخواست}}  {{طرف_مقابل}}
+     {{تعداد_اقلام_کمیسیون}}   ← چند قلم در جدول کمیسیون است
+     {{تعداد_اقلام_درخواست}}   ← کل اقلام درخواست
+     {{اقلام_کمیسیون}}          ← فهرست عنوان اقلام جدول، با ویرگول
+     {{جمع|نام تأمین‌کننده}}     ← جمع مبلغ همان تأمین‌کننده برای اقلام جدول، به ریال
+     {{تعداد|نام تأمین‌کننده}}   ← برای چند قلم قیمت داده
+     {{قیمت|نام تأمین‌کننده|عنوان قلم}} ← قیمت واحد یک قلم
+   مثال: «جمع مبلغ پیشنهادی {{جمع|شرکت آریا}} ریال برای {{تعداد|شرکت آریا}} قلم».
+   عددی که در «حرف کارشناس» آمده و در داده نیست (مثلاً «سه بار زنگ زدم») را می‌توانی با حروف بنویسی.`;
 
 /**
  * نامه را از رونویسی صوت و بافتِ درخواست می‌سازد.
  * خروجی ساختاریافته است تا قالب Word بدون تجزیهٔ متن پرش کند.
  */
-export async function writeLetter(env, { transcript, request, items, quotes, notes, expert, company }) {
+/**
+ * دادهٔ نامه از دادهٔ خام ارجاع: فقط استعلام‌های **تیک‌خورده** و قلم‌هایی که همان‌ها
+ * قیمت داده‌اند. همان قاعدهٔ جدول کمیسیون — نامه پیوستِ همان جدول است.
+ */
+export function letterData({ request, items, quotes, allItems }) {
+  const finals = (quotes || []).filter((q) => q.final && q.saved);
+  const covered = new Set(finals.map((q) => q.item_id));
+  const rows = (items || []).filter((i) => covered.has(i.id));
+  const suppliers = [...new Set(finals.map((q) => q.supplier_name))].map((name) => {
+    const qs = finals.filter((q) => q.supplier_name === name);
+    return {
+      name,
+      count: qs.length,
+      sum: qs.reduce((n, q) => n + (+q.price || 0) * (+q.qty || 0), 0),
+      prices: qs.map((q) => ({ item: (rows.find((i) => i.id === q.item_id) || {}).title || "", price: +q.price || 0 })),
+    };
+  });
+  return {
+    request, items: rows, suppliers,
+    totalItems: (allItems || items || []).length,
+  };
+}
+
+const money = (n) => Number(n || 0).toLocaleString("en-US");
+const norm = (s) => String(s == null ? "" : s).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/[\u200c\s]+/g, " ").trim().toLowerCase();
+const same = (a, b) => { const x = norm(a), y = norm(b); return x === y || (x.length > 3 && y.includes(x)) || (y.length > 3 && x.includes(y)); };
+
+/**
+ * جای‌خالی‌های نامه را از دادهٔ سامانه پر می‌کند.
+ *
+ * چرا این‌جا و نه در مدل: مدل یک بار «هفت قلم» و جمعِ هفت قلم را نوشت وقتی فقط
+ * دو قلم تیک خورده بود. عددی که در نامه می‌نشیند باید همان عددِ جدول کمیسیون
+ * باشد، و آن را فقط کد می‌تواند تضمین کند. هر جای‌خالیِ حل‌نشده «—» می‌شود و
+ * گزارش می‌شود؛ هر عددِ بزرگی که مدل خودش نوشته و در داده نیست، مشکوک علامت
+ * می‌خورد تا کارشناس پیش از فرستادن ببیند.
+ */
+export function fillLetter(letter, d) {
+  const unresolved = new Set();
+  const known = new Set([String(d.request.id), ...(d.suppliers || []).flatMap((s) => [s.sum, s.count, ...s.prices.map((p) => p.price)]).map(String)]);
+  known.add(String(d.items.length)); known.add(String(d.totalItems));
+
+  const findSup = (name) => (d.suppliers || []).find((s) => same(s.name, name));
+  const resolve = (token) => {
+    const parts = token.split("|").map((x) => x.trim());
+    const key = parts[0];
+    if (key === "شماره_درخواست") return String(d.request.id || "");
+    if (key === "تاریخ_درخواست") return String(d.request.date || "");
+    if (key === "طرف_مقابل") return String(d.request.party || "");
+    if (key === "تعداد_اقلام_کمیسیون") return String(d.items.length);
+    if (key === "تعداد_اقلام_درخواست") return String(d.totalItems);
+    if (key === "اقلام_کمیسیون") return d.items.map((i) => i.title).join("، ");
+    if (key === "جمع" || key === "تعداد" || key === "قیمت") {
+      const s = findSup(parts[1] || "");
+      if (!s) return null;
+      if (key === "جمع") return money(s.sum);
+      if (key === "تعداد") return String(s.count);
+      const p = s.prices.find((x) => same(x.item, parts[2] || ""));
+      return p ? money(p.price) : null;
+    }
+    return null;
+  };
+  const fill = (text) => String(text == null ? "" : text).replace(/\{\{([^{}]+)\}\}/g, (m, tok) => {
+    const v = resolve(tok);
+    if (v == null) { unresolved.add(tok.trim()); return "—"; }
+    return v;
+  });
+
+  const out = { ...letter };
+  for (const k of ["subject", "to", "salutation", "closing"]) if (out[k] != null) out[k] = fill(out[k]);
+  out.paragraphs = (letter.paragraphs || []).map(fill);
+
+  /* عددهای بزرگی که از داده نیامده‌اند — نامزدِ اشتباهِ مدل */
+  const text = [out.subject, ...(out.paragraphs || []), out.closing].join("\n");
+  const digits = (x) => x.replace(/[۰-۹]/g, (c) => "۰۱۲۳۴۵۶۷۸۹".indexOf(c)).replace(/[٠-٩]/g, (c) => "٠١٢٣٤٥٦٧٨٩".indexOf(c));
+  const suspicious = [];
+  /* روی متنِ اصلی جست‌وجو می‌شود تا همان شکلی که کارشناس در نامه می‌بیند گزارش شود */
+  for (const m of text.matchAll(/[\d۰-۹٠-٩][\d۰-۹٠-٩,٬]{3,}/g)) {
+    const raw = digits(m[0]).replace(/[,٬]/g, "");
+    if (raw.length >= 4 && !known.has(raw) && !/^1[34]\d\d$/.test(raw)) suspicious.push(m[0]);
+  }
+  return { letter: out, unresolved: [...unresolved], suspicious: [...new Set(suspicious)] };
+}
+
+/**
+ * نامه را از رونویسی صوت و بافتِ درخواست می‌سازد.
+ * خروجی ساختاریافته است تا قالب Word بدون تجزیهٔ متن پرش کند.
+ * مدل عدد نمی‌نویسد؛ جای‌خالی می‌گذارد و fillLetter پرش می‌کند.
+ */
+export async function writeLetter(env, { transcript, request, items, quotes, allItems, notes, expert, company }) {
   if (!env.ANTHROPIC_API_KEY) throw new ExtractError("کلید مدل ست نشده است.", 503);
 
-  /* تأمین‌کننده‌ای که همهٔ اقلام را قیمت نداده صریح علامت می‌خورد، وگرنه مدل
-     جمع‌های ناهم‌جنس را مقایسه می‌کند و می‌نویسد «الف گران‌تر از ب بود» — که غلط است. */
-    const total = (items || []).length;
-  const supplierLines = (quotes || []).length
-    ? [...new Set((quotes || []).map((q) => q.supplier_name))].map((s) => {
-      const rows = quotes.filter((q) => q.supplier_name === s);
-      const sum = rows.reduce((n, q) => n + (+q.price || 0) * (+q.qty || 0), 0);
-      const partial = total && rows.length < total;
-      return `- ${s}: برای ${rows.length} قلم از ${total || rows.length} قلمِ درخواست قیمت داده`
-        + `، جمع همان اقلام ${sum.toLocaleString("en-US")} ریال`
-        + (partial ? "  ⟵ ناقص است؛ جمع این تأمین‌کننده با تأمین‌کنندهٔ کامل قابل مقایسه نیست" : "");
-    }).join("\n")
-    : "هنوز استعلامی ثبت نشده است.";
+  const d = letterData({ request, items, quotes, allItems });
+  const supplierLines = d.suppliers.length
+    ? d.suppliers.map((s) => `- ${s.name}: برای ${s.count} قلم از ${d.items.length} قلمِ جدول قیمت داده`
+      + (s.count < d.items.length ? "  ⟵ ناقص است؛ جمعش با تأمین‌کنندهٔ کامل قابل مقایسه نیست" : "")
+      + `\n  جای‌خالی‌هایش: {{جمع|${s.name}}} · {{تعداد|${s.name}}}`
+      + s.prices.map((p) => ` · {{قیمت|${s.name}|${p.item}}}`).join("")).join("\n")
+    : "هنوز استعلامِ تیک‌خورده‌ای نیست.";
 
   const context = `شرکت: ${company}\n`
-    + `درخواست خرید شمارهٔ ${request.id}${request.date ? ` مورخ ${request.date}` : ""}\n`
-    + `طرف مقابل / مرکز هزینه: ${request.party || "—"}\n`
+    + `درخواست خرید {{شماره_درخواست}} مورخ {{تاریخ_درخواست}}\n`
+    + `طرف مقابل / مرکز هزینه: {{طرف_مقابل}}\n`
     + `کارشناس خرید: ${expert}\n\n`
-    + `اقلام:\n${(items || []).map((i) => `- ${i.title}${i.qty != null ? ` (${i.qty} ${i.unit || ""})` : ""}`).join("\n") || "—"}\n\n`
-    + `تأمین‌کنندگان و استعلام‌ها:\n${supplierLines}\n`
+    + `این درخواست {{تعداد_اقلام_درخواست}} قلم دارد و جدول کمیسیون برای {{تعداد_اقلام_کمیسیون}} قلم زیر است:\n`
+    + `${d.items.map((i) => `- ${i.title}${i.qty != null ? ` (${i.qty} ${i.unit || ""})` : ""}`).join("\n") || "—"}\n\n`
+    + `تأمین‌کنندگانِ تیک‌خورده:\n${supplierLines}\n`
     + (notes ? `\nتوضیحات کارشناس در برگهٔ کمیسیون:\n${notes}\n` : "");
 
   const r = await fetch(AI_URL, {
@@ -137,16 +233,23 @@ export async function writeLetter(env, { transcript, request, items, quotes, not
       messages: [{ role: "user", content: [{ type: "text", text:
         `<اطلاعات_درخواست>\n${context}\n</اطلاعات_درخواست>\n\n`
         + `<حرف_کارشناس>\n${transcript}\n</حرف_کارشناس>\n\n`
-        + `نامه را بنویس.` }] }],
+        + `نامه را بنویس. عددها را ننویس؛ فقط جای‌خالی‌های بالا را عیناً بگذار.` }] }],
     }),
   });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ExtractError(`نگارش نامه نشد: ${String((d.error && d.error.message) || r.status).slice(0, 200)}`, 502);
-  const use = (d.content || []).find((c) => c.type === "tool_use");
+  const dd = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ExtractError(`نگارش نامه نشد: ${String((dd.error && dd.error.message) || r.status).slice(0, 200)}`, 502);
+  const use = (dd.content || []).find((c) => c.type === "tool_use");
   if (!use) throw new ExtractError("مدل نامه را ساختاریافته برنگرداند.", 502);
 
+  const filled = fillLetter(use.input, d);
   return {
-    letter: { ...use.input, signature: `کارشناس خرید — ${expert}` },
-    meta: { model: d.model, prompt_version: LETTER_PROMPT_VERSION, tokens_in: d.usage?.input_tokens, tokens_out: d.usage?.output_tokens },
+    letter: { ...filled.letter, signature: `کارشناس خرید — ${expert}` },
+    meta: {
+      model: dd.model, prompt_version: LETTER_PROMPT_VERSION,
+      tokens_in: dd.usage?.input_tokens, tokens_out: dd.usage?.output_tokens,
+      unresolved: filled.unresolved, suspicious: filled.suspicious,
+      items: d.items.length, suppliers: d.suppliers.length,
+    },
   };
 }
+

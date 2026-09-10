@@ -48,6 +48,10 @@ export function commissionHtml({ request, items, quotes, notes, expert, company,
     if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat }; groups.push(g); }
     g.rows[q.item_id] = q;
   }
+  /* فقط قلم‌هایی که دست‌کم یک تأمین‌کنندهٔ تیک‌خورده برایشان قیمت داده در جدول
+     می‌آیند. قلمِ بی‌قیمت در جدول کمیسیون معنایی ندارد و کارشناس وقتی از هفت
+     خط دو تا را انتخاب می‌کند، یعنی همان دو قلم. */
+  items = items.filter((it) => groups.some((g) => g.rows[it.id]));
   const N = groups.length, span = 4 + 3 * N;
   const sums = groups.map((g) => items.reduce((n, it) => n + ((g.rows[it.id] ? (+g.rows[it.id].price || 0) * (+g.rows[it.id].qty || 0) : 0)), 0));
   /* قیمتِ ردیف‌ها همیشه بدون ارزش افزوده است؛ ارزش افزوده فقط این‌جا و فقط
