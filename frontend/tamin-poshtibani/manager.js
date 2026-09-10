@@ -119,7 +119,7 @@
   /* ---------- سرآیند و تب‌ها ---------- */
   function vTop() {
     const R = S.data.requests, items = R.reduce((a, r) => a + r.items.length, 0);
-    const TABS = [["desk", "میز ارجاع"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["log", "تصمیم‌ها و رویدادها"]];
+    const TABS = [["desk", "میز ارجاع"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["log", "تصمیم‌ها و رویدادها"]];
     return `<header class="tp-top">
       <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>میز ارجاع خرید</h1><div class="sub">${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}</div></div></div>
       <span class="spacer"></span>
@@ -149,6 +149,17 @@
       ${S.page.total ? `<button class="tp-btn sm danger" data-purge title="همهٔ درخواست‌ها را از سامانه پاک می‌کند">پاک کردن میز</button>` : ""}
       <span class="end">${visible().length} از ${S.data.requests.length} درخواست${S.page.total > S.page.limit ? ` · صفحهٔ ${Math.floor(S.page.offset / S.page.limit) + 1} از ${Math.ceil(S.page.total / S.page.limit)}
         <button class="tp-btn xs" data-page="-1" ${S.page.offset ? "" : "disabled"}>قبلی</button><button class="tp-btn xs" data-page="1" ${S.page.offset + S.page.limit < S.page.total ? "" : "disabled"}>بعدی</button>` : ""}</span></div>`;
+  }
+
+  /* وضعیت به تفکیک قلم — درخواست یک وضعیت ندارد، هر قلمش دارد.
+     تا شش قلم ردیف‌به‌ردیف، بیشتر از آن شمارشِ هر وضعیت؛ فهرست کامل در کشو. */
+  function itemStates(its) {
+    if (!its.length) return "";
+    const same = its.every((i) => i.state === its[0].state);
+    if (same && its.length > 1) return `<div class="dim" style="font-size:.72rem">همهٔ ${its.length} قلم: ${TP.STATES[its[0].state].label}</div>`;
+    if (its.length <= 6) return `<div style="font-size:.72rem;line-height:1.5;margin-top:2px">${its.map((i) => `<span class="st ${TP.STATES[i.state].cls}" style="font-size:.68rem;padding:0 5px">${TP.STATES[i.state].label}</span> <span class="dim" title="${esc(i.title)}">${esc(i.title.length > 22 ? i.title.slice(0, 21) + "…" : i.title)}</span>`).join("<br>")}</div>`;
+    const cnt = {}; its.forEach((i) => { cnt[i.state] = (cnt[i.state] || 0) + 1; });
+    return `<div class="dim" style="font-size:.72rem">${Object.entries(cnt).map(([k, n]) => `${n} ${TP.STATES[k].label}`).join(" · ")}</div>`;
   }
 
   function stageBoxes(r, a) {
@@ -208,7 +219,7 @@
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
             ${stageBoxes(r, a)}
-            <td class="sep" style="white-space:nowrap"><span class="st ${STL.cls}">${isActive(r, a) ? "در جریان" : STL.label}</span><br>
+            <td class="sep" style="white-space:nowrap"><span class="st ${STL.cls}">${isActive(r, a) ? "در جریان" : STL.label}</span>${itemStates(its)}<br>
               <button class="tp-btn xs warn" data-act="hold|${a.id}">تعلیق</button><button class="tp-btn xs danger" data-act="stop|${a.id}">توقف</button><button class="tp-btn xs" data-act="closed|${a.id}">خاتمه</button>
               ${its.some((i) => i.state === "hold") ? `<button class="tp-btn xs" data-act="open|${a.id}">بازگشت</button>` : ""}</td>
             <td><button class="tp-btn xs" data-open="${a.id}">مشاهده</button> <button class="tp-btn xs" data-move="${a.id}" ${a.dispatched_at ? "" : "disabled"}>تغییر</button></td>`;
@@ -234,6 +245,57 @@
       }
     }
     return h + `</tbody></table></div>`;
+  }
+
+  /* ---------- سوابق تأمین (IMP-13) ----------
+     اسنادِ خریدِ گذشته، یک‌بار و هر وقت مدیر خواست دوباره. تکراری‌ها درج
+     نمی‌شوند و هیچ رکوردی حذف نمی‌شود. پیش از اعمال، نقشهٔ ستون‌ها و شمارش‌ها
+     نشان داده می‌شود تا مدیر ببیند فایل درست خوانده شده. */
+  function vHist() {
+    const st = S.hist || {};
+    const t = st.total || {};
+    return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>سوابق تأمین</h2>
+      <p class="lead">فایل اکسلِ اسنادِ خرید (تاریخ، تأمین‌کننده، قلم، مقدار/فی/مبلغ) را بدهید. تب «بررسی سوابق» کارشناس از همین داده رتبهٔ تأمین‌کنندگان را می‌سازد؛ خریدِ ۱۴۰۴ به بعد ضریب یک دارد و هر ماه عقب‌تر خطی کمتر.</p>
+      <div class="toolrow"><button class="tp-btn primary" data-import-hist>بارگذاری فایل سوابق</button>
+        ${t.n ? `<span class="chip ok">${M(t.n)} سطر</span><span class="chip">${M(t.suppliers)} تأمین‌کننده</span><span class="chip">${M(t.items)} قلم</span><span class="chip num">${esc(t.oldest)} تا ${esc(t.newest)}</span>` : `<span class="chip warn">هنوز چیزی بارگذاری نشده</span>`}</div>
+      <div class="tp-note" style="display:block">ستون‌هایی که شناخته می‌شوند (هر نامی از این‌ها): <b>تاریخ</b> (تاریخ سند / تاریخ فاکتور / تاریخ خرید) · <b>تأمین‌کننده</b> (تامین کننده / فروشنده / طرف مقابل) · <b>قلم</b> (عنوان قلم خریدنی / نام قلم / کالا / شرح) · کد قلم · مقدار · فی (قیمت واحد) · مبلغ (مبلغ کل) · پروژه (مرکز هزینه / مصرف کننده) · شماره سند. مبلغ اگر نبود، فی × مقدار.</div>
+      ${(st.batches || []).length ? `<table class="tp-table" style="margin-top:10px"><thead><tr><th>#</th><th>فایل</th><th>زمان</th><th>سطر فایل</th><th>تازه</th><th>تکراری</th><th>تأمین‌کننده</th></tr></thead><tbody>
+        ${st.batches.map((b) => `<tr><td class="num">${b.id}</td><td>${esc(b.filename || "—")}</td><td class="num">${TP.fmt(b.imported_at)}</td><td class="num">${b.rows == null ? "—" : M(b.rows)}</td><td class="num">${M(b.inserted || 0)}</td><td class="num">${M(b.dup || 0)}</td><td class="num">${M(b.suppliers || 0)}</td></tr>`).join("")}
+      </tbody></table>` : ""}</div>`;
+  }
+
+  async function loadHist() { try { S.hist = await TP.api("/history/status"); } catch (e) { S.hist = { error: e.message }; } render(); }
+
+  function pickAndImportHist() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx,.xls";
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) importHistFile(f); };
+    inp.click();
+  }
+  async function importHistFile(f) {
+    const busy = TP.busy("در حال خواندن فایل سوابق…", esc(f.name));
+    let parsed;
+    try { parsed = await TP.importHistory(f, (t) => busy.set(esc(t))); }
+    catch (e) { busy.close(); TP.modal("فایل خوانده نشد", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); return; }
+    busy.close();
+    const st = parsed.stats, mp = parsed.mapping;
+    const mapRow = (k, l) => `<tr><td>${l}</td><td>${mp[k] != null ? `<b>${esc(parsed.headers[mp[k]])}</b>` : `<span class="dim">—</span>`}</td></tr>`;
+    /* پیش از اعمال: نقشه و شمارش (IMP-13) */
+    TP.modal("پیش‌نمایش سوابق — پیش از اعمال", `<b>${M(st.rows)}</b> سطر · <b>${M(st.good)}</b> قابل‌ورود · <b>${M(st.bad)}</b> ناقص (بی‌تاریخ/بی‌مبلغ/بی‌نام) · <b>${M(st.suppliers)}</b> تأمین‌کننده · بازه ${esc(st.dateMin || "—")} تا ${esc(st.dateMax || "—")}<br><br>
+      <table class="tp-table"><thead><tr><th>فیلد</th><th>ستون فایل</th></tr></thead><tbody>
+      ${mapRow("date", "تاریخ")}${mapRow("supplier", "تأمین‌کننده")}${mapRow("item", "قلم")}${mapRow("code", "کد قلم")}${mapRow("qty", "مقدار")}${mapRow("price", "فی")}${mapRow("amount", "مبلغ")}${mapRow("party", "پروژه / مرکز")}${mapRow("doc", "شماره سند")}</tbody></table>
+      <br><span class="dim">رکوردِ تکراری (همان تأمین‌کننده، قلم، تاریخ، مقدار، فی) دوباره درج نمی‌شود و هیچ رکوردی حذف نمی‌شود.</span>`,
+      async () => {
+        const b = TP.busy("ارسال سوابق…");
+        try {
+          const { batch_id } = await TP.api("/history/begin", { body: { filename: f.name, rows: st.rows, mapping: mp } });
+          const rows = parsed.rows; let k = 0, ins = 0, dup = 0;
+          for (let i = 0; i < rows.length; i += 500) { const r = await TP.api("/history/chunk", { body: { batch_id, rows: rows.slice(i, i + 500) } }); ins += r.inserted; dup += r.dup; b.set(`ارسال دستهٔ ${++k} از ${Math.ceil(rows.length / 500)}…`); }
+          const fin = await TP.api("/history/finish", { body: { batch_id } });
+          b.close();
+          TP.modal("سوابق بارگذاری شد", `<b>${M(ins)}</b> رکورد تازه · <b>${M(dup)}</b> تکراری (نادیده) · اکنون <b>${M(fin.total.n)}</b> سطر از <b>${M(fin.total.suppliers)}</b> تأمین‌کننده، ${esc(fin.total.oldest)} تا ${esc(fin.total.newest)}.`, null, "باشد", "");
+          await loadHist();
+        } catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+      }, "اعمال");
   }
 
   function vFoot() {
@@ -349,7 +411,7 @@
     app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
-        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : vLog()}</div>`);
+        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : vLog()}</div>`);
     wire();
     TP.stickHeader(app.querySelector("table.tp-table"));
     restore();
@@ -359,7 +421,8 @@
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
     const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#mcode").value.trim(); if (!c) return; TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); S.error = e.message; render(); } }; lg.onclick = go; G("#mcode").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
-    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); render(); });
+    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
+    const ih = G("[data-import-hist]"); if (ih) ih.onclick = pickAndImportHist;
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
@@ -417,7 +480,16 @@
     Q("[data-save-scores]").forEach((b) => b.onclick = async () => { await Promise.all([save({ assign: settings().assign, deadline: settings().deadline }), TP.api("/scores", { method: "PUT", body: S.scores })]); TP.modal("ذخیره شد", "ضرایب و ماتریس‌ها ذخیره شدند.", null, "باشد", ""); });
     const aa = G("[data-apply-asg]"); if (aa) aa.onclick = applyAssignAll;
     const ad = G("[data-apply-dl]"); if (ad) ad.onclick = applyDeadlineAll;
-    Q("[data-dec]").forEach((b) => b.onclick = async () => { const [what, id] = b.dataset.dec.split("|"); await TP.api(`/decisions/${id}/${what}`, { body: {} }); await refresh(); });
+    Q("[data-dec]").forEach((b) => b.onclick = async () => {
+      const [what, id] = b.dataset.dec.split("|");
+      if (what === "reject") {
+        /* دلیلِ رد برای کارشناس در تلگرام فرستاده می‌شود — همان‌طور که از دکمهٔ تلگرامِ مدیر */
+        const d = TP.modal("رد تصمیم کارشناس", `<div class="tp-field"><b>چرا رد می‌کنید؟</b><textarea class="tp-input" id="dec-note" rows="3" style="width:100%;margin-top:6px" placeholder="همین متن برای کارشناس می‌رود"></textarea></div>`,
+          async () => { await TP.api(`/decisions/${id}/reject`, { body: { note: (d.querySelector("#dec-note") || {}).value || "" } }); await refresh(); }, "رد و اطلاع به کارشناس");
+        return;
+      }
+      await TP.api(`/decisions/${id}/approve`, { body: {} }); await refresh();
+    });
     const le = G("[data-load-events]"); if (le) le.onclick = loadEvents;
   }
 

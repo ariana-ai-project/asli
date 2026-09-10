@@ -24,6 +24,7 @@ import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missi
 import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
+import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -50,7 +51,8 @@ export async function drainOutbox(env, limit = 20) {
      می‌رسد. (پاسخِ خودِ گفت‌وگو از این مسیر رد نمی‌شود؛ اگر کارشناس شب چیزی
      برای بات بفرستد، همان لحظه جواب می‌گیرد.) */
   const t = now();
-  if (!inWorkHours(t)) {
+  /* TG_IGNORE_HOURS فقط در توسعهٔ محلی ست می‌شود تا تست‌ها به ساعتِ دیواری وابسته نباشند */
+  if (!env.TG_IGNORE_HOURS && !inWorkHours(t)) {
     const at = nextWorkMoment(t);
     const r = await env.DB.prepare("UPDATE outbox SET next_at=? WHERE status='pending' AND next_at<?").bind(at, at).run();
     return { sent: 0, failed: 0, deferred: (r.meta && r.meta.changes) || 0, until: at };
@@ -246,7 +248,24 @@ async function expertOfChat(env, chatId) {
 
 async function onMessage(env, msg) {
   const chat = msg.chat && msg.chat.id;
-  if (!chat || (msg.chat.type !== "private")) return { ok: true }; /* گروه/کانال جای گفت‌وگو نیست */
+  /* کانال/گروه جای گفت‌وگو نیست — با یک استثنا: مدیر که «رد» را زده، دلیلش را
+     همان‌جا می‌نویسد. (در گروه با حالت خصوصیِ بات، فقط پاسخ‌های مستقیم به پیامِ
+     بات می‌رسند؛ برای همین از او خواسته می‌شود Reply کند.) */
+  if (chat && msg.chat.type !== "private") {
+    const mgr = await settingValue(env, "managerChat");
+    const pend = mgr && String(chat) === String(mgr) ? await settingValue(env, "mgrReject") : null;
+    if (pend && pend.decision_id && T(msg.text)) {
+      const reason = /^بدون دلیل$/.test(T(msg.text)) ? "" : T(msg.text);
+      await env.DB.prepare("DELETE FROM settings WHERE key='mgrReject'").run();
+      try {
+        await rejectDecision(env, pend.decision_id, reason);
+        await telegram(env).sendMessage(chat, "✅ رد ثبت شد و به کارشناس اطلاع داده شد.").catch(() => {});
+      } catch (e) { await telegram(env).sendMessage(chat, `رد ثبت نشد: ${esc(e.message)}`).catch(() => {}); }
+      await drainOutbox(env, 10).catch(() => {});
+    }
+    return { ok: true };
+  }
+  if (!chat) return { ok: true };
   const api = telegram(env);
   const text = T(msg.text);
 
@@ -891,8 +910,14 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
 
   const body = commissionHtml({ ...d, notes: d.assignment.notes });
   const t = now();
-  await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-    .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, channel: "telegram" })).run();
+  /* تولید جدول = مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند. باکس مدیر
+     همین‌جا سبز می‌شود، نه بعد از تحویل فایل‌ها. هشدارهای مانده هم بی‌معنی‌اند. */
+  await env.DB.batch([
+    env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, channel: "telegram" })),
+  ]);
   if (messageId) await api.editMessageText(chat, messageId, `📊 جدول کمیسیون با <b>${M(finals.length)}</b> خط ساخته شد.`).catch(() => {});
 
   let sent = true;
@@ -905,10 +930,45 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   if (!sent) warn.push("⚠️ فایل به تلگرام نرسید؛ در پنل با «تولید جدول کمیسیون» همین را می‌گیرید.");
   if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدشده ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
   if (!st.hasNotes) warn.push("📝 توضیحات پای برگه خالی است — با /tozihat می‌نویسید.");
-  await api.sendMessage(chat,
-    (warn.length ? warn.join("\n") + "\n\n" : "")
-    + `<b>برای این خرید نامهٔ پیوست هم لازم دارید؟</b>\nاگر چالشی داشتید یا چیزی هست که کمیسیون باید بداند، یک پیام صوتی بدهید یا تایپ کنید تا نامه‌اش را بنویسم.`,
-    letterOffer(aid));
+  return closeCard(env, api, chat, ex, aid, null,
+    `✅ <b>جدول کمیسیون تولید شد.</b>` + (warn.length ? "\n" + warn.join("\n") : ""));
+}
+
+/**
+ * کارتِ «تأیید کمیسیون و خاتمه» — زیرِ جدولِ تولیدشده.
+ *
+ * اقلامِ بازِ درخواست چندانتخابی‌اند: کارشناس هر کدام را که کمیسیون تأیید کرده
+ * تیک می‌زند و «خاتمه» را می‌زند. فقط همان‌ها بسته می‌شوند؛ اگر همه بودند
+ * درخواست به‌کل می‌رود، وگرنه با باقی اقلام در جریان می‌ماند. «ویرایش» پرونده
+ * را برای ادامهٔ کار باز نگه می‌دارد (پیش‌فاکتور تازه، خط تازه، جدول دوباره).
+ */
+async function closeCard(env, api, chat, ex, aid, messageId, head) {
+  const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+  if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const its = (await env.DB.prepare(
+    "SELECT id, title, qty, unit, commission_ok FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40",
+  ).bind(aid).all()).results || [];
+  if (!its.length) { await api.sendMessage(chat, "این درخواست قلمِ بازی ندارد.", panelButton); return { ok: true }; }
+  const n = its.filter((i) => i.commission_ok).length;
+  const s = await getSettings(env);
+
+  const kb = its.map((i) => [{
+    text: `${i.commission_ok ? "☑" : "☐"} ${short(i.title, 30)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`,
+    callback_data: `cm:${aid}:t:${i.id}`,
+  }]);
+  kb.push([{ text: "☑ همه", callback_data: `cm:${aid}:all:0` }, { text: "☐ هیچ", callback_data: `cm:${aid}:none:0` }]);
+  kb.push([{ text: `🔒 خاتمه (${M(n)} قلم)`, callback_data: `cm:${aid}:end:0` }, { text: "✏️ ویرایش", callback_data: `cm:${aid}:edit:0` }]);
+  kb.push([{ text: "📝 نامهٔ پیوست لازم دارم", callback_data: `lt:${aid}:ask:0` }]);
+  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+
+  const text = `${head ? head + "\n\n" : ""}🧾 <b>تأیید کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
+    + `کدام اقلام را کمیسیون تأیید کرد؟ روی هر قلم بزنید تا تیک بخورد؛ بعد «خاتمه».\n`
+    + `<b>${M(n)}</b> از ${M(its.length)} قلم تیک خورده.\n\n`
+    + (s.approvalRequired
+      ? "<i>چون «تصمیم کارشناس منوط به تأیید مدیر» فعال است، خاتمه اول برای مدیر می‌رود.</i>"
+      : "<i>«خاتمه» همان لحظه اقلامِ تیک‌خورده را می‌بندد؛ اگر همه بودند، درخواست از کارتابل می‌رود.</i>");
+  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
+  await api.sendMessage(chat, text, kb);
   return { ok: true };
 }
 
@@ -1015,11 +1075,6 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
 /* نامهٔ پیوست کمیسیون — از صدا یا نوشتهٔ کارشناس                                 */
 /* ------------------------------------------------------------------ */
 
-/** «نیاز به نامه دارید؟» — بعد از ثبت پیش‌فاکتور پرسیده می‌شود */
-function letterOffer(aid) {
-  return [[{ text: "📝 بله، نامه لازم دارم", callback_data: `lt:${aid}:ask:0` }],
-    [{ text: "نه، لازم نیست", callback_data: `lt:${aid}:no:0` }]];
-}
 
 async function startLetter(env, api, chat, ex, aid) {
   const a = await env.DB.prepare("SELECT a.id, r.id AS rid FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=? AND a.expert_id=?")
@@ -1213,6 +1268,7 @@ async function sendProgress(env, api, chat, aid, prefix) {
   if (!done[2]) kb.push([{ text: "✅ جستجو را انجام دادم", callback_data: `st:${aid}:smart:0` }]);
   if (done[3]) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `st:${aid}:table:0` }]);
   if (done[3] && done[4] && !done[5]) kb.push([{ text: "📦 گرفتن فایل‌ها و بستن کار", callback_data: `st:${aid}:deliver:0` }]);
+  if (done[5]) kb.push([{ text: "🧾 تأیید کمیسیون و خاتمه", callback_data: `cm:${aid}:card:0` }]);
   kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
   await api.sendMessage(chat,
     `${prefix ? prefix + "\n\n" : ""}📊 <b>پیشرفت درخواست ${esc(s.request_id)}</b>\n\n${progressBar(s)}`, kb).catch(() => {});
@@ -1444,6 +1500,34 @@ async function onCallback(env, cq) {
     return { ok: true };
   }
 
+  /* تصمیم مدیر روی درخواستِ کارشناس: mdec:<decisionId>:ok|no */
+  if (action === "mdec") {
+    const mgr = await settingValue(env, "managerChat");
+    if (!mgr || String(chat) !== String(mgr)) { await ack("این دکمه فقط از کانال مدیر کار می‌کند.", true); return { ok: true }; }
+    const [, didRaw, verdict] = T(cq.data).split(":");
+    const did = parseInt(didRaw, 10);
+    if (verdict === "ok") {
+      try {
+        const res = await approveDecision(env, did, "telegram");
+        await ack("تأیید شد ✅");
+        if (cq.message) await api.editMessageText(chat, cq.message.message_id,
+          (cq.message.text ? esc(cq.message.text) : "") + `\n\n<b>✅ تأیید شد</b> — ${M(res.closed || 0)} قلم بسته شد${res.fullyClosed ? "؛ درخواست به‌کل بسته شد." : "."}`).catch(() => {});
+      } catch (e) { await ack(String(e.message || "نشد").slice(0, 180), true); }
+      await drainOutbox(env, 10).catch(() => {});
+      return { ok: true };
+    }
+    if (verdict === "no") {
+      /* دلیل لازم است؛ پیام بعدیِ مدیر (در پاسخ به همین پیام) دلیل است */
+      await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('mgrReject',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+        .bind(JSON.stringify({ decision_id: did, at: now() }), now()).run();
+      await ack("دلیل رد را بنویسید");
+      await api.sendMessage(chat, "❌ <b>رد شد.</b> لطفاً <b>در پاسخ (Reply) به همین پیام</b> بنویسید چرا — همان متن برای کارشناس فرستاده می‌شود.\n\n<i>اگر نمی‌خواهید دلیلی بنویسید، فقط بنویسید «بدون دلیل».</i>").catch(() => {});
+      return { ok: true };
+    }
+    await ack();
+    return { ok: true };
+  }
+
   const ex = chat ? await expertOfChat(env, chat) : null;
 
   if (!ex) { await ack("این گفت‌وگو به کارشناسی وصل نیست.", true); return { ok: true }; }
@@ -1520,6 +1604,56 @@ async function onCallback(env, cq) {
     if (step === "go") { await ack("در حال ساختن…"); return makeTable(env, api, chat, ex, aid, mid); }
     await ack();
     return tableSelect(env, api, chat, ex, aid, null);
+  }
+
+  /* تأیید کمیسیون و خاتمه: cm:<aid>:<step>:<value> */
+  if (action === "cm") {
+    const [, aidRaw, step, valRaw] = T(cq.data).split(":");
+    const aid = parseInt(aidRaw, 10);
+    const mid = cq.message && cq.message.message_id;
+    const own = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+    if (!own) { await ack("این ارجاع متعلق به شما نیست.", true); return { ok: true }; }
+
+    if (step === "t") {
+      await env.DB.prepare("UPDATE items SET commission_ok=CASE WHEN commission_ok=1 THEN 0 ELSE 1 END WHERE id=? AND assignment_id=? AND state='open'")
+        .bind(parseInt(valRaw, 10), aid).run();
+      await ack();
+      return closeCard(env, api, chat, ex, aid, mid);
+    }
+    if (step === "all" || step === "none") {
+      await env.DB.prepare("UPDATE items SET commission_ok=? WHERE assignment_id=? AND state='open'").bind(step === "all" ? 1 : 0, aid).run();
+      await ack();
+      return closeCard(env, api, chat, ex, aid, mid);
+    }
+    if (step === "edit") {
+      /* پرونده باز می‌ماند: مرحلهٔ «جدول کمیسیون» از سبز برمی‌گردد تا معلوم باشد کار ادامه دارد */
+      await env.DB.batch([
+        env.DB.prepare("UPDATE assignments SET commission_at=NULL WHERE id=?").bind(aid),
+        env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+          .bind(now(), `expert:${ex.id}`, "commission_reopen", null, JSON.stringify({ assignment_id: aid, channel: "telegram" })),
+      ]);
+      await ack("پرونده برای ویرایش باز است");
+      if (mid) await api.editMessageText(chat, mid, "✏️ پرونده باز است. پیش‌فاکتور تازه بفرستید، خط اضافه کنید یا قیمت‌ها را عوض کنید؛ بعد دوباره جدول کمیسیون را بسازید.", panelButton).catch(() => {});
+      return sendProgress(env, api, chat, aid);
+    }
+    if (step === "end") {
+      let res;
+      try { res = await expertDecision(env, ex, aid, { action: "end" }); }
+      catch (e) { await ack(String(e.message || "نشد").slice(0, 180), true); return { ok: true }; }
+      await ack(res.pending ? "برای تأیید مدیر رفت" : "بسته شد ✅");
+      const txt = res.pending
+        ? `🟠 <b>خاتمهٔ ${M(res.items)} قلم برای تأیید مدیر فرستاده شد.</b>\nتا تأیید یا ردِ او، درخواست در کارتابل شما می‌ماند و نتیجه همین‌جا می‌آید.`
+        : `🔒 <b>${M(res.closed)} قلم بسته شد.</b>` + (res.fullyClosed
+          ? "\nهمهٔ اقلام تمام شد و درخواست از کارتابل شما خارج شد. خسته نباشید."
+          : "\nباقی اقلام همچنان در کارتابل شماست و پیگیری می‌شود.");
+      if (mid) await api.editMessageText(chat, mid, txt, panelButton).catch(() => api.sendMessage(chat, txt, panelButton));
+      else await api.sendMessage(chat, txt, panelButton);
+      /* پیام‌های صف (اعلان مدیر) بی‌درنگ بروند، نه با Cron بعدی */
+      await drainOutbox(env, 10).catch(() => {});
+      return { ok: true };
+    }
+    await ack();
+    return closeCard(env, api, chat, ex, aid, null);
   }
 
   /* جریان پیش‌فاکتور: pf:<uploadId>:<step>:<value> */

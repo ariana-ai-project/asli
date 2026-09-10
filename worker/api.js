@@ -23,7 +23,8 @@ import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
-import { notifyClosed } from "./manager.js";
+import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
+import { HISTORY_SCHEMA, historyBegin, historyChunk, historyFinish, historyStatus, historyFor } from "./history.js";
 import { commissionHtml } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
@@ -133,6 +134,7 @@ const COLUMN_MIGRATIONS = [
   ["quotes", "vat", "TEXT"],                  /* ارزش افزوده: دارد | ندارد (اجباری، انتخابی) */
   ["assignments", "mgr_colors", "TEXT"],      /* عکسِ شش رنگِ پایش، برای تشخیص تغییر (اعلان مدیر) */
   ["assignments", "mgr_seen_at", "INTEGER"],  /* مدیر خاتمه را دید — از میز کارش می‌رود */
+  ["decisions", "note", "TEXT"],              /* دلیلِ ردِ مدیر (یا مسیرِ تأیید) */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -159,6 +161,7 @@ async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
+  await env.DB.exec(HISTORY_SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   await migrateColumns(env);
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();
   if (!c || !c.n) {
@@ -713,45 +716,7 @@ async function commission(env, ex, aid) {
   return { ok: true };
 }
 
-/* تصمیم کارشناس: تعلیق/توقف/خاتمه — یا مستقیم اعمال، یا در انتظار تأیید مدیر */
-async function expertDecision(env, ex, aid, body) {
-  await ownAssignment(env, ex, aid);
-  const action = body.action; if (!["hold", "stop", "end"].includes(action)) throw new HttpError("action نامعتبر است.");
-  const s = await getSettings(env);
-  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(aid).first();
-  const payload = { item_ids: body.item_ids || null };
-  if (s.approvalRequired) {
-    const r = await env.DB.prepare("INSERT INTO decisions (assignment_id,expert_id,action,payload_json,requested_at) VALUES (?,?,?,?,?)").bind(aid, ex.id, action, JSON.stringify(payload), now()).run();
-    await env.DB.batch([ev(env, `expert:${ex.id}`, "decision_requested", a.request_id, null, { decision_id: r.meta.last_row_id, action, notify: "telegram" })]);
-    return { ok: true, pending: true, decision_id: r.meta.last_row_id };
-  }
-  await applyDecision(env, `expert:${ex.id}`, aid, action, payload);
-  return { ok: true, pending: false };
-}
-async function applyDecision(env, actor, aid, action, payload) {
-  const t = now();
-  if (action === "end") {
-    /* خاتمه: فقط اقلامی که کمیسیون تأییدشان کرده بسته می‌شوند؛ بقیه باز می‌مانند (خاتمهٔ جزئی) */
-    const ids = Array.isArray(payload && payload.item_ids) && payload.item_ids.length ? payload.item_ids.map((x) => int(x)).filter(Boolean) : null;
-    if (ids) await env.DB.prepare(`UPDATE items SET state='closed', state_at=? WHERE assignment_id=? AND id IN (${ids.map(() => "?").join(",")})`).bind(t, aid, ...ids).run();
-    else await env.DB.prepare("UPDATE items SET state='closed', state_at=? WHERE assignment_id=? AND commission_ok=1").bind(t, aid).run();
-  } else {
-    await env.DB.prepare("UPDATE items SET state=?, state_at=? WHERE assignment_id=? AND state='open'").bind(action, t, aid).run();
-  }
-  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(aid).first();
-  await env.DB.batch([ev(env, actor, action === "end" ? "close" : action, a && a.request_id, null, { assignment_id: aid, notify: "telegram" })]);
-  /* بسته شدن یک خبر است، نه چیزی که بی‌صدا از جلوی چشم مدیر برداشته شود.
-     مگر آنکه خودِ مدیر خاتمه را تأیید کرده باشد — تأیید، همان مشاهده است. */
-  if (action === "end") {
-    if (!actor.startsWith("expert:")) {
-      await env.DB.prepare("UPDATE assignments SET mgr_seen_at=COALESCE(mgr_seen_at,?) WHERE id=?").bind(t, aid).run();
-      return;
-    }
-    const chat = await env.DB.prepare("SELECT value FROM settings WHERE key='managerChat'").first();
-    let mgr = null; if (chat) { try { mgr = JSON.parse(chat.value); } catch (_) { mgr = null; } }
-    await notifyClosed(env, aid, mgr, "کارشناس").catch(() => {});
-  }
-}
+/* تصمیم کارشناس و تأیید/ردِ مدیر: worker/decisions.js */
 
 /* ------------------------------------------------------------------ */
 /* مشترک: کانال‌ها، قالب‌ها، امتیازها                                     */
@@ -971,11 +936,10 @@ async function route(request, env, ctx) {
     if (path === "/items/state" && m === "POST") { requireManager(request, env); return json(await setState(env, await readJson(request), "manager")); }
     if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
     if ((mm = /^\/decisions\/(\d+)\/(approve|reject)$/.exec(path)) && m === "POST") {
-      requireManager(request, env); const d = await env.DB.prepare("SELECT * FROM decisions WHERE id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(int(mm[1])).first();
-      if (!d) throw new HttpError("تصمیم پیدا نشد یا قبلاً رسیدگی شده.", 404);
-      if (mm[2] === "approve") { await applyDecision(env, "manager", d.assignment_id, d.action, JSON.parse(d.payload_json || "{}")); await env.DB.prepare("UPDATE decisions SET approved_at=? WHERE id=?").bind(now(), d.id).run(); }
-      else await env.DB.prepare("UPDATE decisions SET rejected_at=? WHERE id=?").bind(now(), d.id).run();
-      return json({ ok: true });
+      requireManager(request, env); const b = await readJson(request).catch(() => ({}));
+      const r = mm[2] === "approve" ? await approveDecision(env, int(mm[1]), "panel") : await rejectDecision(env, int(mm[1]), b && b.note);
+      flush(env, ctx, 1);
+      return json(r);
     }
     if (path === "/events" && m === "GET") { requireManager(request, env); const since = int(url.searchParams.get("since"), 0); return json({ events: (await env.DB.prepare("SELECT * FROM events WHERE at>? ORDER BY at DESC LIMIT 300").bind(since).all()).results || [] }); }
 
@@ -984,7 +948,10 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)$/.exec(path)) && m === "GET") { const who = await requireAny(request, env); return json(await assignmentDetail(env, int(mm[1]), who)); }
     if ((mm = /^\/assignments\/(\d+)\/viewed$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); await ownAssignment(env, ex, int(mm[1])); await env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(now(), int(mm[1])).run(); return json({ ok: true }); }
     if ((mm = /^\/assignments\/(\d+)\/commission$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await commission(env, ex, int(mm[1]))); }
-    if ((mm = /^\/assignments\/(\d+)\/decision$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await expertDecision(env, ex, int(mm[1]), await readJson(request))); }
+    if ((mm = /^\/assignments\/(\d+)\/decision$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env); const r = await expertDecision(env, ex, int(mm[1]), await readJson(request));
+      flush(env, ctx, 1); return json(r);
+    }
     if ((mm = /^\/items\/(\d+)\/progress$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); const b = await readJson(request); return json(await markProgress(env, ex, int(mm[1]), b.stage)); }
     if ((mm = /^\/items\/(\d+)\/commission$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env); const b = await readJson(request);
@@ -1146,7 +1113,15 @@ async function route(request, env, ctx) {
     if (path === "/notify/telegram") { await requireAny(request, env); return NOT_CONNECTED("اعلان تلگرام"); }
     if (path === "/notify/email") { await requireAny(request, env); return NOT_CONNECTED("ارسال ایمیل"); }
     if (path === "/search/smart") { await requireAny(request, env); return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده"); }
-    if (path === "/suppliers/history") { await requireAny(request, env); return NOT_CONNECTED("سوابق تأمین‌کنندگان"); }
+    /* سوابق تأمین (IMP-13): بارگذاری از تب مدیر، خواندن از تب کارشناس */
+    if (path === "/history/status" && m === "GET") { requireManager(request, env); return json(await historyStatus(env)); }
+    if (path === "/history/begin" && m === "POST") { requireManager(request, env); return json(await historyBegin(env, await readJson(request))); }
+    if (path === "/history/chunk" && m === "POST") { requireManager(request, env); return json(await historyChunk(env, await readJson(request))); }
+    if (path === "/history/finish" && m === "POST") { requireManager(request, env); return json(await historyFinish(env, await readJson(request))); }
+    if (path === "/suppliers/history" && m === "GET") {
+      await requireAny(request, env);
+      return json(await historyFor(env, { item: url.searchParams.get("item"), code: url.searchParams.get("code") }));
+    }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }
     if (/^\/proformas\/\d+\/extract$/.test(path)) { await requireAny(request, env); return NOT_CONNECTED("استخراج از پیش‌فاکتور"); }
 

@@ -31,6 +31,8 @@ TG_BOT_USERNAME = "ArianaSupplyBot"
 # تلگرامِ بدلی برای تست محلی (scratchpad/tg-stub.mjs). در تولید وجود ندارد.
 TG_API_BASE = "http://127.0.0.1:8799/bot"
 TG_FILE_API_BASE = "http://127.0.0.1:8799/file/bot"
+# تست‌ها نباید به ساعت اداری وابسته باشند (پنجشنبه ۱۲:۳۰ صف را می‌بندد). در تولید ست نمی‌شود.
+TG_IGNORE_HOURS = "1"
 
 [triggers]
 crons = ["*/5 * * * *"]
