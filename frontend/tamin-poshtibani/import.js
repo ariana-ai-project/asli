@@ -230,4 +230,70 @@
     if (cur.length) out.push(cur);
     return out;
   };
+
+  /* ---------- سوابق تأمین (IMP-13) ----------
+     فایلِ اسنادِ خرید شکلِ ثابتی ندارد (از حسابداری می‌آید، نه از خروجی
+     درخواست‌ها)، پس ستون‌ها با نام‌های جایگزین شناخته می‌شوند و نقشهٔ نهایی به
+     مدیر نشان داده می‌شود. */
+  const HCOLS = [
+    ["date", ["تاریخ سند", "تاریخ فاکتور", "تاریخ خرید", "تاریخ", "تاریخ درخواست"], true],
+    ["supplier", ["تامین کننده", "تأمین کننده", "نام تامین کننده", "فروشنده", "طرف مقابل", "نام فروشنده"], true],
+    ["item", ["عنوان قلم خریدنی", "عنوان قلم", "نام قلم", "نام کالا", "کالا", "شرح کالا", "شرح"], true],
+    ["code", ["کد قلم خریدنی", "کد قلم", "کد کالا"], false],
+    ["qty", ["مقدار", "تعداد"], false],
+    ["price", ["فی", "قیمت واحد", "مبلغ واحد", "نرخ", "بهای واحد"], false],
+    ["amount", ["مبلغ", "مبلغ کل", "جمع", "قیمت کل", "بهای کل", "جمع مبلغ"], false],
+    ["party", ["مرکز هزینه", "پروژه", "مصرف کننده", "مرکز درخواست کننده", "محل مصرف"], false],
+    ["doc", ["شماره سند", "شماره فاکتور", "شماره درخواست", "سند"], false],
+  ];
+  const hNormDate = (v) => {
+    const s = String(v == null ? "" : v).replace(/[۰-۹]/g, (c) => "۰۱۲۳۴۵۶۷۸۹".indexOf(c)).trim();
+    let m = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(s);
+    if (!m) { const c = /^(\d{4})(\d{2})(\d{2})$/.exec(s); if (c) m = [s, c[1], c[2], c[3]]; }
+    if (!m) return null;
+    const y = +m[1], mo = +m[2], d = +m[3];
+    if (y < 1300 || y > 1500 || mo < 1 || mo > 12 || d < 1 || d > 31) return null;
+    return `${y}/${String(mo).padStart(2, "0")}/${String(d).padStart(2, "0")}`;
+  };
+
+  TP.importHistory = async function (file, onProgress) {
+    if (!window.XLSX) throw new Error("کتابخانهٔ خواندن اکسل بارگذاری نشده است.");
+    if (file.size > MAX_BYTES) throw new Error(`حجم فایل از سقف ${MAX_BYTES / 1048576} مگابایت بیشتر است.`);
+    onProgress && onProgress("خواندن فایل…");
+    const wb = XLSX.read(await file.arrayBuffer(), { type: "array", cellDates: false, cellText: false, cellHTML: false, cellNF: false, cellStyles: false });
+    /* کاربرگی که سه ستونِ لازم را دارد؛ سرستون در ده سطر اول جست‌وجو می‌شود */
+    let found = null;
+    for (const n of wb.SheetNames) {
+      const ws = wb.Sheets[n]; if (!ws || !ws["!ref"]) continue;
+      const rows = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false, blankrows: false });
+      for (let hr = 0; hr < Math.min(10, rows.length); hr++) {
+        const head = (rows[hr] || []).map((x) => TP.nrm(x));
+        const mapping = {};
+        for (const [key, names] of HCOLS) { for (const nm of names) { const i = head.indexOf(TP.nrm(nm)); if (i >= 0) { mapping[key] = i; break; } } }
+        const need = HCOLS.filter((c) => c[2]).every((c) => mapping[c[0]] != null);
+        if (need && (mapping.amount != null || mapping.price != null)) { found = { sheet: n, rows, hr, mapping, headers: rows[hr].map((x) => String(x == null ? "" : x)) }; break; }
+      }
+      if (found) break;
+    }
+    if (!found) {
+      const e = new Error("هیچ کاربرگی با ستون‌های لازمِ سوابق (تاریخ، تأمین‌کننده، قلم، و مبلغ یا فی) پیدا نشد. کاربرگ‌ها: " + wb.SheetNames.join("، "));
+      e.code = "BAD_HEADER"; throw e;
+    }
+    onProgress && onProgress(`ساخت رکوردها از ${TP.M(found.rows.length - found.hr - 1)} سطر…`);
+    const mp = found.mapping, out = [], sups = new Set();
+    let bad = 0, dateMin = null, dateMax = null;
+    const get = (row, k) => (mp[k] == null ? null : row[mp[k]]);
+    for (let r = found.hr + 1; r < found.rows.length; r++) {
+      const row = found.rows[r]; if (!row) continue;
+      const date = hNormDate(get(row, "date")), supplier = T(get(row, "supplier")), item = T(get(row, "item"));
+      const qty = TP.num(get(row, "qty")), price = TP.num(get(row, "price"));
+      let amount = TP.num(get(row, "amount")); if (amount == null && price != null && qty != null) amount = price * qty;
+      if (!date || !supplier || !item || !(amount > 0)) { bad++; continue; }
+      out.push({ date, supplier, item, code: T(get(row, "code")), qty, price, amount, party: T(get(row, "party")), doc: T(get(row, "doc")) });
+      sups.add(TP.nrm(supplier));
+      if (!dateMin || date < dateMin) dateMin = date; if (!dateMax || date > dateMax) dateMax = date;
+    }
+    return { rows: out, mapping: mp, headers: found.headers, sheet: found.sheet, filename: file.name,
+      stats: { rows: found.rows.length - found.hr - 1, good: out.length, bad, suppliers: sups.size, dateMin, dateMax } };
+  };
 })();
