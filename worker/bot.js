@@ -1260,7 +1260,7 @@ async function deliver(env, api, chat, ex, aid) {
     if (f) letterBytes = await new Response(f.body).arrayBuffer();
   }
 
-  const files = buildFiles(d, letterBytes);
+  const files = await buildFiles(d, letterBytes);
 
   /* اول ثبت، بعد ارسال.
      تولید جدول کمیسیون یعنی مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند.

@@ -284,13 +284,45 @@
       <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">امضا کارشناس خرید: ${esc(S.expert.name)}</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">امضا مدیر پشتیبانی:</td></tr>
       <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${span - 2 * Math.ceil(span / 3)}">عضو کمیسیون</td></tr></table>`;
   }
+  /* ستون‌های برگهٔ درخواست خرید، از راست به چپ — همان ترتیبِ فرم چاپی.
+     فایل Word هم دقیقاً همین‌هاست (worker/reqdoc.js)؛ اگر یکی عوض شد، آن یکی هم. */
+  const RQC = ["ردیف", "کد قلم", "نام قلم", "مقدار", "واحد", "تاریخ نیاز", "مصرف کننده", "وضعیت",
+    "تامین کننده", "کارشناس خرید", "روند خرید", "مهلت استعلام"];
+
+  /** تأمین‌کنندهٔ هر قلم از استعلامِ ثبت‌شده — ترجیح با تأییدنهایی */
+  function supplierOf(itemId) {
+    let best = null;
+    for (const q of S.d.quotes) {
+      if (q.item_id !== itemId || !q.saved) continue;
+      if (!best || (q.final && !best.final)) best = q;
+    }
+    return best ? best.supplier_name : "";
+  }
+
   function reqForm(r) {
-    return `<table class="cf" style="margin-bottom:14px"><tr><td class="ttl" colspan="6">برگه درخواست خرید</td></tr>
-      <tr><td class="lbl rt" colspan="2">شماره درخواست: ${esc(r.id)}</td><td class="lbl rt" colspan="2">تاریخ درخواست: ${esc(r.date)}</td><td class="lbl rt" colspan="2">نوع درخواست: ${esc(r.head_req_type || "عادی")}</td></tr>
-      <tr><td class="lbl rt" colspan="3">طرف مقابل / مرکز هزینه: ${esc(r.party)}</td><td class="lbl rt" colspan="3">کارشناس خرید: ${esc(S.expert.name)}</td></tr>
-      <tr><td class="lbl">ردیف</td><td class="lbl">کد قلم</td><td class="lbl">شرح قلم</td><td class="lbl">تعداد</td><td class="lbl">واحد</td><td class="lbl">توضیحات</td></tr>
-      ${items().map((it, i) => `<tr><td class="num">${i + 1}</td><td class="num">${esc(it.code || "—")}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td>${esc(it.unit)}</td><td class="rt">${esc(it.note || it.spec || "")}</td></tr>`).join("")}
-      <tr class="tall"><td class="rt" colspan="3">امضا درخواست‌کننده:</td><td class="rt" colspan="3">امضا مدیر پشتیبانی:</td></tr></table>`;
+    const a = A(), its = items(), N = RQC.length;
+    const deadline = a.deadline_at ? TP.fmtD(a.deadline_at) : "";
+    const note = [...new Set(its.map((i) => (i.note || "").trim()).filter(Boolean))].join(" · ");
+    /* هر سطرِ کادر مشخصات باید دقیقاً ${N} ستون بشود، وگرنه جدول کج می‌نشیند:
+       برچسب(۱) + مقدار(۳) + برچسب(۲) + مقدار(۳) + جای خالی(۳) */
+    const pair = (k, v, kw, vw) => `<td class="lbl rt" colspan="${kw}">${esc(k)}</td><td class="rt" colspan="${vw}">${esc(v == null || v === "" ? "—" : v)}</td>`;
+    const info = (k1, v1, k2, v2) => `<tr>${pair(k1, v1, 1, 3)}${pair(k2, v2, 2, 3)}<td colspan="${N - 9}"></td></tr>`;
+    const third = Math.round(N / 3);
+    return `<table class="cf rq" style="margin-bottom:14px">
+      <tr><td colspan="${N - 2 * third}"></td><td class="ttl" colspan="${third}">درخواست خرید<div style="font-weight:400;font-size:.85em">شرکت ${COMPANY}</div></td>
+          <td class="rt" colspan="${third}" style="font-size:.85em">شماره صفحه: ۱<br>تاریخ گزارش: ${esc(TP.fmtD(S.now))}</td></tr>
+      ${info("شماره درخواست", r.id, "مرکز درخواست کننده", r.center)}
+      ${info("تاریخ درخواست", r.date, "درخواست کننده", r.requester)}
+      ${info("واحد/رمز تامین", r.buy_type, "نوع طرف مقابل", r.party_type)}
+      ${info("نوع قلم", r.head_req_type || "کالا", "طرف مقابل", r.party)}
+      <tr><td class="lbl rt">توضیحات</td><td class="rt" colspan="${N - 1}">${esc(note)}</td></tr>
+      <tr>${RQC.map((t) => `<th class="hd">${t}</th>`).join("")}</tr>
+      ${its.map((it, i) => `<tr><td class="num">${M(i + 1)}</td><td class="num">${esc(it.code || "")}</td><td class="rt">${esc(it.title)}</td>
+        <td class="num">${it.qty == null ? "" : M(it.qty)}</td><td class="num">${esc(it.unit || "")}</td><td class="num">${esc(it.need_date || "")}</td>
+        <td class="rt">${esc(it.consumer || "")}</td><td class="num">${esc(it.src_status || "")}</td><td class="rt">${esc(supplierOf(it.id))}</td>
+        <td class="rt">${esc(S.expert.name)}</td><td class="num">${esc(r.buy_flow || "")}</td><td class="num">${esc(deadline)}</td></tr>`).join("")}
+      <tr class="tall"><td class="rt" colspan="${Math.ceil(N / 2)}">نام صادر کننده: ${esc(r.requester || "")}<br><br>امضا</td>
+          <td class="rt" colspan="${N - Math.ceil(N / 2)}">نام تایید کننده:<br><br>امضا</td></tr></table>`;
   }
   function downloadXls() {
     const r = S.d.request, d = commData();

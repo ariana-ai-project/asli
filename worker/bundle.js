@@ -3,7 +3,8 @@
  *
  * وقتی کار کارشناس تمام شد (پیش‌فاکتورها ثبت، توضیحات نوشته، و در صورت نیاز
  * نامه آماده)، این ماژول دو تا سه فایل می‌سازد:
- *   ۱. برگهٔ درخواست خرید — از همان داده‌ای که مدیر با اکسل بارگذاری کرده
+ *   ۱. برگهٔ درخواست خرید — فایل Word در قالب فرم چاپی شرکت، از همان داده‌ای
+ *      که مدیر با اکسل بارگذاری کرده به‌علاوهٔ تأمین‌کنندهٔ استعلامِ ثبت‌شده
  *   ۲. جدول مقایسه استعلام بها (فرم کمیسیون)
  *   ۳. نامهٔ پیوست، اگر ساخته شده باشد
  *
@@ -11,14 +12,15 @@
  * تلگرام برایش می‌روند و هم در پنل می‌مانند؛ هیچ‌کدام جای دیگری را نمی‌گیرد.
  */
 import { HttpError } from "./http.js";
-import { commissionHtml, requestHtml } from "./sheets.js";
-import { jStr } from "./time.js";
+import { commissionHtml } from "./sheets.js";
+import { renderRequestDoc } from "./reqdoc.js";
+import { jStr, fmtFa } from "./time.js";
 
 /** همهٔ داده‌های لازم برای برگه‌ها، با یک بار خواندن از دیتابیس */
 export async function bundleData(env, aid, settings, company) {
   const a = await env.DB.prepare(
     `SELECT a.*, e.name AS expert_name, e.label AS expert_label, r.id AS req_id, r.date AS req_date, r.party,
-            r.party_type, r.center, r.requester, r.req_type, r.urgency
+            r.party_type, r.center, r.requester, r.req_type, r.buy_type, r.buy_flow, r.urgency
      FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id WHERE a.id=?`,
   ).bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
@@ -32,8 +34,12 @@ export async function bundleData(env, aid, settings, company) {
   return {
     assignment: a,
     request: {
-      id: a.req_id, date: a.req_date, party: a.party, center: a.center, requester: a.requester,
+      id: a.req_id, date: a.req_date, party: a.party, party_type: a.party_type,
+      center: a.center, requester: a.requester, buy_type: a.buy_type, buy_flow: a.buy_flow,
       head_req_type: a.req_type, urgency: a.urgency, head_deal_type: null, head_site: null,
+      /* «مهلت استعلام» در فرمِ چاپی همان مهلتِ ارجاع است */
+      deadline: a.deadline_at ? jStr(a.deadline_at) : "",
+      deadlineFull: a.deadline_at ? fmtFa(a.deadline_at) : "",
     },
     items: items.results || [],
     quotes: quotes.results || [],
@@ -53,10 +59,10 @@ const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.doc
  * `letterBytes` را صدازننده می‌دهد (از انبار خوانده می‌شود) تا این ماژول به
  * جایی وصل نباشد و بشود مستقل تستش کرد.
  */
-export function buildFiles(d, letterBytes) {
+export async function buildFiles(d, letterBytes) {
   const id = d.request.id;
   const files = [
-    { name: `درخواست-خرید-${id}.xls`, type: XLS, body: requestHtml(d) },
+    { name: `درخواست-خرید-${id}.docx`, type: DOCX, body: await (await renderRequestDoc(d)).arrayBuffer() },
     { name: `کمیسیون-${id}.xls`, type: XLS, body: commissionHtml({ ...d, notes: d.assignment.notes }) },
   ];
   if (letterBytes) files.push({ name: `نامه-${id}.docx`, type: DOCX, body: letterBytes });

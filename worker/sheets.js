@@ -1,9 +1,12 @@
 /**
- * تولید برگه‌ها سمت سرور — جدول کمیسیون و برگهٔ درخواست خرید
+ * جدول مقایسه استعلام بها، سمت سرور
  *
  * چرا سمت سرور و نه فقط در پنل: کارشناس بیشتر با گوشی کار می‌کند و می‌خواهد
  * فایل‌ها را در تلگرام داشته باشد. پنل همان جدول را نشان می‌دهد، ولی بات باید
  * بتواند فایل بسازد و بفرستد بدون اینکه مرورگری باز باشد.
+ *
+ * برگهٔ درخواست خرید این‌جا نیست: آن یکی فایل Word است، در قالب فرم چاپی شرکت
+ * (worker/reqdoc.js).
  *
  * قالب خروجی همان چیزی است که پنل تولید می‌کند: جدول HTML با پسوند xls.
  * اکسل آن را با کادر و راست‌به‌چپ درست باز می‌کند و برخلاف ساختن xlsx واقعی،
@@ -81,21 +84,4 @@ export function commissionHtml({ request, items, quotes, notes, expert, company,
     <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${span - 2 * Math.ceil(span / 3)}">عضو کمیسیون</td></tr>
   </table>`;
   return wrap("جدول کمیسیون", body);
-}
-
-/** برگهٔ درخواست خرید — از همان داده‌ای که مدیر با اکسل راهکاران بارگذاری کرده */
-export function requestHtml({ request, items, expert, company, date }) {
-  const body = `<table>
-    <tr><td class="ttl" colspan="6">برگه درخواست خرید</td></tr>
-    <tr><td class="rt" colspan="2">شماره درخواست: <b>${esc(request.id)}</b></td><td class="rt" colspan="2">تاریخ درخواست: ${esc(request.date)}</td>
-        <td class="rt" colspan="2">نوع درخواست: ${esc(request.head_req_type || request.urgency || "عادی")}</td></tr>
-    <tr><td class="rt" colspan="3">طرف مقابل / مرکز هزینه: ${esc(request.party)}</td><td class="rt" colspan="3">کارشناس خرید: ${esc(expert)}</td></tr>
-    ${request.requester || request.center ? `<tr><td class="rt" colspan="3">درخواست‌کننده: ${esc(request.requester || "—")}</td><td class="rt" colspan="3">مرکز هزینه: ${esc(request.center || "—")}</td></tr>` : ""}
-    <tr><td class="lbl">ردیف</td><td class="lbl">کد قلم</td><td class="lbl">شرح قلم</td><td class="lbl">تعداد</td><td class="lbl">واحد</td><td class="lbl">توضیحات</td></tr>
-    ${items.map((it, i) => `<tr><td class="num">${M(i + 1)}</td><td class="num">${esc(it.code || "—")}</td><td class="rt">${esc(it.title)}</td>
-      <td class="num">${it.qty == null ? "" : M(it.qty)}</td><td class="num">${esc(it.unit)}</td><td class="rt">${esc(it.note || it.spec || "")}</td></tr>`).join("")}
-    <tr><td class="rt" colspan="6">شرکت ${esc(company)} — تاریخ تنظیم برگه: ${esc(date)}</td></tr>
-    <tr class="tall"><td class="rt" colspan="3">امضا درخواست‌کننده:</td><td class="rt" colspan="3">امضا مدیر پشتیبانی:</td></tr>
-  </table>`;
-  return wrap("برگه درخواست خرید", body);
 }

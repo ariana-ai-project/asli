@@ -23,7 +23,8 @@ import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
-import { requestHtml, commissionHtml } from "./sheets.js";
+import { commissionHtml } from "./sheets.js";
+import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, queueStmt, dispatchText, drainOutbox } from "./bot.js";
@@ -1041,10 +1042,14 @@ async function route(request, env, ctx) {
       const aid = int(mm[1]); const kind = mm[2];
       if (who.expert) await ownAssignment(env, who.expert, aid);
       const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
-      const html = kind === "request" ? requestHtml(d) : commissionHtml({ ...d, notes: d.assignment.notes });
-      const name = `${kind === "request" ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.xls`;
-      return new Response(html, { headers: {
-        "content-type": "application/vnd.ms-excel; charset=utf-8",
+      /* برگهٔ درخواست خرید فایل Word است (قالب چاپیِ شرکت)، جدول کمیسیون اکسل */
+      const isReq = kind === "request";
+      const body = isReq ? await renderRequestDoc(d) : commissionHtml({ ...d, notes: d.assignment.notes });
+      const name = `${isReq ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.${isReq ? "docx" : "xls"}`;
+      return new Response(body, { headers: {
+        "content-type": isReq
+          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+          : "application/vnd.ms-excel; charset=utf-8",
         "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
       } });
     }
