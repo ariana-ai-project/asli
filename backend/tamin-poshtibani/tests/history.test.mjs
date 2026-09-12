@@ -121,6 +121,18 @@ test("پارسر سوابق: فایل مرجع", { skip: FIXTURE ? false : "فا
      باشد باید خوانده شود، وگرنه ستون قیمت در ریز خریدها خالی می‌ماند. */
   assert.ok(parsed.rows.filter((r) => r.unitPrice != null).length > st.rows * 0.5, "قیمت واحد خوانده نشد");
 
+  /* هویتِ ردیف: بدون یکتا بودنش، بارگذاری افزایشی ردیف‌ها را بی‌صدا می‌اندازد.
+     در فایل واقعی چند صد ردیف با همهٔ ستون‌ها یکسان‌اند و باید جداگانه بمانند. */
+  const keys = new Set(parsed.rows.map((r) => r.dkey));
+  assert.equal(keys.size, st.rows, "کلید ردیف‌ها یکتا نیست");
+  assert.ok(parsed.rows.every((r) => r.dkey), "ردیفِ بی‌کلید");
+  assert.ok(st.dups > 0, "انتظار می‌رفت فایل واقعی ردیف کاملاً تکراری داشته باشد");
+
+  /* اثر انگشت باید برای همان فایل ثابت بماند، وگرنه هر بار دوباره نوشته می‌شود */
+  const again = await sandbox.TP.importHistory(fileFrom(sandbox, FIXTURE));
+  assert.equal(again.stats.fingerprint, st.fingerprint);
+  assert.match(st.fingerprint, /^\d+-[0-9a-f]+$/);
+
   /* دسته‌بندی برای ارسال، هیچ ردیفی را جا نیندازد یا دوبار نفرستد */
   const chunks = sandbox.TP.chunkHistory(parsed.rows);
   assert.equal(chunks.reduce((n, c) => n + c.length, 0), st.rows);

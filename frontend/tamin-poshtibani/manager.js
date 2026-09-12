@@ -287,37 +287,54 @@
     inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) askHistoryImport(f); };
     inp.click();
   }
-  function askHistoryImport(f) {
-    const c = S.hist && S.hist.current;
-    TP.modal("بارگذاری سوابق خرید", `فایل <b>${esc(f.name)}</b> (${(f.size / 1048576).toFixed(1)} مگابایت)
-      ${c ? `<br><br>سوابق فعلی (${M(c.rows)} ردیف از «${esc(c.filename || "—")}») <b>جایگزین</b> می‌شود.` : ""}
-      <br><br>ارسال چند دقیقه طول می‌کشد و در این مدت پنجره را نبندید؛ اگر نیمه‌کاره بماند باید از نو بارگذاری کنید.`,
-      () => importHistoryFile(f), "بارگذاری کن");
-  }
-  async function importHistoryFile(f) {
+  /* فایل پیش از هر پرسشی خوانده می‌شود تا اثر انگشتش را داشته باشیم: اگر همان
+     فایلِ بارگذاری‌شده باشد، اصلاً نباید چیزی از مدیر پرسیده شود. */
+  async function askHistoryImport(f) {
     const busy = TP.busy("در حال خواندن فایل سوابق…", `${esc(f.name)} — ${(f.size / 1048576).toFixed(1)} مگابایت`);
+    let parsed;
+    try { parsed = await TP.importHistory(f, (t) => busy.set(esc(t))); }
+    catch (e) { busy.close(); TP.modal("فایل خوانده نشد", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); return; }
+    busy.close();
+    const st = parsed.stats;
+    if (!st.rows) return TP.modal("فایل خالی بود", "هیچ ردیف معتبری نداشت؛ هر ردیف باید تاریخ، عنوان قلم و تأمین‌کننده داشته باشد.", null, "باشد", "");
+
+    const c = S.hist && S.hist.current;
+    if (c && c.fingerprint && c.fingerprint === st.fingerprint) {
+      return TP.modal("همین فایل از قبل بارگذاری شده", `<b>${esc(f.name)}</b> دقیقاً همان سوابقی است که الان در سامانه است
+        (${M(c.rows)} ردیف). چیزی نوشته نشد و سهمیهٔ دیتابیس هم مصرف نشد.`, null, "باشد", "");
+    }
+    TP.modal("بارگذاری سوابق خرید", `<b>${esc(f.name)}</b> — ${M(st.rows)} ردیف معتبر${st.dups ? ` (${M(st.dups)} ردیفِ کاملاً یکسان که جداگانه شمرده می‌شوند)` : ""}
+      ${c ? `<br><br>سوابق فعلی: ${M(c.rows)} ردیف از «${esc(c.filename || "—")}». ردیف‌های مشترک دوباره نوشته نمی‌شوند.`
+          : "<br><br>اولین بارگذاری سوابق است."}
+      <br><br>ارسال چند دقیقه طول می‌کشد و در این مدت پنجره را نبندید.`,
+      () => importHistoryFile(f, parsed), "بارگذاری کن");
+  }
+  async function importHistoryFile(f, parsed) {
+    const st = parsed.stats;
+    const busy = TP.busy("بارگذاری سوابق…", `${esc(f.name)} — ${M(st.rows)} ردیف`);
     try {
-      const parsed = await TP.importHistory(f, (t) => busy.set(esc(t)));
-      const st = parsed.stats;
-      if (!st.rows) throw new Error("هیچ ردیف معتبری در فایل نبود (هر ردیف باید تاریخ، عنوان قلم و تأمین‌کننده داشته باشد).");
-      const { import_id } = await TP.api("/history/begin", { body: { filename: f.name, rows: st.rows, stats: st } });
+      const beg = await TP.api("/history/begin", { body: { filename: f.name, rows: st.rows, stats: st, fingerprint: st.fingerprint } });
+      if (beg.skipped) {
+        busy.close(); await loadHist();
+        return TP.modal("چیزی برای نوشتن نبود", "این فایل دقیقاً همان سوابقِ موجود است.", null, "باشد", "");
+      }
       const chunks = TP.chunkHistory(parsed.rows);
-      let sent = 0;
+      let sent = 0, ins = 0, dup = 0;
       for (let i = 0; i < chunks.length; i++) {
-        await TP.api("/history/chunk", { body: { import_id, rows: chunks[i] } });
-        sent += chunks[i].length;
-        busy.set(`ارسال ${M(sent)} از ${M(st.rows)} ردیف — دستهٔ ${i + 1} از ${chunks.length}`);
+        const r = await TP.api("/history/chunk", { body: { import_id: beg.import_id, rows: chunks[i] } });
+        sent += chunks[i].length; ins += r.inserted || 0; dup += r.dup || 0;
+        busy.set(`ارسال ${M(sent)} از ${M(st.rows)} ردیف — ${M(ins)} تازه، ${M(dup)} تکراری`);
       }
       busy.set("ساخت نمایه‌ها و آمار مرجع…");
-      const fin = await TP.api("/history/finish", { body: { import_id } });
+      const fin = await TP.api("/history/finish", { body: { import_id: beg.import_id, fingerprint: st.fingerprint } });
       busy.close();
       await loadHist();
-      TP.modal("سوابق خرید بارگذاری شد", `<b>${M(fin.stats.rows)}</b> ردیف · <b>${M(fin.stats.suppliers)}</b> تأمین‌کننده · <b>${M(fin.stats.codes)}</b> کد قلم
-        · بازه ${ymFa(fin.stats.minYm)} تا ${ymFa(fin.stats.maxYm)}
-        ${st.skipped ? `<br><span style="color:#fcd34d">${M(st.skipped)} سطر ناقص (بدون تاریخ، عنوان یا تأمین‌کننده) رد شد.</span>` : ""}
-        ${fin.stats.noIndex ? `<br><span style="color:#fcd34d">${M(fin.stats.noIndex)} ردیف شاخص تعدیل نداشتند و مبلغ ۱۴۰۴ برایشان ساخته نشد.</span>` : ""}
-        ${st.noCode ? `<br><span style="color:#fcd34d">${M(st.noCode)} ردیف «کد قلم جدید» ندارند؛ برای آن‌ها تطبیق با کد راهکاران یا عنوان انجام می‌شود.</span>` : ""}
-        <br><br>تب «بررسی سوابق» کارشناسان از همین حالا کار می‌کند.`, null, "باشد", "");
+      TP.modal("سوابق خرید بارگذاری شد", `<b>${M(ins)}</b> ردیف تازه نوشته شد${dup ? ` و <b>${M(dup)}</b> ردیف چون از قبل بود دوباره نوشته نشد` : ""}.
+        <br>اکنون <b>${M(fin.stats.rows)}</b> ردیف · <b>${M(fin.stats.suppliers)}</b> تأمین‌کننده · <b>${M(fin.stats.codes)}</b> کد قلم · بازه ${ymFa(fin.stats.minYm)} تا ${ymFa(fin.stats.maxYm)}
+        ${beg.mode === "replace" ? `<br><span class="dim">این بار جدول از نو ساخته شد چون ردیف‌های قدیمی کلید یکتا نداشتند؛ از این پس فقط ردیف‌های تازه نوشته می‌شوند.</span>` : ""}
+        ${st.skipped ? `<br><span style="color:#fcd34d">${M(st.skipped)} سطر ناقص رد شد.</span>` : ""}
+        ${fin.stats.noIndex ? `<br><span style="color:#fcd34d">${M(fin.stats.noIndex)} ردیف شاخص تعدیل نداشتند.</span>` : ""}
+        ${st.noCode ? `<br><span style="color:#fcd34d">${M(st.noCode)} ردیف «کد قلم جدید» ندارند؛ تطبیق با کد راهکاران یا عنوان انجام می‌شود.</span>` : ""}`, null, "باشد", "");
     } catch (e) { busy.close(); TP.modal("خطا در بارگذاری سوابق", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); }
   }
 

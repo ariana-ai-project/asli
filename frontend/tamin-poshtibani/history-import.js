@@ -116,6 +116,11 @@
       suppliers: 0, codes: 0, titles: 0, ymMin: null, ymMax: null, dateMin: null, dateMax: null,
     };
     const sup = new Set(), codes = new Set(), titles = new Set();
+    /* شمارندهٔ تکرار: در فایل واقعی ۶۶۷ ردیف با همهٔ ستون‌ها یکسان‌اند (دو خطِ
+       یکسان در یک سفارش). این‌ها خریدِ جداگانه‌اند و نباید یکی شمرده شوند، پس
+       کلیدشان یک شمارنده هم می‌گیرد. */
+    const seen = new Map();
+    let fp = 0x811c9dc5;   /* FNV-1a روی کلیدها — اثر انگشت فایل */
 
     for (let r = 1; r < rows.length; r++) {
       const row = rows[r]; if (!row) continue;
@@ -141,9 +146,17 @@
       const code2 = T(g("code2"));
       if (!code2) stats.noCode++;
 
+      const unitPrice = numOf(g("unitPrice"));
+      /* هویت ردیف، مستقل از ترتیبِ فایل: با همین کلید، بارگذاری دوبارهٔ همان
+         فایل هیچ ردیفی نمی‌نویسد و فایلِ گسترش‌یافته فقط ردیف‌های تازه را. */
+      const base = [TP.nrm(supplier), TP.nrm(title), date, qty, unitPrice, amount].join("|");
+      const n = seen.get(base) || 0; seen.set(base, n + 1);
+      const dkey = n ? `${base}#${n}` : base;
+      for (let i = 0; i < dkey.length; i++) { fp ^= dkey.charCodeAt(i); fp = Math.imul(fp, 0x01000193); }
+
       out.push({
-        date, ym, itemCode: T(g("itemCode")), code2, title,
-        qty, unit: T(g("unit")), unitPrice: numOf(g("unitPrice")), amount,
+        dkey, date, ym, itemCode: T(g("itemCode")), code2, title,
+        qty, unit: T(g("unit")), unitPrice, amount,
         supplier, idx: idxVal, amount1404: a1404, unit1404: u1404,
         lvl1: T(g("lvl1")), lvl2: T(g("lvl2")), lvl3: T(g("lvl3")),
       });
@@ -153,6 +166,9 @@
       if (stats.ymMax == null || ym > stats.ymMax) { stats.ymMax = ym; stats.dateMax = date; }
     }
     stats.suppliers = sup.size; stats.codes = codes.size; stats.titles = titles.size;
+    stats.dups = stats.rows - seen.size;
+    /* شمار ردیف‌ها هم داخل اثر انگشت می‌آید تا فایلِ کوتاه‌شده با فایلِ کامل یکی نشود */
+    stats.fingerprint = `${stats.rows}-${(fp >>> 0).toString(16)}`;
     return { rows: out, stats };
   }
 

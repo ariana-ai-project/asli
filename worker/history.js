@@ -54,11 +54,11 @@ const N = (v) => { const s = String(v == null ? "" : v).replace(/,/g, "").trim()
 /* بارگذاری فایل مرجع                                                   */
 /* ------------------------------------------------------------------ */
 
-const COLS = ["import_id", "order_date", "ym", "item_code", "code2", "title", "title_n", "qty", "unit",
+const COLS = ["import_id", "dkey", "order_date", "ym", "item_code", "code2", "title", "title_n", "qty", "unit",
   "unit_price", "amount", "supplier", "supplier_n", "idx_val", "amount_1404", "unit_1404", "lvl1", "lvl2", "lvl3"];
 
 export const HISTORY_TABLE = "CREATE TABLE IF NOT EXISTS purchase_history ("
-  + "id INTEGER PRIMARY KEY, import_id INTEGER NOT NULL, order_date TEXT, ym INTEGER,"
+  + "id INTEGER PRIMARY KEY, import_id INTEGER NOT NULL, dkey TEXT, order_date TEXT, ym INTEGER,"
   + " item_code TEXT, code2 TEXT, title TEXT, title_n TEXT, qty REAL, unit TEXT,"
   + " unit_price REAL, amount REAL, supplier TEXT, supplier_n TEXT,"
   + " idx_val REAL, amount_1404 REAL, unit_1404 REAL, lvl1 TEXT, lvl2 TEXT, lvl3 TEXT)";
@@ -68,23 +68,40 @@ const HISTORY_INDEXES = [
   "CREATE INDEX IF NOT EXISTS ix_ph_item ON purchase_history(item_code)",
   "CREATE INDEX IF NOT EXISTS ix_ph_title ON purchase_history(title_n)",
   "CREATE INDEX IF NOT EXISTS ix_ph_sup ON purchase_history(supplier_n)",
+  /* هویتِ ردیف. روی ردیف‌های قدیمیِ بی‌کلید مزاحمتی ندارد چون SQLite هر NULL را
+     با NULL دیگر نابرابر می‌گیرد. */
+  "CREATE UNIQUE INDEX IF NOT EXISTS ux_ph_dkey ON purchase_history(dkey)",
 ];
 
 /**
- * شروع بارگذاری تازه.
+ * شروع بارگذاری.
+ *
+ * سه حالت، به ترتیبِ ارزانی:
+ *   skip    — اثر انگشتِ فایل با بارگذاریِ فعلی یکی است: هیچ نوشتنی لازم نیست.
+ *   append  — همهٔ ردیف‌های موجود کلید دارند: فقط ردیف‌های تازه نوشته می‌شوند.
+ *   replace — ردیف‌های بی‌کلیدِ بارگذاری‌های قدیمی هنوز هستند و با درجِ افزایشی
+ *             دوبار شمرده می‌شوند، پس یک بار جدول از نو ساخته می‌شود.
  *
  * جدول DROP و دوباره ساخته می‌شود، نه DELETE: پاک‌کردن ۷۰ هزار ردیف در D1
  * ۷۰ هزار «سطر نوشته‌شده» حساب می‌شود و سهمیهٔ روزانه را دو برابر می‌سوزاند.
- * نمایه‌ها هم عمداً این‌جا ساخته نمی‌شوند — درج بدون نمایه چند برابر سریع‌تر
- * است و در `historyFinish` یک‌جا ساخته می‌شوند.
  */
 export async function historyBegin(env, body) {
-  await env.DB.exec("DROP TABLE IF EXISTS purchase_history;");
-  await env.DB.exec(HISTORY_TABLE + ";");
+  const fp = T(body.fingerprint);
+  const cur = await activeImport(env);
+  if (fp && cur && cur.stats.fingerprint === fp) {
+    return { skipped: true, mode: "skip", import_id: cur.id, rows: cur.row_count };
+  }
+
+  const legacy = await env.DB.prepare("SELECT 1 AS x FROM purchase_history WHERE dkey IS NULL LIMIT 1").first();
+  const mode = legacy ? "replace" : "append";
+  if (mode === "replace") {
+    await env.DB.exec("DROP TABLE IF EXISTS purchase_history;");
+    await env.DB.exec(HISTORY_TABLE + ";");
+  }
   await env.DB.prepare("UPDATE hist_imports SET state='stale' WHERE state<>'stale'").run();
   const r = await env.DB.prepare("INSERT INTO hist_imports (filename,imported_at,row_count,state,stats_json) VALUES (?,?,?,'loading',?)")
     .bind(T(body.filename), Date.now(), Number(body.rows) || null, body.stats ? JSON.stringify(body.stats) : null).run();
-  return { import_id: r.meta.last_row_id };
+  return { import_id: r.meta.last_row_id, mode };
 }
 
 /** یک دستهٔ ردیف، به همان شکلی که پارسر مرورگر می‌سازد. */
@@ -92,10 +109,11 @@ export async function historyChunk(env, body) {
   const importId = Number(body.import_id);
   if (!importId) throw new HttpError("import_id لازم است.");
   const rows = Array.isArray(body.rows) ? body.rows : [];
-  if (!rows.length) return { ok: true, inserted: 0 };
+  if (!rows.length) return { ok: true, inserted: 0, dup: 0 };
 
-  /* سقف D1 برای پارامترهای مقیدشده ۱۰۰ تاست؛ با ۱۹ ستون یعنی حداکثر ۵ ردیف
-     در هر دستور. چندردیفی‌نوشتن پنج برابر کمتر رفت‌وبرگشت می‌خواهد. */
+  /* سقف D1 برای پارامترهای مقیدشده ۱۰۰ تاست؛ با ۲۰ ستون یعنی حداکثر ۵ ردیف
+     در هر دستور. چندردیفی‌نوشتن پنج برابر کمتر رفت‌وبرگشت می‌خواهد.
+     OR IGNORE: ردیفی که کلیدش هست دوباره نوشته نمی‌شود. */
   const PER = 5;
   const tuple = `(${COLS.map(() => "?").join(",")})`;
   const stmts = [];
@@ -103,14 +121,18 @@ export async function historyChunk(env, body) {
     const part = rows.slice(i, i + PER);
     const args = [];
     for (const r of part) {
-      args.push(importId, T(r.date), Number(r.ym) || null, T(r.itemCode), T(r.code2), T(r.title), nrm(r.title),
+      args.push(importId, T(r.dkey), T(r.date), Number(r.ym) || null, T(r.itemCode), T(r.code2), T(r.title), nrm(r.title),
         N(r.qty), T(r.unit), N(r.unitPrice), N(r.amount), T(r.supplier), nrm(r.supplier),
         N(r.idx), N(r.amount1404), N(r.unit1404), T(r.lvl1), T(r.lvl2), T(r.lvl3));
     }
-    stmts.push(env.DB.prepare(`INSERT INTO purchase_history (${COLS.join(",")}) VALUES ${part.map(() => tuple).join(",")}`).bind(...args));
+    stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO purchase_history (${COLS.join(",")}) VALUES ${part.map(() => tuple).join(",")}`).bind(...args));
   }
-  for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
-  return { ok: true, inserted: rows.length };
+  let inserted = 0;
+  for (let i = 0; i < stmts.length; i += 100) {
+    const res = await env.DB.batch(stmts.slice(i, i + 100));
+    for (const x of res) inserted += (x.meta && x.meta.changes) || 0;
+  }
+  return { ok: true, inserted, dup: rows.length - inserted };
 }
 
 /** پایان بارگذاری: نمایه‌ها ساخته و آمار مرجع ذخیره می‌شود. */
@@ -118,12 +140,15 @@ export async function historyFinish(env, body) {
   const importId = Number(body.import_id);
   if (!importId) throw new HttpError("import_id لازم است.");
   for (const sql of HISTORY_INDEXES) await env.DB.exec(sql + ";");
+  /* آمار روی کل جدول است، نه فقط این بارگذاری: در حالت افزایشی ردیف‌های
+     بارگذاری‌های قبلی هم سر جایشان‌اند و باید در بازه و شمارش بیایند. */
   const s = await env.DB.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT supplier_n) AS suppliers,
       COUNT(DISTINCT code2) AS codes, MIN(ym) AS min_ym, MAX(ym) AS max_ym,
       SUM(CASE WHEN amount_1404 IS NULL THEN 1 ELSE 0 END) AS no_index
-    FROM purchase_history WHERE import_id=?`).bind(importId).first();
+    FROM purchase_history`).first();
   const stats = {
     rows: s.n, suppliers: s.suppliers, codes: s.codes, minYm: s.min_ym, maxYm: s.max_ym, noIndex: s.no_index,
+    fingerprint: T(body.fingerprint) || null,
     /* شیبِ کاهش بر این فاصله تنظیم می‌شود تا قدیمی‌ترین خریدِ موجود هم مثبت بماند */
     ageMax: s.min_ym ? Math.max(1, BASE_YM - s.min_ym) : 1,
   };
