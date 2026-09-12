@@ -147,6 +147,13 @@ const COLUMN_MIGRATIONS = [
    درست‌تر است. جدول هنوز خالی است، پس تغییر نام بی‌خطر است. */
 const COLUMN_RENAMES = [["proformas", "r2_key", "storage_key"]];
 
+/* جدول‌های پیاده‌سازیِ قبلیِ سوابق. جایشان را purchase_history و hist_imports
+   گرفته‌اند و دیگر هیچ کدی نمی‌خواندشان؛ اگر بمانند فقط فضای D1 را می‌گیرند و
+   آدم را سرِ خواندنِ طرح دیتابیس گمراه می‌کنند.
+   یک‌بارمصرف است: بعد از استقرارِ بعدی روی همهٔ محیط‌ها، این آرایه و حلقه‌اش
+   را می‌شود برداشت. */
+const DROPPED_TABLES = ["supply_history", "history_batches"];
+
 /* کارشناسان اولیه — همان config.js؛ اینجا تکرار شده تا سرور به فایل استاتیک وابسته نباشد.
    بعد از اولین اجرا، منبعِ حقیقت جدول experts است (مدیر می‌تواند فعال/غیرفعال کند). */
 const SEED_EXPERTS = [
@@ -166,6 +173,7 @@ async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
+  for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();
   if (!c || !c.n) {
