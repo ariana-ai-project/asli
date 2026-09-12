@@ -36,6 +36,9 @@
     itemIdx: 0, tab: "history",
     q: { id: "", date: "", party: "", item: "" },
     weights: [20, 40, 15, 25], open: { 0: false, 1: false, 2: false, 3: false },
+    sort: { grp: null, kind: "score" },   // ستون رتبه‌ای که جدول سوابق با آن مرتب است
+    mom: 5,                               // ضریب اهمیت گشتاور (۱ تا ۱۰) — از localStorage پر می‌شود
+    prof: null,                           // کلید تأمین‌کننده‌ای که کارتش باز است
     scope: "item", caps: { contact: true, cred: true, reviews: false, price: true },
     srch: { brand: "", yMin: "", yMax: "", cond: "نو", maker: "", spec: "", origin: "", trade: "داخلی", place: "" },
     f: { maxDelivery: "", priceOnly: false, adMin: 0, adMax: 365 },
@@ -135,67 +138,197 @@
   }
 
   /* ---------- تب بررسی سوابق ----------
-     سوابق از اسنادِ خریدِ گذشته می‌آید (تب «سوابق تأمین» مدیر). سرور برای هر
-     تأمین‌کننده سطلِ ماهانهٔ مبلغ می‌دهد؛ وزن، سهم و رتبه این‌جا حساب می‌شود تا
-     وقتی کارشناس ضریب زمان را عوض می‌کند، جدول همان لحظه دوباره چیده شود. */
-  const recKey = "tp.recency";
-  S.recency = Math.min(10, Math.max(1, +(localStorage.getItem(recKey) || 5)));
-  S.hsort = "item"; S.prof = null;
+     چهار گروهِ ماک‌آپ مرجع. دو گروهِ «پروژه» ستون پروژه می‌خواهند که فایل سوابق
+     ندارد؛ ستون‌هایشان سرِ جایشان می‌مانند و تا آمدن آن داده خاموش‌اند.
 
-  /** وزن‌دهی، سهم و رتبه — همان قاعدهٔ سرور (TP.recencyWeight) */
-  function calcHist(h, k) {
-    const sum = (b) => Object.entries(b || {}).reduce((n, [ym, amt]) => n + amt * TP.recencyWeight(ym, h.oldest, k), 0);
-    const raw = (b) => Object.values(b || {}).reduce((n, a) => n + a, 0);
-    const rows = h.suppliers.map((s) => ({ ...s, totalW: sum(s.total), itemW: sum(s.item), totalRaw: raw(s.total), itemRaw: raw(s.item) }));
-    const T1 = rows.reduce((n, r) => n + r.totalW, 0) || 1, T2 = rows.reduce((n, r) => n + r.itemW, 0) || 1;
-    rows.forEach((r) => { r.totalShare = r.totalW / T1; r.itemShare = r.itemW / T2; });
-    [...rows].sort((a, b) => b.totalW - a.totalW).forEach((r, i) => { r.totalRank = i + 1; });
-    [...rows].sort((a, b) => b.itemW - a.itemW).forEach((r, i) => { r.itemRank = i + 1; });
-    rows.sort((a, b) => (S.hsort === "total" ? a.totalRank - b.totalRank : a.itemRank - b.itemRank));
-    return rows;
+     «گشتاور» = همان مبلغ به نرخ ۱۴۰۴، وقتی با فاصلهٔ ماهانه‌اش تا اسفند ۱۴۰۴
+     کم‌ارزش شود. سرور آن را حساب می‌کند (چون به کل ردیف‌ها نیاز دارد) و سهم،
+     امتیاز، رتبه و ترتیب این‌جا — تا تغییر ضریب اهمیت همان لحظه اثر کند. */
+  /* ضریب اهمیت، انتخابِ شخصیِ کارشناس است و نباید با هر بار باز کردن پنل صفر شود */
+  const MOM_KEY = "tp.mom";
+  try { S.mom = Math.min(10, Math.max(1, +(localStorage.getItem(MOM_KEY) || 5))); } catch (_) { /* حالت خصوصی */ }
+
+  const HGRP = [["کل خرید", "tot", "totM", "g1"], ["خرید قلم", "itot", "itotM", "g2"],
+                ["خرید پروژه", "ptot", "ptotM", "g3"], ["خرید قلم در پروژه", "iptot", "iptotM", "g4"]];
+  /* ارقام ریالیِ هفت‌رقمی در ستون جا نمی‌شوند؛ همه‌جا میلیون ریال نشان داده می‌شود */
+  const MR = (n) => M(Math.round((Number(n) || 0) / 1e6));
+  const MATCH = { normalized: "کد استاندارد", code: "کد قلم راهکاران", title: "عنوان قلم", none: "بی‌سابقه" };
+
+  function calcHist(it) {
+    const d = S.hist[it.id];
+    if (!d || !d.available || !d.suppliers || !d.suppliers.length) return { rows: [], on: [false, false, false, false] };
+    const on = HGRP.map((G) => d.totals[G[1]] != null);
+    const w = HGRP.map((G, i) => (on[i] ? Number(S.weights[i]) || 0 : 0));
+    const sw = w.reduce((a, b) => a + b, 0) || 1;
+    const sum = HGRP.map((G, i) => (on[i] ? d.suppliers.reduce((n, s) => n + (s[G[1]] || 0), 0) : 0));
+    const rows = d.suppliers.map((s) => {
+      const r = { ...s, sh: [], mr: [] };
+      HGRP.forEach((G, i) => {
+        r.sh[i] = on[i] && sum[i] ? (s[G[1]] || 0) / sum[i] : null;
+        /* نسبت گشتاور به خام: چقدر از خریدِ این تأمین‌کننده تازه است */
+        r.mr[i] = on[i] && s[G[1]] ? (s[G[2]] || 0) / s[G[1]] : null;
+      });
+      r.score = HGRP.reduce((n, G, i) => n + (r.sh[i] || 0) * w[i], 0) / sw * 100;
+      r.mscore = HGRP.reduce((n, G, i) => n + (r.mr[i] || 0) * w[i], 0) / sw * 100;
+      return r;
+    });
+    HGRP.forEach((G, i) => {
+      [...rows].sort((a, b) => (b[G[1]] || 0) - (a[G[1]] || 0)).forEach((x, n) => { x["rk" + i] = n + 1; });
+      [...rows].sort((a, b) => (b[G[2]] || 0) - (a[G[2]] || 0)).forEach((x, n) => { x["mk" + i] = n + 1; });
+    });
+    [...rows].sort((a, b) => b.score - a.score).forEach((x, i) => { x.rk = i + 1; });
+    [...rows].sort((a, b) => b.mscore - a.mscore).forEach((x, i) => { x.mrk = i + 1; });
+    const s = S.sort;
+    if (s.grp === null) rows.sort((a, b) => a[s.kind === "mom" ? "mrk" : "rk"] - b[s.kind === "mom" ? "mrk" : "rk"]);
+    else rows.sort((a, b) => a[(s.kind === "mom" ? "mk" : "rk") + s.grp] - b[(s.kind === "mom" ? "mk" : "rk") + s.grp]);
+    return { rows, on };
+  }
+
+  /* کارت تأمین‌کننده — بالای جدول، با کلیک روی نام باز می‌شود */
+  function vProfile(it) {
+    const d = S.hist[it.id]; if (!S.prof || !d) return "";
+    const p = (d.suppliers || []).find((x) => x.key === S.prof); if (!p) return "";
+    const c = p.contact || {};
+    const f = (lab, val, cls) => `<div class="f"><b>${lab}</b><span class="${cls || ""}">${val == null || val === "" ? "—" : esc(val)}</span></div>`;
+    return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.code ? `<span class="chip num">${esc(p.code)}</span>` : ""}
+        <button class="tp-btn xs" data-close-prof style="margin-inline-start:auto">بستن</button></div>
+      <div class="gridp">
+        ${f("تعداد خرید این قلم", M(p.nItem), "num")}${f("کل خریدهای شرکت از او", M(p.nAll) + " ردیف", "num")}
+        ${f("نخستین خرید", p.firstDate, "num")}${f("آخرین خرید", p.lastDate, "num")}
+        ${f("قیمت واحد میانگین (۱۴۰۴)", p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
+        ${f("کمینه / بیشینه قیمت واحد (۱۴۰۴)", p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
+        ${f("شهر", c.city)}${f("تلفن همراه", c.phone, "num")}${f("تلفن ثابت", c.tel2, "num")}${f("ایمیل", c.email)}${f("وب‌سایت", c.site)}</div>
+      ${c.note ? `<div class="desc"><b>توضیحات مدیر:</b> ${esc(c.note)}</div>` : ""}
+      <div class="dim" style="font-size:.82rem;margin-top:8px">${p.contact ? "راه‌های تماس از دفترچهٔ تأمین‌کنندگان خوانده شده‌اند."
+        : `راه‌های تماس این تأمین‌کننده هنوز در دفترچه ثبت نشده است. <span class="chip mock">دفترچهٔ تأمین‌کنندگان — مرحلهٔ بعد</span>`}</div></div>`;
   }
 
   function vHistory(it) {
-    const h = S.hist[it.id], k = S.recency;
-    const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
+    const d = S.hist[it.id];
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
-        ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
-        <span style="margin-inline-start:auto;display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = خریدهای قدیمی هم تقریباً به همان اندازه می‌ارزند · ۱۰ = فقط خریدهای تازه مهم‌اند">
-          <b>ضریب زمان</b><input type="range" min="1" max="10" step="1" data-rec value="${k}" style="width:150px;accent-color:#4f8cff"><b class="num" style="min-width:1.4em;text-align:center">${M(k)}</b></span>
-        <button class="tp-btn primary" data-run-hist>${h ? "دوباره بخوان" : "جستجوی سوابق این قلم"}</button>
-        ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">بررسی کردم — علامت بزن</button>`}</div>`;
-    if (!h) return `<div class="pad">${head}<div class="tp-note">سوابق خریدِ این قلم از اسنادِ گذشتهٔ شرکت خوانده می‌شود. خریدِ ۱۴۰۴ به بعد ضریب ۱ دارد و هر ماه که عقب‌تر برویم، با شیبی که ضریب زمان تعیین می‌کند، کمتر به حساب می‌آید.</div></div>`;
-    if (!h.available) return `<div class="pad">${head}<div class="tp-note warn">هنوز هیچ سابقهٔ خریدی بارگذاری نشده است. مدیر از تب <b>«سوابق تأمین»</b> فایل اسناد را می‌دهد.</div></div>`;
-    if (!h.suppliers.length) return `<div class="pad">${head}<div class="tp-note">برای این قلم سابقهٔ خریدی در ${M(h.total_rows)} سطرِ اسناد پیدا نشد (از ${esc(h.oldest || "—")} تا ${esc(h.newest || "—")}). می‌توانید از «جستجوی هوشمند» یا «افزودن تأمین‌کننده» در تب استعلامات شروع کنید.</div></div>`;
+      ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
+      <span style="margin-inline-start:auto"></span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = گذشتهٔ دور تقریباً هم‌ارزش امروز · ۱۰ = فقط خریدهای تازه وزن دارند">
+        <b>ضریب اهمیت گشتاور</b>
+        <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
+        <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
+      <button class="tp-btn primary" data-run-hist>${d ? "محاسبهٔ دوباره" : "جستجوی سوابق این قلم"}</button>
+      ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>`;
 
-    const rows = calcHist(h, k);
-    const RK = (key, label) => `<th class="rk ${S.hsort === key ? "on" : ""}" data-hsort="${key}" title="برای مرتب‌سازی کلیک کنید">${label}${S.hsort === key ? " ▾" : ""}</th>`;
-    const prof = S.prof ? rows.find((r) => TP.nrm(r.name) === TP.nrm(S.prof)) : null;
-    const profile = prof ? `<div class="tp-note" style="display:block;margin:8px 0;background:rgba(79,140,255,.08)">
-        <div class="toolrow" style="margin:0"><b style="font-size:1rem">${esc(prof.name)}</b>
-          ${prof.contact ? `${prof.contact.city ? `<span class="chip">${esc(prof.contact.city)}</span>` : ""}${prof.contact.phone ? `<span class="chip num">☎ ${esc(prof.contact.phone)}</span>` : ""}${prof.contact.tel2 ? `<span class="chip num">☎ ${esc(prof.contact.tel2)}</span>` : ""}${prof.contact.email ? `<span class="chip">✉ ${esc(prof.contact.email)}</span>` : ""}${prof.contact.site ? `<span class="chip">${esc(prof.contact.site)}</span>` : ""}`
-            : `<span class="chip warn">راه تماس ثبت نشده — بعداً از پایگاه تأمین‌کنندگان پر می‌شود</span>`}
-          <button class="tp-btn xs" data-prof="" style="margin-inline-start:auto">بستن</button></div>
-        <div style="font-size:.85rem;margin-top:6px">${M(prof.totalCount)} خرید در کل · ${M(prof.buys.length)} خرید از همین قلم · مبلغ خامِ همین قلم ${M(Math.round(prof.itemRaw).toLocaleString("en-US"))} ریال</div>
-        <div class="tp-scroll" style="max-height:200px;margin-top:6px"><table class="tp-table"><thead><tr><th>تاریخ</th><th>قلم</th><th>مقدار</th><th>فی</th><th>مبلغ</th><th>پروژه / مرکز</th><th>ضریب</th></tr></thead><tbody>
-          ${prof.buys.map((b) => `<tr><td class="num">${esc(b.date)}</td><td>${esc(b.title || "")}</td><td class="num">${b.qty == null ? "—" : M(b.qty)}</td><td class="num">${b.price == null ? "—" : M(Math.round(b.price).toLocaleString("en-US"))}</td><td class="num">${M(Math.round(b.amount).toLocaleString("en-US"))}</td><td class="dim">${esc(b.party || "—")}</td><td class="num">${TP.recencyWeight(b.date.slice(0, 7), h.oldest, k).toFixed(2)}</td></tr>`).join("")}
-        </tbody></table></div></div>` : "";
+    if (!d) {
+      return `<div class="pad">${head}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
+        دکمهٔ «جستجوی سوابق این قلم» را بزنید. رتبه‌بندی از فایل سوابق خرید خوانده می‌شود و به مدل زبانی نیاز ندارد.</div></div>`;
+    }
+    if (d.available === false) {
+      return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div></div>`;
+    }
+    const { rows, on } = calcHist(it);
+    const exc = d.excluded || [];
+    const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
+    if (!rows.length) {
+      return `<div class="pad">${head}<div class="tp-note warn">${exc.length
+        ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${esc(exc[0].name)}» ثبت شده (${M(exc[0].nItem)} خرید) و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
+        : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div></div>`;
+    }
 
-    return `<div class="pad">${head}${profile}
-      <div class="toolrow"><span class="chip">${M(rows.length)} تأمین‌کننده</span>
-        ${h.fuzzy ? `<span class="chip warn" title="عنوان قلم دقیقاً پیدا نشد؛ روی دو کلمهٔ اول تطبیق شد">تطبیق تقریبی</span>` : ""}
-        <span class="chip" style="background:#FFF6E3;border-color:#E2C57E;color:#7A5A08">سرستون‌های زردِ «رتبه» قابل کلیک‌اند — ترتیب جدول عوض می‌شود</span>
-        <span class="dim" style="font-size:.82rem">مبنا ${esc(h.base)} · قدیمی‌ترین سند ${esc(h.oldest)} · کفِ ضریب ${h.floor}</span></div>
-      <div class="tp-scroll" style="max-height:52vh"><table class="tp-table"><thead><tr>
-        <th></th><th class="rt">تأمین‌کننده</th>${RK("item", "رتبهٔ این قلم")}<th>سهم قلم</th><th>مبلغ وزنیِ قلم</th>${RK("total", "رتبهٔ کل خرید")}<th>سهم کل</th><th>مبلغ وزنیِ کل</th><th>خریدها</th></tr></thead><tbody>
-        ${rows.map((r) => `<tr class="${prof && prof.name === r.name ? "sel" : ""}">
-          <td>${added.has(TP.nrm(r.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs primary" data-add-sup="${esc(r.name)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا فاکتور دستی">افزودن</button>`}</td>
-          <td class="rt"><a href="#" data-prof="${esc(r.name)}" style="color:inherit;font-weight:600">${esc(r.name)}</a>${r.contact ? "" : ` <span class="dim" style="font-size:.72rem">(بی تماس)</span>`}</td>
-          <td class="num rkc">${M(r.itemRank)}</td><td class="num">${(r.itemShare * 100).toFixed(1)}٪</td><td class="num">${M(Math.round(r.itemW).toLocaleString("en-US"))}</td>
-          <td class="num rkc">${M(r.totalRank)}</td><td class="num">${(r.totalShare * 100).toFixed(1)}٪</td><td class="num">${M(Math.round(r.totalW).toLocaleString("en-US"))}</td>
-          <td class="num"><button class="tp-btn xs" data-prof="${esc(r.name)}">${M(r.buys.length)} / ${M(r.totalCount)}</button></td></tr>`).join("")}
+    const sc = (g, k) => (S.sort.grp === g && S.sort.kind === k ? "sorted" : "");
+    let h1 = "", h2 = "", h3 = "", h4 = "";
+    HGRP.forEach((G, gi) => {
+      const op = on[gi] && S.open[gi], cs = op ? 4 : 1;
+      h1 += `<th class="h-imp ${G[3]}" colspan="${cs}">ضریب اهمیت</th>`;
+      h2 += `<th class="h-w ${G[3]}" colspan="${cs}"><input data-w="${gi}" value="${S.weights[gi]}" inputmode="numeric" ${on[gi] ? "" : "disabled"}>٪</th>`;
+      h3 += `<th class="h-grp ${G[3]} ${on[gi] ? "" : "off"}" colspan="${cs}" ${on[gi] ? `data-grp="${gi}"` : 'title="ستون پروژه در فایل سوابق نیست"'}>${G[0]} <span class="car">${on[gi] ? (op ? "▾" : "◂") : "—"}</span></th>`;
+      h4 += op
+        ? `<th class="${G[3]}">مبلغ</th><th class="${G[3]}">گشتاور</th><th class="rkcol ${sc(gi, "score")}" data-sort="${gi}|score">رتبه</th><th class="${G[3]}">سهم</th>`
+        : `<th class="${G[3]}">سهم</th>`;
+    });
+
+    return `<div class="pad">
+      ${vProfile(it)}
+      ${head}
+      <div class="toolrow">
+        <span class="chip">${M(rows.length)} تأمین‌کننده · ${M(d.totals.rows)} خرید</span>
+        <span class="chip info">تطبیق با ${MATCH[d.match.by] || esc(d.match.by)}${d.match.code2 ? ` · ${esc(d.match.code2)}` : ""}</span>
+        ${d.item && d.item.lvl1 ? `<span class="chip">سطح ${esc(d.item.lvl1)}/${esc(d.item.lvl2)}/${esc(d.item.lvl3)}</span>` : ""}
+        ${exc.map((x) => `<span class="chip warn" title="نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده">«${esc(x.name)}» کنار گذاشته شد — ${M(x.nItem)} خرید</span>`).join("")}
+        <span class="chip" style="background:rgba(226,197,126,.16);border-color:#e2c57e;color:#f2d79a">سلول‌های زرد «رتبه» قابل کلیک‌اند — با کلیک، مرتب‌سازی جدول عوض می‌شود</span>
+        <button class="tp-btn sm" data-reset-sort style="margin-inline-start:auto">بازگشت به رتبه کل</button></div>
+      <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead>
+        <tr><th colspan="5"></th>${h1}<th colspan="3"></th></tr>
+        <tr><th colspan="5"></th>${h2}<th colspan="3"></th></tr>
+        <tr><th>انتخاب</th><th>کد</th><th class="rt">تأمین‌کننده</th>
+          <th class="rkcol ${S.sort.grp === null && S.sort.kind === "score" ? "sorted" : ""}" data-sort="all|score">رتبه</th>
+          <th class="rkcol ${S.sort.grp === null && S.sort.kind === "mom" ? "sorted" : ""}" data-sort="all|mom">رتبه<br>گشتاوری</th>
+          ${h3}<th>امتیاز</th><th>امتیاز<br>گشتاوری</th><th>خریدها</th></tr>
+        <tr><th></th><th></th><th></th><th class="rkcol"></th><th class="rkcol"></th>${h4}<th></th><th></th><th></th></tr>
+      </thead><tbody>
+      ${rows.map((h) => {
+        let c = "";
+        HGRP.forEach((G, gi) => {
+          const share = h.sh[gi] == null ? "—" : (h.sh[gi] * 100).toFixed(1) + "٪";
+          c += (on[gi] && S.open[gi])
+            ? `<td class="num ${G[3]}">${MR(h[G[1]])}</td><td class="num ${G[3]}">${MR(h[G[2]])}</td>
+               <td class="num rkcol" data-sort="${gi}|score">${h["rk" + gi]}</td><td class="num ${G[3]}">${share}</td>`
+            : `<td class="num ${G[3]}">${share}</td>`;
+        });
+        return `<tr class="${S.prof === h.key ? "sel" : ""}">
+          <td>${added.has(TP.nrm(h.name)) ? `<span class="chip ok">در استعلامات</span>`
+            : `<button class="tp-btn xs" data-to-quote="${esc(h.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
+          <td class="num">${esc(h.code || "—")}</td>
+          <td class="rt"><span class="supname" data-prof="${esc(h.key)}">${esc(h.name)}</span></td>
+          <td class="num rkcol" data-sort="all|score">${h.rk}</td><td class="num rkcol" data-sort="all|mom">${h.mrk}</td>
+          ${c}<td class="num" style="font-weight:700">${h.score.toFixed(1)}</td><td class="num">${h.mscore.toFixed(1)}</td>
+          <td><button class="tp-btn xs" data-buys="${esc(h.key)}">${M(h.nItem)}</button></td></tr>`;
+      }).join("")}
       </tbody></table></div>
-      <div class="tp-note" style="display:block">مبلغِ وزنی = جمعِ مبلغِ هر خرید × ضریب ماهش. خریدِ ${esc(h.base)} به بعد ضریب ۱؛ قدیمی‌ترین ماه با ضریب زمانِ ۱۰ به ${h.floor} می‌رسد و با ۱ به ${(1 - 0.1 * (1 - h.floor)).toFixed(3)} — هیچ خریدی صفر یا منفی نمی‌شود. «سهم» = مبلغ وزنیِ تأمین‌کننده ÷ جمعِ همه.</div></div>`;
+      <div class="tp-note">مبلغ‌ها به <b>میلیون ریال</b> و به نرخ ۱۴۰۴ هستند. «گشتاور» همان مبلغ است وقتی با فاصلهٔ ماهانه‌اش تا
+        <b>${esc(d.base.label)}</b> کم‌ارزش شود؛ با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ افت دارد و قدیمی‌ترین خریدِ فایل
+        (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ ارزشش را نگه می‌دارد.
+        روی نام گروه کلیک کنید تا مبلغ، گشتاور و رتبه‌اش باز شود؛ ضریب اهمیت را که عوض کنید امتیاز و ترتیب همان لحظه دوباره حساب می‌شوند.
+        «افزودن» تأمین‌کننده را وارد خط استعلامِ همین قلم می‌کند — قیمت تازه‌اش از پیش‌فاکتور یا ورود دستی می‌آید.
+        <span class="chip mock">خرید پروژه و خرید قلم در پروژه — در انتظار ستون پروژه در فایل سوابق</span></div></div>`;
+  }
+
+  const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
+
+  async function runHist() {
+    const it = item(); if (!it) return;
+    const b = TP.busy("خواندن سوابق…", esc(it.title));
+    try { S.hist[it.id] = await TP.api(`/suppliers/history?item_id=${it.id}&k=${S.mom}`); S.prof = null; }
+    catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); return; }
+    b.close();
+    /* خواندنِ سوابق خودش همان «بررسی سوابق» است — باکس دوم پایش مدیر سبز می‌شود */
+    if (!it.hist_done_at && S.hist[it.id].available) {
+      try { await TP.api(`/items/${it.id}/progress`, { body: { stage: "hist" } }); await reload(); return; }
+      catch (_) { /* نمایش جدول مهم‌تر از سبزشدن باکس است */ }
+    }
+    render();
+  }
+
+  async function showBuys(key) {
+    const it = item(), s = supOf(key); if (!s) return;
+    try {
+      const r = await TP.api(`/suppliers/history/buys?item_id=${it.id}&supplier=${encodeURIComponent(s.name)}`);
+      TP.modal(`سوابق خرید — ${esc(s.name)}`, r.buys.length
+        ? `<div class="tp-scroll" style="max-height:56vh"><table class="tp-mx" style="width:100%"><thead><tr>
+            <th>تاریخ</th><th>عنوان در فایل</th><th>مقدار</th><th>واحد</th><th>قیمت واحد روز</th><th>قیمت واحد (۱۴۰۴)</th><th>مبلغ (۱۴۰۴)</th></tr></thead><tbody>
+          ${r.buys.map((x) => `<tr><td class="num">${esc(x.order_date)}</td><td class="rt" style="white-space:normal">${esc(x.title)}</td>
+            <td class="num">${x.qty == null ? "—" : M(x.qty)}</td><td>${esc(x.unit || "")}</td>
+            <td class="num">${x.unit_price == null ? "—" : M(Math.round(x.unit_price))}</td>
+            <td class="num">${x.unit_1404 == null ? "—" : M(Math.round(x.unit_1404))}</td>
+            <td class="num">${x.amount_1404 == null ? "—" : M(Math.round(x.amount_1404))}</td></tr>`).join("")}
+          </tbody></table></div>` : "ردیفی پیدا نشد.", null, "بستن", "");
+    } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+
+  /* از سوابق فقط نام (و کد) تأمین‌کننده وارد خط استعلام می‌شود؛ قیمتِ تازه باید
+     از پیش‌فاکتور یا ورود دستی بیاید و قیمتِ سابقه جای آن را نمی‌گیرد. */
+  async function addFromHistory(key) {
+    const it = item(), s = supOf(key); if (!s) return;
+    try {
+      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name, supplier_code: s.code || "" } });
+      S.tab = "quotes"; await reload();
+    } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
   }
 
   /* ---------- تب جستجوی هوشمند (زیرساخت: پارامترها + علامت دستی) ---------- */
@@ -463,6 +596,9 @@
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
+    /* سرآیند چهارطبقهٔ جدول سوابق باید بچسبد، وگرنه با اسکرول معلوم نیست
+       هر ستون مال کدام گروه است. */
+    const grid = app.querySelector("table.grid"); if (grid) TP.stickHeader(grid);
     restore();
   }
 
@@ -483,24 +619,25 @@
     Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
     const tp = G("[data-tpl]"); if (tp) tp.onclick = pickTemplate;
     /* سوابق / جستجو */
-    Q("[data-w]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); S.weights[+e.target.dataset.w] = +e.target.value || 0; });
-    const rh = G("[data-run-hist]"); if (rh) rh.onclick = async () => {
-      const it = item();
-      try { S.hist[it.id] = await TP.api(`/suppliers/history?item=${encodeURIComponent(it.title)}&code=${encodeURIComponent(it.code || "")}`); }
-      catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); return; }
-      /* خواندنِ سوابق همان «بررسی سوابق» است — باکس دوم سبز می‌شود */
-      if (!it.hist_done_at && S.hist[it.id].available) { try { await TP.api(`/items/${it.id}/progress`, { body: { stage: "hist" } }); await reload(); return; } catch (_) { /* نمایش مهم‌تر است */ } }
-      render();
-    };
-    const rec = G("[data-rec]"); if (rec) rec.oninput = (e) => { S.recency = +e.target.value; try { localStorage.setItem(recKey, String(S.recency)); } catch (_) {} render(); };
-    Q("[data-hsort]").forEach((th) => th.onclick = () => { S.hsort = th.dataset.hsort; render(); });
-    Q("[data-prof]").forEach((el) => el.onclick = (e) => { e.preventDefault(); S.prof = el.dataset.prof && S.prof !== el.dataset.prof ? el.dataset.prof : null; render(); });
-    Q("[data-add-sup]").forEach((b) => b.onclick = async () => {
-      /* فقط نام می‌رود؛ قیمت با پیش‌فاکتور یا فاکتور دستی */
-      const it = item();
-      try { await TP.api("/quotes", { body: { assignment_id: A().id, item_id: it.id, supplier_name: b.dataset.addSup } }); await reload(); }
-      catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
-    });
+    /* تغییر ضریب اهمیت باید همان لحظه امتیاز و ترتیب را عوض کند، پس بازرندر
+       می‌کنیم و فوکوس و مکان‌نما را سر جایشان برمی‌گردانیم. */
+    Q("[data-w]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); S.weights[+e.target.dataset.w] = +e.target.value || 0; TP.keepFocus(e.target, "w", render); });
+    /* ضریب گشتاور برعکس، وزنِ خودِ ردیف‌ها را عوض می‌کند و باید از سرور بیاید */
+    /* کشیدنِ نوار، فقط عدد کنارش را عوض می‌کند؛ محاسبهٔ دوباره وقتی است که رها شود،
+       وگرنه هر پیکسلِ کشیدن یک درخواست به سرور می‌فرستد. */
+    const mo = G("[data-mom]");
+    if (mo) {
+      mo.oninput = (e) => { S.mom = +e.target.value; const lab = G("[data-mom-val]"); if (lab) lab.textContent = M(S.mom); };
+      mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
+    }
+    const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
+    Q("[data-grp]").forEach((h) => h.onclick = () => { S.open[+h.dataset.grp] = !S.open[+h.dataset.grp]; render(); });
+    Q("[data-sort]").forEach((el) => el.onclick = () => { const [g, k] = el.dataset.sort.split("|"); S.sort = { grp: g === "all" ? null : +g, kind: k === "mom" ? "mom" : "score" }; render(); });
+    const rs2 = G("[data-reset-sort]"); if (rs2) rs2.onclick = () => { S.sort = { grp: null, kind: "score" }; render(); };
+    Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });
+    const cp = G("[data-close-prof]"); if (cp) cp.onclick = () => { S.prof = null; render(); };
+    Q("[data-buys]").forEach((b) => b.onclick = () => showBuys(b.dataset.buys));
+    Q("[data-to-quote]").forEach((b) => b.onclick = () => addFromHistory(b.dataset.toQuote));
     const rs = G("[data-run-smart]"); if (rs) rs.onclick = async () => { const it = item(); S.srch.notes = (G("#notes") || {}).value; S.smart[it.id] = await TP.api("/search/smart", { body: { item: it.title, code: it.code, notes: S.srch.notes, scope: S.scope, caps: S.caps, srch: S.srch, filters: S.f } }); render(); };
     Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); const stage = b.dataset.mark; const ids = S.scope === "all" && stage === "smart" ? items().map((x) => x.id) : [it.id]; for (const id of ids) await TP.api(`/items/${id}/progress`, { body: { stage } }); await reload(); });
     Q("[data-scope]").forEach((x) => x.onchange = (e) => { S.scope = e.target.dataset.scope; render(); });

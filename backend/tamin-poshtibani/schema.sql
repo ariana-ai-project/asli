@@ -96,6 +96,7 @@ CREATE TABLE IF NOT EXISTS items (
   state          TEXT NOT NULL DEFAULT 'open',
   state_at       INTEGER,
   assignment_id  INTEGER REFERENCES assignments(id) ON DELETE SET NULL,
+  hist_code      TEXT,                    -- کد استاندارد سوابق («نرمال‌سازی اقلام» — مرحلهٔ بعد)
   hist_done_at   INTEGER,                 -- مرحلهٔ «بررسی سوابق»
   smart_done_at  INTEGER,                 -- مرحلهٔ «جستجوی هوشمند»
   commission_ok  INTEGER NOT NULL DEFAULT 0,  -- تأیید کمیسیون این قلم
@@ -169,6 +170,47 @@ CREATE TABLE IF NOT EXISTS supplier_channels (
   updated_at    INTEGER NOT NULL,
   PRIMARY KEY (supplier_code, item_title, platform)
 );
+
+-- ---------- سوابق خرید (فایل مرجع مدیر) ----------
+-- هر بارگذاری تازه، purchase_history را DROP و از نو می‌سازد و ردیف قبلی این
+-- جدول 'stale' می‌شود. DROP به‌جای DELETE، چون پاک‌کردن ۷۰ هزار ردیف در D1
+-- ۷۰ هزار «سطر نوشته‌شده» حساب می‌شود.
+CREATE TABLE IF NOT EXISTS hist_imports (
+  id          INTEGER PRIMARY KEY,
+  filename    TEXT,
+  imported_at INTEGER NOT NULL,
+  finished_at INTEGER,
+  row_count   INTEGER,
+  state       TEXT NOT NULL DEFAULT 'loading',  -- loading | ready | stale
+  stats_json  TEXT                              -- بازهٔ ماه‌ها، شمار تأمین‌کننده/کد، ageMax
+);
+
+-- یک ردیف به ازای هر سطر فایل سوابق. مبنای همهٔ جمع‌ها amount_1404 است
+-- (مبلغ به نرخ ۱۴۰۴)، نه مبلغ روزِ خرید.
+CREATE TABLE IF NOT EXISTS purchase_history (
+  id          INTEGER PRIMARY KEY,
+  import_id   INTEGER NOT NULL,
+  order_date  TEXT,                    -- تاریخ سفارش (شمسی)
+  ym          INTEGER,                 -- سال×۱۲ + ماه — فاصلهٔ ماهانه تا اسفند ۱۴۰۴
+  item_code   TEXT,                    -- کد قلم خریدنی راهکاران (همان items.code)
+  code2       TEXT,                    -- کد قلم جدید (استاندارد) — کلید گروه‌بندی نگارش‌ها
+  title       TEXT,
+  title_n     TEXT,                    -- عنوان نرمال‌شده، برای تطبیق بی‌کد
+  qty         REAL,
+  unit        TEXT,
+  unit_price  REAL,                    -- فی (روزِ خرید)
+  amount      REAL,                    -- مبلغ به ارز عملیاتی (ریال، روزِ خرید)
+  supplier    TEXT,
+  supplier_n  TEXT,                    -- نام نرمال‌شده، کلید گروه‌بندی تأمین‌کننده
+  idx_val     REAL,                    -- شاخص تعدیل
+  amount_1404 REAL,                    -- قیمت کل (۱۴۰۴) = idx_val × amount ÷ ۱۰۰
+  unit_1404   REAL,                    -- قیمت واحد (۱۴۰۴)
+  lvl1 TEXT, lvl2 TEXT, lvl3 TEXT      -- سطح اول/دوم/سوم طبقه‌بندی
+);
+CREATE INDEX IF NOT EXISTS ix_ph_code2 ON purchase_history(code2);
+CREATE INDEX IF NOT EXISTS ix_ph_item  ON purchase_history(item_code);
+CREATE INDEX IF NOT EXISTS ix_ph_title ON purchase_history(title_n);
+CREATE INDEX IF NOT EXISTS ix_ph_sup   ON purchase_history(supplier_n);
 
 -- ---------- قالب‌های پیام ----------
 CREATE TABLE IF NOT EXISTS templates (

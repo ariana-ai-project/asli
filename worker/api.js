@@ -24,7 +24,7 @@ import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
-import { HISTORY_SCHEMA, historyBegin, historyChunk, historyFinish, historyStatus, historyFor } from "./history.js";
+import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys } from "./history.js";
 import { commissionHtml } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
@@ -114,6 +114,8 @@ CREATE TABLE IF NOT EXISTS tg_flows (id INTEGER PRIMARY KEY, expert_id INTEGER N
 CREATE INDEX IF NOT EXISTS ix_flows_open ON tg_flows(expert_id) WHERE done_at IS NULL;
 CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, expert_id INTEGER NOT NULL, voice_key TEXT, voice_secs REAL, transcript TEXT, letter_json TEXT, docx_key TEXT, state TEXT NOT NULL DEFAULT 'need_voice', meta_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
+CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT);
+${HISTORY_TABLE};
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -135,6 +137,9 @@ const COLUMN_MIGRATIONS = [
   ["assignments", "mgr_colors", "TEXT"],      /* عکسِ شش رنگِ پایش، برای تشخیص تغییر (اعلان مدیر) */
   ["assignments", "mgr_seen_at", "INTEGER"],  /* مدیر خاتمه را دید — از میز کارش می‌رود */
   ["decisions", "note", "TEXT"],              /* دلیلِ ردِ مدیر (یا مسیرِ تأیید) */
+  /* «کد قلم جدید» فایل سوابق. تا وقتی «نرمال‌سازی اقلام» ساخته نشده NULL می‌ماند و
+     تطبیق سوابق با کد راهکاران یا عنوان انجام می‌شود (worker/history.js:resolveItem). */
+  ["items", "hist_code", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -161,7 +166,6 @@ async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
-  await env.DB.exec(HISTORY_SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   await migrateColumns(env);
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();
   if (!c || !c.n) {
@@ -635,6 +639,17 @@ async function assignmentDetail(env, aid, who) {
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
   const decisions = (await env.DB.prepare("SELECT * FROM decisions WHERE assignment_id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(aid).all()).results || [];
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await getSettings(env) };
+}
+
+/* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
+   مدیر هر قلمی را می‌بیند (پنل فقط‌خواندنی‌اش همین را لازم دارد). */
+async function ownItem(env, who, itemId) {
+  if (!itemId) throw new HttpError("item_id لازم است.");
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, a.expert_id
+    FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
+  if (!it) throw new HttpError("قلم پیدا نشد.", 404);
+  if (who.role === "expert" && it.expert_id !== who.expert.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
+  return it;
 }
 
 async function markProgress(env, ex, itemId, stage) {
@@ -1113,14 +1128,23 @@ async function route(request, env, ctx) {
     if (path === "/notify/telegram") { await requireAny(request, env); return NOT_CONNECTED("اعلان تلگرام"); }
     if (path === "/notify/email") { await requireAny(request, env); return NOT_CONNECTED("ارسال ایمیل"); }
     if (path === "/search/smart") { await requireAny(request, env); return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده"); }
-    /* سوابق تأمین (IMP-13): بارگذاری از تب مدیر، خواندن از تب کارشناس */
-    if (path === "/history/status" && m === "GET") { requireManager(request, env); return json(await historyStatus(env)); }
+    /* سوابق خرید (IMP-13): بارگذاری سه‌مرحله‌ای از تب مدیر، خواندن از تب کارشناس.
+       begin جدول را از نو می‌سازد، chunkها ردیف‌ها را می‌ریزند و finish نمایه‌ها
+       و آمار مرجع (از جمله فاصلهٔ قدیمی‌ترین خرید) را می‌سازد. */
+    if (path === "/history/status" && m === "GET") { await requireAny(request, env); return json(await historyStatus(env)); }
     if (path === "/history/begin" && m === "POST") { requireManager(request, env); return json(await historyBegin(env, await readJson(request))); }
     if (path === "/history/chunk" && m === "POST") { requireManager(request, env); return json(await historyChunk(env, await readJson(request))); }
     if (path === "/history/finish" && m === "POST") { requireManager(request, env); return json(await historyFinish(env, await readJson(request))); }
+    if (path === "/items/normalize") { requireManager(request, env); return NOT_CONNECTED("نرمال‌سازی اقلام"); }
     if (path === "/suppliers/history" && m === "GET") {
-      await requireAny(request, env);
-      return json(await historyFor(env, { item: url.searchParams.get("item"), code: url.searchParams.get("code") }));
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      return json(await itemHistory(env, it, { k: url.searchParams.get("k") }));
+    }
+    if (path === "/suppliers/history/buys" && m === "GET") {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      return json(await supplierBuys(env, it, url.searchParams.get("supplier")));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }
     if (/^\/proformas\/\d+\/extract$/.test(path)) { await requireAny(request, env); return NOT_CONNECTED("استخراج از پیش‌فاکتور"); }

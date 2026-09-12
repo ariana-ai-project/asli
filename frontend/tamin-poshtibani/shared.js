@@ -46,19 +46,6 @@
   TP.nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
   TP.hit = (v, q) => !q || TP.nrm(v).includes(TP.nrm(q));
 
-  /* ---------- وزن زمانیِ سوابق — همان تابعِ worker/history.js (تست تطابق دارد) ----------
-     خریدِ ۱۴۰۴ به بعد ضریب ۱؛ هر ماه عقب‌تر خطی کمتر با شیبِ ضریب k (۱..۱۰)؛
-     قدیمی‌ترین ماه هیچ‌وقت صفر یا منفی نمی‌شود (کف ۰٫۰۵). */
-  const monthIndex = (ym) => { const m = /^(\d{4})\/(\d{1,2})/.exec(String(ym || "")); return m ? (+m[1]) * 12 + (+m[2] - 1) : null; };
-  TP.recencyWeight = function (ym, oldest, k = 5, base = "1404/01", floor = 0.05) {
-    const m = monthIndex(ym), b = monthIndex(base), o = monthIndex(oldest);
-    if (m == null || b == null) return 1;
-    if (m >= b) return 1;
-    const M = Math.max(1, b - (o == null ? m : Math.min(o, m)));
-    const dist = Math.min(M, b - m);
-    const kk = Math.min(10, Math.max(1, Number(k) || 5));
-    return 1 - (kk / 10) * (dist / M) * (1 - floor);
-  };
   /* مقدار راهکاران: «2,000» یا «12.5» → عدد */
   TP.num = (v) => { const s = String(v == null ? "" : v).replace(/,/g, "").trim(); if (!s) return null; const n = Number(s); return isNaN(n) ? null : n; };
 

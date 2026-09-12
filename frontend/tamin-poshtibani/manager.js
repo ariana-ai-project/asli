@@ -15,7 +15,7 @@
   const S = {
     tab: "desk", now: Date.now(),
     data: { requests: [], experts: [], settings: null }, scores: { scores: [], weights: [] },
-    decisions: [], events: [],
+    decisions: [], events: [], hist: null,
     filter: { expert: "", status: "", state: "", window: CFG.defaults.window || "3d" },
     q: { id: "", date: "", party: "", item: "" },
     page: { limit: 300, offset: 0, total: 0 },   // صفحه‌بندی سمت سرور برای بازه‌های بزرگ
@@ -247,56 +247,80 @@
     return h + `</tbody></table></div>`;
   }
 
-  /* ---------- سوابق تأمین (IMP-13) ----------
-     اسنادِ خریدِ گذشته، یک‌بار و هر وقت مدیر خواست دوباره. تکراری‌ها درج
-     نمی‌شوند و هیچ رکوردی حذف نمی‌شود. پیش از اعمال، نقشهٔ ستون‌ها و شمارش‌ها
-     نشان داده می‌شود تا مدیر ببیند فایل درست خوانده شده. */
+  /* ---------- سوابق خرید ---------- */
+  /* ym = سال×۱۲ + ماه — همان چیزی که سرور برای فاصلهٔ ماهانه نگه می‌دارد */
+  const ymFa = (v) => { if (!v) return "—"; const y = Math.floor((v - 1) / 12); return `${TP.JM[v - y * 12 - 1]} ${y}`; };
   function vHist() {
-    const st = S.hist || {};
-    const t = st.total || {};
-    return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>سوابق تأمین</h2>
-      <p class="lead">فایل اکسلِ اسنادِ خرید (تاریخ، تأمین‌کننده، قلم، مقدار/فی/مبلغ) را بدهید. تب «بررسی سوابق» کارشناس از همین داده رتبهٔ تأمین‌کنندگان را می‌سازد؛ خریدِ ۱۴۰۴ به بعد ضریب یک دارد و هر ماه عقب‌تر خطی کمتر.</p>
-      <div class="toolrow"><button class="tp-btn primary" data-import-hist>بارگذاری فایل سوابق</button>
-        ${t.n ? `<span class="chip ok">${M(t.n)} سطر</span><span class="chip">${M(t.suppliers)} تأمین‌کننده</span><span class="chip">${M(t.items)} قلم</span><span class="chip num">${esc(t.oldest)} تا ${esc(t.newest)}</span>` : `<span class="chip warn">هنوز چیزی بارگذاری نشده</span>`}</div>
-      <div class="tp-note" style="display:block">ستون‌هایی که شناخته می‌شوند (هر نامی از این‌ها): <b>تاریخ</b> (تاریخ سند / تاریخ فاکتور / تاریخ خرید) · <b>تأمین‌کننده</b> (تامین کننده / فروشنده / طرف مقابل) · <b>قلم</b> (عنوان قلم خریدنی / نام قلم / کالا / شرح) · کد قلم · مقدار · فی (قیمت واحد) · مبلغ (مبلغ کل) · پروژه (مرکز هزینه / مصرف کننده) · شماره سند. مبلغ اگر نبود، فی × مقدار.</div>
-      ${(st.batches || []).length ? `<table class="tp-table" style="margin-top:10px"><thead><tr><th>#</th><th>فایل</th><th>زمان</th><th>سطر فایل</th><th>تازه</th><th>تکراری</th><th>تأمین‌کننده</th></tr></thead><tbody>
-        ${st.batches.map((b) => `<tr><td class="num">${b.id}</td><td>${esc(b.filename || "—")}</td><td class="num">${TP.fmt(b.imported_at)}</td><td class="num">${b.rows == null ? "—" : M(b.rows)}</td><td class="num">${M(b.inserted || 0)}</td><td class="num">${M(b.dup || 0)}</td><td class="num">${M(b.suppliers || 0)}</td></tr>`).join("")}
-      </tbody></table>` : ""}</div>`;
+    const h = S.hist, c = h && h.current;
+    const k = (lab, val) => `<div class="k"><b>${lab}</b><span style="font-size:.95rem">${val}</span></div>`;
+    return `<div class="tp-card tp-pane" style="max-width:1000px"><h2>سوابق تأمین</h2>
+      <p class="lead">فایل مرجع خریدهای گذشتهٔ شرکت. کارشناس در تب «بررسی سوابق» هر قلم، تأمین‌کنندگان همان قلم، سهم و رتبه‌شان را از همین فایل می‌بیند — بدون مدل زبانی و با کوئری ثابت.</p>
+      ${!h ? `<div class="empty">در حال بارگیری وضعیت…</div>`
+        : c ? `<div class="kpi">${k("فایل", esc(c.filename || "—"))}${k("بارگذاری", TP.fmt(c.finished_at || c.imported_at))}
+            ${k("ردیف", M(c.rows))}${k("تأمین‌کننده", M(c.suppliers))}${k("کد قلم", M(c.codes))}
+            ${k("بازه", `${ymFa(c.minYm)} تا ${ymFa(c.maxYm)}`)}${k("مبنای ارزش", h.base.label)}</div>
+          ${c.noIndex ? `<div class="tp-note warn">${M(c.noIndex)} ردیف «شاخص تعدیل» ندارند و مبلغ ۱۴۰۴ برایشان ساخته نشد؛ در جمع‌ها صفر حساب می‌شوند.</div>` : ""}`
+        : `<div class="empty"><b>هنوز فایل سوابقی بارگذاری نشده است.</b>تا آن زمان تب «بررسی سوابق» کارشناس پیام «بارگذاری نشده» می‌دهد.</div>`}
+      ${h && h.loading ? `<div class="tp-note warn">یک بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)} هست («${esc(h.loading.filename || "")}»). تا پایان نگرفتنش، سوابق قبلی در دسترس نیست — فایل را دوباره بارگذاری کنید.</div>` : ""}
+      <div class="tp-row"><button class="tp-btn primary" data-hist-import>بارگذاری فایل سوابق (.xlsx)</button>
+        <span class="dim" style="font-size:.85rem">یا فایل را وقتی روی همین تب هستید روی صفحه رها کنید.</span></div>
+      <div class="tp-note">ستون‌های لازم: <b>تاریخ سفارش</b> · <b>عنوان قلم خریدنی</b> · <b>تامین کننده</b> · <b>مبلغ به ارز عملیاتی</b> · <b>شاخص تعدیل</b> · <b>کد قلم جدید</b>.
+        ستون‌های «قیمت کل (۱۴۰۴)» و «قیمت واحد (۱۴۰۴)» در فایل فرمول‌اند؛ اگر مقدارِ ذخیره‌شده نداشته باشند، از روی مبلغ × شاخص تعدیل ساخته می‌شوند.
+        بارگذاری تازه <b>جای فایل قبلی را می‌گیرد</b>.</div>
+      <div class="tp-sect"><h3>نرمال‌سازی اقلام <span>مرحلهٔ بعد</span></h3>
+        <p class="lead">هم‌اکنون هر قلم با «کد قلم خریدنی» راهکاران و اگر نبود با عنوانش به سوابق وصل می‌شود، و اگر ردیف‌های پیداشده «کد قلم جدید» داشته باشند، همهٔ نگارش‌های آن کد با هم دیده می‌شوند.
+          نرمال‌سازی، همین کار را برای قلم‌هایی می‌کند که تفاوت نگارشی (مثلاً «نمره» و «عدد») از سابقه‌شان جدایشان کرده است: مدل عنوان قلم را با فهرست سوابق و لایه‌های طبقه‌بندی می‌سنجد و کد استاندارد را روی قلم می‌نویسد.</p>
+        <button class="tp-btn" data-normalize>نرمال‌سازی اقلام</button>
+        <span class="chip mock">در انتظار اتصال به مدل</span></div></div>`;
   }
 
-  async function loadHist() { try { S.hist = await TP.api("/history/status"); } catch (e) { S.hist = { error: e.message }; } render(); }
 
-  function pickAndImportHist() {
-    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx,.xls";
-    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) importHistFile(f); };
+  /* ---------- بارگذاری سوابق خرید ----------
+     همان الگوی درخواست‌های روزانه: خواندن در مرورگر، ارسال دسته‌ای، پایان.
+     تفاوتش این است که begin جدول سوابق را از نو می‌سازد — پس اگر بارگذاری وسط
+     راه بماند فایل قبلی رفته است و باید دوباره فرستاده شود. برای همین قبلش
+     صریح می‌پرسیم. */
+  async function loadHist() { try { S.hist = await TP.api("/history/status"); } catch (e) { S.hist = { ready: false, error: e.message }; } render(); }
+
+  function pickHistory() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx";
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) askHistoryImport(f); };
     inp.click();
   }
-  async function importHistFile(f) {
-    const busy = TP.busy("در حال خواندن فایل سوابق…", esc(f.name));
-    let parsed;
-    try { parsed = await TP.importHistory(f, (t) => busy.set(esc(t))); }
-    catch (e) { busy.close(); TP.modal("فایل خوانده نشد", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); return; }
-    busy.close();
-    const st = parsed.stats, mp = parsed.mapping;
-    const mapRow = (k, l) => `<tr><td>${l}</td><td>${mp[k] != null ? `<b>${esc(parsed.headers[mp[k]])}</b>` : `<span class="dim">—</span>`}</td></tr>`;
-    /* پیش از اعمال: نقشه و شمارش (IMP-13) */
-    TP.modal("پیش‌نمایش سوابق — پیش از اعمال", `<b>${M(st.rows)}</b> سطر · <b>${M(st.good)}</b> قابل‌ورود · <b>${M(st.bad)}</b> ناقص (بی‌تاریخ/بی‌مبلغ/بی‌نام) · <b>${M(st.suppliers)}</b> تأمین‌کننده · بازه ${esc(st.dateMin || "—")} تا ${esc(st.dateMax || "—")}<br><br>
-      <table class="tp-table"><thead><tr><th>فیلد</th><th>ستون فایل</th></tr></thead><tbody>
-      ${mapRow("date", "تاریخ")}${mapRow("supplier", "تأمین‌کننده")}${mapRow("item", "قلم")}${mapRow("code", "کد قلم")}${mapRow("qty", "مقدار")}${mapRow("price", "فی")}${mapRow("amount", "مبلغ")}${mapRow("party", "پروژه / مرکز")}${mapRow("doc", "شماره سند")}</tbody></table>
-      <br><span class="dim">رکوردِ تکراری (همان تأمین‌کننده، قلم، تاریخ، مقدار، فی) دوباره درج نمی‌شود و هیچ رکوردی حذف نمی‌شود.</span>`,
-      async () => {
-        const b = TP.busy("ارسال سوابق…");
-        try {
-          const { batch_id } = await TP.api("/history/begin", { body: { filename: f.name, rows: st.rows, mapping: mp } });
-          const rows = parsed.rows; let k = 0, ins = 0, dup = 0;
-          for (let i = 0; i < rows.length; i += 500) { const r = await TP.api("/history/chunk", { body: { batch_id, rows: rows.slice(i, i + 500) } }); ins += r.inserted; dup += r.dup; b.set(`ارسال دستهٔ ${++k} از ${Math.ceil(rows.length / 500)}…`); }
-          const fin = await TP.api("/history/finish", { body: { batch_id } });
-          b.close();
-          TP.modal("سوابق بارگذاری شد", `<b>${M(ins)}</b> رکورد تازه · <b>${M(dup)}</b> تکراری (نادیده) · اکنون <b>${M(fin.total.n)}</b> سطر از <b>${M(fin.total.suppliers)}</b> تأمین‌کننده، ${esc(fin.total.oldest)} تا ${esc(fin.total.newest)}.`, null, "باشد", "");
-          await loadHist();
-        } catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); }
-      }, "اعمال");
+  function askHistoryImport(f) {
+    const c = S.hist && S.hist.current;
+    TP.modal("بارگذاری سوابق خرید", `فایل <b>${esc(f.name)}</b> (${(f.size / 1048576).toFixed(1)} مگابایت)
+      ${c ? `<br><br>سوابق فعلی (${M(c.rows)} ردیف از «${esc(c.filename || "—")}») <b>جایگزین</b> می‌شود.` : ""}
+      <br><br>ارسال چند دقیقه طول می‌کشد و در این مدت پنجره را نبندید؛ اگر نیمه‌کاره بماند باید از نو بارگذاری کنید.`,
+      () => importHistoryFile(f), "بارگذاری کن");
   }
+  async function importHistoryFile(f) {
+    const busy = TP.busy("در حال خواندن فایل سوابق…", `${esc(f.name)} — ${(f.size / 1048576).toFixed(1)} مگابایت`);
+    try {
+      const parsed = await TP.importHistory(f, (t) => busy.set(esc(t)));
+      const st = parsed.stats;
+      if (!st.rows) throw new Error("هیچ ردیف معتبری در فایل نبود (هر ردیف باید تاریخ، عنوان قلم و تأمین‌کننده داشته باشد).");
+      const { import_id } = await TP.api("/history/begin", { body: { filename: f.name, rows: st.rows, stats: st } });
+      const chunks = TP.chunkHistory(parsed.rows);
+      let sent = 0;
+      for (let i = 0; i < chunks.length; i++) {
+        await TP.api("/history/chunk", { body: { import_id, rows: chunks[i] } });
+        sent += chunks[i].length;
+        busy.set(`ارسال ${M(sent)} از ${M(st.rows)} ردیف — دستهٔ ${i + 1} از ${chunks.length}`);
+      }
+      busy.set("ساخت نمایه‌ها و آمار مرجع…");
+      const fin = await TP.api("/history/finish", { body: { import_id } });
+      busy.close();
+      await loadHist();
+      TP.modal("سوابق خرید بارگذاری شد", `<b>${M(fin.stats.rows)}</b> ردیف · <b>${M(fin.stats.suppliers)}</b> تأمین‌کننده · <b>${M(fin.stats.codes)}</b> کد قلم
+        · بازه ${ymFa(fin.stats.minYm)} تا ${ymFa(fin.stats.maxYm)}
+        ${st.skipped ? `<br><span style="color:#fcd34d">${M(st.skipped)} سطر ناقص (بدون تاریخ، عنوان یا تأمین‌کننده) رد شد.</span>` : ""}
+        ${fin.stats.noIndex ? `<br><span style="color:#fcd34d">${M(fin.stats.noIndex)} ردیف شاخص تعدیل نداشتند و مبلغ ۱۴۰۴ برایشان ساخته نشد.</span>` : ""}
+        ${st.noCode ? `<br><span style="color:#fcd34d">${M(st.noCode)} ردیف «کد قلم جدید» ندارند؛ برای آن‌ها تطبیق با کد راهکاران یا عنوان انجام می‌شود.</span>` : ""}
+        <br><br>تب «بررسی سوابق» کارشناسان از همین حالا کار می‌کند.`, null, "باشد", "");
+    } catch (e) { busy.close(); TP.modal("خطا در بارگذاری سوابق", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); }
+  }
+
 
   function vFoot() {
     const n = readyAssignments().length;
@@ -422,7 +446,11 @@
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
     const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#mcode").value.trim(); if (!c) return; TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); S.error = e.message; render(); } }; lg.onclick = go; G("#mcode").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
-    const ih = G("[data-import-hist]"); if (ih) ih.onclick = pickAndImportHist;
+    const ih = G("[data-hist-import]"); if (ih) ih.onclick = pickHistory;
+    const nz = G("[data-normalize]"); if (nz) nz.onclick = async () => {
+      const r = await TP.api("/items/normalize", { body: {} }).catch((e) => ({ message: e.message }));
+      TP.modal("نرمال‌سازی اقلام", `${esc(r.message || "")}<br><br>تا آن زمان، تطبیق با «کد قلم خریدنی» راهکاران و عنوان انجام می‌شود و برای بیشتر اقلام کار می‌کند.`, null, "باشد", "");
+    };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
@@ -435,8 +463,9 @@
     body.ondrop = (e) => {
       e.preventDefault(); body.classList.remove("tp-drop-over");
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
-      if (!/\.xlsx$/i.test(f.name)) { TP.modal("فایل نامناسب", `فقط خروجی اکسل راهکاران (.xlsx) پذیرفته می‌شود؛ «${esc(f.name)}» نیست.`, null, "باشد", ""); return; }
-      importFile(f);
+      if (!/\.xlsx$/i.test(f.name)) { TP.modal("فایل نامناسب", `فقط فایل اکسل (.xlsx) پذیرفته می‌شود؛ «${esc(f.name)}» نیست.`, null, "باشد", ""); return; }
+      /* روی تب سوابق، فایلِ رهاشده همان فایل سوابق است نه درخواست‌های روزانه */
+      if (S.tab === "hist") askHistoryImport(f); else importFile(f);
     };
     Q("[data-f]").forEach((s) => s.onchange = (e) => { S.filter[e.target.dataset.f] = e.target.value; if (e.target.dataset.f === "window") { S.page.offset = 0; refresh(); } else render(); });
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };

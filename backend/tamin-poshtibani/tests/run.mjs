@@ -28,11 +28,12 @@ export function loadTP() {
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
 
-  for (const f of ["vendor/xlsx.full.min.js", "shared.js", "import.js"]) {
+  for (const f of ["vendor/xlsx.full.min.js", "shared.js", "import.js", "history-import.js"]) {
     vm.runInContext(readFileSync(resolve(FRONT, f), "utf8"), sandbox, { filename: f });
   }
   if (!sandbox.XLSX) throw new Error("XLSX در سندباکس بار نشد");
   if (!sandbox.TP || !sandbox.TP.importExcel) throw new Error("TP.importExcel بار نشد");
+  if (!sandbox.TP.importHistory) throw new Error("TP.importHistory بار نشد");
   return sandbox;
 }
 

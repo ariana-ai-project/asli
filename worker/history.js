@@ -1,183 +1,293 @@
 /**
- * سوابق تأمین — بارگذاری اسنادِ خریدِ گذشته و امتیازِ زمان‌وزنیِ تأمین‌کنندگان
+ * سوابق خرید — بارگذاری فایل مرجع و محاسبهٔ ارقام تب «بررسی سوابق»
  *
- * (T-17 supply_history · IMP-13 · مبنا: اسناد ۱۴۰۴)
+ * فایل مرجع (خروجی اقلام با ستون‌های تعدیل‌شده) در مرورگرِ مدیر خوانده و
+ * دسته‌دسته این‌جا نوشته می‌شود؛ Worker خودش اکسل ۷۰ هزارسطری را باز نمی‌کند.
  *
- * چه چیزی وارد می‌شود: هر سطر یک خریدِ انجام‌شده است — تاریخ، تأمین‌کننده، قلم،
- * مقدار/فی/مبلغ، و پروژه. مدیر از تب «سوابق تأمین» هر وقت خواست فایل تازه
- * می‌دهد؛ رکورد تکراری (همان تأمین‌کننده، قلم، تاریخ، مقدار، فی) دوباره درج
- * نمی‌شود و هیچ رکوردی حذف نمی‌شود (INV-04).
- *
- * چه چیزی برمی‌گردد: برای یک قلم، هر تأمین‌کننده‌ای که یا همان قلم را داده یا
- * اصلاً از او خرید شده، با **سطل‌های ماهانهٔ مبلغ** — یک بار برای کل خریدها و یک
- * بار برای همین قلم. وزن‌دهی و رتبه در مرورگر حساب می‌شود تا وقتی کارشناس ضریب
- * ۱ تا ۱۰ را عوض می‌کند، جدول همان لحظه دوباره چیده شود، بی رفت‌وبرگشت.
- *
- * قاعدهٔ وزنِ زمانی (همان که این‌جا و در shared.js یکی است و تست تطابق دارد):
- *   خریدِ ۱۴۰۴ به بعد → ضریب ۱
- *   هر ماه که عقب‌تر می‌رویم، خطی کم می‌شود؛ شیب از ضریب ۱..۱۰ کارشناس می‌آید
- *   قدیمی‌ترین ماهِ موجود هیچ‌وقت صفر یا منفی نمی‌شود: با ضریب ۱۰ دقیقاً به کف
- *   (۰٫۰۵) می‌رسد و با ضریب ۱ به ۰٫۹۰۵.
+ * تب «بررسی سوابق» با کوئری ثابت جواب می‌گیرد — بدون مدل زبانی. برای هر
+ * تأمین‌کنندهٔ یک قلم دو جفت عدد برمی‌گردد:
+ *   • «خام»    = جمع ستون «قیمت کل (۱۴۰۴)» — مبلغ به نرخ امروز.
+ *   • «گشتاور» = همان جمع، وقتی هر خرید با فاصلهٔ ماهانه‌اش تا اسفند ۱۴۰۴
+ *                خطی کم‌ارزش شود. شیبِ کاهش را «ضریب اهمیت گشتاور» (۱ تا ۱۰)
+ *                در پنل کارشناس تعیین می‌کند.
+ * سهم، امتیاز، رتبه و مرتب‌سازی در مرورگر حساب می‌شوند تا تغییر ضریب اهمیت
+ * همان لحظه اثر کند (همان رفتار ماک‌آپ مرجع).
  */
+
 import { HttpError } from "./http.js";
 
-const now = () => Date.now();
-const T = (v) => String(v == null ? "" : v).trim();
-const num = (v) => { const s = String(v == null ? "" : v).replace(/[,٬]/g, "").replace(/[۰-۹]/g, (c) => "۰۱۲۳۴۵۶۷۸۹".indexOf(c)).trim(); if (!s) return null; const n = Number(s); return isNaN(n) ? null : n; };
-export const nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/[‌\s]+/g, " ").trim().toLowerCase();
+/* اسفند ۱۴۰۴ — مبنای ارزش‌گذاری. خریدِ این ماه و بعدترش ضریب ۱ می‌گیرد. */
+export const BASE_YM = 1404 * 12 + 12;
+/* بیشترین افتِ ممکن. با ۰٫۹۵ حتی قدیمی‌ترین خرید با ضریب ۱۰ هم ۵٪ ارزشش را
+   نگه می‌دارد، پس هیچ گشتاوری صفر یا منفی نمی‌شود. */
+export const MAX_DROP = 0.95;
 
-export const HISTORY_SCHEMA = `
-CREATE TABLE IF NOT EXISTS history_batches (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, rows INTEGER, inserted INTEGER, dup INTEGER, suppliers INTEGER, mapping_json TEXT);
-CREATE TABLE IF NOT EXISTS supply_history (id INTEGER PRIMARY KEY, batch_id INTEGER NOT NULL, supplier_name TEXT NOT NULL, supplier_norm TEXT NOT NULL, item_title TEXT NOT NULL, item_norm TEXT NOT NULL, item_code TEXT, party TEXT, supplied_on TEXT NOT NULL, ym TEXT NOT NULL, qty REAL, unit_price REAL, amount REAL NOT NULL, doc_no TEXT, dkey TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL);
-CREATE INDEX IF NOT EXISTS ix_hist_item ON supply_history(item_norm);
-CREATE INDEX IF NOT EXISTS ix_hist_code ON supply_history(item_code);
-CREATE INDEX IF NOT EXISTS ix_hist_sup ON supply_history(supplier_norm);
-`;
+export const clampK = (k) => Math.min(10, Math.max(1, Math.round(Number(k) || 1)));
+
+/** افتِ ارزش به ازای هر ماه فاصله. `ageMax` = فاصلهٔ قدیمی‌ترین خریدِ موجود. */
+export function decayPerMonth(k, ageMax) {
+  return clampK(k) / 10 * MAX_DROP / Math.max(1, ageMax);
+}
+
+/** ضریب گشتاور یک خرید در ماهِ `ym` — همیشه در بازهٔ [۰٫۰۵، ۱]. */
+export function momentWeight(ym, k, ageMax) {
+  const span = Math.max(1, ageMax);
+  const age = Math.min(Math.max(BASE_YM - ym, 0), span);
+  return 1 - decayPerMonth(k, span) * age;
+}
+
+/* همان عبارت به زبان SQLite. min/max دوآرگومانی اسکالرند، پس داخل SUM درست‌اند. */
+const W_SQL = "(1 - ? * min(max(? - ym, 0), ?))";
+const wArgs = (k, ageMax) => [decayPerMonth(k, ageMax), BASE_YM, Math.max(1, ageMax)];
+
+const nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").trim();
+
+/* «سایر تامین کنندگان» در فایل مرجع یک سطل تجمیعی است، نه یک تأمین‌کننده. اگر
+   بماند در بیشتر اقلام رتبهٔ اول می‌شود و سهم تأمین‌کنندگان واقعی را له می‌کند —
+   در گازوئیل ۵۴٪ از کل خرید زیر همین یک نام است. از رتبه‌بندی کنار گذاشته
+   می‌شود، ولی جمعش برمی‌گردد تا کارشناس بداند چه چیزی از سهم‌ها کم شده. */
+const BUCKETS = new Set(["سایر تامین کنندگان", "سایر تأمین کنندگان", "متفرقه"].map(nrm));
+const T = (v) => { const s = String(v == null ? "" : v).trim(); return s || null; };
+const N = (v) => { const s = String(v == null ? "" : v).replace(/,/g, "").trim(); if (!s) return null; const n = Number(s); return isNaN(n) ? null : n; };
 
 /* ------------------------------------------------------------------ */
-/* وزن زمانی                                                           */
+/* بارگذاری فایل مرجع                                                   */
 /* ------------------------------------------------------------------ */
 
-export const BASE_YM = "1404/01";
-export const FLOOR = 0.05;
+const COLS = ["import_id", "order_date", "ym", "item_code", "code2", "title", "title_n", "qty", "unit",
+  "unit_price", "amount", "supplier", "supplier_n", "idx_val", "amount_1404", "unit_1404", "lvl1", "lvl2", "lvl3"];
 
-/** «1404/01» → شمارهٔ ماه (برای فاصله‌گیری) */
-export const monthIndex = (ym) => { const m = /^(\d{4})\/(\d{1,2})/.exec(String(ym || "")); return m ? (+m[1]) * 12 + (+m[2] - 1) : null; };
+export const HISTORY_TABLE = "CREATE TABLE IF NOT EXISTS purchase_history ("
+  + "id INTEGER PRIMARY KEY, import_id INTEGER NOT NULL, order_date TEXT, ym INTEGER,"
+  + " item_code TEXT, code2 TEXT, title TEXT, title_n TEXT, qty REAL, unit TEXT,"
+  + " unit_price REAL, amount REAL, supplier TEXT, supplier_n TEXT,"
+  + " idx_val REAL, amount_1404 REAL, unit_1404 REAL, lvl1 TEXT, lvl2 TEXT, lvl3 TEXT)";
+
+const HISTORY_INDEXES = [
+  "CREATE INDEX IF NOT EXISTS ix_ph_code2 ON purchase_history(code2)",
+  "CREATE INDEX IF NOT EXISTS ix_ph_item ON purchase_history(item_code)",
+  "CREATE INDEX IF NOT EXISTS ix_ph_title ON purchase_history(title_n)",
+  "CREATE INDEX IF NOT EXISTS ix_ph_sup ON purchase_history(supplier_n)",
+];
 
 /**
- * ضریب یک ماه. k ضریب ۱..۱۰ کارشناس، oldest قدیمی‌ترین ماهِ موجود در سوابق.
- * خطی در فاصله، همیشه در (0, 1]، و در قدیمی‌ترین ماه = 1 − (k/10)(1 − کف).
+ * شروع بارگذاری تازه.
+ *
+ * جدول DROP و دوباره ساخته می‌شود، نه DELETE: پاک‌کردن ۷۰ هزار ردیف در D1
+ * ۷۰ هزار «سطر نوشته‌شده» حساب می‌شود و سهمیهٔ روزانه را دو برابر می‌سوزاند.
+ * نمایه‌ها هم عمداً این‌جا ساخته نمی‌شوند — درج بدون نمایه چند برابر سریع‌تر
+ * است و در `historyFinish` یک‌جا ساخته می‌شوند.
  */
-export function recencyWeight(ym, oldest, k = 5, base = BASE_YM, floor = FLOOR) {
-  const m = monthIndex(ym), b = monthIndex(base), o = monthIndex(oldest);
-  if (m == null || b == null) return 1;
-  if (m >= b) return 1;
-  const M = Math.max(1, b - (o == null ? m : Math.min(o, m)));
-  const dist = Math.min(M, b - m);
-  const kk = Math.min(10, Math.max(1, Number(k) || 5));
-  return 1 - (kk / 10) * (dist / M) * (1 - floor);
-}
-
-/* ------------------------------------------------------------------ */
-/* بارگذاری                                                            */
-/* ------------------------------------------------------------------ */
-
-/** «1404/1/5»، «1404-01-05»، «14040105» → «1404/01/05»؛ نامعتبر → null */
-export function normDate(v) {
-  const s = String(v == null ? "" : v).replace(/[۰-۹]/g, (c) => "۰۱۲۳۴۵۶۷۸۹".indexOf(c)).trim();
-  let m = /^(\d{4})[\/\-.](\d{1,2})[\/\-.](\d{1,2})/.exec(s);
-  if (!m) { const c = /^(\d{4})(\d{2})(\d{2})$/.exec(s); if (c) m = [s, c[1], c[2], c[3]]; }
-  if (!m) return null;
-  const jy = +m[1], jm = +m[2], jd = +m[3];
-  if (jy < 1300 || jy > 1500 || jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
-  return `${jy}/${String(jm).padStart(2, "0")}/${String(jd).padStart(2, "0")}`;
-}
-
 export async function historyBegin(env, body) {
-  const r = await env.DB.prepare("INSERT INTO history_batches (filename,imported_at,rows,mapping_json) VALUES (?,?,?,?)")
-    .bind(T(body.filename) || null, now(), body.rows == null ? null : Number(body.rows), body.mapping ? JSON.stringify(body.mapping) : null).run();
-  return { batch_id: r.meta.last_row_id };
+  await env.DB.exec("DROP TABLE IF EXISTS purchase_history;");
+  await env.DB.exec(HISTORY_TABLE + ";");
+  await env.DB.prepare("UPDATE hist_imports SET state='stale' WHERE state<>'stale'").run();
+  const r = await env.DB.prepare("INSERT INTO hist_imports (filename,imported_at,row_count,state,stats_json) VALUES (?,?,?,'loading',?)")
+    .bind(T(body.filename), Date.now(), Number(body.rows) || null, body.stats ? JSON.stringify(body.stats) : null).run();
+  return { import_id: r.meta.last_row_id };
 }
 
-/**
- * یک دسته سطر. هر سطر: {date, supplier, item, code?, qty?, price?, amount?, party?, doc?}
- * مبلغ = amount، یا فی×مقدار. سطرِ بی‌مبلغ یا بی‌تاریخ رد می‌شود و شمرده می‌شود.
- */
+/** یک دستهٔ ردیف، به همان شکلی که پارسر مرورگر می‌سازد. */
 export async function historyChunk(env, body) {
-  const batch = Number(body.batch_id); if (!batch) throw new HttpError("batch_id لازم است.");
+  const importId = Number(body.import_id);
+  if (!importId) throw new HttpError("import_id لازم است.");
   const rows = Array.isArray(body.rows) ? body.rows : [];
-  const t = now();
+  if (!rows.length) return { ok: true, inserted: 0 };
+
+  /* سقف D1 برای پارامترهای مقیدشده ۱۰۰ تاست؛ با ۱۹ ستون یعنی حداکثر ۵ ردیف
+     در هر دستور. چندردیفی‌نوشتن پنج برابر کمتر رفت‌وبرگشت می‌خواهد. */
+  const PER = 5;
+  const tuple = `(${COLS.map(() => "?").join(",")})`;
   const stmts = [];
-  let bad = 0;
-  for (const r of rows) {
-    const date = normDate(r.date);
-    const supplier = T(r.supplier), item = T(r.item);
-    const qty = num(r.qty), price = num(r.price);
-    let amount = num(r.amount);
-    if (amount == null && price != null && qty != null) amount = price * qty;
-    if (!date || !supplier || !item || amount == null || amount <= 0) { bad++; continue; }
-    /* کلیدِ تکراری در خودِ سطر ساخته می‌شود: UNIQUE روی ستون‌های NULL‌پذیر در SQLite
-       تکراری را نمی‌گیرد (هر NULL با NULL دیگر فرق دارد) و سطرِ بی‌مقدار/بی‌فی دوباره
-       درج می‌شد. */
-    const dkey = [nrm(supplier), nrm(item), date, qty == null ? "" : qty, price == null ? "" : price, amount].join("|");
-    stmts.push(env.DB.prepare(
-      `INSERT OR IGNORE INTO supply_history (batch_id,supplier_name,supplier_norm,item_title,item_norm,item_code,party,supplied_on,ym,qty,unit_price,amount,doc_no,dkey,created_at)
-       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    ).bind(batch, supplier, nrm(supplier), item, nrm(item), T(r.code) || null, T(r.party) || null, date, date.slice(0, 7), qty, price, amount, T(r.doc) || null, dkey, t));
+  for (let i = 0; i < rows.length; i += PER) {
+    const part = rows.slice(i, i + PER);
+    const args = [];
+    for (const r of part) {
+      args.push(importId, T(r.date), Number(r.ym) || null, T(r.itemCode), T(r.code2), T(r.title), nrm(r.title),
+        N(r.qty), T(r.unit), N(r.unitPrice), N(r.amount), T(r.supplier), nrm(r.supplier),
+        N(r.idx), N(r.amount1404), N(r.unit1404), T(r.lvl1), T(r.lvl2), T(r.lvl3));
+    }
+    stmts.push(env.DB.prepare(`INSERT INTO purchase_history (${COLS.join(",")}) VALUES ${part.map(() => tuple).join(",")}`).bind(...args));
   }
-  let inserted = 0;
-  for (let i = 0; i < stmts.length; i += 100) {
-    const res = await env.DB.batch(stmts.slice(i, i + 100));
-    for (const x of res) inserted += (x.meta && x.meta.changes) || 0;
-  }
-  const dup = stmts.length - inserted;
-  await env.DB.prepare("UPDATE history_batches SET inserted=COALESCE(inserted,0)+?, dup=COALESCE(dup,0)+? WHERE id=?").bind(inserted, dup, batch).run();
-  return { ok: true, inserted, dup, bad };
+  for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
+  return { ok: true, inserted: rows.length };
 }
 
+/** پایان بارگذاری: نمایه‌ها ساخته و آمار مرجع ذخیره می‌شود. */
 export async function historyFinish(env, body) {
-  const batch = Number(body.batch_id); if (!batch) throw new HttpError("batch_id لازم است.");
-  const sup = await env.DB.prepare("SELECT COUNT(DISTINCT supplier_norm) AS n FROM supply_history WHERE batch_id=?").bind(batch).first();
-  await env.DB.prepare("UPDATE history_batches SET suppliers=? WHERE id=?").bind(sup ? sup.n : 0, batch).run();
-  const b = await env.DB.prepare("SELECT * FROM history_batches WHERE id=?").bind(batch).first();
-  const total = await env.DB.prepare("SELECT COUNT(*) AS n, MIN(supplied_on) AS oldest, MAX(supplied_on) AS newest, COUNT(DISTINCT supplier_norm) AS suppliers FROM supply_history").first();
-  return { ok: true, batch: b, total };
+  const importId = Number(body.import_id);
+  if (!importId) throw new HttpError("import_id لازم است.");
+  for (const sql of HISTORY_INDEXES) await env.DB.exec(sql + ";");
+  const s = await env.DB.prepare(`SELECT COUNT(*) AS n, COUNT(DISTINCT supplier_n) AS suppliers,
+      COUNT(DISTINCT code2) AS codes, MIN(ym) AS min_ym, MAX(ym) AS max_ym,
+      SUM(CASE WHEN amount_1404 IS NULL THEN 1 ELSE 0 END) AS no_index
+    FROM purchase_history WHERE import_id=?`).bind(importId).first();
+  const stats = {
+    rows: s.n, suppliers: s.suppliers, codes: s.codes, minYm: s.min_ym, maxYm: s.max_ym, noIndex: s.no_index,
+    /* شیبِ کاهش بر این فاصله تنظیم می‌شود تا قدیمی‌ترین خریدِ موجود هم مثبت بماند */
+    ageMax: s.min_ym ? Math.max(1, BASE_YM - s.min_ym) : 1,
+  };
+  await env.DB.prepare("UPDATE hist_imports SET state='ready', finished_at=?, row_count=?, stats_json=? WHERE id=?")
+    .bind(Date.now(), s.n, JSON.stringify(stats), importId).run();
+  return { ok: true, stats };
+}
+
+/** بارگذاری آمادهٔ فعلی (اگر باشد) به‌همراه آمارش. */
+export async function activeImport(env) {
+  const r = await env.DB.prepare("SELECT * FROM hist_imports WHERE state='ready' ORDER BY id DESC LIMIT 1").first();
+  if (!r) return null;
+  let stats = {};
+  try { stats = JSON.parse(r.stats_json || "{}"); } catch (_) { stats = {}; }
+  return { ...r, stats };
 }
 
 export async function historyStatus(env) {
-  const total = await env.DB.prepare("SELECT COUNT(*) AS n, MIN(supplied_on) AS oldest, MAX(supplied_on) AS newest, COUNT(DISTINCT supplier_norm) AS suppliers, COUNT(DISTINCT item_norm) AS items FROM supply_history").first();
-  const batches = (await env.DB.prepare("SELECT * FROM history_batches ORDER BY id DESC LIMIT 20").all()).results || [];
-  return { total, batches };
+  const cur = await activeImport(env);
+  const loading = await env.DB.prepare("SELECT id, filename, imported_at FROM hist_imports WHERE state='loading' ORDER BY id DESC LIMIT 1").first();
+  return {
+    ready: !!cur, loading: loading || null,
+    current: cur ? { id: cur.id, filename: cur.filename, imported_at: cur.imported_at, finished_at: cur.finished_at, ...cur.stats } : null,
+    base: { ym: BASE_YM, label: "اسفند ۱۴۰۴" },
+  };
 }
 
 /* ------------------------------------------------------------------ */
-/* سوابق یک قلم                                                        */
+/* تطبیق قلم با سوابق                                                   */
 /* ------------------------------------------------------------------ */
-
 /**
- * برای یک قلم: تأمین‌کنندگانی که آن را داده‌اند، با سطل ماهانهٔ مبلغ برای همین
- * قلم و برای کل خریدهایشان، فهرست خریدهای همین قلم، و راه‌های تماس اگر ثبت باشد.
- * تطبیق قلم: کد اگر باشد، وگرنه عنوانِ نرمال‌شده؛ اگر هیچ، تطبیقِ تقریبی روی
- * دو کلمهٔ اول و پرچمِ fuzzy.
+ * قلمِ درخواست را به ردیف‌های سوابق وصل می‌کند.
+ *
+ * ترتیب تلاش:
+ *   ۱. `hist_code` — کد استانداردی که «نرمال‌سازی اقلام» (مرحلهٔ بعد) روی قلم می‌نویسد.
+ *   ۲. «کد قلم خریدنی» راهکاران، که در فایل درخواست و فایل سوابق یکی است.
+ *   ۳. عنوان نرمال‌شده.
+ * در دو حالت آخر، اگر ردیف‌های پیداشده «کد قلم جدید» داشته باشند فیلتر به آن
+ * کد پهن می‌شود تا نگارش‌های مختلف یک کالا زیر یک سابقه جمع شوند — همان کاری
+ * که نرمال‌سازی قرار است دقیق‌تر انجام دهد.
  */
-export async function historyFor(env, { item, code }) {
-  const key = nrm(item);
-  if (!key && !T(code)) throw new HttpError("عنوان یا کد قلم لازم است.");
-  const where = [], args = [];
-  if (T(code)) { where.push("item_code=?"); args.push(T(code)); }
-  if (key) { where.push("item_norm=?"); args.push(key); }
-  let rows = (await env.DB.prepare(`SELECT * FROM supply_history WHERE ${where.join(" OR ")} ORDER BY supplied_on DESC LIMIT 2000`).bind(...args).all()).results || [];
-  let fuzzy = false;
-  if (!rows.length && key) {
-    const words = key.split(" ").filter((w) => w.length > 1).slice(0, 2).join(" ");
-    if (words.length >= 4) {
-      rows = (await env.DB.prepare("SELECT * FROM supply_history WHERE item_norm LIKE ? ORDER BY supplied_on DESC LIMIT 2000").bind(`%${words}%`).all()).results || [];
-      fuzzy = rows.length > 0;
-    }
+export async function resolveItem(env, it) {
+  const mk = (by, code2, where, args) => ({ by, code2, where, args });
+  if (T(it.hist_code)) return mk("normalized", T(it.hist_code), "code2=?", [T(it.hist_code)]);
+
+  const tries = [];
+  if (T(it.code)) tries.push(["code", "item_code=?", [T(it.code)]]);
+  if (nrm(it.title)) tries.push(["title", "title_n=?", [nrm(it.title)]]);
+
+  for (const [by, where, args] of tries) {
+    const g = await env.DB.prepare(`SELECT code2, COUNT(*) AS n FROM purchase_history
+      WHERE ${where} AND code2 IS NOT NULL GROUP BY code2 ORDER BY n DESC LIMIT 1`).bind(...args).first();
+    if (g && g.code2) return mk(by, g.code2, "code2=?", [g.code2]);
+    const c = await env.DB.prepare(`SELECT COUNT(*) AS n FROM purchase_history WHERE ${where}`).bind(...args).first();
+    if (c && c.n) return mk(by, null, where, args);
   }
-  const range = await env.DB.prepare("SELECT MIN(ym) AS oldest, MAX(ym) AS newest, COUNT(*) AS n FROM supply_history").first();
-  if (!rows.length) return { available: !!(range && range.n), item, code, fuzzy: false, oldest: range && range.oldest, base: BASE_YM, suppliers: [], total_rows: range ? range.n : 0 };
+  return mk("none", null, null, null);
+}
 
-  const sups = [...new Set(rows.map((r) => r.supplier_norm))];
-  /* کل خریدها از همین تأمین‌کننده‌ها، به ماه — یک کوئریِ گروهی */
-  const all = (await env.DB.prepare(
-    `SELECT supplier_norm, ym, SUM(amount) AS amt, COUNT(*) AS n FROM supply_history WHERE supplier_norm IN (${sups.map(() => "?").join(",")}) GROUP BY supplier_norm, ym`,
-  ).bind(...sups).all()).results || [];
-  const contacts = (await env.DB.prepare("SELECT code, name, city, site, phone, tel2, email FROM suppliers LIMIT 3000").all()).results || [];
+/* ------------------------------------------------------------------ */
+/* ارقام تب سوابق                                                       */
+/* ------------------------------------------------------------------ */
+/**
+ * تأمین‌کنندگان یک قلم، با «خام» و «گشتاور» در دو دامنه: کل خرید شرکت از آن
+ * تأمین‌کننده، و خرید همین قلم از او.
+ *
+ * دو گروه دیگرِ ماک‌آپ («خرید پروژه» و «خرید قلم در پروژه») ستون پروژه
+ * می‌خواهند که فایل مرجع ندارد؛ ستون‌هایشان می‌مانند و مقدارشان null است.
+ */
+export async function itemHistory(env, it, opts = {}) {
+  const cur = await activeImport(env);
+  if (!cur) return { available: false, message: "فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق خرید» بارگذاری می‌کند." };
 
-  const bySup = new Map();
-  for (const s of sups) bySup.set(s, { name: "", total: {}, item: {}, buys: [], totalCount: 0 });
-  for (const r of rows) {
-    const g = bySup.get(r.supplier_norm);
-    g.name = g.name || r.supplier_name;
-    g.item[r.ym] = (g.item[r.ym] || 0) + r.amount;
-    g.buys.push({ date: r.supplied_on, qty: r.qty, price: r.unit_price, amount: r.amount, party: r.party, title: r.item_title, doc: r.doc_no });
+  const ageMax = Math.max(1, Number(cur.stats.ageMax) || 1);
+  const k = clampK(opts.k);
+  const w = wArgs(k, ageMax);
+
+  const m = await resolveItem(env, it);
+  const head = {
+    available: true,
+    match: { by: m.by, code2: m.code2 },
+    base: { ym: BASE_YM, label: "اسفند ۱۴۰۴", ageMax, k, decay: decayPerMonth(k, ageMax) },
+    source: { filename: cur.filename, imported_at: cur.finished_at || cur.imported_at, rows: cur.row_count },
+  };
+  if (m.by === "none") {
+    return { ...head, suppliers: [], titles: [], totals: { itot: 0, itotM: 0, rows: 0, suppliers: 0 },
+      message: "برای این قلم سابقه‌ای در فایل مرجع پیدا نشد. «نرمال‌سازی اقلام» (مرحلهٔ بعد) عنوان‌های نزدیک را به هم وصل می‌کند." };
   }
-  for (const a of all) { const g = bySup.get(a.supplier_norm); if (g) { g.total[a.ym] = a.amt; g.totalCount += a.n; } }
 
-  const suppliers = [...bySup.values()].map((g) => {
-    const c = contacts.find((x) => nrm(x.name) === nrm(g.name));
-    return { ...g, contact: c || null };
+  /* ۱) تأمین‌کنندگان همین قلم + مبلغ همین قلم */
+  const perAll = (await env.DB.prepare(`SELECT supplier_n AS sn, MAX(supplier) AS name,
+      COUNT(*) AS n_item, SUM(qty) AS qty_item,
+      SUM(amount_1404) AS itot, SUM(COALESCE(amount_1404,0) * ${W_SQL}) AS itotm,
+      MIN(order_date) AS first_date, MAX(order_date) AS last_date,
+      MIN(unit_1404) AS min_unit, MAX(unit_1404) AS max_unit
+    FROM purchase_history WHERE ${m.where} GROUP BY supplier_n`).bind(...w, ...m.args).all()).results || [];
+  const per = perAll.filter((r) => !BUCKETS.has(r.sn));
+  const excluded = perAll.filter((r) => BUCKETS.has(r.sn))
+    .map((r) => ({ name: r.name, nItem: r.n_item, itot: r.itot || 0, itotM: r.itotm || 0 }));
+
+  /* ۲) کل خرید شرکت از همان تأمین‌کنندگان — تکه‌تکه، چون سقف پارامتر D1 ۱۰۰ است */
+  const keys = per.map((r) => r.sn);
+  const allBy = new Map();
+  for (let i = 0; i < keys.length; i += 80) {
+    const part = keys.slice(i, i + 80);
+    const rs = (await env.DB.prepare(`SELECT supplier_n AS sn, COUNT(*) AS n_all,
+        SUM(amount_1404) AS tot, SUM(COALESCE(amount_1404,0) * ${W_SQL}) AS totm
+      FROM purchase_history WHERE supplier_n IN (${part.map(() => "?").join(",")}) GROUP BY supplier_n`)
+      .bind(...w, ...part).all()).results || [];
+    rs.forEach((r) => allBy.set(r.sn, r));
+  }
+
+  /* ۳) راه‌های تماس — جدول تأمین‌کنندگان هنوز پر نشده و خالی‌بودنش خطا نیست */
+  const contacts = new Map();
+  for (let i = 0; i < per.length; i += 80) {
+    const part = per.slice(i, i + 80).map((r) => r.name);
+    const rs = (await env.DB.prepare(`SELECT * FROM suppliers WHERE name IN (${part.map(() => "?").join(",")})`).bind(...part).all()).results || [];
+    rs.forEach((r) => contacts.set(nrm(r.name), r));
+  }
+
+  const suppliers = per.map((r) => {
+    const a = allBy.get(r.sn) || {};
+    return {
+      key: r.sn, name: r.name,
+      code: (contacts.get(r.sn) || {}).code || null,
+      nAll: a.n_all || 0, tot: a.tot || 0, totM: a.totm || 0,
+      nItem: r.n_item, qtyItem: r.qty_item, itot: r.itot || 0, itotM: r.itotm || 0,
+      ptot: null, ptotM: null, iptot: null, iptotM: null,
+      firstDate: r.first_date, lastDate: r.last_date,
+      minUnit: r.min_unit, maxUnit: r.max_unit,
+      avgUnit: r.qty_item ? (r.itot || 0) / r.qty_item : null,
+      contact: contacts.get(r.sn) || null,
+    };
   });
-  return { available: true, item, code, fuzzy, oldest: range.oldest, newest: range.newest, base: BASE_YM, floor: FLOOR, suppliers, total_rows: range.n };
+
+  const titles = (await env.DB.prepare(`SELECT MAX(title) AS title, COUNT(*) AS n FROM purchase_history
+    WHERE ${m.where} GROUP BY title_n ORDER BY n DESC LIMIT 8`).bind(...m.args).all()).results || [];
+  const lv = await env.DB.prepare(`SELECT lvl1, lvl2, lvl3, item_code, unit FROM purchase_history WHERE ${m.where} LIMIT 1`).bind(...m.args).first();
+
+  return {
+    ...head,
+    item: lv ? { unit: lv.unit, sourceCode: lv.item_code, lvl1: lv.lvl1, lvl2: lv.lvl2, lvl3: lv.lvl3 } : null,
+    titles, excluded,
+    totals: {
+      itot: suppliers.reduce((n, s) => n + s.itot, 0),
+      itotM: suppliers.reduce((n, s) => n + s.itotM, 0),
+      tot: suppliers.reduce((n, s) => n + s.tot, 0),
+      totM: suppliers.reduce((n, s) => n + s.totM, 0),
+      rows: suppliers.reduce((n, s) => n + s.nItem, 0),
+      suppliers: suppliers.length,
+    },
+    suppliers,
+  };
+}
+
+/** ریز خریدهای یک تأمین‌کننده از همین قلم — پشتِ دکمهٔ «خریدها». */
+export async function supplierBuys(env, it, supplier) {
+  const name = nrm(supplier);
+  if (!name) throw new HttpError("نام تأمین‌کننده لازم است.");
+  if (!(await activeImport(env))) throw new HttpError("فایل سوابق بارگذاری نشده است.", 409);
+  const m = await resolveItem(env, it);
+  if (m.by === "none") return { buys: [] };
+  const rows = (await env.DB.prepare(`SELECT order_date, title, qty, unit, unit_price, amount, idx_val, amount_1404, unit_1404
+    FROM purchase_history WHERE ${m.where} AND supplier_n=? ORDER BY order_date DESC LIMIT 300`)
+    .bind(...m.args, name).all()).results || [];
+  return { buys: rows };
 }

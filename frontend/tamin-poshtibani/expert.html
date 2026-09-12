@@ -58,11 +58,41 @@
     .cf .sup { background: #f2f7f6 !important; font-weight: 700; }
     /* نوار سرستون‌های برگهٔ درخواست خرید — همان سبزِ کم‌رنگِ فرم چاپی */
     .cf .hd { background: #d9e2d9 !important; font-weight: 700; }
-    /* سرستون‌های «رتبه» در تب سوابق: زرد و قابل کلیک */
-    .tp-table th.rk { background: #fff6e3 !important; color: #7a5a08 !important; cursor: pointer; user-select: none; }
-    .tp-table th.rk.on { background: #ffe9b8 !important; }
-    .tp-table td.rkc { background: rgba(255, 233, 184, .18); font-weight: 700; }
-    .tp-table tr.sel td { background: rgba(79, 140, 255, .10); }
+    /* ---------- جدول بررسی سوابق ----------
+       چهار گروه، هرکدام یک ته‌رنگ. سرآیند چسبان است، پس سلول‌های سرآیند باید
+       رنگ مات داشته باشند وگرنه ردیف‌ها از پشتشان دیده می‌شوند. */
+    .grid tbody .g1 { background: rgba(242,194,48,.07) !important; }
+    .grid tbody .g2 { background: rgba(79,140,255,.09) !important; }
+    .grid tbody .g3 { background: rgba(186,124,255,.09) !important; }
+    .grid tbody .g4 { background: rgba(34,197,94,.08) !important; }
+    .grid thead .g1 { background: #2a2637 !important; }
+    .grid thead .g2 { background: #14274a !important; }
+    .grid thead .g3 { background: #251f42 !important; }
+    .grid thead .g4 { background: #142f3a !important; }
+    .grid th.h-imp { font-weight: 500; font-size: .78rem; color: var(--tp-muted); }
+    .grid th.h-w { padding: 3px !important; }
+    .grid th.h-w input { width: 54px; text-align: center; border: 1px solid var(--tp-line-2); border-radius: 6px; padding: 2px; background: rgba(3,8,20,.5); color: var(--tp-fg); font-variant-numeric: tabular-nums; }
+    .grid th.h-w input[disabled] { opacity: .35; }
+    .grid th.h-grp { font-size: .95rem; font-weight: 700; cursor: pointer; user-select: none; }
+    .grid th.h-grp:not(.off):hover { filter: brightness(1.4); }
+    .grid th.h-grp.off { cursor: not-allowed; opacity: .5; }
+    .grid th.h-grp .car { color: var(--tp-accent); font-size: .8rem; }
+    /* سلول‌های زردِ «رتبه» — کلیک روی هرکدام، مرتب‌سازی جدول را عوض می‌کند */
+    .grid td.rkcol { background: rgba(226,197,126,.13) !important; color: #f2d79a; cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+    .grid td.rkcol:hover { background: rgba(226,197,126,.28) !important; }
+    .grid thead th.rkcol { background: #3a3320 !important; color: #f6e3b0; cursor: pointer; }
+    .grid thead th.rkcol:hover { background: #4a4126 !important; }
+    .grid th.sorted { box-shadow: inset 0 -3px 0 var(--tp-accent); }
+    .grid tbody tr.sel td { background: rgba(79,140,255,.15) !important; }
+    .supname { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+    .supname:hover { color: var(--tp-accent); }
+    /* کارت تأمین‌کننده */
+    .prof { border: 1px solid var(--tp-accent); border-radius: 12px; background: rgba(79,140,255,.08); padding: 14px 16px; margin-bottom: 14px; }
+    .prof .top { display: flex; align-items: baseline; gap: 12px; }
+    .prof h4 { margin: 0; font-size: 1.05rem; }
+    .prof .gridp { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 22px; margin-top: 10px; }
+    .prof .f b { display: block; font-size: .78rem; color: var(--tp-muted); font-weight: 400; }
+    .prof .desc { margin-top: 10px; border-top: 1px solid var(--tp-line); padding-top: 8px; font-size: .9rem; }
     .cf .rt { text-align: right; }
     .cf .tall { height: 44px; }
     #printarea { background: #fff; padding: 12px; border-radius: 10px; }
