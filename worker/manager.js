@@ -114,7 +114,13 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
     if (!row.mgr_colors) continue;                    /* اولین عکس — خبر نیست */
 
     const before = row.mgr_colors.split(",");
-    const diff = colors.map((c, i) => (c === before[i] ? -1 : i)).filter((i) => i >= 0);
+    /* تصمیم مدیر: از مراحل میانی (بررسی سوابق ۱، جستجوی هوشمند ۲، استعلامات ۳)
+       نه خبرِ انجام می‌خواهد نه خبرِ گذشتن از آستانه — فقط مشاهده، پیش‌فاکتور و
+       جدول کمیسیون. هشدارهای خود کارشناس برای همهٔ مراحل سر جایشان‌اند
+       (bot.js:runAlerts). عکسِ رنگ‌ها بالاتر کامل ذخیره شد تا مقایسهٔ بعدی
+       نلغزد؛ فقط پیام فیلتر می‌شود. */
+    const MGR_STAGES = [0, 4, 5];
+    const diff = colors.map((c, i) => (c === before[i] ? -1 : i)).filter((i) => i >= 0 && MGR_STAGES.includes(i));
     if (diff.length) news.push({ row, colors, key, diff });
   }
 

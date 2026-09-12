@@ -211,16 +211,26 @@ export async function resolveItem(env, it) {
 /* ------------------------------------------------------------------ */
 /* ارقام تب سوابق                                                       */
 /* ------------------------------------------------------------------ */
+const rankBy = (rows, field, rankField) => {
+  [...rows].sort((a, b) => (b[field] || 0) - (a[field] || 0)).forEach((x, i) => { x[rankField] = i + 1; });
+};
+
 /**
- * تأمین‌کنندگان یک قلم، با «خام» و «گشتاور» در دو دامنه: کل خرید شرکت از آن
- * تأمین‌کننده، و خرید همین قلم از او.
+ * تأمین‌کنندگان یک قلم. مبنای مقایسه (تصمیم مدیر) سه چیز است، نه قیمت:
+ *   n    — دفعات خرید همین قلم از این تأمین‌کننده
+ *   qty  — جمع مقدار خریداری‌شده
+ *   qtyM — گشتاور: همان جمع مقدار، وقتی هر خرید با فاصلهٔ ماهانه‌اش تا اسفند
+ *          ۱۴۰۴ کم‌وزن شود (شیب از ضریب ۱..۱۰ کارشناس). خریدِ تازه سنگین‌تر است.
+ * سهم = qty/Σ و امتیاز گشتاوری = qtyM/Σ (درصد). رتبه‌ها همین‌جا حساب می‌شوند تا
+ * پنل و بات تلگرام یک عدد را نشان بدهند. ترتیب پیش‌فرض: رتبهٔ گشتاوری.
+ * قیمت‌ها (روز و ۱۴۰۴) فقط برای نمایشِ ریز خریدها و کارت تأمین‌کننده می‌مانند.
  *
- * دو گروه دیگرِ ماک‌آپ («خرید پروژه» و «خرید قلم در پروژه») ستون پروژه
- * می‌خواهند که فایل مرجع ندارد؛ ستون‌هایشان می‌مانند و مقدارشان null است.
+ * «خرید قلم در پروژه» ستون پروژه می‌خواهد که فایل مرجع هنوز ندارد؛ جایش در
+ * پاسخ (groups) رزرو است تا UI خاموش نشانش بدهد.
  */
 export async function itemHistory(env, it, opts = {}) {
   const cur = await activeImport(env);
-  if (!cur) return { available: false, message: "فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق خرید» بارگذاری می‌کند." };
+  if (!cur) return { available: false, message: "فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند." };
 
   const ageMax = Math.max(1, Number(cur.stats.ageMax) || 1);
   const k = clampK(opts.k);
@@ -232,34 +242,26 @@ export async function itemHistory(env, it, opts = {}) {
     match: { by: m.by, code2: m.code2 },
     base: { ym: BASE_YM, label: "اسفند ۱۴۰۴", ageMax, k, decay: decayPerMonth(k, ageMax) },
     source: { filename: cur.filename, imported_at: cur.finished_at || cur.imported_at, rows: cur.row_count },
+    groups: { item: true, itemParty: false },   /* خرید قلم فعال؛ خرید قلم در پروژه در انتظار داده */
   };
   if (m.by === "none") {
-    return { ...head, suppliers: [], titles: [], totals: { itot: 0, itotM: 0, rows: 0, suppliers: 0 },
+    return { ...head, suppliers: [], titles: [], excluded: [], totals: { n: 0, qty: 0, qtyM: 0, suppliers: 0 },
       message: "برای این قلم سابقه‌ای در فایل مرجع پیدا نشد. «نرمال‌سازی اقلام» (مرحلهٔ بعد) عنوان‌های نزدیک را به هم وصل می‌کند." };
   }
 
-  /* ۱) تأمین‌کنندگان همین قلم + مبلغ همین قلم */
+  /* ۱) گروه‌بندی خریدهای همین قلم به تفکیک تأمین‌کننده */
   const perAll = (await env.DB.prepare(`SELECT supplier_n AS sn, MAX(supplier) AS name,
-      COUNT(*) AS n_item, SUM(qty) AS qty_item,
-      SUM(amount_1404) AS itot, SUM(COALESCE(amount_1404,0) * ${W_SQL}) AS itotm,
-      MIN(order_date) AS first_date, MAX(order_date) AS last_date,
+      COUNT(*) AS n, SUM(COALESCE(qty,0)) AS qty,
+      SUM(COALESCE(qty,0) * ${W_SQL}) AS qtym,
+      SUM(amount_1404) AS amt, MIN(order_date) AS first_date, MAX(order_date) AS last_date,
       MIN(unit_1404) AS min_unit, MAX(unit_1404) AS max_unit
     FROM purchase_history WHERE ${m.where} GROUP BY supplier_n`).bind(...w, ...m.args).all()).results || [];
   const per = perAll.filter((r) => !BUCKETS.has(r.sn));
-  const excluded = perAll.filter((r) => BUCKETS.has(r.sn))
-    .map((r) => ({ name: r.name, nItem: r.n_item, itot: r.itot || 0, itotM: r.itotm || 0 }));
+  const excluded = perAll.filter((r) => BUCKETS.has(r.sn)).map((r) => ({ name: r.name, n: r.n, qty: r.qty || 0 }));
 
-  /* ۲) کل خرید شرکت از همان تأمین‌کنندگان — تکه‌تکه، چون سقف پارامتر D1 ۱۰۰ است */
-  const keys = per.map((r) => r.sn);
-  const allBy = new Map();
-  for (let i = 0; i < keys.length; i += 80) {
-    const part = keys.slice(i, i + 80);
-    const rs = (await env.DB.prepare(`SELECT supplier_n AS sn, COUNT(*) AS n_all,
-        SUM(amount_1404) AS tot, SUM(COALESCE(amount_1404,0) * ${W_SQL}) AS totm
-      FROM purchase_history WHERE supplier_n IN (${part.map(() => "?").join(",")}) GROUP BY supplier_n`)
-      .bind(...w, ...part).all()).results || [];
-    rs.forEach((r) => allBy.set(r.sn, r));
-  }
+  /* ۲) واحد سنجش — اگر یک کد چند واحد دارد، جمعِ «مقدار» بی‌معنا می‌شود و باید هشدار داد */
+  const um = await env.DB.prepare(`SELECT GROUP_CONCAT(DISTINCT unit) AS units, COUNT(DISTINCT COALESCE(unit,'')) AS nu
+    FROM purchase_history WHERE ${m.where}`).bind(...m.args).first();
 
   /* ۳) راه‌های تماس — جدول تأمین‌کنندگان هنوز پر نشده و خالی‌بودنش خطا نیست */
   const contacts = new Map();
@@ -269,20 +271,23 @@ export async function itemHistory(env, it, opts = {}) {
     rs.forEach((r) => contacts.set(nrm(r.name), r));
   }
 
-  const suppliers = per.map((r) => {
-    const a = allBy.get(r.sn) || {};
-    return {
-      key: r.sn, name: r.name,
-      code: (contacts.get(r.sn) || {}).code || null,
-      nAll: a.n_all || 0, tot: a.tot || 0, totM: a.totm || 0,
-      nItem: r.n_item, qtyItem: r.qty_item, itot: r.itot || 0, itotM: r.itotm || 0,
-      ptot: null, ptotM: null, iptot: null, iptotM: null,
-      firstDate: r.first_date, lastDate: r.last_date,
-      minUnit: r.min_unit, maxUnit: r.max_unit,
-      avgUnit: r.qty_item ? (r.itot || 0) / r.qty_item : null,
-      contact: contacts.get(r.sn) || null,
-    };
-  });
+  const sumQty = per.reduce((s, r) => s + (r.qty || 0), 0);
+  const sumM = per.reduce((s, r) => s + (r.qtym || 0), 0);
+  const suppliers = per.map((r) => ({
+    key: r.sn, name: r.name,
+    code: (contacts.get(r.sn) || {}).code || null,
+    n: r.n, qty: r.qty || 0, qtyM: r.qtym || 0,
+    share: sumQty ? (r.qty || 0) / sumQty * 100 : 0,
+    mshare: sumM ? (r.qtym || 0) / sumM * 100 : 0,
+    firstDate: r.first_date, lastDate: r.last_date,
+    minUnit: r.min_unit, maxUnit: r.max_unit,
+    avgUnit: r.qty ? (r.amt || 0) / r.qty : null,
+    contact: contacts.get(r.sn) || null,
+  }));
+  rankBy(suppliers, "n", "rankN");
+  rankBy(suppliers, "qty", "rankQty");
+  rankBy(suppliers, "qtyM", "rankM");
+  suppliers.sort((a, b) => a.rankM - b.rankM);
 
   const titles = (await env.DB.prepare(`SELECT MAX(title) AS title, COUNT(*) AS n FROM purchase_history
     WHERE ${m.where} GROUP BY title_n ORDER BY n DESC LIMIT 8`).bind(...m.args).all()).results || [];
@@ -290,18 +295,27 @@ export async function itemHistory(env, it, opts = {}) {
 
   return {
     ...head,
-    item: lv ? { unit: lv.unit, sourceCode: lv.item_code, lvl1: lv.lvl1, lvl2: lv.lvl2, lvl3: lv.lvl3 } : null,
+    item: lv ? { unit: lv.unit, units: um && um.units, mixedUnits: !!(um && um.nu > 1),
+      sourceCode: lv.item_code, lvl1: lv.lvl1, lvl2: lv.lvl2, lvl3: lv.lvl3 } : null,
     titles, excluded,
-    totals: {
-      itot: suppliers.reduce((n, s) => n + s.itot, 0),
-      itotM: suppliers.reduce((n, s) => n + s.itotM, 0),
-      tot: suppliers.reduce((n, s) => n + s.tot, 0),
-      totM: suppliers.reduce((n, s) => n + s.totM, 0),
-      rows: suppliers.reduce((n, s) => n + s.nItem, 0),
-      suppliers: suppliers.length,
-    },
+    totals: { n: per.reduce((s, r) => s + r.n, 0), qty: sumQty, qtyM: sumM, suppliers: suppliers.length },
     suppliers,
   };
+}
+
+/**
+ * سری زمانی خریدهای یک قلم برای نمودار: هر خرید یک نقطه (تاریخ، مقدار) به
+ * تفکیک تأمین‌کننده. سطل‌های تجمیعی مثل «سایر تامین کنندگان» این‌جا هم نیستند.
+ */
+export async function itemSeries(env, it) {
+  if (!(await activeImport(env))) throw new HttpError("فایل سوابق بارگذاری نشده است.", 409);
+  const m = await resolveItem(env, it);
+  if (m.by === "none") return { points: [] };
+  const rows = (await env.DB.prepare(`SELECT supplier_n AS key, MAX(supplier) AS name, order_date AS date, ym,
+      SUM(COALESCE(qty,0)) AS qty, COUNT(*) AS n
+    FROM purchase_history WHERE ${m.where}
+    GROUP BY supplier_n, order_date ORDER BY order_date LIMIT 3000`).bind(...m.args).all()).results || [];
+  return { points: rows.filter((r) => !BUCKETS.has(r.key)) };
 }
 
 /** ریز خریدهای یک تأمین‌کننده از همین قلم — پشتِ دکمهٔ «خریدها». */

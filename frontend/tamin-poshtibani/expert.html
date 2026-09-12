@@ -58,6 +58,9 @@
     .cf .sup { background: #f2f7f6 !important; font-weight: 700; }
     /* نوار سرستون‌های برگهٔ درخواست خرید — همان سبزِ کم‌رنگِ فرم چاپی */
     .cf .hd { background: #d9e2d9 !important; font-weight: 700; }
+    /* برچسب مرحله بالای هر باکس پایش در سربرگ جزئیات */
+    .boxcol { display: flex; flex-direction: column; align-items: center; gap: 3px; }
+    .boxlab { font-size: .6rem; color: var(--tp-muted); white-space: nowrap; line-height: 1; }
     /* ---------- جدول بررسی سوابق ----------
        چهار گروه، هرکدام یک ته‌رنگ. سرآیند چسبان است، پس سلول‌های سرآیند باید
        رنگ مات داشته باشند وگرنه ردیف‌ها از پشتشان دیده می‌شوند. */
@@ -86,6 +89,10 @@
     .grid tbody tr.sel td { background: rgba(79,140,255,.15) !important; }
     .supname { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
     .supname:hover { color: var(--tp-accent); }
+    /* رتبهٔ داخل پرانتز کنار هر عدد، و راهنمای رنگ نمودار روند */
+    .rkp { color: #f2d79a; font-size: .72rem; }
+    .chlegend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 8px; font-size: .82rem; }
+    .chlegend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-inline-end: 5px; vertical-align: middle; }
     /* کارت تأمین‌کننده */
     .prof { border: 1px solid var(--tp-accent); border-radius: 12px; background: rgba(79,140,255,.08); padding: 14px 16px; margin-bottom: 14px; }
     .prof .top { display: flex; align-items: baseline; gap: 12px; }

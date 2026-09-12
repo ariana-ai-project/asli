@@ -24,7 +24,7 @@ import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
-import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys } from "./history.js";
+import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
 import { commissionHtml } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
@@ -710,13 +710,17 @@ async function quoteUpdate(env, ex, id, body) {
   if (!q) throw new HttpError("استعلام پیدا نشد.", 404);
   const sets = [], args = [];
   for (const f of QUOTE_FIELDS) if (f in body) { sets.push(`${f}=?`); args.push(["qty", "price"].includes(f) ? num(body[f]) : ["final", "low_conf", "item_id"].includes(f) ? int(body[f], 0) : (T(body[f]) || null)); }
-  /* هر ویرایشِ فیلد، «ثبت موقت» را برمی‌دارد؛ save صریح آن را می‌گذارد */
+  /* هر ویرایشِ فیلدِ محتوایی، «ثبت موقت» را برمی‌دارد؛ save صریح آن را می‌گذارد.
+     «تأیید نهایی» ویرایش محتوا نیست — تیکش نباید ثبت موقت را باطل کند، وگرنه
+     همان تیکی که باید دکمهٔ کمیسیون را روشن کند (saved=1 AND final=1)
+     خاموشش می‌کند. مسیر تلگرام از اول همین‌طور بود. */
+  const contentEdited = Object.keys(body).some((f) => QUOTE_FIELDS.includes(f) && f !== "final");
   if (body.save === true) {
     const merged = { ...q, ...body };
     const miss = missingRequired(merged);
     if (miss.length) throw new HttpError("این فیلدها خالی‌اند و ثبت موقت انجام نشد.", 422, { missing: miss });
     sets.push("saved=1");
-  } else if (sets.length) sets.push("saved=0");
+  } else if (contentEdited) sets.push("saved=0");
   if (!sets.length) return { ok: true };
   sets.push("updated_at=?"); args.push(now(), id);
   await env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args).run();
@@ -1156,6 +1160,12 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       return json(await supplierBuys(env, it, url.searchParams.get("supplier")));
+    }
+    /* نقاط نمودار روند خرید قلم (تاریخ × مقدار، به تفکیک تأمین‌کننده) */
+    if (path === "/suppliers/history/series" && m === "GET") {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      return json(await itemSeries(env, it));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }
     if (/^\/proformas\/\d+\/extract$/.test(path)) { await requireAny(request, env); return NOT_CONNECTED("استخراج از پیش‌فاکتور"); }

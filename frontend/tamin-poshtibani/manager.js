@@ -357,7 +357,7 @@
         <div class="tp-field"><b>مهلت ارسال توسط مدیر (روز کاری از لحظهٔ بارگذاری)</b><input class="tp-input" id="ddays" value="${s.dispatchDays}" inputmode="numeric" style="width:110px;text-align:center"></div>
         <div class="tp-field"><b>حداقل تأمین‌کننده به ازای هر قلم</b><input class="tp-input" id="minsup" value="${s.minSuppliers}" inputmode="numeric" style="width:110px;text-align:center"></div>
         <div class="tp-field"><b>ظرفیت درخواست باز هر کارشناس (بار کاری)</b><input class="tp-input" id="capacity" value="${s.capacity}" inputmode="numeric" style="width:110px;text-align:center"></div>
-        <button class="tp-btn primary" data-save-alerts>ذخیره</button></div>
+        ${AUTOSAVED}</div>
       <div class="tp-note">«جدول کمیسیون» روی ۱۰۰ هرگز زرد نمی‌شود و مستقیم قرمز می‌شود. برای هشدار زودتر عددی کمتر بگذارید.</div>
       <div class="tp-note">کارشناس تا وقتی هر قلم به تعداد «حداقل تأمین‌کننده» استعلامِ ثبت‌شده نداشته باشد، نمی‌تواند جدول کمیسیون بسازد.</div></div>`;
   }
@@ -375,7 +375,7 @@
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
         <button class="tp-btn primary" data-apply-asg ${pend.length ? "" : "disabled"}>اعمال پیشنهاد روی همه درخواست‌های بی‌کارشناس (${pend.length})</button>
         ${target ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(target.id)}</b> · گروه «${esc(reqCat(target))}»: ${scored.slice(0, 3).map((x, i) => `${i + 1}. <b>${esc(x.e.label || x.e.name)}</b> (${x.s.toFixed(1)})`).join(" · ")}</span>` : ""}
-        <button class="tp-btn" data-save-scores style="margin-inline-start:auto">ذخیره ضرایب و ماتریس‌ها</button></div>
+        <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
       <h2>ارجاع هوشمند</h2><p class="lead">سیستم برای هر درخواست یک کارشناس پیشنهاد می‌دهد. پیشنهاد الزام‌آور نیست و مدیر می‌تواند ردش کند.</p>
       <div class="tp-formula"><span class="eq">امتیاز =</span>
         <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه کالایی</b></span>${opSel("op1", A.op1)}
@@ -403,7 +403,7 @@
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
         <button class="tp-btn primary" data-apply-dl ${pend.length ? "" : "disabled"}>اعمال روی همه ارجاع‌های ارسال‌نشده (${pend.reduce((n, r) => n + r.assignments.filter((a) => !a.dispatched_at).length, 0)})</button>
         ${t && e ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(t.id)}</b> · ${esc(e.label || e.name)} · گروه «${esc(reqCat(t))}» ⇒ <b>${smartDays(t, e)} روز کاری</b></span>` : ""}
-        <button class="tp-btn" data-save-scores style="margin-inline-start:auto">ذخیره ضرایب</button></div>
+        <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
       <h2>مهلت هوشمند</h2><p class="lead">پیشنهاد تعداد روز مهلت بر اساس سرعت کارشناس، پروژه و گروه کالایی. نتیجه گرد و حداقل ۱ روز می‌شود.</p>
       <div class="tp-formula"><span class="eq">مهلت (روز) =</span>
         <span class="term"><input class="tp-input" data-dl="base" value="${D.base}"> <b>پایه</b></span>${opSel("op1", D.op1)}
@@ -508,22 +508,34 @@
     Q("[data-act]").forEach((b) => b.onclick = () => { const [st, aid] = b.dataset.act.split("|"); doAct(st, +aid); });
     Q("[data-open]").forEach((b) => b.onclick = () => openDetail(+b.dataset.open));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
-    /* اعلانات */
-    Q("[data-thr]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); const vals = [...Q("[data-thr]")].map((x) => x.value === "" ? "" : +x.value); const act = vals.filter((v) => v !== ""); const ok = act.every((v, k) => k === 0 || v > act[k - 1]) && act.every((v) => v >= 1 && v <= 100); G("#thrErr").textContent = ok ? "" : "درصدها باید صعودی و بین ۱ تا ۱۰۰ باشند."; });
-    const sa = G("[data-save-alerts]"); if (sa) sa.onclick = async () => { if (G("#thrErr").textContent) return; await save({ thresholds: [...Q("[data-thr]")].map((x) => x.value === "" ? "" : +x.value), dispatchDays: +G("#ddays").value || 0, minSuppliers: Math.max(1, +G("#minsup").value || 1), capacity: Math.max(1, +G("#capacity").value || 8) }); TP.modal("ذخیره شد", "تنظیمات اعلانات به‌روز شد.", null, "باشد", ""); };
-    /* ارجاع/مهلت هوشمند — تغییر محلی؛ دکمهٔ ذخیره روی سرور می‌نویسد */
-    Q("[data-asg]").forEach((i) => i.oninput = (e) => { settings().assign[e.target.dataset.asg] = e.target.value.replace(/[^0-9]/g, ""); TP.keepFocus(e.target, "asg", render); });
-    Q("[data-asg-op]").forEach((s) => s.onchange = (e) => { settings().assign[e.target.dataset.asgOp] = e.target.value; render(); });
-    Q("[data-dl]").forEach((i) => i.oninput = (e) => { settings().deadline[e.target.dataset.dl] = e.target.value.replace(/[^0-9.]/g, ""); TP.keepFocus(e.target, "dl", render); });
-    Q("[data-dl-op]").forEach((s) => s.onchange = (e) => { settings().deadline[e.target.dataset.dlOp] = e.target.value; render(); });
-    const setScore = (eid, kind, key, v) => { const x = S.scores.scores.find((s) => s.expert_id === eid && s.kind === kind && s.key === key); const score = Math.max(0, Math.min(5, +String(v).replace(/[^0-9]/g, "") || 0)); if (x) x.score = score; else S.scores.scores.push({ expert_id: eid, kind, key, score }); };
-    const setW = (kind, key, v) => { const x = S.scores.weights.find((s) => s.kind === kind && s.key === key); const w = +v || 1; if (x) x.w = w; else S.scores.weights.push({ kind, key, w }); };
-    Q("[data-g]").forEach((i) => i.oninput = (e) => { const [eid, c] = e.target.dataset.g.split("|"); setScore(+eid, "category", c, e.target.value); TP.keepFocus(e.target, "g", render); });
-    Q("[data-p]").forEach((i) => i.oninput = (e) => { const [eid, p] = e.target.dataset.p.split("|"); setScore(+eid, "party", p, e.target.value); TP.keepFocus(e.target, "p", render); });
-    Q("[data-sp]").forEach((i) => i.onchange = async (e) => { const ex = S.data.experts.find((x) => x.id === +e.target.dataset.sp); ex.speed = +e.target.value || 1; await TP.api(`/experts/${ex.id}`, { method: "PUT", body: { speed: ex.speed } }); render(); });
-    Q("[data-cw]").forEach((i) => i.oninput = (e) => { setW("category", e.target.dataset.cw, e.target.value); TP.keepFocus(e.target, "cw", render); });
-    Q("[data-pw]").forEach((i) => i.oninput = (e) => { setW("party", e.target.dataset.pw, e.target.value); TP.keepFocus(e.target, "pw", render); });
-    Q("[data-save-scores]").forEach((b) => b.onclick = async () => { await Promise.all([save({ assign: settings().assign, deadline: settings().deadline }), TP.api("/scores", { method: "PUT", body: S.scores })]); TP.modal("ذخیره شد", "ضرایب و ماتریس‌ها ذخیره شدند.", null, "باشد", ""); });
+    /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ درصدهای نامعتبر فرستاده نمی‌شوند */
+    const alertsPatch = () => {
+      const thr = [...Q("[data-thr]")];
+      if (!thr.length || !G("#ddays")) return null;   /* تب عوض شده؛ چیزی برای خواندن نیست */
+      return { thresholds: thr.map((x) => x.value === "" ? "" : +x.value), dispatchDays: +G("#ddays").value || 0,
+        minSuppliers: Math.max(1, +G("#minsup").value || 1), capacity: Math.max(1, +G("#capacity").value || 8) };
+    };
+    const saveAlerts = () => autoSave("alerts", async () => { const p = alertsPatch(); if (p) await saveQuiet(p); });
+    Q("[data-thr]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); const vals = [...Q("[data-thr]")].map((x) => x.value === "" ? "" : +x.value); const act = vals.filter((v) => v !== ""); const ok = act.every((v, k) => k === 0 || v > act[k - 1]) && act.every((v) => v >= 1 && v <= 100); G("#thrErr").textContent = ok ? "" : "درصدها باید صعودی و بین ۱ تا ۱۰۰ باشند."; if (ok) saveAlerts(); });
+    ["#ddays", "#minsup", "#capacity"].forEach((id) => { const el = G(id); if (el) el.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); saveAlerts(); }; });
+    /* ارجاع/مهلت هوشمند — هر تغییر همان‌جا روی سرور می‌نشیند */
+    const saveCoef = () => autoSave("coef", () => saveQuiet({ assign: settings().assign, deadline: settings().deadline }));
+    Q("[data-asg]").forEach((i) => i.oninput = (e) => { settings().assign[e.target.dataset.asg] = e.target.value.replace(/[^0-9]/g, ""); saveCoef(); TP.keepFocus(e.target, "asg", render); });
+    Q("[data-asg-op]").forEach((s) => s.onchange = (e) => { settings().assign[e.target.dataset.asgOp] = e.target.value; saveCoef(); render(); });
+    Q("[data-dl]").forEach((i) => i.oninput = (e) => { settings().deadline[e.target.dataset.dl] = e.target.value.replace(/[^0-9.]/g, ""); saveCoef(); TP.keepFocus(e.target, "dl", render); });
+    Q("[data-dl-op]").forEach((s) => s.onchange = (e) => { settings().deadline[e.target.dataset.dlOp] = e.target.value; saveCoef(); render(); });
+    /* ماتریس‌ها — فقط همان خانهٔ تغییرکرده فرستاده می‌شود؛ سرور upsert می‌کند */
+    const setScore = (eid, kind, key, v) => { const x = S.scores.scores.find((s) => s.expert_id === eid && s.kind === kind && s.key === key); const score = Math.max(0, Math.min(5, +String(v).replace(/[^0-9]/g, "") || 0)); if (x) x.score = score; else S.scores.scores.push({ expert_id: eid, kind, key, score }); return score; };
+    const setW = (kind, key, v) => { const x = S.scores.weights.find((s) => s.kind === kind && s.key === key); const w = +v || 1; if (x) x.w = w; else S.scores.weights.push({ kind, key, w }); return w; };
+    Q("[data-g]").forEach((i) => i.oninput = (e) => { const [eid, c] = e.target.dataset.g.split("|"); const score = setScore(+eid, "category", c, e.target.value);
+      autoSave(`g:${e.target.dataset.g}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "category", key: c, score }] } })); TP.keepFocus(e.target, "g", render); });
+    Q("[data-p]").forEach((i) => i.oninput = (e) => { const [eid, p] = e.target.dataset.p.split("|"); const score = setScore(+eid, "party", p, e.target.value);
+      autoSave(`p:${e.target.dataset.p}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "party", key: p, score }] } })); TP.keepFocus(e.target, "p", render); });
+    Q("[data-sp]").forEach((i) => i.onchange = async (e) => { const ex = S.data.experts.find((x) => x.id === +e.target.dataset.sp); ex.speed = +e.target.value || 1; await TP.api(`/experts/${ex.id}`, { method: "PUT", body: { speed: ex.speed } }); savedFlash(); render(); });
+    Q("[data-cw]").forEach((i) => i.oninput = (e) => { const w = setW("category", e.target.dataset.cw, e.target.value);
+      autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "category", key: e.target.dataset.cw, w }] } })); TP.keepFocus(e.target, "cw", render); });
+    Q("[data-pw]").forEach((i) => i.oninput = (e) => { const w = setW("party", e.target.dataset.pw, e.target.value);
+      autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "party", key: e.target.dataset.pw, w }] } })); TP.keepFocus(e.target, "pw", render); });
     const aa = G("[data-apply-asg]"); if (aa) aa.onclick = applyAssignAll;
     const ad = G("[data-apply-dl]"); if (ad) ad.onclick = applyDeadlineAll;
     Q("[data-dec]").forEach((b) => b.onclick = async () => {
@@ -540,6 +552,25 @@
   }
 
   async function save(patch) { try { S.data.settings = await TP.api("/settings", { method: "PUT", body: patch }); render(); } catch (e) { TP.modal("خطا در ذخیره", esc(e.message), null, "باشد", ""); } }
+  /* ---------- ذخیرهٔ خودکار تنظیمات ----------
+     هر تغییرِ مدیر بعد از یک مکث کوتاه روی D1 می‌نشیند — آخرین مقدار برنده است
+     و رفرش دیگر چیزی را نمی‌پراند. حین تایپ رندر نمی‌کنیم که فوکوس نپرد. */
+  async function saveQuiet(patch) { S.data.settings = await TP.api("/settings", { method: "PUT", body: patch }); }
+  function savedFlash() {
+    document.querySelectorAll("[data-autosaved]").forEach((el) => {
+      el.textContent = "ذخیره شد ✓"; el.style.color = "#6ee7b7";
+      clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = "ذخیرهٔ خودکار روشن است"; el.style.color = ""; }, 1800);
+    });
+  }
+  const AS_TIMERS = {};
+  function autoSave(key, fn, ms = 700) {
+    clearTimeout(AS_TIMERS[key]);
+    AS_TIMERS[key] = setTimeout(async () => {
+      try { await fn(); savedFlash(); }
+      catch (e) { TP.modal("ذخیرهٔ خودکار انجام نشد", esc(e.message), null, "باشد", ""); }
+    }, ms);
+  }
+  const AUTOSAVED = `<span class="dim" data-autosaved style="font-size:.85rem">ذخیرهٔ خودکار روشن است</span>`;
   async function loadEvents() { try { S.events = (await TP.api("/events")).events || []; render(); } catch (e) { S.error = e.message; render(); } }
 
   /* ---------- اقدام‌های گروهی ---------- */

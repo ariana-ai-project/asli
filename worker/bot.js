@@ -25,6 +25,7 @@ import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
+import { itemHistory } from "./history.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -140,6 +141,13 @@ export function managerOverdueText(row) {
 
 const seenButton = (aid) => [[{ text: "✅ مشاهده کردم", callback_data: `seen:a:${aid}` }], [{ text: "باز کردن پنل", url: PANEL_URL }]];
 const panelButton = [[{ text: "باز کردن پنل", url: PANEL_URL }]];
+/* بعد از «مشاهده کردم» همان‌جا دو قدم بعدی پیشنهاد می‌شود؛ جستجوی هوشمند تا
+   اتصال مدل فقط پیام می‌دهد. */
+const afterSeenKb = (aid) => [
+  [{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }],
+  [{ text: "🔎 جستجوی هوشمند", callback_data: `hs:s:${aid}` }],
+  [{ text: "باز کردن پنل", url: PANEL_URL }],
+];
 
 /* ------------------------------------------------------------------ */
 /* هشدارهای مهلت (SLA-03، SLA-05)                                       */
@@ -342,6 +350,12 @@ async function onFlowText(env, api, chat, f, text) {
   const d = flowData(f);
 
   if (f.kind === "field" && f.step === "need_value") return onFieldText(env, api, chat, f, text);
+
+  /* منوی چندانتخابی سوابق متن نمی‌خواهد — انتخاب فقط با دکمه‌هاست */
+  if (f.kind === "hist") {
+    await api.sendMessage(chat, "برای انتخاب تأمین‌کننده از دکمه‌های زیر فهرست استفاده کنید؛ اگر تأمین‌کنندهٔ تازه‌ای مدنظر است، از «افزودن دستی استعلام جدید» بروید.").catch(() => {});
+    return { ok: true };
+  }
 
   if (f.step === "need_supplier") {
     if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
@@ -1264,7 +1278,8 @@ async function sendProgress(env, api, chat, aid, prefix) {
   if (!s) return { ok: true };
   const done = stageFlags(s);
   const kb = [];
-  if (!done[1]) kb.push([{ text: "✅ سوابق را بررسی کردم", callback_data: `st:${aid}:hist:0` }]);
+  /* سوابق دیگر «علامت دستی» نیست — همان بررسی واقعی از داخل بات اجرا می‌شود */
+  if (!done[1]) kb.push([{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }]);
   if (!done[2]) kb.push([{ text: "✅ جستجو را انجام دادم", callback_data: `st:${aid}:smart:0` }]);
   if (done[3]) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `st:${aid}:table:0` }]);
   if (done[3] && done[4] && !done[5]) kb.push([{ text: "📦 گرفتن فایل‌ها و بستن کار", callback_data: `st:${aid}:deliver:0` }]);
@@ -1289,6 +1304,161 @@ async function markStage(env, api, chat, ex, aid, stage) {
       .bind(t, `expert:${ex.id}`, stage, own.request_id, JSON.stringify({ assignment_id: aid, channel: "telegram" })),
   ]);
   return sendProgress(env, api, chat, aid, `✅ مرحلهٔ «${stage === "hist" ? "بررسی سوابق" : "جستجوی هوشمند"}» سبز شد.`);
+}
+
+/* ------------------------------------------------------------------ */
+/* بررسی سوابق در بات — همان موتور پنل (worker/history.js)               */
+/* ------------------------------------------------------------------ */
+/* ضریب اهمیت گشتاور در بات ثابت است؛ نوارِ ۱ تا ۱۰ مال پنل است و رتبه‌ها
+   آن‌جا همان لحظه عوض می‌شوند. */
+const HIST_K = 5;
+const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدارها بدون زبالهٔ اعشار شناور */
+const HIST_MAX_LIST = 12;   /* سقف متن پیام — تلگرام ۴۰۹۶ نویسه جا دارد */
+const HIST_MAX_SEL = 24;    /* سقف دکمه‌های منوی چندانتخابی */
+const HIST_SEL_TEXT = "تأمین‌کنندگان موردنظر را انتخاب کنید و «افزودن به استعلامات» را بزنید؛ فقط نامشان وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید.";
+
+async function histPickItem(env, api, chat, ex, aid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const its = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40").bind(aid).all()).results || [];
+  if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
+  if (its.length === 1) return histRun(env, api, chat, ex, its[0].id);
+  const kb = its.map((i) => [{ text: `${short(i.title, 32)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`, callback_data: `hs:i:${i.id}` }]);
+  await api.sendMessage(chat, `📚 <b>بررسی سوابق</b>\nدرخواست <b>${esc(asg.request_id)}</b>\n\nسوابق کدام قلم را ببینم؟ (یکی را انتخاب کنید)`, kb).catch(() => {});
+  return { ok: true };
+}
+
+async function histRun(env, api, chat, ex, itemId) {
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.hist_done_at, a.id AS aid, a.expert_id, a.request_id
+    FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
+  if (!it || it.expert_id !== ex.id) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
+  const h = await itemHistory(env, it, { k: HIST_K });
+  if (!h.available) { await api.sendMessage(chat, `📚 ${esc(h.message)}`).catch(() => {}); return { ok: true }; }
+
+  /* خواندنِ سوابق همان انجامِ مرحله است — همان رفتار پنل؛ باکس مدیر سبز می‌شود */
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE items SET hist_done_at=COALESCE(hist_done_at,?) WHERE id=?").bind(t, itemId),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=1 AND fired_at IS NULL").bind(t, it.aid),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "hist", it.request_id, JSON.stringify({ assignment_id: it.aid, item_id: itemId, channel: "telegram" })),
+  ]);
+
+  const rows = h.suppliers || [];
+  if (!rows.length) {
+    const why = h.excluded && h.excluded.length
+      ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${h.excluded[0].name}» ثبت شده و تأمین‌کنندهٔ نام‌داری ندارد.`
+      : (h.message || "سابقه‌ای در فایل مرجع پیدا نشد.");
+    await api.sendMessage(chat, `📚 <b>سوابق «${esc(short(it.title, 40))}»</b>\n\n${esc(why)}`).catch(() => {});
+    return { ok: true };
+  }
+
+  const unit = h.item && h.item.unit ? ` ${h.item.unit}` : "";
+  const list = rows.slice(0, HIST_MAX_LIST).map((s, i) =>
+    `${M(i + 1)}. <b>${esc(short(s.name, 36))}</b>\n`
+    + `▫️ دفعات خرید: <b>${M(s.n)}</b> (رتبه ${M(s.rankN)}) · مقدار: <b>${M(RQ(s.qty))}</b>${esc(unit)} (رتبه ${M(s.rankQty)})\n`
+    + `▫️ سهم: <b>${s.share.toFixed(1)}٪</b> · امتیاز گشتاوری: <b>${s.mshare.toFixed(1)}٪</b> (رتبه ${M(s.rankM)})`).join("\n");
+  const text = `📚 <b>سوابق تأمین «${esc(short(it.title, 40))}»</b>\n`
+    + `${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}\n`
+    + `<i>ترتیب با امتیاز گشتاوری است: خریدِ تازه‌تر سنگین‌تر (ضریب ${M(h.base.k)}).</i>\n\n${list}`
+    + (rows.length > HIST_MAX_LIST ? `\n\n<i>و ${M(rows.length - HIST_MAX_LIST)} تأمین‌کنندهٔ دیگر — در پنل</i>` : "")
+    + (h.item && h.item.mixedUnits ? `\n\n⚠️ <i>واحدهای این قلم یکدست نیستند (${esc(h.item.units || "")})؛ جمع مقدار را با احتیاط بخوانید.</i>` : "");
+  await api.sendMessage(chat, text).catch(() => {});
+
+  /* منوی چندانتخابی، در یک پیام جدا: با هر انتخاب فقط همین پیام کوچک ویرایش
+     می‌شود و متنِ بلندِ رتبه‌بندی دست‌نخورده می‌ماند. */
+  const options = rows.slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
+  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'hist','pick_suppliers',?,?,?,?)")
+    .bind(ex.id, String(chat), it.aid, JSON.stringify({ itemId, options, sel: [] }), t, t + FLOW_TTL).run();
+  const fid = r.meta.last_row_id;
+  const msg = await api.sendMessage(chat, HIST_SEL_TEXT, histSelKb(fid, options, [])).catch(() => null);
+  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+  return { ok: true };
+}
+
+function histSelKb(fid, options, sel) {
+  const kb = (options || []).map((o, i) => [{ text: `${(sel || []).includes(i) ? "☑" : "☐"} ${short(o.name, 32)}`, callback_data: `hf:${fid}:t:${i}` }]);
+  kb.push([{ text: `➕ افزودن به استعلامات${(sel || []).length ? ` (${M(sel.length)})` : ""}`, callback_data: `hf:${fid}:go:0` }]);
+  kb.push([{ text: "✖️ بستن", callback_data: `hf:${fid}:x:0` }]);
+  return kb;
+}
+
+/** انتخاب‌شده‌ها را به خط‌های استعلامِ همان قلم تبدیل می‌کند و کارت خط‌ها را می‌فرستد */
+async function histAddToQuotes(env, api, chat, ex, f, d, messageId) {
+  const aid = f.assignment_id;
+  const itRow = await env.DB.prepare("SELECT id, unit, qty FROM items WHERE id=? AND assignment_id=?").bind(d.itemId, aid).first();
+  if (!itRow) { await api.sendMessage(chat, "قلم این فهرست دیگر پیدا نمی‌شود.").catch(() => {}); return { ok: true }; }
+  const have = new Set(((await env.DB.prepare("SELECT supplier_name FROM quotes WHERE assignment_id=? AND item_id=?").bind(aid, d.itemId).all()).results || [])
+    .map((q) => q.supplier_name));
+  const t = now();
+  const stmts = []; let added = 0, skipped = 0;
+  for (const i of d.sel || []) {
+    const o = (d.options || [])[i]; if (!o) continue;
+    if (have.has(o.name)) { skipped++; continue; }
+    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,'telegram',?,?)`)
+      .bind(aid, d.itemId, o.name, o.code || null, itRow.unit || null, itRow.qty ?? null, INVOICE_DEFAULT, t, t));
+    added++;
+  }
+  stmts.push(env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id));
+  await env.DB.batch(stmts);
+  if (messageId) await api.editMessageText(chat, messageId,
+    `✅ <b>${M(added)}</b> تأمین‌کننده وارد استعلامات شد${skipped ? ` و ${M(skipped)} مورد از قبل بود` : ""}.`).catch(() => {});
+  return quoteLinesCard(env, api, chat, ex, aid);
+}
+
+/* ------------------------------------------------------------------ */
+/* کارت خط‌های استعلام — بعد از افزودن از سوابق، خودکار می‌آید              */
+/* ------------------------------------------------------------------ */
+async function quoteLinesCard(env, api, chat, ex, aid, messageId) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const qs2 = (await env.DB.prepare(`SELECT q.id, q.supplier_name, q.price, q.saved, i.title
+    FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? ORDER BY q.id LIMIT 24`).bind(aid).all()).results || [];
+  const text = `🧾 <b>استعلامات درخواست ${esc(asg.request_id)}</b>\n\n`
+    + (qs2.length
+      ? qs2.map((q, i) => `${M(i + 1)}. <b>${esc(short(q.supplier_name, 28))}</b> — ${esc(short(q.title, 26))}${q.price != null ? ` — ${M(q.price)} ریال` : ""} ${q.saved ? "✅" : "✳️"}`).join("\n")
+        + "\n\n✅ ثبت موقت شده · ✳️ هنوز ناقص\nروی هر خط بزنید تا پیش‌فاکتورش را بدهید یا دستی ویرایشش کنید."
+      : "هنوز خط استعلامی ثبت نشده است.");
+  const kb = qs2.map((q, i) => [{ text: `${M(i + 1)}. ${short(q.supplier_name, 24)} — ${short(q.title, 16)}`, callback_data: `hql:${q.id}:c:0` }]);
+  kb.push([{ text: "➕ افزودن دستی استعلام جدید", callback_data: `hq:${aid}:new:0` }]);
+  const edited = messageId ? await api.editMessageText(chat, messageId, text, kb).catch(() => null) : null;
+  if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
+  return { ok: true };
+}
+
+async function quoteLineMenu(env, api, chat, ex, qid, messageId) {
+  const q = await ownQuote(env, ex.id, qid);
+  if (!q) { await api.sendMessage(chat, "این خط استعلام پیدا نشد.").catch(() => {}); return { ok: true }; }
+  const text = `🧾 خط استعلام <b>${esc(short(q.supplier_name, 32))}</b>${q.price != null ? ` — قیمت فعلی ${M(q.price)} ریال` : " — هنوز قیمت ندارد"}\n\nچه می‌کنید؟`;
+  const kb = [
+    [{ text: "📎 دریافت پیش‌فاکتور", callback_data: `hqp:${q.id}:0:0` }],
+    [{ text: "✏️ ویرایش دستی", callback_data: `qe:${q.id}:0` }],
+    [{ text: "→ بازگشت به فهرست", callback_data: `hq:${q.assignment_id}:show:0` }],
+  ];
+  const edited = messageId ? await api.editMessageText(chat, messageId, text, kb).catch(() => null) : null;
+  if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
+  return { ok: true };
+}
+
+/** استعلام دستی برای ارجاعِ معلوم — بدون پرسیدنِ دوبارهٔ «کدام درخواست» */
+async function manualForAssignment(env, api, chat, ex, aid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  await closeFlows(env, ex.id);
+  const sups = ((await env.DB.prepare("SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name").bind(aid).all()).results || [])
+    .map((r) => r.supplier_name).filter(Boolean);
+  const t = now();
+  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'manual','need_supplier',?,?,?,?)")
+    .bind(ex.id, String(chat), aid, JSON.stringify({ supplierOptions: sups }), t, t + FLOW_TTL).run();
+  const fid = r.meta.last_row_id;
+  const kb = sups.map((s2, i) => [{ text: short(s2, 34), callback_data: `fl:${fid}:s:${i}` }]);
+  kb.push([{ text: "✖️ لغو", callback_data: `fl:${fid}:x:0` }]);
+  const msg = await api.sendMessage(chat,
+    `🧾 <b>استعلام دستی</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
+    + (sups.length ? "از کدام تأمین‌کننده؟ اگر تازه است، نامش را بنویسید." : "نام تأمین‌کننده را بنویسید:"), kb).catch(() => null);
+  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1547,8 +1717,73 @@ async function onCallback(env, cq) {
     await ack("ثبت شد ✅");
     if (cq.message) {
       await api.editMessageText(chat, cq.message.message_id, cq.message.text
-        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", panelButton).catch(() => {});
+        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", afterSeenKb(id)).catch(() => {});
     }
+    return { ok: true };
+  }
+
+  /* بررسی سوابق: hs:a:<aid> (انتخاب قلم) · hs:i:<itemId> (اجرا) · hs:s (جستجوی هوشمند — هنوز وصل نیست) */
+  if (action === "hs") {
+    const [, sub, vRaw] = T(cq.data).split(":");
+    const v = parseInt(vRaw, 10);
+    if (sub === "s") { await ack("جستجوی هوشمند هنوز به مدل وصل نشده است؛ به‌زودی فعال می‌شود.", true); return { ok: true }; }
+    if (sub === "a") { await ack(); return histPickItem(env, api, chat, ex, v); }
+    if (sub === "i") { await ack("در حال محاسبه…"); return histRun(env, api, chat, ex, v); }
+    await ack(); return { ok: true };
+  }
+
+  /* منوی چندانتخابی تأمین‌کنندگانِ سوابق: hf:<flowId>:t:<idx> · go · x */
+  if (action === "hf") {
+    const [, fidRaw, step, valRaw] = T(cq.data).split(":");
+    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='hist'").bind(parseInt(fidRaw, 10), ex.id).first();
+    if (!f || f.done_at) { await ack("این فهرست دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f);
+    if (step === "x") {
+      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
+      await ack("بسته شد");
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ فهرست بسته شد؛ از پنل یا با اجرای دوبارهٔ «بررسی سوابق» دوباره باز می‌شود.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "t") {
+      const i = parseInt(valRaw, 10);
+      if (!(d.options || [])[i]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+      d.sel = d.sel || [];
+      const at = d.sel.indexOf(i);
+      if (at >= 0) d.sel.splice(at, 1); else d.sel.push(i);
+      await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
+      await ack();
+      if (cq.message) await api.editMessageText(chat, cq.message.message_id, HIST_SEL_TEXT, histSelKb(f.id, d.options, d.sel)).catch(() => {});
+      return { ok: true };
+    }
+    if (step === "go") {
+      if (!(d.sel || []).length) { await ack("هنوز تأمین‌کننده‌ای انتخاب نکرده‌اید.", true); return { ok: true }; }
+      await ack("در حال افزودن…");
+      return histAddToQuotes(env, api, chat, ex, f, d, cq.message && cq.message.message_id);
+    }
+    await ack(); return { ok: true };
+  }
+
+  /* کارت خط‌های استعلام: hq:<aid>:show|new · hql:<qid> (منوی خط) · hqp:<qid> (درخواست پیش‌فاکتور) */
+  if (action === "hq") {
+    const [, aidRaw, sub] = T(cq.data).split(":");
+    const aid2 = parseInt(aidRaw, 10);
+    await ack();
+    if (sub === "new") return manualForAssignment(env, api, chat, ex, aid2);
+    return quoteLinesCard(env, api, chat, ex, aid2, cq.message && cq.message.message_id);
+  }
+  if (action === "hql") {
+    const [, qidRaw] = T(cq.data).split(":");
+    await ack();
+    return quoteLineMenu(env, api, chat, ex, parseInt(qidRaw, 10), cq.message && cq.message.message_id);
+  }
+  if (action === "hqp") {
+    const [, qidRaw] = T(cq.data).split(":");
+    const q = await ownQuote(env, ex.id, parseInt(qidRaw, 10));
+    if (!q) { await ack("این خط استعلام پیدا نشد.", true); return { ok: true }; }
+    await ack();
+    await api.sendMessage(chat,
+      `📎 فایل پیش‌فاکتور <b>${esc(short(q.supplier_name, 36))}</b> را همین حالا همین‌جا بفرستید (PDF یا عکس).\n\n`
+      + "<i>هر فایلی که به بات بفرستید پیش‌فاکتور حساب می‌شود؛ بعد از دریافت، همان‌جا تأمین‌کننده‌اش را تأیید می‌کنید و استخراج خودکار شروع می‌شود.</i>").catch(() => {});
     return { ok: true };
   }
 
@@ -1845,7 +2080,7 @@ async function onChatMember(env, m) {
       await telegram(env).sendMessage(chat.id,
         "✅ این‌جا به‌عنوان کانال اعلان مدیر واحد پشتیبانی ثبت شد.\n\n"
         + "از این پس این‌ها اعلام می‌شود:\n"
-        + "• هر تغییر وضعیت در باکس‌های پایش هر درخواست\n"
+        + "• تغییر وضعیت مراحل «مشاهده»، «پیش‌فاکتور» و «جدول کمیسیون»\n"
         + "• عبور از مهلت\n"
         + "• بسته شدن درخواست، با دکمهٔ «مشاهده کردم»\n\n"
         + "<i>اعلان‌ها فقط در ساعت اداری فرستاده می‌شوند.</i>");

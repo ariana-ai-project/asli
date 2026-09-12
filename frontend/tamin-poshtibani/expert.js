@@ -35,15 +35,15 @@
     d: null,               // جزئیات ارجاع باز: {assignment, request, items, quotes, proformas, pendingDecisions}
     itemIdx: 0, tab: "history",
     q: { id: "", date: "", party: "", item: "" },
-    weights: [20, 40, 15, 25], open: { 0: false, 1: false, 2: false, 3: false },
-    sort: { grp: null, kind: "score" },   // ستون رتبه‌ای که جدول سوابق با آن مرتب است
+    hsort: "m",                           // ستون مرتب‌سازی جدول سوابق: m (گشتاور) | qty | n
+    chart: false,                         // نمودار روند خرید باز است؟
     mom: 5,                               // ضریب اهمیت گشتاور (۱ تا ۱۰) — از localStorage پر می‌شود
     prof: null,                           // کلید تأمین‌کننده‌ای که کارتش باز است
     scope: "item", caps: { contact: true, cred: true, reviews: false, price: true },
     srch: { brand: "", yMin: "", yMax: "", cond: "نو", maker: "", spec: "", origin: "", trade: "داخلی", place: "" },
     f: { maxDelivery: "", priceOnly: false, adMin: 0, adMax: 365 },
     templates: [], tpl: 0,
-    hist: {}, smart: {},   // پاسخ endpointها برای هر قلم (available:false تا اتصال)
+    hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
   };
   const settings = () => S.settings || CFG.defaults;
@@ -60,7 +60,11 @@
   }
   function boxes(a, done, active, small) {
     const st = { dispatchedAt: a.dispatched_at, days: a.days, done, active };
-    return `<div class="boxes">${TP.STAGES.map((s, i) => `<div class="box ${small ? "sm" : ""} b-${TP.stageColor(st, i, settings().thresholds, S.now)}" title="${s}">${i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : ""}</div>`).join("")}</div>`;
+    const box = (s, i) => `<div class="box ${small ? "sm" : ""} b-${TP.stageColor(st, i, settings().thresholds, S.now)}" title="${s}">${i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : ""}</div>`;
+    /* در سربرگ جزئیات، بدون برچسب معلوم نیست هر باکس مال کدام مرحله است؛
+       در جدول کارتابل جا نیست و همان title کافی است. */
+    if (small) return `<div class="boxes">${TP.STAGES.map(box).join("")}</div>`;
+    return `<div class="boxes">${TP.STAGES.map((s, i) => `<div class="boxcol"><span class="boxlab">${s}</span>${box(s, i)}</div>`).join("")}</div>`;
   }
 
   /* ---------- ورود و کارتابل ---------- */
@@ -138,62 +142,34 @@
   }
 
   /* ---------- تب بررسی سوابق ----------
-     چهار گروهِ ماک‌آپ مرجع. دو گروهِ «پروژه» ستون پروژه می‌خواهند که فایل سوابق
-     ندارد؛ ستون‌هایشان سرِ جایشان می‌مانند و تا آمدن آن داده خاموش‌اند.
-
-     «گشتاور» = همان مبلغ به نرخ ۱۴۰۴، وقتی با فاصلهٔ ماهانه‌اش تا اسفند ۱۴۰۴
-     کم‌ارزش شود. سرور آن را حساب می‌کند (چون به کل ردیف‌ها نیاز دارد) و سهم،
-     امتیاز، رتبه و ترتیب این‌جا — تا تغییر ضریب اهمیت همان لحظه اثر کند. */
-  /* ضریب اهمیت، انتخابِ شخصیِ کارشناس است و نباید با هر بار باز کردن پنل صفر شود */
+     مبنای مقایسهٔ تأمین‌کنندگان (تصمیم مدیر) سه ستون است، نه قیمت:
+     دفعات خرید، جمع مقدار، و «گشتاور» — همان جمع مقدار وقتی خریدِ تازه‌تر
+     سنگین‌تر شمرده شود (شیب از نوار ۱..۱۰). قیمت‌ها فقط در ریز خریدها و کارت
+     تأمین‌کننده نمایش داده می‌شوند. رتبه‌ها را سرور می‌سازد تا پنل و بات تلگرام
+     یک عدد بگویند؛ این‌جا فقط ستون مرتب‌سازی انتخاب می‌شود (پیش‌فرض: گشتاور).
+     گروه «خرید قلم در پروژه» تا رسیدن ستون پروژه به فایل مرجع خاموش است. */
   const MOM_KEY = "tp.mom";
   try { S.mom = Math.min(10, Math.max(1, +(localStorage.getItem(MOM_KEY) || 5))); } catch (_) { /* حالت خصوصی */ }
-
-  const HGRP = [["کل خرید", "tot", "totM", "g1"], ["خرید قلم", "itot", "itotM", "g2"],
-                ["خرید پروژه", "ptot", "ptotM", "g3"], ["خرید قلم در پروژه", "iptot", "iptotM", "g4"]];
-  /* ارقام ریالیِ هفت‌رقمی در ستون جا نمی‌شوند؛ همه‌جا میلیون ریال نشان داده می‌شود */
-  const MR = (n) => M(Math.round((Number(n) || 0) / 1e6));
+  const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدار بدون زبالهٔ اعشار شناور */
   const MATCH = { normalized: "کد استاندارد", code: "کد قلم راهکاران", title: "عنوان قلم", none: "بی‌سابقه" };
+  const HSORT = { m: "rankM", qty: "rankQty", n: "rankN" };
+  const CHART_COLORS = ["#4f8cff", "#ff8c42", "#22c55e", "#e5484d", "#a78bfa", "#f2c230", "#2dd4bf", "#f472b6", "#93c5fd", "#fb923c", "#86efac", "#fca5a5"];
 
-  function calcHist(it) {
-    const d = S.hist[it.id];
-    if (!d || !d.available || !d.suppliers || !d.suppliers.length) return { rows: [], on: [false, false, false, false] };
-    const on = HGRP.map((G) => d.totals[G[1]] != null);
-    const w = HGRP.map((G, i) => (on[i] ? Number(S.weights[i]) || 0 : 0));
-    const sw = w.reduce((a, b) => a + b, 0) || 1;
-    const sum = HGRP.map((G, i) => (on[i] ? d.suppliers.reduce((n, s) => n + (s[G[1]] || 0), 0) : 0));
-    const rows = d.suppliers.map((s) => {
-      const r = { ...s, sh: [], mr: [] };
-      HGRP.forEach((G, i) => {
-        r.sh[i] = on[i] && sum[i] ? (s[G[1]] || 0) / sum[i] : null;
-        /* نسبت گشتاور به خام: چقدر از خریدِ این تأمین‌کننده تازه است */
-        r.mr[i] = on[i] && s[G[1]] ? (s[G[2]] || 0) / s[G[1]] : null;
-      });
-      r.score = HGRP.reduce((n, G, i) => n + (r.sh[i] || 0) * w[i], 0) / sw * 100;
-      r.mscore = HGRP.reduce((n, G, i) => n + (r.mr[i] || 0) * w[i], 0) / sw * 100;
-      return r;
-    });
-    HGRP.forEach((G, i) => {
-      [...rows].sort((a, b) => (b[G[1]] || 0) - (a[G[1]] || 0)).forEach((x, n) => { x["rk" + i] = n + 1; });
-      [...rows].sort((a, b) => (b[G[2]] || 0) - (a[G[2]] || 0)).forEach((x, n) => { x["mk" + i] = n + 1; });
-    });
-    [...rows].sort((a, b) => b.score - a.score).forEach((x, i) => { x.rk = i + 1; });
-    [...rows].sort((a, b) => b.mscore - a.mscore).forEach((x, i) => { x.mrk = i + 1; });
-    const s = S.sort;
-    if (s.grp === null) rows.sort((a, b) => a[s.kind === "mom" ? "mrk" : "rk"] - b[s.kind === "mom" ? "mrk" : "rk"]);
-    else rows.sort((a, b) => a[(s.kind === "mom" ? "mk" : "rk") + s.grp] - b[(s.kind === "mom" ? "mk" : "rk") + s.grp]);
-    return { rows, on };
-  }
+  const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]);
 
   /* کارت تأمین‌کننده — بالای جدول، با کلیک روی نام باز می‌شود */
   function vProfile(it) {
     const d = S.hist[it.id]; if (!S.prof || !d) return "";
     const p = (d.suppliers || []).find((x) => x.key === S.prof); if (!p) return "";
     const c = p.contact || {};
+    const unit = d.item && d.item.unit ? " " + d.item.unit : "";
     const f = (lab, val, cls) => `<div class="f"><b>${lab}</b><span class="${cls || ""}">${val == null || val === "" ? "—" : esc(val)}</span></div>`;
     return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.code ? `<span class="chip num">${esc(p.code)}</span>` : ""}
         <button class="tp-btn xs" data-close-prof style="margin-inline-start:auto">بستن</button></div>
       <div class="gridp">
-        ${f("تعداد خرید این قلم", M(p.nItem), "num")}${f("کل خریدهای شرکت از او", M(p.nAll) + " ردیف", "num")}
+        ${f("دفعات خرید این قلم", `${M(p.n)} بار (رتبه ${M(p.rankN)})`, "num")}
+        ${f("جمع مقدار", `${M(RQ(p.qty))}${unit} (رتبه ${M(p.rankQty)})`, "num")}
+        ${f("امتیاز گشتاوری", `${p.mshare.toFixed(1)}٪ (رتبه ${M(p.rankM)})`, "num")}
         ${f("نخستین خرید", p.firstDate, "num")}${f("آخرین خرید", p.lastDate, "num")}
         ${f("قیمت واحد میانگین (۱۴۰۴)", p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
         ${f("کمینه / بیشینه قیمت واحد (۱۴۰۴)", p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
@@ -203,90 +179,96 @@
         : `راه‌های تماس این تأمین‌کننده هنوز در دفترچه ثبت نشده است. <span class="chip mock">دفترچهٔ تأمین‌کنندگان — مرحلهٔ بعد</span>`}</div></div>`;
   }
 
+  /* نمودار روند خرید: محور افقی زمان (از اولین تا آخرین تأمین این قلم)، محور
+     عمودی مقدار؛ هر خرید یک نقطه به رنگ تأمین‌کننده‌اش و نقاط هر تأمین‌کننده
+     با خط باریک هم‌رنگ به هم وصل‌اند تا روند کم/زیاد شدن خرید دیده شود. */
+  function vChart(it, d) {
+    const se = S.series[it.id];
+    if (se === "loading") return `<div class="tp-note">در حال خواندن نقاط نمودار…</div>`;
+    if (!se) return "";
+    const pts = (se.points || []).map((p) => ({ ...p, t: TP.jStr2ms(p.date) })).filter((p) => p.t != null && p.qty > 0);
+    if (!pts.length) return `<div class="tp-note warn">هیچ خرید مقدارداری برای نمودار نیست.</div>`;
+    const by = new Map();
+    for (const p of pts) { if (!by.has(p.key)) by.set(p.key, { name: p.name, pts: [] }); by.get(p.key).pts.push(p); }
+    const groups = [...by.values()].sort((a, b) => b.pts.reduce((s, x) => s + x.qty, 0) - a.pts.reduce((s, x) => s + x.qty, 0));
+    groups.forEach((g, i) => { g.color = CHART_COLORS[i % CHART_COLORS.length]; g.pts.sort((a, b) => a.t - b.t); });
+    const W = 920, H = 320, PL = 74, PR = 14, PT = 12, PB = 32;
+    const t0 = Math.min(...pts.map((p) => p.t)), t1 = Math.max(...pts.map((p) => p.t));
+    const qMax = Math.max(...pts.map((p) => p.qty));
+    const X = (t) => (t1 === t0 ? PL + (W - PL - PR) / 2 : PL + (t - t0) / (t1 - t0) * (W - PL - PR));
+    const Y = (q) => H - PB - q / qMax * (H - PT - PB);
+    /* خط‌کش سال‌ها: فروردینِ هر سالِ داخل بازه؛ بازهٔ کوتاه فقط دو سرش را می‌گیرد */
+    const jy0 = +TP.fmtD(t0).slice(0, 4), jy1 = +TP.fmtD(t1).slice(0, 4);
+    let ticks = [];
+    for (let y = jy0; y <= jy1 + 1; y++) { const ms = TP.jStr2ms(`${y}/01/01`); if (ms != null && ms >= t0 && ms <= t1) ticks.push({ x: X(ms), lab: String(y) }); }
+    if (ticks.length < 2) ticks = [{ x: X(t0), lab: TP.fmtD(t0).slice(0, 7) }, { x: X(t1), lab: TP.fmtD(t1).slice(0, 7) }];
+    const AX = "#9fb2d8", GRID = "rgba(158,197,255,.13)";
+    let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;direction:ltr" xmlns="http://www.w3.org/2000/svg" role="img">`;
+    [0, .25, .5, .75, 1].forEach((fr) => { const y = Y(qMax * fr); svg += `<line x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}" stroke="${GRID}"/><text x="${PL - 6}" y="${y + 4}" fill="${AX}" font-size="11" text-anchor="end">${M(Math.round(qMax * fr))}</text>`; });
+    ticks.forEach((tk) => { svg += `<line x1="${tk.x}" x2="${tk.x}" y1="${PT}" y2="${H - PB}" stroke="${GRID}"/><text x="${tk.x}" y="${H - PB + 16}" fill="${AX}" font-size="11" text-anchor="middle">${tk.lab}</text>`; });
+    for (const g of groups) {
+      if (g.pts.length > 1) svg += `<polyline fill="none" stroke="${g.color}" stroke-width="1.3" opacity=".85" points="${g.pts.map((p) => `${X(p.t).toFixed(1)},${Y(p.qty).toFixed(1)}`).join(" ")}"/>`;
+      for (const p of g.pts) svg += `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.qty).toFixed(1)}" r="3.2" fill="${g.color}"><title>${esc(g.name)} — ${esc(p.date)} — ${M(p.qty)}</title></circle>`;
+    }
+    svg += `</svg>`;
+    const unit = d && d.item && d.item.unit ? ` (${esc(d.item.unit)})` : "";
+    return `<div class="tp-note" style="display:block"><b>روند خرید این قلم</b> — افقی: زمان از ${esc(TP.fmtD(t0))} تا ${esc(TP.fmtD(t1))} · عمودی: مقدار${unit}. هر نقطه یک خرید است.
+      <div style="background:rgba(3,8,20,.5);border:1px solid var(--tp-line);border-radius:10px;margin-top:8px;padding:6px 4px">${svg}</div>
+      <div class="chlegend">${groups.map((g) => `<span><i style="background:${g.color}"></i>${esc(g.name)}</span>`).join("")}</div></div>`;
+  }
+
   function vHistory(it) {
     const d = S.hist[it.id];
+    const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
       ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
-      <span style="display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = گذشتهٔ دور تقریباً هم‌ارزش امروز · ۱۰ = فقط خریدهای تازه وزن دارند">
+      <span style="display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = گذشتهٔ دور تقریباً هم‌وزن امروز · ۱۰ = فقط خریدهای تازه وزن دارند">
         <b>ضریب اهمیت گشتاور</b>
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
+      <button class="tp-btn ${S.chart ? "primary" : ""}" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده">${S.chart ? "بستن نمودار" : "نمودار روند"}</button>
       <button class="tp-btn primary" data-run-hist>${d ? "محاسبهٔ دوباره" : "جستجوی سوابق این قلم"}</button>
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>`;
 
-    if (!d) {
-      return `<div class="pad">${head}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
-        دکمهٔ «جستجوی سوابق این قلم» را بزنید. رتبه‌بندی از فایل سوابق خرید خوانده می‌شود و به مدل زبانی نیاز ندارد.</div></div>`;
-    }
-    if (d.available === false) {
-      return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div></div>`;
-    }
-    const { rows, on } = calcHist(it);
+    if (!d) return `<div class="pad">${head}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
+      دکمهٔ «جستجوی سوابق این قلم» را بزنید. رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
+    if (d.available === false) return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div></div>`;
     const exc = d.excluded || [];
+    const rows = histRows(d);
+    if (!rows.length) return `<div class="pad">${head}<div class="tp-note warn">${exc.length
+      ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${esc(exc[0].name)}» ثبت شده (${M(exc[0].n)} خرید) و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
+      : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div></div>`;
+
     const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
-    if (!rows.length) {
-      return `<div class="pad">${head}<div class="tp-note warn">${exc.length
-        ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${esc(exc[0].name)}» ثبت شده (${M(exc[0].nItem)} خرید) و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
-        : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div></div>`;
-    }
-
-    const sc = (g, k) => (S.sort.grp === g && S.sort.kind === k ? "sorted" : "");
-    let h1 = "", h2 = "", h3 = "", h4 = "";
-    HGRP.forEach((G, gi) => {
-      const op = on[gi] && S.open[gi], cs = op ? 4 : 1;
-      h1 += `<th class="h-imp ${G[3]}" colspan="${cs}">ضریب اهمیت</th>`;
-      h2 += `<th class="h-w ${G[3]}" colspan="${cs}"><input data-w="${gi}" value="${S.weights[gi]}" inputmode="numeric" ${on[gi] ? "" : "disabled"}>٪</th>`;
-      h3 += `<th class="h-grp ${G[3]} ${on[gi] ? "" : "off"}" colspan="${cs}" ${on[gi] ? `data-grp="${gi}"` : 'title="ستون پروژه در فایل سوابق نیست"'}>${G[0]} <span class="car">${on[gi] ? (op ? "▾" : "◂") : "—"}</span></th>`;
-      h4 += op
-        ? `<th class="${G[3]}">مبلغ</th><th class="${G[3]}">گشتاور</th><th class="rkcol ${sc(gi, "score")}" data-sort="${gi}|score">رتبه</th><th class="${G[3]}">سهم</th>`
-        : `<th class="${G[3]}">سهم</th>`;
-    });
-
+    const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
+    const hd = (k, l) => `<th class="rkcol ${S.hsort === k ? "sorted" : ""}" data-hsort="${k}" title="برای مرتب‌سازی روی همین ستون کلیک کنید">${l}${S.hsort === k ? " ▾" : ""}</th>`;
     return `<div class="pad">
       ${vProfile(it)}
       ${head}
       <div class="toolrow">
-        <span class="chip">${M(rows.length)} تأمین‌کننده · ${M(d.totals.rows)} خرید</span>
+        <span class="chip ok">خرید قلم — فعال</span>
+        <span class="chip mock" title="ستون پروژه هنوز در فایل مرجع نیست">خرید قلم در پروژه — در انتظار ساختار داده</span>
+        <span class="chip">${M(rows.length)} تأمین‌کننده · ${M(d.totals.n)} خرید · جمع مقدار ${M(RQ(d.totals.qty))}${unit}</span>
         <span class="chip info">تطبیق با ${MATCH[d.match.by] || esc(d.match.by)}${d.match.code2 ? ` · ${esc(d.match.code2)}` : ""}</span>
-        ${d.item && d.item.lvl1 ? `<span class="chip">سطح ${esc(d.item.lvl1)}/${esc(d.item.lvl2)}/${esc(d.item.lvl3)}</span>` : ""}
-        ${exc.map((x) => `<span class="chip warn" title="نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده">«${esc(x.name)}» کنار گذاشته شد — ${M(x.nItem)} خرید</span>`).join("")}
-        <span class="chip" style="background:rgba(226,197,126,.16);border-color:#e2c57e;color:#f2d79a">سلول‌های زرد «رتبه» قابل کلیک‌اند — با کلیک، مرتب‌سازی جدول عوض می‌شود</span>
-        <button class="tp-btn sm" data-reset-sort style="margin-inline-start:auto">بازگشت به رتبه کل</button></div>
-      <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead>
-        <tr><th colspan="5"></th>${h1}<th colspan="3"></th></tr>
-        <tr><th colspan="5"></th>${h2}<th colspan="3"></th></tr>
-        <tr><th>انتخاب</th><th>کد</th><th class="rt">تأمین‌کننده</th>
-          <th class="rkcol ${S.sort.grp === null && S.sort.kind === "score" ? "sorted" : ""}" data-sort="all|score">رتبه</th>
-          <th class="rkcol ${S.sort.grp === null && S.sort.kind === "mom" ? "sorted" : ""}" data-sort="all|mom">رتبه<br>گشتاوری</th>
-          ${h3}<th>امتیاز</th><th>امتیاز<br>گشتاوری</th><th>خریدها</th></tr>
-        <tr><th></th><th></th><th></th><th class="rkcol"></th><th class="rkcol"></th>${h4}<th></th><th></th><th></th></tr>
-      </thead><tbody>
-      ${rows.map((h) => {
-        let c = "";
-        HGRP.forEach((G, gi) => {
-          const share = h.sh[gi] == null ? "—" : (h.sh[gi] * 100).toFixed(1) + "٪";
-          c += (on[gi] && S.open[gi])
-            ? `<td class="num ${G[3]}">${MR(h[G[1]])}</td><td class="num ${G[3]}">${MR(h[G[2]])}</td>
-               <td class="num rkcol" data-sort="${gi}|score">${h["rk" + gi]}</td><td class="num ${G[3]}">${share}</td>`
-            : `<td class="num ${G[3]}">${share}</td>`;
-        });
-        return `<tr class="${S.prof === h.key ? "sel" : ""}">
-          <td>${added.has(TP.nrm(h.name)) ? `<span class="chip ok">در استعلامات</span>`
-            : `<button class="tp-btn xs" data-to-quote="${esc(h.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
-          <td class="num">${esc(h.code || "—")}</td>
-          <td class="rt"><span class="supname" data-prof="${esc(h.key)}">${esc(h.name)}</span></td>
-          <td class="num rkcol" data-sort="all|score">${h.rk}</td><td class="num rkcol" data-sort="all|mom">${h.mrk}</td>
-          ${c}<td class="num" style="font-weight:700">${h.score.toFixed(1)}</td><td class="num">${h.mscore.toFixed(1)}</td>
-          <td><button class="tp-btn xs" data-buys="${esc(h.key)}">${M(h.nItem)}</button></td></tr>`;
-      }).join("")}
+        ${d.item && d.item.mixedUnits ? `<span class="chip warn" title="جمع مقدار وقتی معنا دارد که واحد یکی باشد">واحدها یکدست نیستند: ${esc(d.item.units || "")}</span>` : ""}
+        ${exc.map((x) => `<span class="chip warn" title="نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده">«${esc(x.name)}» کنار گذاشته شد — ${M(x.n)} خرید</span>`).join("")}</div>
+      ${S.chart ? vChart(it, d) : ""}
+      <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
+        <th>انتخاب</th><th class="rt">تأمین‌کننده</th>${hd("n", "دفعات خرید")}${hd("qty", "مقدار")}<th>سهم</th>${hd("m", "امتیاز گشتاوری")}<th>خریدها</th></tr></thead><tbody>
+      ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
+        <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
+          : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
+        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span></td>
+        <td class="num">${M(s.n)} <span class="rkp">(${M(s.rankN)})</span></td>
+        <td class="num">${M(RQ(s.qty))}${unit} <span class="rkp">(${M(s.rankQty)})</span></td>
+        <td class="num">${s.share.toFixed(1)}٪</td>
+        <td class="num" style="font-weight:700">${s.mshare.toFixed(1)}٪ <span class="rkp">(${M(s.rankM)})</span></td>
+        <td><button class="tp-btn xs" data-buys="${esc(s.key)}">${M(s.n)}</button></td></tr>`).join("")}
       </tbody></table></div>
-      <div class="tp-note">مبلغ‌ها به <b>میلیون ریال</b> و به نرخ ۱۴۰۴ هستند. «گشتاور» همان مبلغ است وقتی با فاصلهٔ ماهانه‌اش تا
-        <b>${esc(d.base.label)}</b> کم‌ارزش شود؛ با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ افت دارد و قدیمی‌ترین خریدِ فایل
-        (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ ارزشش را نگه می‌دارد.
-        روی نام گروه کلیک کنید تا مبلغ، گشتاور و رتبه‌اش باز شود؛ ضریب اهمیت را که عوض کنید امتیاز و ترتیب همان لحظه دوباره حساب می‌شوند.
-        «افزودن» تأمین‌کننده را وارد خط استعلامِ همین قلم می‌کند — قیمت تازه‌اش از پیش‌فاکتور یا ورود دستی می‌آید.
-        <span class="chip mock">خرید پروژه و خرید قلم در پروژه — در انتظار ستون پروژه در فایل سوابق</span></div></div>`;
+      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>گشتاور</b> است و قیمت در آن اثری ندارد؛ قیمت‌ها را در «خریدها» و کارت تأمین‌کننده ببینید.
+        «گشتاور» یعنی مقدارِ هر خرید با فاصلهٔ ماهانه‌اش تا <b>${esc(d.base.label)}</b> کم‌وزن شود — با ضریب ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ افت، و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد؛ پس تأمین‌کننده‌ای که تازه‌تر فروخته امتیاز گشتاوری بالاتری می‌گیرد.
+        سرستون‌های زرد قابل کلیک‌اند و ترتیب جدول را عوض می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
   }
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
@@ -302,6 +284,14 @@
       try { await TP.api(`/items/${it.id}/progress`, { body: { stage: "hist" } }); await reload(); return; }
       catch (_) { /* نمایش جدول مهم‌تر از سبزشدن باکس است */ }
     }
+    render();
+  }
+
+  /* نقاط نمودار از خودِ ضریب مستقل‌اند؛ یک بار برای هر قلم خوانده و نگه داشته می‌شوند */
+  async function loadSeries(it) {
+    S.series[it.id] = "loading"; render();
+    try { S.series[it.id] = await TP.api(`/suppliers/history/series?item_id=${it.id}`); }
+    catch (e) { S.series[it.id] = null; S.chart = false; TP.modal("خطا", esc(e.message), null, "باشد", ""); }
     render();
   }
 
@@ -618,22 +608,15 @@
     Q("[data-idone]").forEach((c) => c.onchange = async (e) => { try { await TP.api(`/items/${e.target.dataset.idone}/commission`, { body: { ok: e.target.checked } }); await reload(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } });
     Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
     const tp = G("[data-tpl]"); if (tp) tp.onclick = pickTemplate;
-    /* سوابق / جستجو */
-    /* تغییر ضریب اهمیت باید همان لحظه امتیاز و ترتیب را عوض کند، پس بازرندر
-       می‌کنیم و فوکوس و مکان‌نما را سر جایشان برمی‌گردانیم. */
-    Q("[data-w]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); S.weights[+e.target.dataset.w] = +e.target.value || 0; TP.keepFocus(e.target, "w", render); });
-    /* ضریب گشتاور برعکس، وزنِ خودِ ردیف‌ها را عوض می‌کند و باید از سرور بیاید */
-    /* کشیدنِ نوار، فقط عدد کنارش را عوض می‌کند؛ محاسبهٔ دوباره وقتی است که رها شود،
-       وگرنه هر پیکسلِ کشیدن یک درخواست به سرور می‌فرستد. */
+    /* سوابق */
     const mo = G("[data-mom]");
     if (mo) {
       mo.oninput = (e) => { S.mom = +e.target.value; const lab = G("[data-mom-val]"); if (lab) lab.textContent = M(S.mom); };
       mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
     }
     const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
-    Q("[data-grp]").forEach((h) => h.onclick = () => { S.open[+h.dataset.grp] = !S.open[+h.dataset.grp]; render(); });
-    Q("[data-sort]").forEach((el) => el.onclick = () => { const [g, k] = el.dataset.sort.split("|"); S.sort = { grp: g === "all" ? null : +g, kind: k === "mom" ? "mom" : "score" }; render(); });
-    const rs2 = G("[data-reset-sort]"); if (rs2) rs2.onclick = () => { S.sort = { grp: null, kind: "score" }; render(); };
+    const chb = G("[data-chart]"); if (chb) chb.onclick = () => { S.chart = !S.chart; const it = item(); if (S.chart && !S.series[it.id]) { loadSeries(it); return; } render(); };
+    Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });
     const cp = G("[data-close-prof]"); if (cp) cp.onclick = () => { S.prof = null; render(); };
     Q("[data-buys]").forEach((b) => b.onclick = () => showBuys(b.dataset.buys));
