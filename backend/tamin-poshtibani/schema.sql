@@ -212,6 +212,24 @@ CREATE INDEX IF NOT EXISTS ix_ph_item  ON purchase_history(item_code);
 CREATE INDEX IF NOT EXISTS ix_ph_title ON purchase_history(title_n);
 CREATE INDEX IF NOT EXISTS ix_ph_sup   ON purchase_history(supplier_n);
 
+-- ---------- جستجوهای هوشمند (کشف تأمین‌کننده با Claude + جستجوی وب) ----------
+-- هر اجرا یک ردیف: قیدهای کارشناس (بازارها/برند/مشخصات/ملاحظات) و کل خروجی
+-- JSON مدل. نتیجه در پنل و بات از همین‌جا خوانده می‌شود و رفرش چیزی را نمی‌پراند.
+CREATE TABLE IF NOT EXISTS smart_searches (
+  id             INTEGER PRIMARY KEY,
+  item_id        INTEGER NOT NULL,
+  assignment_id  INTEGER,
+  expert_id      INTEGER,
+  params_json    TEXT,                  -- {markets[], brand, specs, notes, deliveryHint}
+  result_json    TEXT,                  -- خروجی <result> پرامپت supplier-discovery
+  model          TEXT,
+  prompt_version TEXT,
+  in_tokens      INTEGER,
+  out_tokens     INTEGER,
+  created_at     INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
+
 -- ---------- قالب‌های پیام ----------
 CREATE TABLE IF NOT EXISTS templates (
   id         INTEGER PRIMARY KEY,

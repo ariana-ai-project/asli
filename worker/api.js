@@ -25,6 +25,7 @@ import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
+import { MARKETS, smartSearch, lastSearch } from "./discovery.js";
 import { commissionHtml } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { selfTest } from "./selftest.js";
@@ -116,6 +117,8 @@ CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGE
 CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
 CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT);
 ${HISTORY_TABLE};
+CREATE TABLE IF NOT EXISTS smart_searches (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER, params_json TEXT, result_json TEXT, model TEXT, prompt_version TEXT, in_tokens INTEGER, out_tokens INTEGER, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -656,7 +659,7 @@ async function assignmentDetail(env, aid, who) {
    مدیر هر قلمی را می‌بیند (پنل فقط‌خواندنی‌اش همین را لازم دارد). */
 async function ownItem(env, who, itemId) {
   if (!itemId) throw new HttpError("item_id لازم است.");
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, a.expert_id
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
     FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (who.role === "expert" && it.expert_id !== who.expert.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
@@ -815,7 +818,7 @@ async function route(request, env, ctx) {
       /* آپدیت تکراری (تلگرام در صورت نگرفتن ۲۰۰ دوباره می‌فرستد) دوبار اجرا نشود */
       const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(u.update_id, now()).run();
       if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
-      await handleUpdate(env, u);
+      await handleUpdate(env, u, ctx);
       return json({ ok: true });
     }
 
@@ -1142,7 +1145,20 @@ async function route(request, env, ctx) {
     /* --- زیرساخت اتصال‌های خارجی (مرحلهٔ بعد) --- */
     if (path === "/notify/telegram") { await requireAny(request, env); return NOT_CONNECTED("اعلان تلگرام"); }
     if (path === "/notify/email") { await requireAny(request, env); return NOT_CONNECTED("ارسال ایمیل"); }
-    if (path === "/search/smart") { await requireAny(request, env); return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده"); }
+    /* جستجوی هوشمند تأمین‌کننده — کشف با Claude + جستجوی وب، ثبت‌شده در D1.
+       GET نتیجهٔ ذخیره‌شدهٔ قبلی را می‌دهد تا رفرش چیزی را نپراند. */
+    if (path === "/search/smart" && m === "GET") {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      return json({ markets: MARKETS, last: await lastSearch(env, it.id) });
+    }
+    if (path === "/search/smart" && m === "POST") {
+      const who = await requireAny(request, env);
+      const b = await readJson(request);
+      const it = await ownItem(env, who, int(b.item_id));
+      if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
+      return json(await smartSearch(env, it, who.expert || null, b, "panel"));
+    }
     /* سوابق خرید (IMP-13): بارگذاری سه‌مرحله‌ای از تب مدیر، خواندن از تب کارشناس.
        begin جدول را از نو می‌سازد، chunkها ردیف‌ها را می‌ریزند و finish نمایه‌ها
        و آمار مرجع (از جمله فاصلهٔ قدیمی‌ترین خرید) را می‌سازد. */

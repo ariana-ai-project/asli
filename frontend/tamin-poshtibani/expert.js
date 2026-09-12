@@ -39,9 +39,9 @@
     chart: false,                         // نمودار روند خرید باز است؟
     mom: 5,                               // ضریب اهمیت گشتاور (۱ تا ۱۰) — از localStorage پر می‌شود
     prof: null,                           // کلید تأمین‌کننده‌ای که کارتش باز است
-    scope: "item", caps: { contact: true, cred: true, reviews: false, price: true },
-    srch: { brand: "", yMin: "", yMax: "", cond: "نو", maker: "", spec: "", origin: "", trade: "داخلی", place: "" },
-    f: { maxDelivery: "", priceOnly: false, adMin: 0, adMax: 365 },
+    sm: { markets: ["IR"], brand: "", specs: "", notes: "" },   // قیدهای جستجوی هوشمند
+    smProf: null,                          // تأمین‌کنندهٔ بازشده در نتایج جستجو
+    marketsMeta: [{ key: "IR", fa: "ایران", kind: "project" }, { key: "TJ", fa: "تاجیکستان", kind: "project" }, { key: "TM", fa: "ترکمنستان", kind: "project" }, { key: "UZ", fa: "ازبکستان", kind: "project" }, { key: "KZ", fa: "قزاقستان", kind: "project" }, { key: "AM", fa: "ارمنستان", kind: "project" }, { key: "CN", fa: "چین", kind: "hub" }, { key: "AE", fa: "امارات", kind: "hub" }, { key: "TR", fa: "ترکیه", kind: "hub" }],
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
@@ -321,35 +321,156 @@
     } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
   }
 
-  /* ---------- تب جستجوی هوشمند (زیرساخت: پارامترها + علامت دستی) ---------- */
-  function vSmart(it) {
-    const sm = S.smart[it.id];
-    return `<div class="pad"><div class="two"><div class="main">
-      <div class="toolrow"><b style="font-size:1.02rem">ملاحظات جستجو برای «${esc(it.title)}»</b>${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}</div>
-      <textarea class="tp-textarea" id="notes" placeholder="مثلاً: تأمین‌کنندهٔ داخلی، ترجیحاً تولیدکننده نه واسطه">${esc(S.srch.notes || "تامین‌کننده داخلی، ترجیحاً تولیدکننده نه واسطه")}</textarea>
-      <div class="toolrow" style="margin-top:12px"><button class="tp-btn primary" data-run-smart>اجرای مدل ${S.scope === "all" ? "روی تمام اقلام" : "برای همین قلم"}</button>
-        ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart">جستجو را بیرون از سامانه انجام دادم — علامت بزن</button>`}</div>
-      <div class="tp-note ${sm && sm.available === false ? "warn" : ""}">${sm ? esc(sm.message) : "مدل با این ملاحظات و محدوده‌های ستون کنار، تأمین‌کنندگان تازه را پیدا و درگاه تماس، اعتبار و قیمت روزشان را استخراج می‌کند."} <span class="chip mock">در انتظار اتصال به مدل</span></div>
-      <div class="tp-note">پلتفرم‌های پیام (تلگرام، واتساپ، بله، روبیکا) و ارسال از اکانت خودتان، بعد از اتصال روی هر تأمین‌کننده فعال می‌شود. قالب‌های پیام از همین حالا ذخیره می‌شوند («قالب‌های پیام» در نوار بالا).</div>
-    </div>${vSide()}</div></div>`;
+  /* ---------- تب جستجوی هوشمند ----------
+     کشف تأمین‌کنندهٔ تازه با Claude + جستجوی وب. کارشناس بازارها را تیک می‌زند
+     (مهم‌ترین قید — بالای ستون)، برند و مشخصات و ملاحظات را می‌نویسد و اجرا
+     می‌کند؛ نتیجه در D1 ثبت می‌شود و رفرش چیزی را نمی‌پراند. */
+  const ROLE_FA = {
+    manufacturer: "تولیدکننده", authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده",
+    retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
+  };
+  const smState = () => S.smart[(item() || {}).id];
+
+  async function loadSmart(it) {
+    if (S.smart[it.id] !== undefined) return;
+    S.smart[it.id] = "loading";
+    try {
+      const r = await TP.api(`/search/smart?item_id=${it.id}`);
+      S.marketsMeta = r.markets || S.marketsMeta;
+      S.smart[it.id] = r.last || null;
+    } catch (_) { S.smart[it.id] = null; }
+    render();
   }
-  function vSide() {
-    const t = S.now;
-    return `<div class="side"><h4>محدوده جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها به‌علاوهٔ متن ملاحظات به مدل داده می‌شوند.</div>
-      <div class="grp"><b>دامنه اجرا</b><label><input type="radio" name="sc" data-scope="item" ${S.scope === "item" ? "checked" : ""}> فقط همین قلم</label><label><input type="radio" name="sc" data-scope="all" ${S.scope === "all" ? "checked" : ""}> تمام اقلام این درخواست</label></div>
-      <div class="grp"><b>قابلیت‌ها</b>${[["contact", "استخراج درگاه تماس"], ["cred", "بررسی سابقه و اعتبار"], ["reviews", "نظرات خریداران"], ["price", "استخراج قیمت روز"]].map(([k, l]) => `<label><input type="checkbox" data-cap="${k}" ${S.caps[k] ? "checked" : ""}> ${l}</label>`).join("")}</div>
-      <div class="grp"><b>مشخصات موردنظر (دستی)</b>
-        <div class="fld"><b>برند محصول</b><input class="tp-input" data-s="brand" value="${esc(S.srch.brand)}"></div>
-        <div class="fld"><b>شرکت سازنده</b><input class="tp-input" data-s="maker" value="${esc(S.srch.maker)}"></div>
-        <div class="fld"><b>سال ساخت</b><div class="two2"><input class="tp-input" data-s="yMin" value="${esc(S.srch.yMin)}" placeholder="از" inputmode="numeric"><input class="tp-input" data-s="yMax" value="${esc(S.srch.yMax)}" placeholder="تا" inputmode="numeric"></div></div>
-        <div class="fld"><b>وضعیت کالا</b><select class="tp-select" data-s="cond">${["نو", "دست دوم", "فرقی ندارد"].map((x) => `<option ${S.srch.cond === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
-        <div class="fld"><b>مشخصات فنی</b><textarea class="tp-textarea" data-s="spec" style="min-height:52px">${esc(S.srch.spec)}</textarea></div>
-        <div class="fld"><b>محل تأمین</b><input class="tp-input" data-s="origin" value="${esc(S.srch.origin)}" placeholder="مثلاً تهران، اصفهان"></div></div>
-      <div class="grp"><b>نوع خرید</b><label><input type="radio" name="tr" data-tr="داخلی" ${S.srch.trade === "داخلی" ? "checked" : ""}> داخلی</label><label><input type="radio" name="tr" data-tr="خارجی" ${S.srch.trade === "خارجی" ? "checked" : ""}> خارجی</label>
-        <div class="fld" style="margin-top:6px"><b>محل دقیق تحویل</b><input class="tp-input" data-s="place" value="${esc(S.srch.place)}" placeholder="${S.srch.trade === "خارجی" ? "مثلاً بندر عباس، تحویل CFR" : "مثلاً انبار مرکزی کرج"}"></div></div>
-      <div class="grp"><b>محدودیت تاریخ تحویل</b><input class="tp-input date" data-date="maxDelivery" value="${esc(S.f.maxDelivery)}" placeholder="حداکثر تا …" readonly style="width:100%"></div>
-      <div class="grp"><b>قیمت</b><label><input type="checkbox" data-po ${S.f.priceOnly ? "checked" : ""}> فقط مواردی که قیمت اعلام کرده‌اند</label></div>
-      <div class="grp"><b>حداکثر سن آگهی (روز)</b><input type="range" min="0" max="365" value="${S.f.adMax}" data-admax style="width:100%;accent-color:#4f8cff"><div class="dim num" style="font-size:.8rem">از ${TP.fmtD(t - S.f.adMax * DAY)} تا امروز</div></div></div>`;
+
+  async function runSmart() {
+    const it = item(); if (!it) return;
+    if (!S.sm.markets.length) return TP.modal("بازار انتخاب نشده", "دست‌کم یک بازار را تیک بزنید — مهم‌ترین قید جستجو همین است.", null, "باشد", "");
+    const b = TP.busy("جستجوی هوشمند در حال اجراست…",
+      `${esc(it.title)}<br><span class="dim">مدل در بازارهای انتخابی می‌گردد، صفحه‌ها را می‌خواند و تماس‌ها را استخراج می‌کند؛ ممکن است چند دقیقه طول بکشد. پنجره را نبندید.</span>`);
+    try {
+      const r = await TP.api("/search/smart", { body: { item_id: it.id, markets: S.sm.markets, brand: S.sm.brand, specs: S.sm.specs, notes: S.sm.notes, deliveryHint: S.d.request.party } });
+      b.close();
+      if (r.available === false) { S.smart[it.id] = null; return TP.modal("جستجوی هوشمند", esc(r.message), null, "باشد", ""); }
+      S.smart[it.id] = r; S.smProf = null;
+      if (!it.hist_done_at || !it.smart_done_at) { await reload(); return; }
+      render();
+    } catch (e) { b.close(); TP.modal("جستجو انجام نشد", esc(e.message), null, "باشد", ""); }
+  }
+
+  /* افزودن تأمین‌کنندهٔ کشف‌شده به خط استعلام همین قلم — فقط نام می‌رود */
+  async function addFromSmart(idx) {
+    const it = item(), d = smState();
+    const s = d && d.result && (d.result.suppliers || [])[idx]; if (!s) return;
+    try {
+      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name } });
+      S.tab = "quotes"; await reload();
+    } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
+  }
+
+  /* پیام آماده برای یک تأمین‌کنندهٔ نتیجه: انتخاب قالب → متنِ پرشده → کپی */
+  async function smartMessage(idx) {
+    const it = item(), d = smState();
+    const s = d && d.result && (d.result.suppliers || [])[idx]; if (!s) return;
+    await loadTemplates();
+    if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(); }
+    const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
+      <textarea class="tp-textarea" id="mtxt" style="min-height:170px"></textarea>
+      <div class="tp-acts"><button class="tp-btn primary" data-mcopy>کپی متن</button><span class="dim" data-mmsg style="font-size:.85rem"></span></div>
+      <div class="tp-note" style="margin-top:8px">جای‌خالی‌ها با نام تأمین‌کننده و مشخصات همین قلم پر شده‌اند؛ متن را کپی کنید و در هر کانالی که خواستید بفرستید.</div>`, null, "بستن", "");
+    const paint = (i) => {
+      dlg.querySelectorAll("[data-mt]").forEach((x) => x.classList.toggle("on", +x.dataset.mt === i));
+      dlg.querySelector("#mtxt").value = fillTpl(S.templates[i].body, s.name);
+    };
+    dlg.querySelectorAll("[data-mt]").forEach((x) => x.onclick = () => paint(+x.dataset.mt));
+    dlg.querySelector("[data-mcopy]").onclick = async () => {
+      const ta = dlg.querySelector("#mtxt");
+      try { await navigator.clipboard.writeText(ta.value); dlg.querySelector("[data-mmsg]").textContent = "کپی شد ✓"; }
+      catch (_) { ta.select(); document.execCommand("copy"); dlg.querySelector("[data-mmsg]").textContent = "کپی شد ✓"; }
+    };
+    paint(0);
+  }
+
+  function vSmartProf(d) {
+    if (S.smProf == null) return "";
+    const s = (d.result.suppliers || [])[S.smProf]; if (!s) return "";
+    const li = (arr, fn) => (arr || []).map(fn).join("") || `<span class="dim">—</span>`;
+    return `<div class="prof"><div class="top"><h4>${esc(s.name)}</h4>
+        <span class="chip">${ROLE_FA[s.role] || esc(s.role || "")}</span>
+        ${s.location ? `<span class="chip">${esc([s.location.city, s.location.country].filter(Boolean).join("، "))}</span>` : ""}
+        ${s.contact_gated ? `<span class="chip warn" title="${esc(s.gating_note || "")}">برخی تماس‌ها پشت کلیک/ورود است</span>` : ""}
+        <button class="tp-btn xs" data-sm-close style="margin-inline-start:auto">بستن</button></div>
+      <div class="gridp" style="margin-top:10px">
+        <div class="f"><b>وب‌سایت</b>${s.website ? `<a href="${esc(s.website)}" target="_blank" rel="noopener" style="color:var(--tp-accent)">${esc(s.website)}</a>` : "—"}</div>
+        <div class="f"><b>تلفن‌ها</b>${li(s.phones, (p) => `<div class="num" dir="ltr" style="text-align:right">${esc(p.e164 || p.verbatim)} <span class="dim">(${p.type === "mobile" ? "همراه" : p.type === "landline" ? "ثابت" : "؟"}${p.verification === "verified" ? " ✓" : p.verification === "gated" ? " · بسته" : ""})</span></div>`)}</div>
+        <div class="f"><b>ایمیل</b>${li(s.emails, (e) => `<div dir="ltr" style="text-align:right">${esc(e.verbatim)}</div>`)}</div>
+        <div class="f"><b>پیام‌رسان‌ها</b>${li(s.messengers, (m2) => `<div dir="ltr" style="text-align:right">${esc(m2.platform)}: ${esc(m2.handle_or_link)}</div>`)}</div>
+        <div class="f"><b>نشانی</b>${li(s.addresses, (a) => `<div>${esc(a.verbatim)}</div>`)}</div>
+        <div class="f"><b>هویت حقوقی</b>${s.credibility && s.credibility.legal_identity && (s.credibility.legal_identity.legal_name || s.credibility.legal_identity.registry_id)
+          ? esc([s.credibility.legal_identity.legal_name, s.credibility.legal_identity.registry_id].filter(Boolean).join(" · ")) : "—"}</div></div>
+      ${s.scores && s.scores.rationale ? `<div class="desc"><b>چرا این رتبه:</b> ${esc(s.scores.rationale)}</div>` : ""}
+      ${s.credibility && (s.credibility.red_flags || []).filter(Boolean).length ? `<div class="desc" style="color:#fca5a5"><b>پرچم قرمز:</b> ${esc(s.credibility.red_flags.filter(Boolean).join(" · "))}</div>` : ""}
+      <div class="dim" style="font-size:.8rem;margin-top:8px">${(s.evidence || []).length} مدرک با نشانی منبع ثبت شده؛ هر مقدار عیناً از صفحهٔ منبع رونویسی شده است.</div></div>`;
+  }
+
+  function vSmart(it) {
+    const d = S.smart[it.id];
+    if (d === undefined) { loadSmart(it); }
+    const head = `<div class="toolrow"><b style="font-size:1.02rem">جستجوی هوشمند برای «${esc(it.title)}»</b>
+      ${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}
+      <span style="margin-inline-start:auto"></span>
+      <button class="tp-btn primary" data-run-smart>${d && d !== "loading" && d.result ? "جستجوی دوباره" : "اجرای جستجوی هوشمند"}</button>
+      ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart" title="اگر جستجو را بیرون از سامانه انجام داده‌اید">علامت بزن</button>`}</div>`;
+
+    let main;
+    if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن نتیجهٔ قبلی…</div>`;
+    else if (!d || !d.result) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
+      بازارها را در ستون کنار انتخاب کنید، اگر برند یا مشخصات خاصی مدنظر است بنویسید، و «اجرای جستجوی هوشمند» را بزنید.
+      مدل در همان بازارها می‌گردد، تماس‌ها را عیناً از صفحه‌ها برمی‌دارد و تأمین‌کنندگان را برای اولین تماس رتبه می‌کند.</div>`;
+    else {
+      const R = d.result, sup = R.suppliers || [];
+      const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
+      const exN = (R.excluded || []).length;
+      const contactCell = (s) => {
+        const mob = (s.mobile_numbers || []).slice(0, 2).map((x) => `<div class="num" dir="ltr" style="text-align:right">📱 ${esc(x)}</div>`).join("");
+        const land = !mob && s.phones && s.phones.length ? `<div class="num" dir="ltr" style="text-align:right">${esc(s.phones[0].e164 || s.phones[0].verbatim)}</div>` : "";
+        const msg = !mob && !land && s.messengers && s.messengers.length ? `<div dir="ltr" style="text-align:right">${esc(s.messengers[0].platform)}: ${esc(s.messengers[0].handle_or_link)}</div>` : "";
+        const gate = s.contact_gated ? `<span class="chip warn" style="font-size:.7rem">پشت کلیک</span>` : "";
+        return (mob + land + msg) || gate || "—";
+      };
+      main = `${vSmartProf(d)}
+        <div class="tp-note" style="display:block"><b>خلاصهٔ جستجو:</b> ${esc(R.summary_fa || "—")}
+          <div class="dim" style="font-size:.8rem;margin-top:6px">${M(sup.length)} تأمین‌کننده · ${M((R.request || {}).searches_used || 0)} جستجو و ${M((R.request || {}).fetches_used || 0)} صفحه · ${TP.fmt(d.created_at)}${exN ? ` · ${M(exN)} مورد ردشده (خارج از بازار یا بی‌هویت)` : ""} · قیمت و کیفیت سنجیده نشده‌اند — این فقط ترتیبِ تماس اول است.</div></div>
+        <div class="tp-scroll" data-keep-scroll style="max-height:52vh"><table class="tp-table"><thead><tr>
+          <th>رتبه</th><th class="rt">تأمین‌کننده</th><th>نقش</th><th>بازار</th><th class="rt">تماس</th><th class="rt">ایمیل</th><th>امتیاز</th><th>عمل</th></tr></thead><tbody>
+        ${sup.map((s, i) => `<tr class="${S.smProf === i ? "sel" : ""}">
+          <td class="num">${M(s.rank || i + 1)}</td>
+          <td class="rt"><span class="supname" data-sm-prof="${i}">${esc(s.name)}</span>${s.website ? `<div class="dim" style="font-size:.72rem" dir="ltr">${esc(String(s.website).replace("https://", "").replace("http://", ""))}</div>` : ""}</td>
+          <td>${ROLE_FA[s.role] || esc(s.role || "—")}</td>
+          <td>${esc([s.location && s.location.city, s.location && s.location.country].filter(Boolean).join("، ") || "—")}</td>
+          <td class="rt">${contactCell(s)}</td>
+          <td class="rt" dir="ltr" style="text-align:right">${esc((s.emails && s.emails[0] && s.emails[0].verbatim) || "—")}</td>
+          <td class="num" style="font-weight:700">${s.scores && s.scores.total != null ? M(Math.round(s.scores.total)) : "—"}</td>
+          <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
+            <button class="tp-btn xs" data-sm-msg="${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>`).join("")}
+        ${sup.length ? "" : `<tr><td colspan="8"><div class="empty">مدل تأمین‌کنندهٔ قابل‌قبولی در بازارهای انتخابی پیدا نکرد؛ بازار بیشتری تیک بزنید یا مشخصات را ساده‌تر کنید.</div></td></tr>`}
+        </tbody></table></div>`;
+    }
+
+    /* ستون قیدها — مهم‌ترین: بازارها */
+    const mk = (kind, label) => `<div class="grp"><b>${label}</b>${(S.marketsMeta || []).filter((x) => x.kind === kind).map((x) =>
+      `<label><input type="checkbox" data-smk="${x.key}" ${S.sm.markets.includes(x.key) ? "checked" : ""}> ${esc(x.fa)}</label>`).join("")}</div>`;
+    const side = `<div class="side"><h4>قیدهای جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها عیناً به مدل داده می‌شوند؛ بازارها قید سخت‌اند.</div>
+      ${mk("project", "بازارهای هدف — کشورهای محل پروژه")}
+      ${mk("hub", "بازارهای تجاری")}
+      <div class="grp"><b>برند موردنظر <span class="dim" style="font-weight:400">(اختیاری)</span></b>
+        <input class="tp-input" data-sm="brand" value="${esc(S.sm.brand)}" placeholder="مثلاً Komatsu" style="width:100%"></div>
+      <div class="grp"><b>مشخصات فنی <span class="dim" style="font-weight:400">(اختیاری)</span></b>
+        <textarea class="tp-textarea" data-sm="specs" style="min-height:64px" placeholder="استاندارد، سایز، گرید…">${esc(S.sm.specs)}</textarea></div>
+      <div class="grp"><b>ملاحظات</b>
+        <textarea class="tp-textarea" data-sm="notes" style="min-height:64px" placeholder="مثلاً: ترجیحاً تولیدکننده نه واسطه">${esc(S.sm.notes)}</textarea></div>
+      <div class="grp dim" style="font-size:.78rem">نتیجه در پایگاه داده می‌ماند و با «افزودن»، تأمین‌کننده وارد تب استعلامات می‌شود؛ قیمت تازه‌اش از پیش‌فاکتور یا ورود دستی می‌آید.</div></div>`;
+
+    return `<div class="pad">${head}<div class="two"><div class="main">${main}</div>${side}</div></div>`;
   }
 
   /* ---------- تب استعلامات (واقعی) ---------- */
@@ -621,15 +742,15 @@
     const cp = G("[data-close-prof]"); if (cp) cp.onclick = () => { S.prof = null; render(); };
     Q("[data-buys]").forEach((b) => b.onclick = () => showBuys(b.dataset.buys));
     Q("[data-to-quote]").forEach((b) => b.onclick = () => addFromHistory(b.dataset.toQuote));
-    const rs = G("[data-run-smart]"); if (rs) rs.onclick = async () => { const it = item(); S.srch.notes = (G("#notes") || {}).value; S.smart[it.id] = await TP.api("/search/smart", { body: { item: it.title, code: it.code, notes: S.srch.notes, scope: S.scope, caps: S.caps, srch: S.srch, filters: S.f } }); render(); };
-    Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); const stage = b.dataset.mark; const ids = S.scope === "all" && stage === "smart" ? items().map((x) => x.id) : [it.id]; for (const id of ids) await TP.api(`/items/${id}/progress`, { body: { stage } }); await reload(); });
-    Q("[data-scope]").forEach((x) => x.onchange = (e) => { S.scope = e.target.dataset.scope; render(); });
-    Q("[data-cap]").forEach((x) => x.onchange = (e) => { S.caps[e.target.dataset.cap] = e.target.checked; });
-    Q("[data-s]").forEach((x) => x.oninput = x.onchange = (e) => { S.srch[e.target.dataset.s] = e.target.value; if (e.target.tagName === "SELECT") render(); });
-    Q("[data-tr]").forEach((x) => x.onchange = (e) => { S.srch.trade = e.target.dataset.tr; render(); });
-    const po = G("[data-po]"); if (po) po.onchange = (e) => { S.f.priceOnly = e.target.checked; };
-    const am = G("[data-admax]"); if (am) am.oninput = (e) => { S.f.adMax = +e.target.value; e.target.nextElementSibling.textContent = `از ${TP.fmtD(S.now - S.f.adMax * DAY)} تا امروز`; };
-    Q("[data-date]").forEach((i) => i.onclick = () => TP.openDatePicker(i, (v) => { S.f.maxDelivery = v; render(); }, { single: true }));
+    const rs = G("[data-run-smart]"); if (rs) rs.onclick = runSmart;
+    Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); await TP.api(`/items/${it.id}/progress`, { body: { stage: b.dataset.mark } }); await reload(); });
+    /* قیدهای جستجوی هوشمند — بدون بازرندر حین تایپ تا فوکوس نپرد؛ state همان لحظه به‌روز است */
+    Q("[data-smk]").forEach((c) => c.onchange = (e) => { const k = e.target.dataset.smk; const i = S.sm.markets.indexOf(k); if (e.target.checked && i < 0) S.sm.markets.push(k); if (!e.target.checked && i >= 0) S.sm.markets.splice(i, 1); });
+    Q("[data-sm]").forEach((el) => el.oninput = (e) => { S.sm[e.target.dataset.sm] = e.target.value; });
+    Q("[data-sm-prof]").forEach((el) => el.onclick = () => { S.smProf = S.smProf === +el.dataset.smProf ? null : +el.dataset.smProf; render(); });
+    const smc = G("[data-sm-close]"); if (smc) smc.onclick = () => { S.smProf = null; render(); };
+    Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(+b.dataset.smAdd));
+    Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(+b.dataset.smMsg));
     /* استعلامات */
     const ar = G("[data-add-row]"); if (ar) ar.onclick = () => {
       /* یک تأمین‌کننده معمولاً چند قلم را با هم قیمت می‌دهد، پس اقلام چندانتخابی‌اند؛ برای هر قلم یک خط ساخته می‌شود */

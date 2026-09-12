@@ -26,6 +26,7 @@ import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory } from "./history.js";
+import { MARKETS, smartSearch, searchById, fillTemplate } from "./discovery.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -239,10 +240,10 @@ export async function makeLink(env, expertId) {
  * یک آپدیت را پردازش می‌کند. همیشه بدون استثنا برمی‌گردد — اگر به تلگرام
  * پاسخ ۲۰۰ ندهیم، همان آپدیت را بارها دوباره می‌فرستد.
  */
-export async function handleUpdate(env, u) {
+export async function handleUpdate(env, u, ctx) {
   try {
     if (u.message) return await onMessage(env, u.message);
-    if (u.callback_query) return await onCallback(env, u.callback_query);
+    if (u.callback_query) return await onCallback(env, u.callback_query, ctx);
     if (u.my_chat_member) return await onChatMember(env, u.my_chat_member);
   } catch (e) {
     console.error("bot update failed", e && e.message);
@@ -352,8 +353,20 @@ async function onFlowText(env, api, chat, f, text) {
   if (f.kind === "field" && f.step === "need_value") return onFieldText(env, api, chat, f, text);
 
   /* منوی چندانتخابی سوابق متن نمی‌خواهد — انتخاب فقط با دکمه‌هاست */
-  if (f.kind === "hist") {
+  if (f.kind === "hist" || f.kind === "smsel") {
     await api.sendMessage(chat, "برای انتخاب تأمین‌کننده از دکمه‌های زیر فهرست استفاده کنید؛ اگر تأمین‌کنندهٔ تازه‌ای مدنظر است، از «افزودن دستی استعلام جدید» بروید.").catch(() => {});
+    return { ok: true };
+  }
+
+  /* قیدهای متنیِ جستجوی هوشمند: برند / مشخصات / ملاحظات */
+  if (f.kind === "smart") {
+    const key = f.step === "need_brand" ? "brand" : f.step === "need_specs" ? "specs" : f.step === "need_notes2" ? "notes" : null;
+    if (key) {
+      d[key] = text.trim() === "-" ? "" : text.slice(0, 500);
+      await env.DB.prepare("UPDATE tg_flows SET step='prefs', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
+      return smartPrefsRender(env, api, chat, f, d, f.message_id);
+    }
+    await api.sendMessage(chat, "از دکمه‌های کارت جستجو استفاده کنید.").catch(() => {});
     return { ok: true };
   }
 
@@ -1462,6 +1475,140 @@ async function manualForAssignment(env, api, chat, ex, aid) {
 }
 
 /* ------------------------------------------------------------------ */
+/* جستجوی هوشمند در بات — همان موتور پنل (worker/discovery.js)            */
+/* ------------------------------------------------------------------ */
+const SMART_SEL_TEXT = "تأمین‌کنندگان موردنظر را انتخاب کنید و «افزودن به استعلامات» را بزنید؛ فقط نامشان وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید.";
+
+async function smartItemOf(env, exId, itemId) {
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec,
+      a.id AS aid, a.expert_id, a.request_id, r.party
+    FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=a.request_id WHERE i.id=?`).bind(itemId).first();
+  return it && it.expert_id === exId ? it : null;
+}
+
+async function smartPickItem(env, api, chat, ex, aid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const its = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40").bind(aid).all()).results || [];
+  if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
+  if (its.length === 1) return smartPrefsCard(env, api, chat, ex, its[0].id);
+  const kb = its.map((i) => [{ text: `${short(i.title, 32)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`, callback_data: `sm:i:${i.id}` }]);
+  await api.sendMessage(chat, `🔎 <b>جستجوی هوشمند</b>\nدرخواست <b>${esc(asg.request_id)}</b>\n\nبرای کدام قلم تأمین‌کنندهٔ تازه پیدا کنم؟`, kb).catch(() => {});
+  return { ok: true };
+}
+
+async function smartPrefsCard(env, api, chat, ex, itemId) {
+  const it = await smartItemOf(env, ex.id, itemId);
+  if (!it) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
+  await closeFlows(env, ex.id);
+  const t = now();
+  const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: "", notes: "" };
+  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smart','prefs',?,?,?,?)")
+    .bind(ex.id, String(chat), it.aid, JSON.stringify(d), t, t + FLOW_TTL).run();
+  const f = { id: r.meta.last_row_id };
+  return smartPrefsRender(env, api, chat, f, d, null);
+}
+
+function smartPrefsText(d) {
+  const names = (d.markets || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، ") || "—";
+  return `🔎 <b>جستجوی هوشمند «${esc(short(d.title || "", 40))}»</b>\n\n`
+    + `🌍 بازارهای هدف: <b>${esc(names)}</b>\n`
+    + `🏷 برند: ${d.brand ? `<b>${esc(d.brand)}</b>` : "—"}\n`
+    + `📋 مشخصات فنی: ${d.specs ? esc(short(d.specs, 80)) : "—"}\n`
+    + `📝 ملاحظات: ${d.notes ? esc(short(d.notes, 80)) : "—"}\n\n`
+    + "قیدها را تنظیم کنید و «اجرای جستجو» را بزنید؛ بازارها مهم‌ترین قیدند.";
+}
+function smartPrefsKb(fid) {
+  return [
+    [{ text: "🌍 بازارهای هدف", callback_data: `sf:${fid}:mk:0` }],
+    [{ text: "🏷 برند", callback_data: `sf:${fid}:br:0` }, { text: "📋 مشخصات فنی", callback_data: `sf:${fid}:sp:0` }],
+    [{ text: "📝 ملاحظات", callback_data: `sf:${fid}:no:0` }],
+    [{ text: "▶️ اجرای جستجو", callback_data: `sf:${fid}:go:0` }],
+    [{ text: "✖️ لغو", callback_data: `sf:${fid}:x:0` }],
+  ];
+}
+async function smartPrefsRender(env, api, chat, f, d, mid) {
+  const text = smartPrefsText(d), kb = smartPrefsKb(f.id);
+  const edited = mid ? await api.editMessageText(chat, mid, text, kb).catch(() => null) : null;
+  if (!edited) {
+    const msg = await api.sendMessage(chat, text, kb).catch(() => null);
+    if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, f.id).run();
+  }
+  return { ok: true };
+}
+async function smartMarketMenu(env, api, chat, f, d, mid) {
+  const kb = MARKETS.map((m2, i) => [{ text: `${(d.markets || []).includes(m2.key) ? "☑" : "☐"} ${m2.fa}${m2.kind === "hub" ? " (بازار تجاری)" : ""}`, callback_data: `sf:${f.id}:m:${i}` }]);
+  kb.push([{ text: "→ بازگشت", callback_data: `sf:${f.id}:back:0` }]);
+  const text = "🌍 بازارهای هدف را تیک بزنید — کشورهای محل پروژه و بازارهای تجاری. هرچه بیرون از این‌ها باشد در نتایج نمی‌آید.";
+  const edited = mid ? await api.editMessageText(chat, mid, text, kb).catch(() => null) : null;
+  if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
+  return { ok: true };
+}
+
+async function smartRunAndSend(env, api, chat, ex, d) {
+  const it = await smartItemOf(env, ex.id, d.itemId);
+  if (!it) { await api.sendMessage(chat, "قلم جستجو دیگر پیدا نمی‌شود.").catch(() => {}); return { ok: true }; }
+  const out = await smartSearch(env, it, ex, { markets: d.markets, brand: d.brand, specs: d.specs, notes: d.notes, deliveryHint: it.party }, "telegram");
+  const R = out.result, sup = R.suppliers || [];
+  if (!sup.length) {
+    await api.sendMessage(chat, `🔎 <b>جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n\n${esc(R.summary_fa || "تأمین‌کنندهٔ قابل‌قبولی در بازارهای انتخابی پیدا نشد.")}`).catch(() => {});
+    return { ok: true };
+  }
+  const line = (s, i) => {
+    const loc = [s.location && s.location.city, s.location && s.location.country].filter(Boolean).join("، ");
+    const mob = (s.mobile_numbers || []).slice(0, 2).join(" · ");
+    const land = (s.phones || []).filter((p) => p.type === "landline").slice(0, 1).map((p) => p.e164 || p.verbatim).join("");
+    const mail = (s.emails || []).slice(0, 1).map((e) => e.verbatim).join("");
+    const msgr = (s.messengers || []).slice(0, 1).map((m2) => `${m2.platform}: ${m2.handle_or_link}`).join("");
+    return `${M(i + 1)}. <b>${esc(short(s.name, 38))}</b> — ${esc(ROLE_FA_BOT[s.role] || s.role || "؟")}${loc ? ` · ${esc(loc)}` : ""}${s.scores && s.scores.total != null ? ` · امتیاز ${M(Math.round(s.scores.total))}` : ""}\n`
+      + (mob ? `   📱 <code>${esc(mob)}</code>\n` : "")
+      + (land ? `   ☎️ <code>${esc(land)}</code>\n` : "")
+      + (mail ? `   ✉️ <code>${esc(mail)}</code>\n` : "")
+      + (!mob && !land && !mail && msgr ? `   💬 ${esc(msgr)}\n` : "")
+      + (s.contact_gated ? "   🔒 <i>بخشی از تماس‌ها پشت کلیک/ورود است — در پنل ببینید</i>\n" : "");
+  };
+  const text = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n`
+    + `${M(sup.length)} تأمین‌کننده در ${esc((d.markets || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، "))}\n\n`
+    + `${esc(R.summary_fa || "")}\n\n`
+    + sup.slice(0, 8).map(line).join("")
+    + (sup.length > 8 ? `\n<i>و ${M(sup.length - 8)} مورد دیگر — در پنل</i>\n` : "")
+    + "\n<i>قیمت و کیفیت سنجیده نشده‌اند؛ این فقط ترتیبِ تماس اول است.</i>";
+  await api.sendMessage(chat, text).catch(() => {});
+  await api.sendMessage(chat, "با نتایج چه کنم؟", [
+    [{ text: "➕ انتخاب برای استعلام", callback_data: `sq:${out.search_id}:open:0` }],
+    [{ text: "✉️ ارسال پیام به تأمین‌کننده", callback_data: `sg:${out.search_id}:open:0` }],
+    [{ text: "باز کردن پنل", url: PANEL_URL }],
+  ]).catch(() => {});
+  return { ok: true };
+}
+const ROLE_FA_BOT = {
+  manufacturer: "تولیدکننده", authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده",
+  retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
+};
+
+/** منوی چندانتخابی تأمین‌کنندگانِ نتیجهٔ جستجو — همان مسیر افزودن سوابق را می‌رود */
+async function smartSelOpen(env, api, chat, ex, searchId) {
+  const sr = await searchById(env, searchId);
+  if (!sr || sr.expert_id !== ex.id) { await api.sendMessage(chat, "این جستجو پیدا نشد.").catch(() => {}); return { ok: true }; }
+  const sup = (sr.result && sr.result.suppliers) || [];
+  const options = sup.slice(0, 24).map((s) => ({ name: s.name, code: "" }));
+  if (!options.length) { await api.sendMessage(chat, "تأمین‌کننده‌ای برای انتخاب نیست.").catch(() => {}); return { ok: true }; }
+  const t = now();
+  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smsel','pick_suppliers',?,?,?,?)")
+    .bind(ex.id, String(chat), sr.assignment_id, JSON.stringify({ itemId: sr.item_id, options, sel: [] }), t, t + FLOW_TTL).run();
+  const fid = r.meta.last_row_id;
+  const msg = await api.sendMessage(chat, SMART_SEL_TEXT, smartSelKb(fid, options, [])).catch(() => null);
+  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+  return { ok: true };
+}
+function smartSelKb(fid, options, sel) {
+  const kb = (options || []).map((o, i) => [{ text: `${(sel || []).includes(i) ? "☑" : "☐"} ${short(o.name, 32)}`, callback_data: `sq:${fid}:t:${i}` }]);
+  kb.push([{ text: `➕ افزودن به استعلامات${(sel || []).length ? ` (${M(sel.length)})` : ""}`, callback_data: `sq:${fid}:go:0` }]);
+  kb.push([{ text: "✖️ بستن", callback_data: `sq:${fid}:x:0` }]);
+  return kb;
+}
+
+/* ------------------------------------------------------------------ */
 /* تحویل بسته                                                          */
 /* ------------------------------------------------------------------ */
 
@@ -1647,7 +1794,7 @@ async function saveManual(env, api, chat, f) {
     `✅ ${M(n)} قلم قیمت‌گذاری شد.${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\nبرای ثبت موقت، شرایط فاکتور (زمان تحویل و شرایط تسویه) هم لازم است:`);
 }
 
-async function onCallback(env, cq) {
+async function onCallback(env, cq, ctx) {
   const api = telegram(env);
   /* تأیید فشردن دکمه فقط ساعت‌شنی تلگرام را برمی‌دارد. اگر شکست بخورد نباید
      تغییر وضعیتی که کاربر خواسته را لغو کند، پس خطایش بلعیده می‌شود. */
@@ -1726,7 +1873,10 @@ async function onCallback(env, cq) {
   if (action === "hs") {
     const [, sub, vRaw] = T(cq.data).split(":");
     const v = parseInt(vRaw, 10);
-    if (sub === "s") { await ack("جستجوی هوشمند هنوز به مدل وصل نشده است؛ به‌زودی فعال می‌شود.", true); return { ok: true }; }
+    if (sub === "s") {
+      if (!env.ANTHROPIC_API_KEY) { await ack("جستجوی هوشمند هنوز به مدل وصل نشده است.", true); return { ok: true }; }
+      await ack(); return smartPickItem(env, api, chat, ex, v);
+    }
     if (sub === "a") { await ack(); return histPickItem(env, api, chat, ex, v); }
     if (sub === "i") { await ack("در حال محاسبه…"); return histRun(env, api, chat, ex, v); }
     await ack(); return { ok: true };
@@ -1759,6 +1909,120 @@ async function onCallback(env, cq) {
       if (!(d.sel || []).length) { await ack("هنوز تأمین‌کننده‌ای انتخاب نکرده‌اید.", true); return { ok: true }; }
       await ack("در حال افزودن…");
       return histAddToQuotes(env, api, chat, ex, f, d, cq.message && cq.message.message_id);
+    }
+    await ack(); return { ok: true };
+  }
+
+  /* جستجوی هوشمند: sm:i:<itemId> (انتخاب قلم) · sf:<flowId>:… (قیدها و اجرا) */
+  if (action === "sm") {
+    const [, sub, vRaw] = T(cq.data).split(":");
+    if (sub === "i") { await ack(); return smartPrefsCard(env, api, chat, ex, parseInt(vRaw, 10)); }
+    await ack(); return { ok: true };
+  }
+  if (action === "sf") {
+    const [, fidRaw, step, valRaw] = T(cq.data).split(":");
+    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='smart'").bind(parseInt(fidRaw, 10), ex.id).first();
+    if (!f || f.done_at) { await ack("این گفت‌وگو دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f);
+    const mid = f.message_id || (cq.message && cq.message.message_id);
+    if (step === "x") {
+      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
+      await ack("لغو شد");
+      if (mid) await api.editMessageText(chat, mid, "✖️ جستجوی هوشمند لغو شد.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "mk") { await ack(); return smartMarketMenu(env, api, chat, f, d, mid); }
+    if (step === "m") {
+      const k = (MARKETS[parseInt(valRaw, 10)] || {}).key;
+      if (k) { const i = (d.markets = d.markets || []).indexOf(k); if (i >= 0) d.markets.splice(i, 1); else d.markets.push(k); }
+      await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
+      await ack();
+      return smartMarketMenu(env, api, chat, f, d, mid);
+    }
+    if (step === "back") { await ack(); return smartPrefsRender(env, api, chat, f, d, mid); }
+    if (step === "br" || step === "sp" || step === "no") {
+      const st2 = step === "br" ? "need_brand" : step === "sp" ? "need_specs" : "need_notes2";
+      await env.DB.prepare("UPDATE tg_flows SET step=? WHERE id=?").bind(st2, f.id).run();
+      await ack();
+      await api.sendMessage(chat, step === "br" ? "🏷 نام برند موردنظر را بنویسید (برای پاک‌کردن: -)"
+        : step === "sp" ? "📋 مشخصات فنی موردنظر را بنویسید (برای پاک‌کردن: -)"
+        : "📝 ملاحظات جستجو را بنویسید (برای پاک‌کردن: -)").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "go") {
+      if (!(d.markets || []).length) { await ack("دست‌کم یک بازار انتخاب کنید.", true); return { ok: true }; }
+      await ack("جستجو شروع شد");
+      await env.DB.prepare("UPDATE tg_flows SET step='running', done_at=? WHERE id=?").bind(now(), f.id).run();
+      await api.sendMessage(chat, "⏳ جستجوی هوشمند شروع شد؛ مدل در بازارهای انتخابی می‌گردد و صفحه‌ها را می‌خواند. معمولاً چند دقیقه طول می‌کشد — نتیجه همین‌جا می‌آید.").catch(() => {});
+      const job = smartRunAndSend(env, api, chat, ex, d).catch((e) => api.sendMessage(chat, `❌ جستجو انجام نشد: ${esc(String(e && e.message || e).slice(0, 200))}`).catch(() => {}));
+      if (ctx && ctx.waitUntil) ctx.waitUntil(job); else await job;
+      return { ok: true };
+    }
+    await ack(); return { ok: true };
+  }
+  /* نتایج جستجو: sq (چندانتخابی استعلام) · sg (ارسال پیام با قالب) */
+  if (action === "sq") {
+    const [, aRaw, step, vRaw] = T(cq.data).split(":");
+    if (step === "open") { await ack(); return smartSelOpen(env, api, chat, ex, parseInt(aRaw, 10)); }
+    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='smsel'").bind(parseInt(aRaw, 10), ex.id).first();
+    if (!f || f.done_at) { await ack("این فهرست دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f);
+    const mid = f.message_id || (cq.message && cq.message.message_id);
+    if (step === "x") {
+      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
+      await ack("بسته شد");
+      if (mid) await api.editMessageText(chat, mid, "✖️ فهرست بسته شد.").catch(() => {});
+      return { ok: true };
+    }
+    if (step === "t") {
+      const i = parseInt(vRaw, 10);
+      if (!(d.options || [])[i]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+      d.sel = d.sel || []; const at = d.sel.indexOf(i);
+      if (at >= 0) d.sel.splice(at, 1); else d.sel.push(i);
+      await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
+      await ack();
+      if (mid) await api.editMessageText(chat, mid, SMART_SEL_TEXT, smartSelKb(f.id, d.options, d.sel)).catch(() => {});
+      return { ok: true };
+    }
+    if (step === "go") {
+      if (!(d.sel || []).length) { await ack("هنوز چیزی انتخاب نکرده‌اید.", true); return { ok: true }; }
+      await ack("در حال افزودن…");
+      return histAddToQuotes(env, api, chat, ex, f, d, mid);
+    }
+    await ack(); return { ok: true };
+  }
+  if (action === "sg") {
+    const [, sidRaw, step, aRaw, bRaw] = T(cq.data).split(":");
+    const sr = await searchById(env, parseInt(sidRaw, 10));
+    if (!sr || sr.expert_id !== ex.id) { await ack("این جستجو پیدا نشد.", true); return { ok: true }; }
+    const sup = (sr.result && sr.result.suppliers) || [];
+    if (step === "open") {
+      await ack();
+      const kb = sup.slice(0, 12).map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}` }]);
+      await api.sendMessage(chat, "✉️ پیام برای کدام تأمین‌کننده آماده شود؟", kb).catch(() => {});
+      return { ok: true };
+    }
+    if (step === "p") {
+      const i = parseInt(aRaw, 10); const s2 = sup[i];
+      if (!s2) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+      await ack();
+      const tpls = (await env.DB.prepare("SELECT id,title,body FROM templates WHERE expert_id IS NULL OR expert_id=? ORDER BY id LIMIT 12").bind(ex.id).all()).results || [];
+      if (!tpls.length) { await api.sendMessage(chat, "هنوز قالب پیامی ساخته نشده؛ از پنل، «قالب‌های پیام» را باز کنید.").catch(() => {}); return { ok: true }; }
+      const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>`).join("\n");
+      const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}` }]);
+      await api.sendMessage(chat, `✉️ پیام برای <b>${esc(short(s2.name, 36))}</b>\nکدام قالب؟\n\n${desc}`, kb).catch(() => {});
+      return { ok: true };
+    }
+    if (step === "t") {
+      const i = parseInt(aRaw, 10), tplId = parseInt(bRaw, 10);
+      const s2 = sup[i];
+      const tpl = await env.DB.prepare("SELECT * FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(tplId, ex.id).first();
+      if (!s2 || !tpl) { await ack("پیدا نشد.", true); return { ok: true }; }
+      const itRow = await env.DB.prepare("SELECT title, qty, unit, spec FROM items WHERE id=?").bind(sr.item_id).first() || {};
+      await ack();
+      const text = fillTemplate(tpl.body, { supplier: s2.name, item: itRow, expertName: ex.name });
+      await api.sendMessage(chat, `✉️ <b>متن آماده برای ${esc(short(s2.name, 36))}</b> — کپی کنید و در کانال دلخواه بفرستید:\n\n<code>${esc(text)}</code>`).catch(() => {});
+      return { ok: true };
     }
     await ack(); return { ok: true };
   }
