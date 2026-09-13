@@ -19,7 +19,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
 
-import { BASE_YM, MAX_DROP, clampK, decayPerMonth, momentWeight } from "../../../worker/history.js";
+import { BASE_YM, MAX_DROP, clampK, decayPerMonth, momentWeight, rankBy } from "../../../worker/history.js";
 import { loadTP, fileFrom } from "./run.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -143,4 +143,15 @@ test("پارسر سوابق: فایل بی‌ربط رد می‌شود", { skip:
   const sandbox = loadTP();
   const fake = { name: "x.xlsx", size: 10, async arrayBuffer() { return new ArrayBuffer(10); } };
   await assert.rejects(() => sandbox.TP.importHistory(fake));
+});
+
+/* ---------------- رتبهٔ رقابتی ---------------- */
+
+test("عددهای برابر رتبهٔ برابر می‌گیرند — ۴، ۲، ۲، ۱ ← ۱، ۲، ۲، ۴", () => {
+  const rows = [{ v: 2 }, { v: 4 }, { v: 1 }, { v: 2 }];
+  rankBy(rows, "v", "r");
+  assert.deepEqual(rows.map((x) => x.r), [2, 1, 4, 2]);
+  const f = [{ v: 0.1 + 0.2 }, { v: 0.3 }, { v: 5 }];
+  rankBy(f, "v", "r");
+  assert.deepEqual(f.map((x) => x.r), [2, 2, 1], "زبالهٔ اعشار شناور دو عدد برابر را نابرابر نمی‌کند");
 });

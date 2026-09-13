@@ -211,8 +211,13 @@ export async function resolveItem(env, it) {
 /* ------------------------------------------------------------------ */
 /* ارقام تب سوابق                                                       */
 /* ------------------------------------------------------------------ */
-const rankBy = (rows, field, rankField) => {
-  [...rows].sort((a, b) => (b[field] || 0) - (a[field] || 0)).forEach((x, i) => { x[rankField] = i + 1; });
+/* رتبهٔ رقابتی: عددهای برابر رتبهٔ برابر می‌گیرند و رتبهٔ بعدی به اندازهٔ تعدادشان
+   جلو می‌رود (۴، ۲، ۲، ۱ ← ۱، ۲، ۲، ۴). مقایسه روی مقدارِ گردشده است تا زبالهٔ اعشار
+   شناور (۰٫۱+۰٫۲) دو عدد برابر را نابرابر نکند. */
+export const rankBy = (rows, field, rankField) => {
+  const key = (x) => Math.round((Number(x[field]) || 0) * 1e6);
+  const sorted = [...rows].sort((a, b) => key(b) - key(a));
+  sorted.forEach((x, i) => { x[rankField] = i > 0 && key(sorted[i - 1]) === key(x) ? sorted[i - 1][rankField] : i + 1; });
 };
 
 /**
@@ -221,8 +226,9 @@ const rankBy = (rows, field, rankField) => {
  *   qty  — جمع مقدار خریداری‌شده
  *   qtyM — گشتاور: همان جمع مقدار، وقتی هر خرید با فاصلهٔ ماهانه‌اش تا اسفند
  *          ۱۴۰۴ کم‌وزن شود (شیب از ضریب ۱..۱۰ کارشناس). خریدِ تازه سنگین‌تر است.
- * سهم = qty/Σ و امتیاز گشتاوری = qtyM/Σ (درصد). رتبه‌ها همین‌جا حساب می‌شوند تا
- * پنل و بات تلگرام یک عدد را نشان بدهند. ترتیب پیش‌فرض: رتبهٔ گشتاوری.
+ * سهم = qty/Σ (درصد)؛ امتیاز گشتاوری خودِ qtyM است — عدد، نه درصد. رتبه‌ها رقابتی‌اند
+ * (برابرها رتبهٔ برابر) و همین‌جا حساب می‌شوند تا پنل و بات تلگرام یک عدد را نشان
+ * بدهند. ترتیب پیش‌فرض: رتبهٔ گشتاوری.
  * قیمت‌ها (روز و ۱۴۰۴) فقط برای نمایشِ ریز خریدها و کارت تأمین‌کننده می‌مانند.
  *
  * «خرید قلم در پروژه» ستون پروژه می‌خواهد که فایل مرجع هنوز ندارد؛ جایش در
@@ -287,7 +293,7 @@ export async function itemHistory(env, it, opts = {}) {
   rankBy(suppliers, "n", "rankN");
   rankBy(suppliers, "qty", "rankQty");
   rankBy(suppliers, "qtyM", "rankM");
-  suppliers.sort((a, b) => a.rankM - b.rankM);
+  suppliers.sort((a, b) => a.rankM - b.rankM || b.qtyM - a.qtyM || String(a.name).localeCompare(String(b.name), "fa"));
 
   const titles = (await env.DB.prepare(`SELECT MAX(title) AS title, COUNT(*) AS n FROM purchase_history
     WHERE ${m.where} GROUP BY title_n ORDER BY n DESC LIMIT 8`).bind(...m.args).all()).results || [];

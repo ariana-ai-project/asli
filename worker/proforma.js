@@ -6,7 +6,7 @@
  */
 import { HttpError } from "./http.js";
 import { extractProforma, toRial } from "./extract.js";
-import { VAT_RATE, netOf, ENUMS, missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
+import { VAT_RATE, netOf, ENUMS, missingRequired, INVOICE_AI } from "./quote-rules.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -92,13 +92,14 @@ export async function applyExtraction(env, p, body) {
   const soleItem = its.size === 1 && priced.length === 1 ? [...its.keys()][0] : null;
 
   /* شرایط فاکتور، مشترک برای همهٔ خط‌های این تأمین‌کننده.
-     نوع فاکتور اگر در سند نبود «رسمی» است — قاعدهٔ شرکت، نه حدسِ مدل. */
+     نوع فاکتورِ پیش‌فاکتورِ خوانده‌شده اگر در سند نبود «رسمی» است — قاعدهٔ شرکت، نه حدسِ
+     مدل؛ ولی نوعی که کارشناس خودش انتخاب کرده (invoice_src='manual') دست نمی‌خورد. */
   const terms = {
     supplier_code: r.supplier_code || null,
     dtime: r.delivery_date || null,
     valid_days: r.valid_days == null ? null : String(r.valid_days),
     ship: r.ship_method || null,
-    invoice: r.invoice_type || INVOICE_DEFAULT,
+    invoice: r.invoice_type || INVOICE_AI,
     pay: r.pay_class || r.pay_terms || null,
     place: r.place || null,
     place_other: r.place === "سایر" ? (r.place_other || null) : null,
@@ -138,7 +139,7 @@ export async function applyExtraction(env, p, body) {
     const merged = old
       ? { ...old, spec: line.spec || old.spec, unit: old.unit || line.unit || it.unit, qty: old.qty ?? line.qty ?? it.qty, price,
           supplier_code: old.supplier_code || terms.supplier_code, dtime: terms.dtime || old.dtime, valid_days: terms.valid_days || old.valid_days,
-          ship: terms.ship || old.ship, invoice: r.invoice_type || old.invoice || INVOICE_DEFAULT, pay: terms.pay || old.pay,
+          ship: terms.ship || old.ship, invoice: old.invoice_src === "manual" && old.invoice ? old.invoice : (r.invoice_type || INVOICE_AI), pay: terms.pay || old.pay,
           place: terms.place || old.place, place_other: terms.place_other || old.place_other, vat: terms.vat || old.vat }
       : { spec: line.spec || null, unit: line.unit || it.unit, qty: line.qty == null ? it.qty : line.qty, price, ...terms };
     /* ثبت موقت فقط وقتی همهٔ اجباری‌ها هستند؛ وگرنه خط می‌ماند تا کارشناس در بات یا پنل پرش کند */

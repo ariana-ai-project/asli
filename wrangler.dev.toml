@@ -35,4 +35,4 @@ TG_FILE_API_BASE = "http://127.0.0.1:8799/file/bot"
 TG_IGNORE_HOURS = "1"
 
 [triggers]
-crons = ["*/5 * * * *"]
+crons = ["* * * * *"]

@@ -26,8 +26,9 @@ import { bundleData, readiness } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
 import { MARKETS, smartSearch, lastSearch } from "./discovery.js";
-import { commissionHtml } from "./sheets.js";
-import { renderRequestDoc } from "./reqdoc.js";
+import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
+import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
+import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, scheduled, dispatchText, drainOutbox } from "./bot.js";
@@ -119,6 +120,8 @@ CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, 
 ${HISTORY_TABLE};
 CREATE TABLE IF NOT EXISTS smart_searches (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER, params_json TEXT, result_json TEXT, model TEXT, prompt_version TEXT, in_tokens INTEGER, out_tokens INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
+CREATE TABLE IF NOT EXISTS smart_jobs (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, params_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', search_id INTEGER, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER);
+CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -146,6 +149,14 @@ const COLUMN_MIGRATIONS = [
   /* هویت ردیف سوابق، برای بارگذاری افزایشی (worker/history.js). ردیف‌های
      بارگذاری‌شده پیش از این ستون NULL دارند و یک بار جدول از نو ساخته می‌شود. */
   ["purchase_history", "dkey", "TEXT"],
+  /* جستجوی هوشمند: مصرف واقعی و هزینهٔ هر اجرا (worker/discovery.js:runCost) */
+  ["smart_searches", "cache_read", "INTEGER"],
+  ["smart_searches", "cache_write", "INTEGER"],
+  ["smart_searches", "searches", "INTEGER"],
+  ["smart_searches", "fetches", "INTEGER"],
+  ["smart_searches", "cost_usd", "REAL"],
+  /* «manual» یعنی نوع فاکتور را کارشناس خودش گذاشته؛ خواندن پیش‌فاکتور فقط پیش‌فرض را عوض می‌کند */
+  ["quotes", "invoice_src", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -491,9 +502,25 @@ async function desk(env, url) {
   return { requests: [...byReq.values()], total, all_total, limit, offset, experts: await listExperts(env), settings: await getSettings(env) };
 }
 
+/* بار باز کارشناسان برای ارجاع و مهلت هوشمند: همهٔ ارجاع‌هایی که قلم باز یا معلق دارند —
+   ارسال‌شده و ارسال‌نشده، چون فرض پیشنهادها «تأیید همه» است — با طرف مقابل و عنوان اقلام.
+   گروه کالایی را پنل از روی عنوان حدس می‌زند، پس این‌جا فقط دادهٔ خام می‌رود. */
+async function workload(env) {
+  const rows = (await env.DB.prepare(`SELECT a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party, i.title
+    FROM assignments a JOIN requests r ON r.id=a.request_id JOIN items i ON i.assignment_id=a.id
+    WHERE i.state IN ('open','hold') ORDER BY a.id LIMIT 20000`).all()).results || [];
+  const by = new Map();
+  for (const x of rows) {
+    let g = by.get(x.aid);
+    if (!g) { g = { aid: x.aid, expert_id: x.expert_id, request_id: x.request_id, dispatched: !!x.dispatched_at, party: x.party, titles: [] }; by.set(x.aid, g); }
+    g.titles.push(x.title);
+  }
+  return { assignments: [...by.values()] };
+}
+
 async function listExperts(env) {
   return (await env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,
-      (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL AND i.state IN ('open','hold')) AS open_load
+      (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND i.state IN ('open','hold')) AS open_load
     FROM experts e ORDER BY e.active DESC, e.name`).all()).results || [];
 }
 
@@ -717,6 +744,8 @@ async function quoteUpdate(env, ex, id, body) {
      «تأیید نهایی» ویرایش محتوا نیست — تیکش نباید ثبت موقت را باطل کند، وگرنه
      همان تیکی که باید دکمهٔ کمیسیون را روشن کند (saved=1 AND final=1)
      خاموشش می‌کند. مسیر تلگرام از اول همین‌طور بود. */
+  /* نوع فاکتوری که کارشناس خودش انتخاب کرده، با خواندن پیش‌فاکتور بعدی عوض نمی‌شود */
+  if ("invoice" in body) sets.push("invoice_src='manual'");
   const contentEdited = Object.keys(body).some((f) => QUOTE_FIELDS.includes(f) && f !== "final");
   if (body.save === true) {
     const merged = { ...q, ...body };
@@ -962,6 +991,7 @@ async function route(request, env, ctx) {
 
     /* --- میز ارجاع (مدیر) --- */
     if (path === "/desk" && m === "GET") { requireManager(request, env); return json(await desk(env, url)); }
+    if (path === "/workload" && m === "GET") { requireManager(request, env); return json(await workload(env)); }
     if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
@@ -1060,15 +1090,19 @@ async function route(request, env, ctx) {
       const aid = int(mm[1]); const kind = mm[2];
       if (who.expert) await ownAssignment(env, who.expert, aid);
       const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
-      /* برگهٔ درخواست خرید فایل Word است (قالب چاپیِ شرکت)، جدول کمیسیون اکسل */
+      const cd = { ...d, notes: d.assignment.notes };
+      /* format=html: همان برگه برای پیش‌نمایش و چاپ پنل، از همان مدلی که فایل را می‌سازد */
+      if (url.searchParams.get("format") === "html") {
+        return json(kind === "request" ? { html: requestHtml(d), css: REQUEST_CSS } : { html: commissionHtml(cd), css: SHEET_CSS });
+      }
+      /* برگهٔ درخواست خرید فایل Word است (قالب چاپ راهکاران)، جدول کمیسیون xlsx واقعی (فرم TSA-PS-FO-02) */
       const isReq = kind === "request";
-      const body = isReq ? await renderRequestDoc(d) : commissionHtml({ ...d, notes: d.assignment.notes });
-      const name = `${isReq ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.${isReq ? "docx" : "xls"}`;
+      const body = isReq ? await renderRequestDoc(d) : await commissionXlsx(cd);
+      const name = `${isReq ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.${isReq ? "docx" : "xlsx"}`;
       return new Response(body, { headers: {
-        "content-type": isReq
-          ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
-          : "application/vnd.ms-excel; charset=utf-8",
+        "content-type": isReq ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : XLSX_MIME,
         "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+        "cache-control": "private, no-store",
       } });
     }
     /* وضعیت آمادگی بسته — پنل با آن می‌گوید چه چیزی هنوز مانده */
@@ -1157,7 +1191,10 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       const it = await ownItem(env, who, int(b.item_id));
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
-      return json(await smartSearch(env, it, who.expert || null, b, "panel"));
+      /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
+         یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را
+         عوض نمی‌کند، پس در خود JSON می‌آید و پنل همان error را نشان می‌دهد. */
+      return streamJson(() => smartSearch(env, it, who.expert || null, b, "panel"));
     }
     /* سوابق خرید (IMP-13): بارگذاری سه‌مرحله‌ای از تب مدیر، خواندن از تب کارشناس.
        begin جدول را از نو می‌سازد، chunkها ردیف‌ها را می‌ریزند و finish نمایه‌ها
@@ -1199,6 +1236,22 @@ async function route(request, env, ctx) {
 function flush(env, ctx, when) {
   if (!when || !ctx || !env.TG_BOT_TOKEN) return;
   ctx.waitUntil(drainOutbox(env, 20).catch((e) => console.error("outbox flush", e && e.message)));
+}
+
+/* پاسخ JSON جریانی برای کار طولانی. JSON.parse فاصله‌های ابتدایی را نادیده می‌گیرد،
+   پس فاصله‌های نگهداریِ اتصال به خواندنِ پاسخ آسیبی نمی‌زنند. */
+function streamJson(work) {
+  const { readable, writable } = new TransformStream();
+  const w = writable.getWriter(), enc = new TextEncoder();
+  const beat = setInterval(() => { w.write(enc.encode(" ")).catch(() => {}); }, 15000);
+  (async () => {
+    let out;
+    try { out = JSON.stringify(await work()); }
+    catch (e) { out = JSON.stringify({ error: e && e.message ? e.message : String(e), status: (e && e.status) || 500 }); }
+    clearInterval(beat);
+    try { await w.write(enc.encode(out)); await w.close(); } catch (_) { /* کاربر پنجره را بسته است */ }
+  })();
+  return new Response(readable, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 }
 
 export { route };

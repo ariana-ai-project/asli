@@ -12,7 +12,7 @@
  * تلگرام برایش می‌روند و هم در پنل می‌مانند؛ هیچ‌کدام جای دیگری را نمی‌گیرد.
  */
 import { HttpError } from "./http.js";
-import { commissionHtml } from "./sheets.js";
+import { commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { jStr, fmtFa } from "./time.js";
 
@@ -51,7 +51,6 @@ export async function bundleData(env, aid, settings, company) {
   };
 }
 
-const XLS = "application/vnd.ms-excel";
 const DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
 /**
@@ -63,7 +62,7 @@ export async function buildFiles(d, letterBytes) {
   const id = d.request.id;
   const files = [
     { name: `درخواست-خرید-${id}.docx`, type: DOCX, body: await (await renderRequestDoc(d)).arrayBuffer() },
-    { name: `کمیسیون-${id}.xls`, type: XLS, body: commissionHtml({ ...d, notes: d.assignment.notes }) },
+    { name: `کمیسیون-${id}.xlsx`, type: XLSX_MIME, body: await (await commissionXlsx({ ...d, notes: d.assignment.notes })).arrayBuffer() },
   ];
   if (letterBytes) files.push({ name: `نامه-${id}.docx`, type: DOCX, body: letterBytes });
   return files;

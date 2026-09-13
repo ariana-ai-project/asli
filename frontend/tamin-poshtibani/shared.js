@@ -44,7 +44,11 @@
   TP.M = (n) => Number(n || 0).toLocaleString("en-US");
   /* نرمال‌سازی برای مقایسه: ي/ك عربی → فارسی، نیم‌فاصله → فاصله، فاصله‌های تکراری → یکی */
   TP.nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
-  TP.hit = (v, q) => !q || TP.nrm(v).includes(TP.nrm(q));
+  /* برای جستجوی فیلترها: ارقام فارسی و عربی هم لاتین می‌شوند. «۲۱» باید «21» را پیدا کند —
+     وگرنه با کیبورد فارسی هر فیلترِ عددی کل جدول را خالی می‌کرد. TP.nrm دست نمی‌خورد چون
+     کلید یکتای ردیف‌های سوابق خرید از آن ساخته شده است. */
+  TP.fold = (x) => TP.nrm(x).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  TP.hit = (v, q) => !TP.fold(q) || TP.fold(v).includes(TP.fold(q));
 
   /* مقدار راهکاران: «2,000» یا «12.5» → عدد */
   TP.num = (v) => { const s = String(v == null ? "" : v).replace(/,/g, "").trim(); if (!s) return null; const n = Number(s); return isNaN(n) ? null : n; };

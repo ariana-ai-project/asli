@@ -52,23 +52,125 @@
     : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
   const readyAssignments = () => S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && Number(a.days) > 0 && itemsOf(r, a).length));
 
-  function load(e) { const s = e.speed || 1; return s; }
-  function expertLoad(e) { return Math.min(1, (e.open_load || 0) / (settings().capacity || 8)); }
   const scoreOf = (eid, kind, key) => { const s = S.scores.scores.find((x) => x.expert_id === eid && x.kind === kind && x.key === key); return s ? s.score : 3; };
   const weightOf = (kind, key) => { const w = S.scores.weights.find((x) => x.kind === kind && x.key === key); return w ? w.w : 1; };
-  function asgScore(e, r) {
-    const A = settings().assign;
-    const g = scoreOf(e.id, "category", reqCat(r)) / 5 * 100, p = scoreOf(e.id, "party", r.party) / 5 * 100, l = expertLoad(e) * 100;
-    const t1 = (+A.a || 0) / 100 * g, t2 = (+A.b || 0) / 100 * p, t3 = (+A.c || 0) / 100 * l;
-    const s1 = A.op1 === "+" ? t1 + t2 : t1 - t2;
-    return A.op2 === "+" ? s1 + t3 : s1 - t3;
+  /* ---------- ارجاع و مهلت هوشمند: توزیع متوازن با فرض تأیید مدیر ----------
+     «زحمت» هر ارجاع = ضریب پروژه × (۱ واحد سربار درخواست + جمعِ ضریب گروه کالایی اقلامش)؛
+     پس تعداد درخواست، تعداد اقلام، سختی گروه‌ها و اهمیت پروژه همه در آن هست.
+     ظرفیت هر کارشناس = ظرفیت تنظیمات × زحمت یک درخواست میانگین ÷ ضریب سرعت او (عدد
+     کمتر = سریع‌تر = ظرفیت بیشتر). بار فعلی = همهٔ ارجاع‌های باز، ارسال‌شده و ارسال‌نشده،
+     چون فرض این است که مدیر همهٔ پیشنهادها را تأیید می‌کند. */
+  const REQ_OVERHEAD = 1;
+  const speedOf = (e) => Math.max(0.1, Number(e.speed) || 1);
+  const effortOf = (party, titles) => weightOf("party", party) * (REQ_OVERHEAD + titles.reduce((n, t) => n + weightOf("category", catOf(t)), 0));
+  let WL = null, WL_LOADING = false, WL_ERR = null;          /* پاسخ /workload */
+  function needWorkload() {
+    if (WL || WL_LOADING || WL_ERR) return;
+    WL_LOADING = true;
+    TP.api("/workload").then((r) => { WL = r; }).catch((e) => { WL_ERR = e.message; })
+      .finally(() => { WL_LOADING = false; render(); });
   }
-  function smartDays(r, e) {
-    const D = settings().deadline;
-    const b = +D.base || 1, we = (e.speed || 1) * (+D.we || 1), wp = weightOf("party", r.party) * (+D.wp || 1), wi = weightOf("category", reqCat(r)) * (+D.wi || 1);
-    const f = (x, op, y) => op === "×" ? x * y : op === "÷" ? x / (y || 1) : op === "+" ? x + y : x - y;
-    let v = f(b, D.op1, we); v = f(v, D.op2, wp); v = f(v, D.op3, wi);
-    return Math.max(1, Math.round(v));
+  async function loadWorkload() { WL = await TP.api("/workload"); WL_ERR = null; return WL; }
+  function baseLoads(E) {
+    const L = new Map(E.map((e) => [e.id, { effort: 0, reqs: 0, items: 0 }]));
+    for (const g of (WL && WL.assignments) || []) {
+      const x = L.get(g.expert_id); if (!x) continue;
+      x.effort += effortOf(g.party, g.titles); x.reqs++; x.items += g.titles.length;
+    }
+    return L;
+  }
+  /* زحمت یک درخواست میانگین — مبنای تبدیل «ظرفیت n درخواست» به واحد زحمت */
+  function unitEffort(extra) {
+    const all = [...((WL && WL.assignments) || []).map((g) => effortOf(g.party, g.titles)), ...(extra || [])];
+    return all.length ? all.reduce((n, x) => n + x, 0) / all.length : REQ_OVERHEAD + 1;
+  }
+  const capOf = (e, U) => Math.max(0.5, (Number(settings().capacity) || 8) * U / speedOf(e));
+
+  /**
+   * برنامهٔ ارجاع برای همهٔ درخواست‌های بی‌کارشناس با هم.
+   * امتیاز کل = Σ تخصص (فرمول مدیر: گروه کالایی، پروژه) − Σ جریمهٔ بار؛ جریمه با مجذورِ
+   * درصدِ اشغال رشد می‌کند، پس هر درخواستِ اضافه برای کارشناسِ پرتر گران‌تر است.
+   * چیدمان اولیه حریصانه از بزرگ‌ترین درخواست، بعد جابه‌جایی و تعویض دوتایی تا وقتی
+   * امتیاز کل بهتر شود.
+   */
+  function planAssign(pend) {
+    const E = S.data.experts.filter((e) => e.active);
+    const A = settings().assign;
+    const wa = (+A.a || 0) / 100, wb = (+A.b || 0) / 100, wc = (+A.c || 0) / 100;
+    const sb = A.op1 === "−" ? -1 : 1, sc = A.op2 === "+" ? 1 : -1;
+    const jobs = pend.map((r) => { const titles = unassignedOpen(r).map((i) => i.title); return { r, titles, effort: effortOf(r.party, titles) }; })
+      .sort((x, y) => y.effort - x.effort);
+    const U = unitEffort(jobs.map((j) => j.effort));
+    const before = baseLoads(E);
+    const cap = E.map((e) => capOf(e, U));
+    const loads = E.map((e) => before.get(e.id).effort);
+    const pen = (k, eff) => { const p = 100 * eff / cap[k]; return p * p / 100; };
+    const fit = jobs.map((j) => E.map((e) => {
+      let ws = 0, ss = 0;
+      for (const t of j.titles) { const c = catOf(t), w = weightOf("category", c); ws += w; ss += w * scoreOf(e.id, "category", c); }
+      const g = ws ? ss / ws : scoreOf(e.id, "category", reqCat(j.r));
+      return wa * (g / 5 * 100) + sb * wb * (scoreOf(e.id, "party", j.r.party) / 5 * 100);
+    }));
+    const at = [];
+    jobs.forEach((j, n) => {
+      let best = 0, bestV = -Infinity;
+      E.forEach((e, k) => {
+        const v = fit[n][k] + sc * wc * (pen(k, loads[k] + j.effort) - pen(k, loads[k]));
+        if (v > bestV + 1e-9 || (Math.abs(v - bestV) <= 1e-9 && loads[k] / cap[k] < loads[best] / cap[best])) { best = k; bestV = v; }
+      });
+      at[n] = best; loads[best] += j.effort;
+    });
+    for (let pass = 0; pass < 40 && E.length > 1; pass++) {
+      let moved = false;
+      for (let n = 0; n < jobs.length; n++) {
+        const k1 = at[n], ef = jobs[n].effort;
+        for (let k2 = 0; k2 < E.length; k2++) {
+          if (k2 === k1) continue;
+          const d = fit[n][k2] - fit[n][k1] + sc * wc * (pen(k1, loads[k1] - ef) - pen(k1, loads[k1]) + pen(k2, loads[k2] + ef) - pen(k2, loads[k2]));
+          if (d > 1e-6) { loads[k1] -= ef; loads[k2] += ef; at[n] = k2; moved = true; break; }
+        }
+      }
+      if (jobs.length <= 400) {
+        for (let n = 0; n < jobs.length; n++) {
+          for (let m = n + 1; m < jobs.length; m++) {
+            const k1 = at[n], k2 = at[m]; if (k1 === k2) continue;
+            const e1 = jobs[n].effort, e2 = jobs[m].effort;
+            const d = fit[n][k2] + fit[m][k1] - fit[n][k1] - fit[m][k2]
+              + sc * wc * (pen(k1, loads[k1] - e1 + e2) - pen(k1, loads[k1]) + pen(k2, loads[k2] - e2 + e1) - pen(k2, loads[k2]));
+            if (d > 1e-6) { loads[k1] += e2 - e1; loads[k2] += e1 - e2; at[n] = k2; at[m] = k1; moved = true; }
+          }
+        }
+      }
+      if (!moved) break;
+    }
+    const plan = jobs.map((j, n) => ({ r: j.r, e: E[at[n]], effort: j.effort, items: j.titles.length }));
+    const after = new Map(E.map((e, k) => [e.id, { effort: loads[k], reqs: before.get(e.id).reqs, items: before.get(e.id).items }]));
+    plan.forEach((p) => { const x = after.get(p.e.id); x.reqs++; x.items += p.items; });
+    return { plan, before, after, U, cap: new Map(E.map((e, k) => [e.id, cap[k]])) };
+  }
+
+  /* مهلت یک ارجاع: فرمول مدیر (پایه، سرعت کارشناس، ضریب پروژه، میانگینِ ضریب گروهِ اقلام)
+     × ریشهٔ دومِ تعداد اقلام × ضریب اشغالِ کارشناس (فقط وقتی از ظرفیتش پرتر است). */
+  const OPS = { "×": (x, y) => x * y, "÷": (x, y) => x / (y || 1), "+": (x, y) => x + y, "−": (x, y) => x - y };
+  function deadlineOf(party, titles, e, loadPct) {
+    const D = settings().deadline, f = (x, op, y) => (OPS[op] || OPS["×"])(x, y);
+    const wi = titles.length ? titles.reduce((n, t) => n + weightOf("category", catOf(t)), 0) / titles.length : 1;
+    let v = f(+D.base || 1, D.op1, speedOf(e) * (+D.we || 1));
+    v = f(v, D.op2, weightOf("party", party) * (+D.wp || 1));
+    v = f(v, D.op3, wi * (+D.wi || 1));
+    const size = Math.sqrt(Math.max(1, titles.length)), busy = Math.max(1, (loadPct || 0) / 100);
+    return { days: Math.max(1, Math.round(v * size * busy)), base: v, size, busy };
+  }
+  /* list: ارجاع‌های ارسال‌نشده؛ اشغال هر کارشناس از همهٔ ارجاع‌های بازش (با فرض تأیید همه) */
+  function planDeadlines(list) {
+    const E = S.data.experts.filter((e) => e.active);
+    const U = unitEffort(), L = baseLoads(E);
+    return list.map(({ r, a }) => {
+      const e = S.data.experts.find((x) => x.id === a.expert_id); if (!e) return null;
+      const titles = itemsOf(r, a).filter((i) => i.state === "open" || i.state === "hold").map((i) => i.title);
+      const x = L.get(e.id), pct = x ? 100 * x.effort / capOf(e, U) : 0;
+      return { r, a, e, pct, items: titles.length, ...deadlineOf(r.party, titles, e, pct) };
+    }).filter(Boolean);
   }
 
   /* ---------- فیلتر (بازه و صفحه سمت سرور؛ جستجوی ستونی سمت کلاینت روی همان صفحه) ---------- */
@@ -93,7 +195,7 @@
 
   /* ---------- بارگذاری داده ---------- */
   async function refresh() {
-    S.loading = true; S.error = ""; render();
+    S.loading = true; S.error = ""; WL = null; WL_ERR = null; render();
     try {
       S.now = Date.now();
       const qs = `?from=${encodeURIComponent(fromDate())}&limit=${S.page.limit}&offset=${S.page.offset}`;
@@ -162,6 +264,15 @@
     return `<div class="dim" style="font-size:.72rem">${Object.entries(cnt).map(([k, n]) => `${n} ${TP.STATES[k].label}`).join(" · ")}</div>`;
   }
 
+  /* نام کارشناسِ ستون «کارشناس خرید» فایل راهکاران — همیشه زیرِ انتخاب کارشناس، حتی بعد از
+     ارجاع؛ اگر با انتخابِ مدیر فرق دارد زرد می‌شود. زیرِ باکس است تا عرض ستون ثابت بماند. */
+  function fileExpert(its, chosen) {
+    const names = [...new Set((its || []).map((i) => i.src_expert).filter(Boolean))];
+    if (!names.length) return "";
+    const differs = chosen != null && names.some((n) => TP.nrm(n) !== TP.nrm(chosen));
+    return `<div class="filexp ${differs ? "warn" : ""}" title="${differs ? "کارشناس فایل راهکاران با کارشناس انتخاب‌شده فرق دارد" : "کارشناس خرید در فایل راهکاران"}">${differs ? "⚠ " : ""}فایل: ${esc(names.join("، "))}</div>`;
+  }
+
   function stageBoxes(r, a) {
     const A = { dispatchedAt: a.dispatched_at, days: a.days, done: doneFlags(r, a), active: isActive(r, a) };
     return TP.STAGES.map((s, i) => {
@@ -178,8 +289,10 @@
     }
     if (!S.data.requests.length) return `<div class="empty"><b>هنوز فایلی بارگذاری نشده است.</b>با دکمه «بارگذاری درخواست‌های روزانه» فایل خروجی راهکاران (.xlsx) را انتخاب کنید — یا فایل را همین‌جا روی صفحه رها کنید.</div>`;
     const rows = visible();
-    if (!rows.length) return `<div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
-      ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div>`;
+    /* نتیجهٔ خالیِ فیلتر هم سرآیند و ردیف فیلترها را نگه می‌دارد؛ وگرنه کادرهای جستجو
+       ناپدید می‌شدند و راهی جز «پاک کردن فیلترها» برای برگشتن نمی‌ماند. */
+    const noRows = rows.length ? "" : `<tr><td colspan="18"><div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
+      ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div></td></tr>`;
     const E = S.data.experts.filter((e) => e.active);
     let h = `<div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 300px)"><table class="tp-table"><thead>
       <tr class="group"><th colspan="6">داده فایل ورودی</th><th colspan="3" class="sep">تصمیم مدیر</th><th colspan="7" class="console sep">پایش مراحل</th><th colspan="2" class="sep">اقدام</th></tr>
@@ -213,8 +326,7 @@
         }
         if (u.a) {
           const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
-          h += `<td class="sep"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}>${E.map((e) => `<option value="${e.id}" ${e.id === a.expert_id ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>
-              ${its.some((i) => i.src_expert && TP.nrm(i.src_expert) !== TP.nrm(a.expert_name)) ? `<span class="chip warn" title="کارشناس فایل راهکاران متفاوت است">⚠ فایل: ${esc(its.find((i) => i.src_expert).src_expert)}</span>` : ""}</td>
+          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}>${E.map((e) => `<option value="${e.id}" ${e.id === a.expert_id ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(its, a.expert_name)}</td>
             <td><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}></td>
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
@@ -224,8 +336,7 @@
               ${its.some((i) => i.state === "hold") ? `<button class="tp-btn xs" data-act="open|${a.id}">بازگشت</button>` : ""}</td>
             <td><button class="tp-btn xs" data-open="${a.id}">مشاهده</button> <button class="tp-btn xs" data-move="${a.id}" ${a.dispatched_at ? "" : "disabled"}>تغییر</button></td>`;
         } else if (u.un) {
-          h += `<td class="sep"><select class="tp-select unset" data-assign="${esc(r.id)}"><option value="">— انتخاب کارشناس —</option>${E.map((e) => `<option value="${e.id}">${esc(e.label || e.name)}</option>`).join("")}</select>
-              ${r.items.some((i) => i.src_expert) ? `<div class="dim" style="font-size:.75rem">فایل: ${esc([...new Set(r.items.map((i) => i.src_expert).filter(Boolean))].join("، "))}</div>` : ""}</td>
+          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}"><option value="">— انتخاب کارشناس —</option>${E.map((e) => `<option value="${e.id}">${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
             <td><input class="tp-input num unset" style="width:64px;text-align:center" disabled placeholder="—"></td><td class="num">${u.un.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, null, S.now)}"></div></td>
             ${TP.STAGES.map(() => `<td class="console"><div class="box b-idle"></div></td>`).join("")}
@@ -244,7 +355,7 @@
           </tbody></table></div></td></tr>`;
       }
     }
-    return h + `</tbody></table></div>`;
+    return h + noRows + `</tbody></table></div>`;
   }
 
   /* ---------- سوابق خرید ---------- */
@@ -366,55 +477,82 @@
   function vAssign() {
     const E = S.data.experts.filter((e) => e.active), A = settings().assign;
     const pend = S.data.requests.filter((r) => unassignedOpen(r).length);
-    const target = pend[0] || S.data.requests[0];
     const parties = [...new Set(S.data.requests.map((r) => r.party))];
     const opSel = (k, v) => `<select class="tp-select op" data-asg-op="${k}">${["+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
     const shortP = (p) => p.replace(/^مرکز هزینه\s*/, "").slice(0, 26) + (p.length > 32 ? "…" : "");
-    const scored = target ? E.map((e) => ({ e, s: asgScore(e, target) })).sort((a, b) => b.s - a.s) : [];
+    needWorkload();
+    const P = WL ? planAssign(pend) : null;
+    const pctOf = (x, cap) => (cap ? Math.round(100 * x / cap) : 0);
+    const bar = (p) => `<span class="bar-load"><i style="width:${Math.min(100, p)}%"></i></span> ${M(p)}٪`;
+    const preview = WL_ERR ? `<div class="tp-note warn">بار فعلی کارشناسان خوانده نشد: ${esc(WL_ERR)}</div>`
+      : !P ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان…</div>`
+      : `<div class="tp-sect"><h3>پیش‌نمایش توزیع <span>${P.plan.length ? `با فرض تأیید همهٔ ${M(P.plan.length)} پیشنهاد` : "درخواست بی‌کارشناسی نیست — بار فعلی"}</span></h3>
+        <div class="tp-scroll" data-keep-scroll style="max-height:380px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>درخواست باز</th><th>اقلام باز</th><th>زحمت</th><th>ظرفیت</th><th>اشغال فعلی</th><th>پیشنهاد تازه</th><th>اشغال بعد از تأیید</th></tr></thead><tbody>
+        ${E.map((e) => {
+          const b = P.before.get(e.id), a2 = P.after.get(e.id), cap = P.cap.get(e.id), add = P.plan.filter((p) => p.e.id === e.id);
+          return `<tr><td class="name">${esc(e.label || e.name)}</td>
+            <td class="num">${M(b.reqs)}${add.length ? ` → <b>${M(a2.reqs)}</b>` : ""}</td><td class="num">${M(b.items)}${add.length ? ` → <b>${M(a2.items)}</b>` : ""}</td>
+            <td class="num">${b.effort.toFixed(1)}${add.length ? ` → <b>${a2.effort.toFixed(1)}</b>` : ""}</td><td class="num">${cap.toFixed(1)}</td>
+            <td>${bar(pctOf(b.effort, cap))}</td>
+            <td style="white-space:normal;max-width:280px">${add.length ? add.slice(0, 6).map((p) => `<span class="chip num" title="${esc(p.r.party)} · ${M(p.items)} قلم">${esc(p.r.id)}</span>`).join(" ") + (add.length > 6 ? ` <span class="dim">و ${M(add.length - 6)} دیگر</span>` : "") : "—"}</td>
+            <td>${bar(pctOf(a2.effort, cap))}</td></tr>`;
+        }).join("")}
+        </tbody></table></div></div>`;
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-asg ${pend.length ? "" : "disabled"}>اعمال پیشنهاد روی همه درخواست‌های بی‌کارشناس (${pend.length})</button>
-        ${target ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(target.id)}</b> · گروه «${esc(reqCat(target))}»: ${scored.slice(0, 3).map((x, i) => `${i + 1}. <b>${esc(x.e.label || x.e.name)}</b> (${x.s.toFixed(1)})`).join(" · ")}</span>` : ""}
+        <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی همه درخواست‌های بی‌کارشناس (${pend.length})</button>
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>ارجاع هوشمند</h2><p class="lead">سیستم برای هر درخواست یک کارشناس پیشنهاد می‌دهد. پیشنهاد الزام‌آور نیست و مدیر می‌تواند ردش کند.</p>
+      <h2>ارجاع هوشمند</h2><p class="lead">پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس <b>با هم</b> ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های کالایی، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه. پیشنهاد الزام‌آور نیست و مدیر هرکدام را می‌تواند عوض کند.</p>
       <div class="tp-formula"><span class="eq">امتیاز =</span>
         <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه کالایی</b></span>${opSel("op1", A.op1)}
         <span class="term"><input class="tp-input" data-asg="b" value="${A.b}">٪ <b>سابقه در این پروژه</b></span>${opSel("op2", A.op2)}
-        <span class="term"><input class="tp-input" data-asg="c" value="${A.c}">٪ <b>بار کاری فعلی</b></span></div>
-      <div class="tp-note">«بار کاری» = درخواست‌های ارسال‌شدهٔ بازِ کارشناس تقسیم بر ظرفیت ${settings().capacity}. امتیاز ۱ تا ۵ در ماتریس‌ها را خودتان می‌دهید؛ پیش‌فرض ۳.</div>
+        <span class="term"><input class="tp-input" data-asg="c" value="${A.c}">٪ <b>جریمهٔ بار کاری</b></span></div>
+      <div class="tp-note"><b>زحمت هر درخواست</b> = ضریب پروژه × (۱ واحد سربار + جمع ضریب گروه کالایی اقلامش) — ضریب‌ها همان جدول‌های تب «مهلت هوشمند»اند.
+        <b>ظرفیت هر کارشناس</b> = ظرفیت تنظیمات (${M(settings().capacity)} درخواست) × زحمت یک درخواست میانگین ÷ ضریب سرعت او.
+        <b>جریمهٔ بار</b> با مجذور درصد اشغال بزرگ می‌شود؛ پس هرچه کارشناسی پرتر باشد، هر درخواست اضافه برایش گران‌تر است و توزیع خودبه‌خود متوازن می‌شود.
+        بعد از چیدمان اولیه (از بزرگ‌ترین درخواست)، جابه‌جایی‌ها و تعویض‌های دوتایی تا جایی ادامه می‌یابد که امتیاز کل دیگر بهتر نشود. امتیاز ۱ تا ۵ ماتریس‌ها را خودتان می‌دهید؛ پیش‌فرض ۳.</div>
+      ${preview}
       <div class="tp-sect"><h3>۱. ماتریس کارشناس / گروه کالایی <span>امتیاز ۱ تا ۵</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:320px"><table class="tp-mx"><thead><tr><th>کارشناس</th>${CATS.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>
         ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td>${CATS.map((c) => `<td><input class="tp-input" data-g="${e.id}|${esc(c)}" value="${scoreOf(e.id, "category", c)}" inputmode="numeric"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
       <div class="tp-sect"><h3>۲. ماتریس کارشناس / پروژه <span>امتیاز ۱ تا ۵ — فقط طرف‌های موجود در میز</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:320px"><table class="tp-mx"><thead><tr><th>کارشناس</th>${parties.map((p) => `<th title="${esc(p)}">${esc(shortP(p))}</th>`).join("")}</tr></thead><tbody>
-        ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td>${parties.map((p) => `<td><input class="tp-input" data-p="${e.id}|${esc(p)}" value="${scoreOf(e.id, "party", p)}" inputmode="numeric"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۳. بار کاری فعلی <span>ظرفیت ${settings().capacity} درخواست باز</span></h3><div class="tp-scroll" style="max-height:320px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>درخواست باز</th><th>اشغال</th><th>ضریب اثر</th></tr></thead><tbody>
-        ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td><td class="num">${e.open_load || 0}</td><td><span class="bar-load"><i style="width:${Math.round(expertLoad(e) * 100)}%"></i></span> ${Math.round(expertLoad(e) * 100)}٪</td><td class="num">${(expertLoad(e) * 100 * (+A.c || 0) / 100).toFixed(1)}</td></tr>`).join("")}</tbody></table></div></div>
-      ${target ? `<div class="tp-note" style="margin-top:14px"><b>محاسبه کامل نمونه</b> — درخواست ${esc(target.id)} · ${esc(target.party)}<br>${scored.map((x, i) => `${i + 1}. <b>${esc(x.e.label || x.e.name)}</b> — امتیاز ${x.s.toFixed(1)} <span class="dim">(تخصص ${scoreOf(x.e.id, "category", reqCat(target))}/۵ · پروژه ${scoreOf(x.e.id, "party", target.party)}/۵ · اشغال ${Math.round(expertLoad(x.e) * 100)}٪)</span>`).join("<br>")}</div>` : ""}</div>`;
+        ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td>${parties.map((p) => `<td><input class="tp-input" data-p="${e.id}|${esc(p)}" value="${scoreOf(e.id, "party", p)}" inputmode="numeric"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div></div>`;
   }
 
   /* ---------- مهلت هوشمند ---------- */
   function vDeadline() {
     const E = S.data.experts.filter((e) => e.active), D = settings().deadline;
-    const pend = S.data.requests.filter((r) => r.assignments.some((a) => !a.dispatched_at));
-    const t = pend[0] || S.data.requests[0]; const e = t && t.assignments[0] ? E.find((x) => x.id === t.assignments[0].expert_id) || E[0] : E[0];
+    const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at).map((a) => ({ r, a })));
     const parties = [...new Set(S.data.requests.map((r) => r.party))];
     const opSel = (k, v) => `<select class="tp-select op" data-dl-op="${k}">${["×", "÷", "+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
     const shortP = (p) => p.replace(/^مرکز هزینه\s*/, "").slice(0, 30) + (p.length > 36 ? "…" : "");
+    needWorkload();
+    const plans = WL ? planDeadlines(list) : [];
+    const x0 = plans[0];
+    const preview = WL_ERR ? `<div class="tp-note warn">بار فعلی کارشناسان خوانده نشد: ${esc(WL_ERR)}</div>`
+      : !WL ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان…</div>`
+      : plans.length ? `<div class="tp-sect"><h3>پیش‌نمایش مهلت‌ها <span>${M(plans.length)} ارجاع ارسال‌نشده — با فرض تأیید همه</span></h3>
+        <div class="tp-scroll" data-keep-scroll style="max-height:360px"><table class="tp-mx"><thead><tr><th>درخواست</th><th>کارشناس</th><th>اقلام</th><th>فرمول</th><th>√اقلام</th><th>اشغال کارشناس</th><th>مهلت پیشنهادی</th></tr></thead><tbody>
+        ${plans.slice(0, 60).map((x) => `<tr><td class="num">${esc(x.r.id)}</td><td class="name">${esc(x.e.label || x.e.name)}</td><td class="num">${M(x.items)}</td>
+          <td class="num">${x.base.toFixed(2)}</td><td class="num">${x.size.toFixed(2)}</td><td class="num">${M(Math.round(x.pct))}٪${x.busy > 1 ? ` (× ${x.busy.toFixed(2)})` : ""}</td><td class="num"><b>${M(x.days)} روز</b></td></tr>`).join("")}
+        </tbody></table></div></div>` : "";
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-dl ${pend.length ? "" : "disabled"}>اعمال روی همه ارجاع‌های ارسال‌نشده (${pend.reduce((n, r) => n + r.assignments.filter((a) => !a.dispatched_at).length, 0)})</button>
-        ${t && e ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(t.id)}</b> · ${esc(e.label || e.name)} · گروه «${esc(reqCat(t))}» ⇒ <b>${smartDays(t, e)} روز کاری</b></span>` : ""}
+        <button class="tp-btn primary" data-apply-dl ${list.length && WL ? "" : "disabled"}>اعمال روی همه ارجاع‌های ارسال‌نشده (${list.length})</button>
+        ${x0 ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: فرمول ${x0.base.toFixed(2)} × √اقلام ${x0.size.toFixed(2)} × اشغال ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></span>` : ""}
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>مهلت هوشمند</h2><p class="lead">پیشنهاد تعداد روز مهلت بر اساس سرعت کارشناس، پروژه و گروه کالایی. نتیجه گرد و حداقل ۱ روز می‌شود.</p>
+      <h2>مهلت هوشمند</h2><p class="lead">مهلت هر ارجاع با فرض تأیید همهٔ ارجاع‌ها حساب می‌شود: فرمول زیر (پایه، سرعت کارشناس، ضریب پروژه، و میانگین ضریب گروه کالایی اقلام) × ریشهٔ دوم تعداد اقلام × ضریب اشغال کارشناس. اشغال، بار همهٔ ارجاع‌های باز اوست بر ظرفیتش؛ تا ظرفیت، ضریبش ۱ است و بالاتر از آن مهلت به همان نسبت بلندتر می‌شود. نتیجه گرد و حداقل ۱ روز است.</p>
       <div class="tp-formula"><span class="eq">مهلت (روز) =</span>
         <span class="term"><input class="tp-input" data-dl="base" value="${D.base}"> <b>پایه</b></span>${opSel("op1", D.op1)}
         <span class="term"><input class="tp-input" data-dl="we" value="${D.we}"> <b>ضریب کارشناس</b></span>${opSel("op2", D.op2)}
         <span class="term"><input class="tp-input" data-dl="wp" value="${D.wp}"> <b>ضریب پروژه</b></span>${opSel("op3", D.op3)}
-        <span class="term"><input class="tp-input" data-dl="wi" value="${D.wi}"> <b>ضریب گروه کالایی</b></span></div>
-      <div class="tp-sect"><h3>۱. سرعت انجام کار کارشناس <span>عدد کمتر یعنی سریع‌تر</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>ضریب</th></tr></thead><tbody>
+        <span class="term"><input class="tp-input" data-dl="wi" value="${D.wi}"> <b>ضریب گروه کالایی</b></span>
+        <span class="eq">× √تعداد اقلام × ضریب اشغال</span></div>
+      ${preview}
+      <div class="tp-sect"><h3>۱. سرعت انجام کار کارشناس <span>عدد کمتر یعنی سریع‌تر — ظرفیت هم به همان نسبت بیشتر</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>ضریب</th></tr></thead><tbody>
         ${E.map((x) => `<tr><td class="name">${esc(x.label || x.name)}</td><td><input class="tp-input" data-sp="${x.id}" value="${x.speed}"></td></tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۲. زمان موردنیاز گروه کالایی</h3><div class="tp-scroll" style="max-height:300px"><table class="tp-mx"><thead><tr><th>گروه کالایی</th><th>ضریب</th></tr></thead><tbody>
+      <div class="tp-sect"><h3>۲. زمان موردنیاز گروه کالایی <span>همین ضریب «سختی» قلم در ارجاع هوشمند است</span></h3><div class="tp-scroll" style="max-height:300px"><table class="tp-mx"><thead><tr><th>گروه کالایی</th><th>ضریب</th></tr></thead><tbody>
         ${CATS.map((c) => `<tr><td class="name">${c}</td><td><input class="tp-input" data-cw="${esc(c)}" value="${weightOf("category", c)}"></td></tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۳. زمان موردنیاز پروژه</h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>پروژه</th><th>ضریب</th></tr></thead><tbody>
+      <div class="tp-sect"><h3>۳. زمان موردنیاز پروژه <span>همین ضریب «اهمیت» پروژه در ارجاع هوشمند است</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>پروژه</th><th>ضریب</th></tr></thead><tbody>
         ${parties.map((p) => `<tr><td class="name" title="${esc(p)}">${esc(shortP(p))}</td><td><input class="tp-input" data-pw="${esc(p)}" value="${weightOf("party", p)}"></td></tr>`).join("")}</tbody></table></div></div></div>`;
   }
 
@@ -575,20 +713,30 @@
 
   /* ---------- اقدام‌های گروهی ---------- */
   async function applyAssignAll() {
-    const E = S.data.experts.filter((e) => e.active), pend = S.data.requests.filter((r) => unassignedOpen(r).length);
+    const pend = S.data.requests.filter((r) => unassignedOpen(r).length);
     if (!pend.length) return TP.modal("ارجاع هوشمند", "درخواستِ بی‌کارشناسی نیست.", null, "باشد", "");
     const b = TP.busy("اعمال ارجاع هوشمند…", `${pend.length} درخواست`); let n = 0;
-    for (const r of pend) { const best = E.map((e) => ({ e, s: asgScore(e, r) })).sort((x, y) => y.s - x.s)[0]; if (best) { await TP.api("/assign", { body: { request_id: r.id, expert_id: best.e.id } }); n++; b.set(`${n} از ${pend.length}`); } }
+    try {
+      await loadWorkload();
+      const P = planAssign(pend);
+      for (const p of P.plan) {
+        await TP.api("/assign", { body: { request_id: p.r.id, expert_id: p.e.id, item_ids: unassignedOpen(p.r).map((i) => i.id) } });
+        n++; b.set(`${n} از ${P.plan.length}`);
+      }
+    } catch (e) { b.close(); WL = null; await refresh(); return TP.modal("ارجاع هوشمند نیمه‌کاره ماند", `${n} درخواست ارجاع شد؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد. هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
+    TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد — توزیع با فرض تأیید همه متوازن شده است. هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
   }
   async function applyDeadlineAll() {
     const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at).map((a) => ({ r, a })));
     if (!list.length) return TP.modal("مهلت هوشمند", "ارجاع ارسال‌نشده‌ای نیست.", null, "باشد", "");
     const b = TP.busy("اعمال مهلت هوشمند…", `${list.length} ارجاع`); let n = 0;
-    for (const { r, a } of list) { const e = S.data.experts.find((x) => x.id === a.expert_id); if (!e) continue; await TP.api("/assign/days", { body: { assignment_id: a.id, days: smartDays(r, e) } }); n++; b.set(`${n} از ${list.length}`); }
+    try {
+      await loadWorkload();
+      for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days } }); n++; b.set(`${n} از ${list.length}`); }
+    } catch (e) { b.close(); await refresh(); return TP.modal("مهلت هوشمند نیمه‌کاره ماند", `${n} ارجاع مهلت گرفت؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاع ارسال‌نشده مهلت پیشنهادی گذاشته شد.`, null, "باشد", "");
+    TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاع ارسال‌نشده مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها.`, null, "باشد", "");
   }
   function doDispatch() {
     const list = readyAssignments(); const by = {};

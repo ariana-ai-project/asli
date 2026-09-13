@@ -15,7 +15,17 @@ import { ExtractError } from "./extract.js";
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const AI_URL = "https://api.anthropic.com/v1/messages";
 
-export const LETTER_PROMPT_VERSION = "letter/2.0";
+export const LETTER_PROMPT_VERSION = "letter/2.1";
+
+/* مخاطب و موضوع نامه را سامانه می‌گذارد، نه مدل (تصمیم مدیر):
+   مخاطب همیشه همین است و موضوع «گزارش خرید» + عنوانِ اقلامی که کارشناس بعد از
+   توضیحاتش انتخاب می‌کند، با «و» میانشان. «با تشکر» هم ته نامه، سمت چپ. */
+export const LETTER_TO = "مدیر محترم کمیسیون معاملات، جناب دکتر صفری";
+export const LETTER_THANKS = "با تشکر";
+export const letterSubject = (titles) => {
+  const list = [...new Set((titles || []).map((t) => String(t == null ? "" : t).trim()).filter(Boolean))];
+  return `گزارش خرید ${list.join(" و ")}`.trim();
+};
 
 /**
  * صوت را به متن فارسی تبدیل می‌کند.
@@ -45,14 +55,12 @@ export async function transcribe(env, fileUrl) {
 const LETTER_SCHEMA = {
   type: "object",
   properties: {
-    subject: { type: "string", description: "موضوع نامه، یک سطر، بدون کلمهٔ «موضوع»" },
-    to: { type: "string", description: "مخاطب، مثلاً «کمیسیون محترم خرید شرکت تونل سد آریانا»" },
     salutation: { type: "string", description: "با سلام و احترام،" },
     paragraphs: { type: "array", items: { type: "string" }, description: "بدنهٔ نامه، هر بند یک عضو آرایه. دو تا چهار بند." },
-    closing: { type: "string", description: "جملهٔ پایانی و درخواست اقدام" },
+    closing: { type: "string", description: "جملهٔ پایانی و درخواست اقدام — بدون «با تشکر»" },
     uncertain: { type: "array", items: { type: "string" }, description: "چیزهایی که در صوت مبهم بود و در نامه نیاوردی" },
   },
-  required: ["subject", "to", "salutation", "paragraphs", "closing"],
+  required: ["salutation", "paragraphs", "closing"],
   additionalProperties: false,
 };
 
@@ -95,6 +103,7 @@ const LETTER_SYSTEM = `تو نامه‌های اداری یک شرکت پیما�
    کلمه‌های مرکب را هم با نیم‌فاصله بنویس: «تأمین‌کننده»، «پیش‌فاکتور»، «قیمت‌ها»، «می‌شود».
 
 ۱۰. تاریخ و شمارهٔ نامه را خودت در متن نیاور؛ جای آن‌ها فیلدهای بالای سربرگ است و سامانه پرشان می‌کند.
+    مخاطب، موضوع و «با تشکر» پایان نامه را هم سامانه می‌گذارد؛ هیچ‌کدام را ننویس و closing را با «با تشکر» تمام نکن.
 
 ۱۱. **هیچ عدد مالی یا شمارشی را خودت ننویس.** جمع مبلغ، قیمت، تعداد اقلام، شمارهٔ درخواست و تاریخ درخواست
    را با جای‌خالی بگذار؛ سامانه از دادهٔ خودش پرشان می‌کند. جای‌خالی‌های مجاز (دقیقاً همین شکل، با همان
@@ -201,7 +210,7 @@ export function fillLetter(letter, d) {
  * خروجی ساختاریافته است تا قالب Word بدون تجزیهٔ متن پرش کند.
  * مدل عدد نمی‌نویسد؛ جای‌خالی می‌گذارد و fillLetter پرش می‌کند.
  */
-export async function writeLetter(env, { transcript, request, items, quotes, allItems, notes, expert, company }) {
+export async function writeLetter(env, { transcript, request, items, quotes, allItems, notes, expert, company, subjectTitles }) {
   if (!env.ANTHROPIC_API_KEY) throw new ExtractError("کلید مدل ست نشده است.", 503);
 
   const d = letterData({ request, items, quotes, allItems });
@@ -242,8 +251,10 @@ export async function writeLetter(env, { transcript, request, items, quotes, all
   if (!use) throw new ExtractError("مدل نامه را ساختاریافته برنگرداند.", 502);
 
   const filled = fillLetter(use.input, d);
+  /* موضوع: اقلامی که کارشناس انتخاب کرد؛ اگر انتخابی نیامد، همان اقلامِ جدول کمیسیون */
+  const titles = subjectTitles && subjectTitles.length ? subjectTitles : d.items.map((i) => i.title);
   return {
-    letter: { ...filled.letter, signature: `کارشناس خرید — ${expert}` },
+    letter: { ...filled.letter, to: LETTER_TO, subject: letterSubject(titles), thanks: LETTER_THANKS, signature: `کارشناس خرید — ${expert}` },
     meta: {
       model: dd.model, prompt_version: LETTER_PROMPT_VERSION,
       tokens_in: dd.usage?.input_tokens, tokens_out: dd.usage?.output_tokens,

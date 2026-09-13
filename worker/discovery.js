@@ -2,15 +2,19 @@
  * جستجوی هوشمند تأمین‌کننده — پرامپت کشف + فراخوانی Claude API با جستجوی وب
  *
  * پرامپت از سند تحقیقی مدیر (supplier_discovery_prompt v1.0) آمده و این‌جا
- * بازبینی شده (v1.1):
- *   • مدل منطقه‌ای «یک مقصد + کشورهای همسایه» با مدل «بازارهای انتخابی» عوض شد —
- *     کارشناس چند بازار را تیک می‌زند (کشورهای محل پروژه + قطب‌های تجاری) و
- *     هرچه بیرون از آن‌هاست از دروازهٔ G3 رد می‌شود.
+ * بازبینی شده (v1.2):
+ *   • مدل منطقه‌ای «یک مقصد + کشورهای همسایه» با یک فهرست «بازار تأمین کالا» عوض
+ *     شد — کارشناس چند بازار را تیک می‌زند و هرچه بیرون از آن‌هاست از دروازهٔ G3 رد
+ *     می‌شود. بازارهای انتخابی هم‌ارزند؛ تنها برتری، نزدیکی به کشورِ تحویل است (C3).
  *   • ترجیح برند و مشخصات فنی و ملاحظات کارشناس ورودی صریح شدند.
  *   • نقشهٔ منابع و طرح شماره‌گذاری برای ترکمنستان، ازبکستان، چین، امارات و
  *     ترکیه اضافه شد (بازارهای قبلی فقط ایران/تاجیکستان/قزاقستان/ارمنستان بودند).
  *   • نسخهٔ ابزارها به web_search_20260209 / web_fetch_20260209 اصلاح شد و
  *     خروجی همان بلوک <result> تک‌JSON ماند تا بک‌اند قطعی پارس کند.
+ *   • مدل Sonnet 5 است. user_location فرستاده نمی‌شود: جستجوگر کشورهایی مثل ایران
+ *     را نمی‌پذیرد و کل درخواست را رد می‌کرد؛ محلی‌سازی از زبانِ کوئری‌ها می‌آید.
+ *   • پرامپت سیستم کش می‌شود و متن هر صفحهٔ خوانده‌شده سقف دارد؛ هزینهٔ واقعی هر
+ *     اجرا از usage حساب و کنار نتیجه ثبت می‌شود.
  *
  * اجرا یک فراخوانی است (نه دو مرحله‌ای): مدل خودش می‌گردد، می‌خواند و JSON را
  * در <result> می‌نویسد. اگر حلقهٔ ابزار سرور به سقفش برسد stop_reason=pause_turn
@@ -20,27 +24,29 @@
 import { HttpError } from "./http.js";
 
 const API_BASE = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
-const MODEL = "claude-opus-5";
-export const DISCOVERY_PROMPT_VERSION = "supplier-discovery/1.1";
+const MODEL = "claude-sonnet-5";
+export const DISCOVERY_PROMPT_VERSION = "supplier-discovery/1.2";
 
-/* بازارهای قابل انتخاب — کلیدها همانی است که فرانت و بات می‌فرستند */
+/* «بازار تأمین کالا» — یک فهرست، بی تفکیک محل پروژه و بازار تجاری.
+   کلیدها همانی است که فرانت و بات می‌فرستند. */
 export const MARKETS = [
-  { key: "IR", fa: "ایران", en: "Iran", kind: "project", langs: "fa" },
-  { key: "TJ", fa: "تاجیکستان", en: "Tajikistan", kind: "project", langs: "tg-Cyrl, ru" },
-  { key: "TM", fa: "ترکمنستان", en: "Turkmenistan", kind: "project", langs: "tk, ru" },
-  { key: "UZ", fa: "ازبکستان", en: "Uzbekistan", kind: "project", langs: "uz, ru" },
-  { key: "KZ", fa: "قزاقستان", en: "Kazakhstan", kind: "project", langs: "ru, kk" },
-  { key: "AM", fa: "ارمنستان", en: "Armenia", kind: "project", langs: "hy, ru, en" },
-  { key: "CN", fa: "چین", en: "China", kind: "hub", langs: "zh, en" },
-  { key: "AE", fa: "امارات", en: "United Arab Emirates", kind: "hub", langs: "en, ar" },
-  { key: "TR", fa: "ترکیه", en: "Turkey", kind: "hub", langs: "tr, en" },
+  { key: "IR", fa: "ایران", en: "Iran", langs: "fa" },
+  { key: "TJ", fa: "تاجیکستان", en: "Tajikistan", langs: "tg-Cyrl, ru" },
+  { key: "TM", fa: "ترکمنستان", en: "Turkmenistan", langs: "tk, ru" },
+  { key: "UZ", fa: "ازبکستان", en: "Uzbekistan", langs: "uz, ru" },
+  { key: "KZ", fa: "قزاقستان", en: "Kazakhstan", langs: "ru, kk" },
+  { key: "AM", fa: "ارمنستان", en: "Armenia", langs: "hy, ru, en" },
+  { key: "CN", fa: "چین", en: "China", langs: "zh, en" },
+  { key: "AE", fa: "امارات", en: "United Arab Emirates", langs: "en, ar" },
+  { key: "TR", fa: "ترکیه", en: "Turkey", langs: "tr, en" },
 ];
 const marketOf = (k) => MARKETS.find((m) => m.key === k);
 
-const DEFAULTS = { MAX_CANDIDATES: 12, MIN_CANDIDATES: 5, SEARCH_BUDGET: 14, FETCH_BUDGET: 12 };
+/* FETCH_TOKENS سقف متن هر صفحه است (کاتالوگ‌ها بلندند)؛ MAX_TOKENS جای فکر کردن و JSON دوازده تأمین‌کننده را دارد */
+const DEFAULTS = { MAX_CANDIDATES: 12, MIN_CANDIDATES: 5, SEARCH_BUDGET: 14, FETCH_BUDGET: 12, FETCH_TOKENS: 12000, MAX_TOKENS: 32000 };
 
 /* ------------------------------------------------------------------ */
-/* پرامپت سیستم (v1.1)                                                  */
+/* پرامپت سیستم (v1.2)                                                  */
 /* ------------------------------------------------------------------ */
 const SYSTEM = `
 You are a procurement research analyst working for a heavy-civil construction contractor. Your job is to discover candidate suppliers for one purchase item inside the buyer's selected target markets, extract their contact details exactly as published, gather the evidence a buyer needs to judge whether each supplier is real and reachable, and rank them for the buyer's first contact.
@@ -73,8 +79,8 @@ Notes on inputs:
 - item_context is optional. When present it contains the item's taxonomy path, internal code and known attributes. Use it to build better queries; never let it override what the item_name plainly says.
 - brand_preference is optional. When present, the buyer prefers this brand: include the brand (and its local transliterations) in your queries, actively look for the brand's manufacturer sales channel and authorized distributors in the target markets, and treat an authorized channel of this brand as the best possible supplier_role. Still report strong non-brand suppliers of the same item — the buyer compares.
 - tech_specs and buyer_notes are the buyer's own words (mostly Persian). Respect hard constraints stated there (e.g. "فقط تولیدکننده", a required standard or size); treat soft wishes as ranking hints, and say in the summary if a constraint could not be satisfied.
-- target_markets is the closed list of markets in scope. Each line is one market with its kind: "project_country" (a country where the buyer's projects operate) or "trade_hub" (a major sourcing market). A supplier physically located outside every listed market fails gate G3 — do not spend budget on it beyond recognizing it is out of scope.
-- delivery_hint, when present, names the buyer entity or project the purchase is for; use it only as a soft proximity hint inside a market, never as a filter.
+- target_markets is the closed list of supply markets the buyer selected; every listed market is equally in scope. A supplier physically located outside every listed market fails gate G3 — do not spend budget on it beyond recognizing it is out of scope.
+- delivery_hint, when present, names the buyer entity or project the purchase is for (often a cost centre whose name includes a site or town). Use it to infer the delivery country when that is reasonably clear, and only as a soft proximity hint — never as a filter.
 - Budgets are hard caps. Plan to finish well inside them.
 
 <definitions>
@@ -90,10 +96,10 @@ Supplier role (assign exactly one, with evidence):
 Source type (each piece of evidence carries one):
 - own_website · b2b_directory · classifieds_listing · marketplace_storefront · map_listing · registry · social_channel · news_or_other.
 
-Market tier of a supplier (by its physical location, not its delivery claims):
-- T1 — located in a listed project_country market.
-- T2 — located in a listed trade_hub market.
+Market scope of a supplier (by its physical location, not its delivery claims):
+- in_scope — located in one of the listed target_markets.
 - out_of_scope — located anywhere else (fails G3; list under "excluded").
+Delivery-country match: true when the supplier is located in the country where the goods will be delivered (inferred from delivery_hint), false when it is in another listed market, null when the delivery country cannot be determined.
 
 Contact gating: a platform shows the phone only after a click or login ("اطلاعات تماس", "Показать телефон", "Numarayı göster", "Call"). You cannot perform that click. Record gated contacts as gated — never as absent, never as a guessed number.
 </definitions>
@@ -115,7 +121,7 @@ Tajikistan (tg-Cyrl and ru; Tajik is Persian in Cyrillic — the same item and f
 - Registry: andoz.tj Unified State Register (EIN, INN, status, registration date).
 
 Turkmenistan (tk and ru; the sparsest web of these markets):
-- Independent supplier websites are rare; expect state-linked firms, regional B2B boards and cross-border sellers from the listed hub markets. Query in Russian first.
+- Independent supplier websites are rare; expect state-linked firms, regional B2B boards and cross-border sellers from the other listed markets. Query in Russian first.
 - Treat any result with a single unverifiable source as low-confidence and say so; do not pad the list to reach min_candidates from this market.
 
 Uzbekistan (uz-Latn, uz-Cyrl and ru):
@@ -133,16 +139,16 @@ Armenia (hy, ru, en; registry records are Armenian-only):
 - Directories: spyur.am (trilingual card: address, several phones, departmental contacts, website, socials, founding year, staff band), yell.am, 2gis.am.
 - Registry: e-register.moj.am, src.am taxpayer search.
 
-China (zh primary, en on export platforms; a trade_hub — expect export-oriented suppliers):
+China (zh primary, en on export platforms; expect export-oriented suppliers):
 - B2B: 1688.com (domestic wholesale, Chinese, CNY — strongest for factory-direct), alibaba.com and made-in-china.com and globalsources.com (export-facing, English). Platform badges (years, verified/gold supplier, transaction volume) are meaningful platform_profile evidence but are not registry evidence.
 - Registry: the national enterprise credit publicity system (gsxt.gov.cn) for legal name and status when a Chinese legal name is known.
 - Contact is often platform-mediated chat; capture WhatsApp/WeChat/email when printed. Beware trade-lead spam sites; apply the listicle rule strictly.
 
-United Arab Emirates (en, ar; a trade_hub and re-export market):
+United Arab Emirates (en, ar; a re-export market):
 - Trade directories and classifieds vary in quality; prefer the supplier's own site and official licence data. The National Economic Register (ner.economy.ae) verifies licence/legal name; Dubai DED licence lookup for Dubai firms.
 - Many Gulf "supplier" pages are brokers — role evidence matters more than presence.
 
-Turkey (tr, en; a trade_hub with strong manufacturing):
+Turkey (tr, en; strong manufacturing):
 - Classifieds/marketplace: sahibinden.com (phones gated), industrial B2B boards.
 - Directories/verification: TOBB industry database (sanayi.tobb.org.tr), Trade Registry Gazette (ticaretsicil.gov.tr) for legal name and registration.
 - Manufacturers commonly have own websites in tr+en with export departments; query "üretici"/"toptan" plus the item.
@@ -170,12 +176,12 @@ Work through the phases in order. Think before each phase and after each batch o
 Phase 0 — Understand the item and build queries.
 1. Restate the item in one line: what it is, the spec that matters (grade, size, brand, part number), and the item family. Use item_context, brand_preference and tech_specs.
 2. Build 4–8 short queries (under 5 words each — short queries return more, long ones return nothing) in the local language(s) of each target market first, then Russian for CIS markets, then English. Combine the item term with one supplier-role word and, where useful, a market/city name. Include local spellings and transliterations. If brand_preference is set, add brand+item and brand+"نمایندگی"/"дилер"/"bayi"/"distributor" queries. For a branded machine part, also query the OEM part number and the machine model plus "запчасти"/"قطعات"/"yedek parça".
-3. Split the search budget deliberately across the selected markets: every project_country market gets at least one dedicated query before any market gets a third. Hubs are searched after project countries unless the item is plainly import-only.
+3. Split the search budget deliberately across the selected markets: every listed market gets at least one dedicated query before any market gets a third. When the delivery country is known and listed, search it first; otherwise follow the order of target_markets.
 
 Phase 1 — Broad discovery (start wide, then narrow).
 4. Run the broad queries. From each result set, harvest candidate supplier names and URLs from every source type. Do not stop at the first page of one platform.
 5. Source quality rule: prefer a supplier's own site, an official directory card, a registry record or a platform seller profile over content farms, "top 10 suppliers" listicles, SEO aggregator pages and unverifiable trade-lead sites. Listicles may name candidates but are never evidence for any field.
-6. Stop discovery when two consecutive searches return only suppliers you already have, or when you have reached max_candidates with at least min_candidates in project_country markets, or when half the search budget is used — whichever comes first. Keep the remaining budget for Phase 2 and Phase 4.
+6. Stop discovery when two consecutive searches return only suppliers you already have, or when you have reached max_candidates and every listed market has had its dedicated query, or when half the search budget is used — whichever comes first. Keep the remaining budget for Phase 2 and Phase 4.
 
 Phase 2 — Candidate deep-dive (one fetch per candidate, two at most).
 7. Own website: fetch the contact page ("تماس با ما", "Контакты", "İletişim", "联系我们", "Կապ", "Contact") or the home page and read the footer, the about page and the product page that shows the item. Look for an organization block, trust seals, a registry number, founding year, certificates, named clients and projects.
@@ -220,19 +226,19 @@ Two-step screening rank: hard gates first (qualification), then a weighted score
 Hard gates — a candidate that fails any gate is listed under "excluded" with the reason and is not scored:
 - G1 relevance: the supplier demonstrably offers this item or the item's immediate family with a matching spec (and does not contradict a hard constraint in tech_specs/buyer_notes).
 - G2 identity: at least one of own website, registry record, directory card, or platform seller profile with a name.
-- G3 market: located in a listed target market (T1 or T2).
+- G3 market: located in one of the listed target_markets.
 - G4 reachability: at least one contact channel, gated counts.
 
 Scored criteria, each 0–4, then weighted:
 - C1 item_fit (25): 4 = exact item and spec (and brand, when brand_preference is set) shown for sale on the supplier's own page; 3 = exact item on a platform listing; 2 = item family with the spec plausible; 1 = category only; 0 = weak.
 - C2 supplier_role (15): 4 = manufacturer, or authorized distributor of the preferred brand; 3 = wholesaler/importer (or authorized distributor of another brand); 2 = retailer shop; 1 = marketplace-only seller; 0 = broker/unknown.
-- C3 market_fit (15): bulk or heavy items (cement, aggregates, rebar, sections, pipe): 4 = T1, 1 = T2. Other items: 4 = T1, 3 = T2. Within a tier, proximity to delivery_hint is a soft tie-break.
+- C3 market_fit (15): bulk or heavy items (cement, aggregates, rebar, sections, pipe): 4 = located in the delivery country, 2 = another listed market, 3 = delivery country unknown. Other items: 4 = delivery country, 3 = another listed market or delivery country unknown. Within the same score, proximity to delivery_hint is a soft tie-break.
 - C4 reachability (15): 4 = verified mobile AND at least one of landline/email, plus address; 3 = verified mobile or verified landline + email; 2 = one verified channel; 1 = messenger handle only or all contacts gated; 0 = none.
 - C5 legitimacy (15): 4 = registry identifier or official licence/seal AND consistency across 2+ independent source types; 3 = one of those; 2 = own website with full address and a founding year; 1 = platform profile with business flag and 2+ years; 0 = none.
 - C6 track_record (10): 4 = named projects/clients AND recognised certificate or 20+ recent reviews; 3 = one of those; 2 = some reviews or a long active history; 1 = claims without evidence; 0 = none.
 - C7 freshness (5): 4 = dated activity in the last 6 months; 3 = 12 months; 2 = 24 months; 1 = older; 0 = undated.
 
-Score = Σ (weight × sub-score / 4), range 0–100. Ties: higher C4, then higher C5, then T1 before T2.
+Score = Σ (weight × sub-score / 4), range 0–100. Ties: higher C4, then higher C5, then a delivery-country match first.
 Present the ranking as a screening order for first contact; state explicitly that price, quality and lead time are not assessed.
 </ranking>
 
@@ -255,7 +261,7 @@ Return exactly one <result> block containing a single JSON object and nothing el
     {
       "rank": 1,
       "name": "", "name_variants": [""], "role": "manufacturer|authorized_distributor|wholesaler_importer|retailer_shop|marketplace_only|broker_intermediary|unknown", "role_evidence": {"quote": "", "source_url": ""},
-      "location": {"country": "", "province": "", "city": "", "tier": "T1|T2"},
+      "location": {"country": "", "province": "", "city": "", "delivery_country_match": null},
       "item_match": {"level": "exact_spec|exact_item|family|category", "brand_match": "preferred_brand|other_brand|unbranded|unknown", "quote": "", "source_url": ""},
       "website": null,
       "phones": [{"verbatim": "", "e164": "", "type": "mobile|landline|unparsed", "channels": ["voice"], "verification": "verified|unverified|gated", "source_url": "", "source_type": ""}],
@@ -299,7 +305,7 @@ const fill = (tpl, vars) => tpl.replace(/\{\{(\w+)\}\}/g, (_, k) => (vars[k] == 
 
 export function buildPrompt(p) {
   const markets = (p.markets && p.markets.length ? p.markets : ["IR"]).map(marketOf).filter(Boolean);
-  const marketLines = markets.map((m) => `- ${m.en} (${m.kind === "project" ? "project_country" : "trade_hub"}; languages: ${m.langs})`).join("\n");
+  const marketLines = markets.map((m) => `- ${m.en} (languages: ${m.langs})`).join("\n");
   const ctx = [
     p.code2 ? `internal_item_code: ${p.code2}` : null,
     p.itemCode ? `rahkaran_item_code: ${p.itemCode}` : null,
@@ -320,9 +326,7 @@ export function buildPrompt(p) {
   };
   const system = fill(SYSTEM, vars);
   const user = `Find suppliers for «${p.item}» inside the selected target markets, following the system instructions, and finish with the single <result> JSON block.`;
-  /* user_location جستجو: اولین کشورِ محل پروژهٔ انتخابی؛ اگر فقط قطب تجاری انتخاب شده، همان */
-  const loc = (markets.find((m) => m.kind === "project") || markets[0] || { key: "IR" }).key;
-  return { system, user, vars, userLocation: loc };
+  return { system, user, vars };
 }
 
 /* <result> آخر را درمی‌آورد و JSON را می‌خواند؛ اگر بستهٔ تمیز نبود، بین اولین { و آخرین } */
@@ -342,46 +346,80 @@ export function parseResult(text) {
   return null;
 }
 
+/* قیمت فهرستی هر میلیون توکن به دلار — برای برآورد هزینهٔ هر اجرا از usage واقعی.
+   کش: خواندن ۰٫۱ و نوشتن ۱٫۲۵ برابرِ ورودی. جستجوی وب ۱۰ دلار برای هر هزار جستجو؛
+   خواندن صفحه هزینهٔ جدا ندارد و فقط توکن‌هایش حساب می‌شود. */
+const PRICES = { "claude-sonnet-5": { in: 2, out: 10 }, "claude-opus-5": { in: 5, out: 25 } };
+const SEARCH_USD = 0.01;
+
+export function runCost(model, u) {
+  const p = PRICES[model] || PRICES[MODEL];
+  const tokens = (u.input || 0) * p.in + (u.output || 0) * p.out
+    + (u.cacheRead || 0) * p.in * 0.1 + (u.cacheWrite || 0) * p.in * 1.25;
+  return Math.round((tokens / 1e6 + (u.searches || 0) * SEARCH_USD) * 1000) / 1000;
+}
+
 /**
  * یک اجرای کامل کشف. حلقهٔ سرورِ ابزارها اگر به سقفش برسد pause_turn می‌دهد؛
  * طبق مستندات باید همان messages به‌علاوهٔ پاسخ ناتمام دوباره فرستاده شود —
  * بدون پیام «ادامه بده» — تا از همان‌جا ادامه دهد.
+ *
+ * user_location عمداً فرستاده نمی‌شود: جستجوگر فقط بعضی کشورها را می‌پذیرد و
+ * برای ایران کل درخواست را با «Country code IR is not supported» رد می‌کرد.
  */
 export async function runDiscovery(env, p) {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError("کلید مدل روی این پروژه ست نشده است.", 503);
-  const { system, user, userLocation } = buildPrompt(p);
-  const tools = [
-    { type: env.WEB_SEARCH_TOOL || "web_search_20260209", name: "web_search",
-      max_uses: p.searchBudget || DEFAULTS.SEARCH_BUDGET,
-      user_location: { type: "approximate", country: userLocation } },
-    { type: env.WEB_FETCH_TOOL || "web_fetch_20260209", name: "web_fetch",
-      max_uses: p.fetchBudget || DEFAULTS.FETCH_BUDGET },
+  const { system, user } = buildPrompt(p);
+  const model = env.DISCOVERY_MODEL || MODEL;
+  /* سقف متن هر صفحه اختیاری است؛ اگر API نپذیرفتش، یک بار بی آن */
+  let capFetch = true;
+  const tools = () => [
+    { type: env.WEB_SEARCH_TOOL || "web_search_20260209", name: "web_search", max_uses: p.searchBudget || DEFAULTS.SEARCH_BUDGET },
+    { type: env.WEB_FETCH_TOOL || "web_fetch_20260209", name: "web_fetch", max_uses: p.fetchBudget || DEFAULTS.FETCH_BUDGET,
+      ...(capFetch ? { max_content_tokens: DEFAULTS.FETCH_TOKENS } : {}) },
   ];
   const messages = [{ role: "user", content: user }];
-  let usage = { input: 0, output: 0 };
-  let content = null;
+  const usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, searches: 0, fetches: 0 };
+  let content = null, stop = null;
 
-  for (let round = 0; round < 5; round++) {
+  for (let round = 0; round < 8; round++) {
     const r = await fetch(API_BASE(env), {
       method: "POST",
       headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({ model: env.DISCOVERY_MODEL || MODEL, max_tokens: 16000, system, tools, messages }),
+      body: JSON.stringify({
+        model, max_tokens: DEFAULTS.MAX_TOKENS,
+        /* پرامپت سیستم ثابت است و کش می‌شود؛ ابزارهای سرور بعد از هر نتیجه خودشان نقطهٔ کش می‌گذارند */
+        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+        tools: tools(), messages,
+      }),
     });
     const d = await r.json().catch(() => ({}));
     if (!r.ok) {
-      const msg = (d && d.error && d.error.message) || `خطای ${r.status}`;
-      throw new HttpError(`جستجوی هوشمند شکست خورد: ${String(msg).slice(0, 300)}`, r.status === 429 ? 429 : 502);
+      const msg = String((d && d.error && d.error.message) || `خطای ${r.status}`);
+      if (r.status === 400 && capFetch && /max_content_tokens/i.test(msg)) { capFetch = false; round--; continue; }
+      throw new HttpError(`جستجوی هوشمند شکست خورد: ${msg.slice(0, 300)}`, r.status === 429 ? 429 : 502);
     }
-    if (d.usage) { usage.input += d.usage.input_tokens || 0; usage.output += d.usage.output_tokens || 0; }
-    content = d.content || [];
-    if (d.stop_reason !== "pause_turn") break;
+    const u = d.usage || {}, st = u.server_tool_use || {};
+    usage.input += u.input_tokens || 0; usage.output += u.output_tokens || 0;
+    usage.cacheRead += u.cache_read_input_tokens || 0; usage.cacheWrite += u.cache_creation_input_tokens || 0;
+    usage.searches += st.web_search_requests || 0; usage.fetches += st.web_fetch_requests || 0;
+    content = d.content || []; stop = d.stop_reason;
+    if (stop !== "pause_turn") break;
     messages.push({ role: "assistant", content });
   }
 
   const text = (content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
   const result = parseResult(text);
-  if (!result) throw new HttpError("پاسخ مدل قالب <result> نداشت؛ دوباره اجرا کنید.", 502);
-  return { result, usage, model: env.DISCOVERY_MODEL || MODEL, promptVersion: DISCOVERY_PROMPT_VERSION };
+  if (!result) {
+    throw new HttpError(stop === "max_tokens"
+      ? "خروجی مدل از سقف طول گذشت و نیمه ماند؛ بازار کمتری تیک بزنید یا دوباره اجرا کنید."
+      : "پاسخ مدل قالب <result> نداشت؛ دوباره اجرا کنید.", 502);
+  }
+  /* اگر usage شمار جستجو را نداد، همان عددی که مدل گزارش کرده */
+  const req = result.request || {};
+  if (!usage.searches && req.searches_used) usage.searches = +req.searches_used || 0;
+  if (!usage.fetches && req.fetches_used) usage.fetches = +req.fetches_used || 0;
+  return { result, usage, model, promptVersion: DISCOVERY_PROMPT_VERSION, cost: runCost(model, usage) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -399,10 +437,12 @@ export async function smartSearch(env, it, ex, params, channel) {
     deliveryHint: T(params.deliveryHint),
   };
   const out = await runDiscovery(env, p);
-  const t = Date.now();
-  const r = await env.DB.prepare(`INSERT INTO smart_searches (item_id,assignment_id,expert_id,params_json,result_json,model,prompt_version,in_tokens,out_tokens,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .bind(it.id, it.aid || null, ex ? ex.id : null, JSON.stringify(p), JSON.stringify(out.result), out.model, out.promptVersion, out.usage.input, out.usage.output, t).run();
+  const t = Date.now(), u = out.usage;
+  const r = await env.DB.prepare(`INSERT INTO smart_searches (item_id,assignment_id,expert_id,params_json,result_json,model,prompt_version,
+      in_tokens,out_tokens,cache_read,cache_write,searches,fetches,cost_usd,created_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(it.id, it.aid || null, ex ? ex.id : null, JSON.stringify(p), JSON.stringify(out.result), out.model, out.promptVersion,
+      u.input, u.output, u.cacheRead, u.cacheWrite, u.searches, u.fetches, out.cost, t).run();
   /* اجرای واقعی جستجو همان انجامِ مرحله است */
   await env.DB.batch([
     env.DB.prepare("UPDATE items SET smart_done_at=COALESCE(smart_done_at,?) WHERE id=?").bind(t, it.id),
@@ -411,7 +451,7 @@ export async function smartSearch(env, it, ex, params, channel) {
       .bind(t, ex ? `expert:${ex.id}` : "system", "smart", it.request_id || null, it.id,
         JSON.stringify({ assignment_id: it.aid || null, search_id: r.meta.last_row_id, suppliers: (out.result.suppliers || []).length, channel: channel || "panel" })),
   ]);
-  return { search_id: r.meta.last_row_id, result: out.result, model: out.model, usage: out.usage, created_at: t };
+  return { search_id: r.meta.last_row_id, result: out.result, model: out.model, usage: u, cost: out.cost, created_at: t };
 }
 
 export async function lastSearch(env, itemId) {
@@ -420,8 +460,10 @@ export async function lastSearch(env, itemId) {
   let result = null, params = null;
   try { result = JSON.parse(row.result_json); } catch (_) { /* خراب */ }
   try { params = JSON.parse(row.params_json); } catch (_) { /* خراب */ }
-  return { search_id: row.id, result, params, created_at: row.created_at, model: row.model };
+  return { search_id: row.id, result, params, created_at: row.created_at, model: row.model, cost: row.cost_usd, usage: usageOf(row) };
 }
+
+const usageOf = (row) => ({ input: row.in_tokens, output: row.out_tokens, cacheRead: row.cache_read, cacheWrite: row.cache_write, searches: row.searches, fetches: row.fetches });
 
 export async function searchById(env, id) {
   const row = await env.DB.prepare("SELECT * FROM smart_searches WHERE id=?").bind(id).first();

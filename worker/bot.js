@@ -19,7 +19,7 @@ import { runExtraction, extractFor, saveExtraction, applyExtraction } from "./pr
 import { transcribe, writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { bundleData, buildFiles, readiness } from "./bundle.js";
-import { commissionHtml } from "./sheets.js";
+import { commissionXlsx } from "./sheets.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
@@ -793,7 +793,7 @@ async function setField(env, q, field, value) {
   const v = value == null || value === "" ? null : (field === "qty" || field === "price" ? Number(value) : String(value));
   const t = now();
   if (PER_SUPPLIER.includes(field)) {
-    await env.DB.prepare(`UPDATE quotes SET ${field}=?, saved=0, updated_at=? WHERE assignment_id=? AND supplier_name=?`)
+    await env.DB.prepare(`UPDATE quotes SET ${field}=?${field === "invoice" ? ", invoice_src='manual'" : ""}, saved=0, updated_at=? WHERE assignment_id=? AND supplier_name=?`)
       .bind(v, t, q.assignment_id, q.supplier_name).run();
   } else {
     await env.DB.prepare(`UPDATE quotes SET ${field}=?, saved=0, updated_at=? WHERE id=?`).bind(v, t, q.id).run();
@@ -919,7 +919,6 @@ async function tableSelect(env, api, chat, ex, aid, messageId, head) {
   return { ok: true };
 }
 
-const XLS_MIME = "application/vnd.ms-excel";
 
 /**
  * ساختن و فرستادن جدول کمیسیون. هیچ مدلی در کار نیست — همان کدِ مکانیکیِ
@@ -935,7 +934,7 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   const finals = d.quotes.filter((q) => q.final && q.saved);
   if (!finals.length) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
 
-  const body = commissionHtml({ ...d, notes: d.assignment.notes });
+  const body = await commissionXlsx({ ...d, notes: d.assignment.notes });
   const t = now();
   /* تولید جدول = مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند. باکس مدیر
      همین‌جا سبز می‌شود، نه بعد از تحویل فایل‌ها. هشدارهای مانده هم بی‌معنی‌اند. */
@@ -949,7 +948,7 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
 
   let sent = true;
   try {
-    await api.sendDocument(chat, `کمیسیون-${d.request.id}.xls`, new Blob([body], { type: XLS_MIME }),
+    await api.sendDocument(chat, `کمیسیون-${d.request.id}.xlsx`, body,
       `📊 <b>جدول مقایسه استعلام بها — ${esc(d.request.id)}</b>\n${M(finals.length)} خط · ${M(st.suppliers)} تأمین‌کننده`);
   } catch (e) { sent = false; }
 
@@ -1512,15 +1511,15 @@ async function smartPrefsCard(env, api, chat, ex, itemId) {
 function smartPrefsText(d) {
   const names = (d.markets || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، ") || "—";
   return `🔎 <b>جستجوی هوشمند «${esc(short(d.title || "", 40))}»</b>\n\n`
-    + `🌍 بازارهای هدف: <b>${esc(names)}</b>\n`
+    + `🌍 بازار تأمین کالا: <b>${esc(names)}</b>\n`
     + `🏷 برند: ${d.brand ? `<b>${esc(d.brand)}</b>` : "—"}\n`
     + `📋 مشخصات فنی: ${d.specs ? esc(short(d.specs, 80)) : "—"}\n`
     + `📝 ملاحظات: ${d.notes ? esc(short(d.notes, 80)) : "—"}\n\n`
-    + "قیدها را تنظیم کنید و «اجرای جستجو» را بزنید؛ بازارها مهم‌ترین قیدند.";
+    + "قیدها را تنظیم کنید و «اجرای جستجو» را بزنید؛ بازار تأمین کالا مهم‌ترین قید است.";
 }
 function smartPrefsKb(fid) {
   return [
-    [{ text: "🌍 بازارهای هدف", callback_data: `sf:${fid}:mk:0` }],
+    [{ text: "🌍 بازار تأمین کالا", callback_data: `sf:${fid}:mk:0` }],
     [{ text: "🏷 برند", callback_data: `sf:${fid}:br:0` }, { text: "📋 مشخصات فنی", callback_data: `sf:${fid}:sp:0` }],
     [{ text: "📝 ملاحظات", callback_data: `sf:${fid}:no:0` }],
     [{ text: "▶️ اجرای جستجو", callback_data: `sf:${fid}:go:0` }],
@@ -1537,50 +1536,99 @@ async function smartPrefsRender(env, api, chat, f, d, mid) {
   return { ok: true };
 }
 async function smartMarketMenu(env, api, chat, f, d, mid) {
-  const kb = MARKETS.map((m2, i) => [{ text: `${(d.markets || []).includes(m2.key) ? "☑" : "☐"} ${m2.fa}${m2.kind === "hub" ? " (بازار تجاری)" : ""}`, callback_data: `sf:${f.id}:m:${i}` }]);
+  const kb = MARKETS.map((m2, i) => [{ text: `${(d.markets || []).includes(m2.key) ? "☑" : "☐"} ${m2.fa}`, callback_data: `sf:${f.id}:m:${i}` }]);
   kb.push([{ text: "→ بازگشت", callback_data: `sf:${f.id}:back:0` }]);
-  const text = "🌍 بازارهای هدف را تیک بزنید — کشورهای محل پروژه و بازارهای تجاری. هرچه بیرون از این‌ها باشد در نتایج نمی‌آید.";
+  const text = "🌍 <b>بازار تأمین کالا</b> — هر بازاری که تأمین‌کننده از آن پذیرفتنی است را تیک بزنید. هرچه بیرون از این‌ها باشد در نتایج نمی‌آید.";
   const edited = mid ? await api.editMessageText(chat, mid, text, kb).catch(() => null) : null;
   if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
   return { ok: true };
 }
 
-async function smartRunAndSend(env, api, chat, ex, d) {
-  const it = await smartItemOf(env, ex.id, d.itemId);
-  if (!it) { await api.sendMessage(chat, "قلم جستجو دیگر پیدا نمی‌شود.").catch(() => {}); return { ok: true }; }
-  const out = await smartSearch(env, it, ex, { markets: d.markets, brand: d.brand, specs: d.specs, notes: d.notes, deliveryHint: it.party }, "telegram");
-  const R = out.result, sup = R.suppliers || [];
+/**
+ * نتیجهٔ یک جستجو را در یک پیام می‌فرستد. خودِ اجرا در صف انجام شده
+ * (runSmartJobs)؛ این‌جا فقط قالب‌بندی است و متن زیر سقف ۴۰۹۶ نویسهٔ تلگرام می‌ماند.
+ */
+async function smartResultsMessage(env, api, chat, ex, it, params, out) {
+  const R = out.result || {}, sup = R.suppliers || [];
+  const markets = ((params && params.markets) || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، ");
   if (!sup.length) {
     await api.sendMessage(chat, `🔎 <b>جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n\n${esc(R.summary_fa || "تأمین‌کنندهٔ قابل‌قبولی در بازارهای انتخابی پیدا نشد.")}`).catch(() => {});
     return { ok: true };
   }
-  const line = (s, i) => {
-    const loc = [s.location && s.location.city, s.location && s.location.country].filter(Boolean).join("، ");
-    const mob = (s.mobile_numbers || []).slice(0, 2).join(" · ");
-    const land = (s.phones || []).filter((p) => p.type === "landline").slice(0, 1).map((p) => p.e164 || p.verbatim).join("");
-    const mail = (s.emails || []).slice(0, 1).map((e) => e.verbatim).join("");
-    const msgr = (s.messengers || []).slice(0, 1).map((m2) => `${m2.platform}: ${m2.handle_or_link}`).join("");
-    return `${M(i + 1)}. <b>${esc(short(s.name, 38))}</b> — ${esc(ROLE_FA_BOT[s.role] || s.role || "؟")}${loc ? ` · ${esc(loc)}` : ""}${s.scores && s.scores.total != null ? ` · امتیاز ${M(Math.round(s.scores.total))}` : ""}\n`
+  const line = (s2, i) => {
+    const loc = [s2.location && s2.location.city, s2.location && s2.location.country].filter(Boolean).join("، ");
+    const mob = (s2.mobile_numbers || []).slice(0, 2).join(" · ");
+    const land = (s2.phones || []).filter((p) => p.type === "landline").slice(0, 1).map((p) => p.e164 || p.verbatim).join("");
+    const mail = (s2.emails || []).slice(0, 1).map((e) => e.verbatim).join("");
+    const msgr = (s2.messengers || []).slice(0, 1).map((m2) => `${m2.platform}: ${m2.handle_or_link}`).join("");
+    return `${M(i + 1)}. <b>${esc(short(s2.name, 38))}</b> — ${esc(ROLE_FA_BOT[s2.role] || s2.role || "؟")}${loc ? ` · ${esc(loc)}` : ""}${s2.scores && s2.scores.total != null ? ` · امتیاز ${M(Math.round(s2.scores.total))}` : ""}\n`
       + (mob ? `   📱 <code>${esc(mob)}</code>\n` : "")
       + (land ? `   ☎️ <code>${esc(land)}</code>\n` : "")
       + (mail ? `   ✉️ <code>${esc(mail)}</code>\n` : "")
       + (!mob && !land && !mail && msgr ? `   💬 ${esc(msgr)}\n` : "")
-      + (s.contact_gated ? "   🔒 <i>بخشی از تماس‌ها پشت کلیک/ورود است — در پنل ببینید</i>\n" : "");
+      + (s2.contact_gated ? "   🔒 <i>بخشی از تماس‌ها پشت کلیک/ورود است — در پنل ببینید</i>\n" : "");
   };
-  const text = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n`
-    + `${M(sup.length)} تأمین‌کننده در ${esc((d.markets || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، "))}\n\n`
-    + `${esc(R.summary_fa || "")}\n\n`
-    + sup.slice(0, 8).map(line).join("")
-    + (sup.length > 8 ? `\n<i>و ${M(sup.length - 8)} مورد دیگر — در پنل</i>\n` : "")
-    + "\n<i>قیمت و کیفیت سنجیده نشده‌اند؛ این فقط ترتیبِ تماس اول است.</i>";
+  let text = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n`
+    + `${M(sup.length)} تأمین‌کننده در ${esc(markets || "—")}`
+    + (out.cost != null ? ` · هزینهٔ تقریبی ${M(Number(out.cost).toFixed(2))} دلار` : "") + "\n\n"
+    + `${esc(short(R.summary_fa || "", 900))}\n\n`;
+  let shown = 0;
+  for (const [i, s2] of sup.entries()) {
+    const l = line(s2, i);
+    if (text.length + l.length > 3700) break;
+    text += l; shown++;
+  }
+  if (shown < sup.length) text += `\n<i>و ${M(sup.length - shown)} مورد دیگر — در پنل</i>\n`;
+  text += "\n<i>قیمت و کیفیت سنجیده نشده‌اند؛ این فقط ترتیبِ تماس اول است.</i>";
   await api.sendMessage(chat, text).catch(() => {});
   await api.sendMessage(chat, "با نتایج چه کنم؟", [
-    [{ text: "➕ انتخاب برای استعلام", callback_data: `sq:${out.search_id}:open:0` }],
-    [{ text: "✉️ ارسال پیام به تأمین‌کننده", callback_data: `sg:${out.search_id}:open:0` }],
-    [{ text: "باز کردن پنل", url: PANEL_URL }],
+    [{ text: "➕ انتخاب جهت استعلام", callback_data: `sq:${out.search_id}:open:0` }],
+    [{ text: "✉️ انتخاب جهت ارسال پیام", callback_data: `sg:${out.search_id}:open:0` }],
   ]).catch(() => {});
   return { ok: true };
 }
+
+/* ------------------------------------------------------------------ */
+/* صف جستجوی هوشمند — Cron اجرایش می‌کند                                 */
+/*                                                                      */
+/* جستجو چند دقیقه طول می‌کشد. waitUntil بعد از پاسخ به تلگرام فقط ۳۰      */
+/* ثانیه فرصت می‌دهد، ولی اجرای Cron تا ۱۵ دقیقه. پس دکمهٔ «اجرا» فقط کار   */
+/* را در smart_jobs می‌نشاند و Cron هر دقیقه یک کار برمی‌دارد.             */
+/* ------------------------------------------------------------------ */
+const JOB_STALE = 16 * 60000;
+
+export async function runSmartJobs(env) {
+  const t = now();
+  const api = telegram(env);
+  /* کاری که از سقف Cron گذشته، مرده است — کارشناس بی‌خبر نمی‌ماند */
+  const stale = (await env.DB.prepare("SELECT id, chat_id FROM smart_jobs WHERE state='running' AND started_at<?").bind(t - JOB_STALE).all()).results || [];
+  for (const j of stale) {
+    await env.DB.prepare("UPDATE smart_jobs SET state='failed', error='timeout', finished_at=? WHERE id=?").bind(t, j.id).run();
+    await api.sendMessage(j.chat_id, "❌ جستجوی هوشمند در زمان مجاز تمام نشد؛ دوباره اجرا کنید (بازار کمتری تیک بزنید).").catch(() => {});
+  }
+  /* برداشتنِ اتمیِ یک کار: دو اجرای هم‌زمان هرگز یک کار را دو بار نمی‌گیرند */
+  const claimed = (await env.DB.prepare(
+    `UPDATE smart_jobs SET state='running', started_at=? WHERE id=(SELECT id FROM smart_jobs WHERE state='queued' ORDER BY id LIMIT 1) AND state='queued' RETURNING *`,
+  ).bind(t).all()).results || [];
+  const job = claimed[0];
+  if (!job) return { jobs: 0, stale: stale.length };
+  try {
+    const ex = await env.DB.prepare("SELECT id, name, label FROM experts WHERE id=?").bind(job.expert_id).first();
+    const it = ex ? await smartItemOf(env, ex.id, job.item_id) : null;
+    if (!it) throw new Error("این قلم دیگر در دسترس شما نیست.");
+    const params = JSON.parse(job.params_json || "{}");
+    const out = await smartSearch(env, it, ex, { ...params, deliveryHint: it.party }, "telegram");
+    await env.DB.prepare("UPDATE smart_jobs SET state='done', search_id=?, finished_at=? WHERE id=?").bind(out.search_id, now(), job.id).run();
+    await smartResultsMessage(env, api, job.chat_id, ex, it, params, out);
+    return { jobs: 1, stale: stale.length };
+  } catch (e) {
+    const msg = String((e && e.message) || e).slice(0, 300);
+    await env.DB.prepare("UPDATE smart_jobs SET state='failed', error=?, finished_at=? WHERE id=?").bind(msg, now(), job.id).run();
+    await api.sendMessage(job.chat_id, `❌ جستجوی هوشمند انجام نشد: ${esc(msg.slice(0, 200))}`).catch(() => {});
+    return { jobs: 1, failed: 1, stale: stale.length };
+  }
+}
+
 const ROLE_FA_BOT = {
   manufacturer: "تولیدکننده", authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده",
   retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
@@ -1951,11 +1999,19 @@ async function onCallback(env, cq, ctx) {
     }
     if (step === "go") {
       if (!(d.markets || []).length) { await ack("دست‌کم یک بازار انتخاب کنید.", true); return { ok: true }; }
-      await ack("جستجو شروع شد");
-      await env.DB.prepare("UPDATE tg_flows SET step='running', done_at=? WHERE id=?").bind(now(), f.id).run();
-      await api.sendMessage(chat, "⏳ جستجوی هوشمند شروع شد؛ مدل در بازارهای انتخابی می‌گردد و صفحه‌ها را می‌خواند. معمولاً چند دقیقه طول می‌کشد — نتیجه همین‌جا می‌آید.").catch(() => {});
-      const job = smartRunAndSend(env, api, chat, ex, d).catch((e) => api.sendMessage(chat, `❌ جستجو انجام نشد: ${esc(String(e && e.message || e).slice(0, 200))}`).catch(() => {}));
-      if (ctx && ctx.waitUntil) ctx.waitUntil(job); else await job;
+      const it = await smartItemOf(env, ex.id, d.itemId);
+      if (!it) { await ack("این قلم دیگر در دسترس نیست.", true); return { ok: true }; }
+      /* اجرا در صف: Cron برش می‌دارد (runSmartJobs) — waitUntil برای کار چنددقیقه‌ای کوتاه است */
+      const t = now();
+      await env.DB.batch([
+        env.DB.prepare("UPDATE tg_flows SET step='queued', done_at=? WHERE id=?").bind(t, f.id),
+        env.DB.prepare("INSERT INTO smart_jobs (item_id,assignment_id,expert_id,chat_id,params_json,state,created_at) VALUES (?,?,?,?,?,'queued',?)")
+          .bind(it.id, it.aid, ex.id, String(chat), JSON.stringify({ markets: d.markets, brand: d.brand || "", specs: d.specs || "", notes: d.notes || "" }), t),
+      ]);
+      await ack("در صف اجرا");
+      const note = `🔎 <b>جستجوی هوشمند «${esc(short(d.title || it.title, 40))}»</b>\n\n⏳ در صف اجرا گذاشته شد. اجرا تا یکی-دو دقیقه شروع می‌شود و معمولاً چند دقیقه طول می‌کشد؛ نتیجه همین‌جا می‌آید.`;
+      if (mid) await api.editMessageText(chat, mid, note).catch(() => api.sendMessage(chat, note).catch(() => {}));
+      else await api.sendMessage(chat, note).catch(() => {});
       return { ok: true };
     }
     await ack(); return { ok: true };
@@ -2364,15 +2420,24 @@ async function onChatMember(env, m) {
  * یک اجرای زمان‌بندی‌شده. سقف‌ها محافظه‌کارانه‌اند چون در پلن رایگان هر فراخوانی
  * ۵۰ subrequest دارد و هر کوئری D1 و هر sendMessage یکی از آن‌هاست.
  */
-export async function scheduled(env) {
-  const a = await runAlerts(env, 15);
-  /* رنگ‌های پایش را می‌سنجد و تغییرها را برای مدیر به صف می‌گذارد. پیش از
-     drain است تا اگر چیزی تازه به صف آمد، در همین اجرا برود. */
-  let w = { checked: 0, changed: 0 };
-  try {
-    const [settings, managerChat] = await Promise.all([getSettings(env), settingValue(env, "managerChat")]);
-    w = await stageWatch(env, settings, managerChat, 40);
-  } catch (e) { console.error("stageWatch failed", e && e.message); }
-  const d = await drainOutbox(env, 20);
-  return { ...a, ...d, watched: w.checked, colorChanges: w.changed };
+export async function scheduled(env, cron) {
+  /* Cron هر دقیقه می‌زند. دقیقه‌های مضرب ۵: چرخهٔ هشدار، پایش رنگ‌ها و صف پیام (مثل
+     قبل). بقیهٔ دقیقه‌ها: یک کار از صف جستجوی هوشمند. جدا ماندنشان سقف ۵۰ زیردرخواستِ
+     هر اجرا را حفظ می‌کند. اجرای دستی (/tg/tick، بدون cron) هر دو را می‌زند. */
+  const heavy = !cron || new Date().getUTCMinutes() % 5 === 0;
+  let out = {};
+  if (heavy) {
+    const a = await runAlerts(env, 15);
+    /* رنگ‌های پایش را می‌سنجد و تغییرها را برای مدیر به صف می‌گذارد. پیش از
+       drain است تا اگر چیزی تازه به صف آمد، در همین اجرا برود. */
+    let w = { checked: 0, changed: 0 };
+    try {
+      const [settings, managerChat] = await Promise.all([getSettings(env), settingValue(env, "managerChat")]);
+      w = await stageWatch(env, settings, managerChat, 40);
+    } catch (e) { console.error("stageWatch failed", e && e.message); }
+    const d = await drainOutbox(env, 20);
+    out = { ...a, ...d, watched: w.checked, colorChanges: w.changed };
+  }
+  if (!cron || !heavy) out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
+  return out;
 }

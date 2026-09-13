@@ -20,7 +20,7 @@
   const VATS = ["دارد", "ندارد"], VAT_RATE = 0.1;
   const REQT = ["عادی", "فوری"], DEALT = ["خرید", "فروش"];
   /* فیلدهای استعلام: [کلید, عنوان, عرض, نوع, اختیاری؟]
-     اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی).
+     اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض غیررسمی؛ با خواندن پیش‌فاکتور، رسمی).
      اختیاری: مشخصات فنی، اعتبار، روش حمل، محل معامله، محل تحویل — خالی بودنشان مانع ثبت موقت نیست. */
   const QF = [["spec", "جنس / مشخصات فنی", 170, "", true], ["unit", "واحد", 70], ["qty", "مقدار", 80, "num"], ["price", "قیمت واحد (ریال)", 130, "num"],
               ["dtime", "زمان تحویل", 116, "date"], ["valid_days", "اعتبار پیش‌فاکتور (روز)", 100, "num", true], ["ship", "روش حمل", 130, "", true]];
@@ -31,21 +31,21 @@
   /* ---------- وضعیت ---------- */
   const S = {
     screen: "login", now: Date.now(), expert: TP.session.get(),
-    tray: [], settings: null, error: "",
+    tray: [], settings: null, error: "", traySort: false,
     d: null,               // جزئیات ارجاع باز: {assignment, request, items, quotes, proformas, pendingDecisions}
     itemIdx: 0, tab: "history",
     q: { id: "", date: "", party: "", item: "" },
     hsort: "m",                           // ستون مرتب‌سازی جدول سوابق: m (گشتاور) | qty | n
-    chart: false,                         // نمودار روند خرید باز است؟
     mom: 5,                               // ضریب اهمیت گشتاور (۱ تا ۱۰) — از localStorage پر می‌شود
     prof: null,                           // کلید تأمین‌کننده‌ای که کارتش باز است
     sm: { markets: ["IR"], brand: "", specs: "", notes: "" },   // قیدهای جستجوی هوشمند
     smProf: null,                          // تأمین‌کنندهٔ بازشده در نتایج جستجو
-    marketsMeta: [{ key: "IR", fa: "ایران", kind: "project" }, { key: "TJ", fa: "تاجیکستان", kind: "project" }, { key: "TM", fa: "ترکمنستان", kind: "project" }, { key: "UZ", fa: "ازبکستان", kind: "project" }, { key: "KZ", fa: "قزاقستان", kind: "project" }, { key: "AM", fa: "ارمنستان", kind: "project" }, { key: "CN", fa: "چین", kind: "hub" }, { key: "AE", fa: "امارات", kind: "hub" }, { key: "TR", fa: "ترکیه", kind: "hub" }],
+    marketsMeta: [{ key: "IR", fa: "ایران" }, { key: "TJ", fa: "تاجیکستان" }, { key: "TM", fa: "ترکمنستان" }, { key: "UZ", fa: "ازبکستان" }, { key: "KZ", fa: "قزاقستان" }, { key: "AM", fa: "ارمنستان" }, { key: "CN", fa: "چین" }, { key: "AE", fa: "امارات" }, { key: "TR", fa: "ترکیه" }],
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
   };
+  try { S.traySort = localStorage.getItem("tp.traySort") === "1"; } catch (_) { /* حالت خصوصی */ }
   const settings = () => S.settings || CFG.defaults;
   const A = () => S.d && S.d.assignment;
   const items = () => (S.d ? S.d.items : []);
@@ -78,8 +78,12 @@
   function trayRows() {
     return S.tray.filter((a) => TP.hit(a.request_id, S.q.id) && (!dateList().length || dateList().includes(a.date)) && TP.hit(a.party, S.q.party));
   }
+  /* ساعت کاری مانده تا مهلت — منفی یعنی مهلت گذشته */
+  const trayLeft = (a) => TP.budget(a.dispatched_at, a.days || 1) - TP.wh(a.dispatched_at, S.now);
   function vList() {
     const rows = trayRows();
+    /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
+    if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
     return `<div class="tp-wrap" style="padding-bottom:20px"><div class="tp-card">
       <div class="tp-filters" style="border-top:0;border-radius:16px 16px 0 0">
         <span class="lab">شماره درخواست</span><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" style="width:120px">
@@ -88,7 +92,8 @@
         <button class="tp-btn sm" data-clr>پاک کردن</button>
         <span class="end">${rows.length} از ${S.tray.length} · خاتمه‌یافته، معلق و متوقف در کارتابل نیستند</span></div>
       <div class="tp-scroll" style="border:0;border-radius:0 0 16px 16px"><table class="tp-table" style="width:100%"><thead><tr>
-        <th>شماره درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>اقلام باز</th><th>مهلت</th><th>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th></tr></thead><tbody>
+        <th>شماره درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>اقلام باز</th><th>مهلت</th>
+        <th><button class="sortbtn ${S.traySort ? "on" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th></tr></thead><tbody>
         ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
           const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
           return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
@@ -155,7 +160,8 @@
   const HSORT = { m: "rankM", qty: "rankQty", n: "rankN" };
   const CHART_COLORS = ["#4f8cff", "#ff8c42", "#22c55e", "#e5484d", "#a78bfa", "#f2c230", "#2dd4bf", "#f472b6", "#93c5fd", "#fb923c", "#86efac", "#fca5a5"];
 
-  const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]);
+  const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]
+    || (b.qtyM || 0) - (a.qtyM || 0) || String(a.name).localeCompare(String(b.name), "fa"));
 
   /* کارت تأمین‌کننده — بالای جدول، با کلیک روی نام باز می‌شود */
   function vProfile(it) {
@@ -169,7 +175,7 @@
       <div class="gridp">
         ${f("دفعات خرید این قلم", `${M(p.n)} بار (رتبه ${M(p.rankN)})`, "num")}
         ${f("جمع مقدار", `${M(RQ(p.qty))}${unit} (رتبه ${M(p.rankQty)})`, "num")}
-        ${f("امتیاز گشتاوری", `${p.mshare.toFixed(1)}٪ (رتبه ${M(p.rankM)})`, "num")}
+        ${f("امتیاز گشتاوری", `${M(RQ(p.qtyM))}${unit} (رتبه ${M(p.rankM)})`, "num")}
         ${f("نخستین خرید", p.firstDate, "num")}${f("آخرین خرید", p.lastDate, "num")}
         ${f("قیمت واحد میانگین (۱۴۰۴)", p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
         ${f("کمینه / بیشینه قیمت واحد (۱۴۰۴)", p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
@@ -179,42 +185,82 @@
         : `راه‌های تماس این تأمین‌کننده هنوز در دفترچه ثبت نشده است. <span class="chip mock">دفترچهٔ تأمین‌کنندگان — مرحلهٔ بعد</span>`}</div></div>`;
   }
 
-  /* نمودار روند خرید: محور افقی زمان (از اولین تا آخرین تأمین این قلم)، محور
-     عمودی مقدار؛ هر خرید یک نقطه به رنگ تأمین‌کننده‌اش و نقاط هر تأمین‌کننده
-     با خط باریک هم‌رنگ به هم وصل‌اند تا روند کم/زیاد شدن خرید دیده شود. */
-  function vChart(it, d) {
+  /* نمودار روند خرید — پنجرهٔ بزرگ وسط صفحه. افقی: زمان از اولین تا آخرین تأمین، با
+     خط‌کش سال (بازهٔ بلند) یا ماه (بازهٔ کوتاه). عمودی: مقدار با گام‌های گرد (۱، ۲، ۲٫۵، ۵
+     × ۱۰ⁿ) که به مقیاس همان مقدارهای خریداری‌شده می‌خورد. هر خرید یک نقطه به رنگ
+     تأمین‌کننده‌اش و نقاط هر تأمین‌کننده با خط هم‌رنگ به هم وصل‌اند. */
+  const niceStep = (raw) => { const p = Math.pow(10, Math.floor(Math.log10(raw > 0 ? raw : 1))), f = raw / p; return (f <= 1 ? 1 : f <= 2 ? 2 : f <= 2.5 ? 2.5 : f <= 5 ? 5 : 10) * p; };
+  const jParts = (ms) => TP.fmtD(ms).split("/").map(Number);
+  const jMonth = (y, m) => TP.jStr2ms(`${y + Math.floor((m - 1) / 12)}/${((m - 1) % 12 + 12) % 12 + 1}/01`);
+
+  function chartBody(it, d) {
     const se = S.series[it.id];
-    if (se === "loading") return `<div class="tp-note">در حال خواندن نقاط نمودار…</div>`;
-    if (!se) return "";
-    const pts = (se.points || []).map((p) => ({ ...p, t: TP.jStr2ms(p.date) })).filter((p) => p.t != null && p.qty > 0);
+    if (se === "loading") return `<div class="empty">در حال خواندن نقاط نمودار…</div>`;
+    const pts = ((se && se.points) || []).map((p) => ({ ...p, t: TP.jStr2ms(p.date) })).filter((p) => p.t != null && p.qty > 0);
     if (!pts.length) return `<div class="tp-note warn">هیچ خرید مقدارداری برای نمودار نیست.</div>`;
     const by = new Map();
     for (const p of pts) { if (!by.has(p.key)) by.set(p.key, { name: p.name, pts: [] }); by.get(p.key).pts.push(p); }
-    const groups = [...by.values()].sort((a, b) => b.pts.reduce((s, x) => s + x.qty, 0) - a.pts.reduce((s, x) => s + x.qty, 0));
+    const groups = [...by.values()].sort((a, b) => b.pts.reduce((n, x) => n + x.qty, 0) - a.pts.reduce((n, x) => n + x.qty, 0));
     groups.forEach((g, i) => { g.color = CHART_COLORS[i % CHART_COLORS.length]; g.pts.sort((a, b) => a.t - b.t); });
-    const W = 920, H = 320, PL = 74, PR = 14, PT = 12, PB = 32;
-    const t0 = Math.min(...pts.map((p) => p.t)), t1 = Math.max(...pts.map((p) => p.t));
+
+    const W = 1200, H = 620, PL = 150, PR = 36, PT = 30, PB = 86, FS = 22;
+    const tMin = Math.min(...pts.map((p) => p.t)), tMax = Math.max(...pts.map((p) => p.t));
+    const [y0, m0] = jParts(tMin), [y1, m1] = jParts(tMax);
+    const span = (y1 - y0) * 12 + (m1 - m0) + 1;            /* ماه‌های درگیر */
+    let start, end;
+    const ticks = [];
+    if (span > 24) {
+      start = TP.jStr2ms(`${y0}/01/01`); end = TP.jStr2ms(`${y1 + 1}/01/01`);
+      const every = Math.max(1, Math.ceil((y1 + 1 - y0) / 12));
+      for (let y = y0; y <= y1 + 1; y += every) ticks.push({ t: TP.jStr2ms(`${y}/01/01`), lab: String(y) });
+    } else {
+      start = jMonth(y0, m0); end = jMonth(y1, m1 + 1);
+      const every = [1, 2, 3, 6].find((k) => span / k <= 12) || 12;
+      for (let k = 0; k <= span; k += every) { const t = jMonth(y0, m0 + k), [yy, mm] = jParts(t); ticks.push({ t, lab: `${yy}/${String(mm).padStart(2, "0")}` }); }
+    }
     const qMax = Math.max(...pts.map((p) => p.qty));
-    const X = (t) => (t1 === t0 ? PL + (W - PL - PR) / 2 : PL + (t - t0) / (t1 - t0) * (W - PL - PR));
-    const Y = (q) => H - PB - q / qMax * (H - PT - PB);
-    /* خط‌کش سال‌ها: فروردینِ هر سالِ داخل بازه؛ بازهٔ کوتاه فقط دو سرش را می‌گیرد */
-    const jy0 = +TP.fmtD(t0).slice(0, 4), jy1 = +TP.fmtD(t1).slice(0, 4);
-    let ticks = [];
-    for (let y = jy0; y <= jy1 + 1; y++) { const ms = TP.jStr2ms(`${y}/01/01`); if (ms != null && ms >= t0 && ms <= t1) ticks.push({ x: X(ms), lab: String(y) }); }
-    if (ticks.length < 2) ticks = [{ x: X(t0), lab: TP.fmtD(t0).slice(0, 7) }, { x: X(t1), lab: TP.fmtD(t1).slice(0, 7) }];
-    const AX = "#9fb2d8", GRID = "rgba(158,197,255,.13)";
-    let svg = `<svg viewBox="0 0 ${W} ${H}" style="width:100%;direction:ltr" xmlns="http://www.w3.org/2000/svg" role="img">`;
-    [0, .25, .5, .75, 1].forEach((fr) => { const y = Y(qMax * fr); svg += `<line x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}" stroke="${GRID}"/><text x="${PL - 6}" y="${y + 4}" fill="${AX}" font-size="11" text-anchor="end">${M(Math.round(qMax * fr))}</text>`; });
-    ticks.forEach((tk) => { svg += `<line x1="${tk.x}" x2="${tk.x}" y1="${PT}" y2="${H - PB}" stroke="${GRID}"/><text x="${tk.x}" y="${H - PB + 16}" fill="${AX}" font-size="11" text-anchor="middle">${tk.lab}</text>`; });
+    const step = niceStep(qMax / 5), yMax = Math.max(step, Math.ceil(qMax / step - 1e-9) * step);
+    const X = (t) => PL + (end > start ? (t - start) / (end - start) : 0.5) * (W - PL - PR);
+    const Y = (q) => H - PB - q / yMax * (H - PT - PB);
+    const AX = "#b8c7e6", GRID = "rgba(158,197,255,.16)";
+    const fmtQ = (v) => M(Math.round(v * 100) / 100);
+    let svg = `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg" role="img" font-family="Vazirmatn, Tahoma, sans-serif">`;
+    for (let k = 0; k * step <= yMax + step / 1000; k++) { const v = k * step, y = Y(v); svg += `<line x1="${PL}" x2="${W - PR}" y1="${y}" y2="${y}" stroke="${GRID}"/><text x="${PL - 14}" y="${y + FS / 3}" fill="${AX}" font-size="${FS}" text-anchor="end">${fmtQ(v)}</text>`; }
+    for (const tk of ticks) { const x = X(tk.t); svg += `<line x1="${x}" x2="${x}" y1="${PT}" y2="${H - PB}" stroke="${GRID}"/><text x="${x}" y="${H - PB + FS + 14}" fill="${AX}" font-size="${FS}" text-anchor="middle">${tk.lab}</text>`; }
+    svg += `<line x1="${PL}" x2="${W - PR}" y1="${H - PB}" y2="${H - PB}" stroke="${AX}" stroke-width="1.5"/><line x1="${PL}" x2="${PL}" y1="${PT}" y2="${H - PB}" stroke="${AX}" stroke-width="1.5"/>`;
     for (const g of groups) {
-      if (g.pts.length > 1) svg += `<polyline fill="none" stroke="${g.color}" stroke-width="1.3" opacity=".85" points="${g.pts.map((p) => `${X(p.t).toFixed(1)},${Y(p.qty).toFixed(1)}`).join(" ")}"/>`;
-      for (const p of g.pts) svg += `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.qty).toFixed(1)}" r="3.2" fill="${g.color}"><title>${esc(g.name)} — ${esc(p.date)} — ${M(p.qty)}</title></circle>`;
+      if (g.pts.length > 1) svg += `<polyline fill="none" stroke="${g.color}" stroke-width="2.5" opacity=".85" points="${g.pts.map((p) => `${X(p.t).toFixed(1)},${Y(p.qty).toFixed(1)}`).join(" ")}"/>`;
+      for (const p of g.pts) svg += `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.qty).toFixed(1)}" r="6.5" fill="${g.color}" stroke="#0b1730" stroke-width="1.5"><title>${esc(g.name)} — ${esc(p.date)} — ${fmtQ(p.qty)}</title></circle>`;
     }
     svg += `</svg>`;
     const unit = d && d.item && d.item.unit ? ` (${esc(d.item.unit)})` : "";
-    return `<div class="tp-note" style="display:block"><b>روند خرید این قلم</b> — افقی: زمان از ${esc(TP.fmtD(t0))} تا ${esc(TP.fmtD(t1))} · عمودی: مقدار${unit}. هر نقطه یک خرید است.
-      <div style="background:rgba(3,8,20,.5);border:1px solid var(--tp-line);border-radius:10px;margin-top:8px;padding:6px 4px">${svg}</div>
-      <div class="chlegend">${groups.map((g) => `<span><i style="background:${g.color}"></i>${esc(g.name)}</span>`).join("")}</div></div>`;
+    return `<div class="dim" style="font-size:1.05rem;margin-bottom:10px">افقی: زمان از ${esc(TP.fmtD(tMin))} تا ${esc(TP.fmtD(tMax))} · عمودی: مقدار${unit} · هر نقطه یک خرید است.</div>
+      ${svg}
+      <div class="chlegend">${groups.map((g) => `<span><i style="background:${g.color}"></i>${esc(g.name)}</span>`).join("")}</div>`;
+  }
+
+  function openChart(it) {
+    if (!it) return;
+    const d = S.hist[it.id];
+    const onKey = (ev) => { if (ev.key === "Escape") close(); };
+    function close() { const x = document.getElementById("tp-chart"); if (x) x.remove(); document.removeEventListener("keydown", onKey); }
+    function draw() {
+      const bg = document.getElementById("tp-chart"); if (!bg) return;
+      bg.innerHTML = `<div class="chart-box" role="dialog" aria-modal="true">
+        <div class="chart-head"><b>روند خرید «${esc(it.title)}»</b><button class="tp-btn" data-chart-close>بستن</button></div>
+        ${chartBody(it, d)}</div>`;
+      bg.querySelector("[data-chart-close]").onclick = close;
+    }
+    const old = document.getElementById("tp-chart"); if (old) old.remove();
+    const bg = document.createElement("div"); bg.id = "tp-chart"; bg.className = "chart-bg";
+    bg.onclick = (ev) => { if (ev.target === bg) close(); };
+    document.body.appendChild(bg);
+    document.addEventListener("keydown", onKey);
+    if (S.series[it.id] && S.series[it.id] !== "loading") { draw(); return; }
+    S.series[it.id] = "loading"; draw();
+    TP.api(`/suppliers/history/series?item_id=${it.id}`)
+      .then((r) => { S.series[it.id] = r; draw(); })
+      .catch((err) => { S.series[it.id] = null; close(); TP.modal("خطا", esc(err.message), null, "باشد", ""); });
   }
 
   function vHistory(it) {
@@ -227,7 +273,7 @@
         <b>ضریب اهمیت گشتاور</b>
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
-      <button class="tp-btn ${S.chart ? "primary" : ""}" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده">${S.chart ? "بستن نمودار" : "نمودار روند"}</button>
+      <button class="tp-btn" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده — در پنجرهٔ بزرگ وسط صفحه">نمودار روند</button>
       <button class="tp-btn primary" data-run-hist>${d ? "محاسبهٔ دوباره" : "جستجوی سوابق این قلم"}</button>
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>`;
 
@@ -242,7 +288,9 @@
 
     const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
-    const hd = (k, l) => `<th class="rkcol ${S.hsort === k ? "sorted" : ""}" data-hsort="${k}" title="برای مرتب‌سازی روی همین ستون کلیک کنید">${l}${S.hsort === k ? " ▾" : ""}</th>`;
+    /* رتبه در ستونِ باریکِ زردِ بعد از هر عدد؛ کلیک روی هر ستون رتبه، کل جدول را مرتب می‌کند */
+    const rk = (k) => `<th class="rkcol ${S.hsort === k ? "sorted" : ""}" data-hsort="${k}" title="مرتب‌سازی کل جدول بر اساس همین رتبه">رتبه${S.hsort === k ? " ▾" : ""}</th>`;
+    const rc = (k, v) => `<td class="rkcol num" data-hsort="${k}" title="مرتب‌سازی کل جدول بر اساس همین رتبه">${M(v)}</td>`;
     return `<div class="pad">
       ${vProfile(it)}
       ${head}
@@ -253,22 +301,21 @@
         <span class="chip info">تطبیق با ${MATCH[d.match.by] || esc(d.match.by)}${d.match.code2 ? ` · ${esc(d.match.code2)}` : ""}</span>
         ${d.item && d.item.mixedUnits ? `<span class="chip warn" title="جمع مقدار وقتی معنا دارد که واحد یکی باشد">واحدها یکدست نیستند: ${esc(d.item.units || "")}</span>` : ""}
         ${exc.map((x) => `<span class="chip warn" title="نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده">«${esc(x.name)}» کنار گذاشته شد — ${M(x.n)} خرید</span>`).join("")}</div>
-      ${S.chart ? vChart(it, d) : ""}
       <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
-        <th>انتخاب</th><th class="rt">تأمین‌کننده</th>${hd("n", "دفعات خرید")}${hd("qty", "مقدار")}<th>سهم</th>${hd("m", "امتیاز گشتاوری")}<th>خریدها</th></tr></thead><tbody>
+        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
           : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
         <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span></td>
-        <td class="num">${M(s.n)} <span class="rkp">(${M(s.rankN)})</span></td>
-        <td class="num">${M(RQ(s.qty))}${unit} <span class="rkp">(${M(s.rankQty)})</span></td>
+        <td class="num">${M(s.n)}</td>${rc("n", s.rankN)}
+        <td class="num">${M(RQ(s.qty))}${unit}</td>${rc("qty", s.rankQty)}
         <td class="num">${s.share.toFixed(1)}٪</td>
-        <td class="num" style="font-weight:700">${s.mshare.toFixed(1)}٪ <span class="rkp">(${M(s.rankM)})</span></td>
+        <td class="num" style="font-weight:700">${M(RQ(s.qtyM))}</td>${rc("m", s.rankM)}
         <td><button class="tp-btn xs" data-buys="${esc(s.key)}">${M(s.n)}</button></td></tr>`).join("")}
       </tbody></table></div>
-      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>گشتاور</b> است و قیمت در آن اثری ندارد؛ قیمت‌ها را در «خریدها» و کارت تأمین‌کننده ببینید.
-        «گشتاور» یعنی مقدارِ هر خرید با فاصلهٔ ماهانه‌اش تا <b>${esc(d.base.label)}</b> کم‌وزن شود — با ضریب ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ افت، و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد؛ پس تأمین‌کننده‌ای که تازه‌تر فروخته امتیاز گشتاوری بالاتری می‌گیرد.
-        سرستون‌های زرد قابل کلیک‌اند و ترتیب جدول را عوض می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
+      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>امتیاز گشتاوری</b> است و قیمت در آن اثری ندارد؛ قیمت‌ها را در «خریدها» و کارت تأمین‌کننده ببینید.
+        <b>امتیاز گشتاوری عدد است، نه درصد</b>: جمعِ مقدارِ هر خرید ضرب در ضریب تازگی‌اش. ضریب برای خرید در ${esc(d.base.label)} یک است و با هر ماه فاصله کم می‌شود — با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ — و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد؛ پس از دو مقدار برابر، آن‌که تازه‌تر فروخته امتیاز بالاتری دارد.
+        عددهای برابر رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). «سهم» رتبهٔ جدا ندارد چون همان رتبهٔ مقدار است. ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
   }
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
@@ -287,13 +334,6 @@
     render();
   }
 
-  /* نقاط نمودار از خودِ ضریب مستقل‌اند؛ یک بار برای هر قلم خوانده و نگه داشته می‌شوند */
-  async function loadSeries(it) {
-    S.series[it.id] = "loading"; render();
-    try { S.series[it.id] = await TP.api(`/suppliers/history/series?item_id=${it.id}`); }
-    catch (e) { S.series[it.id] = null; S.chart = false; TP.modal("خطا", esc(e.message), null, "باشد", ""); }
-    render();
-  }
 
   async function showBuys(key) {
     const it = item(), s = supOf(key); if (!s) return;
@@ -349,6 +389,8 @@
       `${esc(it.title)}<br><span class="dim">مدل در بازارهای انتخابی می‌گردد، صفحه‌ها را می‌خواند و تماس‌ها را استخراج می‌کند؛ ممکن است چند دقیقه طول بکشد. پنجره را نبندید.</span>`);
     try {
       const r = await TP.api("/search/smart", { body: { item_id: it.id, markets: S.sm.markets, brand: S.sm.brand, specs: S.sm.specs, notes: S.sm.notes, deliveryHint: S.d.request.party } });
+      /* پاسخ جریانی است: خطای وسط اجرا با وضعیت ۲۰۰ و فیلد error می‌آید */
+      if (r && r.error) throw Object.assign(new Error(r.error), { status: r.status });
       b.close();
       if (r.available === false) { S.smart[it.id] = null; return TP.modal("جستجوی هوشمند", esc(r.message), null, "باشد", ""); }
       S.smart[it.id] = r; S.smProf = null;
@@ -439,7 +481,7 @@
       };
       main = `${vSmartProf(d)}
         <div class="tp-note" style="display:block"><b>خلاصهٔ جستجو:</b> ${esc(R.summary_fa || "—")}
-          <div class="dim" style="font-size:.8rem;margin-top:6px">${M(sup.length)} تأمین‌کننده · ${M((R.request || {}).searches_used || 0)} جستجو و ${M((R.request || {}).fetches_used || 0)} صفحه · ${TP.fmt(d.created_at)}${exN ? ` · ${M(exN)} مورد ردشده (خارج از بازار یا بی‌هویت)` : ""} · قیمت و کیفیت سنجیده نشده‌اند — این فقط ترتیبِ تماس اول است.</div></div>
+          <div class="dim" style="font-size:.8rem;margin-top:6px">${M(sup.length)} تأمین‌کننده · ${M((d.usage && d.usage.searches) || (R.request || {}).searches_used || 0)} جستجو و ${M((d.usage && d.usage.fetches) || (R.request || {}).fetches_used || 0)} صفحه · ${TP.fmt(d.created_at)}${d.cost != null ? ` · هزینهٔ تقریبی این اجرا ${Number(d.cost).toFixed(2)} دلار` : ""}${exN ? ` · ${M(exN)} مورد ردشده (خارج از بازار یا بی‌هویت)` : ""} · قیمت و کیفیت سنجیده نشده‌اند — این فقط ترتیبِ تماس اول است.</div></div>
         <div class="tp-scroll" data-keep-scroll style="max-height:52vh"><table class="tp-table"><thead><tr>
           <th>رتبه</th><th class="rt">تأمین‌کننده</th><th>نقش</th><th>بازار</th><th class="rt">تماس</th><th class="rt">ایمیل</th><th>امتیاز</th><th>عمل</th></tr></thead><tbody>
         ${sup.map((s, i) => `<tr class="${S.smProf === i ? "sel" : ""}">
@@ -456,12 +498,11 @@
         </tbody></table></div>`;
     }
 
-    /* ستون قیدها — مهم‌ترین: بازارها */
-    const mk = (kind, label) => `<div class="grp"><b>${label}</b>${(S.marketsMeta || []).filter((x) => x.kind === kind).map((x) =>
+    /* ستون قیدها — مهم‌ترین قید، «بازار تأمین کالا»، یک فهرست است */
+    const markets = `<div class="grp"><b>بازار تأمین کالا</b>${(S.marketsMeta || []).map((x) =>
       `<label><input type="checkbox" data-smk="${x.key}" ${S.sm.markets.includes(x.key) ? "checked" : ""}> ${esc(x.fa)}</label>`).join("")}</div>`;
-    const side = `<div class="side"><h4>قیدهای جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها عیناً به مدل داده می‌شوند؛ بازارها قید سخت‌اند.</div>
-      ${mk("project", "بازارهای هدف — کشورهای محل پروژه")}
-      ${mk("hub", "بازارهای تجاری")}
+    const side = `<div class="side"><h4>قیدهای جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها عیناً به مدل داده می‌شوند؛ بازار تأمین کالا قید سخت است.</div>
+      ${markets}
       <div class="grp"><b>برند موردنظر <span class="dim" style="font-weight:400">(اختیاری)</span></b>
         <input class="tp-input" data-sm="brand" value="${esc(S.sm.brand)}" placeholder="مثلاً Komatsu" style="width:100%"></div>
       <div class="grp"><b>مشخصات فنی <span class="dim" style="font-weight:400">(اختیاری)</span></b>
@@ -479,7 +520,7 @@
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض رسمی). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
+        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض غیررسمی؛ با خواندن پیش‌فاکتور، رسمی). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
@@ -522,107 +563,95 @@
       ${g.miss.length ? `<div style="color:#fca5a5">مدیر حداقل <b>${g.need}</b> استعلام برای هر قلم باز را الزامی کرده. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${g.need})`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز حداقل ${g.need} استعلام دارند.</div>`}</div></div>`;
   }
 
-  /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ---------- */
+  /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ----------
+     پیش‌نمایش، دانلود و چاپ هر سه از سرور می‌آیند — از همان مدلی که فایل اکسل و Word را
+     می‌سازد — تا آنچه دیده و چاپ می‌شود عیناً همان فایل‌ها باشد. */
   function commData() {
-    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat }; sup.push(g); } g.rows[q.item_id] = q; });
+    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {} }; sup.push(g); } g.rows[q.item_id] = q; });
     return { sup };
+  }
+  const sheetsFor = () => (S.sheets && S.d && S.sheets.aid === A().id && S.sheets.at === S.d.loadedAt ? S.sheets : null);
+  async function loadSheets() {
+    const aid = A().id, at = S.d.loadedAt;
+    S.sheets = { aid, at, loading: true };
+    try {
+      const [rq, cm] = await Promise.all([TP.api(`/assignments/${aid}/sheet/request?format=html`), TP.api(`/assignments/${aid}/sheet/commission?format=html`)]);
+      if (S.sheets && S.sheets.aid === aid && S.sheets.at === at) S.sheets = { aid, at, rq, cm };
+    } catch (err) { S.sheets = { aid, at, error: err.message }; }
+    render();
   }
   function vComm() {
     const a = A(), r = S.d.request;
     if (!a.commission_at) return `<div class="pad"><div class="empty"><b>جدول کمیسیون هنوز ساخته نشده.</b>از تب استعلامات، تأمین‌کنندگان منتخب را «تأیید نهایی» کنید و «تولید جدول کمیسیون» را بزنید.</div></div>`;
     const d = commData();
     if (!d.sup.length) return `<div class="pad"><div class="empty">هیچ استعلام تأییدنهایی‌شده‌ای نیست.</div></div>`;
-    return `<div class="pad"><div class="toolrow noprint"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
-        <button class="tp-btn sm" data-xls style="margin-inline-start:auto">دانلود اکسل</button><button class="tp-btn sm" data-print>پرینت / PDF (برگه درخواست + جدول)</button></div>
-      <div class="tp-note noprint" style="display:block;margin-bottom:10px">
-        <b>توضیحات تدارکات و پشتیبانی</b> — این متن پای برگهٔ کمیسیون چاپ می‌شود. از بات تلگرام هم با <code>/tozihat</code> می‌توانید بنویسید.
-        <textarea class="tp-input" data-notes rows="3" maxlength="1500" placeholder="مثلاً: تأمین‌کندهٔ دوم زمان تحویل بهتری داشت ولی قیمتش بالاتر است…"
+    const sh = sheetsFor();
+    if (!sh) loadSheets();
+    const z = S.sheetZoom || 10;
+    const ready = sh && sh.rq && sh.cm;
+    return `<div class="pad"><div class="toolrow"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
+        <span style="margin-inline-start:auto"></span>
+        <button class="tp-btn sm" data-dl="commission">دانلود اکسل جدول کمیسیون</button>
+        <button class="tp-btn sm" data-dl="request">دانلود Word برگهٔ درخواست خرید</button>
+        <button class="tp-btn sm primary" data-print ${ready ? "" : "disabled"}>پرینت / PDF (برگه درخواست + جدول)</button></div>
+      <div class="tp-note" style="display:block;margin-bottom:10px">
+        <b>توضیحات تدارکات و پشتیبانی</b> — این متن در خانهٔ «توضیحات تدارکات و پشتیبانی» جدول کمیسیون می‌نشیند. از بات تلگرام هم در منوی «تولید جدول کمیسیون» با «درج توضیحات» می‌توانید بنویسید.
+        <textarea class="tp-input" data-notes rows="3" maxlength="1500" placeholder="مثلاً: تأمین‌کنندهٔ دوم زمان تحویل بهتری داشت ولی قیمتش بالاتر است…"
           style="width:100%;margin-top:8px;resize:vertical;font-family:inherit">${esc(a.notes || "")}</textarea>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
           <button class="tp-btn sm primary" data-save-notes>ذخیرهٔ توضیحات</button><span class="dim" data-notes-msg style="font-size:.85rem"></span></div>
       </div>
-      <div class="tp-scroll" style="max-height:64vh;background:#fff"><div id="printarea">${reqForm(r)}${commForm(r, d)}</div></div>
-      <div class="tp-note noprint">قالب مطابق فرم <b>TSA-PS-FO-02</b> و راست‌به‌چپ: ردیف و شرح اقلام سمت راست، بلوک هر تأمین‌کننده به سمت چپ. ارزش افزوده ۱۰٪. مبلغ کل هر سطر = قیمت واحد × تعداد. <b>قالب برگهٔ درخواست موقت است</b> و با فرمت راهکاران جایگزین می‌شود.</div></div>`;
-  }
-  function commForm(r, d) {
-    /* فقط قلم‌هایی که تأمین‌کنندهٔ تیک‌خورده برایشان قیمت داده — همان قاعدهٔ سرور */
-    const its = items().filter((it) => d.sup.some((g) => g.rows[it.id])), N = d.sup.length, span = 4 + 3 * N;
-    const mAll = [], mVat = [], mTot = [];
-    /* تأمین‌کننده‌ای که گفته ارزش افزوده ندارد، سطر ارزش افزوده‌اش صفر است */
-    d.sup.forEach((g) => { let t = 0; its.forEach((it) => { const q = g.rows[it.id]; if (q) t += (+q.price || 0) * (+q.qty || 0); }); const v = g.vat === "ندارد" ? 0 : Math.round(t * VAT_RATE); mAll.push(t); mVat.push(v); mTot.push(t + v); });
-    const B = (fn) => d.sup.map((g, k) => fn(g, k)).join("");
-    const chk = (v, t) => v === t ? "☑" : "☐", dealChk = (v) => d.sup.some((g) => g.deal === v) ? "☑" : "☐";
-    return `<table class="cf">
-      <tr><td class="ttl" colspan="4">مقایسه استعلام بها</td><td class="lbl rt" colspan="${3 * N}">کد: TSA-PS-FO-02 &nbsp; شماره بازنگری: ۱ &nbsp; تاریخ تنظیم سند: ${TP.fmtD(S.now)}</td></tr>
-      <tr><td class="rt" colspan="${4 + Math.max(0, N - 2) * 3}">محل معامله: ${dealChk("کارگاه")} کارگاه &nbsp; ${dealChk("دفتر مرکزی")} دفتر مرکزی</td>
-          <td class="rt" colspan="${Math.min(3 * N, 3)}">نوع معامله: ${chk(r.head_deal_type || "خرید", "خرید")} خرید &nbsp; ${chk(r.head_deal_type, "فروش")} فروش</td>
-          <td class="rt" colspan="${Math.max(1, span - 4 - Math.max(0, N - 2) * 3 - Math.min(3 * N, 3))}">نوع درخواست: ${chk(r.head_req_type, "فوری")} فوری &nbsp; ${chk(r.head_req_type || "عادی", "عادی")} عادی</td></tr>
-      <tr><td class="rt" colspan="2">شماره درخواست: ${esc(r.id)}</td><td class="rt" colspan="2">تاریخ درخواست خرید: ${esc(r.date)}</td>
-          <td class="rt" colspan="${Math.max(1, Math.floor(3 * N / 2))}">محل پروژه: ${esc(r.head_site == null ? r.party : r.head_site)}</td><td class="rt" colspan="${Math.max(1, 3 * N - Math.max(1, Math.floor(3 * N / 2)))}">تاریخ نیاز: ${esc((its[0] || {}).need_date || "—")}</td></tr>
-      <tr><td class="lbl" colspan="4">خریدار: ${COMPANY}</td><td class="lbl" colspan="${3 * N}">فروشنده / ارائه‌دهنده خدمات</td></tr>
-      <tr><td class="lbl">ردیف</td><td class="lbl">شرح اقلام</td><td class="lbl">تعداد</td><td class="lbl">واحد</td>${B((g) => `<td class="sup" colspan="3">${esc(g.name)}</td>`)}</tr>
-      <tr><td colspan="4"></td>${B(() => `<td class="lbl">جنس</td><td class="lbl">مبلغ کل (ریال)</td><td class="lbl">مبلغ واحد (ریال)</td>`)}</tr>
-      ${its.map((it, i) => `<tr><td class="num">${i + 1}</td><td class="rt">${esc(it.title)}</td><td class="num">${it.qty == null ? "" : M(it.qty)}</td><td>${esc(it.unit)}</td>
-        ${B((g) => { const q = g.rows[it.id]; const tot = q ? (+q.price || 0) * (+q.qty || 0) : ""; return `<td>${q ? esc(q.spec) : ""}</td><td class="num">${q ? M(tot) : ""}</td><td class="num">${q ? M(q.price) : ""}</td>`; })}</tr>`).join("")}
-      <tr><td class="lbl rt" colspan="4">جمع کل بدون ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3">${M(mAll[k])}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">ارزش افزوده (۱۰٪):</td>${B((g, k) => `<td class="num" colspan="3">${g.vat === "ندارد" ? "ندارد" : M(mVat[k])}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">جمع کل با ارزش افزوده (ریال):</td>${B((g, k) => `<td class="num" colspan="3" style="font-weight:700">${M(mTot[k])}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">نوع فاکتور و میزان مالیات و عوارض:</td>${B((g) => `<td colspan="3">${esc(g.invoice || "—")}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">مدت اعتبار پیش‌فاکتور:</td>${B((g) => `<td colspan="3">${g.valid ? esc(g.valid) + " روز" : "—"}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">شرایط تسویه:</td>${B((g) => `<td colspan="3">${esc(g.pay || "—")}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">زمان تحویل:</td>${B((g) => `<td colspan="3">${esc(g.dtime || "—")}</td>`)}</tr>
-      <tr><td class="lbl rt" colspan="4">تاییدیه فنی:</td>${B(() => `<td colspan="3">—</td>`)}</tr>
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر کارگاه:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">توضیحات تدارکات و پشتیبانی:${A().notes ? `<div style="font-weight:400;padding-top:4px;white-space:pre-wrap">${esc(A().notes)}</div>` : ""}</td></tr>
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">نظر واحد فنی:</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">نظر واحد حقوقی:</td></tr>
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 2)}">امضا کارشناس خرید: ${esc(S.expert.name)}</td><td class="rt" colspan="${span - Math.ceil(span / 2)}">امضا مدیر پشتیبانی:</td></tr>
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${Math.ceil(span / 3)}">عضو کمیسیون</td><td class="rt" colspan="${span - 2 * Math.ceil(span / 3)}">عضو کمیسیون</td></tr></table>`;
-  }
-  /* ستون‌های برگهٔ درخواست خرید، از راست به چپ — همان ترتیبِ فرم چاپی.
-     فایل Word هم دقیقاً همین‌هاست (worker/reqdoc.js)؛ اگر یکی عوض شد، آن یکی هم. */
-  const RQC = ["ردیف", "کد قلم", "نام قلم", "مقدار", "واحد", "تاریخ نیاز", "مصرف کننده", "وضعیت",
-    "تامین کننده", "کارشناس خرید", "روند خرید", "مهلت استعلام"];
-
-  /** تأمین‌کنندهٔ هر قلم از استعلامِ ثبت‌شده — ترجیح با تأییدنهایی */
-  function supplierOf(itemId) {
-    let best = null;
-    for (const q of S.d.quotes) {
-      if (q.item_id !== itemId || !q.saved) continue;
-      if (!best || (q.final && !best.final)) best = q;
-    }
-    return best ? best.supplier_name : "";
+      ${!sh || sh.loading ? `<div class="empty">در حال ساختن پیش‌نمایش برگه‌ها…</div>`
+        : sh.error ? `<div class="tp-note warn">پیش‌نمایش ساخته نشد: ${esc(sh.error)}</div>`
+        : `<div class="toolrow"><span class="dim" style="font-size:.85rem">بزرگ‌نمایی پیش‌نمایش</span><button class="tp-btn xs" data-zoom="-1">−</button><button class="tp-btn xs" data-zoom="1">+</button></div>
+        <style>${sh.rq.css}${sh.cm.css}</style>
+        <div class="sheetview" data-keep-scroll>
+          <div class="sheetpage" style="--u:${(z * 0.42).toFixed(2)}px">${sh.rq.html}</div>
+          <div class="sheetpage" style="font-size:${z}px">${sh.cm.html}</div></div>`}
+      <div class="tp-note">پیش‌نمایش، فایل اکسل و فایل Word از یک مدل ساخته می‌شوند و عیناً قالب فرم‌های شرکت‌اند: جدول کمیسیون مثل «مقایسه استعلام بها» (TSA-PS-FO-02) و برگهٔ درخواست مثل چاپ راهکاران. پرینت هر برگه را در یک صفحهٔ A4 افقی جا می‌دهد؛ برای PDF در پنجرهٔ چاپ «Save as PDF» را انتخاب کنید.</div></div>`;
   }
 
-  function reqForm(r) {
-    const a = A(), its = items(), N = RQC.length;
-    const deadline = a.deadline_at ? TP.fmtD(a.deadline_at) : "";
-    const note = [...new Set(its.map((i) => (i.note || "").trim()).filter(Boolean))].join(" · ");
-    /* هر سطرِ کادر مشخصات باید دقیقاً ${N} ستون بشود، وگرنه جدول کج می‌نشیند:
-       برچسب(۱) + مقدار(۳) + برچسب(۲) + مقدار(۳) + جای خالی(۳) */
-    const pair = (k, v, kw, vw) => `<td class="lbl rt" colspan="${kw}">${esc(k)}</td><td class="rt" colspan="${vw}">${esc(v == null || v === "" ? "—" : v)}</td>`;
-    const info = (k1, v1, k2, v2) => `<tr>${pair(k1, v1, 1, 3)}${pair(k2, v2, 2, 3)}<td colspan="${N - 9}"></td></tr>`;
-    const third = Math.round(N / 3);
-    return `<table class="cf rq" style="margin-bottom:14px">
-      <tr><td colspan="${N - 2 * third}"></td><td class="ttl" colspan="${third}">درخواست خرید<div style="font-weight:400;font-size:.85em">شرکت ${COMPANY}</div></td>
-          <td class="rt" colspan="${third}" style="font-size:.85em">شماره صفحه: ۱<br>تاریخ گزارش: ${esc(TP.fmtD(S.now))}</td></tr>
-      ${info("شماره درخواست", r.id, "مرکز درخواست کننده", r.center)}
-      ${info("تاریخ درخواست", r.date, "درخواست کننده", r.requester)}
-      ${info("واحد/رمز تامین", r.buy_type, "نوع طرف مقابل", r.party_type)}
-      ${info("نوع قلم", r.head_req_type || "کالا", "طرف مقابل", r.party)}
-      <tr><td class="lbl rt">توضیحات</td><td class="rt" colspan="${N - 1}">${esc(note)}</td></tr>
-      <tr>${RQC.map((t) => `<th class="hd">${t}</th>`).join("")}</tr>
-      ${its.map((it, i) => `<tr><td class="num">${M(i + 1)}</td><td class="num">${esc(it.code || "")}</td><td class="rt">${esc(it.title)}</td>
-        <td class="num">${it.qty == null ? "" : M(it.qty)}</td><td class="num">${esc(it.unit || "")}</td><td class="num">${esc(it.need_date || "")}</td>
-        <td class="rt">${esc(it.consumer || "")}</td><td class="num">${esc(it.src_status || "")}</td><td class="rt">${esc(supplierOf(it.id))}</td>
-        <td class="rt">${esc(S.expert.name)}</td><td class="num">${esc(r.buy_flow || "")}</td><td class="num">${esc(deadline)}</td></tr>`).join("")}
-      <tr class="tall"><td class="rt" colspan="${Math.ceil(N / 2)}">نام صادر کننده: ${esc(r.requester || "")}<br><br>امضا</td>
-          <td class="rt" colspan="${N - Math.ceil(N / 2)}">نام تایید کننده:<br><br>امضا</td></tr></table>`;
+  /* دانلود فایل از سرور با کد کارشناس — لینک مستقیم هدر احراز هویت را نمی‌فرستد */
+  async function downloadSheet(kind) {
+    const r = S.d.request, aid = A().id;
+    const b = TP.busy("ساختن فایل…", kind === "request" ? "برگهٔ درخواست خرید (Word)" : "جدول کمیسیون (اکسل)");
+    try {
+      const ex = TP.session.get();
+      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/sheet/${kind}`, { headers: ex && ex.code ? { "X-Expert-Code": ex.code } : {} });
+      if (!res.ok) { let msg = `خطای سرور ${res.status}`; try { msg = (await res.json()).error || msg; } catch (_) { /* متن خام */ } throw new Error(msg); }
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob);
+      link.download = `${kind === "request" ? "درخواست-خرید" : "کمیسیون"}-${r.id}.${kind === "request" ? "docx" : "xlsx"}`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+      b.close();
+    } catch (err) { b.close(); TP.modal("دانلود نشد", esc(err.message), null, "باشد", ""); }
   }
-  function downloadXls() {
-    const r = S.d.request, d = commData();
-    const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"><!--[if gte mso 9]><xml><x:ExcelWorkbook><x:ExcelWorksheets><x:ExcelWorksheet><x:Name>کمیسیون</x:Name><x:WorksheetOptions><x:DisplayRightToLeft/></x:WorksheetOptions></x:ExcelWorksheet></x:ExcelWorksheets></x:ExcelWorkbook></xml><![endif]-->
-      <style>table,td,th{border:1px solid #666;border-collapse:collapse;font-family:Tahoma;font-size:11pt}td{padding:3px}</style></head><body dir="rtl">${reqForm(r)}<br>${commForm(r, d)}</body></html>`;
-    const blob = new Blob(["﻿" + html], { type: "application/vnd.ms-excel;charset=utf-8" });
-    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `کمیسیون-${r.id}.xls`; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+
+  /* چاپ در iframe جدا: فقط دو برگه، هر کدام یک صفحهٔ A4 افقی. window.print خودِ صفحهٔ پنل
+     (پس‌زمینهٔ تیره، جدول اسکرول‌دار) را می‌داد و برگه بریده یا خالی چاپ می‌شد. */
+  function printSheets() {
+    const sh = sheetsFor(); if (!sh || !sh.rq || !sh.cm) return;
+    const old = document.getElementById("tp-print"); if (old) old.remove();
+    const f = document.createElement("iframe"); f.id = "tp-print";
+    f.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:0;visibility:hidden";
+    document.body.appendChild(f);
+    const doc = f.contentDocument;
+    doc.open();
+    doc.write(`<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>درخواست ${esc(S.d.request.id)}</title><style>
+      @page { size: A4 landscape; margin: 8mm; }
+      html, body { margin: 0; background: #fff; }
+      ${sh.rq.css}${sh.cm.css}
+      .page { break-after: page; page-break-after: always; display: flex; justify-content: center; }
+      .page:last-child { break-after: auto; page-break-after: auto; }
+      .page .rqdoc { --u: 1.0144mm; }
+      .page table.xsheet { font-size: min(calc(281mm / var(--wem)), calc(193mm / var(--hem))); }
+    </style></head><body><div class="page">${sh.rq.html}</div><div class="page">${sh.cm.html}</div></body></html>`);
+    doc.close();
+    const go = () => { try { f.contentWindow.focus(); f.contentWindow.print(); } catch (err) { TP.modal("پرینت", esc(err.message), null, "باشد", ""); } };
+    /* لوگو باید پیش از چاپ بار شده باشد */
+    Promise.all([...doc.images].map((im) => (im.complete ? 0 : new Promise((ok) => { im.onload = im.onerror = ok; })))).then(() => setTimeout(go, 150));
   }
 
   /* ---------- قالب‌های پیام (واقعی، ذخیره در D1) ---------- */
@@ -691,7 +720,7 @@
     render();
   }
   async function openDetail(aid, keepTab) {
-    try { S.d = await TP.api(`/assignments/${aid}`); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail"; render();
+    try { S.d = await TP.api(`/assignments/${aid}`); S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail"; render();
       if (!S.d.assignment.viewed_at) { await TP.api(`/assignments/${aid}/viewed`, { body: {} }); S.d.assignment.viewed_at = Date.now(); render(); } }
     catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
   }
@@ -723,6 +752,7 @@
     Q("[data-req]").forEach((x) => x.onclick = () => openDetail(+x.dataset.req));
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
+    const ts = G("[data-tsort]"); if (ts) ts.onclick = () => { S.traySort = !S.traySort; try { localStorage.setItem("tp.traySort", S.traySort ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };
     const bk = G("[data-back]"); if (bk) bk.onclick = () => { S.screen = "list"; S.d = null; loadTray(); };
     Q("[data-item]").forEach((x) => x.onclick = () => { S.itemIdx = +x.dataset.item; render(); });
     Q("[data-tab]").forEach((x) => x.onclick = () => { S.tab = x.dataset.tab; render(); });
@@ -736,7 +766,7 @@
       mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
     }
     const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
-    const chb = G("[data-chart]"); if (chb) chb.onclick = () => { S.chart = !S.chart; const it = item(); if (S.chart && !S.series[it.id]) { loadSeries(it); return; } render(); };
+    const chb = G("[data-chart]"); if (chb) chb.onclick = () => openChart(item());
     Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });
     const cp = G("[data-close-prof]"); if (cp) cp.onclick = () => { S.prof = null; render(); };
@@ -782,20 +812,21 @@
       inp.click();
     });
     Q("[data-extract]").forEach((b) => b.onclick = async () => { const r = await TP.api(`/proformas/${b.dataset.extract}/extract`, { body: {} }); TP.modal("استخراج از پیش‌فاکتور", `${esc(r.message)} <span class="chip mock">در انتظار اتصال به مدل</span><br><br>تا آن زمان، فیلدهای زمان تحویل، اعتبار، تسویه و نوع فاکتور را دستی وارد کنید.`, null, "باشد", ""); });
-    Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; render(); });
+    Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; S.sheets = null; render(); });
     const mc = G("[data-make-comm]"); if (mc) mc.onclick = async () => { try { await TP.api(`/assignments/${A().id}/commission`, { body: {} }); S.tab = "comm"; await reload(); } catch (e) { TP.modal("تولید جدول کمیسیون", esc(e.message) + (e.data && e.data.missing && e.data.missing.length ? `<br><br>${e.data.missing.map((m) => `• ${esc(m.title)} (${m.n} از ${e.data.need})`).join("<br>")}` : ""), null, "باشد", ""); } };
-    const dx = G("[data-xls]"); if (dx) dx.onclick = downloadXls;
+    Q("[data-dl]").forEach((b) => b.onclick = () => downloadSheet(b.dataset.dl));
+    Q("[data-zoom]").forEach((b) => b.onclick = () => { S.sheetZoom = Math.min(22, Math.max(6, (S.sheetZoom || 10) + +b.dataset.zoom)); render(); });
     const sn = G("[data-save-notes]");
     if (sn) sn.onclick = async () => {
       const box = G("[data-notes]"), msg = G("[data-notes-msg]");
       try {
         await TP.api(`/assignments/${A().id}/notes`, { method: "PUT", body: { notes: box.value } });
-        A().notes = box.value;            /* تا بدون بارگذاری دوباره، در خود فرم دیده شود */
+        A().notes = box.value; S.sheets = null;   /* پیش‌نمایش با توضیحات تازه از نو ساخته شود */
         msg.textContent = "ذخیره شد ✅";
         render();
       } catch (e) { msg.textContent = e.message; }
     };
-    const pr = G("[data-print]"); if (pr) pr.onclick = () => TP.modal("پرینت", "دو برگه با هم چاپ می‌شوند:<br><br>۱. برگه درخواست خرید<br>۲. جدول مقایسه استعلام بها (کمیسیون)<br><br>برای PDF، در پنجرهٔ چاپ «Save as PDF» را انتخاب کنید.", () => window.print(), "چاپ کن");
+    const pr = G("[data-print]"); if (pr) pr.onclick = printSheets;
   }
 
   function doExpertAct(act) {

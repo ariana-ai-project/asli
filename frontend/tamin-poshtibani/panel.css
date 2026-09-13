@@ -244,3 +244,9 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
   .tp-pane { padding: 14px; }
   .tp-formula input { width: 46px; }
 }
+
+/* میز ارجاع: ستون کارشناس عرض ثابت دارد؛ نام کارشناسِ فایل راهکاران همیشه زیر انتخاب می‌نشیند */
+.tp-table td.expcell { width: 200px; min-width: 200px; max-width: 200px; white-space: normal; }
+.tp-table td.expcell select { width: 100%; }
+.filexp { font-size: .74rem; color: var(--tp-dim); margin-top: 3px; line-height: 1.45; white-space: normal; text-align: right; }
+.filexp.warn { color: #fcd34d; }

@@ -8,7 +8,8 @@
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert/strict";
-import { letterData, fillLetter, LETTER_PROMPT_VERSION } from "../../../worker/letter.js";
+import { letterData, fillLetter, LETTER_PROMPT_VERSION, LETTER_TO, letterSubject } from "../../../worker/letter.js";
+import { buildDocumentXml } from "../../../worker/docx.js";
 
 const request = { id: "3400976", date: "1405/06/19", party: "ایستگاه پمپاژ دوم" };
 const items = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: n, title: "تابلو برق " + n, qty: 1, unit: "عدد" }));
@@ -56,5 +57,20 @@ test("عددِ بزرگی که مدل خودش نوشته، مشکوک علام�
 });
 
 test("نسخهٔ دستور عوض شده تا خروجی‌های قدیمی قابل تشخیص باشند", () => {
-  assert.equal(LETTER_PROMPT_VERSION, "letter/2.0");
+  assert.equal(LETTER_PROMPT_VERSION, "letter/2.1");
+});
+
+test("مخاطب ثابت، موضوع از اقلامِ انتخابی با «و»، و «با تشکر» ته نامه سمت چپ", () => {
+  assert.equal(LETTER_TO, "مدیر محترم کمیسیون معاملات، جناب دکتر صفری");
+  assert.equal(letterSubject(["سیم جوش زیر پودری", "الکترود نمره 4", "سیم جوش زیر پودری"]), "گزارش خرید سیم جوش زیر پودری و الکترود نمره 4");
+  assert.equal(letterSubject(["پودر جوشکاری"]), "گزارش خرید پودر جوشکاری");
+  const tpl = `<w:document><w:body><w:p/><w:sectPr/></w:body></w:document>`;
+  const xml = buildDocumentXml(tpl, { to: LETTER_TO, subject: letterSubject(["پودر جوشکاری"]), salutation: "با سلام و احترام،", paragraphs: ["بند"], closing: "خواهشمند است دستور فرمایید.", thanks: "با تشکر", signature: "کارشناس خرید — x" });
+  const paras = [...xml.matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map((m) => m[1]);
+  const textOf = (p) => [...p.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("");
+  assert.equal(textOf(paras[0]), "مدیر محترم کمیسیون معاملات، جناب دکتر صفری");
+  assert.equal(textOf(paras[1]), "موضوع: گزارش خرید پودر جوشکاری");
+  const thanks = paras.findIndex((p) => textOf(p) === "با تشکر");
+  assert.ok(thanks > 0 && paras[thanks].includes('<w:jc w:val="left"/>'), "«با تشکر» سمت چپ");
+  assert.ok(thanks === paras.length - 2, "«با تشکر» پیش از امضا و بعد از جملهٔ پایانی");
 });

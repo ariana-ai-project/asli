@@ -20,7 +20,7 @@ export default {
 
   async scheduled(event, env, ctx) {
     if (!env.TG_BOT_TOKEN) return; /* بات هنوز ست نشده — چیزی برای فرستادن نیست */
-    ctx.waitUntil(botTick(env).then(
+    ctx.waitUntil(botTick(env, event.cron).then(
       (r) => console.log("bot tick", JSON.stringify(r)),
       (e) => console.error("bot tick failed", e && e.message),
     ));

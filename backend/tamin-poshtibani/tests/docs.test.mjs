@@ -11,7 +11,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { persianize, textRuns, ltrOf, fillHeader, buildDocumentXml, unzip } from "../../../worker/docx.js";
 import { requestDocumentXml, requestSheetData, renderRequestDoc } from "../../../worker/reqdoc.js";
-import { commissionHtml } from "../../../worker/sheets.js";
+import { commissionHtml, commissionXlsx } from "../../../worker/sheets.js";
 
 const texts = (xml) => [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]);
 const RPR = '<w:rPr><w:rFonts w:cs="B Lotus"/><w:rtl/></w:rPr>';
@@ -93,12 +93,20 @@ test("برگهٔ درخواست: تاریخ‌ها run چپ‌به‌راست د
 });
 
 /* ---------- جدول کمیسیون ---------- */
-test("جدول کمیسیون فقط قلم‌های تیک‌خورده را دارد", () => {
+test("جدول کمیسیون فقط قلم‌های تیک‌خورده را دارد، و xlsx واقعی با لوگوست", async () => {
   const items = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: n, title: "قلم " + n, qty: 1, unit: "عدد" }));
   const quotes = items.map((it) => ({ item_id: it.id, supplier_name: "آریا", saved: 1, final: it.id === 2 || it.id === 5 ? 1 : 0, price: 1000 * it.id, qty: 1, vat: "دارد" }));
-  const html = commissionHtml({ request: { id: "R" }, items, quotes, notes: "", expert: "x", company: "c", date: "1405/06/19" });
-  const rowTitles = [...html.matchAll(/<td class="rt">(قلم \d)<\/td>/g)].map((m) => m[1]);
-  assert.deepEqual(rowTitles, ["قلم 2", "قلم 5"], "فقط دو قلمِ تیک‌خورده");
+  const d = { request: { id: "R" }, items, quotes, notes: "", expert: "x", company: "c", date: "1405/06/19" };
+  const html = commissionHtml(d);
+  /* HTML رقم فارسی دارد، مثل قلمِ B Nazanin در اکسل */
+  const cells = html.replace(/<[^>]+>/g, "|");
+  assert.ok(cells.includes("|قلم ۲|") && cells.includes("|قلم ۵|"), "دو قلمِ تیک‌خورده هست");
+  for (const n of ["۱", "۳", "۴", "۶", "۷"]) assert.ok(!cells.includes(`|قلم ${n}|`), `قلم ${n} نباید باشد`);
   assert.ok(html.includes("۷٬۰۰۰"), "جمع = ۲۰۰۰ + ۵۰۰۰");
   assert.ok(!html.includes("۲۸٬۰۰۰"), "جمعِ هفت قلم نباید باشد");
+  assert.ok(html.includes("مقایسه استعلام بها") && html.includes("TSA-PS-FO-۰۲"), "سربرگ فرم");
+  const buf = Buffer.from(await (await commissionXlsx(d)).arrayBuffer());
+  assert.deepEqual([...buf.slice(0, 2)], [0x50, 0x4b]);
+  const names = (await unzip(buf)).map((e) => e.name);
+  for (const n of ["xl/workbook.xml", "xl/worksheets/sheet1.xml", "xl/styles.xml", "xl/drawings/drawing1.xml", "xl/media/image1.png"]) assert.ok(names.includes(n), n);
 });
