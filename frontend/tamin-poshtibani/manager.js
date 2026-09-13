@@ -326,7 +326,7 @@
         }
         if (u.a) {
           const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
-          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}>${E.map((e) => `<option value="${e.id}" ${e.id === a.expert_id ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(its, a.expert_name)}</td>
+          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${E.map((e) => `<option value="${e.id}" ${e.id === a.expert_id ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(its, a.expert_name)}</td>
             <td><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}></td>
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
@@ -637,7 +637,13 @@
     Q("[data-toggle]").forEach((b) => b.onclick = () => { S.open[b.dataset.toggle] = !S.open[b.dataset.toggle]; render(); });
     Q("select[data-assign]").forEach((s) => s.onchange = async (e) => {
       const rid = e.target.dataset.assign, aid = e.target.dataset.aid ? +e.target.dataset.aid : null, eid = +e.target.value || null;
-      try { if (aid && eid) await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid } }); else await TP.api("/assign", { body: { request_id: rid, expert_id: eid } }); await refresh(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
+      /* «— انتخاب کارشناس —» روی ارجاعِ ارسال‌نشده: کارشناس برداشته می‌شود و با «ارسال» نمی‌رود */
+      try {
+        if (aid && eid) await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid } });
+        else if (aid) await TP.api("/unassign", { body: { assignment_id: aid } });
+        else await TP.api("/assign", { body: { request_id: rid, expert_id: eid } });
+        await refresh();
+      } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
     });
     Q("input[data-days]").forEach((i) => { i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); e.target.className = "tp-input num" + (e.target.value ? "" : " unset"); };
       i.onchange = async (e) => { try { await TP.api("/assign/days", { body: { assignment_id: +e.target.dataset.days, days: +e.target.value || null } }); const r = S.data.requests.find((x) => x.assignments.some((y) => y.id === +e.target.dataset.days)); if (r) r.assignments.find((y) => y.id === +e.target.dataset.days).days = +e.target.value || null; render(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } }; });

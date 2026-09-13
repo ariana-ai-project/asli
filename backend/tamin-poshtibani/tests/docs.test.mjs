@@ -81,7 +81,7 @@ test("برگهٔ درخواست: هیچ XML escape‌شده‌ای در متن �
 test("برگهٔ درخواست: تاریخ‌ها run چپ‌به‌راست دارند و ساختار جدول‌ها متوازن است", async () => {
   const xml = requestDocumentXml(requestSheetData(D));
   const dateRuns = [...xml.matchAll(/<w:r>([\s\S]*?)<\/w:r>/g)].map((m) => m[1]).filter((r) => r.includes("۱۴۰۵/۰۶/"));
-  assert.ok(dateRuns.length >= 4, "تاریخ درخواست، تاریخ گزارش، تاریخ نیاز، مهلت");
+  assert.ok(dateRuns.length >= 4, "تاریخ درخواست، تاریخ گزارش، تاریخ نیازِ هر قلم");
   assert.ok(dateRuns.every((r) => !r.includes("<w:rtl/>")), "همهٔ تاریخ‌ها چپ‌به‌راست");
   for (const tag of ["w:tbl", "w:tr", "w:tc", "w:p", "w:r"]) {
     const open = (xml.match(new RegExp(`<${tag}>`, "g")) || []).length, close = (xml.match(new RegExp(`</${tag}>`, "g")) || []).length;
@@ -90,6 +90,21 @@ test("برگهٔ درخواست: تاریخ‌ها run چپ‌به‌راست د
   const buf = Buffer.from(await (await renderRequestDoc(D)).arrayBuffer());
   assert.deepEqual([...buf.slice(0, 2)], [0x50, 0x4b]);
   assert.ok((await unzip(buf)).some((e) => e.name === "word/document.xml"));
+});
+
+test("برگهٔ درخواست فقط از دادهٔ فایل اکسل پر می‌شود: نه تأمین‌کنندهٔ استعلام، نه مهلت، نه کارشناسِ ارجاع", async () => {
+  const d = { ...D, assignment: { expert_name: "کارشناسِ ارجاع" },
+    items: D.items.map((i, k) => ({ ...i, src_expert: k ? "ابوذر بهمنی" : "" })) };
+  const dt = requestSheetData(d);
+  assert.deepEqual(dt.items.map((i) => i.expert), ["", "ابوذر بهمنی"]);
+  assert.ok(!("supplier" in dt.items[0]) && !("deadline" in dt) && !("expert" in dt));
+  const xml = requestDocumentXml(dt);
+  const text = [...xml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("|");
+  assert.ok(!text.includes("آریا صنعت"), "تأمین‌کنندهٔ استعلام در برگه نیست");
+  assert.ok(!text.includes("۱۴۰۵/۰۶/۲۴") && !text.includes("1405/06/24"), "مهلت ارجاع در برگه نیست");
+  assert.ok(!text.includes("کارشناسِ ارجاع") && !text.includes("آقای بهمنی"), "کارشناسِ ارجاع در برگه نیست");
+  assert.ok(text.includes("ابوذر بهمنی"), "کارشناسِ ستون فایل در برگه هست");
+  assert.equal(dt.request.item_type, "کالا");
 });
 
 /* ---------- جدول کمیسیون ---------- */

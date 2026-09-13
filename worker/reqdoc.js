@@ -149,10 +149,10 @@ function itemsSection(dt) {
     C(5, it.need_date || ""),
     C(6, it.consumer || "", { align: "right" }),
     C(7, it.src_status || ""),
-    C(8, it.supplier || "", { align: "right" }),
-    C(9, dt.expert || "", { align: "right" }),
+    C(8, "", { align: "right" }),
+    C(9, it.expert || "", { align: "right" }),
     C(10, dt.buy_flow || ""),
-    C(11, dt.deadline || ""),
+    C(11, ""),
   ], { cantSplit: true, height: 360 }));
   return tbl(g, [head, ...rows], { insideH: 4 });
 }
@@ -229,20 +229,15 @@ export function requestDocumentXml(dt) {
  * است، همان‌طور که راهکاران می‌نویسد.
  */
 export function requestSheetData(d) {
-  const byItem = new Map();
-  for (const q of d.quotes || []) {
-    if (!q.saved) continue;
-    const cur = byItem.get(q.item_id);
-    if (!cur || (q.final && !cur.final)) byItem.set(q.item_id, q);
-  }
+  /* فقط آنچه مدیر با فایل اکسل بارگذاری کرده (تصمیم مدیر): تأمین‌کننده، مهلت و
+     کارشناسی که بعداً در سامانه تعیین می‌شوند در این برگه نمی‌آیند. «کارشناس خرید»
+     همان ستون کارشناسِ خودِ فایل است. */
   const notes = [...new Set((d.items || []).map((i) => (i.note || "").trim()).filter(Boolean))];
 
   return {
     company: `شرکت ${d.company}`,
     date: d.date,
-    expert: (d.assignment && d.assignment.expert_name) || d.expert,
     buy_flow: d.request.buy_flow || "",
-    deadline: d.request.deadline || "",
     request: {
       id: d.request.id,
       date: d.request.date,
@@ -251,10 +246,10 @@ export function requestSheetData(d) {
       party: d.request.party,
       party_type: d.request.party_type,
       supplyUnit: d.request.supply_unit || d.request.buy_type || "",
-      item_type: d.request.item_type || "کالا",
+      item_type: d.request.head_req_type || d.request.req_type || "",
       note: notes.join("\n"),
     },
-    items: (d.items || []).map((i) => ({ ...i, supplier: (byItem.get(i.id) || {}).supplier_name || "" })),
+    items: (d.items || []).map((i) => ({ ...i, expert: i.src_expert || "" })),
   };
 }
 
@@ -305,7 +300,7 @@ export function requestHtml(d) {
       <thead><tr>${REQUEST_COLUMNS.map(([t]) => `<th>${t}</th>`).join("")}</tr></thead><tbody>
       ${dt.items.map((it, i) => `<tr><td>${i + 1}</td><td>${lat(it.code)}</td><td class="rt">${txt(it.title)}</td><td>${it.qty == null ? "" : faD(Number(it.qty).toLocaleString("en-US"))}</td>`
         + `<td>${txt(it.unit)}</td><td>${txt(it.need_date)}</td><td class="rt">${txt(it.consumer)}</td><td>${txt(it.src_status)}</td>`
-        + `<td class="rt">${txt(it.supplier)}</td><td class="rt">${txt(dt.expert)}</td><td>${txt(dt.buy_flow)}</td><td>${txt(dt.deadline)}</td></tr>`).join("")}
+        + `<td class="rt"></td><td class="rt">${txt(it.expert)}</td><td>${txt(dt.buy_flow)}</td><td></td></tr>`).join("")}
       </tbody></table></td></tr>
     <tr class="s4"><td></td></tr>
     <tr class="s5"><td><table class="rq-sign">${cols([0.11, 0.20, 0.11, 0.20])}<tbody>

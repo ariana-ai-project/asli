@@ -317,6 +317,70 @@ export function runCost(model, u) {
 }
 
 /**
+ * یک فراخوانی جریانی (SSE) و بازسازیِ همان پیامی که پاسخ غیرجریانی می‌داد.
+ *
+ * چرا جریانی: جستجو با ابزارهای سرور چند دقیقه طول می‌کشد. در پاسخ غیرجریانی تا
+ * پایان کار هیچ بایتی برنمی‌گردد و لبهٔ شبکهٔ API اتصالِ بیکار را حدود دو دقیقه بعد
+ * می‌بندد — همان «خطای 524» که هر دو اجرای واقعی درست پس از ۱۲۵ ثانیه گرفتند.
+ * در جریان، رویدادها و pingها پشت سر هم می‌آیند و اتصال زنده می‌ماند.
+ *
+ * بلوک‌ها همان‌طور که آمده‌اند بازسازی می‌شوند (متن، ورودیِ server_tool_use از
+ * input_json_delta، ارجاع‌ها از citations_delta، و نتیجه‌های ابزار که کامل در
+ * content_block_start می‌رسند) تا در pause_turn عیناً برگردانده شوند.
+ */
+async function streamMessage(env, body) {
+  const r = await fetch(API_BASE(env), {
+    method: "POST",
+    headers: { "content-type": "application/json", accept: "text/event-stream", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+    body: JSON.stringify({ ...body, stream: true }),
+  });
+  if (!r.ok || !r.body) {
+    const d = await r.json().catch(() => ({}));
+    return { ok: false, status: r.status, error: String((d && d.error && d.error.message) || `خطای ${r.status}`) };
+  }
+  const blocks = [], usage = {};
+  let stop = null, failure = null, buf = "";
+  const handle = (ev) => {
+    if (ev.type === "message_start") Object.assign(usage, (ev.message && ev.message.usage) || {});
+    else if (ev.type === "content_block_start") blocks[ev.index] = { ...ev.content_block };
+    else if (ev.type === "content_block_delta") {
+      const b = blocks[ev.index], x = ev.delta || {};
+      if (!b) return;
+      if (x.type === "text_delta") b.text = (b.text || "") + x.text;
+      else if (x.type === "input_json_delta") b._json = (b._json || "") + (x.partial_json || "");
+      else if (x.type === "citations_delta") (b.citations = b.citations || []).push(x.citation);
+      else if (x.type === "thinking_delta") b.thinking = (b.thinking || "") + x.thinking;
+      else if (x.type === "signature_delta") b.signature = x.signature;
+    } else if (ev.type === "content_block_stop") {
+      const b = blocks[ev.index];
+      if (b && b._json !== undefined) {
+        try { b.input = JSON.parse(b._json || "{}"); } catch (_) { b.input = b.input || {}; }
+        delete b._json;
+      }
+    } else if (ev.type === "message_delta") {
+      if (ev.delta && ev.delta.stop_reason) stop = ev.delta.stop_reason;
+      Object.assign(usage, ev.usage || {});
+    } else if (ev.type === "error") failure = String((ev.error && ev.error.message) || "خطای جریان");
+  };
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf = (buf + dec.decode(value, { stream: true })).replace(/\r\n/g, "\n");
+    let i;
+    while ((i = buf.indexOf("\n\n")) >= 0) {
+      const data = buf.slice(0, i).split("\n").filter((l) => l.startsWith("data:")).map((l) => l.slice(5).trimStart()).join("\n");
+      buf = buf.slice(i + 2);
+      if (!data) continue;
+      try { handle(JSON.parse(data)); } catch (_) { /* رویداد ناقص */ }
+    }
+  }
+  if (failure) return { ok: false, status: 502, error: failure };
+  if (!stop) return { ok: false, status: 502, error: "اتصال به مدل پیش از پایان پاسخ قطع شد؛ دوباره اجرا کنید." };
+  return { ok: true, content: blocks.filter(Boolean), stop, usage };
+}
+
+/**
  * یک اجرای کامل کشف. حلقهٔ سرورِ ابزارها اگر به سقفش برسد pause_turn می‌دهد؛
  * طبق مستندات همان messages به‌علاوهٔ پاسخ ناتمام دوباره فرستاده می‌شود — بدون
  * پیام «ادامه بده» — تا از همان‌جا ادامه دهد.
@@ -335,7 +399,7 @@ export async function runDiscovery(env, p) {
   const model = env.DISCOVERY_MODEL || MODEL;
   const cap = Number(env.SMART_COST_CAP) > 0 ? Number(env.SMART_COST_CAP) : LIMITS.COST_CAP;
   /* سقف متن هر صفحه اختیاری است؛ اگر API نپذیرفتش، یک بار بی آن */
-  let capFetch = true, finishing = false, capped = false;
+  let capFetch = true, finishing = false, capped = false, plainRetry = false;
   const tools = () => [
     { type: env.WEB_SEARCH_TOOL || "web_search_20260209", name: "web_search", max_uses: LIMITS.SEARCH_BUDGET },
     { type: env.WEB_FETCH_TOOL || "web_fetch_20260209", name: "web_fetch", max_uses: LIMITS.FETCH_BUDGET,
@@ -346,32 +410,29 @@ export async function runDiscovery(env, p) {
   let content = [], stop = null;
 
   for (let round = 0; round < LIMITS.MAX_ROUNDS; round++) {
-    const r = await fetch(API_BASE(env), {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-      body: JSON.stringify({
-        model, max_tokens: LIMITS.MAX_TOKENS,
-        /* پرامپت سیستم ثابت است و کش می‌شود؛ ابزارهای سرور بعد از هر نتیجه خودشان نقطهٔ کش می‌گذارند */
-        system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
-        tools: tools(), messages,
-        ...(finishing ? { tool_choice: { type: "none" } } : {}),
-      }),
+    const res = await streamMessage(env, {
+      model, max_tokens: LIMITS.MAX_TOKENS,
+      /* پرامپت سیستم ثابت است و کش می‌شود؛ ابزارهای سرور بعد از هر نتیجه خودشان نقطهٔ کش می‌گذارند */
+      system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
+      tools: tools(), messages,
+      ...(finishing ? { tool_choice: { type: "none" } } : {}),
     });
-    const d = await r.json().catch(() => ({}));
-    if (!r.ok) {
-      const msg = String((d && d.error && d.error.message) || `خطای ${r.status}`);
-      if (r.status === 400 && capFetch && /max_content_tokens/i.test(msg)) { capFetch = false; round--; continue; }
-      throw new HttpError(`جستجوی هوشمند شکست خورد: ${msg.slice(0, 300)}`, r.status === 429 ? 429 : 502);
+    if (!res.ok) {
+      if (res.status === 400 && capFetch && /max_content_tokens/i.test(res.error)) { capFetch = false; round--; continue; }
+      /* اگر API ادامهٔ بی‌ابزار را نپذیرفت (مثلاً فراخوانیِ ابزارِ نیمه‌کاره)، یک بار عادی ادامه می‌دهیم */
+      if (res.status === 400 && finishing && !plainRetry) { finishing = false; plainRetry = true; round--; continue; }
+      throw new HttpError(`جستجوی هوشمند شکست خورد: ${res.error.slice(0, 300)}`, res.status === 429 ? 429 : 502);
     }
-    const u = d.usage || {}, st = u.server_tool_use || {};
+    const u = res.usage, st = u.server_tool_use || {};
     usage.input += u.input_tokens || 0; usage.output += u.output_tokens || 0;
     usage.cacheRead += u.cache_read_input_tokens || 0; usage.cacheWrite += u.cache_creation_input_tokens || 0;
     usage.searches += st.web_search_requests || 0; usage.fetches += st.web_fetch_requests || 0;
-    content = d.content || []; stop = d.stop_reason;
+    content = res.content; stop = res.stop;
     if (stop !== "pause_turn" || finishing) break;
     messages.push({ role: "assistant", content });
     /* دور بعد بی‌ابزار، اگر پول تمام است یا دورها */
-    if (runCost(model, usage) >= cap - LIMITS.FINISH_RESERVE) { finishing = true; capped = true; }
+    if (plainRetry) { /* ادامهٔ بی‌ابزار پذیرفته نشد؛ همان سقف‌های ابزار هزینه را نگه می‌دارند */ }
+    else if (runCost(model, usage) >= cap - LIMITS.FINISH_RESERVE) { finishing = true; capped = true; }
     else if (round >= LIMITS.MAX_ROUNDS - 2) finishing = true;
   }
 

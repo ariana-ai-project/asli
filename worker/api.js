@@ -637,6 +637,22 @@ async function reassign(env, body) {
   return { ok: true, assignment_id: b.id };
 }
 
+/* مدیر کارشناسِ یک ارجاعِ ارسال‌نشده را برمی‌دارد: اقلامش دوباره «بدون کارشناس»
+   می‌شوند و با «ارسال» جایی نمی‌روند. فقط همان ارجاع، نه بقیهٔ کارشناس‌های همین درخواست. */
+async function unassign(env, body) {
+  const aid = int(body.assignment_id);
+  const a = await env.DB.prepare("SELECT * FROM assignments WHERE id=?").bind(aid).first();
+  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
+  if (a.dispatched_at) throw new HttpError("این ارجاع ارسال شده است؛ برای عوض کردن کارشناس از «تغییر» استفاده کنید.", 409);
+  await env.DB.batch([
+    env.DB.prepare("UPDATE items SET assignment_id=NULL WHERE assignment_id=?").bind(aid),
+    env.DB.prepare("DELETE FROM alerts WHERE assignment_id=?").bind(aid),
+    env.DB.prepare("DELETE FROM assignments WHERE id=? AND dispatched_at IS NULL").bind(aid),
+    ev(env, "manager", "unassign", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id }),
+  ]);
+  return { ok: true };
+}
+
 /* تعلیق / توقف / خاتمه / بازگشت — مدیر */
 async function setState(env, body, actor) {
   const st = body.state; if (!["open", "hold", "stop", "closed"].includes(st)) throw new HttpError("state نامعتبر است.");
@@ -995,6 +1011,7 @@ async function route(request, env, ctx) {
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { requireManager(request, env); return json(await reassign(env, await readJson(request))); }
+    if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
     if (path === "/items/state" && m === "POST") { requireManager(request, env); return json(await setState(env, await readJson(request), "manager")); }
     if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
     if ((mm = /^\/decisions\/(\d+)\/(approve|reject)$/.exec(path)) && m === "POST") {

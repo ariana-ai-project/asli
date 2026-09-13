@@ -1,4 +1,4 @@
-/* جستجوی هوشمند، نسخهٔ کم‌هزینه: پرامپت فقط بازارهای انتخابی، خروجی کوتاه ← شکل پنل، سقف هزینه */
+/* جستجوی هوشمند، نسخهٔ کم‌هزینه: پرامپت فقط بازارهای انتخابی، خروجی کوتاه ← شکل پنل، سقف هزینه، پاسخ جریانی */
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { buildPrompt, normalizeResult, runDiscovery, runCost, LIMITS, MAX_MARKETS, DISCOVERY_PROMPT_VERSION } from "../../../worker/discovery.js";
@@ -17,6 +17,44 @@ const lean = (over = {}) => ({
   ...over,
 });
 
+/**
+ * پاسخ جریانیِ ساختگی، با همان رویدادهای API. `blocks` بلوک‌های کامل‌اند؛ متن در
+ * چند تکه و ورودیِ server_tool_use با input_json_delta فرستاده می‌شود تا بازسازی سنجیده شود.
+ */
+function sse({ blocks, stop, usage }) {
+  const ev = [];
+  const send = (type, data) => ev.push(`event: ${type}\r\ndata: ${JSON.stringify({ type, ...data })}\r\n\r\n`);
+  const { output_tokens, server_tool_use, ...inUsage } = usage;
+  send("message_start", { message: { id: "m", type: "message", role: "assistant", content: [], usage: { ...inUsage, output_tokens: 1 } } });
+  send("ping", {});
+  blocks.forEach((b, index) => {
+    if (b.type === "text") {
+      send("content_block_start", { index, content_block: { type: "text", text: "" } });
+      for (let i = 0; i < b.text.length; i += 7) send("content_block_delta", { index, delta: { type: "text_delta", text: b.text.slice(i, i + 7) } });
+    } else if (b.type === "server_tool_use") {
+      send("content_block_start", { index, content_block: { ...b, input: {} } });
+      const j = JSON.stringify(b.input);
+      send("content_block_delta", { index, delta: { type: "input_json_delta", partial_json: j.slice(0, 5) } });
+      send("content_block_delta", { index, delta: { type: "input_json_delta", partial_json: j.slice(5) } });
+    } else send("content_block_start", { index, content_block: b });
+    send("content_block_stop", { index });
+  });
+  send("message_delta", { delta: { stop_reason: stop }, usage: { output_tokens, server_tool_use } });
+  send("message_stop", {});
+  /* تکه‌های نامنظم تا مرزِ رویدادها وسط تکه بیفتد */
+  const all = ev.join("");
+  return new Response(new ReadableStream({
+    start(c) { for (let i = 0; i < all.length; i += 23) c.enqueue(new TextEncoder().encode(all.slice(i, i + 23))); c.close(); },
+  }), { status: 200, headers: { "content-type": "text/event-stream" } });
+}
+
+async function withFetch(fn, handler) {
+  const real = globalThis.fetch;
+  globalThis.fetch = handler;
+  try { return await fn(); } finally { globalThis.fetch = real; }
+}
+const ENV = { ANTHROPIC_API_KEY: "k", ANTHROPIC_API_BASE: "http://stub" };
+
 test("نسخهٔ پرامپت و بودجه‌های کم‌هزینه", () => {
   assert.equal(DISCOVERY_PROMPT_VERSION, "supplier-discovery/2.0");
   assert.equal(LIMITS.MAX_CANDIDATES, 5);
@@ -24,15 +62,23 @@ test("نسخهٔ پرامپت و بودجه‌های کم‌هزینه", () => {
   assert.equal(MAX_MARKETS, 3);
 });
 
-test("پرامپت فقط یادداشتِ بازارهای انتخابی را دارد و کوتاه است", () => {
-  const { system } = buildPrompt({ item: "سیمان تیپ ۲", markets: ["IR", "AM"], qty: 400, unit: "تن" });
+test("پرامپت با فیلدهای جستجو پر می‌شود و فقط یادداشتِ بازارهای انتخابی را دارد", () => {
+  const { system, user } = buildPrompt({ item: "سیمان تیپ ۲", markets: ["IR", "AM"], qty: 400, unit: "تن", brand: "سیمان تهران", specs: "استاندارد ۳۸۹", notes: "فقط تولیدکننده", deliveryHint: "کاجاران" });
+  assert.match(system, /<item_name>سیمان تیپ ۲<\/item_name>/);
+  assert.match(system, /<brand_preference>سیمان تهران<\/brand_preference>/);
+  assert.match(system, /<tech_specs>استاندارد ۳۸۹<\/tech_specs>/);
+  assert.match(system, /<buyer_notes>فقط تولیدکننده<\/buyer_notes>/);
+  assert.match(system, /<delivery_hint>کاجاران<\/delivery_hint>/);
+  assert.match(system, /requested_quantity: 400 تن/);
   assert.match(system, /divar\.ir/);
   assert.match(system, /list\.am/);
   assert.doesNotMatch(system, /1688\.com|somon\.tj|sahibinden/);
   assert.match(system, /max_suppliers=5/);
   assert.match(system, /web_searches=5; page_fetches=3/);
+  assert.match(system, /"scores":\[0,0,0,0,0,0,0\]/, "قالب JSON خروجی در پرامپت تعریف شده");
   assert.doesNotMatch(system, /\{\{\w+\}\}/, "هیچ جای‌خالیِ پرنشده‌ای نماند");
   assert.ok(system.length < 13000, `پرامپت ${system.length} نویسه`);
+  assert.match(user, /سیمان تیپ ۲/);
 });
 
 test("خروجی کوتاه ← شکل پنل و بات: امتیاز کل از هفت عدد، موبایل‌ها، هویت", () => {
@@ -76,31 +122,43 @@ test("خروجیِ شکل قدیم (v1) بی‌تغییر می‌گذرد", () =
   assert.equal(r.request.searches_used, 7);
 });
 
-test("سقف هزینه: وقتی هزینه به سقف منهای ذخیره رسید، دور بعد بی‌ابزار است", async () => {
+test("پاسخ جریانی: بلوک‌ها عیناً بازسازی و در pause_turn برگردانده می‌شوند؛ سقف هزینه دور بعد را بی‌ابزار می‌کند", async () => {
   const bodies = [];
-  const realFetch = globalThis.fetch;
-  globalThis.fetch = async (_url, init) => {
+  const tool = { type: "server_tool_use", id: "srv_1", name: "web_search", input: { query: "سیمان فله تهران" } };
+  const found = { type: "web_search_tool_result", tool_use_id: "srv_1", content: [{ type: "web_search_result", url: "https://arya.example", title: "آریا", encrypted_content: "x" }] };
+  const out = await withFetch(() => runDiscovery(ENV, { item: "سیمان", markets: ["IR"] }), async (_url, init) => {
     const body = JSON.parse(init.body);
     bodies.push(body);
-    const first = bodies.length === 1;
-    const out = first
-      /* ۶۰ هزار توکن نوشتن در کش + ۵ جستجو ≈ ۰٫۱۵ + ۰٫۰۵ = ۰٫۲۰ ⇒ به سقف رسیده */
-      ? { stop_reason: "pause_turn", content: [{ type: "text", text: "…" }], usage: { input_tokens: 1000, output_tokens: 500, cache_creation_input_tokens: 60000, server_tool_use: { web_search_requests: 5 } } }
-      : { stop_reason: "end_turn", content: [{ type: "text", text: `<result>${JSON.stringify({ suppliers: [lean()], summary_fa: "خلاصه" })}</result>` }], usage: { input_tokens: 200, output_tokens: 1500, cache_read_input_tokens: 62000 } };
-    return new Response(JSON.stringify(out), { status: 200, headers: { "content-type": "application/json" } });
-  };
-  try {
-    const out = await runDiscovery({ ANTHROPIC_API_KEY: "k", ANTHROPIC_API_BASE: "http://stub" }, { item: "سیمان", markets: ["IR"] });
-    assert.equal(bodies.length, 2);
-    assert.equal(bodies[0].tool_choice, undefined);
-    assert.deepEqual(bodies[1].tool_choice, { type: "none" });
-    assert.equal(bodies[0].max_tokens, LIMITS.MAX_TOKENS);
-    assert.equal(bodies[0].tools[0].max_uses, 5);
-    assert.equal(bodies[0].tools[1].max_uses, 3);
-    assert.equal(bodies[0].tools[1].max_content_tokens, 3000);
-    assert.ok(bodies[0].tools.every((t) => !t.user_location));
-    assert.equal(out.result.request.cost_capped, true);
-    assert.equal(out.result.suppliers[0].scores.total > 0, true);
-    assert.equal(out.cost, runCost("claude-sonnet-5", out.usage));
-  } finally { globalThis.fetch = realFetch; }
+    if (bodies.length === 1) {
+      /* ۶۰ هزار توکن نوشتن در کش + ۵ جستجو ≈ ۰٫۲۰ ⇒ به سقف رسیده */
+      return sse({ blocks: [tool, found], stop: "pause_turn",
+        usage: { input_tokens: 1000, cache_creation_input_tokens: 60000, cache_read_input_tokens: 0, output_tokens: 500, server_tool_use: { web_search_requests: 5 } } });
+    }
+    return sse({ blocks: [{ type: "text", text: `<result>${JSON.stringify({ suppliers: [lean()], summary_fa: "خلاصه" })}</result>` }], stop: "end_turn",
+      usage: { input_tokens: 200, cache_read_input_tokens: 62000, output_tokens: 1500 } });
+  });
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].stream, true);
+  assert.equal(bodies[0].tool_choice, undefined);
+  assert.deepEqual(bodies[1].tool_choice, { type: "none" });
+  assert.deepEqual(bodies[1].messages[1], { role: "assistant", content: [tool, found] }, "پاسخ ناتمام عیناً برگشت");
+  assert.equal(bodies[0].max_tokens, LIMITS.MAX_TOKENS);
+  assert.equal(bodies[0].tools[0].max_uses, 5);
+  assert.equal(bodies[0].tools[1].max_uses, 3);
+  assert.equal(bodies[0].tools[1].max_content_tokens, 3000);
+  assert.ok(bodies[0].tools.every((t) => !t.user_location));
+  assert.deepEqual(out.usage, { input: 1200, output: 2000, cacheRead: 62000, cacheWrite: 60000, searches: 5, fetches: 0 });
+  assert.equal(out.result.request.cost_capped, true);
+  assert.equal(out.result.suppliers[0].name, "بازرگانی سیمان آریا");
+  assert.equal(out.cost, runCost("claude-sonnet-5", out.usage));
+});
+
+test("پاسخ جریانی: خطای میانهٔ جریان و قطع پیش از پایان، پیام روشن می‌دهند", async () => {
+  const broken = (text) => async () => new Response(text, { status: 200, headers: { "content-type": "text/event-stream" } });
+  await assert.rejects(withFetch(() => runDiscovery(ENV, { item: "سیمان", markets: ["IR"] }),
+    broken(`event: error\ndata: ${JSON.stringify({ type: "error", error: { type: "overloaded_error", message: "Overloaded" } })}\n\n`)), /Overloaded/);
+  await assert.rejects(withFetch(() => runDiscovery(ENV, { item: "سیمان", markets: ["IR"] }),
+    broken(`event: message_start\ndata: ${JSON.stringify({ type: "message_start", message: { usage: {} } })}\n\n`)), /پیش از پایان پاسخ قطع شد/);
+  await assert.rejects(withFetch(() => runDiscovery(ENV, { item: "سیمان", markets: ["IR"] }),
+    async () => new Response(JSON.stringify({ error: { message: "invalid x-api-key" } }), { status: 401 })), /invalid x-api-key/);
 });
