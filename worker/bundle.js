@@ -68,6 +68,22 @@ export async function buildFiles(d, letterBytes) {
   return files;
 }
 
+/**
+ * نگهبان جدول کمیسیون — یک قاعده برای پنل و بات: دست‌کم یک «تأیید نهایی»، و برای
+ * هر قلمِ باز دست‌کم به تعدادِ «حداقل تأمین‌کننده»ی مدیر استعلامِ ثبت‌موقت‌شده.
+ */
+export async function commissionGuard(env, aid, settings) {
+  const need = Math.max(1, Number(settings && settings.minSuppliers) || 1);
+  const [items, counts, fin] = await Promise.all([
+    env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=? AND state='open'").bind(aid).all(),
+    env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 GROUP BY item_id").bind(aid).all(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(aid).first(),
+  ]);
+  const byItem = new Map((counts.results || []).map((c) => [c.item_id, c.n]));
+  const missing = (items.results || []).filter((i) => (byItem.get(i.id) || 0) < need).map((i) => ({ title: i.title, n: byItem.get(i.id) || 0 }));
+  return { need, missing, finals: (fin && fin.n) || 0 };
+}
+
 /** چه چیزی هنوز آماده نیست — پیش از تحویل به کارشناس گفته می‌شود، نه بعدش */
 export function readiness(d) {
   const finals = d.quotes.filter((q) => q.final && q.saved);

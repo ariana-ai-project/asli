@@ -8,6 +8,18 @@
  *   runAlerts     — Cron: هشدارهای سررسیده را به صف می‌گذارد
  *   drainOutbox   — Cron یا waitUntil: صف را می‌فرستد
  *
+ * مسیر کار کارشناس (همان ترتیبی که مدیر خواسته):
+ *   ارجاع ← «مشاهده» ← بررسی سوابق · جستجوی هوشمند · کارتابل
+ *   سوابق: اقلام (چندانتخابی یا «همه») ← یک پیامِ تفکیک‌شده به قلم ← انتخاب قلم
+ *          ← تأمین‌کنندگان (چندانتخابی) ← «افزودن به استعلامات» یا «فهرست»
+ *          ← تب استعلامات · جستجوی هوشمند · کارتابل · درخواست · بازگشت
+ *   تب استعلامات: خط‌ها (چندانتخابی) ← «دریافت پیش‌فاکتور» · خط استعلام دستی · جدول کمیسیون
+ *   جدول کمیسیون (با «درج توضیحات») ← تحویل (درخواست خرید، نامه، جدول، پیوست‌ها) و خاتمه.
+ *   درخواست فقط با «خاتمه» از کارتابل و منوها بیرون می‌رود، نه با ساختن جدول.
+ *
+ * فایلِ رسیده سه معنا دارد و فقط «حالتی» که کارشناس خودش باز کرده تعیینش می‌کند:
+ * پیوستِ تحویل، پیش‌فاکتورِ منتظر، یا پیش‌فاکتورِ آزاد (درخواست ← اقلام ← استفاده).
+ *
  * قاعدهٔ مالکیت (INV-11): هر چیزی که بات نشان می‌دهد یا تغییر می‌دهد، فقط از
  * ارجاع‌های همان کارشناسی است که chat_id‌اش گره خورده. هیچ مسیری این را دور نمی‌زند.
  */
@@ -15,24 +27,24 @@ import { telegram, esc, TgError } from "./telegram.js";
 import { fmtFa, workHours, nextWorkMoment, inWorkHours } from "./time.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import { REFUSAL_FA } from "./extract.js";
-import { runExtraction, extractFor, saveExtraction, applyExtraction } from "./proforma.js";
-import { transcribe, writeLetter } from "./letter.js";
+import { runExtraction, extractFor, saveExtraction, applyExtraction, lineUnitPrice, idList } from "./proforma.js";
+import { transcribe, writeLetter, letterSubject } from "./letter.js";
 import { renderLetter } from "./docx.js";
-import { bundleData, buildFiles, readiness } from "./bundle.js";
+import { bundleData, readiness, commissionGuard } from "./bundle.js";
 import { commissionXlsx } from "./sheets.js";
+import { renderRequestDoc } from "./reqdoc.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
-import { itemHistory } from "./history.js";
+import { itemHistory, activeImport } from "./history.js";
 import { MARKETS, smartSearch, searchById, fillTemplate } from "./discovery.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
 
 export { STAGE_NAMES, queueStmt } from "./queue.js";
-const PANEL_URL = "https://arianaai.website/tamin-poshtibani/expert";
 
 /* عددهای فارسی، چون بقیهٔ سامانه هم فارسی نشان می‌دهد. ممیز هم فارسی می‌شود
    وگرنه «۱۱.۹» یک نقطهٔ لاتین وسط رقم‌های فارسی دارد و بد می‌نشیند. */
@@ -140,15 +152,52 @@ export function managerOverdueText(row) {
     + `مهلت: ${esc(fmtFa(row.deadline_at))}`;
 }
 
-const seenButton = (aid) => [[{ text: "✅ مشاهده کردم", callback_data: `seen:a:${aid}` }], [{ text: "باز کردن پنل", url: PANEL_URL }]];
-const panelButton = [[{ text: "باز کردن پنل", url: PANEL_URL }]];
-/* بعد از «مشاهده کردم» همان‌جا دو قدم بعدی پیشنهاد می‌شود؛ جستجوی هوشمند تا
-   اتصال مدل فقط پیام می‌دهد. */
-const afterSeenKb = (aid) => [
+/* ------------------------------------------------------------------ */
+/* دکمه‌های راهبری — یک جا، تا هر منو همان برچسب‌ها را داشته باشد       */
+/* ------------------------------------------------------------------ */
+
+/** پیام ارجاع فقط یک دکمه دارد؛ بقیهٔ مسیر بعد از «مشاهده» باز می‌شود */
+export const seenKb = (aid) => [[{ text: "👁 مشاهده", callback_data: `seen:a:${aid}` }]];
+
+/** بعد از «مشاهده»: دو کار اول، و کارتابل */
+const firstStepsKb = (aid) => [
   [{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }],
-  [{ text: "🔎 جستجوی هوشمند", callback_data: `hs:s:${aid}` }],
-  [{ text: "باز کردن پنل", url: PANEL_URL }],
+  [{ text: "🔎 جستجوی هوشمند", callback_data: `sm:a:${aid}` }],
+  [{ text: "📋 کارتابل", callback_data: "kt:n" }],
 ];
+
+const KARTABL_BTN = { text: "📋 کارتابل", callback_data: "kt:n" };
+const reqBtn = (aid) => ({ text: "📄 درخواست", callback_data: `rq:${aid}:m` });
+const navRow = (aid) => [KARTABL_BTN, reqBtn(aid)];
+/** زیر یادآوری‌ها: مستقیم به مسیر همان درخواست */
+const reqKb = (aid) => [[{ text: "📄 باز کردن درخواست", callback_data: `rq:${aid}:m` }]];
+
+/**
+ * پنج راهِ بعد از انتخاب تأمین‌کننده (یا «فهرست»).
+ * `back` کارتی است که از آن آمده‌ایم: h<flow> سوابق · s<flow> جستجو · p<flow> انتخاب قلم.
+ */
+const hubKb = (aid, back) => [
+  [{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }],
+  [{ text: "🔎 جستجوی هوشمند", callback_data: `sm:a:${aid}` }],
+  navRow(aid),
+  ...(back ? [[{ text: "↩️ بازگشت", callback_data: `hb:${back}` }]] : []),
+];
+const hub = (api, chat, aid, back, mid, head) => show(api, chat, mid, `${head ? head + "\n\n" : ""}قدم بعد؟`, hubKb(aid, back));
+
+/** دو گزینهٔ زیر نتیجهٔ جستجوی هوشمند */
+const smartChoiceKb = (sid) => [
+  [{ text: "➕ انتخاب جهت استعلام", callback_data: `sq:${sid}:open:0` }],
+  [{ text: "✉️ انتخاب جهت ارسال پیام", callback_data: `sg:${sid}:open:0` }],
+];
+
+/** اگر mid باشد همان پیام ویرایش می‌شود، وگرنه (یا اگر ویرایش نشد) پیام تازه */
+async function show(api, chat, mid, text, kb) {
+  if (mid) {
+    const r = await api.editMessageText(chat, mid, text, kb || []).catch(() => null);
+    if (r) return r;
+  }
+  return api.sendMessage(chat, text, kb).catch(() => null);
+}
 
 /* ------------------------------------------------------------------ */
 /* هشدارهای مهلت (SLA-03، SLA-05)                                       */
@@ -196,11 +245,11 @@ export async function runAlerts(env, limit = 20) {
     if (row.kind === "stage") {
       if (!row.telegram_chat) { skipped++; continue; }
       stmts.push(queueStmt(env, `stage:${row.aid}:${row.stage}:${row.fire_at}`, row.telegram_chat,
-        stageAlertText(row, row.stage), row.stage === 0 ? seenButton(row.aid) : panelButton));
+        stageAlertText(row, row.stage), row.stage === 0 ? seenKb(row.aid) : reqKb(row.aid)));
       queued++;
     } else {
       /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر (SLA-05، TG-04) */
-      if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), panelButton)); queued++; }
+      if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), reqKb(row.aid))); queued++; }
       if (managerChat) { stmts.push(queueStmt(env, `over-mgr:${row.aid}:${row.fire_at}`, managerChat, managerOverdueText(row))); queued++; }
     }
   }
@@ -280,11 +329,10 @@ async function onMessage(env, msg) {
 
   if (text.startsWith("/start")) {
     const token = T(text.slice(6));
-    if (!token) {
+    if (!token || token === "kartabl") {
       const ex = await expertOfChat(env, chat);
-      await api.sendMessage(chat, ex
-        ? `سلام ${esc(ex.label || ex.name)}.\nحساب شما از قبل به سامانه وصل است.\n\nبا /kartabl کارتابل، و با /stop قطع اتصال.`
-        : "برای اتصال، از پنل کارشناس دکمهٔ «اتصال به تلگرام» را بزنید و روی لینکی که می‌دهد کلیک کنید.\n\nاین بات فقط با کارشناسان ثبت‌شدهٔ واحد تأمین و پشتیبانی کار می‌کند.");
+      if (ex) return kartabl(env, api, chat, ex, { head: `سلام ${esc(ex.label || ex.name)}. حساب شما به سامانه وصل است.` });
+      await api.sendMessage(chat, "برای اتصال، از پنل کارشناس دکمهٔ «اتصال به تلگرام» را بزنید و روی لینکی که می‌دهد کلیک کنید.\n\nاین بات فقط با کارشناسان ثبت‌شدهٔ واحد تأمین و پشتیبانی کار می‌کند.");
       return { ok: true };
     }
     return bindToken(env, api, chat, token);
@@ -294,125 +342,80 @@ async function onMessage(env, msg) {
   if (!ex) { await api.sendMessage(chat, "این گفت‌وگو به هیچ کارشناسی وصل نیست. از پنل کارشناس «اتصال به تلگرام» را بزنید."); return { ok: true }; }
 
   if (msg.voice || msg.audio) return onVoice(env, msg, ex);
-  if (msg.document || msg.photo) return onDocument(env, msg, ex);
-
-  if (text === "/faktor" || text === "فاکتور دستی") return startFlow(env, api, chat, ex, "manual");
-  if (text === "/tozihat" || text === "توضیحات") return startFlow(env, api, chat, ex, "notes");
-  if (text === "/nameh" || text === "نامه") return startFlow(env, api, chat, ex, "letter");
-  if (text === "/tahvil" || text === "تحویل") return startFlow(env, api, chat, ex, "deliver");
-  if (text === "/pishraft" || text === "پیشرفت") return startFlow(env, api, chat, ex, "progress");
-
-  /* متن آزاد: پاسخِ کدام گفت‌وگوی نیمه‌کاره است؟
-     کارشناس ممکن است هم‌زمان یک نامهٔ منتظرِ توضیح، یک فایلِ منتظرِ نام
-     تأمین‌کننده و یک فاکتور دستیِ نیمه‌کاره داشته باشد. قاعده ساده و قابل
-     پیش‌بینی است: **آخرین چیزی که شروع کرده، همان است که جواب می‌گیرد.**
-     (پیش از این، نامهٔ نیمه‌کاره متنِ فاکتور دستی را می‌بلعید.) */
-  if (text && !text.startsWith("/")) {
-    const t = now();
-    const [letter, upload, flow] = await Promise.all([
-      /* نامه: چه صوتی چه نوشتاری. اصلاح متنِ رونویسی‌شده هم همین‌جاست، تا
-         کارشناس برای یک غلط املایی مجبور به ضبط دوباره نشود. */
-      env.DB.prepare("SELECT * FROM letters WHERE expert_id=? AND state IN ('need_voice','transcribed') ORDER BY id DESC LIMIT 1").bind(ex.id).first(),
-      env.DB.prepare("SELECT * FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1").bind(ex.id, t).first(),
-      openFlow(env, ex.id),
-    ]);
-    const pick = [
-      letter && { at: letter.updated_at || letter.created_at, run: () => onLetterText(env, api, chat, ex, letter, text) },
-      upload && { at: upload.created_at, run: async () => {
-        if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
-        return saveProforma(env, api, chat, upload, text);
-      } },
-      flow && { at: flow.created_at, run: () => onFlowText(env, api, chat, flow, text) },
-    ].filter(Boolean).sort((a, b) => b.at - a.at)[0];
-    if (pick) return pick.run();
-  }
+  if (msg.document || msg.photo || msg.video) return onFile(env, msg, ex);
 
   if (text === "/stop") {
     await env.DB.prepare("UPDATE experts SET telegram_chat=NULL WHERE id=?").bind(ex.id).run();
     await api.sendMessage(chat, "اتصال قطع شد. دیگر اعلانی فرستاده نمی‌شود.\nبرای وصل شدن دوباره، از پنل لینک تازه بگیرید.");
     return { ok: true };
   }
-  if (text === "/kartabl" || text === "/start kartabl") return sendTray(env, api, chat, ex);
+  if (text === "/kartabl") return kartabl(env, api, chat, ex);
+  /* میان‌بُرها به همان مسیرهای منو می‌رسند؛ فقط «کدام درخواست؟» را اول می‌پرسند */
+  if (SHORTCUTS[text]) return kartabl(env, api, chat, ex, { target: SHORTCUTS[text] });
 
-  await api.sendMessage(chat,
-    "چه کاری می‌خواهید بکنید؟\n\n"
-    + "/kartabl — ارجاع‌های باز شما\n"
-    + "/faktor — فاکتور دستی (قیمت‌ها را خودتان وارد کنید)\n"
-    + "/tozihat — توضیحات برگهٔ کمیسیون\n"
-    + "/nameh — نامهٔ پیوست کمیسیون (صوتی یا نوشتاری)\n"
-    + "/tahvil — گرفتن فایل‌های آماده\n"
-    + "/stop — قطع اتصال\n\n"
-    + "<i>برای پیش‌فاکتور، فقط فایلش را همین‌جا بفرستید.</i>");
+  /* متن آزاد: پاسخِ کدام پرسشِ باز است؟ کارشناس ممکن است هم‌زمان نامه‌ای منتظرِ
+     توضیح، فایلی منتظرِ نام تأمین‌کننده و فیلدی منتظرِ مقدار داشته باشد. قاعده ساده
+     و قابل پیش‌بینی است: **آخرین چیزی که پرسیده شده، همان است که جواب می‌گیرد.** */
+  if (text && !text.startsWith("/")) {
+    const t = now();
+    const [letter, upload, flow] = await Promise.all([
+      env.DB.prepare("SELECT * FROM letters WHERE expert_id=? AND state IN ('need_voice','transcribed') AND updated_at>? ORDER BY id DESC LIMIT 1")
+        .bind(ex.id, t - LETTER_FRESH).first(),
+      env.DB.prepare("SELECT *, COALESCE(asked_at, created_at) AS at FROM tg_uploads WHERE expert_id=? AND state='need_name' AND done_at IS NULL AND expires_at>? ORDER BY at DESC, id DESC LIMIT 1")
+        .bind(ex.id, t).first(),
+      inputFlow(env, ex.id),
+    ]);
+    const pick = [
+      letter && { at: letter.updated_at || letter.created_at, run: () => onLetterText(env, api, chat, ex, letter, text) },
+      upload && { at: upload.at, run: () => nameForUpload(env, api, chat, ex, upload, text) },
+      flow && { at: flow.at, run: () => onFlowText(env, api, chat, ex, flow, text) },
+    ].filter(Boolean).sort((a, b) => b.at - a.at)[0];
+    if (pick) return pick.run();
+  }
+
+  await api.sendMessage(chat, HELP_TEXT, [[KARTABL_BTN]]);
   return { ok: true };
 }
 
-/** پاسخ متنی کاربر در یکی از گام‌های گفت‌وگو */
-async function onFlowText(env, api, chat, f, text) {
+const SHORTCUTS = { "/estelam": "t", "/faktor": "f", "/tozihat": "n", "/nameh": "l", "/tahvil": "d" };
+const HELP_TEXT = "چه کاری می‌خواهید بکنید؟\n\n"
+  + "/kartabl — کارتابل: درخواست‌های فعال و مسیر هر کدام\n"
+  + "/estelam — تب استعلامات یک درخواست\n"
+  + "/faktor — خط استعلام دستی\n"
+  + "/tozihat — توضیحات جدول کمیسیون\n"
+  + "/nameh — نامهٔ پیوست (صوتی یا نوشتاری)\n"
+  + "/tahvil — تحویل اسناد\n"
+  + "/stop — قطع اتصال\n\n"
+  + "<i>هر فایلی که بیرون از «دریافت پیش‌فاکتور» یا «پیوست‌ها»ی تحویل بفرستید، پیش‌فاکتور حساب می‌شود.</i>";
+
+/** پاسخ متنی کارشناس به پرسشِ یک گفت‌وگو (فقط گام‌های INPUT_STEPS به این‌جا می‌رسند) */
+async function onFlowText(env, api, chat, ex, f, text) {
   const d = flowData(f);
-
-  if (f.kind === "field" && f.step === "need_value") return onFieldText(env, api, chat, f, text);
-
-  /* منوی چندانتخابی سوابق متن نمی‌خواهد — انتخاب فقط با دکمه‌هاست */
-  if (f.kind === "hist" || f.kind === "smsel") {
-    await api.sendMessage(chat, "برای انتخاب تأمین‌کننده از دکمه‌های زیر فهرست استفاده کنید؛ اگر تأمین‌کنندهٔ تازه‌ای مدنظر است، از «افزودن دستی استعلام جدید» بروید.").catch(() => {});
-    return { ok: true };
-  }
+  if (f.kind === "field") return onFieldText(env, api, chat, f, text);
 
   /* قیدهای متنیِ جستجوی هوشمند: برند / مشخصات / ملاحظات */
   if (f.kind === "smart") {
-    const key = f.step === "need_brand" ? "brand" : f.step === "need_specs" ? "specs" : f.step === "need_notes2" ? "notes" : null;
-    if (key) {
-      d[key] = text.trim() === "-" ? "" : text.slice(0, 500);
-      await env.DB.prepare("UPDATE tg_flows SET step='prefs', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-      return smartPrefsRender(env, api, chat, f, d, f.message_id);
-    }
-    await api.sendMessage(chat, "از دکمه‌های کارت جستجو استفاده کنید.").catch(() => {});
-    return { ok: true };
+    const key = f.step === "need_brand" ? "brand" : f.step === "need_specs" ? "specs" : "notes";
+    d[key] = text.trim() === "-" ? "" : text.slice(0, 500);
+    await env.DB.prepare("UPDATE tg_flows SET step='prefs', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
+    return smartPrefsRender(env, api, chat, f, d, f.message_id);
   }
 
-  if (f.step === "need_supplier") {
-    if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
-    d.supplier = text; d.idx = 0; d.prices = {};
-    await env.DB.prepare("UPDATE tg_flows SET step='prices', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-    return askPrice(env, api, chat, { ...f, step: "prices", data_json: JSON.stringify(d) });
-  }
-
-  if (f.step === "prices") {
-    const its = await itemsOf(env, f.assignment_id);
-    const it = its[d.idx || 0];
-    if (!it) return confirmManual(env, api, chat, f);
-    if (text !== "-" && text !== "—") {
-      const price = parsePrice(text);
-      if (price == null) {
-        await api.sendMessage(chat, "عدد را نفهمیدم. فقط رقم بنویسید — مثلاً <code>2500000</code> یا <code>۲٬۵۰۰٬۰۰۰</code>.\nاگر این قلم در فاکتور نیست، «-» بفرستید.");
-        return { ok: true };
-      }
-      d.prices[it.id] = price;
-    }
-    d.idx = (d.idx || 0) + 1;
-    await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-    const next = { ...f, data_json: JSON.stringify(d) };
-    return (d.idx < its.length) ? askPrice(env, api, chat, next) : confirmManual(env, api, chat, next);
-  }
-
-  if (f.step === "need_notes") {
+  /* «درج توضیحات» منوی جدول کمیسیون */
+  if (f.kind === "notes") {
     if (text.length > 1500) { await api.sendMessage(chat, "توضیحات خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
-    if (f.kind === "notes") {
-      const t = now();
-      await env.DB.batch([
-        env.DB.prepare("UPDATE assignments SET notes=? WHERE id=?").bind(text, f.assignment_id),
-        env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id),
-      ]);
-      const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(f.assignment_id).first();
-      await api.sendMessage(chat, `📝 ثبت شد.\n\nاین توضیحات پای برگهٔ کمیسیون درخواست <b>${esc(a ? a.request_id : "")}</b> چاپ می‌شود، در بخش «توضیحات تدارکات و پشتیبانی».`, panelButton);
-      return { ok: true };
-    }
-    /* توضیحات وسط جریان فاکتور دستی */
-    d.notes = text;
-    await env.DB.prepare("UPDATE tg_flows SET step='confirm', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-    return confirmManual(env, api, chat, { ...f, data_json: JSON.stringify(d) });
+    await env.DB.batch([
+      env.DB.prepare("UPDATE assignments SET notes=? WHERE id=? AND expert_id=?").bind(text, f.assignment_id, ex.id),
+      env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id),
+    ]);
+    return tableSelect(env, api, chat, ex, f.assignment_id, null, "📝 توضیحات ثبت شد؛ در بخش «توضیحات تدارکات و پشتیبانی» جدول کمیسیون می‌نشیند.");
   }
 
+  /* خط استعلام دستی: نام تأمین‌کنندهٔ تازه */
+  if (f.kind === "manual") {
+    if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
+    return manualItems(env, api, chat, ex, f, { ...d, supplier: text }, null);
+  }
   return { ok: true };
 }
 
@@ -448,99 +451,27 @@ async function bindToken(env, api, chat, token) {
   ]);
   await api.sendMessage(chat,
     `✅ وصل شد.\n\n${esc(ex.label || ex.name)} گرامی، از این پس ارجاع‌های تازه و یادآوری مهلت‌ها همین‌جا به شما اطلاع داده می‌شود.\n\n/kartabl — ارجاع‌های باز\n/stop — قطع اتصال`);
-  return await sendTray(env, api, chat, ex);
-}
-
-async function sendTray(env, api, chat, ex) {
-  const rows = (await env.DB.prepare(
-    `SELECT a.id, a.request_id, a.days, a.deadline_at, r.party,
-            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count
-     FROM assignments a JOIN requests r ON r.id=a.request_id
-     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL
-       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
-     ORDER BY a.deadline_at LIMIT 15`,
-  ).bind(ex.id).all()).results || [];
-
-  if (!rows.length) { await api.sendMessage(chat, "کارتابل شما خالی است.", panelButton); return { ok: true }; }
-  const body = rows.map((r) => {
-    const left = r.deadline_at ? Math.max(0, workHours(now(), r.deadline_at)) : null;
-    return `• <b>${esc(r.request_id)}</b> — ${esc(r.party || "")}\n  ${M(r.open_count)} قلم باز`
-      + (r.deadline_at ? ` · مهلت ${esc(fmtFa(r.deadline_at))} (${M(left.toFixed(1))} ساعت کاری)` : "");
-  }).join("\n");
-  await api.sendMessage(chat, `📋 <b>کارتابل شما</b> — ${M(rows.length)} ارجاع باز\n\n${body}`, panelButton);
-  return { ok: true };
+  return kartabl(env, api, chat, ex);
 }
 
 /* ------------------------------------------------------------------ */
-/* دریافت پیش‌فاکتور از بات (ADR-0008، TG-11)                            */
+/* کارتابل و مسیر هر درخواست                                           */
 /* ------------------------------------------------------------------ */
 
-const UPLOAD_TTL = 24 * 3600000;
-
-/**
- * فایل رسیده را **بلافاصله** دانلود و ذخیره می‌کند، بعد می‌پرسد مال کدام درخواست است.
- *
- * ترتیب مهم است: لینک دانلود تلگرام فقط حدود یک ساعت معتبر است. اگر اول سؤال
- * می‌پرسیدیم و کارشناس جواب را فردا می‌داد، فایل از دست می‌رفت (ADR-0008).
- */
-async function onDocument(env, msg, ex) {
-  const api = telegram(env);
-  const chat = msg.chat.id;
-  const store = storage(env);
-  if (!store) { await api.sendMessage(chat, "انبار فایل هنوز به سامانه وصل نشده است. فعلاً پیش‌فاکتور را از پنل بارگذاری کنید."); return { ok: true }; }
-
-  /* سند یا عکس؛ از عکس، بزرگ‌ترین اندازه برداشته می‌شود */
-  const doc = msg.document;
-  const photo = !doc && Array.isArray(msg.photo) && msg.photo.length ? msg.photo[msg.photo.length - 1] : null;
-  const fileId = doc ? doc.file_id : photo && photo.file_id;
-  if (!fileId) return { ok: true };
-  const size = (doc && doc.file_size) || (photo && photo.file_size) || 0;
-  const filename = (doc && doc.file_name) || `عکس-${new Date().toISOString().slice(0, 10)}.jpg`;
-  const mime = (doc && doc.mime_type) || (photo ? "image/jpeg" : "application/octet-stream");
-
-  if (size > MAX_BYTES) {
-    await api.sendMessage(chat, `این فایل ${M((size / 1048576).toFixed(1))} مگابایت است.\nبات تلگرام فقط تا ${M(20)} مگابایت را می‌تواند بگیرد؛ لطفاً از پنل بارگذاری کنید یا فشرده‌ترش کنید.`, panelButton);
-    return { ok: true };
-  }
-
-  const open = await openAssignments(env, ex.id);
-  if (!open.length) { await api.sendMessage(chat, "الان هیچ ارجاع بازی ندارید که این پیش‌فاکتور به آن بخورد."); return { ok: true }; }
-
-  /* دانلود فوری و جریانی — بایت‌ها از حافظهٔ Worker رد نمی‌شوند */
-  const f = await api.getFile(fileId);
-  const src = await fetch(api.fileUrl(f.file_path));
-  if (!src.ok || !src.body) { await api.sendMessage(chat, "دانلود فایل از تلگرام نشد. یک بار دیگر بفرستید."); return { ok: true }; }
-  const key = storageKey(open.length === 1 ? open[0].id : null, filename);
-  await store.put(key, src.body, { contentType: mime, size: size || undefined });
-
-  const t = now();
-  const ins = await env.DB.prepare(
-    `INSERT INTO tg_uploads (expert_id,chat_id,file_id,storage_key,filename,mime,size_bytes,state,created_at,expires_at)
-     VALUES (?,?,?,?,?,?,?,'need_request',?,?)`,
-  ).bind(ex.id, String(chat), fileId, key, filename, mime, size || null, t, t + UPLOAD_TTL).run();
-  const uid = ins.meta.last_row_id;
-
-  /* اگر فقط یک ارجاع باز دارد، پرسیدن «کدام درخواست؟» بی‌معنی است */
-  if (open.length === 1) return askQuote(env, api, chat, uid, open[0], filename, null);
-
-  const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `pf:${uid}:r:${a.id}` }]);
-  kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
-  const sent = await api.sendMessage(chat, `📎 <b>${esc(filename)}</b> گرفته شد.\n\nاین پیش‌فاکتور برای کدام درخواست است؟`, kb);
-  await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(sent.message_id, uid).run();
-  return { ok: true };
-}
-
-const OPEN_ASSIGNMENT = `SELECT a.id, a.request_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
-  WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.commission_at IS NULL
+/* «فعال» همان تعریف کارتابل پنل است: ارسال شده و دست‌کم یک قلمِ باز دارد. ساختن
+   جدول کمیسیون درخواست را نمی‌بندد؛ فقط «خاتمه» اقلام را می‌بندد و درخواست وقتی
+   قلمِ بازی نماند از این‌جا (و از همهٔ منوهای بات) بیرون می‌رود. */
+const OPEN_ASSIGNMENT = `SELECT a.id, a.request_id, a.deadline_at, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
+  WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
     AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')`;
 
-/** ارجاع‌های باز همین کارشناس، برای ساختن دکمه‌ها (INV-11) */
+/** ارجاع‌های فعال همین کارشناس، برای ساختن دکمه‌ها (INV-11) */
 async function openAssignments(env, expertId) {
-  return (await env.DB.prepare(`${OPEN_ASSIGNMENT} ORDER BY a.deadline_at LIMIT 24`).bind(expertId).all()).results || [];
+  return (await env.DB.prepare(`${OPEN_ASSIGNMENT} ORDER BY a.deadline_at LIMIT 25`).bind(expertId).all()).results || [];
 }
 
 /**
- * یک ارجاعِ باز و متعلق به همین کارشناس.
+ * یک ارجاعِ فعال و متعلق به همین کارشناس.
  *
  * مستقیم پرسیده می‌شود، نه با جست‌وجو در فهرستِ دکمه‌ها: آن فهرست سقف دارد و
  * اگر کارشناس ارجاع‌های بیشتری داشته باشد، انتخابِ ارجاعِ خارج از سقف بی‌صدا
@@ -552,141 +483,370 @@ async function ownOpenAssignment(env, expertId, aid) {
 
 const short = (s, n = 28) => { const x = String(s || "").trim(); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
 
-/**
- * گام دوم: این پیش‌فاکتور برای کدام استعلام است؟
- *
- * ملاکِ دیده‌شدن، **باز بودنِ خط استعلام** است، نه «ثبت موقت». ثبت موقت خودش
- * می‌خواهد همهٔ فیلدها از قبل دستی پر شده باشند — و اگر شرطش می‌کردیم، خواندنِ
- * خودکار بی‌معنی می‌شد: کارشناس باید همان چیزی را تایپ می‌کرد که قرار است مدل
- * از روی سند بخواند.
- *
- * نام تأمین‌کننده می‌تواند بلند باشد و `callback_data` سقف ۶۴ بایت دارد، پس
- * گزینه‌ها در خود ردیف آپلود ذخیره و با اندیس ارجاع داده می‌شوند.
- */
-async function askQuote(env, api, chat, uid, asg, filename, messageId) {
+/** خواندن خودکار پیش‌فاکتور روی این نصب فعال است؟ (مدل + انبارِ دارای لینک امضاشده) */
+const aiReady = (env) => !!(env.ANTHROPIC_API_KEY && (storage(env) || {}).signedUrl);
+
+/* مقصدِ بعد از انتخاب درخواست — برای میان‌بُرها */
+const KT_TARGET = { t: "🧾 تب استعلامات", f: "✍️ خط استعلام دستی", n: "📝 توضیحات جدول کمیسیون", l: "✉️ نامه", d: "📦 تحویل" };
+
+/** کارتابل: فهرست درخواست‌های فعال با یک دکمه برای هر کدام */
+async function kartabl(env, api, chat, ex, { target = "m", mid = null, head = "" } = {}) {
   const rows = (await env.DB.prepare(
-    `SELECT q.supplier_name, q.saved FROM quotes q WHERE q.assignment_id=? ORDER BY q.supplier_name, q.id LIMIT 60`,
-  ).bind(asg.id).all()).results || [];
+    `SELECT a.id, a.request_id, a.deadline_at, r.party,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count
+     FROM assignments a JOIN requests r ON r.id=a.request_id
+     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
+       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
+     ORDER BY a.deadline_at LIMIT 25`,
+  ).bind(ex.id).all()).results || [];
+  const top = head ? head + "\n\n" : "";
+  if (!rows.length) return show(api, chat, mid, `${top}📋 <b>کارتابل شما خالی است.</b>`, []);
+  const t = now();
+  const body = rows.map((r) => {
+    const left = r.deadline_at ? Math.max(0, workHours(t, r.deadline_at)) : null;
+    return `• <b>${esc(r.request_id)}</b> — ${esc(short(r.party, 40))}\n   ${M(r.open_count)} قلم باز`
+      + (r.deadline_at ? ` · مهلت ${esc(fmtFa(r.deadline_at))} (${M(left.toFixed(1))} ساعت کاری)` : "");
+  }).join("\n");
+  const kb = rows.map((r) => [{ text: `📄 ${r.request_id} — ${short(r.party, 24)}`, callback_data: `rq:${r.id}:${KT_TARGET[target] ? target : "m"}:e` }]);
+  return show(api, chat, mid,
+    `${top}📋 <b>کارتابل</b> — ${M(rows.length)} درخواست فعال\n\n${body}\n\n`
+    + (KT_TARGET[target] ? `برای ${KT_TARGET[target]}، درخواست را انتخاب کنید:` : "هر درخواست را بزنید تا مسیرش باز شود."), kb);
+}
 
-  /* خط‌های یک تأمین‌کننده یک گزینه‌اند: پیش‌فاکتور به تأمین‌کننده می‌چسبد، نه به قلم */
-  const groups = [];
-  for (const r of rows) {
-    const name = T(r.supplier_name);
-    if (!name) continue;
-    let g = groups.find((x) => x.n === name);
-    if (!g) { g = { n: name, c: 0, s: 0 }; groups.push(g); }
-    g.c++; if (r.saved) g.s++;
+/**
+ * مسیر یک درخواست. کار تازه همان دو قدم اول را دارد (سوابق، جستجوی هوشمند)؛
+ * مرحله‌های بعدی فقط وقتی دکمه می‌شوند که کار به آن‌جا رسیده باشد، تا کارشناسی
+ * که فردا برمی‌گردد برای «تحویل» مجبور نباشد از سوابق دوباره راه بیفتد.
+ */
+async function requestMenu(env, api, chat, ex, aid, { mid = null, head = "" } = {}) {
+  const s = await env.DB.prepare(
+    `SELECT a.id, a.request_id, a.deadline_at, a.viewed_at, a.commission_at, r.party,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist,
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart,
+            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
+            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
+            (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
+     FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=? AND a.expert_id=? AND a.dispatched_at IS NOT NULL`,
+  ).bind(aid, ex.id).first();
+  if (!s) return show(api, chat, mid, "این درخواست متعلق به شما نیست.", [[KARTABL_BTN]]);
+  /* حالتِ فایلِ درخواستِ دیگری («دریافت پیش‌فاکتور»، «پیوست‌ها») این‌جا بسته می‌شود
+     تا فایلِ بعدی به درخواستِ اشتباه نچسبد */
+  await endModes(env, ex.id, aid);
+  if (!s.open_count) {
+    return show(api, chat, mid, `📄 درخواست <b>${esc(s.request_id)}</b>\n\nهمهٔ اقلام این درخواست بسته شده و دیگر در کارتابل نیست.`, [[KARTABL_BTN]]);
   }
+  const done = [!!s.viewed_at, s.hist > 0, s.smart > 0, s.quotes > 0, s.proformas > 0, !!s.commission_at];
+  const left = s.deadline_at ? Math.max(0, workHours(now(), s.deadline_at)) : null;
+  const text = `${head ? head + "\n\n" : ""}📄 <b>درخواست ${esc(s.request_id)}</b>\n${esc(s.party || "")}\n\n`
+    + `${M(s.open_count)} قلم باز از ${M(s.item_count)}`
+    + (s.deadline_at ? ` · مهلت ${esc(fmtFa(s.deadline_at))} (${M(left.toFixed(1))} ساعت کاری)` : "") + "\n\n"
+    + STAGE_NAMES.map((n, i) => `${done[i] ? "✅" : "⬜"} ${n}`).join("\n");
+  const kb = [
+    [{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }],
+    [{ text: "🔎 جستجوی هوشمند", callback_data: `sm:a:${aid}` }],
+  ];
+  if (s.lines) kb.push([{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }]);
+  if (s.quotes) kb.push([{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
+  if (s.commission_at) kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }]);
+  kb.push([KARTABL_BTN]);
+  return show(api, chat, mid, text, kb);
+}
 
-  await env.DB.prepare("UPDATE tg_uploads SET assignment_id=?, state='need_supplier', options_json=? WHERE id=?")
-    .bind(asg.id, JSON.stringify(groups), uid).run();
+/* ------------------------------------------------------------------ */
+/* فایلِ رسیده (ADR-0008، TG-11)                                        */
+/*                                                                      */
+/* یک فایل سه معنا دارد و فقط «حالتی» که کارشناس خودش با دکمه باز کرده   */
+/* تعیینش می‌کند:                                                       */
+/*   ۱. «پیوست‌ها»ی تحویل باز است ← پیوست (هر چند فایل پشت سر هم)        */
+/*   ۲. «دریافت پیش‌فاکتور» از تب استعلامات باز است ← پیش‌فاکتورِ همان    */
+/*      تأمین‌کنندگان و اقلام؛ «کدام درخواست؟» دیگر پرسیده نمی‌شود       */
+/*   ۳. هیچ‌کدام ← پیش‌فاکتورِ آزاد: درخواست ← اقلام ← «استفاده پیش‌فاکتور» */
+/* ------------------------------------------------------------------ */
 
-  const kb = groups.map((g, i) => [{
-    /* ⚪ یعنی هنوز ثبت موقت نشده — همین‌ها بودند که قبلاً از قلم می‌افتادند */
-    text: `${g.s === g.c ? "✅" : "⚪"} ${short(g.n, 26)} · ${M(g.c)} قلم`,
-    callback_data: `pf:${uid}:s:${i}`,
-  }]);
-  const ai = !!(env.ANTHROPIC_API_KEY && (storage(env) || {}).signedUrl);
-  if (ai) kb.push([{ text: "➕ استعلام جدید (از روی همین فایل)", callback_data: `pf:${uid}:a:0` }]);
-  kb.push([{ text: "✍️ نام تأمین‌کننده را خودم می‌نویسم", callback_data: `pf:${uid}:n:0` }]);
-  kb.push([{ text: "✖️ بی‌خیال", callback_data: `pf:${uid}:x:0` }]);
+const UPLOAD_TTL = 24 * 3600000;
 
-  const text = `📎 <b>${esc(filename)}</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
-    + (groups.length
-      ? "این پیش‌فاکتور برای کدام استعلام است؟\n<i>⚪ یعنی هنوز ثبت موقت نشده؛ فرقی نمی‌کند، انتخابش کنید.</i>"
-      : ai
-        ? "برای این درخواست هنوز استعلامی باز نشده.\n«استعلام جدید» را بزنید تا خودم سند را بخوانم و خط استعلام را با نام همان تأمین‌کننده بسازم."
-        : "برای این درخواست هنوز استعلامی باز نشده. نام تأمین‌کننده را بنویسید:");
+/** مشخصات فایلِ پیام: سند، عکس (بزرگ‌ترین اندازه) یا ویدئو */
+function fileOf(msg) {
+  const day = new Date().toISOString().slice(0, 10);
+  if (msg.document) {
+    const d = msg.document;
+    return { kind: "document", id: d.file_id, size: d.file_size || 0, name: d.file_name || `سند-${day}`, mime: d.mime_type || "application/octet-stream" };
+  }
+  if (Array.isArray(msg.photo) && msg.photo.length) {
+    const p = msg.photo[msg.photo.length - 1];
+    return { kind: "photo", id: p.file_id, size: p.file_size || 0, name: `عکس-${day}.jpg`, mime: "image/jpeg" };
+  }
+  if (msg.video) {
+    const v = msg.video;
+    return { kind: "video", id: v.file_id, size: v.file_size || 0, name: v.file_name || `ویدئو-${day}.mp4`, mime: v.mime_type || "video/mp4" };
+  }
+  return null;
+}
 
-  if (messageId) { await api.editMessageText(chat, messageId, text, kb); return { ok: true }; }
-  const sent = await api.sendMessage(chat, text, kb);
+async function onFile(env, msg, ex) {
+  const api = telegram(env);
+  const chat = msg.chat.id;
+  const file = fileOf(msg);
+  if (!file) return { ok: true };
+  /* اگر هر دو حالت باز باشند، آخرینی که کارشناس باز کرده برنده است */
+  const mode = await env.DB.prepare(
+    `SELECT *, COALESCE(asked_at, created_at) AS at FROM tg_flows WHERE expert_id=? AND done_at IS NULL AND expires_at>?
+       AND ((kind='deliver' AND step='attach') OR (kind='await_pf' AND step='wait'))
+     ORDER BY at DESC, id DESC LIMIT 1`,
+  ).bind(ex.id, now()).first();
+  /* پیوست دانلود نمی‌شود: تلگرام همان file_id را هنگام تحویل دوباره می‌فرستد */
+  if (mode && mode.kind === "deliver") return addAttachment(env, api, chat, ex, mode, file);
+
+  if (file.kind === "video") {
+    await api.sendMessage(chat, "ویدئو پیش‌فاکتور حساب نمی‌شود؛ فقط در «پیوست‌ها»ی تحویل پذیرفته می‌شود.");
+    return { ok: true };
+  }
+  if (file.size > MAX_BYTES) {
+    await api.sendMessage(chat, `این فایل ${M((file.size / 1048576).toFixed(1))} مگابایت است.\nبات تلگرام فقط تا ${M(20)} مگابایت را می‌تواند بگیرد؛ لطفاً از پنل بارگذاری کنید یا فشرده‌ترش کنید.`);
+    return { ok: true };
+  }
+  const store = storage(env);
+  if (!store) { await api.sendMessage(chat, "انبار فایل هنوز به سامانه وصل نشده است. فعلاً پیش‌فاکتور را از پنل بارگذاری کنید."); return { ok: true }; }
+  if (mode) return awaitedProforma(env, api, chat, ex, mode, file, store);
+  return freeProforma(env, api, chat, ex, file, store);
+}
+
+/**
+ * دانلود فوری و جریانی به انبار — بایت‌ها از حافظهٔ Worker رد نمی‌شوند.
+ * ترتیب مهم است: لینک دانلود تلگرام فقط حدود یک ساعت معتبر است؛ اگر اول سؤال
+ * می‌پرسیدیم و کارشناس فردا جواب می‌داد، فایل از دست می‌رفت (ADR-0008).
+ */
+async function storeFile(api, store, aid, file) {
+  const f = await api.getFile(file.id);
+  const src = await fetch(api.fileUrl(f.file_path));
+  if (!src.ok || !src.body) return null;
+  const key = storageKey(aid || null, file.name);
+  await store.put(key, src.body, { contentType: file.mime, size: file.size || undefined });
+  return key;
+}
+
+async function newUpload(env, ex, chat, file, key, aid, state, opts) {
+  const t = now();
+  const r = await env.DB.prepare(
+    `INSERT INTO tg_uploads (expert_id,chat_id,file_id,storage_key,filename,mime,size_bytes,state,assignment_id,options_json,created_at,expires_at,asked_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+  ).bind(ex.id, String(chat), file.id, key, file.name, file.mime, file.size || null, state, aid || null, JSON.stringify(opts || {}), t, t + UPLOAD_TTL, t).run();
+  return r.meta.last_row_id;
+}
+
+/* گزینه‌های بارگذاری: sel (اقلام تیک‌خورده) · groups (تأمین‌کنندگان) · read (سندِ خوانده‌شده).
+   ردیف‌های قدیمی آرایهٔ تأمین‌کنندگان بودند. */
+const uploadOpts = (up) => {
+  let o;
+  try { o = JSON.parse((up && up.options_json) || "{}"); } catch (_) { o = {}; }
+  return Array.isArray(o) ? { groups: o } : (o || {});
+};
+const ownUpload = (env, ex, uid) => env.DB.prepare("SELECT * FROM tg_uploads WHERE id=? AND expert_id=?").bind(uid, ex.id).first();
+const dropFileKb = (uid) => [[{ text: "✖️ بی‌خیال (فایل حذف شود)", callback_data: `pf:${uid}:x:0` }]];
+
+/** پیش‌فاکتورِ آزاد، گام اول: کدام درخواست؟ (با یک درخواستِ فعال پرسیده نمی‌شود) */
+async function freeProforma(env, api, chat, ex, file, store) {
+  const open = await openAssignments(env, ex.id);
+  if (!open.length) { await api.sendMessage(chat, "الان هیچ درخواست فعالی ندارید که این پیش‌فاکتور به آن بخورد."); return { ok: true }; }
+  const one = open.length === 1 ? open[0] : null;
+  const key = await storeFile(api, store, one && one.id, file);
+  if (!key) { await api.sendMessage(chat, "دانلود فایل از تلگرام نشد. یک بار دیگر بفرستید."); return { ok: true }; }
+  const uid = await newUpload(env, ex, chat, file, key, one && one.id, one ? "need_items" : "need_request", {});
+  if (one) return uploadItems(env, api, chat, ex, await ownUpload(env, ex, uid), null);
+
+  const kb = open.map((a) => [{ text: `📄 ${a.request_id} — ${short(a.party)}`, callback_data: `pf:${uid}:r:${a.id}` }]);
+  kb.push(...dropFileKb(uid));
+  const sent = await api.sendMessage(chat, `📎 <b>${esc(file.name)}</b> گرفته شد و پیش‌فاکتور حساب می‌شود.\n\nبرای کدام درخواست است؟`, kb);
   await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(sent.message_id, uid).run();
   return { ok: true };
 }
 
-/**
- * «استعلام جدید +» — سند خوانده می‌شود تا **نام تأمین‌کننده از خود پیش‌فاکتور**
- * دربیاید و خط استعلام با همان نام ساخته شود.
- *
- * ترتیب اجباری است: کلیدِ ردیف پیش‌فاکتور همان نام تأمین‌کننده است، پس تا سند
- * خوانده نشود ردیفی هم نمی‌شود ساخت. برای همین این‌جا extractFor صدا زده می‌شود
- * که چیزی در دیتابیس نمی‌نویسد.
- */
-async function newQuoteFromFile(env, api, chat, ex, up) {
-  const store = storage(env);
-  const fallback = async (msg) => {
-    await env.DB.prepare("UPDATE tg_uploads SET state='need_name' WHERE id=?").bind(up.id).run();
-    await api.sendMessage(chat, msg + "\n\nنام تأمین‌کننده را بنویسید تا فایل را همان‌جا ثبت کنم:");
-    return { ok: true };
-  };
-  if (!env.ANTHROPIC_API_KEY || !store || !store.signedUrl) return fallback("خواندن خودکار روی این نصب فعال نیست.");
-
-  const asg = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
-  if (!asg) return fallback("این ارجاع پیدا نشد.");
-
-  await api.sendMessage(chat, "⏳ دارم سند را می‌خوانم تا خط استعلام را خودم بسازم…").catch(() => {});
-  let out;
-  try {
-    out = await extractFor(env, store, {
-      assignment_id: up.assignment_id, request_id: asg.request_id, storage_key: up.storage_key, mime: up.mime,
-    });
-  } catch (e) { return fallback(`خواندن نشد: ${esc(e.message)}`); }
-
-  const r = out.result;
-  const supplier = T(r.supplier_name);
-  if (!r.extractable) {
-    return fallback(`⚠️ نتوانستم مطمئن بخوانم — <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>.`
-      + "\nقیمت‌ها را بعداً با /faktor دستی وارد کنید.");
+/** پیش‌فاکتورِ آزاد، گام دوم: کدام اقلام؟ چندانتخابی با «همه»، بعد «استفاده پیش‌فاکتور» */
+async function uploadItems(env, api, chat, ex, up, mid) {
+  const asg = up && await ownOpenAssignment(env, ex.id, up.assignment_id);
+  if (!asg) { await api.sendMessage(chat, "این درخواست دیگر فعال نیست.").catch(() => {}); return { ok: true }; }
+  const its = await itemsOf(env, up.assignment_id);
+  const o = uploadOpts(up);
+  /* تک‌قلمی از پیش تیک می‌خورد؛ «استفاده» همچنان لازم است تا بی‌اجازه خرجِ خواندن نشود */
+  if (!Array.isArray(o.sel)) {
+    o.sel = its.length === 1 ? [its[0].id] : [];
+    await env.DB.prepare("UPDATE tg_uploads SET options_json=? WHERE id=?").bind(JSON.stringify(o), up.id).run();
   }
-  /* بدون نام تأمین‌کننده، خط استعلام کلید ندارد */
-  if (!supplier) return fallback("⚠️ سند را خواندم ولی نام تأمین‌کننده روی سربرگش پیدا نشد.");
-
-  return saveProforma(env, api, chat, up, supplier, out);
-}
-
-/**
- * گام آخر: ثبت پیش‌فاکتور روی استعلام آن تأمین‌کننده.
- * اگر سند از پیش خوانده شده (مسیر «استعلام جدید»)، همان خروجی روی ردیف تازه
- * می‌نشیند تا دو بار به مدل پول ندهیم.
- */
-async function saveProforma(env, api, chat, up, supplier, out) {
-  const t = now();
-  await env.DB.batch([
-    env.DB.prepare(
-      `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at)
-       VALUES (?,?,?,?,?,?,'telegram',?)
-       ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
-         mime=excluded.mime, size_bytes=excluded.size_bytes, source='telegram', uploaded_at=excluded.uploaded_at`,
-    ).bind(up.assignment_id, supplier, up.filename, up.storage_key, up.mime, up.size_bytes, t),
-    env.DB.prepare("UPDATE tg_uploads SET state='done', done_at=? WHERE id=?").bind(t, up.id),
-    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${up.expert_id}`, "proforma", null, JSON.stringify({ assignment_id: up.assignment_id, supplier, filename: up.filename, channel: "telegram" })),
-  ]);
-  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(up.assignment_id).first();
-  const pf = await env.DB.prepare("SELECT id FROM proformas WHERE assignment_id=? AND supplier_name=?").bind(up.assignment_id, supplier).first();
-  await sendProgress(env, api, chat, up.assignment_id);
-
-  if (out && pf) {
-    await saveExtraction(env, pf.id, out);
-    if (up.message_id) {
-      await api.editMessageText(chat, up.message_id,
-        `✅ فایل زیر نام <b>${esc(supplier)}</b> ثبت شد.\n📎 ${esc(up.filename)}`, panelButton).catch(() => {});
-    }
-    return presentExtraction(env, api, chat, pf.id, out.result, up.assignment_id);
-  }
-
-  const text = `✅ ثبت شد.\n\n📎 <b>${esc(up.filename)}</b>\nدرخواست <b>${esc(a ? a.request_id : "")}</b> · تأمین‌کننده <b>${esc(supplier)}</b>`;
-  const kb = pf && env.ANTHROPIC_API_KEY
-    ? [[{ text: "🤖 خواندن خودکار قیمت‌ها", callback_data: `ai:${pf.id}:go:0` }], [{ text: "باز کردن پنل", url: PANEL_URL }]]
-    : panelButton;
-  if (up.message_id) await api.editMessageText(chat, up.message_id, text, kb).catch(() => api.sendMessage(chat, text, kb));
-  else await api.sendMessage(chat, text, kb);
+  const sel = new Set(o.sel);
+  const kb = its.slice(0, 40).map((i) => [{
+    text: `${sel.has(i.id) ? "☑" : "☐"} ${short(i.title, 30)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`,
+    callback_data: `pf:${up.id}:t:${i.id}`,
+  }]);
+  if (its.length > 1) kb.push([{ text: sel.size === its.length ? "☐ هیچ" : "☑ همه", callback_data: `pf:${up.id}:all:0` }]);
+  kb.push([{ text: `📎 استفاده پیش‌فاکتور${sel.size ? ` (${M(sel.size)} قلم)` : ""}`, callback_data: `pf:${up.id}:use:0` }]);
+  kb.push(...dropFileKb(up.id));
+  const r = await show(api, chat, mid,
+    `📎 <b>${esc(up.filename)}</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
+    + "این پیش‌فاکتور برای کدام اقلام است؟ تیک بزنید و «استفاده پیش‌فاکتور» را بزنید.", kb);
+  if (r && r.message_id && r.message_id !== up.message_id) await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(r.message_id, up.id).run();
   return { ok: true };
 }
 
-/* ------------------------------------------------------------------ */
-/* استخراج خودکار (AI-06) — خواندن، نمایش، و ثبت فقط با تأیید کارشناس    */
-/* ------------------------------------------------------------------ */
+/**
+ * پیش‌فاکتورِ آزاد، گام سوم: کدام تأمین‌کننده؟ فقط آن‌هایی که روی همان اقلام خط
+ * استعلام دارند — پیش‌فاکتور به تأمین‌کننده می‌چسبد. اگر هیچ نیست، سند خوانده
+ * می‌شود تا نام از سربرگ خودش دربیاید (یا بی خواندن خودکار، نام پرسیده می‌شود).
+ */
+async function uploadSupplier(env, api, chat, ex, up, mid) {
+  const o = uploadOpts(up);
+  const ids = idList(o.sel);
+  const rows = ids.length ? (await env.DB.prepare(
+    `SELECT supplier_name AS n, COUNT(*) AS c, SUM(saved) AS s FROM quotes
+     WHERE assignment_id=? AND item_id IN (${ids.map(() => "?").join(",")}) GROUP BY supplier_name ORDER BY supplier_name LIMIT 30`,
+  ).bind(up.assignment_id, ...ids).all()).results || [] : [];
+  o.groups = rows.filter((g) => T(g.n)).map((g) => ({ n: g.n, c: g.c, s: g.s || 0 }));
+  const ai = aiReady(env);
+  const state = o.groups.length || ai ? "need_supplier" : "need_name";
+  await env.DB.prepare("UPDATE tg_uploads SET state=?, options_json=?, asked_at=? WHERE id=?").bind(state, JSON.stringify(o), now(), up.id).run();
+  const next = { ...up, state, options_json: JSON.stringify(o) };
+  if (!o.groups.length && ai) return newQuoteFromFile(env, api, chat, ex, next, mid);
+
+  const kb = o.groups.map((g, i) => [{ text: `${g.s === g.c ? "✅" : "⚪"} ${short(g.n, 26)} · ${M(g.c)} قلم`, callback_data: `pf:${up.id}:s:${i}` }]);
+  if (ai) kb.push([{ text: "➕ تأمین‌کنندهٔ تازه (نامش را از خود فایل می‌خوانم)", callback_data: `pf:${up.id}:a:0` }]);
+  if (o.groups.length) kb.push([{ text: "✍️ نام تأمین‌کننده را خودم می‌نویسم", callback_data: `pf:${up.id}:n:0` }]);
+  kb.push(...dropFileKb(up.id));
+  await show(api, chat, mid, `📎 <b>${esc(up.filename)}</b> · ${M(ids.length)} قلم\n\n`
+    + (o.groups.length
+      ? "این پیش‌فاکتورِ کدام تأمین‌کننده است؟\n<i>⚪ یعنی هنوز ثبت موقت نشده؛ فرقی نمی‌کند، انتخابش کنید.</i>"
+      : "برای این اقلام هنوز خط استعلامی نیست. <b>نام تأمین‌کننده را بنویسید:</b>"), kb);
+  return { ok: true };
+}
+
+/**
+ * «تأمین‌کنندهٔ تازه» — سند خوانده می‌شود تا **نام تأمین‌کننده از خود پیش‌فاکتور**
+ * دربیاید. کلیدِ ردیف پیش‌فاکتور همان نام است، پس تا سند خوانده نشود ردیفی هم
+ * نمی‌شود ساخت؛ برای همین extractFor صدا زده می‌شود که چیزی نمی‌نویسد. خروجی در
+ * گزینه‌های بارگذاری می‌ماند تا اگر نام را کارشناس نوشت، دوباره پول خواندن ندهیم.
+ */
+async function newQuoteFromFile(env, api, chat, ex, up, mid) {
+  const o = uploadOpts(up);
+  const askName = async (why) => {
+    await env.DB.prepare("UPDATE tg_uploads SET state='need_name', options_json=?, asked_at=? WHERE id=?").bind(JSON.stringify(o), now(), up.id).run();
+    await show(api, chat, mid, `📎 <b>${esc(up.filename)}</b>\n\n${why}\n\n<b>نام تأمین‌کننده را بنویسید</b> تا فایل همان‌جا ثبت شود:`, dropFileKb(up.id));
+    return { ok: true };
+  };
+  const asg = await ownOpenAssignment(env, ex.id, up.assignment_id);
+  if (!asg) { await api.sendMessage(chat, "این درخواست دیگر فعال نیست.").catch(() => {}); return { ok: true }; }
+  if (!aiReady(env)) return askName("خواندن خودکار روی این نصب فعال نیست.");
+
+  await show(api, chat, mid, `📎 <b>${esc(up.filename)}</b>\n\n⏳ دارم سند را می‌خوانم تا نام تأمین‌کننده و قیمت‌ها را از خودش بردارم…`, []);
+  let out;
+  try {
+    out = await extractFor(env, storage(env), {
+      assignment_id: up.assignment_id, request_id: asg.request_id, storage_key: up.storage_key, mime: up.mime, item_ids: o.sel,
+    });
+  } catch (e) { return askName(`خواندن نشد: ${esc(e.message)}`); }
+  const r = out.result;
+  o.read = out;
+  if (!r.extractable) return askName(`⚠️ نتوانستم مطمئن بخوانم — <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>. بعد از ثبت، فیلدها را روی کارت استعلام دستی پر کنید.`);
+  if (!T(r.supplier_name)) return askName("⚠️ سند را خواندم ولی نام تأمین‌کننده روی سربرگش پیدا نشد.");
+  return attachProforma(env, api, chat, ex, { aid: up.assignment_id, up, supplier: T(r.supplier_name), itemIds: o.sel, out, mid: null });
+}
+
+/** پاسخ متنی به «نام تأمین‌کننده را بنویسید» */
+async function nameForUpload(env, api, chat, ex, up, name) {
+  if (name.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
+  const o = uploadOpts(up);
+  return attachProforma(env, api, chat, ex, { aid: up.assignment_id, up, supplier: name, itemIds: o.sel, out: o.read || null, mid: null });
+}
+
+/** خط استعلامِ (تأمین‌کننده × قلم) اگر نیست — خطِ موجود دست نمی‌خورد */
+const lineInserts = (env, aid, supplier, ids, t, source = "telegram") => ids.map((iid) => env.DB.prepare(
+  `INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,created_at,updated_at)
+   SELECT i.assignment_id, i.id, ?, i.unit, i.qty, ?, ?, ?, ? FROM items i
+   WHERE i.id=? AND i.assignment_id=?
+     AND NOT EXISTS (SELECT 1 FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.supplier_name=?)`,
+).bind(supplier, INVOICE_DEFAULT, source, t, t, iid, aid, supplier));
+
+/**
+ * ثبت پیش‌فاکتور روی یک تأمین‌کننده و اقلامش، بعد خواندن خودکار.
+ *
+ * خطِ استعلامِ اقلامِ انتخابی اگر برای این تأمین‌کننده نبود همین‌جا ساخته می‌شود:
+ * هم خواندن روی همان خط می‌نشیند، هم اگر خواندن نشد کارت استعلام همهٔ فیلدها را
+ * برای پرکردنِ دستی دارد. فهرست اقلام روی ردیف پیش‌فاکتور می‌ماند تا خواندن و ثبت
+ * (حتی «دوباره بخوان» ساعتی بعد) فقط همان اقلام را ببیند. فایلِ تازه برای همان
+ * تأمین‌کننده، خواندنِ قبلی را بی‌اعتبار می‌کند.
+ */
+async function attachProforma(env, api, chat, ex, { aid, up, supplier, itemIds, out, mid }) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این درخواست دیگر فعال نیست.").catch(() => {}); return { ok: true }; }
+  const ids = idList(itemIds);
+  const t = now();
+  const stmts = [
+    env.DB.prepare(
+      `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at,item_ids)
+       VALUES (?,?,?,?,?,?,'telegram',?,?)
+       ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
+         mime=excluded.mime, size_bytes=excluded.size_bytes, source='telegram', uploaded_at=excluded.uploaded_at,
+         item_ids=excluded.item_ids, extracted_json=NULL, extract_state=NULL, extract_at=NULL`,
+    ).bind(aid, supplier, up.filename, up.storage_key, up.mime, up.size_bytes || null, t, ids.length ? JSON.stringify(ids) : null),
+    ...lineInserts(env, aid, supplier, ids, t),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "proforma", asg.request_id, JSON.stringify({ assignment_id: aid, supplier, filename: up.filename, items: ids, channel: "telegram" })),
+  ];
+  if (up.id) stmts.push(env.DB.prepare("UPDATE tg_uploads SET state='done', done_at=?, assignment_id=? WHERE id=?").bind(t, aid, up.id));
+  await env.DB.batch(stmts);
+
+  const pf = await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=? AND supplier_name=?").bind(aid, supplier).first();
+  await show(api, chat, mid, `✅ پیش‌فاکتور <b>${esc(up.filename)}</b> زیر نام <b>${esc(supplier)}</b> ثبت شد${ids.length ? ` — ${M(ids.length)} قلم` : ""}.`, []);
+  if (!pf) return { ok: true };
+  if (out) {
+    await saveExtraction(env, pf.id, out);
+    return presentExtraction(env, api, chat, pf.id, out.result, aid, ids);
+  }
+  if (!aiReady(env)) return quoteCard(env, api, chat, aid, supplier, null, "خواندن خودکار روی این نصب فعال نیست؛ فیلدها را همین‌جا پر کنید:");
+  await api.sendMessage(chat, "⏳ در حال خواندن پیش‌فاکتور…").catch(() => {});
+  try {
+    const res = await runExtraction(env, storage(env), { ...pf, request_id: asg.request_id });
+    return presentExtraction(env, api, chat, pf.id, res.result, aid, ids);
+  } catch (e) {
+    await api.sendMessage(chat, `خواندن نشد: ${esc(e.message)}`, [
+      [{ text: "🔁 دوباره بخوان", callback_data: `ai:${pf.id}:go:0` }],
+      [{ text: "✍️ پرکردن دستی روی کارت استعلام", callback_data: `qk:${pf.id}` }],
+    ]).catch(() => {});
+    return { ok: true };
+  }
+}
+
+/** «دریافت پیش‌فاکتور» باز است: فایل بی‌پرسشِ درخواست به همان تأمین‌کنندگان و اقلام می‌نشیند */
+async function awaitedProforma(env, api, chat, ex, f, file, store) {
+  const d = flowData(f);
+  const pending = (d.want || []).map((w, i) => ({ ...w, i })).filter((w) => !w.got);
+  if (!pending.length) {
+    await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+    return freeProforma(env, api, chat, ex, file, store);
+  }
+  const key = await storeFile(api, store, f.assignment_id, file);
+  if (!key) { await api.sendMessage(chat, "دانلود فایل از تلگرام نشد. یک بار دیگر بفرستید."); return { ok: true }; }
+  const uid = await newUpload(env, ex, chat, file, key, f.assignment_id, "need_await", { flow: f.id });
+  const up = { id: uid, filename: file.name, storage_key: key, mime: file.mime, size_bytes: file.size || null };
+  if (pending.length === 1) return receiveAwaited(env, api, chat, ex, f.id, pending[0].i, up, null);
+
+  /* چند تأمین‌کننده منتظرند: فقط همان‌ها دکمه می‌شوند */
+  const kb = pending.map((w) => [{ text: `${short(w.s, 30)} · ${M((w.items || []).length)} قلم`, callback_data: `aw:${f.id}:s:${w.i}:${uid}` }]);
+  kb.push([{ text: "✖️ این فایل را نمی‌خواهم", callback_data: `pf:${uid}:x:0` }]);
+  const sent = await api.sendMessage(chat, `📎 <b>${esc(file.name)}</b>\n\nپیش‌فاکتورِ کدام‌یک از تأمین‌کنندگانِ منتظر است؟`, kb);
+  await env.DB.prepare("UPDATE tg_uploads SET message_id=? WHERE id=?").bind(sent.message_id, uid).run();
+  return { ok: true };
+}
+
+async function receiveAwaited(env, api, chat, ex, fid, idx, up, mid) {
+  /* اتمی: دو فایلِ هم‌زمان هر کدام علامتِ خودش را می‌زند و علامتِ دیگری را پاک نمی‌کند */
+  await env.DB.prepare(`UPDATE tg_flows SET data_json=json_set(data_json, '$.want[${Number(idx) | 0}].got', 1) WHERE id=? AND expert_id=?`).bind(fid, ex.id).run();
+  const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=?").bind(fid).first();
+  const d = flowData(f), w = (d.want || [])[idx];
+  if (!w) return { ok: true };
+  if (!d.want.some((x) => !x.got)) await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=? AND done_at IS NULL").bind(now(), fid).run();
+  await attachProforma(env, api, chat, ex, { aid: f.assignment_id, up, supplier: w.s, itemIds: w.items, out: null, mid });
+  return awaitStatus(env, api, chat, f, null);
+}
 
 /* ------------------------------------------------------------------ */
 /* کارت استعلام — چه خوانده شد، چه نه؛ پرکردن دستی؛ ثبت موقت           */
@@ -764,7 +924,7 @@ async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
   kb.push([{ text: "✏️ اصلاح یک فیلد پرشده", callback_data: `qe:${q0.id}:0` }]);
   if (!allSaved) kb.push([{ text: missReq.length ? "✅ ثبت موقت (اول ❌ها را پر کنید)" : "✅ ثبت موقت", callback_data: `qs:${q0.id}:0` }]);
   if (a && a.saved_all > 0) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
-  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+  kb.push([{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }], navRow(aid));
 
   const state = allSaved
     ? `✅ <b>همهٔ خط‌ها ثبت موقت شده‌اند.</b> حالا می‌توانید جدول کمیسیون را بسازید.`
@@ -824,7 +984,7 @@ const FIELD_HINTS = {
 
 /** فیلد متنی/عددی: یک گفت‌وگوی کوتاه؛ پاسخِ بعدیِ کارشناس همین را پر می‌کند */
 async function askFieldText(env, api, chat, ex, q, field, messageId) {
-  await closeFlows(env, ex.id);
+  await closeInputs(env, ex.id);
   const t = now();
   const ins = await env.DB.prepare(
     "INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'field','need_value',?,?,?,?)",
@@ -880,28 +1040,28 @@ async function saveSupplier(env, api, chat, ex, q, messageId) {
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
       .bind(t, `expert:${ex.id}`, "quote_saved", q.request_id, JSON.stringify({ assignment_id: q.assignment_id, supplier: q.supplier_name, lines: lines.length, channel: "telegram" })),
   ]);
-  await quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `✅ ${M(lines.length)} خط استعلام «${esc(q.supplier_name)}» ثبت موقت شد.`);
-  return sendProgress(env, api, chat, q.assignment_id);
+  return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `✅ ${M(lines.length)} خط استعلام «${esc(q.supplier_name)}» ثبت موقت شد.`);
 }
 
 /* ------------------------------------------------------------------ */
-/* جدول کمیسیون از بات — انتخاب خط‌ها، ساختِ مکانیکی، بدون مدل           */
+/* جدول کمیسیون — انتخاب خط‌ها، درج توضیحات، ساختِ مکانیکی، بدون مدل     */
 /* ------------------------------------------------------------------ */
 
 /**
- * کدام خط‌ها در جدول بیایند؟ همان «تأیید نهایی» پنل است؛ هر بار زدن روی یک خط،
- * پرچمِ final همان خط را برمی‌گرداند و در پنل هم دیده می‌شود.
+ * منوی «تولید». هر خط یک تیکِ «تأیید نهایی» پنل است؛ «درج توضیحات» همان متنی
+ * است که در بخش «توضیحات تدارکات و پشتیبانی» جدول چاپ می‌شود.
  */
 async function tableSelect(env, api, chat, ex, aid, messageId, head) {
-  const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+  const own = await env.DB.prepare("SELECT id, request_id, notes FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const top = `${head ? head + "\n\n" : ""}📊 <b>جدول کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`;
   const lines = (await env.DB.prepare(
     `SELECT q.id, q.supplier_name, q.price, q.final, i.title FROM quotes q JOIN items i ON i.id=q.item_id
      WHERE q.assignment_id=? AND q.saved=1 ORDER BY q.supplier_name, i.line_no LIMIT 60`,
   ).bind(aid).all()).results || [];
   if (!lines.length) {
-    await api.sendMessage(chat, "هنوز هیچ خط استعلامِ ثبت‌موقت‌شده‌ای ندارید. اول خط‌ها را ثبت موقت کنید.", panelButton);
-    return { ok: true };
+    return show(api, chat, messageId, top + "هنوز هیچ خط استعلامِ ثبت‌موقت‌شده‌ای نیست. اول در تب استعلامات فیلدها را کامل و «ثبت موقت» کنید.",
+      [[{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }], navRow(aid)]);
   }
   const n = lines.filter((l) => l.final).length;
   const kb = lines.map((l) => [{
@@ -909,64 +1069,81 @@ async function tableSelect(env, api, chat, ex, aid, messageId, head) {
     callback_data: `ct:${aid}:t:${l.id}`,
   }]);
   kb.push([{ text: "☑ همه", callback_data: `ct:${aid}:all:0` }, { text: "☐ هیچ", callback_data: `ct:${aid}:none:0` }]);
+  kb.push([{ text: own.notes ? "📝 ویرایش توضیحات" : "📝 درج توضیحات", callback_data: `ct:${aid}:nt:0` }]);
   kb.push([{ text: `📊 تولید جدول کمیسیون (${M(n)} خط)`, callback_data: `ct:${aid}:go:0` }]);
-  kb.push([{ text: "✖️ بی‌خیال", callback_data: `ct:${aid}:x:0` }]);
-  const text = `${head ? head + "\n\n" : ""}📊 <b>جدول کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
-    + `کدام استعلام‌ها در جدول بیایند؟ روی هر خط بزنید تا انتخاب یا لغو شود (همان «تأیید نهایی» پنل).\n\n`
-    + `<b>${M(n)}</b> از ${M(lines.length)} خط انتخاب شده.`;
-  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
-  await api.sendMessage(chat, text, kb);
+  kb.push([{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }], navRow(aid));
+  return show(api, chat, messageId, top
+    + "کدام استعلام‌ها در جدول بیایند؟ روی هر خط بزنید تا انتخاب یا لغو شود (همان «تأیید نهایی» پنل).\n"
+    + `<b>${M(n)}</b> از ${M(lines.length)} خط انتخاب شده.\n\n`
+    + `📝 <b>توضیحات:</b> ${own.notes ? `<i>${esc(short(own.notes, 600))}</i>` : "— خالی"}`, kb);
+}
+
+/** «درج توضیحات»: پاسخِ متنیِ بعدی، توضیحاتِ جدول می‌شود (جایگزینِ متن قبلی) */
+async function notesAsk(env, api, chat, ex, aid) {
+  const own = await env.DB.prepare("SELECT id, request_id, notes FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+  if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  await closeInputs(env, ex.id);
+  const f = await newFlow(env, ex, chat, "notes", "need_notes", aid, {});
+  await api.sendMessage(chat, `📝 <b>توضیحات جدول کمیسیون</b> — درخواست <b>${esc(own.request_id)}</b>\n\n`
+    + (own.notes
+      ? `متن فعلی:\n<i>${esc(own.notes)}</i>\n\nمتن تازه را بنویسید (جایگزین می‌شود):`
+      : "توضیحاتتان را بنویسید؛ در بخش «توضیحات تدارکات و پشتیبانی» جدول چاپ می‌شود:"),
+  [[{ text: "✖️ بی‌خیال", callback_data: `fl:${f.id}:x:0` }]]).catch(() => {});
   return { ok: true };
 }
 
-
 /**
- * ساختن و فرستادن جدول کمیسیون. هیچ مدلی در کار نیست — همان کدِ مکانیکیِ
- * sheets.js که پنل هم استفاده می‌کند، از روی خط‌های تأییدنهایی‌شده.
- * مرحلهٔ «تحویل» (commission_at) این‌جا زده نمی‌شود؛ آن با /tahvil و بستهٔ
- * کامل است، تا ارجاع برای پیش‌فاکتور و نامهٔ بعدی باز بماند.
+ * ساختن و فرستادن جدول کمیسیون — همان کدِ مکانیکیِ sheets.js و همان نگهبانِ پنل.
+ * تولید جدول درخواست را **نمی‌بندد**: فقط مرحلهٔ «جدول کمیسیون» سبز می‌شود و
+ * درخواست تا «خاتمه» در کارتابل می‌ماند. هشدار عبور از مهلت هم می‌ماند؛ فقط
+ * یادآوری‌های مرحله بی‌معنی شده‌اند.
  */
 async function makeTable(env, api, chat, ex, aid, messageId) {
   const settings = await getSettings(env);
   const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
   if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const g = await commissionGuard(env, aid, settings);
+  if (!g.finals) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
+  if (g.missing.length) {
+    return tableSelect(env, api, chat, ex, aid, messageId,
+      `⛔ مدیر برای هر قلم دست‌کم ${M(g.need)} استعلامِ ثبت‌موقت‌شده خواسته. این‌ها کم دارند:\n`
+      + g.missing.slice(0, 8).map((x) => `• ${esc(short(x.title, 40))} (${M(x.n)})`).join("\n"));
+  }
   const st = readiness(d);
   const finals = d.quotes.filter((q) => q.final && q.saved);
-  if (!finals.length) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
-
-  const body = await commissionXlsx({ ...d, notes: d.assignment.notes });
   const t = now();
-  /* تولید جدول = مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند. باکس مدیر
-     همین‌جا سبز می‌شود، نه بعد از تحویل فایل‌ها. هشدارهای مانده هم بی‌معنی‌اند. */
   await env.DB.batch([
     env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid),
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
       .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, channel: "telegram" })),
   ]);
-  if (messageId) await api.editMessageText(chat, messageId, `📊 جدول کمیسیون با <b>${M(finals.length)}</b> خط ساخته شد.`).catch(() => {});
+  if (messageId) await api.editMessageText(chat, messageId, `📊 جدول کمیسیون درخواست <b>${esc(d.request.id)}</b> با <b>${M(finals.length)}</b> خط ساخته شد.`).catch(() => {});
 
   let sent = true;
   try {
-    await api.sendDocument(chat, `کمیسیون-${d.request.id}.xlsx`, body,
+    await api.sendDocument(chat, `کمیسیون-${d.request.id}.xlsx`, await commissionXlsx({ ...d, notes: d.assignment.notes }),
       `📊 <b>جدول مقایسه استعلام بها — ${esc(d.request.id)}</b>\n${M(finals.length)} خط · ${M(st.suppliers)} تأمین‌کننده`);
   } catch (e) { sent = false; }
 
   const warn = [];
-  if (!sent) warn.push("⚠️ فایل به تلگرام نرسید؛ در پنل با «تولید جدول کمیسیون» همین را می‌گیرید.");
+  if (!sent) warn.push("⚠️ فایل به تلگرام نرسید؛ در «تحویل» یا پنل دوباره می‌گیرید.");
   if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدشده ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
-  if (!st.hasNotes) warn.push("📝 توضیحات پای برگه خالی است — با /tozihat می‌نویسید.");
-  return closeCard(env, api, chat, ex, aid, null,
-    `✅ <b>جدول کمیسیون تولید شد.</b>` + (warn.length ? "\n" + warn.join("\n") : ""));
+  if (!st.hasNotes) warn.push("📝 توضیحات جدول خالی است — «جدول کمیسیون» ← «درج توضیحات».");
+  return show(api, chat, null, `✅ <b>جدول کمیسیون تولید شد.</b>${warn.length ? "\n" + warn.join("\n") : ""}\n\nدرخواست تا «خاتمه» در کارتابل می‌ماند. قدم بعد؟`, [
+    [{ text: "📦 تحویل", callback_data: `dvo:${aid}` }],
+    [{ text: "🔒 خاتمه (تأیید کمیسیون)", callback_data: `cm:${aid}:card:0` }],
+    [{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }],
+    navRow(aid),
+  ]);
 }
 
 /**
- * کارتِ «تأیید کمیسیون و خاتمه» — زیرِ جدولِ تولیدشده.
+ * کارتِ «تأیید کمیسیون و خاتمه».
  *
  * اقلامِ بازِ درخواست چندانتخابی‌اند: کارشناس هر کدام را که کمیسیون تأیید کرده
- * تیک می‌زند و «خاتمه» را می‌زند. فقط همان‌ها بسته می‌شوند؛ اگر همه بودند
- * درخواست به‌کل می‌رود، وگرنه با باقی اقلام در جریان می‌ماند. «ویرایش» پرونده
- * را برای ادامهٔ کار باز نگه می‌دارد (پیش‌فاکتور تازه، خط تازه، جدول دوباره).
+ * تیک می‌زند و «خاتمه» را می‌زند. فقط همان‌ها بسته می‌شوند؛ اگر همه بودند درخواست
+ * از کارتابل می‌رود، وگرنه با باقی اقلام در جریان می‌ماند.
  */
 async function closeCard(env, api, chat, ex, aid, messageId, head) {
   const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
@@ -974,7 +1151,7 @@ async function closeCard(env, api, chat, ex, aid, messageId, head) {
   const its = (await env.DB.prepare(
     "SELECT id, title, qty, unit, commission_ok FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40",
   ).bind(aid).all()).results || [];
-  if (!its.length) { await api.sendMessage(chat, "این درخواست قلمِ بازی ندارد.", panelButton); return { ok: true }; }
+  if (!its.length) return show(api, chat, messageId, "این درخواست قلمِ بازی ندارد.", [[KARTABL_BTN]]);
   const n = its.filter((i) => i.commission_ok).length;
   const s = await getSettings(env);
 
@@ -983,26 +1160,22 @@ async function closeCard(env, api, chat, ex, aid, messageId, head) {
     callback_data: `cm:${aid}:t:${i.id}`,
   }]);
   kb.push([{ text: "☑ همه", callback_data: `cm:${aid}:all:0` }, { text: "☐ هیچ", callback_data: `cm:${aid}:none:0` }]);
-  kb.push([{ text: `🔒 خاتمه (${M(n)} قلم)`, callback_data: `cm:${aid}:end:0` }, { text: "✏️ ویرایش", callback_data: `cm:${aid}:edit:0` }]);
-  kb.push([{ text: "📝 نامهٔ پیوست لازم دارم", callback_data: `lt:${aid}:ask:0` }]);
-  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+  kb.push([{ text: `🔒 خاتمه (${M(n)} قلم)`, callback_data: `cm:${aid}:end:0` }]);
+  kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }], navRow(aid));
 
-  const text = `${head ? head + "\n\n" : ""}🧾 <b>تأیید کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
-    + `کدام اقلام را کمیسیون تأیید کرد؟ روی هر قلم بزنید تا تیک بخورد؛ بعد «خاتمه».\n`
+  return show(api, chat, messageId, `${head ? head + "\n\n" : ""}🧾 <b>تأیید کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
+    + "کدام اقلام را کمیسیون تأیید کرد؟ روی هر قلم بزنید تا تیک بخورد؛ بعد «خاتمه».\n"
     + `<b>${M(n)}</b> از ${M(its.length)} قلم تیک خورده.\n\n`
     + (s.approvalRequired
       ? "<i>چون «تصمیم کارشناس منوط به تأیید مدیر» فعال است، خاتمه اول برای مدیر می‌رود.</i>"
-      : "<i>«خاتمه» همان لحظه اقلامِ تیک‌خورده را می‌بندد؛ اگر همه بودند، درخواست از کارتابل می‌رود.</i>");
-  if (messageId) { const r = await api.editMessageText(chat, messageId, text, kb).catch(() => null); if (r) return { ok: true }; }
-  await api.sendMessage(chat, text, kb);
-  return { ok: true };
+      : "<i>«خاتمه» همان لحظه اقلامِ تیک‌خورده را می‌بندد؛ اگر همه بودند، درخواست از کارتابل می‌رود.</i>"), kb);
 }
 
 /** خلاصهٔ خوانا از خروجی مدل، تا کارشناس پیش از ثبت ببیند چه چیزی قرار است بنشیند */
 function extractSummary(r, itemTitles) {
   if (!r.extractable) {
     return `⚠️ <b>نتوانستم مطمئن بخوانم</b>\n\nدلیل: <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>\n\n`
-      + `${r.notes ? esc(r.notes) + "\n\n" : ""}قیمت‌ها را با «فاکتور دستی» وارد کنید — /faktor`;
+      + `${r.notes ? esc(r.notes) + "\n\n" : ""}قیمت‌ها را روی کارت استعلام دستی وارد کنید.`;
   }
   const matched = (r.lines || []).filter((l) => l.matched_item_id);
   const other = (r.lines || []).filter((l) => !l.matched_item_id);
@@ -1038,13 +1211,16 @@ function extractSummary(r, itemTitles) {
  *
  * دکمه فقط وقتی می‌آید که واقعاً چیزی برای نوشتن باشد؛ همان شرطی که
  * applyExtraction هم دارد — از جمله ته‌مانده‌ی «یک قلم، یک سطر» که خودش وصل
- * می‌شود. وگرنه کارشناس دکمه‌ای می‌زد که ته‌اش خطا بود.
+ * می‌شود. `itemIds` اگر باشد، فقط اقلامی که کارشناس برای این پیش‌فاکتور تیک
+ * زده به حساب می‌آیند (همان محدودیتی که ثبت هم دارد).
  */
-async function presentExtraction(env, api, chat, pid, r, aid) {
-  const items = (await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=?").bind(aid).all()).results || [];
+async function presentExtraction(env, api, chat, pid, r, aid, itemIds) {
+  const only = idList(itemIds);
+  const items = ((await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=?").bind(aid).all()).results || [])
+    .filter((i) => !only.length || only.includes(i.id));
   const titles = new Map(items.map((i) => [i.id, i.title]));
-  const priced = (r.lines || []).filter((l) => l.unit_price != null);
-  const sole = titles.size === 1 && priced.length === 1 && !priced[0].matched_item_id;
+  const priced = (r.lines || []).filter((l) => lineUnitPrice(l) != null);
+  const sole = titles.size === 1 && priced.length === 1 && !(priced[0].matched_item_id && titles.has(priced[0].matched_item_id));
   const canApply = r.extractable && (priced.some((l) => l.matched_item_id && titles.has(l.matched_item_id)) || sole);
 
   const has = await env.DB.prepare("SELECT COUNT(*) AS n FROM quotes q JOIN proformas p ON p.assignment_id=q.assignment_id AND p.supplier_name=q.supplier_name WHERE p.id=?").bind(pid).first();
@@ -1059,10 +1235,11 @@ async function presentExtraction(env, api, chat, pid, r, aid) {
         { text: `${label} — تومان`, callback_data: `ai:${pid}:t:0` }]);
     }
   }
-  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
+  kb.push([{ text: "✍️ کارت استعلام (پرکردن دستی)", callback_data: `qk:${pid}` }]);
+  kb.push([{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }]);
   await api.sendMessage(chat, extractSummary(r, titles)
-    + (sole ? "\n\n<i>این سند یک سطر قیمت دارد و این درخواست هم یک قلم؛ به همان وصل می‌شود.</i>" : "")
-    + (r.extractable ? `\n\n<i>تا وقتی «${label}» را نزنید، چیزی در جدول کمیسیون نمی‌نشیند.</i>` : ""), kb);
+    + (sole ? "\n\n<i>این سند یک سطر قیمت دارد و این پیش‌فاکتور هم یک قلم؛ به همان وصل می‌شود.</i>" : "")
+    + (r.extractable ? `\n\n<i>تا وقتی «${label}» را نزنید، چیزی در جدول کمیسیون نمی‌نشیند.</i>` : ""), kb).catch(() => {});
   return { ok: true };
 }
 
@@ -1078,8 +1255,14 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
     await api.sendMessage(chat, "⏳ در حال خواندن پیش‌فاکتور…").catch(() => {});
     let out;
     try { out = await runExtraction(env, store, p); }
-    catch (e) { await api.sendMessage(chat, `خواندن نشد: ${esc(e.message)}\n\nمی‌توانید با /faktor دستی وارد کنید.`); return { ok: true }; }
-    return presentExtraction(env, api, chat, pid, out.result, p.assignment_id);
+    catch (e) {
+      await api.sendMessage(chat, `خواندن نشد: ${esc(e.message)}`, [
+        [{ text: "🔁 دوباره بخوان", callback_data: `ai:${pid}:go:0` }],
+        [{ text: "✍️ پرکردن دستی روی کارت استعلام", callback_data: `qk:${pid}` }],
+      ]).catch(() => {});
+      return { ok: true };
+    }
+    return presentExtraction(env, api, chat, pid, out.result, p.assignment_id, p.item_ids);
   }
 
   if (step === "ok" || step === "r" || step === "t") {
@@ -1098,13 +1281,25 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
 }
 
 /* ------------------------------------------------------------------ */
-/* نامهٔ پیوست کمیسیون — از صدا یا نوشتهٔ کارشناس                                 */
+/* نامهٔ پیوست کمیسیون — از صدا یا نوشتهٔ کارشناس                        */
+/*                                                                      */
+/* توضیح (صوتی یا نوشتاری) ← تأیید متن ← انتخاب اقلامِ موضوع ← نگارش.     */
+/* مخاطب، «موضوع: گزارش خرید …» و «با تشکر» را سامانه می‌گذارد (letter.js). */
 /* ------------------------------------------------------------------ */
 
+/* نامهٔ نیمه‌کارهٔ کهنه‌تر از این، متن یا صوتِ آزادِ کارشناس را نمی‌بلعد */
+const LETTER_FRESH = 24 * 3600000;
 
-async function startLetter(env, api, chat, ex, aid) {
-  const a = await env.DB.prepare("SELECT a.id, r.id AS rid FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=? AND a.expert_id=?")
-    .bind(aid, ex.id).first();
+/** تحویلی که منتظر ساخته شدنِ نامهٔ همین درخواست است (اگر هست) */
+async function deliverWaiting(env, ex, aid) {
+  return env.DB.prepare(
+    "SELECT * FROM tg_flows WHERE expert_id=? AND kind='deliver' AND step='letter' AND assignment_id=? AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1",
+  ).bind(ex.id, aid, now()).first();
+}
+
+/** `skip` اگر باشد، نامه وسط «تحویل» خواسته شده و لغوش تحویل را بی‌نامه ادامه می‌دهد */
+async function startLetter(env, api, chat, ex, aid, { skip } = {}) {
+  const a = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!a) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
   const t = now();
   await env.DB.batch([
@@ -1112,31 +1307,31 @@ async function startLetter(env, api, chat, ex, aid) {
     env.DB.prepare("INSERT INTO letters (assignment_id,expert_id,state,created_at,updated_at) VALUES (?,?,'need_voice',?,?)").bind(aid, ex.id, t, t),
   ]);
   await api.sendMessage(chat,
-    `✉️ <b>نامهٔ پیوست — درخواست ${esc(a.rid)}</b>\n\n`
-    + `توضیح بدهید در جریان این خرید چه اتفاقی افتاده: چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید.\n\n`
-    + `🎤 <b>یک پیام صوتی بفرستید</b> — یا اگر راحت‌تر است، <b>همین‌جا تایپ کنید</b>.\n\n`
-    + `<i>محاوره‌ای و به زبان خودتان بگویید؛ متنِ رسمی نامه را من می‌نویسم.</i>`,
-    [[{ text: "✖️ بی‌خیال", callback_data: `lt:${aid}:x:0` }]]);
+    `✉️ <b>نامهٔ پیوست — درخواست ${esc(a.request_id)}</b>\n\n`
+    + (skip ? "نامه هنوز ساخته نشده. اگر نامه می‌خواهید، " : "")
+    + "توضیح بدهید در جریان این خرید چه اتفاقی افتاده: چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید.\n\n"
+    + "🎤 <b>یک پیام صوتی بفرستید</b> — یا اگر راحت‌تر است، <b>همین‌جا تایپ کنید</b>.\n\n"
+    + "<i>محاوره‌ای و به زبان خودتان بگویید؛ متنِ رسمی نامه را من می‌نویسم. بعدش اقلامِ موضوعِ نامه را انتخاب می‌کنید.</i>",
+    [[skip ? { text: "✖️ نامه نمی‌خواهم — ادامهٔ تحویل", callback_data: skip } : { text: "✖️ بی‌خیال", callback_data: `lt:${aid}:x:0` }]]);
   return { ok: true };
 }
 
+/* تأیید متن پیش از نگارش: اگر رونویسی اشتباه شنیده باشد، نامه هم غلط می‌شود */
+const letterConfirmKb = (L) => [
+  [{ text: "✅ درست است — انتخاب اقلامِ موضوع", callback_data: `lt:${L.id}:go:0` }],
+  [{ text: "✏️ از نو می‌گویم", callback_data: `lt:${L.assignment_id}:ask:0` }],
+  [{ text: "✖️ بی‌خیال", callback_data: `lt:${L.assignment_id}:x:0` }],
+];
+
 /**
- * همان جای صوت، ولی نوشته.
- * بعضی کارشناس‌ها جایی هستند که نمی‌شود حرف زد، یا ترجیح می‌دهند بنویسند.
- * ورودی هرچه باشد، از این نقطه به بعد مسیر یکی است.
+ * همان جای صوت، ولی نوشته. بعضی کارشناس‌ها جایی هستند که نمی‌شود حرف زد، یا
+ * ترجیح می‌دهند بنویسند. ورودی هرچه باشد، از این نقطه به بعد مسیر یکی است.
  */
 async function onLetterText(env, api, chat, ex, L, text) {
-  if (text.length < 15) {
-    await api.sendMessage(chat, "کمی بیشتر توضیح بدهید تا بشود از آن نامه ساخت.");
-    return { ok: true };
-  }
+  if (text.length < 15) { await api.sendMessage(chat, "کمی بیشتر توضیح بدهید تا بشود از آن نامه ساخت."); return { ok: true }; }
   if (text.length > 4000) { await api.sendMessage(chat, "متن خیلی بلند است؛ خلاصه‌ترش کنید."); return { ok: true }; }
-  await env.DB.prepare("UPDATE letters SET transcript=?, state='transcribed', updated_at=? WHERE id=?")
-    .bind(text, now(), L.id).run();
-  await api.sendMessage(chat, `📄 <b>این را می‌نویسم:</b>\n\n<i>${esc(text)}</i>\n\nنامه را بسازم؟`,
-    [[{ text: "✅ بله، نامه را بنویس", callback_data: `lt:${L.id}:go:0` }],
-      [{ text: "✏️ متن را عوض می‌کنم", callback_data: `lt:${L.assignment_id}:ask:0` }],
-      [{ text: "✖️ بی‌خیال", callback_data: `lt:${L.assignment_id}:x:0` }]]);
+  await env.DB.prepare("UPDATE letters SET transcript=?, state='transcribed', updated_at=? WHERE id=?").bind(text, now(), L.id).run();
+  await api.sendMessage(chat, `📄 <b>این را می‌نویسم:</b>\n\n<i>${esc(text)}</i>\n\nدرست است؟`, letterConfirmKb(L));
   return { ok: true };
 }
 
@@ -1145,14 +1340,11 @@ async function onVoice(env, msg, ex) {
   const api = telegram(env);
   const chat = msg.chat.id;
   const pending = await env.DB.prepare(
-    "SELECT * FROM letters WHERE expert_id=? AND state='need_voice' ORDER BY id DESC LIMIT 1",
-  ).bind(ex.id).first();
-  if (!pending) {
-    await api.sendMessage(chat, "الان منتظر پیام صوتی نبودم.\nاگر می‌خواهید نامه بنویسم، /nameh را بزنید.");
-    return { ok: true };
-  }
+    "SELECT * FROM letters WHERE expert_id=? AND state='need_voice' AND updated_at>? ORDER BY id DESC LIMIT 1",
+  ).bind(ex.id, now() - LETTER_FRESH).first();
+  if (!pending) { await api.sendMessage(chat, "الان منتظر پیام صوتی نبودم.\nاگر نامه می‌خواهید، /nameh را بزنید."); return { ok: true }; }
   const store = storage(env);
-  if (!store || !store.signedUrl) { await api.sendMessage(chat, "انبار فایل برای صوت آماده نیست."); return { ok: true }; }
+  if (!store || !store.signedUrl) { await api.sendMessage(chat, "انبار فایل برای صوت آماده نیست؛ توضیحتان را همین‌جا تایپ کنید."); return { ok: true }; }
 
   const v = msg.voice || msg.audio;
   if (v.file_size > MAX_BYTES) { await api.sendMessage(chat, "این صوت خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
@@ -1168,66 +1360,81 @@ async function onVoice(env, msg, ex) {
   let text;
   try {
     const url = await store.signedUrl(key, 900);
-    const r = await transcribe(env, url);
-    text = r.text;
+    text = (await transcribe(env, url)).text;
   } catch (e) {
-    await env.DB.prepare("UPDATE letters SET voice_key=?, state='failed', updated_at=? WHERE id=?").bind(key, now(), pending.id).run();
-    await api.sendMessage(chat, `صوت به متن تبدیل نشد: ${esc(e.message)}\n\nمی‌توانید متن را تایپ کنید و با /tozihat ثبتش کنید.`);
+    /* نامه منتظر می‌ماند تا کارشناس همان توضیح را تایپ کند یا دوباره ضبط کند */
+    await env.DB.prepare("UPDATE letters SET voice_key=?, updated_at=? WHERE id=?").bind(key, now(), pending.id).run();
+    await api.sendMessage(chat, `صوت به متن تبدیل نشد: ${esc(e.message)}\n\nهمین توضیح را همین‌جا تایپ کنید، یا دوباره ضبط کنید.`);
     return { ok: true };
   }
   if (!text || text.length < 15) {
     await api.sendMessage(chat, "چیزی نشنیدم یا خیلی کوتاه بود. یک بار دیگر و کمی واضح‌تر بفرستید.");
     return { ok: true };
   }
-
   await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, transcript=?, state='transcribed', updated_at=? WHERE id=?")
     .bind(key, v.duration || null, text, now(), pending.id).run();
-
-  /* تأیید متن پیش از نگارش: اگر رونویسی اشتباه شنیده باشد، نامه هم غلط می‌شود */
-  await api.sendMessage(chat,
-    `📄 <b>این را شنیدم:</b>\n\n<i>${esc(text)}</i>\n\nدرست است؟`,
-    [[{ text: "✅ بله، نامه را بنویس", callback_data: `lt:${pending.id}:go:0` }],
-      [{ text: "🎤 دوباره ضبط می‌کنم", callback_data: `lt:${pending.assignment_id}:ask:0` }],
-      [{ text: "✖️ بی‌خیال", callback_data: `lt:${pending.assignment_id}:x:0` }]]);
+  await api.sendMessage(chat, `📄 <b>این را شنیدم:</b>\n\n<i>${esc(text)}</i>\n\nدرست است؟`, letterConfirmKb(pending));
   return { ok: true };
 }
 
-/** نگارش نامه و ساخت فایل Word روی سربرگ */
-async function makeLetter(env, api, chat, ex, letterId) {
+/** بعد از تأیید متن: موضوع نامه = «گزارش خرید» + اقلامِ انتخابی با «و» میانشان */
+async function letterSubjectCard(env, api, chat, ex, L, mid) {
+  const its = (await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=? ORDER BY line_no LIMIT 40").bind(L.assignment_id).all()).results || [];
+  /* پیش‌فرض: اقلامی که در جدول کمیسیون تأیید نهایی دارند */
+  const fin = new Set(((await env.DB.prepare("SELECT DISTINCT item_id FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(L.assignment_id).all()).results || []).map((r) => r.item_id));
+  const f = await newFlow(env, ex, chat, "lsub", "pick", L.assignment_id, { letterId: L.id, sel: its.filter((i) => fin.has(i.id)).map((i) => i.id) });
+  return letterSubjectRender(api, chat, f, flowData(f), its, mid);
+}
+
+function letterSubjectRender(api, chat, f, d, its, mid) {
+  const sel = new Set(d.sel || []);
+  const kb = its.map((i) => [{ text: `${sel.has(i.id) ? "☑" : "☐"} ${short(i.title, 34)}`, callback_data: `ls:${f.id}:t:${i.id}` }]);
+  if (its.length > 1) kb.push([{ text: sel.size === its.length ? "☐ هیچ" : "☑ همه", callback_data: `ls:${f.id}:all:0` }]);
+  kb.push([{ text: `✍️ نوشتن نامه${sel.size ? ` (${M(sel.size)} قلم)` : ""}`, callback_data: `ls:${f.id}:go:0` }]);
+  const titles = its.filter((i) => sel.has(i.id)).map((i) => i.title);
+  return show(api, chat, mid, "✉️ <b>موضوع نامه</b>\n\nنامه دربارهٔ کدام اقلام است؟ هر چند قلم را تیک بزنید.\n\n"
+    + `<b>موضوع:</b> ${titles.length ? esc(letterSubject(titles)) : "—"}`, kb);
+}
+
+/** نگارش نامه و ساخت فایل Word روی سربرگ؛ اگر تحویلی منتظرش بود، همان‌جا ادامه می‌دهد */
+async function makeLetter(env, api, chat, ex, letterId, subjectTitles) {
   const L = await env.DB.prepare("SELECT * FROM letters WHERE id=? AND expert_id=?").bind(letterId, ex.id).first();
-  if (!L || !L.transcript) { await api.sendMessage(chat, "متنی برای این نامه ثبت نشده است."); return { ok: true }; }
+  if (!L || !L.transcript || L.state !== "transcribed") { await api.sendMessage(chat, "این نامه قبلاً نوشته یا لغو شده است.").catch(() => {}); return { ok: true }; }
   const store = storage(env);
+  const dw = await deliverWaiting(env, ex, L.assignment_id);
+  const failKb = dw ? [[{ text: "📦 ادامهٔ تحویل بدون نامه", callback_data: `dv:${dw.id}:nl:0` }]] : [];
   await api.sendMessage(chat, "✍️ در حال نوشتن نامه…").catch(() => {});
 
   const settings = await getSettings(env);
   const d = await bundleData(env, L.assignment_id, settings, env.COMPANY || "تونل سد آریانا");
-
   let out;
   try {
     /* همان قاعدهٔ جدول کمیسیون: فقط استعلام‌های تیک‌خورده و قلم‌هایی که آن‌ها قیمت داده‌اند */
     out = await writeLetter(env, {
       transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes, allItems: d.items,
-      notes: d.assignment.notes, expert: d.expert, company: d.company,
+      notes: d.assignment.notes, expert: d.expert, company: d.company, subjectTitles,
     });
   } catch (e) {
     await env.DB.prepare("UPDATE letters SET state='failed', updated_at=? WHERE id=?").bind(now(), L.id).run();
-    await api.sendMessage(chat, `نگارش نامه نشد: ${esc(e.message)}`);
+    /* خطای letter.js خودش با «نگارش نامه نشد» شروع می‌شود */
+    await api.sendMessage(chat, `نگارش نامه نشد: ${esc(String(e.message || "").replace(/^نگارش نامه نشد:\s*/, ""))}`, failKb);
     return { ok: true };
   }
 
   const letter = { ...out.letter, date: d.date, number: null };
   let docxKey = null;
   try {
+    if (!store) throw new Error("انبار فایل وصل نیست.");
     const tpl = await store.get("_templates/letterhead.docx");
     if (!tpl) throw new Error("سربرگ در انبار پیدا نشد.");
     const blob = await renderLetter(await new Response(tpl.body).arrayBuffer(), letter);
     docxKey = storageKey(L.assignment_id, `letter-${L.id}.docx`);
-    await store.put(docxKey, blob, { contentType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+    await store.put(docxKey, blob, { contentType: DOCX_MIME });
   } catch (e) {
     /* نامه نوشته شده ولی فایلش ساخته نشد — متن را از دست ندهیم */
     await env.DB.prepare("UPDATE letters SET letter_json=?, meta_json=?, state='written', updated_at=? WHERE id=?")
       .bind(JSON.stringify(letter), JSON.stringify(out.meta), now(), L.id).run();
-    await api.sendMessage(chat, `نامه نوشته شد ولی فایل Word ساخته نشد: ${esc(e.message)}\nمتنش در پنل هست.`);
+    await api.sendMessage(chat, `نامه نوشته شد ولی فایل Word ساخته نشد: ${esc(e.message)}\nمتنش در پنل هست.`, failKb);
     return { ok: true };
   }
 
@@ -1238,12 +1445,14 @@ async function makeLetter(env, api, chat, ex, letterId) {
       .bind(now(), `expert:${ex.id}`, "letter", d.request.id, JSON.stringify({ assignment_id: L.assignment_id, letter_id: L.id, channel: "telegram" })),
   ]);
 
-  const file = await store.get(docxKey);
-  const bytes = await new Response(file.body).arrayBuffer();
-  await api.sendDocument(chat, `نامه-${d.request.id}.docx`, new Blob([bytes]),
-    `📝 <b>${esc(letter.subject)}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`);
+  /* وسط تحویل، نامه همراهِ بقیهٔ اسناد می‌رود؛ بیرون از آن، همین حالا */
+  if (!dw) {
+    const file = await store.get(docxKey);
+    await api.sendDocument(chat, `نامه-${d.request.id}.docx`, new Blob([await new Response(file.body).arrayBuffer()], { type: DOCX_MIME }),
+      `📝 <b>${esc(letter.subject)}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`).catch(() => {});
+  }
   if (out.letter.uncertain && out.letter.uncertain.length) {
-    await api.sendMessage(chat, `⚠️ این‌ها در صحبتتان روشن نبود و در نامه نیامد:\n${out.letter.uncertain.map((u) => "• " + esc(u)).join("\n")}`);
+    await api.sendMessage(chat, `⚠️ این‌ها در صحبتتان روشن نبود و در نامه نیامد:\n${out.letter.uncertain.map((u) => "• " + esc(u)).join("\n")}`).catch(() => {});
   }
   /* عددی که مدل خودش نوشته و در دادهٔ سامانه نیست، پیش از پیوست کردن باید دیده شود */
   const mt = out.meta || {};
@@ -1253,230 +1462,360 @@ async function makeLetter(env, api, chat, ex, letterId) {
       + ((mt.unresolved || []).length ? `• جای‌خالیِ حل‌نشده (با «—» پر شد): ${esc(mt.unresolved.join("، "))}\n` : "")
       + `\nنامه بر پایهٔ ${M(mt.items || 0)} قلمِ تیک‌خورده و ${M(mt.suppliers || 0)} تأمین‌کننده نوشته شده — همان جدول کمیسیون.`).catch(() => {});
   }
-  await api.sendMessage(chat, "برای گرفتن کل بستهٔ فایل‌ها (برگهٔ درخواست + جدول کمیسیون + نامه) دستور /tahvil را بزنید.", panelButton);
+  if (dw) {
+    await api.sendMessage(chat, `✅ نامه نوشته شد: <b>${esc(letter.subject)}</b>`).catch(() => {});
+    return deliverNext(env, api, chat, ex, dw, flowData(dw), null);
+  }
+  await api.sendMessage(chat, `✅ نامه آماده است: <b>${esc(letter.subject)}</b>`, [[{ text: "📦 تحویل", callback_data: `dvo:${L.assignment_id}` }], navRow(L.assignment_id)]).catch(() => {});
   return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */
-/* پایش شش مرحله — همان باکس‌های رنگیِ میز مدیر                          */
+/* بررسی سوابق — همان موتور پنل (worker/history.js)                     */
+/*                                                                      */
+/* اقلام چندانتخابی یا «همه اقلام» ← یک پیامِ تفکیک‌شده به قلم ← انتخاب  */
+/* قلم ← تأمین‌کنندگان (چندانتخابی) ← «افزودن به استعلامات» یا «فهرست».  */
+/* درخواستِ تک‌قلمی مستقیم به تأمین‌کنندگان می‌رسد.                      */
 /* ------------------------------------------------------------------ */
-
-/**
- * وضعیت شش مرحلهٔ یک ارجاع، دقیقاً با همان قاعده‌ای که پنل و میز مدیر
- * حساب می‌کنند — تا آنچه کارشناس در تلگرام می‌بیند با آنچه مدیر می‌بیند یکی باشد.
- */
-async function stageState(env, aid) {
-  return env.DB.prepare(
-    `SELECT a.id, a.request_id, a.viewed_at, a.commission_at,
-            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist,
-            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart,
-            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
-            (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
-     FROM assignments a WHERE a.id=?`,
-  ).bind(aid).first();
-}
-
-const stageFlags = (s) => [!!s.viewed_at, s.hist > 0, s.smart > 0, s.quotes > 0, s.proformas > 0, !!s.commission_at];
-
-/** نوار پیشرفت: ✅ برای انجام‌شده، ⬜ برای مانده */
-function progressBar(s) {
-  const done = stageFlags(s);
-  return STAGE_NAMES.map((n, i) => `${done[i] ? "✅" : "⬜"} ${n}`).join("\n");
-}
-
-/** پیام پیشرفت + دکمهٔ مرحله‌هایی که هنوز سبز نشده‌اند */
-async function sendProgress(env, api, chat, aid, prefix) {
-  const s = await stageState(env, aid);
-  if (!s) return { ok: true };
-  const done = stageFlags(s);
-  const kb = [];
-  /* سوابق دیگر «علامت دستی» نیست — همان بررسی واقعی از داخل بات اجرا می‌شود */
-  if (!done[1]) kb.push([{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }]);
-  if (!done[2]) kb.push([{ text: "✅ جستجو را انجام دادم", callback_data: `st:${aid}:smart:0` }]);
-  if (done[3]) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `st:${aid}:table:0` }]);
-  if (done[3] && done[4] && !done[5]) kb.push([{ text: "📦 گرفتن فایل‌ها و بستن کار", callback_data: `st:${aid}:deliver:0` }]);
-  if (done[5]) kb.push([{ text: "🧾 تأیید کمیسیون و خاتمه", callback_data: `cm:${aid}:card:0` }]);
-  kb.push([{ text: "باز کردن پنل", url: PANEL_URL }]);
-  await api.sendMessage(chat,
-    `${prefix ? prefix + "\n\n" : ""}📊 <b>پیشرفت درخواست ${esc(s.request_id)}</b>\n\n${progressBar(s)}`, kb).catch(() => {});
-  return { ok: true };
-}
-
-/** علامت‌زدن مرحلهٔ «بررسی سوابق» یا «جستجوی هوشمند» روی همهٔ اقلام باز */
-async function markStage(env, api, chat, ex, aid, stage) {
-  const col = stage === "hist" ? "hist_done_at" : "smart_done_at";
-  const own = await ownOpenAssignment(env, ex.id, aid);
-  if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
-  const t = now();
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE items SET ${col}=COALESCE(${col},?) WHERE assignment_id=? AND state='open'`).bind(t, aid),
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=? AND fired_at IS NULL")
-      .bind(t, aid, stage === "hist" ? 1 : 2),
-    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${ex.id}`, stage, own.request_id, JSON.stringify({ assignment_id: aid, channel: "telegram" })),
-  ]);
-  return sendProgress(env, api, chat, aid, `✅ مرحلهٔ «${stage === "hist" ? "بررسی سوابق" : "جستجوی هوشمند"}» سبز شد.`);
-}
-
-/* ------------------------------------------------------------------ */
-/* بررسی سوابق در بات — همان موتور پنل (worker/history.js)               */
-/* ------------------------------------------------------------------ */
-/* ضریب اهمیت گشتاور در بات ثابت است؛ نوارِ ۱ تا ۱۰ مال پنل است و رتبه‌ها
-   آن‌جا همان لحظه عوض می‌شوند. */
+/* ضریب اهمیت گشتاور در بات ثابت است؛ نوارِ ۱ تا ۱۰ مال پنل است. */
 const HIST_K = 5;
-const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدارها بدون زبالهٔ اعشار شناور */
-const HIST_MAX_LIST = 12;   /* سقف متن پیام — تلگرام ۴۰۹۶ نویسه جا دارد */
-const HIST_MAX_SEL = 24;    /* سقف دکمه‌های منوی چندانتخابی */
-const HIST_SEL_TEXT = "تأمین‌کنندگان موردنظر را انتخاب کنید و «افزودن به استعلامات» را بزنید؛ فقط نامشان وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید.";
+const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* عددها بدون زبالهٔ اعشار شناور */
+const HIST_MAX_SEL = 24;   /* سقف دکمه‌های تأمین‌کننده در یک کارت */
+/* هر قلم چند کوئری D1 است و هر فراخوانی پلن رایگان ۵۰ زیردرخواست دارد؛ بیش از
+   این در یک فراخوانی نمی‌رود و بقیه با «ادامهٔ سوابق» در فراخوانی بعدی می‌آید. */
+const HIST_BATCH = 5;
+const MSG_MAX = 3900;      /* متن تلگرام ۴۰۹۶ نویسه جا دارد */
 
-async function histPickItem(env, api, chat, ex, aid) {
+async function histStart(env, api, chat, ex, aid, mid) {
   const asg = await ownOpenAssignment(env, ex.id, aid);
-  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
-  const its = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40").bind(aid).all()).results || [];
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const its = await itemsOf(env, aid);
   if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
-  if (its.length === 1) return histRun(env, api, chat, ex, its[0].id);
-  const kb = its.map((i) => [{ text: `${short(i.title, 32)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`, callback_data: `hs:i:${i.id}` }]);
-  await api.sendMessage(chat, `📚 <b>بررسی سوابق</b>\nدرخواست <b>${esc(asg.request_id)}</b>\n\nسوابق کدام قلم را ببینم؟ (یکی را انتخاب کنید)`, kb).catch(() => {});
-  return { ok: true };
+  const d = { sel: [], single: its.length === 1 };
+  const f = await newFlow(env, ex, chat, "hsel", "pick", aid, d);
+  if (d.single) return histRun(env, api, chat, ex, f, d, asg, [its[0].id], null);
+  return histSelCard(api, chat, f, d, its, asg, mid);
 }
 
-async function histRun(env, api, chat, ex, itemId) {
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.hist_done_at, a.id AS aid, a.expert_id, a.request_id
-    FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
-  if (!it || it.expert_id !== ex.id) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
-  const h = await itemHistory(env, it, { k: HIST_K });
-  if (!h.available) { await api.sendMessage(chat, `📚 ${esc(h.message)}`).catch(() => {}); return { ok: true }; }
+function histSelCard(api, chat, f, d, its, asg, mid) {
+  const sel = new Set(d.sel || []);
+  const kb = its.slice(0, 40).map((i) => [{
+    text: `${sel.has(i.id) ? "☑" : "☐"} ${short(i.title, 30)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`,
+    callback_data: `hx:${f.id}:t:${i.id}`,
+  }]);
+  kb.push([{ text: `📚 سوابق اقلام انتخابی${sel.size ? ` (${M(sel.size)})` : ""}`, callback_data: `hx:${f.id}:go:0` }]);
+  kb.push([{ text: "📚 همه اقلام", callback_data: `hx:${f.id}:all:0` }]);
+  kb.push(navRow(f.assignment_id));
+  return show(api, chat, mid, `📚 <b>بررسی سوابق</b> — درخواست <b>${esc(asg.request_id)}</b>\n\n`
+    + "سوابق کدام اقلام را ببینم؟ چند قلم را تیک بزنید و «سوابق اقلام انتخابی» را بزنید، یا «همه اقلام».", kb);
+}
 
-  /* خواندنِ سوابق همان انجامِ مرحله است — همان رفتار پنل؛ باکس مدیر سبز می‌شود */
+async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
+  const aid = f.assignment_id;
+  const want = (await itemsOf(env, aid)).filter((i) => ids.includes(i.id));
+  const its = want.slice(0, HIST_BATCH);
+  d.rest = want.slice(HIST_BATCH).map((i) => i.id);
+  if (!its.length) return show(api, chat, mid, "این اقلام دیگر باز نیستند.", [navRow(aid)]);
+  const cur = await activeImport(env);
+  if (!cur) return show(api, chat, mid, "📚 فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند.", [navRow(aid)]);
+
+  const results = [];
+  for (const it of its) results.push({ it, h: await itemHistory(env, it, { k: HIST_K, cur, brief: true }) });
+
+  const ran = its.map((i) => i.id);
+  d.ran = [...new Set([...(d.ran || []), ...ran])];
+  d.opts = d.opts || {};
+  for (const { it, h } of results) d.opts[it.id] = (h.suppliers || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
   const t = now();
+  /* خواندنِ سوابق همان انجامِ مرحله است — همان رفتار پنل؛ باکس مدیر سبز می‌شود */
   await env.DB.batch([
-    env.DB.prepare("UPDATE items SET hist_done_at=COALESCE(hist_done_at,?) WHERE id=?").bind(t, itemId),
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=1 AND fired_at IS NULL").bind(t, it.aid),
+    env.DB.prepare(`UPDATE items SET hist_done_at=COALESCE(hist_done_at,?) WHERE assignment_id=? AND id IN (${ran.map(() => "?").join(",")})`).bind(t, aid, ...ran),
+    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=1 AND fired_at IS NULL").bind(t, aid),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${ex.id}`, "hist", it.request_id, JSON.stringify({ assignment_id: it.aid, item_id: itemId, channel: "telegram" })),
+      .bind(t, `expert:${ex.id}`, "hist", asg.request_id, JSON.stringify({ assignment_id: aid, item_ids: ran, channel: "telegram" })),
+    env.DB.prepare("UPDATE tg_flows SET step='ran', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id),
   ]);
 
+  if (mid) await api.editMessageText(chat, mid, `📚 سوابق ${M(its.length)} قلم — در پیام بعد.`).catch(() => {});
+  for (const text of histMessages(asg, results)) await api.sendMessage(chat, text).catch(() => {});
+  if (d.rest.length) {
+    await api.sendMessage(chat, `⏭ سوابق ${M(d.rest.length)} قلم دیگر مانده.`,
+      [[{ text: `📚 ادامهٔ سوابق (${M(d.rest.length)} قلم)`, callback_data: `hx:${f.id}:more:0` }], navRow(aid)]).catch(() => {});
+    return { ok: true };
+  }
+  return histAfter(env, api, chat, ex, f, d, null);
+}
+
+/** یک پیام، به تفکیک قلم؛ فقط اگر از سقف تلگرام بگذرد، سر مرزِ قلم‌ها به چند پیام شکسته می‌شود */
+function histMessages(asg, results) {
+  const head = `📚 <b>سوابق تأمین — درخواست ${esc(asg.request_id)}</b>\n`
+    + `<i>ترتیب با امتیاز گشتاوری است: خریدِ تازه‌تر سنگین‌تر (ضریب ${M(HIST_K)}). عددهای برابر، رتبهٔ برابر دارند.</i>`;
+  const budget = Math.max(450, Math.floor((MSG_MAX - head.length) / results.length) - 4);
+  const out = [];
+  let cur = head;
+  for (const [k, r] of results.entries()) {
+    const s = histSection(r.it, r.h, results.length > 1 ? k + 1 : 0, budget);
+    if (cur.length + 2 + s.length > MSG_MAX) { out.push(cur); cur = s; } else cur += "\n\n" + s;
+  }
+  out.push(cur);
+  return out;
+}
+
+function histSection(it, h, no, budget) {
+  const title = `━━ ${no ? `${M(no)}. ` : ""}<b>${esc(short(it.title, 60))}</b>`;
+  if (!h.available) return `${title}\n${esc(h.message)}`;
   const rows = h.suppliers || [];
   if (!rows.length) {
     const why = h.excluded && h.excluded.length
       ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${h.excluded[0].name}» ثبت شده و تأمین‌کنندهٔ نام‌داری ندارد.`
       : (h.message || "سابقه‌ای در فایل مرجع پیدا نشد.");
-    await api.sendMessage(chat, `📚 <b>سوابق «${esc(short(it.title, 40))}»</b>\n\n${esc(why)}`).catch(() => {});
-    return { ok: true };
+    return `${title}\n${esc(why)}`;
   }
-
   const unit = h.item && h.item.unit ? ` ${h.item.unit}` : "";
-  const list = rows.slice(0, HIST_MAX_LIST).map((s, i) =>
-    `${M(i + 1)}. <b>${esc(short(s.name, 36))}</b>\n`
-    + `▫️ دفعات خرید: <b>${M(s.n)}</b> (رتبه ${M(s.rankN)}) · مقدار: <b>${M(RQ(s.qty))}</b>${esc(unit)} (رتبه ${M(s.rankQty)})\n`
-    + `▫️ سهم: <b>${s.share.toFixed(1)}٪</b> · امتیاز گشتاوری: <b>${s.mshare.toFixed(1)}٪</b> (رتبه ${M(s.rankM)})`).join("\n");
-  const text = `📚 <b>سوابق تأمین «${esc(short(it.title, 40))}»</b>\n`
-    + `${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}\n`
-    + `<i>ترتیب با امتیاز گشتاوری است: خریدِ تازه‌تر سنگین‌تر (ضریب ${M(h.base.k)}).</i>\n\n${list}`
-    + (rows.length > HIST_MAX_LIST ? `\n\n<i>و ${M(rows.length - HIST_MAX_LIST)} تأمین‌کنندهٔ دیگر — در پنل</i>` : "")
-    + (h.item && h.item.mixedUnits ? `\n\n⚠️ <i>واحدهای این قلم یکدست نیستند (${esc(h.item.units || "")})؛ جمع مقدار را با احتیاط بخوانید.</i>` : "");
-  await api.sendMessage(chat, text).catch(() => {});
+  let s = `${title}\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}`
+    + (h.item && h.item.mixedUnits ? `\n⚠️ <i>واحدها یکدست نیستند (${esc(h.item.units || "")})؛ جمع مقدار را با احتیاط بخوانید.</i>` : "");
+  let shown = 0;
+  for (const [i, x] of rows.entries()) {
+    const line = `\n${M(i + 1)}. <b>${esc(short(x.name, 36))}</b>\n`
+      + `   دفعات خرید <b>${M(x.n)}</b> (رتبه ${M(x.rankN)}) · مقدار <b>${M(RQ(x.qty))}</b>${esc(unit)} (رتبه ${M(x.rankQty)})\n`
+      + `   امتیاز گشتاوری <b>${M(RQ(x.qtyM))}</b> (رتبه ${M(x.rankM)})`;
+    if (shown && s.length + line.length > budget) break;
+    s += line; shown++;
+  }
+  if (shown < rows.length) s += `\n<i>و ${M(rows.length - shown)} تأمین‌کنندهٔ دیگر — در پنل</i>`;
+  return s;
+}
 
-  /* منوی چندانتخابی، در یک پیام جدا: با هر انتخاب فقط همین پیام کوچک ویرایش
-     می‌شود و متنِ بلندِ رتبه‌بندی دست‌نخورده می‌ماند. */
-  const options = rows.slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
-  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'hist','pick_suppliers',?,?,?,?)")
-    .bind(ex.id, String(chat), it.aid, JSON.stringify({ itemId, options, sel: [] }), t, t + FLOW_TTL).run();
-  const fid = r.meta.last_row_id;
-  const msg = await api.sendMessage(chat, HIST_SEL_TEXT, histSelKb(fid, options, [])).catch(() => null);
-  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+/** بعد از پیامِ سوابق: یک قلم ← مستقیم تأمین‌کنندگانش؛ چند قلم ← اول انتخاب قلم */
+function histAfter(env, api, chat, ex, f, d, mid) {
+  const ran = d.ran || [];
+  if (ran.length === 1) return histSupplierCard(env, api, chat, ex, f, d, ran[0], d.single ? "r" : "x", mid);
+  return histPicker(env, api, chat, f, d, mid);
+}
+
+async function histPicker(env, api, chat, f, d, mid) {
+  const its = (await itemsOf(env, f.assignment_id)).filter((i) => (d.ran || []).includes(i.id));
+  const kb = its.map((i) => {
+    const n = ((d.opts || {})[i.id] || []).length;
+    return [{ text: `${short(i.title, 30)} · ${n ? `${M(n)} تأمین‌کننده` : "بی‌سابقه"}`, callback_data: `hp:${f.id}:${i.id}` }];
+  });
+  kb.push([{ text: "🗂 فهرست", callback_data: `hp:${f.id}:ls` }]);
+  kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `hx:${f.id}:back:0` }]);
+  return show(api, chat, mid, "📚 <b>تأمین‌کنندگانِ کدام قلم را برای استعلام انتخاب می‌کنید؟</b>\n<i>«فهرست» بی‌انتخاب جلو می‌رود.</i>", kb);
+}
+
+/** `back`: p انتخاب قلم · x کارت انتخاب اقلام · r منوی درخواست (تک‌قلمی) */
+async function histSupplierCard(env, api, chat, ex, hf, hd, itemId, back, mid) {
+  const aid = hf.assignment_id;
+  const it = (await itemsOf(env, aid)).find((i) => i.id === itemId);
+  if (!it) return show(api, chat, mid, "این قلم دیگر باز نیست.", [navRow(aid)]);
+  const options = (hd.opts || {})[itemId] || [];
+  if (!options.length) {
+    return hub(api, chat, aid, back === "p" ? `p${hf.id}` : null, mid, `📚 «${esc(short(it.title, 40))}» در سوابق، تأمین‌کنندهٔ نام‌داری ندارد.`);
+  }
+  const f = await newFlow(env, ex, chat, "hist", "pick_suppliers", aid, { itemId, title: it.title, options, sel: [], back, from: hf.id });
+  return supplierCard(env, api, chat, f, flowData(f), mid);
+}
+
+/* ------------------------------------------------------------------ */
+/* کارت انتخاب تأمین‌کننده — مشترکِ سوابق (hf) و جستجوی هوشمند (sq)       */
+/* ------------------------------------------------------------------ */
+
+const haveSet = async (env, aid, itemId) => new Set(((await env.DB.prepare(
+  "SELECT supplier_name FROM quotes WHERE assignment_id=? AND item_id=?",
+).bind(aid, itemId).all()).results || []).map((q) => q.supplier_name));
+
+async function supplierCard(env, api, chat, f, d, mid, head) {
+  const pre = f.kind === "hist" ? "hf" : "sq";
+  const have = await haveSet(env, f.assignment_id, d.itemId);
+  const sel = new Set(d.sel || []);
+  const kb = (d.options || []).map((o, i) => [{ text: `${sel.has(i) ? "☑" : "☐"} ${short(o.name, 30)}${have.has(o.name) ? " ✓" : ""}`, callback_data: `${pre}:${f.id}:t:${i}` }]);
+  kb.push([{ text: `➕ افزودن به استعلامات${sel.size ? ` (${M(sel.size)})` : ""}`, callback_data: `${pre}:${f.id}:go:0` }]);
+  kb.push([{ text: "🗂 فهرست", callback_data: `${pre}:${f.id}:ls:0` }]);
+  kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `${pre}:${f.id}:back:0` }]);
+  const r = await show(api, chat, mid, `${head ? head + "\n\n" : ""}${f.kind === "hist" ? "📚" : "🔎"} <b>تأمین‌کنندگانِ «${esc(short(d.title || "", 40))}»</b>\n\n`
+    + "هر کدام را که می‌خواهید از او استعلام بگیرید تیک بزنید و «افزودن به استعلامات» را بزنید؛ فقط نامش وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید. «فهرست» بی‌افزودن جلو می‌رود."
+    + (have.size ? "\n<i>✓ یعنی از قبل در استعلامات هست.</i>" : ""), kb);
+  if (r && r.message_id && r.message_id !== f.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(r.message_id, f.id).run();
   return { ok: true };
 }
 
-function histSelKb(fid, options, sel) {
-  const kb = (options || []).map((o, i) => [{ text: `${(sel || []).includes(i) ? "☑" : "☐"} ${short(o.name, 32)}`, callback_data: `hf:${fid}:t:${i}` }]);
-  kb.push([{ text: `➕ افزودن به استعلامات${(sel || []).length ? ` (${M(sel.length)})` : ""}`, callback_data: `hf:${fid}:go:0` }]);
-  kb.push([{ text: "✖️ بستن", callback_data: `hf:${fid}:x:0` }]);
-  return kb;
-}
-
-/** انتخاب‌شده‌ها را به خط‌های استعلامِ همان قلم تبدیل می‌کند و کارت خط‌ها را می‌فرستد */
-async function histAddToQuotes(env, api, chat, ex, f, d, messageId) {
+/** انتخاب‌شده‌ها ← خط‌های استعلامِ همان قلم؛ بعد پنج راهِ بعدی */
+async function addSelected(env, api, chat, ex, f, d, mid) {
   const aid = f.assignment_id;
   const itRow = await env.DB.prepare("SELECT id, unit, qty FROM items WHERE id=? AND assignment_id=?").bind(d.itemId, aid).first();
-  if (!itRow) { await api.sendMessage(chat, "قلم این فهرست دیگر پیدا نمی‌شود.").catch(() => {}); return { ok: true }; }
-  const have = new Set(((await env.DB.prepare("SELECT supplier_name FROM quotes WHERE assignment_id=? AND item_id=?").bind(aid, d.itemId).all()).results || [])
-    .map((q) => q.supplier_name));
+  if (!itRow) return show(api, chat, mid, "قلم این فهرست دیگر پیدا نمی‌شود.", [navRow(aid)]);
+  const have = await haveSet(env, aid, d.itemId);
   const t = now();
-  const stmts = []; let added = 0, skipped = 0;
+  const stmts = [];
+  let added = 0, skipped = 0;
   for (const i of d.sel || []) {
-    const o = (d.options || [])[i]; if (!o) continue;
+    const o = (d.options || [])[i];
+    if (!o) continue;
     if (have.has(o.name)) { skipped++; continue; }
+    have.add(o.name);
     stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,created_at,updated_at)
       VALUES (?,?,?,?,?,?,?,'telegram',?,?)`)
       .bind(aid, d.itemId, o.name, o.code || null, itRow.unit || null, itRow.qty ?? null, INVOICE_DEFAULT, t, t));
     added++;
   }
-  stmts.push(env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id));
+  d.sel = [];
+  stmts.push(env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id));
   await env.DB.batch(stmts);
-  if (messageId) await api.editMessageText(chat, messageId,
-    `✅ <b>${M(added)}</b> تأمین‌کننده وارد استعلامات شد${skipped ? ` و ${M(skipped)} مورد از قبل بود` : ""}.`).catch(() => {});
-  return quoteLinesCard(env, api, chat, ex, aid);
+  return hub(api, chat, aid, `${f.kind === "hist" ? "h" : "s"}${f.id}`, mid,
+    `✅ <b>${M(added)}</b> تأمین‌کننده برای «${esc(short(d.title || "", 40))}» وارد استعلامات شد${skipped ? ` و ${M(skipped)} مورد از قبل بود` : ""}.`);
 }
 
-/* ------------------------------------------------------------------ */
-/* کارت خط‌های استعلام — بعد از افزودن از سوابق، خودکار می‌آید              */
-/* ------------------------------------------------------------------ */
-async function quoteLinesCard(env, api, chat, ex, aid, messageId) {
-  const asg = await ownOpenAssignment(env, ex.id, aid);
-  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
-  const qs2 = (await env.DB.prepare(`SELECT q.id, q.supplier_name, q.price, q.saved, i.title
-    FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? ORDER BY q.id LIMIT 24`).bind(aid).all()).results || [];
-  const text = `🧾 <b>استعلامات درخواست ${esc(asg.request_id)}</b>\n\n`
-    + (qs2.length
-      ? qs2.map((q, i) => `${M(i + 1)}. <b>${esc(short(q.supplier_name, 28))}</b> — ${esc(short(q.title, 26))}${q.price != null ? ` — ${M(q.price)} ریال` : ""} ${q.saved ? "✅" : "✳️"}`).join("\n")
-        + "\n\n✅ ثبت موقت شده · ✳️ هنوز ناقص\nروی هر خط بزنید تا پیش‌فاکتورش را بدهید یا دستی ویرایشش کنید."
-      : "هنوز خط استعلامی ثبت نشده است.");
-  const kb = qs2.map((q, i) => [{ text: `${M(i + 1)}. ${short(q.supplier_name, 24)} — ${short(q.title, 16)}`, callback_data: `hql:${q.id}:c:0` }]);
-  kb.push([{ text: "➕ افزودن دستی استعلام جدید", callback_data: `hq:${aid}:new:0` }]);
-  const edited = messageId ? await api.editMessageText(chat, messageId, text, kb).catch(() => null) : null;
-  if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
+/** دکمه‌های کارت تأمین‌کننده: t انتخاب · go افزودن · ls فهرست · back بازگشت */
+async function supplierCardAction(env, api, chat, ex, f, step, v, mid, ack) {
+  const d = flowData(f);
+  if (step === "t") {
+    if (!(d.options || [])[v]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+    d.sel = toggleIn(d.sel, v);
+    await saveFlow(env, f.id, d);
+    await ack();
+    return supplierCard(env, api, chat, f, d, mid);
+  }
+  if (step === "go") {
+    if (!(d.sel || []).length) { await ack("هنوز تأمین‌کننده‌ای انتخاب نکرده‌اید؛ برای رفتن بی‌افزودن «فهرست» را بزنید.", true); return { ok: true }; }
+    await ack("در حال افزودن…");
+    return addSelected(env, api, chat, ex, f, d, mid);
+  }
+  if (step === "ls") { await ack(); return hub(api, chat, f.assignment_id, `${f.kind === "hist" ? "h" : "s"}${f.id}`, mid); }
+  if (step === "back") {
+    await ack();
+    if (f.kind === "smsel") return show(api, chat, mid, "🔎 با نتایج جستجو چه کنم؟", [...smartChoiceKb(d.searchId), navRow(f.assignment_id)]);
+    const hf = d.back === "p" || d.back === "x" ? await ownFlow(env, ex, d.from, "hsel") : null;
+    if (hf && d.back === "p") return histPicker(env, api, chat, hf, flowData(hf), mid);
+    if (hf) {
+      const asg = await ownOpenAssignment(env, ex.id, hf.assignment_id);
+      if (asg) return histSelCard(api, chat, hf, flowData(hf), await itemsOf(env, hf.assignment_id), asg, mid);
+    }
+    return requestMenu(env, api, chat, ex, f.assignment_id, { mid });
+  }
+  await ack();
   return { ok: true };
 }
 
-async function quoteLineMenu(env, api, chat, ex, qid, messageId) {
-  const q = await ownQuote(env, ex.id, qid);
-  if (!q) { await api.sendMessage(chat, "این خط استعلام پیدا نشد.").catch(() => {}); return { ok: true }; }
-  const text = `🧾 خط استعلام <b>${esc(short(q.supplier_name, 32))}</b>${q.price != null ? ` — قیمت فعلی ${M(q.price)} ریال` : " — هنوز قیمت ندارد"}\n\nچه می‌کنید؟`;
-  const kb = [
-    [{ text: "📎 دریافت پیش‌فاکتور", callback_data: `hqp:${q.id}:0:0` }],
-    [{ text: "✏️ ویرایش دستی", callback_data: `qe:${q.id}:0` }],
-    [{ text: "→ بازگشت به فهرست", callback_data: `hq:${q.assignment_id}:show:0` }],
-  ];
-  const edited = messageId ? await api.editMessageText(chat, messageId, text, kb).catch(() => null) : null;
-  if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
-  return { ok: true };
+/* ------------------------------------------------------------------ */
+/* تب استعلامات — انتخاب خط‌ها برای «دریافت پیش‌فاکتور»، خط دستی، کارت‌ها */
+/* ------------------------------------------------------------------ */
+
+async function qtabRows(env, aid) {
+  return (await env.DB.prepare(
+    `SELECT q.id, q.supplier_name, q.item_id, q.price, q.saved, i.title,
+            EXISTS (SELECT 1 FROM proformas p WHERE p.assignment_id=q.assignment_id AND p.supplier_name=q.supplier_name) AS has_pf
+     FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? ORDER BY q.supplier_name, i.line_no, q.id LIMIT 40`,
+  ).bind(aid).all()).results || [];
 }
 
-/** استعلام دستی برای ارجاعِ معلوم — بدون پرسیدنِ دوبارهٔ «کدام درخواست» */
-async function manualForAssignment(env, api, chat, ex, aid) {
+async function quotesTab(env, api, chat, ex, aid, mid, head) {
   const asg = await ownOpenAssignment(env, ex.id, aid);
-  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
-  await closeFlows(env, ex.id);
-  const sups = ((await env.DB.prepare("SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name").bind(aid).all()).results || [])
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const f = await newFlow(env, ex, chat, "qtab", "pick", aid, { sel: [] });
+  return qtabRender(env, api, chat, f, { sel: [] }, asg, mid, head);
+}
+
+async function qtabRender(env, api, chat, f, d, asg, mid, head) {
+  const aid = f.assignment_id;
+  const rows = await qtabRows(env, aid);
+  const sel = new Set(d.sel || []);
+  const list = rows.length
+    ? rows.map((q, i) => `${M(i + 1)}. <b>${esc(short(q.supplier_name, 26))}</b> — ${esc(short(q.title, 24))}`
+      + `${q.price != null ? ` · ${money(q.price)} ریال` : ""} ${q.saved ? "✅" : "✳️"}${q.has_pf ? "📎" : ""}`).join("\n")
+      + "\n\n✅ ثبت موقت · ✳️ ناقص · 📎 پیش‌فاکتور دارد"
+    : "هنوز خط استعلامی ثبت نشده است.";
+  const kb = rows.map((q, i) => [{ text: `${sel.has(q.id) ? "☑" : "☐"} ${M(i + 1)}. ${short(q.supplier_name, 20)} — ${short(q.title, 14)}`, callback_data: `qx:${f.id}:t:${q.id}` }]);
+  if (rows.length > 1) kb.push([{ text: sel.size === rows.length ? "☐ هیچ" : "☑ همه", callback_data: `qx:${f.id}:all:0` }]);
+  if (rows.length) kb.push([{ text: `📎 دریافت پیش‌فاکتور${sel.size ? ` (${M(sel.size)} خط)` : ""}`, callback_data: `qx:${f.id}:pf:0` }]);
+  kb.push([{ text: "➕ خط استعلام دستی", callback_data: `qx:${f.id}:new:0` }]);
+  if (rows.length) kb.push([{ text: "✏️ پرکردن و اصلاح فیلدها", callback_data: `qx:${f.id}:ed:0` }]);
+  if (rows.some((q) => q.saved)) kb.push([{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
+  kb.push(navRow(aid));
+  return show(api, chat, mid, `${head ? head + "\n\n" : ""}🧾 <b>تب استعلامات — درخواست ${esc(asg.request_id)}</b>\n\n${list}`
+    + (rows.length ? "\n\nخط‌هایی را که منتظر پیش‌فاکتورشان هستید تیک بزنید و «دریافت پیش‌فاکتور» را بزنید؛ فایل‌های بعدی بی‌پرسش به همان‌ها می‌نشینند." : ""), kb);
+}
+
+/** تب استعلامات ← «دریافت پیش‌فاکتور»: خط‌های تیک‌خورده به تفکیک تأمین‌کننده منتظر فایل می‌مانند */
+async function awaitStart(env, api, chat, ex, f, d, mid) {
+  const rows = (await qtabRows(env, f.assignment_id)).filter((q) => (d.sel || []).includes(q.id));
+  const want = [];
+  for (const q of rows) {
+    let w = want.find((x) => x.s === q.supplier_name);
+    if (!w) { w = { s: q.supplier_name, items: [], got: 0 }; want.push(w); }
+    if (!w.items.includes(q.item_id)) w.items.push(q.item_id);
+  }
+  /* یک حالتِ فایل در هر لحظه: «پیوست‌ها» یا انتظارِ دیگری بسته می‌شود */
+  await endModes(env, ex.id, null);
+  await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+  const w = await newFlow(env, ex, chat, "await_pf", "wait", f.assignment_id, { want }, MODE_TTL);
+  return awaitStatus(env, api, chat, w, mid);
+}
+
+async function awaitStatus(env, api, chat, f, mid) {
+  const d = flowData(f), aid = f.assignment_id;
+  const want = d.want || [];
+  const left = want.filter((w) => !w.got).length;
+  const list = want.map((w) => `${w.got ? "✅" : "⏳"} <b>${esc(short(w.s, 34))}</b> · ${M((w.items || []).length)} قلم`).join("\n");
+  const nav = [[{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }], navRow(aid)];
+  if (!left) return show(api, chat, mid, `📎 <b>همهٔ پیش‌فاکتورهای منتظر رسید.</b>\n\n${list}\n\nحالت «دریافت پیش‌فاکتور» بسته شد.`, nav);
+  return show(api, chat, mid, `📎 <b>منتظر پیش‌فاکتور</b>\n\n${list}\n\n`
+    + "فایل‌ها را همین‌جا بفرستید؛ هر فایل بی‌آنکه درخواست را بپرسم به همین‌ها و همین اقلام می‌نشیند"
+    + (left > 1 ? " — فقط می‌پرسم مال کدام تأمین‌کننده است." : "."),
+  [[{ text: "✖️ پایان دریافت", callback_data: `aw:${f.id}:x:0` }], ...nav]);
+}
+
+/* ------------------------------------------------------------------ */
+/* خط استعلام دستی: تأمین‌کننده ← اقلام ← کارت استعلام با همهٔ فیلدها     */
+/* ------------------------------------------------------------------ */
+
+async function manualStart(env, api, chat, ex, aid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  await closeInputs(env, ex.id);
+  const sups = ((await env.DB.prepare("SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name LIMIT 20").bind(aid).all()).results || [])
     .map((r) => r.supplier_name).filter(Boolean);
-  const t = now();
-  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'manual','need_supplier',?,?,?,?)")
-    .bind(ex.id, String(chat), aid, JSON.stringify({ supplierOptions: sups }), t, t + FLOW_TTL).run();
-  const fid = r.meta.last_row_id;
-  const kb = sups.map((s2, i) => [{ text: short(s2, 34), callback_data: `fl:${fid}:s:${i}` }]);
-  kb.push([{ text: "✖️ لغو", callback_data: `fl:${fid}:x:0` }]);
-  const msg = await api.sendMessage(chat,
-    `🧾 <b>استعلام دستی</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
-    + (sups.length ? "از کدام تأمین‌کننده؟ اگر تازه است، نامش را بنویسید." : "نام تأمین‌کننده را بنویسید:"), kb).catch(() => null);
-  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+  const f = await newFlow(env, ex, chat, "manual", "need_supplier", aid, { sups });
+  const kb = sups.map((s, i) => [{ text: short(s, 34), callback_data: `mn:${f.id}:s:${i}` }]);
+  kb.push([{ text: "✖️ لغو", callback_data: `mn:${f.id}:x:0` }]);
+  await api.sendMessage(chat, `✍️ <b>خط استعلام دستی</b> — درخواست <b>${esc(asg.request_id)}</b>\n\n`
+    + `<b>نام تأمین‌کننده را بنویسید</b>${sups.length ? "، یا اگر همین‌جا هست انتخابش کنید" : ""}:`, kb).catch(() => {});
   return { ok: true };
+}
+
+async function manualItems(env, api, chat, ex, f, d, mid) {
+  const its = await itemsOf(env, f.assignment_id);
+  if (!Array.isArray(d.sel)) d.sel = its.length === 1 ? [its[0].id] : [];
+  await saveFlow(env, f.id, d, "pick_items");
+  const sel = new Set(d.sel);
+  const kb = its.slice(0, 40).map((i) => [{
+    text: `${sel.has(i.id) ? "☑" : "☐"} ${short(i.title, 30)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`,
+    callback_data: `mn:${f.id}:t:${i.id}`,
+  }]);
+  if (its.length > 1) kb.push([{ text: sel.size === its.length ? "☐ هیچ" : "☑ همه", callback_data: `mn:${f.id}:all:0` }]);
+  kb.push([{ text: `✅ ساختن خط استعلام${sel.size ? ` (${M(sel.size)} قلم)` : ""}`, callback_data: `mn:${f.id}:go:0` }]);
+  kb.push([{ text: "✖️ لغو", callback_data: `mn:${f.id}:x:0` }]);
+  return show(api, chat, mid, `✍️ <b>خط استعلام دستی — «${esc(short(d.supplier, 40))}»</b>\n\n`
+    + "برای کدام اقلام؟ تیک بزنید و «ساختن خط استعلام» را بزنید؛ بعد همهٔ فیلدها را روی کارت استعلام پر می‌کنید.", kb);
+}
+
+async function manualCreate(env, api, chat, ex, f, d, mid) {
+  const its = await itemsOf(env, f.assignment_id);
+  const ids = (d.sel || []).filter((x) => its.some((i) => i.id === x));
+  const t = now();
+  await env.DB.batch([
+    ...lineInserts(env, f.assignment_id, d.supplier, ids, t, "manual"),
+    env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "manual_quote", null, JSON.stringify({ assignment_id: f.assignment_id, supplier: d.supplier, items: ids, channel: "telegram" })),
+  ]);
+  await show(api, chat, mid, `✅ خط استعلام «${esc(d.supplier)}» برای ${M(ids.length)} قلم ساخته شد.`, []);
+  return quoteCard(env, api, chat, f.assignment_id, d.supplier, null, "فیلدها را پر کنید — ❌ اجباری، ⚪ اختیاری — و بعد «ثبت موقت».");
 }
 
 /* ------------------------------------------------------------------ */
 /* جستجوی هوشمند در بات — همان موتور پنل (worker/discovery.js)            */
 /* ------------------------------------------------------------------ */
-const SMART_SEL_TEXT = "تأمین‌کنندگان موردنظر را انتخاب کنید و «افزودن به استعلامات» را بزنید؛ فقط نامشان وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید.";
 
 async function smartItemOf(env, exId, itemId) {
   const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec,
@@ -1487,11 +1826,12 @@ async function smartItemOf(env, exId, itemId) {
 
 async function smartPickItem(env, api, chat, ex, aid) {
   const asg = await ownOpenAssignment(env, ex.id, aid);
-  if (!asg) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
-  const its = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT 40").bind(aid).all()).results || [];
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const its = await itemsOf(env, aid);
   if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
   if (its.length === 1) return smartPrefsCard(env, api, chat, ex, its[0].id);
-  const kb = its.map((i) => [{ text: `${short(i.title, 32)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`, callback_data: `sm:i:${i.id}` }]);
+  const kb = its.slice(0, 40).map((i) => [{ text: `${short(i.title, 32)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`, callback_data: `sm:i:${i.id}` }]);
+  kb.push(navRow(aid));
   await api.sendMessage(chat, `🔎 <b>جستجوی هوشمند</b>\nدرخواست <b>${esc(asg.request_id)}</b>\n\nبرای کدام قلم تأمین‌کنندهٔ تازه پیدا کنم؟`, kb).catch(() => {});
   return { ok: true };
 }
@@ -1499,7 +1839,7 @@ async function smartPickItem(env, api, chat, ex, aid) {
 async function smartPrefsCard(env, api, chat, ex, itemId) {
   const it = await smartItemOf(env, ex.id, itemId);
   if (!it) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
-  await closeFlows(env, ex.id);
+  await closeInputs(env, ex.id);
   const t = now();
   const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: "", notes: "" };
   const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smart','prefs',?,?,?,?)")
@@ -1581,10 +1921,7 @@ async function smartResultsMessage(env, api, chat, ex, it, params, out) {
   if (shown < sup.length) text += `\n<i>و ${M(sup.length - shown)} مورد دیگر — در پنل</i>\n`;
   text += "\n<i>قیمت و کیفیت سنجیده نشده‌اند؛ این فقط ترتیبِ تماس اول است.</i>";
   await api.sendMessage(chat, text).catch(() => {});
-  await api.sendMessage(chat, "با نتایج چه کنم؟", [
-    [{ text: "➕ انتخاب جهت استعلام", callback_data: `sq:${out.search_id}:open:0` }],
-    [{ text: "✉️ انتخاب جهت ارسال پیام", callback_data: `sg:${out.search_id}:open:0` }],
-  ]).catch(() => {});
+  await api.sendMessage(chat, "با نتایج چه کنم؟", [...smartChoiceKb(out.search_id), navRow(it.aid)]).catch(() => {});
   return { ok: true };
 }
 
@@ -1634,215 +1971,217 @@ const ROLE_FA_BOT = {
   retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
 };
 
-/** منوی چندانتخابی تأمین‌کنندگانِ نتیجهٔ جستجو — همان مسیر افزودن سوابق را می‌رود */
-async function smartSelOpen(env, api, chat, ex, searchId) {
+/** «انتخاب جهت استعلام» زیر نتیجهٔ جستجو — همان کارتِ انتخابِ تأمین‌کنندهٔ سوابق */
+async function smartSelOpen(env, api, chat, ex, searchId, mid) {
   const sr = await searchById(env, searchId);
   if (!sr || sr.expert_id !== ex.id) { await api.sendMessage(chat, "این جستجو پیدا نشد.").catch(() => {}); return { ok: true }; }
-  const sup = (sr.result && sr.result.suppliers) || [];
-  const options = sup.slice(0, 24).map((s) => ({ name: s.name, code: "" }));
+  const options = ((sr.result && sr.result.suppliers) || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: "" }));
   if (!options.length) { await api.sendMessage(chat, "تأمین‌کننده‌ای برای انتخاب نیست.").catch(() => {}); return { ok: true }; }
+  const it = await env.DB.prepare("SELECT title FROM items WHERE id=?").bind(sr.item_id).first();
+  const f = await newFlow(env, ex, chat, "smsel", "pick_suppliers", sr.assignment_id, { itemId: sr.item_id, title: it ? it.title : "", searchId, options, sel: [] });
+  return supplierCard(env, api, chat, f, flowData(f), mid);
+}
+
+/* ------------------------------------------------------------------ */
+/* تحویل — انتخاب اسناد، ساختنِ آنچه نیست، پیوست‌ها، و فرستادن همه با هم  */
+/*                                                                      */
+/* درخواست خرید و جدول کمیسیون همان لحظه ساخته می‌شوند؛ نامه اگر نیست     */
+/* پرسیده می‌شود (صوتی یا نوشتاری)؛ «پیوست‌ها» یعنی تا «تحویل» زده نشده،  */
+/* هر فایلی که برسد پیوست است نه پیش‌فاکتور. در پایان همه با هم می‌روند.  */
+/* ------------------------------------------------------------------ */
+
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+const DV_DOCS = [["req", "📄 درخواست خرید"], ["letter", "✉️ نامه"], ["table", "📊 جدول کمیسیون"], ["att", "📎 پیوست‌ها"]];
+const ATT_MAX = 10;   /* هر پیوست یک ارسال است و فراخوانی سقف زیردرخواست دارد */
+
+const writtenLetter = (env, aid) => env.DB.prepare(
+  "SELECT id FROM letters WHERE assignment_id=? AND state='written' AND docx_key IS NOT NULL ORDER BY id DESC LIMIT 1",
+).bind(aid).first();
+
+async function deliverOpen(env, api, chat, ex, aid, mid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  /* یک حالتِ فایل در هر لحظه */
+  await endModes(env, ex.id, null);
+  const d = { docs: { req: 1, letter: (await writtenLetter(env, aid)) ? 1 : 0, table: 1, att: 0 } };
+  const f = await newFlow(env, ex, chat, "deliver", "pick", aid, d, MODE_TTL);
+  return deliverCard(api, chat, f, d, asg, mid);
+}
+
+function deliverCard(api, chat, f, d, asg, mid, head) {
+  const kb = DV_DOCS.map(([k, label]) => [{ text: `${d.docs[k] ? "☑" : "☐"} ${label}`, callback_data: `dv:${f.id}:t:${k}` }]);
+  kb.push([{ text: "📦 تحویل", callback_data: `dv:${f.id}:go:0` }]);
+  kb.push(navRow(f.assignment_id));
+  return show(api, chat, mid, `${head ? head + "\n\n" : ""}📦 <b>تحویل — درخواست ${esc(asg.request_id)}</b>\n\n`
+    + "کدام اسناد تحویل شوند؟ تیک بزنید و «تحویل» را بزنید.\n\n"
+    + "<i>درخواست خرید و جدول کمیسیون همان لحظه ساخته می‌شوند. نامه اگر هنوز نیست، می‌پرسم (صوتی یا نوشتاری). "
+    + "با «پیوست‌ها»، فایل‌هایی که بعدش می‌فرستید پیوست حساب می‌شوند، نه پیش‌فاکتور.</i>", kb);
+}
+
+/** قدم بعدیِ تحویل: اول نامه (اگر لازم است)، بعد پیوست‌ها (اگر خواسته شده)، بعد فرستادن */
+async function deliverNext(env, api, chat, ex, f, d, mid) {
+  const aid = f.assignment_id;
+  if (!Object.values(d.docs || {}).some(Boolean)) {
+    await saveFlow(env, f.id, d, "pick");
+    const asg = await ownOpenAssignment(env, ex.id, aid);
+    return asg ? deliverCard(api, chat, { ...f, step: "pick" }, d, asg, mid, "⛔ هیچ سندی برای تحویل انتخاب نشده.") : { ok: true };
+  }
+  if (d.docs.letter && !(await writtenLetter(env, aid))) {
+    await env.DB.prepare("UPDATE tg_flows SET step='letter', data_json=?, asked_at=? WHERE id=?").bind(JSON.stringify(d), now(), f.id).run();
+    if (mid) await api.editMessageText(chat, mid, "📦 تحویل — اول نامه:").catch(() => {});
+    return startLetter(env, api, chat, ex, aid, { skip: `dv:${f.id}:nl:0` });
+  }
+  if (d.docs.att && f.step !== "attach") {
+    await env.DB.prepare("UPDATE tg_flows SET step='attach', data_json=?, asked_at=? WHERE id=?").bind(JSON.stringify(d), now(), f.id).run();
+    return show(api, chat, mid, "📎 <b>پیوست‌ها</b>\n\n"
+      + "فایل‌های پیوست را همین حالا بفرستید — هر چند تا، پشت سر هم. تا «تحویل» را نزده‌اید، هر فایلی که برسد پیوست حساب می‌شود، نه پیش‌فاکتور.\n\n"
+      + "بعد «📦 تحویل» را بزنید تا همهٔ اسناد با هم فرستاده شوند.",
+    [[{ text: "📦 تحویل", callback_data: `dv:${f.id}:fin:0` }], [{ text: "✖️ بدون پیوست تحویل بده", callback_data: `dv:${f.id}:na:0` }]]);
+  }
+  return deliverSend(env, api, chat, ex, f, d, mid);
+}
+
+/** در حالت «پیوست‌ها»: هر فایل یک ردیف (اتمی — آلبومِ چندفایلی هم‌زمان می‌رسد) */
+async function addAttachment(env, api, chat, ex, f, file) {
+  const cnt = await env.DB.prepare(
+    "SELECT COUNT(*) AS n FROM tg_uploads WHERE expert_id=? AND state='attach' AND done_at IS NULL AND json_extract(options_json,'$.flow')=?",
+  ).bind(ex.id, f.id).first();
+  const n = (cnt && cnt.n) || 0;
+  const finKb = (k) => [[{ text: `📦 تحویل (${M(k)} پیوست)`, callback_data: `dv:${f.id}:fin:0` }]];
+  if (n >= ATT_MAX) { await api.sendMessage(chat, `سقف ${M(ATT_MAX)} پیوست پر شده؛ «تحویل» را بزنید.`, finKb(n)).catch(() => {}); return { ok: true }; }
   const t = now();
-  const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smsel','pick_suppliers',?,?,?,?)")
-    .bind(ex.id, String(chat), sr.assignment_id, JSON.stringify({ itemId: sr.item_id, options, sel: [] }), t, t + FLOW_TTL).run();
-  const fid = r.meta.last_row_id;
-  const msg = await api.sendMessage(chat, SMART_SEL_TEXT, smartSelKb(fid, options, [])).catch(() => null);
-  if (msg && msg.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(msg.message_id, fid).run();
+  await env.DB.prepare(
+    `INSERT INTO tg_uploads (expert_id,chat_id,file_id,filename,mime,size_bytes,state,assignment_id,options_json,created_at,expires_at)
+     VALUES (?,?,?,?,?,?,'attach',?,?,?,?)`,
+  ).bind(ex.id, String(chat), file.id, file.name, file.mime, file.size || null, f.assignment_id, JSON.stringify({ flow: f.id, kind: file.kind }), t, t + MODE_TTL).run();
+  await api.sendMessage(chat, `📎 پیوست ${M(n + 1)}: <b>${esc(file.name)}</b>`, finKb(n + 1)).catch(() => {});
   return { ok: true };
 }
-function smartSelKb(fid, options, sel) {
-  const kb = (options || []).map((o, i) => [{ text: `${(sel || []).includes(i) ? "☑" : "☐"} ${short(o.name, 32)}`, callback_data: `sq:${fid}:t:${i}` }]);
-  kb.push([{ text: `➕ افزودن به استعلامات${(sel || []).length ? ` (${M(sel.length)})` : ""}`, callback_data: `sq:${fid}:go:0` }]);
-  kb.push([{ text: "✖️ بستن", callback_data: `sq:${fid}:x:0` }]);
-  return kb;
-}
 
-/* ------------------------------------------------------------------ */
-/* تحویل بسته                                                          */
-/* ------------------------------------------------------------------ */
-
-async function deliver(env, api, chat, ex, aid) {
+/** ساختن اسناد انتخابی و فرستادنِ همه با هم — اسناد، بعد پیوست‌ها، بعد یک خلاصه */
+async function deliverSend(env, api, chat, ex, f, d, mid) {
+  const aid = f.assignment_id;
+  /* دو بار زدنِ «تحویل» دو بسته نمی‌فرستد */
+  const claim = await env.DB.prepare("UPDATE tg_flows SET step='sent', done_at=? WHERE id=? AND done_at IS NULL").bind(now(), f.id).run();
+  if (!claim.meta.changes) return { ok: true };
   const settings = await getSettings(env);
-  const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
-  if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
+  const b = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
+  if (b.assignment.expert_id !== ex.id) return { ok: true };
+  const id = b.request.id, files = [], notes = [];
+  if (mid) await api.editMessageText(chat, mid, `📦 در حال آماده کردن اسناد درخواست <b>${esc(id)}</b>…`).catch(() => {});
 
-  const st = readiness(d);
-  if (!st.suppliers) {
-    await api.sendMessage(chat, "هنوز هیچ استعلامِ تأییدنهایی‌شده‌ای ندارید، پس جدول کمیسیون خالی درمی‌آید.\nاول قیمت‌ها را ثبت کنید — با /faktor یا فرستادن پیش‌فاکتور.");
-    return { ok: true };
+  if (d.docs.req) {
+    try { files.push({ name: `درخواست-خرید-${id}.docx`, blob: await renderRequestDoc(b) }); }
+    catch (e) { notes.push(`⚠️ درخواست خرید ساخته نشد: ${esc(e.message)}`); }
   }
-
-  const store = storage(env);
-  let letterBytes = null;
-  if (d.letter && d.letter.docx_key && store) {
-    const f = await store.get(d.letter.docx_key).catch(() => null);
-    if (f) letterBytes = await new Response(f.body).arrayBuffer();
+  if (d.docs.letter) {
+    const store = storage(env);
+    const obj = b.letter && b.letter.docx_key && store ? await store.get(b.letter.docx_key).catch(() => null) : null;
+    if (obj) files.push({ name: `نامه-${id}.docx`, blob: new Blob([await new Response(obj.body).arrayBuffer()], { type: DOCX_MIME }) });
+    else notes.push("⚠️ فایل نامه پیدا نشد.");
   }
+  const finals = b.quotes.filter((q) => q.final && q.saved);
+  if (d.docs.table) {
+    if (!finals.length) notes.push("⚠️ جدول کمیسیون خطِ «تأیید نهایی» ندارد و فرستاده نشد.");
+    else files.push({ name: `کمیسیون-${id}.xlsx`, blob: await commissionXlsx({ ...b, notes: b.assignment.notes }) });
+  }
+  const atts = d.docs.att ? ((await env.DB.prepare(
+    "SELECT * FROM tg_uploads WHERE expert_id=? AND state='attach' AND done_at IS NULL AND json_extract(options_json,'$.flow')=? ORDER BY id LIMIT ?",
+  ).bind(ex.id, f.id, ATT_MAX).all()).results || []) : [];
 
-  const files = await buildFiles(d, letterBytes);
-
-  /* اول ثبت، بعد ارسال.
-     تولید جدول کمیسیون یعنی مرحلهٔ ششم انجام شده — همان کاری که دکمهٔ پنل می‌کند.
-     اگر اول می‌فرستادیم و تلگرام یک لحظه در دسترس نبود، کارِ تمام‌شده در میز
-     مدیر ناتمام می‌ماند و هشدارهایش هم می‌رفت. ارسال، تحویل است نه تولید. */
   const t = now();
-  await env.DB.batch([
-    env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid),
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
-    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${ex.id}`, "commission", d.request.id, JSON.stringify({ assignment_id: aid, files: files.length, channel: "telegram" })),
-  ]);
+  const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+    .bind(t, `expert:${ex.id}`, "deliver", id, JSON.stringify({ assignment_id: aid, files: files.map((x) => x.name), attachments: atts.length, channel: "telegram" }))];
+  /* جدولی که این‌جا ساخته و فرستاده شد، همان تولید جدول است — مرحله سبز می‌شود */
+  if (d.docs.table && finals.length) {
+    stmts.push(env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid));
+    stmts.push(env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid));
+  }
+  if (atts.length) stmts.push(env.DB.prepare(`UPDATE tg_uploads SET state='done', done_at=? WHERE id IN (${atts.map(() => "?").join(",")})`).bind(t, ...atts.map((a) => a.id)));
+  await env.DB.batch(stmts);
 
-  await api.sendMessage(chat, `📦 در حال آماده کردن ${M(files.length)} فایل برای درخواست <b>${esc(d.request.id)}</b>…`).catch(() => {});
+  let sent = 0;
   const failed = [];
-  for (const f of files) {
-    try { await api.sendDocument(chat, f.name, new Blob([f.body], { type: f.type })); }
-    catch (e) { failed.push(f.name); }
+  for (const x of files) {
+    try { await api.sendDocument(chat, x.name, x.blob); sent++; } catch (e) { failed.push(x.name); }
   }
-  if (failed.length) {
-    await api.sendMessage(chat,
-      `⚠️ ${M(failed.length)} فایل فرستاده نشد: ${esc(failed.join("، "))}\nهمه‌شان در پنل هستند و از آن‌جا می‌توانید بگیرید.`,
-      panelButton).catch(() => {});
+  for (const a of atts) {
+    /* فایلِ تلگرام با همان نوعی دوباره فرستاده می‌شود که آمده بود (عکس با sendPhoto) */
+    const kind = uploadOpts(a).kind;
+    const [method, field] = kind === "photo" ? ["sendPhoto", "photo"] : kind === "video" ? ["sendVideo", "video"] : ["sendDocument", "document"];
+    try { await api.call(method, { chat_id: chat, [field]: a.file_id, caption: `📎 پیوست — ${a.filename || ""}`.slice(0, 1000) }); sent++; }
+    catch (e) { failed.push(a.filename || "پیوست"); }
   }
-
-  const warn = [];
-  if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدنهایی ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
-  if (!st.hasNotes) warn.push("📝 توضیحات برگهٔ کمیسیون خالی است — با /tozihat می‌نویسید.");
-  if (!st.hasLetter) warn.push("✉️ نامهٔ پیوست ندارید — اگر لازم است /nameh را بزنید.");
-  await api.sendMessage(chat,
-    `✅ فایل‌ها فرستاده شد. همین‌ها در پنل هم هست.` + (warn.length ? `\n\n${warn.join("\n")}` : ""), panelButton).catch(() => {});
-  return sendProgress(env, api, chat, aid);
+  await api.sendMessage(chat, [
+    `✅ <b>تحویل درخواست ${esc(id)}</b> — ${M(sent)} فایل`,
+    ...notes,
+    failed.length ? `⚠️ فرستاده نشد: ${esc(failed.join("، "))}` : "",
+    "<i>درخواست تا «خاتمه» در کارتابل می‌ماند.</i>",
+  ].filter(Boolean).join("\n"), [[{ text: "🔒 خاتمه (تأیید کمیسیون)", callback_data: `cm:${aid}:card:0` }], navRow(aid)]).catch(() => {});
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */
-/* فاکتور دستی و توضیحات — گفت‌وگوی چندمرحله‌ای                          */
+/* گفت‌وگوهای چندمرحله‌ای (tg_flows)                                     */
+/*                                                                      */
+/* سه جور گفت‌وگو، هر کدام با قاعدهٔ بسته‌شدنِ خودش:                      */
+/*   پرسشِ متنی (field، notes، manual، smart): پاسخِ متنیِ بعدی را        */
+/*     می‌گیرد؛ هر پرسشِ تازه پرسش‌های قبلی را می‌بندد.                  */
+/*   حالتِ فایل (await_pf، deliver): معنای فایلِ بعدی را تعیین می‌کند؛     */
+/*     با باز شدنِ حالتِ دیگر یا رفتن به درخواستِ دیگر بسته می‌شود.       */
+/*   کارتِ انتخاب (hsel، hist، smsel، qtab، lsub): فقط دکمه؛ با شناسه‌اش   */
+/*     صدا زده می‌شود و به بقیه کاری ندارد.                              */
 /* ------------------------------------------------------------------ */
 
 const FLOW_TTL = 2 * 3600000;
+/* جوابِ تأمین‌کننده و جمع کردنِ پیوست‌ها ممکن است ساعت‌ها طول بکشد */
+const MODE_TTL = 24 * 3600000;
 
-/** جریان باز همین کارشناس (هر کارشناس در هر لحظه یک جریان دارد) */
-async function openFlow(env, expertId) {
-  return env.DB.prepare("SELECT * FROM tg_flows WHERE expert_id=? AND done_at IS NULL AND expires_at>? ORDER BY id DESC LIMIT 1")
-    .bind(expertId, now()).first();
-}
-async function closeFlows(env, expertId) {
-  await env.DB.prepare("UPDATE tg_flows SET done_at=? WHERE expert_id=? AND done_at IS NULL").bind(now(), expertId).run();
-}
-const flowData = (f) => { try { return JSON.parse(f.data_json || "{}"); } catch { return {}; } };
+const INPUT_STEPS = `((kind='field' AND step='need_value') OR (kind='notes' AND step='need_notes')
+  OR (kind='manual' AND step='need_supplier') OR (kind='smart' AND step IN ('need_brand','need_specs','need_notes2')))`;
 
-/** شروع: کدام درخواست؟ — هم برای فاکتور دستی، هم برای توضیحات */
-async function startFlow(env, api, chat, ex, kind) {
-  const open = await openAssignments(env, ex.id);
-  if (!open.length) { await api.sendMessage(chat, "الان هیچ ارجاع بازی ندارید."); return { ok: true }; }
-  await closeFlows(env, ex.id);
+/** آخرین پرسشِ متنیِ باز همین کارشناس */
+async function inputFlow(env, expertId) {
+  return env.DB.prepare(`SELECT *, COALESCE(asked_at, created_at) AS at FROM tg_flows
+    WHERE expert_id=? AND done_at IS NULL AND expires_at>? AND ${INPUT_STEPS} ORDER BY at DESC, id DESC LIMIT 1`).bind(expertId, now()).first();
+}
+async function closeInputs(env, expertId) {
+  await env.DB.prepare(`UPDATE tg_flows SET done_at=? WHERE expert_id=? AND done_at IS NULL AND ${INPUT_STEPS}`).bind(now(), expertId).run();
+}
+/** حالت‌های فایل را می‌بندد؛ `keepAid` اگر باشد، حالتِ همان درخواست می‌ماند */
+async function endModes(env, expertId, keepAid) {
+  await env.DB.prepare("UPDATE tg_flows SET step='ended', done_at=? WHERE expert_id=? AND done_at IS NULL AND kind IN ('await_pf','deliver') AND assignment_id IS NOT ?")
+    .bind(now(), expertId, keepAid == null ? null : keepAid).run();
+}
+
+async function newFlow(env, ex, chat, kind, step, aid, data, ttl = FLOW_TTL) {
   const t = now();
-  const ins = await env.DB.prepare(
-    "INSERT INTO tg_flows (expert_id,chat_id,kind,step,created_at,expires_at) VALUES (?,?,?,'pick_request',?,?)",
-  ).bind(ex.id, String(chat), kind, t, t + FLOW_TTL).run();
-  const fid = ins.meta.last_row_id;
-
-  const kb = open.map((a) => [{ text: `${a.request_id} — ${short(a.party)}`, callback_data: `fl:${fid}:r:${a.id}` }]);
-  kb.push([{ text: "✖️ بی‌خیال", callback_data: `fl:${fid}:x:0` }]);
-  const title = { manual: "🧾 <b>فاکتور دستی</b>", notes: "📝 <b>توضیحات برگهٔ کمیسیون</b>",
-    letter: "✉️ <b>نامهٔ پیوست کمیسیون</b>", deliver: "📦 <b>گرفتن فایل‌های آماده</b>",
-    progress: "📊 <b>پیشرفت کار</b>" }[kind];
-  const sent = await api.sendMessage(chat, `${title}\n\nبرای کدام درخواست است؟`, kb);
-  await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(sent.message_id, fid).run();
-  return { ok: true };
+  const json = JSON.stringify(data || {});
+  const r = await env.DB.prepare(
+    "INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at,asked_at) VALUES (?,?,?,?,?,?,?,?,?)",
+  ).bind(ex.id, String(chat), kind, step, aid || null, json, t, t + ttl, t).run();
+  return { id: r.meta.last_row_id, expert_id: ex.id, chat_id: String(chat), kind, step, assignment_id: aid || null, data_json: json, created_at: t, expires_at: t + ttl, done_at: null };
 }
+async function saveFlow(env, fid, d, step) {
+  if (step) await env.DB.prepare("UPDATE tg_flows SET data_json=?, step=? WHERE id=?").bind(JSON.stringify(d), step, fid).run();
+  else await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), fid).run();
+}
+/** گفت‌وگوی همین کارشناس از همین نوع (INV-11) */
+const ownFlow = (env, ex, fid, kind) => env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind=?").bind(fid, ex.id, kind).first();
+const flowData = (f) => { try { return JSON.parse((f && f.data_json) || "{}"); } catch (_) { return {}; } };
+const toggleIn = (arr, v) => { const a = Array.isArray(arr) ? [...arr] : []; const i = a.indexOf(v); if (i >= 0) a.splice(i, 1); else a.push(v); return a; };
 
 /** اقلام باز یک ارجاع، به ترتیب سطر */
 async function itemsOf(env, aid) {
   return (await env.DB.prepare(
-    "SELECT id, line_no, title, qty, unit, spec FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
+    "SELECT id, line_no, title, qty, unit, spec, code, hist_code FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
   ).bind(aid).all()).results || [];
-}
-
-/** پرسش قیمت قلم جاری */
-async function askPrice(env, api, chat, f) {
-  const d = flowData(f);
-  const its = await itemsOf(env, f.assignment_id);
-  const it = its[d.idx || 0];
-  if (!it) return confirmManual(env, api, chat, f);
-  const n = its.length;
-  await api.sendMessage(chat,
-    `🧾 قلم ${M((d.idx || 0) + 1)} از ${M(n)}\n\n<b>${esc(it.title)}</b>\n`
-    + `${it.qty == null ? "" : `مقدار: ${M(it.qty)} ${esc(it.unit || "")}\n`}`
-    + `${it.spec ? `مشخصات: ${esc(it.spec)}\n` : ""}`
-    + `\n<b>قیمت واحد</b> را به ریال بنویسید.\nاگر این قلم در فاکتور نیست، «-» بفرستید.`,
-    [[{ text: "✖️ لغو فاکتور دستی", callback_data: `fl:${f.id}:x:0` }]]);
-  return { ok: true };
-}
-
-/** جمع‌بندی و گرفتن تأیید نهایی */
-async function confirmManual(env, api, chat, f) {
-  const d = flowData(f);
-  const its = await itemsOf(env, f.assignment_id);
-  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(f.assignment_id).first();
-  const lines = its.map((it) => {
-    const p = d.prices && d.prices[it.id];
-    if (p == null) return `• ${esc(it.title)} — <i>وارد نشد</i>`;
-    const tot = (+p) * (+it.qty || 0);
-    return `• ${esc(it.title)}\n   ${money(p)} ریال × ${M(it.qty || 0)} = <b>${money(tot)}</b> ریال`;
-  }).join("\n");
-  const sum = its.reduce((s, it) => s + ((d.prices && d.prices[it.id]) || 0) * (+it.qty || 0), 0);
-
-  await env.DB.prepare("UPDATE tg_flows SET step='confirm', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-  await api.sendMessage(chat,
-    `🧾 <b>بازبینی فاکتور دستی</b>\n\nدرخواست <b>${esc(a ? a.request_id : "")}</b>\nتأمین‌کننده: <b>${esc(d.supplier || "")}</b>\n\n${lines}\n\n`
-    + `جمع بدون ارزش افزوده: <b>${money(sum)}</b> ریال\n\n`
-    + `${d.notes ? `📝 توضیحات: ${esc(d.notes)}\n\n` : ""}درست است؟`,
-    [
-      [{ text: "✅ ثبت کن", callback_data: `fl:${f.id}:ok:0` }],
-      [{ text: "📝 افزودن توضیحات", callback_data: `fl:${f.id}:note:0` }],
-      [{ text: "🔁 از اول", callback_data: `fl:${f.id}:again:0` }, { text: "✖️ لغو", callback_data: `fl:${f.id}:x:0` }],
-    ]);
-  return { ok: true };
 }
 
 /** «۱۲٬۳۴۵٬۶۷۸» — جداکنندهٔ هزارگان فارسی */
 const money = (n) => M(Number(n || 0).toLocaleString("en-US")).replace(/,/g, "٬");
 
-/** ثبت نهایی: قیمت‌ها به‌عنوان استعلام همان تأمین‌کننده می‌نشینند —
-    دقیقاً همان جدولی که استخراج مدل هم در آن می‌نویسد، تا جدول کمیسیون یکی باشد.
-    یکتایی (ارجاع، قلم، تأمین‌کننده) در این سامانه با ایندکس تضمین نشده و در کد
-    کنترل می‌شود، پس این‌جا هم اول می‌خوانیم بعد می‌نویسیم. */
-async function saveManual(env, api, chat, f) {
-  const d = flowData(f);
-  const its = await itemsOf(env, f.assignment_id);
-  const t = now();
-  const existing = new Map(((await env.DB.prepare(
-    "SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?",
-  ).bind(f.assignment_id, d.supplier).all()).results || []).map((q) => [q.item_id, q.id]));
-
-  const stmts = [];
-  let n = 0;
-  for (const it of its) {
-    const price = d.prices && d.prices[it.id];
-    if (price == null) continue;
-    n++;
-    const qid = existing.get(it.id);
-    /* ثبت موقت این‌جا زده نمی‌شود: زمان تحویل و شرایط تسویه اجباری‌اند و فاکتور
-       دستی فقط قیمت می‌گیرد. کارتِ بعدی همان دو-سه فیلد را می‌پرسد و «ثبت موقت»
-       را همان‌جا می‌گذارد. */
-    stmts.push(qid
-      ? env.DB.prepare("UPDATE quotes SET price=?, qty=?, unit=COALESCE(unit,?), invoice=COALESCE(invoice,?), saved=0, source='manual', updated_at=? WHERE id=?")
-        .bind(price, it.qty, it.unit || null, INVOICE_DEFAULT, t, qid)
-      : env.DB.prepare(
-        `INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,invoice,saved,final,source,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?,?,0,0,'manual',?,?)`,
-      ).bind(f.assignment_id, it.id, d.supplier, it.spec || null, it.unit || null, it.qty, price, INVOICE_DEFAULT, t, t));
-  }
-  if (d.notes) stmts.push(env.DB.prepare("UPDATE assignments SET notes=? WHERE id=?").bind(d.notes, f.assignment_id));
-  stmts.push(env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id));
-  stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-    .bind(t, `expert:${f.expert_id}`, "manual_quote", null, JSON.stringify({ assignment_id: f.assignment_id, supplier: d.supplier, items: n, channel: "telegram" })));
-  await env.DB.batch(stmts);
-
-  return quoteCard(env, api, chat, f.assignment_id, d.supplier, null,
-    `✅ ${M(n)} قلم قیمت‌گذاری شد.${d.notes ? "\n📝 توضیحات هم در برگهٔ کمیسیون ثبت شد." : ""}\nبرای ثبت موقت، شرایط فاکتور (زمان تحویل و شرایط تسویه) هم لازم است:`);
-}
-
-async function onCallback(env, cq, ctx) {
+async function onCallback(env, cq) {
   const api = telegram(env);
   /* تأیید فشردن دکمه فقط ساعت‌شنی تلگرام را برمی‌دارد. اگر شکست بخورد نباید
      تغییر وضعیتی که کاربر خواسته را لغو کند، پس خطایش بلعیده می‌شود. */
@@ -1850,6 +2189,7 @@ async function onCallback(env, cq, ctx) {
   const chat = cq.message && cq.message.chat && cq.message.chat.id;
   const [action, , idRaw] = T(cq.data).split(":");
   const id = parseInt(idRaw, 10);
+
   /* دکمهٔ مدیر پیش از احراز کارشناس می‌آید: از کانال مدیر زده می‌شود، نه از
      گفت‌وگوی یک کارشناس. mseen:<assignmentId> */
   if (action === "mseen") {
@@ -1894,8 +2234,11 @@ async function onCallback(env, cq, ctx) {
   }
 
   const ex = chat ? await expertOfChat(env, chat) : null;
-
   if (!ex) { await ack("این گفت‌وگو به کارشناسی وصل نیست.", true); return { ok: true }; }
+  /* همهٔ دکمه‌ها action:a:b:c اند */
+  const parts = T(cq.data).split(":");
+  const num = (i) => parseInt(parts[i], 10);
+  const mid = cq.message && cq.message.message_id;
 
   if (action === "seen" && id) {
     /* مالکیت (INV-11): فقط ارجاع خودِ همین کارشناس */
@@ -1911,62 +2254,114 @@ async function onCallback(env, cq, ctx) {
     }
     await ack("ثبت شد ✅");
     if (cq.message) {
-      await api.editMessageText(chat, cq.message.message_id, cq.message.text
-        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", afterSeenKb(id)).catch(() => {});
+      await api.editMessageText(chat, mid, cq.message.text
+        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", firstStepsKb(id)).catch(() => {});
     }
     return { ok: true };
   }
 
-  /* بررسی سوابق: hs:a:<aid> (انتخاب قلم) · hs:i:<itemId> (اجرا) · hs:s (جستجوی هوشمند — هنوز وصل نیست) */
+  /* کارتابل: kt:n پیام تازه · kt:e همان پیام */
+  if (action === "kt") { await ack(); return kartabl(env, api, chat, ex, { mid: parts[1] === "e" ? mid : null }); }
+
+  /* مسیر درخواست: rq:<aid>:<مقصد>[:e] — m منو · t تب استعلامات · f خط دستی · n توضیحات · l نامه · d تحویل */
+  if (action === "rq") {
+    const aid = num(1), target = parts[2] || "m", edit = parts[3] === "e" ? mid : null;
+    await ack();
+    /* فایلِ بعدی نباید به حالتِ بازِ درخواستِ دیگری بچسبد */
+    await endModes(env, ex.id, aid);
+    if (target === "t") return quotesTab(env, api, chat, ex, aid, edit);
+    if (target === "f") return manualStart(env, api, chat, ex, aid);
+    if (target === "n") return notesAsk(env, api, chat, ex, aid);
+    if (target === "l") return startLetter(env, api, chat, ex, aid);
+    if (target === "d") return deliverOpen(env, api, chat, ex, aid, edit);
+    return requestMenu(env, api, chat, ex, aid, { mid: edit });
+  }
+
+  /* بررسی سوابق: hs:a:<aid>. (hs:s و hs:i دکمه‌های پیام‌های قدیمی‌اند و به همان مسیرها می‌رسند) */
   if (action === "hs") {
-    const [, sub, vRaw] = T(cq.data).split(":");
-    const v = parseInt(vRaw, 10);
-    if (sub === "s") {
+    const v = num(2);
+    if (parts[1] === "s") {
       if (!env.ANTHROPIC_API_KEY) { await ack("جستجوی هوشمند هنوز به مدل وصل نشده است.", true); return { ok: true }; }
-      await ack(); return smartPickItem(env, api, chat, ex, v);
-    }
-    if (sub === "a") { await ack(); return histPickItem(env, api, chat, ex, v); }
-    if (sub === "i") { await ack("در حال محاسبه…"); return histRun(env, api, chat, ex, v); }
-    await ack(); return { ok: true };
-  }
-
-  /* منوی چندانتخابی تأمین‌کنندگانِ سوابق: hf:<flowId>:t:<idx> · go · x */
-  if (action === "hf") {
-    const [, fidRaw, step, valRaw] = T(cq.data).split(":");
-    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='hist'").bind(parseInt(fidRaw, 10), ex.id).first();
-    if (!f || f.done_at) { await ack("این فهرست دیگر فعال نیست.", true); return { ok: true }; }
-    const d = flowData(f);
-    if (step === "x") {
-      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
-      await ack("بسته شد");
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ فهرست بسته شد؛ از پنل یا با اجرای دوبارهٔ «بررسی سوابق» دوباره باز می‌شود.").catch(() => {});
-      return { ok: true };
-    }
-    if (step === "t") {
-      const i = parseInt(valRaw, 10);
-      if (!(d.options || [])[i]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
-      d.sel = d.sel || [];
-      const at = d.sel.indexOf(i);
-      if (at >= 0) d.sel.splice(at, 1); else d.sel.push(i);
-      await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
       await ack();
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, HIST_SEL_TEXT, histSelKb(f.id, d.options, d.sel)).catch(() => {});
-      return { ok: true };
+      return smartPickItem(env, api, chat, ex, v);
     }
-    if (step === "go") {
-      if (!(d.sel || []).length) { await ack("هنوز تأمین‌کننده‌ای انتخاب نکرده‌اید.", true); return { ok: true }; }
-      await ack("در حال افزودن…");
-      return histAddToQuotes(env, api, chat, ex, f, d, cq.message && cq.message.message_id);
+    let aid = v;
+    if (parts[1] === "i") {
+      const it = await env.DB.prepare("SELECT i.assignment_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(v, ex.id).first();
+      aid = it ? it.assignment_id : 0;
     }
-    await ack(); return { ok: true };
+    await ack();
+    return histStart(env, api, chat, ex, aid, null);
   }
 
-  /* جستجوی هوشمند: sm:i:<itemId> (انتخاب قلم) · sf:<flowId>:… (قیدها و اجرا) */
-  if (action === "sm") {
-    const [, sub, vRaw] = T(cq.data).split(":");
-    if (sub === "i") { await ack(); return smartPrefsCard(env, api, chat, ex, parseInt(vRaw, 10)); }
-    await ack(); return { ok: true };
+  /* کارت انتخاب اقلامِ سوابق: hx:<flow>:t:<item> · go · all · more · back */
+  if (action === "hx") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    const asg = await ownOpenAssignment(env, ex.id, f.assignment_id);
+    if (!asg) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f), step = parts[2], v = num(3);
+    const its = await itemsOf(env, f.assignment_id);
+    if (step === "t") {
+      if (its.some((i) => i.id === v)) d.sel = toggleIn(d.sel, v);
+      await saveFlow(env, f.id, d);
+      await ack();
+      return histSelCard(api, chat, f, d, its, asg, mid);
+    }
+    if (step === "go" || step === "all") {
+      const ids = step === "all" ? its.map((i) => i.id) : (d.sel || []);
+      if (!ids.length) { await ack("دست‌کم یک قلم را تیک بزنید، یا «همه اقلام».", true); return { ok: true }; }
+      await ack("در حال محاسبه…");
+      return histRun(env, api, chat, ex, f, { ...d, ran: [], opts: {} }, asg, ids, mid);
+    }
+    if (step === "more") {
+      await ack("در حال محاسبه…");
+      if (!(d.rest || []).length) return histAfter(env, api, chat, ex, f, d, mid);
+      return histRun(env, api, chat, ex, f, d, asg, d.rest, mid);
+    }
+    if (step === "back") {
+      await ack();
+      return d.single ? requestMenu(env, api, chat, ex, f.assignment_id, { mid }) : histSelCard(api, chat, f, d, its, asg, mid);
+    }
+    await ack();
+    return { ok: true };
   }
+
+  /* انتخاب قلم بعد از پیامِ سوابق: hp:<flow>:<item> · hp:<flow>:ls (فهرست) */
+  if (action === "hp") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    await ack();
+    if (parts[2] === "ls") return hub(api, chat, f.assignment_id, `p${f.id}`, mid);
+    return histSupplierCard(env, api, chat, ex, f, flowData(f), num(2), "p", mid);
+  }
+
+  /* کارت تأمین‌کنندگانِ سوابق: hf:<flow>:t:<i> · go · ls · back */
+  if (action === "hf") {
+    const f = await ownFlow(env, ex, num(1), "hist");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    return supplierCardAction(env, api, chat, ex, f, parts[2], num(3), mid, ack);
+  }
+
+  /* «بازگشت» از پنج راه: hb:h<flow> سوابق · hb:s<flow> جستجو · hb:p<flow> انتخاب قلم */
+  if (action === "hb") {
+    const tag = parts[1] || "";
+    const kind = { h: "hist", s: "smsel", p: "hsel" }[tag[0]];
+    const f = kind ? await ownFlow(env, ex, parseInt(tag.slice(1), 10), kind) : null;
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    await ack();
+    if (kind === "hsel") return histPicker(env, api, chat, f, flowData(f), mid);
+    return supplierCard(env, api, chat, f, flowData(f), mid);
+  }
+
+  /* جستجوی هوشمند: sm:a:<aid> انتخاب قلم · sm:i:<item> کارت قیدها · sf:<flow>:… قیدها و اجرا */
+  if (action === "sm") {
+    if (!env.ANTHROPIC_API_KEY) { await ack("جستجوی هوشمند هنوز به مدل وصل نشده است.", true); return { ok: true }; }
+    await ack();
+    if (parts[1] === "i") return smartPrefsCard(env, api, chat, ex, num(2));
+    return smartPickItem(env, api, chat, ex, num(2));
+  }
+
   if (action === "sf") {
     const [, fidRaw, step, valRaw] = T(cq.data).split(":");
     const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='smart'").bind(parseInt(fidRaw, 10), ex.id).first();
@@ -1990,7 +2385,7 @@ async function onCallback(env, cq, ctx) {
     if (step === "back") { await ack(); return smartPrefsRender(env, api, chat, f, d, mid); }
     if (step === "br" || step === "sp" || step === "no") {
       const st2 = step === "br" ? "need_brand" : step === "sp" ? "need_specs" : "need_notes2";
-      await env.DB.prepare("UPDATE tg_flows SET step=? WHERE id=?").bind(st2, f.id).run();
+      await env.DB.prepare("UPDATE tg_flows SET step=?, asked_at=? WHERE id=?").bind(st2, now(), f.id).run();
       await ack();
       await api.sendMessage(chat, step === "br" ? "🏷 نام برند موردنظر را بنویسید (برای پاک‌کردن: -)"
         : step === "sp" ? "📋 مشخصات فنی موردنظر را بنویسید (برای پاک‌کردن: -)"
@@ -2016,37 +2411,15 @@ async function onCallback(env, cq, ctx) {
     }
     await ack(); return { ok: true };
   }
-  /* نتایج جستجو: sq (چندانتخابی استعلام) · sg (ارسال پیام با قالب) */
+
+  /* نتیجهٔ جستجو: sq:<search>:open (کارت انتخاب) · sq:<flow>:t:<i> · go · ls · back */
   if (action === "sq") {
-    const [, aRaw, step, vRaw] = T(cq.data).split(":");
-    if (step === "open") { await ack(); return smartSelOpen(env, api, chat, ex, parseInt(aRaw, 10)); }
-    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=? AND kind='smsel'").bind(parseInt(aRaw, 10), ex.id).first();
-    if (!f || f.done_at) { await ack("این فهرست دیگر فعال نیست.", true); return { ok: true }; }
-    const d = flowData(f);
-    const mid = f.message_id || (cq.message && cq.message.message_id);
-    if (step === "x") {
-      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
-      await ack("بسته شد");
-      if (mid) await api.editMessageText(chat, mid, "✖️ فهرست بسته شد.").catch(() => {});
-      return { ok: true };
-    }
-    if (step === "t") {
-      const i = parseInt(vRaw, 10);
-      if (!(d.options || [])[i]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
-      d.sel = d.sel || []; const at = d.sel.indexOf(i);
-      if (at >= 0) d.sel.splice(at, 1); else d.sel.push(i);
-      await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-      await ack();
-      if (mid) await api.editMessageText(chat, mid, SMART_SEL_TEXT, smartSelKb(f.id, d.options, d.sel)).catch(() => {});
-      return { ok: true };
-    }
-    if (step === "go") {
-      if (!(d.sel || []).length) { await ack("هنوز چیزی انتخاب نکرده‌اید.", true); return { ok: true }; }
-      await ack("در حال افزودن…");
-      return histAddToQuotes(env, api, chat, ex, f, d, mid);
-    }
-    await ack(); return { ok: true };
+    if (parts[2] === "open") { await ack(); return smartSelOpen(env, api, chat, ex, num(1), mid); }
+    const f = await ownFlow(env, ex, num(1), "smsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    return supplierCardAction(env, api, chat, ex, f, parts[2], num(3), mid, ack);
   }
+
   if (action === "sg") {
     const [, sidRaw, step, aRaw, bRaw] = T(cq.data).split(":");
     const sr = await searchById(env, parseInt(sidRaw, 10));
@@ -2083,28 +2456,103 @@ async function onCallback(env, cq, ctx) {
     await ack(); return { ok: true };
   }
 
-  /* کارت خط‌های استعلام: hq:<aid>:show|new · hql:<qid> (منوی خط) · hqp:<qid> (درخواست پیش‌فاکتور) */
-  if (action === "hq") {
-    const [, aidRaw, sub] = T(cq.data).split(":");
-    const aid2 = parseInt(aidRaw, 10);
+  /* تب استعلامات: qt:<aid> · qx:<flow>:t:<quote> · all · pf (دریافت پیش‌فاکتور) · new (خط دستی) · ed (کارت‌ها) · back */
+  if (action === "qt") { await ack(); return quotesTab(env, api, chat, ex, num(1), null); }
+  if (action === "qx") {
+    const f = await ownFlow(env, ex, num(1), "qtab");
+    if (!f || f.done_at) { await ack("این فهرست دیگر فعال نیست؛ تب استعلامات را دوباره باز کنید.", true); return { ok: true }; }
+    const asg = await ownOpenAssignment(env, ex.id, f.assignment_id);
+    if (!asg) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f), step = parts[2], v = num(3);
+    if (step === "t" || step === "all") {
+      const rows = await qtabRows(env, f.assignment_id);
+      if (step === "t") { if (rows.some((q) => q.id === v)) d.sel = toggleIn(d.sel, v); }
+      else d.sel = (d.sel || []).length === rows.length ? [] : rows.map((q) => q.id);
+      await saveFlow(env, f.id, d);
+      await ack();
+      return qtabRender(env, api, chat, f, d, asg, mid);
+    }
+    if (step === "pf") {
+      if (!(d.sel || []).length) { await ack("اول خط‌هایی را که منتظر پیش‌فاکتورشان هستید تیک بزنید.", true); return { ok: true }; }
+      await ack("منتظر پیش‌فاکتور");
+      return awaitStart(env, api, chat, ex, f, d, mid);
+    }
+    if (step === "new") { await ack(); return manualStart(env, api, chat, ex, f.assignment_id); }
+    if (step === "ed") {
+      const firsts = [];
+      for (const q of await qtabRows(env, f.assignment_id)) if (!firsts.some((x) => x.supplier_name === q.supplier_name)) firsts.push(q);
+      await ack();
+      const kb = firsts.map((q) => [{ text: `✏️ ${short(q.supplier_name, 32)}`, callback_data: `qc:${q.id}:0` }]);
+      kb.push([{ text: "↩️ بازگشت", callback_data: `qx:${f.id}:back:0` }]);
+      return show(api, chat, mid, "✏️ کارت استعلامِ کدام تأمین‌کننده؟", kb);
+    }
+    if (step === "back") { await ack(); return qtabRender(env, api, chat, f, d, asg, mid); }
     await ack();
-    if (sub === "new") return manualForAssignment(env, api, chat, ex, aid2);
-    return quoteLinesCard(env, api, chat, ex, aid2, cq.message && cq.message.message_id);
-  }
-  if (action === "hql") {
-    const [, qidRaw] = T(cq.data).split(":");
-    await ack();
-    return quoteLineMenu(env, api, chat, ex, parseInt(qidRaw, 10), cq.message && cq.message.message_id);
-  }
-  if (action === "hqp") {
-    const [, qidRaw] = T(cq.data).split(":");
-    const q = await ownQuote(env, ex.id, parseInt(qidRaw, 10));
-    if (!q) { await ack("این خط استعلام پیدا نشد.", true); return { ok: true }; }
-    await ack();
-    await api.sendMessage(chat,
-      `📎 فایل پیش‌فاکتور <b>${esc(short(q.supplier_name, 36))}</b> را همین حالا همین‌جا بفرستید (PDF یا عکس).\n\n`
-      + "<i>هر فایلی که به بات بفرستید پیش‌فاکتور حساب می‌شود؛ بعد از دریافت، همان‌جا تأمین‌کننده‌اش را تأیید می‌کنید و استخراج خودکار شروع می‌شود.</i>").catch(() => {});
     return { ok: true };
+  }
+
+  /* دریافت پیش‌فاکتور: aw:<flow>:x (پایان) · aw:<flow>:s:<i>:<upload> (فایل مالِ کدام تأمین‌کنندهٔ منتظر است) */
+  if (action === "aw") {
+    const f = await ownFlow(env, ex, num(1), "await_pf");
+    if (!f) { await ack("پیدا نشد.", true); return { ok: true }; }
+    if (parts[2] === "x") {
+      await env.DB.prepare("UPDATE tg_flows SET step='ended', done_at=COALESCE(done_at,?) WHERE id=?").bind(now(), f.id).run();
+      await ack("دریافت بسته شد");
+      return show(api, chat, mid, "✖️ حالت «دریافت پیش‌فاکتور» بسته شد؛ فایلِ بعدی دوباره می‌پرسد برای کدام درخواست و اقلام است.",
+        [[{ text: "🧾 تب استعلامات", callback_data: `qt:${f.assignment_id}` }], navRow(f.assignment_id)]);
+    }
+    if (parts[2] === "s") {
+      const idx = num(3), up = await ownUpload(env, ex, num(4));
+      if (f.step === "ended") { await ack("حالت دریافت بسته شده؛ فایل را دوباره بفرستید.", true); return { ok: true }; }
+      if (!up || up.done_at) { await ack("این فایل قبلاً ثبت یا لغو شده است."); return { ok: true }; }
+      if (!(flowData(f).want || [])[idx]) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+      await ack();
+      return receiveAwaited(env, api, chat, ex, f.id, idx, up, mid);
+    }
+    await ack();
+    return { ok: true };
+  }
+
+  /* خط استعلام دستی: mn:<flow>:s:<i> · t:<item> · all · go · x */
+  if (action === "mn") {
+    const f = await ownFlow(env, ex, num(1), "manual");
+    if (!f || f.done_at) { await ack("این گفت‌وگو دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f), step = parts[2], v = num(3);
+    if (step === "x") {
+      await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
+      await ack("لغو شد");
+      return show(api, chat, mid, "✖️ خط استعلام دستی لغو شد.", [[{ text: "🧾 تب استعلامات", callback_data: `qt:${f.assignment_id}` }]]);
+    }
+    if (step === "s") {
+      const name = (d.sups || [])[v];
+      if (!name) { await ack("این گزینه معتبر نیست.", true); return { ok: true }; }
+      await ack();
+      return manualItems(env, api, chat, ex, f, { ...d, supplier: name }, mid);
+    }
+    if (!d.supplier) { await ack("اول نام تأمین‌کننده را بنویسید.", true); return { ok: true }; }
+    if (step === "t" || step === "all") {
+      const its = await itemsOf(env, f.assignment_id);
+      if (step === "t") { if (its.some((i) => i.id === v)) d.sel = toggleIn(d.sel, v); }
+      else d.sel = (d.sel || []).length === its.length ? [] : its.map((i) => i.id);
+      await ack();
+      return manualItems(env, api, chat, ex, f, d, mid);
+    }
+    if (step === "go") {
+      if (!(d.sel || []).length) { await ack("دست‌کم یک قلم را تیک بزنید.", true); return { ok: true }; }
+      await ack();
+      return manualCreate(env, api, chat, ex, f, d, mid);
+    }
+    await ack();
+    return { ok: true };
+  }
+
+  /* کارت استعلامِ تأمین‌کنندهٔ یک پیش‌فاکتور: qk:<proforma> */
+  if (action === "qk") {
+    const p = await env.DB.prepare("SELECT p.assignment_id, p.supplier_name FROM proformas p JOIN assignments a ON a.id=p.assignment_id WHERE p.id=? AND a.expert_id=?")
+      .bind(num(1), ex.id).first();
+    if (!p) { await ack("این پیش‌فاکتور پیدا نشد.", true); return { ok: true }; }
+    await ack();
+    return quoteCard(env, api, chat, p.assignment_id, p.supplier_name, null);
   }
 
   /* کارت استعلام: qf (کدام فیلد؟) · qv (گزینهٔ فهرستی) · qc (کارت) · qe (اصلاح) · qs (ثبت موقت) */
@@ -2131,21 +2579,14 @@ async function onCallback(env, cq, ctx) {
     return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid, `✅ ${esc(fieldLabel(field))}: ${esc(v)}`);
   }
 
-  /* جدول کمیسیون: ct:<aid>:<step>:<value> */
+  /* جدول کمیسیون: ct:<aid>:t:<quote> · all · none · nt (درج توضیحات) · go (تولید) · start */
   if (action === "ct") {
-    const [, aidRaw, step, valRaw] = T(cq.data).split(":");
-    const aid = parseInt(aidRaw, 10);
-    const mid = cq.message && cq.message.message_id;
-    if (step === "x") {
-      await ack("بی‌خیال");
-      if (mid) await api.editMessageText(chat, mid, "باشد. هر وقت خواستید، از کارت استعلام یا /pishraft جدول را بسازید.").catch(() => {});
-      return { ok: true };
-    }
+    const aid = num(1), step = parts[2];
     if (step === "t") {
       await env.DB.prepare(
         `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1
          AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
-      ).bind(now(), parseInt(valRaw, 10), aid, ex.id).run();
+      ).bind(now(), num(3), aid, ex.id).run();
       await ack();
       return tableSelect(env, api, chat, ex, aid, mid);
     }
@@ -2156,22 +2597,20 @@ async function onCallback(env, cq, ctx) {
       await ack();
       return tableSelect(env, api, chat, ex, aid, mid);
     }
+    if (step === "nt") { await ack(); return notesAsk(env, api, chat, ex, aid); }
     if (step === "go") { await ack("در حال ساختن…"); return makeTable(env, api, chat, ex, aid, mid); }
     await ack();
     return tableSelect(env, api, chat, ex, aid, null);
   }
 
-  /* تأیید کمیسیون و خاتمه: cm:<aid>:<step>:<value> */
+  /* تأیید کمیسیون و خاتمه: cm:<aid>:t:<item> · all · none · end · card */
   if (action === "cm") {
-    const [, aidRaw, step, valRaw] = T(cq.data).split(":");
-    const aid = parseInt(aidRaw, 10);
-    const mid = cq.message && cq.message.message_id;
+    const aid = num(1), step = parts[2];
     const own = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
     if (!own) { await ack("این ارجاع متعلق به شما نیست.", true); return { ok: true }; }
-
     if (step === "t") {
       await env.DB.prepare("UPDATE items SET commission_ok=CASE WHEN commission_ok=1 THEN 0 ELSE 1 END WHERE id=? AND assignment_id=? AND state='open'")
-        .bind(parseInt(valRaw, 10), aid).run();
+        .bind(num(3), aid).run();
       await ack();
       return closeCard(env, api, chat, ex, aid, mid);
     }
@@ -2179,17 +2618,6 @@ async function onCallback(env, cq, ctx) {
       await env.DB.prepare("UPDATE items SET commission_ok=? WHERE assignment_id=? AND state='open'").bind(step === "all" ? 1 : 0, aid).run();
       await ack();
       return closeCard(env, api, chat, ex, aid, mid);
-    }
-    if (step === "edit") {
-      /* پرونده باز می‌ماند: مرحلهٔ «جدول کمیسیون» از سبز برمی‌گردد تا معلوم باشد کار ادامه دارد */
-      await env.DB.batch([
-        env.DB.prepare("UPDATE assignments SET commission_at=NULL WHERE id=?").bind(aid),
-        env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-          .bind(now(), `expert:${ex.id}`, "commission_reopen", null, JSON.stringify({ assignment_id: aid, channel: "telegram" })),
-      ]);
-      await ack("پرونده برای ویرایش باز است");
-      if (mid) await api.editMessageText(chat, mid, "✏️ پرونده باز است. پیش‌فاکتور تازه بفرستید، خط اضافه کنید یا قیمت‌ها را عوض کنید؛ بعد دوباره جدول کمیسیون را بسازید.", panelButton).catch(() => {});
-      return sendProgress(env, api, chat, aid);
     }
     if (step === "end") {
       let res;
@@ -2201,8 +2629,7 @@ async function onCallback(env, cq, ctx) {
         : `🔒 <b>${M(res.closed)} قلم بسته شد.</b>` + (res.fullyClosed
           ? "\nهمهٔ اقلام تمام شد و درخواست از کارتابل شما خارج شد. خسته نباشید."
           : "\nباقی اقلام همچنان در کارتابل شماست و پیگیری می‌شود.");
-      if (mid) await api.editMessageText(chat, mid, txt, panelButton).catch(() => api.sendMessage(chat, txt, panelButton));
-      else await api.sendMessage(chat, txt, panelButton);
+      await show(api, chat, mid, txt, res.fullyClosed ? [[KARTABL_BTN]] : [navRow(aid)]);
       /* پیام‌های صف (اعلان مدیر) بی‌درنگ بروند، نه با Cron بعدی */
       await drainOutbox(env, 10).catch(() => {});
       return { ok: true };
@@ -2211,168 +2638,156 @@ async function onCallback(env, cq, ctx) {
     return closeCard(env, api, chat, ex, aid, null);
   }
 
-  /* جریان پیش‌فاکتور: pf:<uploadId>:<step>:<value> */
-  if (action === "pf") {
-    const [, uidRaw, step, valRaw] = T(cq.data).split(":");
-    const up = await env.DB.prepare("SELECT * FROM tg_uploads WHERE id=? AND expert_id=?").bind(parseInt(uidRaw, 10), ex.id).first();
-    if (!up) { await ack("این بارگذاری پیدا نشد.", true); return { ok: true }; }
-    if (up.done_at) { await ack("این فایل قبلاً ثبت شده است."); return { ok: true }; }
+  /* تحویل: dvo:<aid> باز کردن · dv:<flow>:t:<سند> · go · nl (بی‌نامه) · na (بی‌پیوست) · fin (فرستادن) */
+  if (action === "dvo") { await ack(); return deliverOpen(env, api, chat, ex, num(1), null); }
+  if (action === "dv") {
+    const f = await ownFlow(env, ex, num(1), "deliver");
+    if (!f || f.done_at) { await ack("این تحویل دیگر فعال نیست؛ از منوی درخواست دوباره «تحویل» را بزنید.", true); return { ok: true }; }
+    const d = flowData(f), step = parts[2];
+    d.docs = d.docs || {};
+    if (step === "t") {
+      const k = parts[3];
+      if (f.step !== "pick" || !DV_DOCS.some(([x]) => x === k)) { await ack("این انتخاب دیگر باز نیست.", true); return { ok: true }; }
+      d.docs[k] = d.docs[k] ? 0 : 1;
+      await saveFlow(env, f.id, d);
+      await ack();
+      const asg = await ownOpenAssignment(env, ex.id, f.assignment_id);
+      return asg ? deliverCard(api, chat, f, d, asg, mid) : { ok: true };
+    }
+    if (step === "go") { await ack(); return deliverNext(env, api, chat, ex, f, d, mid); }
+    if (step === "nl") {
+      d.docs.letter = 0;
+      await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND expert_id=? AND state IN ('need_voice','transcribed')")
+        .bind(now(), f.assignment_id, ex.id).run();
+      await saveFlow(env, f.id, d, "pick");
+      await ack();
+      return deliverNext(env, api, chat, ex, { ...f, step: "pick" }, d, mid);
+    }
+    if (step === "na") { d.docs.att = 0; await saveFlow(env, f.id, d); await ack(); return deliverSend(env, api, chat, ex, f, d, mid); }
+    if (step === "fin") { await ack("در حال فرستادن…"); return deliverSend(env, api, chat, ex, f, d, mid); }
+    await ack();
+    return { ok: true };
+  }
 
+  /* پیش‌فاکتورِ آزاد: pf:<upload>:r:<aid> · t:<item> · all · use · s:<i> · a (تأمین‌کنندهٔ تازه از فایل) · n (نام دستی) · x */
+  if (action === "pf") {
+    const up = await ownUpload(env, ex, num(1));
+    if (!up) { await ack("این بارگذاری پیدا نشد.", true); return { ok: true }; }
+    if (up.done_at) { await ack("این فایل قبلاً ثبت یا لغو شده است."); return { ok: true }; }
+    const step = parts[2], v = num(3);
     if (step === "x") {
       const store = storage(env);
       if (store && up.storage_key) await store.remove(up.storage_key).catch(() => {});
       await env.DB.prepare("UPDATE tg_uploads SET state='canceled', done_at=? WHERE id=?").bind(now(), up.id).run();
       await ack("لغو شد");
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ لغو شد و فایل حذف شد.").catch(() => {});
-      return { ok: true };
+      return show(api, chat, mid, "✖️ لغو شد و فایل حذف شد.", []);
     }
     if (step === "r") {
-      const asg = await ownOpenAssignment(env, ex.id, parseInt(valRaw, 10));
-      if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
+      const asg = await ownOpenAssignment(env, ex.id, v);
+      if (!asg) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+      await env.DB.prepare("UPDATE tg_uploads SET assignment_id=?, state='need_items' WHERE id=?").bind(v, up.id).run();
       await ack();
-      return askQuote(env, api, chat, up.id, asg, up.filename, cq.message && cq.message.message_id);
+      return uploadItems(env, api, chat, ex, { ...up, assignment_id: v, state: "need_items" }, mid);
+    }
+    if (!up.assignment_id) { await ack("اول درخواست را انتخاب کنید.", true); return { ok: true }; }
+    if (step === "t" || step === "all") {
+      const its = await itemsOf(env, up.assignment_id);
+      const o = uploadOpts(up);
+      if (step === "t") { if (its.some((i) => i.id === v)) o.sel = toggleIn(o.sel, v); }
+      else o.sel = (o.sel || []).length === its.length ? [] : its.map((i) => i.id);
+      await env.DB.prepare("UPDATE tg_uploads SET options_json=? WHERE id=?").bind(JSON.stringify(o), up.id).run();
+      await ack();
+      return uploadItems(env, api, chat, ex, { ...up, options_json: JSON.stringify(o) }, mid);
+    }
+    if (step === "use") {
+      if (!idList(uploadOpts(up).sel).length) { await ack("دست‌کم یک قلم را تیک بزنید.", true); return { ok: true }; }
+      await ack();
+      return uploadSupplier(env, api, chat, ex, up, mid);
     }
     if (step === "s") {
-      const opts = JSON.parse(up.options_json || "[]");
-      const o = opts[parseInt(valRaw, 10)];
-      /* گزینه‌های قدیمی رشتهٔ خالی‌اند، تازه‌ها شیء — هر دو باید کار کنند */
-      const name = typeof o === "string" ? o : o && o.n;
+      const o = uploadOpts(up);
+      const g = (o.groups || [])[v];
+      const name = typeof g === "string" ? g : g && g.n;
       if (!name) { await ack("این گزینه دیگر معتبر نیست.", true); return { ok: true }; }
       await ack();
-      return saveProforma(env, api, chat, up, name);
+      return attachProforma(env, api, chat, ex, { aid: up.assignment_id, up, supplier: name, itemIds: o.sel, out: o.read || null, mid });
     }
-    if (step === "a") {
-      if (!up.assignment_id) { await ack("اول باید درخواست را انتخاب کنید.", true); return { ok: true }; }
-      await ack("در حال خواندن…");
-      return newQuoteFromFile(env, api, chat, ex, up);
-    }
+    if (step === "a") { await ack("در حال خواندن…"); return newQuoteFromFile(env, api, chat, ex, up, mid); }
     if (step === "n") {
-      await env.DB.prepare("UPDATE tg_uploads SET state='need_name' WHERE id=?").bind(up.id).run();
+      await env.DB.prepare("UPDATE tg_uploads SET state='need_name', asked_at=? WHERE id=?").bind(now(), up.id).run();
       await ack();
-      await api.sendMessage(chat, "نام تأمین‌کننده را بنویسید و بفرستید:");
-      return { ok: true };
+      return show(api, chat, mid, `📎 <b>${esc(up.filename)}</b>\n\n<b>نام تأمین‌کننده را بنویسید و بفرستید:</b>`, dropFileKb(up.id));
     }
+    await ack();
+    return { ok: true };
   }
 
-  /* فاکتور دستی و توضیحات: fl:<flowId>:<step>:<value> */
+  /* لغوِ پرسشِ متنی (فیلد، توضیحات): fl:<flow>:x */
   if (action === "fl") {
-    const [, fidRaw, step, valRaw] = T(cq.data).split(":");
-    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=?").bind(parseInt(fidRaw, 10), ex.id).first();
+    const f = await env.DB.prepare("SELECT * FROM tg_flows WHERE id=? AND expert_id=?").bind(num(1), ex.id).first();
     if (!f) { await ack("این گفت‌وگو پیدا نشد.", true); return { ok: true }; }
     if (f.done_at) { await ack("این گفت‌وگو تمام شده است."); return { ok: true }; }
-    const d = flowData(f);
-
-    if (step === "x") {
+    if (parts[2] === "x") {
       await env.DB.prepare("UPDATE tg_flows SET step='canceled', done_at=? WHERE id=?").bind(now(), f.id).run();
       await ack("لغو شد");
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ لغو شد.").catch(() => {});
-      return { ok: true };
+      return show(api, chat, mid, "✖️ لغو شد.", []);
     }
-
-    if (step === "r") {
-      const aid = parseInt(valRaw, 10);
-      const asg = await ownOpenAssignment(env, ex.id, aid);
-      if (!asg) { await ack("این ارجاع دیگر باز نیست.", true); return { ok: true }; }
-      await ack();
-
-      if (f.kind === "progress") {
-        await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='done', done_at=? WHERE id=?").bind(aid, now(), f.id).run();
-        if (cq.message) await api.editMessageText(chat, cq.message.message_id, `درخواست <b>${esc(asg.request_id)}</b>`).catch(() => {});
-        return sendProgress(env, api, chat, aid);
-      }
-      if (f.kind === "letter" || f.kind === "deliver") {
-        await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='done', done_at=? WHERE id=?").bind(aid, now(), f.id).run();
-        if (cq.message) await api.editMessageText(chat, cq.message.message_id, `درخواست <b>${esc(asg.request_id)}</b> انتخاب شد.`).catch(() => {});
-        return f.kind === "letter" ? startLetter(env, api, chat, ex, aid) : deliver(env, api, chat, ex, aid);
-      }
-
-      if (f.kind === "notes") {
-        await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='need_notes' WHERE id=?").bind(aid, f.id).run();
-        const cur = await env.DB.prepare("SELECT notes FROM assignments WHERE id=?").bind(aid).first();
-        await api.editMessageText(chat, cq.message.message_id,
-          `📝 <b>توضیحات برگهٔ کمیسیون</b>\nدرخواست <b>${esc(asg.request_id)}</b>\n\n`
-          + (cur && cur.notes ? `متن فعلی:\n<i>${esc(cur.notes)}</i>\n\nمتن تازه را بنویسید (جایگزین می‌شود):` : "توضیحاتتان را بنویسید:")).catch(() => {});
-        return { ok: true };
-      }
-
-      /* فاکتور دستی: اول تأمین‌کننده */
-      const sups = ((await env.DB.prepare("SELECT DISTINCT supplier_name FROM quotes WHERE assignment_id=? ORDER BY supplier_name").bind(aid).all()).results || [])
-        .map((r) => r.supplier_name).filter(Boolean);
-      d.supplierOptions = sups;
-      await env.DB.prepare("UPDATE tg_flows SET assignment_id=?, step='need_supplier', data_json=? WHERE id=?").bind(aid, JSON.stringify(d), f.id).run();
-      const kb = sups.map((s2, i) => [{ text: short(s2, 34), callback_data: `fl:${f.id}:s:${i}` }]);
-      kb.push([{ text: "✖️ لغو", callback_data: `fl:${f.id}:x:0` }]);
-      await api.editMessageText(chat, cq.message.message_id,
-        `🧾 <b>فاکتور دستی</b>\nدرخواست <b>${esc(asg.request_id)}</b> — ${esc(short(asg.party, 40))}\n\n`
-        + (sups.length ? "فاکتور از کدام تأمین‌کننده است؟ اگر تازه است، نامش را بنویسید." : "نام تأمین‌کننده را بنویسید:"), kb).catch(() => {});
-      return { ok: true };
-    }
-
-    if (step === "s") {
-      const name = (d.supplierOptions || [])[parseInt(valRaw, 10)];
-      if (!name) { await ack("این گزینه معتبر نیست.", true); return { ok: true }; }
-      await ack();
-      d.supplier = name; d.idx = 0; d.prices = {};
-      await env.DB.prepare("UPDATE tg_flows SET step='prices', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-      return askPrice(env, api, chat, { ...f, step: "prices", data_json: JSON.stringify(d) });
-    }
-
-    if (step === "note") {
-      await env.DB.prepare("UPDATE tg_flows SET step='need_notes' WHERE id=?").bind(f.id).run();
-      await ack();
-      await api.sendMessage(chat, "📝 توضیحاتی که باید پای برگهٔ کمیسیون بیاید را بنویسید:");
-      return { ok: true };
-    }
-
-    if (step === "again") {
-      d.idx = 0; d.prices = {};
-      await env.DB.prepare("UPDATE tg_flows SET step='prices', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
-      await ack("از اول");
-      return askPrice(env, api, chat, { ...f, step: "prices", data_json: JSON.stringify(d) });
-    }
-
-    if (step === "ok") {
-      if (!Object.keys(d.prices || {}).length) { await ack("هیچ قیمتی وارد نشده است.", true); return { ok: true }; }
-      await ack();
-      return saveManual(env, api, chat, f);
-    }
+    await ack();
+    return { ok: true };
   }
 
-  /* استخراج خودکار: ai:<proformaId>:<step>:<value> */
+  /* استخراج خودکار: ai:<proforma>:go (دوباره بخوان) · ok · r (ریال) · t (تومان) */
   if (action === "ai") {
-    const [, pidRaw, step, val] = T(cq.data).split(":");
+    const step = parts[2];
     await ack(step === "go" ? "شروع شد" : "");
-    return onExtract(env, api, chat, ex, parseInt(pidRaw, 10), step, val, cq.message && cq.message.message_id);
+    return onExtract(env, api, chat, ex, num(1), step, parts[3], mid);
   }
 
-  /* نامهٔ پیوست: lt:<id>:<step>:0  — در گام ask و x و no شناسه ارجاع است، در go شناسهٔ نامه */
+  /* نامه: lt:<aid>:ask (از نو) · lt:<aid>:x (لغو) · lt:<letter>:go (انتخاب اقلامِ موضوع) */
   if (action === "lt") {
-    const [, idRaw, step] = T(cq.data).split(":");
-    const n = parseInt(idRaw, 10);
+    const n = num(1), step = parts[2];
     await ack();
     if (step === "ask") return startLetter(env, api, chat, ex, n);
-    if (step === "no") {
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "باشد. اگر بعداً لازم شد /nameh را بزنید.\nبرای گرفتن بستهٔ کامل فایل‌ها (برگهٔ درخواست + جدول کمیسیون) و بستن کار، /tahvil را بزنید.", panelButton).catch(() => {});
-      return { ok: true };
-    }
     if (step === "x") {
       await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND expert_id=? AND state IN ('need_voice','transcribed')")
         .bind(now(), n, ex.id).run();
-      if (cq.message) await api.editMessageText(chat, cq.message.message_id, "✖️ نامه لغو شد.").catch(() => {});
-      return { ok: true };
+      const dw = await deliverWaiting(env, ex, n);
+      if (!dw) return show(api, chat, mid, "✖️ نامه لغو شد.", []);
+      /* وسط تحویل: لغوِ نامه یعنی تحویل بدون نامه */
+      const d = flowData(dw);
+      d.docs = { ...(d.docs || {}), letter: 0 };
+      await saveFlow(env, dw.id, d, "pick");
+      await show(api, chat, mid, "✖️ نامه لغو شد؛ تحویل بدون نامه ادامه می‌یابد.", []);
+      return deliverNext(env, api, chat, ex, { ...dw, step: "pick" }, d, null);
     }
-    if (step === "go") return makeLetter(env, api, chat, ex, n);
+    if (step === "go") {
+      const L = await env.DB.prepare("SELECT * FROM letters WHERE id=? AND expert_id=?").bind(n, ex.id).first();
+      if (!L || L.state !== "transcribed" || !L.transcript) return show(api, chat, null, "این نامه قبلاً نوشته یا لغو شده است.", []);
+      return letterSubjectCard(env, api, chat, ex, L, mid);
+    }
+    return { ok: true };
   }
 
-  /* پایش مراحل: st:<assignmentId>:<stage>:0 */
-  if (action === "st") {
-    const [, aidRaw, stage] = T(cq.data).split(":");
-    const aid = parseInt(aidRaw, 10);
+  /* موضوع نامه: ls:<flow>:t:<item> · all · go */
+  if (action === "ls") {
+    const f = await ownFlow(env, ex, num(1), "lsub");
+    if (!f || f.done_at) { await ack("این انتخاب دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f), step = parts[2];
+    const its = (await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=? ORDER BY line_no LIMIT 40").bind(f.assignment_id).all()).results || [];
+    if (step === "go") {
+      const titles = its.filter((i) => (d.sel || []).includes(i.id)).map((i) => i.title);
+      if (!titles.length) { await ack("دست‌کم یک قلم را برای موضوع نامه تیک بزنید.", true); return { ok: true }; }
+      const claim = await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=? AND done_at IS NULL").bind(now(), f.id).run();
+      if (!claim.meta.changes) { await ack(); return { ok: true }; }
+      await ack("در حال نوشتن…");
+      await show(api, chat, mid, `✉️ <b>موضوع:</b> ${esc(letterSubject(titles))}`, []);
+      return makeLetter(env, api, chat, ex, d.letterId, titles);
+    }
+    if (step === "t") { const v = num(3); if (its.some((i) => i.id === v)) d.sel = toggleIn(d.sel, v); }
+    else if (step === "all") d.sel = (d.sel || []).length === its.length ? [] : its.map((i) => i.id);
+    await saveFlow(env, f.id, d);
     await ack();
-    if (stage === "hist" || stage === "smart") return markStage(env, api, chat, ex, aid, stage);
-    if (stage === "deliver") return deliver(env, api, chat, ex, aid);
-    if (stage === "table") return tableSelect(env, api, chat, ex, aid, null);
-    return sendProgress(env, api, chat, aid);
+    return letterSubjectRender(api, chat, f, d, its, mid);
   }
 
   await ack("این دکمه دیگر کار نمی‌کند.");

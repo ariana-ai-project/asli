@@ -11,6 +11,17 @@ import { VAT_RATE, netOf, ENUMS, missingRequired, INVOICE_AI } from "./quote-rul
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
 
+/**
+ * فهرست شناسهٔ اقلامی که یک پیش‌فاکتور به آن‌ها محدود است (ستون proformas.item_ids).
+ * بات وقتی کارشناس اقلام را تیک زده پرش می‌کند؛ پنل خالی می‌گذارد یعنی «همهٔ اقلام».
+ * آرایه یا رشتهٔ JSON می‌پذیرد و همیشه آرایهٔ عدد برمی‌گرداند.
+ */
+export function idList(v) {
+  let a = v;
+  if (typeof v === "string") { try { a = JSON.parse(v); } catch (_) { a = null; } }
+  return Array.isArray(a) ? a.map(Number).filter((n) => Number.isInteger(n) && n > 0) : [];
+}
+
 /** پیش‌فاکتور + بررسی مالکیت (INV-11) */
 export async function proformaOf(env, pid, ex) {
   const p = await env.DB.prepare(
@@ -28,10 +39,13 @@ export async function proformaOf(env, pid, ex) {
  * ردیف پیش‌فاکتوری وجود داشته باشد می‌خواند — نام تأمین‌کننده که کلیدِ همان ردیف
  * است، خودش از دل همین خواندن بیرون می‌آید.
  */
-export async function extractFor(env, store, { assignment_id, request_id, storage_key, mime }) {
-  const items = (await env.DB.prepare(
+export async function extractFor(env, store, { assignment_id, request_id, storage_key, mime, item_ids }) {
+  /* اگر پیش‌فاکتور به چند قلمِ مشخص محدود است، مدل فقط همان‌ها را می‌بیند تا سطرها
+     به قلمِ دیگری وصل نشوند */
+  const only = idList(item_ids);
+  const items = ((await env.DB.prepare(
     "SELECT id, title, qty, unit, spec FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
-  ).bind(assignment_id).all()).results || [];
+  ).bind(assignment_id).all()).results || []).filter((i) => !only.length || only.includes(i.id));
   const req = await env.DB.prepare("SELECT id, party FROM requests WHERE id=?").bind(request_id).first();
 
   /* لینک کوتاه‌عمر: فقط باید تا وقتی مدل سند را می‌گیرد زنده باشد */
@@ -80,8 +94,9 @@ export async function applyExtraction(env, p, body) {
   if (!currency) throw new HttpError("واحد پول در سند مشخص نبود؛ ریال یا تومان را انتخاب کنید.", 422);
 
   const supplier = T(body && body.supplier_name) || p.supplier_name;
+  const only = idList(p.item_ids);
   const its = new Map(((await env.DB.prepare("SELECT id, qty, unit FROM items WHERE assignment_id=?").bind(p.assignment_id).all()).results || [])
-    .map((i) => [i.id, i]));
+    .filter((i) => !only.length || only.includes(i.id)).map((i) => [i.id, i]));
   const existing = new Map(((await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? AND supplier_name=?")
     .bind(p.assignment_id, supplier).all()).results || []).map((q) => [q.item_id, q]));
 

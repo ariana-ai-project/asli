@@ -235,7 +235,10 @@ export const rankBy = (rows, field, rankField) => {
  * پاسخ (groups) رزرو است تا UI خاموش نشانش بدهد.
  */
 export async function itemHistory(env, it, opts = {}) {
-  const cur = await activeImport(env);
+  /* opts.cur: همان بارگذاریِ فعال که صدازننده یک بار خوانده (چند قلم پشت سر هم).
+     opts.brief: فقط آنچه پیام بات لازم دارد — بی عنوان‌های مشابه و با یک کوئریِ واحد
+     برای واحد سنجش؛ هر کوئری D1 یک زیردرخواست است و فراخوانی سقف دارد. */
+  const cur = opts.cur || await activeImport(env);
   if (!cur) return { available: false, message: "فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند." };
 
   const ageMax = Math.max(1, Number(cur.stats.ageMax) || 1);
@@ -266,7 +269,7 @@ export async function itemHistory(env, it, opts = {}) {
   const excluded = perAll.filter((r) => BUCKETS.has(r.sn)).map((r) => ({ name: r.name, n: r.n, qty: r.qty || 0 }));
 
   /* ۲) واحد سنجش — اگر یک کد چند واحد دارد، جمعِ «مقدار» بی‌معنا می‌شود و باید هشدار داد */
-  const um = await env.DB.prepare(`SELECT GROUP_CONCAT(DISTINCT unit) AS units, COUNT(DISTINCT COALESCE(unit,'')) AS nu
+  const um = await env.DB.prepare(`SELECT GROUP_CONCAT(DISTINCT unit) AS units, COUNT(DISTINCT COALESCE(unit,'')) AS nu${opts.brief ? ", MAX(unit) AS unit" : ""}
     FROM purchase_history WHERE ${m.where}`).bind(...m.args).first();
 
   /* ۳) راه‌های تماس — جدول تأمین‌کنندگان هنوز پر نشده و خالی‌بودنش خطا نیست */
@@ -295,9 +298,9 @@ export async function itemHistory(env, it, opts = {}) {
   rankBy(suppliers, "qtyM", "rankM");
   suppliers.sort((a, b) => a.rankM - b.rankM || b.qtyM - a.qtyM || String(a.name).localeCompare(String(b.name), "fa"));
 
-  const titles = (await env.DB.prepare(`SELECT MAX(title) AS title, COUNT(*) AS n FROM purchase_history
+  const titles = opts.brief ? [] : (await env.DB.prepare(`SELECT MAX(title) AS title, COUNT(*) AS n FROM purchase_history
     WHERE ${m.where} GROUP BY title_n ORDER BY n DESC LIMIT 8`).bind(...m.args).all()).results || [];
-  const lv = await env.DB.prepare(`SELECT lvl1, lvl2, lvl3, item_code, unit FROM purchase_history WHERE ${m.where} LIMIT 1`).bind(...m.args).first();
+  const lv = opts.brief ? { unit: um && um.unit } : await env.DB.prepare(`SELECT lvl1, lvl2, lvl3, item_code, unit FROM purchase_history WHERE ${m.where} LIMIT 1`).bind(...m.args).first();
 
   return {
     ...head,

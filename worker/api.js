@@ -22,7 +22,7 @@ import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
-import { bundleData, readiness } from "./bundle.js";
+import { bundleData, readiness, commissionGuard } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
 import { MARKETS, smartSearch, lastSearch } from "./discovery.js";
@@ -31,7 +31,7 @@ import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
-import { handleUpdate, makeLink, scheduled, dispatchText, drainOutbox } from "./bot.js";
+import { handleUpdate, makeLink, scheduled, dispatchText, drainOutbox, seenKb } from "./bot.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
 
@@ -157,6 +157,9 @@ const COLUMN_MIGRATIONS = [
   ["smart_searches", "cost_usd", "REAL"],
   /* «manual» یعنی نوع فاکتور را کارشناس خودش گذاشته؛ خواندن پیش‌فاکتور فقط پیش‌فرض را عوض می‌کند */
   ["quotes", "invoice_src", "TEXT"],
+  ["proformas", "item_ids", "TEXT"],          /* JSON: پیش‌فاکتور فقط برای همین اقلام (بات)؛ خالی = همه */
+  ["tg_flows", "asked_at", "INTEGER"],        /* آخرین باری که این گفت‌وگو از کارشناس چیزی پرسید */
+  ["tg_uploads", "asked_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -600,7 +603,7 @@ async function dispatch(env, body) {
          بی‌صدا می‌خورد (ON CONFLICT DO NOTHING) — همین در تست محلی اتفاق افتاد. */
       stmts.push(queueStmt(env, `dispatch:${a.id}:${t}`, a.telegram_chat,
         dispatchText({ ...a, items: itemsBy.get(a.id) || [], dispatched_at: t, deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt }),
-        [[{ text: "✅ مشاهده کردم", callback_data: `seen:a:${a.id}` }], [{ text: "باز کردن پنل", url: "https://arianaai.website/tamin-poshtibani/expert" }]]));
+        seenKb(a.id)));
       notified++;
     }
     stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: a.telegram_chat ? "telegram" : "none" }));
@@ -766,14 +769,10 @@ async function quoteDelete(env, ex, id) {
 /* جدول کمیسیون: نگهبان حداقل استعلام برای هر قلم + حداقل یک تأیید نهایی */
 async function commission(env, ex, aid) {
   await ownAssignment(env, ex, aid);
-  const s = await getSettings(env);
-  const items = (await env.DB.prepare("SELECT id,title FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
-  const counts = (await env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 GROUP BY item_id").bind(aid).all()).results || [];
-  const byItem = new Map(counts.map((c) => [c.item_id, c.n]));
-  const miss = items.filter((i) => (byItem.get(i.id) || 0) < s.minSuppliers).map((i) => ({ title: i.title, n: byItem.get(i.id) || 0 }));
-  const fin = await env.DB.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(aid).first();
-  if (!fin || !fin.n) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: miss, need: s.minSuppliers });
-  if (miss.length) throw new HttpError(`مدیر حداقل ${s.minSuppliers} استعلام برای هر قلم را الزامی کرده.`, 422, { missing: miss, need: s.minSuppliers });
+  /* همان نگهبانی که بات هم دارد (bundle.js) */
+  const g = await commissionGuard(env, aid, await getSettings(env));
+  if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
+  if (g.missing.length) throw new HttpError(`مدیر حداقل ${g.need} استعلام برای هر قلم را الزامی کرده.`, 422, { missing: g.missing, need: g.need });
   await env.DB.batch([env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(now(), aid), ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid })]);
   return { ok: true };
 }
@@ -1034,7 +1033,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/quotes\/(\d+)$/.exec(path)) && m === "DELETE") { const ex = await requireExpert(request, env); return json(await quoteDelete(env, ex, int(mm[1]))); }
     if (path === "/proformas" && m === "POST") {
       const ex = await requireExpert(request, env); const b = await readJson(request); await ownAssignment(env, ex, int(b.assignment_id));
-      await env.DB.prepare("INSERT INTO proformas (assignment_id,supplier_name,filename,uploaded_at) VALUES (?,?,?,?) ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, uploaded_at=excluded.uploaded_at")
+      await env.DB.prepare("INSERT INTO proformas (assignment_id,supplier_name,filename,uploaded_at) VALUES (?,?,?,?) ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, uploaded_at=excluded.uploaded_at, item_ids=NULL")
         .bind(int(b.assignment_id), T(b.supplier_name), T(b.filename) || null, now()).run();
       return json({ ok: true, stored: false, message: "نام فایل ثبت شد؛ ذخیرهٔ خود فایل (R2) در مرحلهٔ بعد فعال می‌شود." });
     }
@@ -1147,7 +1146,7 @@ async function route(request, env, ctx) {
         `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at)
          VALUES (?,?,?,?,?,?,'panel',?)
          ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
-           mime=excluded.mime, size_bytes=excluded.size_bytes, source='panel', uploaded_at=excluded.uploaded_at`,
+           mime=excluded.mime, size_bytes=excluded.size_bytes, source='panel', uploaded_at=excluded.uploaded_at, item_ids=NULL`,
       ).bind(aid, supplier, filename, key, request.headers.get("content-type") || null, size || null, t).run();
       return json({ ok: true, stored: true, backend: store.backend });
     }

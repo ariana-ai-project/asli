@@ -139,8 +139,14 @@ CREATE TABLE IF NOT EXISTS proformas (
   assignment_id  INTEGER NOT NULL REFERENCES assignments(id) ON DELETE CASCADE,
   supplier_name  TEXT NOT NULL,
   filename       TEXT,
-  r2_key         TEXT,                    -- کلید فایل در R2 (بعداً)
-  extracted_json TEXT,                    -- خروجی استخراج (بعداً)
+  storage_key    TEXT,                    -- کلید فایل در انبار (پیش‌تر r2_key)
+  mime           TEXT,
+  size_bytes     INTEGER,
+  source         TEXT,                    -- panel | telegram
+  item_ids       TEXT,                    -- JSON: پیش‌فاکتور فقط برای همین اقلام (بات)؛ خالی = همهٔ اقلام
+  extracted_json TEXT,                    -- خروجی خام استخراج مدل (INV-15)
+  extract_state  TEXT,                    -- pending | ok | refused | failed
+  extract_at     INTEGER,
   uploaded_at    INTEGER NOT NULL,
   UNIQUE(assignment_id, supplier_name)
 );
@@ -226,9 +232,32 @@ CREATE TABLE IF NOT EXISTS smart_searches (
   prompt_version TEXT,
   in_tokens      INTEGER,
   out_tokens     INTEGER,
+  cache_read     INTEGER,               -- توکن‌های خوانده از کش
+  cache_write    INTEGER,
+  searches       INTEGER,               -- تعداد جستجوی وب (هر ۱۰۰۰ تا ۱۰ دلار)
+  fetches        INTEGER,
+  cost_usd       REAL,                  -- هزینهٔ تقریبیِ همین اجرا
   created_at     INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
+
+-- صف جستجوی هوشمندِ بات: جستجو چند دقیقه طول می‌کشد و waitUntil فقط ۳۰ ثانیه
+-- فرصت می‌دهد؛ دکمهٔ «اجرا» کار را این‌جا می‌نشاند و Cron هر دقیقه یکی برمی‌دارد.
+CREATE TABLE IF NOT EXISTS smart_jobs (
+  id             INTEGER PRIMARY KEY,
+  item_id        INTEGER NOT NULL,
+  assignment_id  INTEGER,
+  expert_id      INTEGER NOT NULL,
+  chat_id        TEXT NOT NULL,
+  params_json    TEXT NOT NULL,
+  state          TEXT NOT NULL DEFAULT 'queued',   -- queued | running | done | failed
+  search_id      INTEGER,
+  error          TEXT,
+  created_at     INTEGER NOT NULL,
+  started_at     INTEGER,
+  finished_at    INTEGER
+);
+CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
 
 -- ---------- قالب‌های پیام ----------
 CREATE TABLE IF NOT EXISTS templates (
