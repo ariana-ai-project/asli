@@ -39,7 +39,7 @@ import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory, activeImport } from "./history.js";
-import { MARKETS, smartSearch, searchById, fillTemplate } from "./discovery.js";
+import { MARKETS, MAX_MARKETS, smartSearch, searchById, fillTemplate } from "./discovery.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -1878,7 +1878,7 @@ async function smartPrefsRender(env, api, chat, f, d, mid) {
 async function smartMarketMenu(env, api, chat, f, d, mid) {
   const kb = MARKETS.map((m2, i) => [{ text: `${(d.markets || []).includes(m2.key) ? "☑" : "☐"} ${m2.fa}`, callback_data: `sf:${f.id}:m:${i}` }]);
   kb.push([{ text: "→ بازگشت", callback_data: `sf:${f.id}:back:0` }]);
-  const text = "🌍 <b>بازار تأمین کالا</b> — هر بازاری که تأمین‌کننده از آن پذیرفتنی است را تیک بزنید. هرچه بیرون از این‌ها باشد در نتایج نمی‌آید.";
+  const text = "🌍 <b>بازار تأمین کالا</b> — حداکثر سه بازار که تأمین‌کننده از آن پذیرفتنی است را تیک بزنید. هرچه بیرون از این‌ها باشد در نتایج نمی‌آید.";
   const edited = mid ? await api.editMessageText(chat, mid, text, kb).catch(() => null) : null;
   if (!edited) await api.sendMessage(chat, text, kb).catch(() => {});
   return { ok: true };
@@ -2377,7 +2377,13 @@ async function onCallback(env, cq) {
     if (step === "mk") { await ack(); return smartMarketMenu(env, api, chat, f, d, mid); }
     if (step === "m") {
       const k = (MARKETS[parseInt(valRaw, 10)] || {}).key;
-      if (k) { const i = (d.markets = d.markets || []).indexOf(k); if (i >= 0) d.markets.splice(i, 1); else d.markets.push(k); }
+      d.markets = d.markets || [];
+      /* سقف هزینهٔ هر جستجو: بیش از سه بازار میان پنج جستجو پخش نمی‌شود */
+      if (k && !d.markets.includes(k) && d.markets.length >= MAX_MARKETS) {
+        await ack("حداکثر سه بازار در هر جستجو؛ اول تیک یکی را بردارید.", true);
+        return { ok: true };
+      }
+      if (k) { const i = d.markets.indexOf(k); if (i >= 0) d.markets.splice(i, 1); else d.markets.push(k); }
       await env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id).run();
       await ack();
       return smartMarketMenu(env, api, chat, f, d, mid);

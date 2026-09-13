@@ -25,7 +25,7 @@ import { DEFAULTS, getSettings } from "./settings.js";
 import { bundleData, readiness, commissionGuard } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
-import { MARKETS, smartSearch, lastSearch } from "./discovery.js";
+import { MARKETS, MAX_MARKETS, smartSearch, lastSearch } from "./discovery.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
@@ -1183,7 +1183,7 @@ async function route(request, env, ctx) {
     if (path === "/search/smart" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      return json({ markets: MARKETS, last: await lastSearch(env, it.id) });
+      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, last: await lastSearch(env, it.id) });
     }
     if (path === "/search/smart" && m === "POST") {
       const who = await requireAny(request, env);

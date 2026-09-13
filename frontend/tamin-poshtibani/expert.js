@@ -377,6 +377,7 @@
     try {
       const r = await TP.api(`/search/smart?item_id=${it.id}`);
       S.marketsMeta = r.markets || S.marketsMeta;
+      S.maxMarkets = r.maxMarkets || S.maxMarkets;
       S.smart[it.id] = r.last || null;
     } catch (_) { S.smart[it.id] = null; }
     render();
@@ -499,7 +500,7 @@
     }
 
     /* ستون قیدها — مهم‌ترین قید، «بازار تأمین کالا»، یک فهرست است */
-    const markets = `<div class="grp"><b>بازار تأمین کالا</b>${(S.marketsMeta || []).map((x) =>
+    const markets = `<div class="grp"><b>بازار تأمین کالا <span class="dim" style="font-weight:400">(حداکثر ${"۰۱۲۳۴۵۶۷۸۹"[S.maxMarkets || 3] || S.maxMarkets})</span></b>${(S.marketsMeta || []).map((x) =>
       `<label><input type="checkbox" data-smk="${x.key}" ${S.sm.markets.includes(x.key) ? "checked" : ""}> ${esc(x.fa)}</label>`).join("")}</div>`;
     const side = `<div class="side"><h4>قیدهای جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها عیناً به مدل داده می‌شوند؛ بازار تأمین کالا قید سخت است.</div>
       ${markets}
@@ -775,7 +776,16 @@
     const rs = G("[data-run-smart]"); if (rs) rs.onclick = runSmart;
     Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); await TP.api(`/items/${it.id}/progress`, { body: { stage: b.dataset.mark } }); await reload(); });
     /* قیدهای جستجوی هوشمند — بدون بازرندر حین تایپ تا فوکوس نپرد؛ state همان لحظه به‌روز است */
-    Q("[data-smk]").forEach((c) => c.onchange = (e) => { const k = e.target.dataset.smk; const i = S.sm.markets.indexOf(k); if (e.target.checked && i < 0) S.sm.markets.push(k); if (!e.target.checked && i >= 0) S.sm.markets.splice(i, 1); });
+    Q("[data-smk]").forEach((c) => c.onchange = (e) => {
+      const k = e.target.dataset.smk, i = S.sm.markets.indexOf(k), cap = S.maxMarkets || 3;
+      /* سقف هزینهٔ هر جستجو: بیش از سه بازار میان پنج جستجو پخش نمی‌شود */
+      if (e.target.checked && i < 0 && S.sm.markets.length >= cap) {
+        e.target.checked = false;
+        return TP.modal("حداکثر سه بازار", "برای اینکه هزینهٔ هر جستجو از سقف ۲۰ سنت نگذرد، هر اجرا حداکثر سه بازار دارد. اول تیک یکی را بردارید.", null, "باشد", "");
+      }
+      if (e.target.checked && i < 0) S.sm.markets.push(k);
+      if (!e.target.checked && i >= 0) S.sm.markets.splice(i, 1);
+    });
     Q("[data-sm]").forEach((el) => el.oninput = (e) => { S.sm[e.target.dataset.sm] = e.target.value; });
     Q("[data-sm-prof]").forEach((el) => el.onclick = () => { S.smProf = S.smProf === +el.dataset.smProf ? null : +el.dataset.smProf; render(); });
     const smc = G("[data-sm-close]"); if (smc) smc.onclick = () => { S.smProf = null; render(); };
