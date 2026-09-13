@@ -1888,39 +1888,37 @@ async function smartMarketMenu(env, api, chat, f, d, mid) {
  * نتیجهٔ یک جستجو را در یک پیام می‌فرستد. خودِ اجرا در صف انجام شده
  * (runSmartJobs)؛ این‌جا فقط قالب‌بندی است و متن زیر سقف ۴۰۹۶ نویسهٔ تلگرام می‌ماند.
  */
+/* نتیجهٔ جستجو را هر دو شکل می‌خوانند: v3 (فهرست ساده) و نتایج ذخیره‌شدهٔ قدیمی */
+const supPhonesBot = (s) => (s.phones || []).map((p) => (p && typeof p === "object" ? p.e164 || p.verbatim : p)).filter(Boolean);
+const supEmailsBot = (s) => (s.emails || []).map((x) => (x && typeof x === "object" ? x.verbatim : x)).filter(Boolean);
+const supPriceBot = (s) => (s.price && typeof s.price === "object" ? [s.price.text, s.price.unit ? `/ ${s.price.unit}` : ""].filter(Boolean).join(" ") : s.price || "");
+
+/**
+ * نتیجهٔ یک جستجو: فقط فهرست تأمین‌کنندگان، و هزینه در یک خط کوچک. هیچ ردیفی کنار
+ * گذاشته نمی‌شود؛ اگر در یک پیام جا نشد (سقف ۴۰۹۶ نویسهٔ تلگرام)، در پیام بعدی می‌آید.
+ */
 async function smartResultsMessage(env, api, chat, ex, it, params, out) {
-  const R = out.result || {}, sup = R.suppliers || [];
-  const markets = ((params && params.markets) || []).map((k) => (MARKETS.find((m2) => m2.key === k) || {}).fa).filter(Boolean).join("، ");
-  if (!sup.length) {
-    await api.sendMessage(chat, `🔎 <b>جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n\n${esc(R.summary_fa || "تأمین‌کنندهٔ قابل‌قبولی در بازارهای انتخابی پیدا نشد.")}`).catch(() => {});
-    return { ok: true };
-  }
-  const line = (s2, i) => {
-    const loc = [s2.location && s2.location.city, s2.location && s2.location.country].filter(Boolean).join("، ");
-    const mob = (s2.mobile_numbers || []).slice(0, 2).join(" · ");
-    const land = (s2.phones || []).filter((p) => p.type === "landline").slice(0, 1).map((p) => p.e164 || p.verbatim).join("");
-    const mail = (s2.emails || []).slice(0, 1).map((e) => e.verbatim).join("");
-    const msgr = (s2.messengers || []).slice(0, 1).map((m2) => `${m2.platform}: ${m2.handle_or_link}`).join("");
-    return `${M(i + 1)}. <b>${esc(short(s2.name, 38))}</b> — ${esc(ROLE_FA_BOT[s2.role] || s2.role || "؟")}${loc ? ` · ${esc(loc)}` : ""}${s2.scores && s2.scores.total != null ? ` · امتیاز ${M(Math.round(s2.scores.total))}` : ""}\n`
-      + (mob ? `   📱 <code>${esc(mob)}</code>\n` : "")
-      + (land ? `   ☎️ <code>${esc(land)}</code>\n` : "")
-      + (mail ? `   ✉️ <code>${esc(mail)}</code>\n` : "")
-      + (!mob && !land && !mail && msgr ? `   💬 ${esc(msgr)}\n` : "")
-      + (s2.contact_gated ? "   🔒 <i>بخشی از تماس‌ها پشت کلیک/ورود است — در پنل ببینید</i>\n" : "");
+  const sup = (out.result && out.result.suppliers) || [];
+  const cost = out.cost != null ? `\n\n<i>هزینهٔ این جستجو: ${M(Number(out.cost).toFixed(2))} دلار</i>` : "";
+  const head = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b> — ${M(sup.length)} تأمین‌کننده`;
+  const card = (s2, i) => {
+    const phones = supPhonesBot(s2), emails = supEmailsBot(s2), price = supPriceBot(s2);
+    const type = s2.type || s2.role || "unknown", market = s2.market || (s2.location && s2.location.country) || "";
+    return `${M(i + 1)}. <b>${esc(s2.name || "—")}</b> — ${esc(ROLE_FA_BOT[type] || type)}${market ? ` · ${esc(market)}` : ""}`
+      + (phones.length ? `\n📞 ${phones.map((p) => `<code>${esc(p)}</code>`).join(" · ")}` : "")
+      + (emails.length ? `\n✉️ ${emails.map((x) => esc(x)).join(" · ")}` : "")
+      + (s2.website ? `\n🌐 ${esc(s2.website)}` : "")
+      + (price ? `\n💰 ${esc(price)}` : "");
   };
-  let text = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b>\n`
-    + `${M(sup.length)} تأمین‌کننده در ${esc(markets || "—")}`
-    + (out.cost != null ? ` · هزینهٔ تقریبی ${M(Number(out.cost).toFixed(2))} دلار` : "") + "\n\n"
-    + `${esc(short(R.summary_fa || "", 900))}\n\n`;
-  let shown = 0;
+  const parts = [];
+  let cur = head;
   for (const [i, s2] of sup.entries()) {
-    const l = line(s2, i);
-    if (text.length + l.length > 3700) break;
-    text += l; shown++;
+    const c = card(s2, i);
+    if (cur.length + c.length + 2 > 3800) { parts.push(cur); cur = c; } else cur += `\n\n${c}`;
   }
-  if (shown < sup.length) text += `\n<i>و ${M(sup.length - shown)} مورد دیگر — در پنل</i>\n`;
-  text += "\n<i>قیمت و کیفیت سنجیده نشده‌اند؛ این فقط ترتیبِ تماس اول است.</i>";
-  await api.sendMessage(chat, text).catch(() => {});
+  parts.push(cur + cost);
+  for (const p of parts) await api.sendMessage(chat, p).catch(() => {});
+  if (!sup.length) return { ok: true };
   await api.sendMessage(chat, "با نتایج چه کنم؟", [...smartChoiceKb(out.search_id), navRow(it.aid)]).catch(() => {});
   return { ok: true };
 }
@@ -1967,8 +1965,10 @@ export async function runSmartJobs(env) {
 }
 
 const ROLE_FA_BOT = {
-  manufacturer: "تولیدکننده", authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده",
-  retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
+  manufacturer: "تولیدکننده", authorized_dealer: "نمایندگی رسمی", wholesaler: "عمده‌فروش/واردکننده",
+  retailer: "فروشگاه", online_seller: "فروشندهٔ آنلاین/آگهی", unknown: "نامشخص",
+  authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده", retailer_shop: "فروشگاه",
+  marketplace_only: "فقط آگهی", broker_intermediary: "واسطه",
 };
 
 /** «انتخاب جهت استعلام» زیر نتیجهٔ جستجو — همان کارتِ انتخابِ تأمین‌کنندهٔ سوابق */
@@ -2433,7 +2433,7 @@ async function onCallback(env, cq) {
     const sup = (sr.result && sr.result.suppliers) || [];
     if (step === "open") {
       await ack();
-      const kb = sup.slice(0, 12).map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}` }]);
+      const kb = sup.map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}` }]);
       await api.sendMessage(chat, "✉️ پیام برای کدام تأمین‌کننده آماده شود؟", kb).catch(() => {});
       return { ok: true };
     }

@@ -365,9 +365,12 @@
      کشف تأمین‌کنندهٔ تازه با Claude + جستجوی وب. کارشناس بازارها را تیک می‌زند
      (مهم‌ترین قید — بالای ستون)، برند و مشخصات و ملاحظات را می‌نویسد و اجرا
      می‌کند؛ نتیجه در D1 ثبت می‌شود و رفرش چیزی را نمی‌پراند. */
+  /* نوع تأمین‌کننده — نسخهٔ تازه (v3) و نقش‌های نتایج قدیمی */
   const ROLE_FA = {
-    manufacturer: "تولیدکننده", authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده",
-    retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "نامشخص",
+    manufacturer: "تولیدکننده", authorized_dealer: "نمایندگی رسمی", wholesaler: "عمده‌فروش/واردکننده",
+    retailer: "فروشگاه", online_seller: "فروشندهٔ آنلاین/آگهی", unknown: "نامشخص",
+    authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده", retailer_shop: "فروشگاه",
+    marketplace_only: "فقط آگهی", broker_intermediary: "واسطه",
   };
   const smState = () => S.smart[(item() || {}).id];
 
@@ -433,72 +436,68 @@
     paint(0);
   }
 
-  function vSmartProf(d) {
-    if (S.smProf == null) return "";
-    const s = (d.result.suppliers || [])[S.smProf]; if (!s) return "";
-    const li = (arr, fn) => (arr || []).map(fn).join("") || `<span class="dim">—</span>`;
-    return `<div class="prof"><div class="top"><h4>${esc(s.name)}</h4>
-        <span class="chip">${ROLE_FA[s.role] || esc(s.role || "")}</span>
-        ${s.location ? `<span class="chip">${esc([s.location.city, s.location.country].filter(Boolean).join("، "))}</span>` : ""}
-        ${s.contact_gated ? `<span class="chip warn" title="${esc(s.gating_note || "")}">برخی تماس‌ها پشت کلیک/ورود است</span>` : ""}
-        <button class="tp-btn xs" data-sm-close style="margin-inline-start:auto">بستن</button></div>
-      <div class="gridp" style="margin-top:10px">
-        <div class="f"><b>وب‌سایت</b>${s.website ? `<a href="${esc(s.website)}" target="_blank" rel="noopener" style="color:var(--tp-accent)">${esc(s.website)}</a>` : "—"}</div>
-        <div class="f"><b>تلفن‌ها</b>${li(s.phones, (p) => `<div class="num" dir="ltr" style="text-align:right">${esc(p.e164 || p.verbatim)} <span class="dim">(${p.type === "mobile" ? "همراه" : p.type === "landline" ? "ثابت" : "؟"}${p.verification === "verified" ? " ✓" : p.verification === "gated" ? " · بسته" : ""})</span></div>`)}</div>
-        <div class="f"><b>ایمیل</b>${li(s.emails, (e) => `<div dir="ltr" style="text-align:right">${esc(e.verbatim)}</div>`)}</div>
-        <div class="f"><b>پیام‌رسان‌ها</b>${li(s.messengers, (m2) => `<div dir="ltr" style="text-align:right">${esc(m2.platform)}: ${esc(m2.handle_or_link)}</div>`)}</div>
-        <div class="f"><b>نشانی</b>${li(s.addresses, (a) => `<div>${esc(a.verbatim)}</div>`)}</div>
-        <div class="f"><b>هویت حقوقی</b>${s.credibility && s.credibility.legal_identity && (s.credibility.legal_identity.legal_name || s.credibility.legal_identity.registry_id)
-          ? esc([s.credibility.legal_identity.legal_name, s.credibility.legal_identity.registry_id].filter(Boolean).join(" · ")) : "—"}</div></div>
-      ${s.scores && s.scores.rationale ? `<div class="desc"><b>چرا این رتبه:</b> ${esc(s.scores.rationale)}</div>` : ""}
-      ${s.credibility && (s.credibility.red_flags || []).filter(Boolean).length ? `<div class="desc" style="color:#fca5a5"><b>پرچم قرمز:</b> ${esc(s.credibility.red_flags.filter(Boolean).join(" · "))}</div>` : ""}
-      <div class="dim" style="font-size:.8rem;margin-top:8px">${(s.evidence || []).length} مدرک با نشانی منبع ثبت شده؛ هر مقدار عیناً از صفحهٔ منبع رونویسی شده است.</div></div>`;
-  }
+  /* نتیجهٔ جستجو را هر دو شکل می‌خوانند: v3 (فهرست ساده) و نتایج ذخیره‌شدهٔ قدیمی */
+  const supPhones = (s) => (s.phones || []).map((p) => (p && typeof p === "object" ? p.e164 || p.verbatim : p)).filter(Boolean);
+  const supEmails = (s) => (s.emails || []).map((x) => (x && typeof x === "object" ? x.verbatim : x)).filter(Boolean);
+  const supMarket = (s) => s.market || (s.location && s.location.country) || "";
+  const supType = (s) => s.type || s.role || "unknown";
+  const supPrice = (s) => (s.price && typeof s.price === "object" ? [s.price.text, s.price.unit ? `/ ${s.price.unit}` : ""].filter(Boolean).join(" ") : s.price || "");
+  const faDigits = (x) => String(x).replace(/\d/g, (c) => "۰۱۲۳۴۵۶۷۸۹"[+c]).replace(/\./g, "٫");
+  /* بررسی دستیِ پیام‌رسان هر شماره — همان مدل دمو: «—» بررسی‌نشده، یک کلیک ✓، کلیک دوم ✗.
+     فعلاً فقط در همین صفحه می‌ماند؛ انتقالش به پایگاه داده مرحلهٔ بعد است. */
+  const TRI = { unk: ["—", "unk"], ok: ["✓", "ok"], no: ["✗", "no"] };
+  const siteLink = (u) => {
+    const x = String(u || "").trim();
+    if (!x) return "—";
+    const href = /^https?:\/\//i.test(x) ? x : `https://${x}`;
+    return `<a href="${esc(href)}" target="_blank" rel="noopener" dir="ltr" style="color:var(--tp-accent)">${esc(x.replace(/^https?:\/\//i, "").replace(/\/$/, ""))}</a>`;
+  };
 
   function vSmart(it) {
     const d = S.smart[it.id];
     if (d === undefined) { loadSmart(it); }
+    S.chan = S.chan || {}; S.chOpen = S.chOpen || {};
+    const has = d && d !== "loading" && d.result;
     const head = `<div class="toolrow"><b style="font-size:1.02rem">جستجوی هوشمند برای «${esc(it.title)}»</b>
       ${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
-      <button class="tp-btn primary" data-run-smart>${d && d !== "loading" && d.result ? "جستجوی دوباره" : "اجرای جستجوی هوشمند"}</button>
+      <button class="tp-btn" data-tpl-open title="قالب‌های پیام موجود را ببینید یا قالب تازه بسازید">ایجاد قالب پیام</button>
+      <button class="tp-btn primary" data-run-smart>${has ? "جستجوی دوباره" : "اجرای جستجوی هوشمند"}</button>
       ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart" title="اگر جستجو را بیرون از سامانه انجام داده‌اید">علامت بزن</button>`}</div>`;
 
     let main;
     if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن نتیجهٔ قبلی…</div>`;
-    else if (!d || !d.result) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
-      بازارها را در ستون کنار انتخاب کنید، اگر برند یا مشخصات خاصی مدنظر است بنویسید، و «اجرای جستجوی هوشمند» را بزنید.
-      مدل در همان بازارها می‌گردد، تماس‌ها را عیناً از صفحه‌ها برمی‌دارد و تأمین‌کنندگان را برای اولین تماس رتبه می‌کند.</div>`;
+    else if (!has) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
+      بازارها را در ستون کنار انتخاب کنید و «اجرای جستجوی هوشمند» را بزنید.</div>`;
     else {
-      const R = d.result, sup = R.suppliers || [];
+      const sup = d.result.suppliers || [], sid = d.search_id || 0;
       const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
-      const exN = (R.excluded || []).length;
-      const contactCell = (s) => {
-        const mob = (s.mobile_numbers || []).slice(0, 2).map((x) => `<div class="num" dir="ltr" style="text-align:right">📱 ${esc(x)}</div>`).join("");
-        const land = !mob && s.phones && s.phones.length ? `<div class="num" dir="ltr" style="text-align:right">${esc(s.phones[0].e164 || s.phones[0].verbatim)}</div>` : "";
-        const msg = !mob && !land && s.messengers && s.messengers.length ? `<div dir="ltr" style="text-align:right">${esc(s.messengers[0].platform)}: ${esc(s.messengers[0].handle_or_link)}</div>` : "";
-        const gate = s.contact_gated ? `<span class="chip warn" style="font-size:.7rem">پشت کلیک</span>` : "";
-        return (mob + land + msg) || gate || "—";
-      };
-      main = `${vSmartProf(d)}
-        <div class="tp-note" style="display:block"><b>خلاصهٔ جستجو:</b> ${esc(R.summary_fa || "—")}
-          <div class="dim" style="font-size:.8rem;margin-top:6px">${M(sup.length)} تأمین‌کننده · ${M((d.usage && d.usage.searches) || (R.request || {}).searches_used || 0)} جستجو و ${M((d.usage && d.usage.fetches) || (R.request || {}).fetches_used || 0)} صفحه · ${TP.fmt(d.created_at)}${d.cost != null ? ` · هزینهٔ تقریبی این اجرا ${Number(d.cost).toFixed(2)} دلار` : ""}${exN ? ` · ${M(exN)} مورد ردشده (خارج از بازار یا بی‌هویت)` : ""} · قیمت و کیفیت سنجیده نشده‌اند — این فقط ترتیبِ تماس اول است.</div></div>
-        <div class="tp-scroll" data-keep-scroll style="max-height:52vh"><table class="tp-table"><thead><tr>
-          <th>رتبه</th><th class="rt">تأمین‌کننده</th><th>نقش</th><th>بازار</th><th class="rt">تماس</th><th class="rt">ایمیل</th><th>امتیاز</th><th>عمل</th></tr></thead><tbody>
-        ${sup.map((s, i) => `<tr class="${S.smProf === i ? "sel" : ""}">
-          <td class="num">${M(s.rank || i + 1)}</td>
-          <td class="rt"><span class="supname" data-sm-prof="${i}">${esc(s.name)}</span>${s.website ? `<div class="dim" style="font-size:.72rem" dir="ltr">${esc(String(s.website).replace("https://", "").replace("http://", ""))}</div>` : ""}</td>
-          <td>${ROLE_FA[s.role] || esc(s.role || "—")}</td>
-          <td>${esc([s.location && s.location.city, s.location && s.location.country].filter(Boolean).join("، ") || "—")}</td>
-          <td class="rt">${contactCell(s)}</td>
-          <td class="rt" dir="ltr" style="text-align:right">${esc((s.emails && s.emails[0] && s.emails[0].verbatim) || "—")}</td>
-          <td class="num" style="font-weight:700">${s.scores && s.scores.total != null ? M(Math.round(s.scores.total)) : "—"}</td>
+      const rows = sup.map((s, i) => {
+        const phones = supPhones(s), emails = supEmails(s), key = `${sid}|${i}`, open = !!S.chOpen[key];
+        const tri = (ph, p, lab) => {
+          const k = `${key}|${ph}|${p}`, st = TRI[S.chan[k]] ? S.chan[k] : "unk";
+          return `<button class="tri ${TRI[st][1]}" data-ch="${esc(k)}" title="${lab}">${TRI[st][0]}</button>`;
+        };
+        const checks = open && phones.length ? `<tr class="chrow"><td></td><td colspan="8"><table class="chx"><thead><tr><th class="rt">شماره</th>${PLATS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead><tbody>
+          ${phones.map((ph) => `<tr><td class="num rt" dir="ltr">${esc(ph)}</td>${PLATS.map(([p, l]) => `<td>${tri(ph, p, l)}</td>`).join("")}</tr>`).join("")}
+          </tbody></table></td></tr>` : "";
+        return `<tr>
+          <td class="num">${M(i + 1)}</td>
+          <td class="rt">${esc(s.name || "—")}</td>
+          <td>${esc(ROLE_FA[supType(s)] || supType(s))}</td>
+          <td>${esc(supMarket(s) || "—")}</td>
+          <td class="rt">${phones.length ? `<div class="phcell"><button class="tp-btn xs hamb ${open ? "on" : ""}" data-chopen="${esc(key)}" title="بررسی تلگرام، واتساپ، بله و روبیکا">☰</button><div>${phones.map((ph) => `<div class="num" dir="ltr">${esc(ph)}</div>`).join("")}</div></div>` : "—"}</td>
+          <td class="rt" dir="ltr" style="text-align:right">${emails.length ? emails.map((x) => `<div>${esc(x)}</div>`).join("") : "—"}</td>
+          <td class="rt">${siteLink(s.website)}</td>
+          <td class="rt">${esc(supPrice(s) || "—")}</td>
           <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
-            <button class="tp-btn xs" data-sm-msg="${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>`).join("")}
-        ${sup.length ? "" : `<tr><td colspan="8"><div class="empty">مدل تأمین‌کنندهٔ قابل‌قبولی در بازارهای انتخابی پیدا نکرد؛ بازار بیشتری تیک بزنید یا مشخصات را ساده‌تر کنید.</div></td></tr>`}
-        </tbody></table></div>`;
+            <button class="tp-btn xs" data-sm-msg="${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>${checks}`;
+      }).join("");
+      main = `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table smres"><thead><tr>
+          <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th class="rt">وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="9"><div class="empty">مدل تأمین‌کننده‌ای برنگرداند.</div></td></tr>`}</tbody></table></div>
+        ${d.cost != null ? `<div class="dim smcost">هزینهٔ این جستجو: ${faDigits(Number(d.cost).toFixed(2))} دلار</div>` : ""}`;
     }
-
     /* ستون قیدها — مهم‌ترین قید، «بازار تأمین کالا»، یک فهرست است */
     const markets = `<div class="grp"><b>بازار تأمین کالا <span class="dim" style="font-weight:400">(حداکثر ${"۰۱۲۳۴۵۶۷۸۹"[S.maxMarkets || 3] || S.maxMarkets})</span></b>${(S.marketsMeta || []).map((x) =>
       `<label><input type="checkbox" data-smk="${x.key}" ${S.sm.markets.includes(x.key) ? "checked" : ""}> ${esc(x.fa)}</label>`).join("")}</div>`;
@@ -682,7 +681,7 @@
         <div class="tp-note" style="margin:8px 0"><b>پیش‌نمایش برای قلم فعلی:</b><br><span style="white-space:pre-wrap">${esc(fillTpl(t.body, "«تأمین‌کننده»"))}</span></div>
         <div class="tp-acts"><button class="tp-btn primary" data-save>ذخیره</button><button class="tp-btn" data-del ${S.templates.length < 2 ? "disabled" : ""}>حذف این قالب</button></div>`;
       const ta = d.querySelector("#tb2");
-      d.querySelectorAll(".tok").forEach((b) => b.onclick = () => { const tk = "{" + b.dataset.k + "}", s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + tk + ta.value.slice(e); const pos = s + tk.length; ta.focus(); ta.setSelectionRange(pos, pos); });
+      d.querySelectorAll(".tok").forEach((b) => b.onclick = () => { /* جای‌خالی همان‌جای مکان‌نما می‌نشیند و مکان‌نما بعد از آن و یک فاصله می‌رود */ const tk = "{" + b.dataset.k + "} ", s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + tk + ta.value.slice(e); const pos = s + tk.length; ta.focus(); ta.setSelectionRange(pos, pos); });
       d.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { S.tpl = +b.dataset.t; paint(); });
       d.querySelector("[data-add]").onclick = async () => { await TP.api("/templates", { body: { title: "قالب جدید", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\n` } }); await loadTemplates(); S.tpl = S.templates.length - 1; paint(); };
       d.querySelector("[data-save]").onclick = async () => { await TP.api(`/templates/${t.id}`, { method: "PUT", body: { title: d.querySelector("#tt").value || "بدون عنوان", body: ta.value } }); await loadTemplates(); paint(); };
@@ -787,8 +786,10 @@
       if (!e.target.checked && i >= 0) S.sm.markets.splice(i, 1);
     });
     Q("[data-sm]").forEach((el) => el.oninput = (e) => { S.sm[e.target.dataset.sm] = e.target.value; });
-    Q("[data-sm-prof]").forEach((el) => el.onclick = () => { S.smProf = S.smProf === +el.dataset.smProf ? null : +el.dataset.smProf; render(); });
-    const smc = G("[data-sm-close]"); if (smc) smc.onclick = () => { S.smProf = null; render(); };
+    Q("[data-tpl-open]").forEach((b) => b.onclick = pickTemplate);
+    Q("[data-chopen]").forEach((b) => b.onclick = () => { S.chOpen[b.dataset.chopen] = !S.chOpen[b.dataset.chopen]; render(); });
+    /* همان چرخهٔ دمو: — ← ✓ ← ✗ ← — */
+    Q("[data-ch]").forEach((b) => b.onclick = () => { const k = b.dataset.ch, c = S.chan[k] || "unk"; S.chan[k] = c === "unk" ? "ok" : c === "ok" ? "no" : "unk"; render(); });
     Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(+b.dataset.smAdd));
     Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(+b.dataset.smMsg));
     /* استعلامات */
