@@ -2091,7 +2091,18 @@ async function smartSelOpen(env, api, chat, ex, searchId, mid, preferId) {
 /* تأمین‌کننده) اگر باشد، «بازگشت» به همان انتخابِ قالب برمی‌گردد.         */
 /* ------------------------------------------------------------------ */
 
-const ctxOf = (sid, i) => (sid ? `:${sid}:${i}` : "");
+/* ctx = «:جستجو:ردیف:قلم» — از کدام نتیجهٔ جستجو و برای کدام قلم آمده‌ایم؛ خالی یعنی /ghaleb */
+const ctxOf = (sid, i, item) => (sid ? `:${sid}:${i}:${item || 0}` : "");
+
+/**
+ * ردیف‌های راهبری پایینِ هر صفحهٔ قالب پیام: «بازگشت» به صفحهٔ قبل، و «کارتابل» و «درخواست».
+ * «درخواست» فقط وقتی معنا دارد که از نتیجهٔ جستجوی یک قلم آمده باشیم؛ در /ghaleb فقط کارتابل.
+ */
+async function tplNav(env, ex, ctx, back) {
+  const item = parseInt(String(ctx || "").split(":")[3], 10) || 0;
+  const it = item ? await smartItemOf(env, ex.id, item) : null;
+  return [[{ text: "↩️ بازگشت", callback_data: back }], it ? navRow(it.aid) : [KARTABL_BTN]];
+}
 const tokensLine = () => TEMPLATE_TOKENS.map((t) => `<code>{${t}}</code>`).join(" ");
 
 /** انتخاب قالب برای یک تأمین‌کنندهٔ نتیجهٔ جستجو (sg:p) */
@@ -2099,7 +2110,8 @@ async function templatePick(env, api, chat, ex, sr, i, s2, mid, itemId) {
   const tpls = (await ensureTemplates(env, ex.id, env.COMPANY)).slice(0, 12);
   const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b> — <i>${esc(short(t2.body.replace(/\s+/g, " "), 60))}</i>`).join("\n");
   const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}${itemId ? `:${itemId}` : ""}` }]);
-  kb.push([{ text: "🗂 قالب‌های پیام (جدید / ویرایش)", callback_data: `tp:ls:0${ctxOf(sr.search_id, i)}` }]);
+  kb.push([{ text: "🗂 قالب‌های پیام (جدید / ویرایش)", callback_data: `tp:ls:0${ctxOf(sr.search_id, i, itemId)}` }]);
+  kb.push(...await tplNav(env, ex, ctxOf(sr.search_id, i, itemId), `sg:${sr.search_id}:open:${itemId || 0}`));
   return show(api, chat, null, `✉️ پیام برای <b>${esc(short(s2.name, 36))}</b>\nکدام قالب؟\n\n${desc}`, kb);
 }
 
@@ -2108,7 +2120,9 @@ async function templateList(env, api, chat, ex, ctx, mid, head) {
   const list = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n   <i>${esc(short(t2.body.replace(/\s+/g, " "), 70))}</i>`).join("\n");
   const kb = tpls.slice(0, 20).map((t2) => [{ text: `📄 ${short(t2.title, 30)}`, callback_data: `tp:v:${t2.id}${ctx || ""}` }]);
   kb.push([{ text: "➕ قالب جدید", callback_data: `tp:new:0${ctx || ""}` }]);
-  if (ctx) { const [, sid, i] = ctx.split(":"); kb.push([{ text: "↩️ بازگشت به انتخاب قالب", callback_data: `sg:${sid}:p:${i}` }]); }
+  /* بازگشت: از نتیجهٔ جستجو ← انتخاب قالب همان تأمین‌کننده؛ از /ghaleb ← راهنمای بات */
+  const [, sid, i, item] = String(ctx || "").split(":");
+  kb.push(...await tplNav(env, ex, ctx, ctx ? `sg:${sid}:p:${i}:${item || 0}` : "tp:hm:0"));
   return show(api, chat, mid, `${head ? head + "\n\n" : ""}🗂 <b>قالب‌های پیام</b> — ${M(tpls.length)} قالب\n\n${list}\n\n`
     + `جای‌خالی‌ها هنگام ارسال با دادهٔ همان قلم و تأمین‌کننده پر می‌شوند: ${tokensLine()}`, kb);
 }
@@ -2119,7 +2133,7 @@ async function templateView(env, api, chat, ex, id, ctx, mid, head) {
   const kb = [
     [{ text: "✏️ ویرایش عنوان", callback_data: `tp:et:${id}${ctx || ""}` }, { text: "✏️ ویرایش متن", callback_data: `tp:eb:${id}${ctx || ""}` }],
     [{ text: "🗑 حذف این قالب", callback_data: `tp:dl:${id}${ctx || ""}` }],
-    [{ text: "🗂 فهرست قالب‌ها", callback_data: `tp:ls:0${ctx || ""}` }],
+    ...await tplNav(env, ex, ctx, `tp:ls:0${ctx || ""}`),
   ];
   return show(api, chat, mid, `${head ? head + "\n\n" : ""}📄 <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n\n<code>${esc(t2.body)}</code>\n\n`
     + `<i>ساختار قالب همین است؛ جای‌خالی‌ها هنگام ارسال پر می‌شوند.</i>`, kb);
@@ -2161,8 +2175,10 @@ async function onTemplateText(env, api, chat, ex, f, d, text) {
 
 async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
   const step = parts[1], id = parseInt(parts[2], 10) || 0;
-  const ctx = parts[3] ? `:${parts[3]}:${parts[4] || 0}` : "";
+  const ctx = parts[3] ? `:${parts[3]}:${parts[4] || 0}:${parts[5] || 0}` : "";
   if (step === "ls") { await ack(); return templateList(env, api, chat, ex, ctx, mid); }
+  /* بازگشت از فهرست قالب‌های /ghaleb */
+  if (step === "hm") { await ack(); return show(api, chat, mid, HELP_TEXT, [[KARTABL_BTN]]); }
   if (step === "v") { await ack(); return templateView(env, api, chat, ex, id, ctx, mid); }
   if (step === "new") { await ack(); return templateAsk(env, api, chat, ex, "need_title", { ctx }, "➕ <b>قالب جدید</b>\n\nعنوان قالب را بنویسید (مثلاً «زمان تحویل»):"); }
   const t2 = id ? await ownTemplate(env, ex.id, id) : null;
@@ -2172,7 +2188,7 @@ async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
   if (step === "dl") {
     await ack();
     return show(api, chat, mid, `🗑 قالب «<b>${esc(t2.title)}</b>» حذف شود؟`,
-      [[{ text: "🗑 بله، حذف شود", callback_data: `tp:dk:${id}${ctx}` }], [{ text: "↩️ بازگشت", callback_data: `tp:v:${id}${ctx}` }]]);
+      [[{ text: "🗑 بله، حذف شود", callback_data: `tp:dk:${id}${ctx}` }], ...await tplNav(env, ex, ctx, `tp:v:${id}${ctx}`)]);
   }
   if (step === "dk") {
     await env.DB.prepare("DELETE FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(id, ex.id).run();
@@ -2657,7 +2673,14 @@ async function onCallback(env, cq) {
     if (step === "open") {
       await ack();
       const kb = sup.map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }]);
-      await api.sendMessage(chat, "✉️ پیام برای کدام تأمین‌کننده آماده شود؟", kb).catch(() => {});
+      kb.push([{ text: "↩️ بازگشت", callback_data: `sg:${sr.search_id}:ch:${sit.id}` }], navRow(sit.aid));
+      await show(api, chat, mid, "✉️ پیام برای کدام تأمین‌کننده آماده شود؟", kb);
+      return { ok: true };
+    }
+    /* بازگشت از فهرست تأمین‌کنندگان ← همان دو گزینهٔ زیر نتیجهٔ جستجو */
+    if (step === "ch") {
+      await ack();
+      await show(api, chat, mid, "🔎 با نتایج جستجو چه کنم؟", [...smartChoiceKb(sr.search_id, sit.id), navRow(sit.aid)]);
       return { ok: true };
     }
     if (step === "p") {
@@ -2678,7 +2701,8 @@ async function onCallback(env, cq) {
          متن بلندتر با لمسِ بلوکِ <code> کپی می‌شود. */
       const kb = [];
       if (text.length <= 256) kb.push([{ text: "📋 کپی پیام", copy_text: { text } }]);
-      kb.push([{ text: "✉️ قالب دیگر", callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }, { text: "🗂 قالب‌های پیام", callback_data: `tp:ls:0:${sr.search_id}:${i}` }]);
+      kb.push([{ text: "✉️ قالب دیگر", callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }, { text: "🗂 قالب‌های پیام", callback_data: `tp:ls:0:${sr.search_id}:${i}:${sit.id}` }]);
+      kb.push([{ text: "↩️ بازگشت", callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }], navRow(sit.aid));
       await api.sendMessage(chat, `✉️ <b>${esc(tpl.title)}</b> — برای ${esc(short(s2.name, 36))}\n\n<code>${esc(text)}</code>\n\n<i>${text.length <= 256 ? "«کپی پیام» را بزنید" : "روی متن بزنید تا کپی شود"} و در کانال دلخواه بفرستید.</i>`, kb).catch(() => {});
       return { ok: true };
     }

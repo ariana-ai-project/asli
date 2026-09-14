@@ -10,7 +10,7 @@
  * هیچ‌کدام از این مراحل بایت‌های صوت را در Worker نگه نمی‌دارند: ElevenLabs
  * خودش فایل را از یک لینک امضاشده برمی‌دارد.
  */
-import { ExtractError } from "./extract.js";
+import { ExtractError, MODEL } from "./extract.js";
 
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 /* ANTHROPIC_API_BASE فقط در توسعهٔ محلی ست می‌شود (مدل بدلی)؛ همان قاعدهٔ discovery.js */
@@ -277,7 +277,7 @@ export async function writeLetter(env, { transcript, request, items, quotes, all
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
-      model: env.AI_MODEL || "claude-sonnet-5",
+      model: env.AI_MODEL || MODEL,
       max_tokens: 3000,
       system: LETTER_SYSTEM,
       tools: [{ name: "write_letter", description: "نامهٔ اداری ساخته‌شده", input_schema: LETTER_SCHEMA }],

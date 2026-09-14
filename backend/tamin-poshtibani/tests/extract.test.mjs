@@ -37,7 +37,7 @@ test("هر دلیل خودداری یک متن فارسی برای نمایش د
 });
 
 test("مدل و نسخهٔ دستور ثبت می‌شوند (INV-15)", () => {
-  assert.match(MODEL, /sonnet-5/);
+  assert.match(MODEL, /haiku-4-5/);
   assert.match(PROMPT_VERSION, /^pf-extract\//);
 });
 

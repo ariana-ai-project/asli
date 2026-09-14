@@ -126,7 +126,7 @@ test("درخواست: جستجوی مستقیم بدون فیلتر کد، بی 
   assert.equal(out.result.suppliers.length, 6);
   assert.deepEqual(out.result.request.markets, ["ایران", "ارمنستان"]);
   assert.deepEqual(out.usage, { input: 1200, output: 2000, cacheRead: 30000, cacheWrite: 60000, searches: 5, fetches: 0 });
-  assert.equal(out.cost, runCost("claude-sonnet-5", out.usage));
+  assert.equal(out.cost, runCost("claude-haiku-4-5-20251001", out.usage));
 });
 
 test("SMART_SEARCH_FILTER=1: فیلتر پویا با نسخهٔ 20260318 و response_inclusion=excluded", async () => {

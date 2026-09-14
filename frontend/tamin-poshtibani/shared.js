@@ -179,9 +179,44 @@
   .jdp-grid button.sel{background:#4f8cff;color:#fff;font-weight:700}
   .jdp-sel{margin-top:8px;font-size:.78rem;color:#9fb2d8;text-align:center}
   .jdp-foot{display:flex;justify-content:space-between;margin-top:8px;gap:6px}
-  .jdp-foot button{flex:1;border:1px solid rgba(158,197,255,.3);background:none;color:inherit;border-radius:6px;padding:4px;font-size:.78rem;cursor:pointer}`;
+  .jdp-foot button{flex:1;border:1px solid rgba(158,197,255,.3);background:none;color:inherit;border-radius:6px;padding:4px;font-size:.78rem;cursor:pointer}
+  :root[data-theme="light"] .tp-modal-bg{background:rgba(15,27,51,.35)}
+  :root[data-theme="light"] .tp-modal{background:#fff;color:#0f1b33;border-color:rgba(30,60,120,.18);box-shadow:0 24px 60px rgba(20,40,80,.2)}
+  :root[data-theme="light"] .tp-modal .tp-body{color:#3b4a66}
+  :root[data-theme="light"] .jdp{background:#fff;color:#0f1b33;border-color:rgba(30,60,120,.22);box-shadow:0 12px 30px rgba(20,40,80,.18)}
+  :root[data-theme="light"] .jdp-head button,:root[data-theme="light"] .jdp-foot button{border-color:rgba(30,60,120,.25)}
+  :root[data-theme="light"] .jdp-grid .wd,:root[data-theme="light"] .jdp-sel{color:#4a5a78}
+  :root[data-theme="light"] .jdp-grid button:hover{background:rgba(47,111,228,.1)}`;
   let cssDone = false;
   function ensureCss() { if (cssDone) return; cssDone = true; const s = document.createElement("style"); s.textContent = SHARED_CSS; document.head.appendChild(s); }
+
+  /* ---------- حالت شب و روز ----------
+     انتخاب در مرورگر همان کاربر می‌ماند (localStorage) و پیش از رندر پنل روی <html> می‌نشیند
+     تا صفحه با رنگ اشتباه چشمک نزند. پیش‌فرض همان پوستهٔ تیرهٔ سایت است. رنگ‌ها در panel.css. */
+  const THEME_KEY = "tp.theme";
+  TP.theme = {
+    get() { try { return localStorage.getItem(THEME_KEY) === "light" ? "light" : "dark"; } catch (_) { return "dark"; } },
+    apply(t) {
+      document.documentElement.dataset.theme = t;
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", t === "light" ? "#eef2f8" : "#030814");
+    },
+    set(t) { try { localStorage.setItem(THEME_KEY, t); } catch (_) { /* حالت خصوصی — فقط همین صفحه */ } TP.theme.apply(t); },
+    toggle() { TP.theme.set(TP.theme.get() === "light" ? "dark" : "light"); },
+  };
+  const themeLabel = () => (TP.theme.get() === "light" ? ["🌙", "حالت شب"] : ["☀️", "حالت روز"]);
+  /** دکمهٔ نوار بالا — پنل‌ها فقط همین را در سرآیندشان می‌گذارند؛ کلیکش را شنوندهٔ سراسری زیر می‌گیرد */
+  TP.themeBtn = () => { const [ic, lab] = themeLabel(); return `<button class="tp-btn sm tp-theme" data-theme-toggle title="${lab}" aria-label="${lab}">${ic} ${lab}</button>`; };
+  /* تست‌ها همین فایل را بیرون از مرورگر اجرا می‌کنند — بی document یا با document ساختگی */
+  const inBrowser = typeof document !== "undefined" && !!document.documentElement && typeof document.addEventListener === "function";
+  if (inBrowser) TP.theme.apply(TP.theme.get());
+  if (inBrowser) document.addEventListener("click", (e) => {
+    const b = e.target && e.target.closest && e.target.closest("[data-theme-toggle]");
+    if (!b) return;
+    TP.theme.toggle();
+    const [ic, lab] = themeLabel();
+    document.querySelectorAll("[data-theme-toggle]").forEach((x) => { x.textContent = `${ic} ${lab}`; x.title = lab; x.setAttribute("aria-label", lab); });
+  });
 
   /* ---------- مودال تأیید ---------- */
   /* modal(title, bodyHtml, onYes, yesLabel="تایید", noLabel="انصراف"); noLabel="" → فقط یک دکمه */

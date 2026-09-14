@@ -226,6 +226,7 @@
       <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>میز ارجاع خرید</h1><div class="sub">${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}</div></div></div>
       <span class="spacer"></span>
       <button class="tp-btn" data-import>بارگذاری درخواست‌های روزانه</button>
+      ${TP.themeBtn()}
       <button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button>
       <a class="tp-back" href="index.html">تدارکات</a>
       <button class="tp-btn xs" data-logout title="خروج">خروج</button>

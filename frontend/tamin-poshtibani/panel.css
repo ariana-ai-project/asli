@@ -250,3 +250,95 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .tp-table td.expcell select { width: 100%; }
 .filexp { font-size: .74rem; color: var(--tp-dim); margin-top: 3px; line-height: 1.45; white-space: normal; text-align: right; }
 .filexp.warn { color: #fcd34d; }
+
+/* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
+.tp-theme { min-width: 34px; }
+
+/* ============================================================
+   حالت روز — html[data-theme="light"]
+   همان پوسته با سطح روشن. رنگ‌های معنایی (سبز/زرد/قرمز مراحل) می‌مانند و فقط
+   سایه‌روشن متن‌ها تیره‌تر می‌شود تا روی زمینهٔ سفید خوانا باشد.
+   ============================================================ */
+:root[data-theme="light"] {
+  --tp-bg: #eef2f8;
+  --tp-bg-2: #e3e9f3;
+  --tp-surface: #ffffff;
+  --tp-surface-2: #f5f8fc;
+  --tp-line: rgba(30, 60, 120, 0.14);
+  --tp-line-2: rgba(30, 60, 120, 0.28);
+  --tp-fg: #0f1b33;
+  --tp-muted: #4a5a78;
+  --tp-dim: #6b7a96;
+  --tp-accent: #2f6fe4;
+  --tp-accent-2: #e8742a;
+  --tp-ok: #16a34a;
+  --tp-warn: #e0ac08;
+  --tp-late: #d9731a;
+  --tp-over: #d63a3f;
+  color-scheme: light;
+}
+:root[data-theme="light"] body.tp-body {
+  background:
+    radial-gradient(ellipse 80% 50% at 85% -10%, rgba(47, 111, 228, 0.10), transparent 60%),
+    radial-gradient(ellipse 70% 45% at 5% 105%, rgba(232, 116, 42, 0.07), transparent 60%),
+    var(--tp-bg);
+}
+:root[data-theme="light"] .tp-top,
+:root[data-theme="light"] .tp-foot { background: rgba(255, 255, 255, 0.92); }
+:root[data-theme="light"] .tp-top .brand img { border-color: rgba(30, 60, 120, 0.25); }
+:root[data-theme="light"] .tp-tab { background: rgba(47, 111, 228, 0.05); }
+:root[data-theme="light"] .tp-tab:hover { background: rgba(47, 111, 228, 0.12); }
+:root[data-theme="light"] .tp-tab .cnt { background: rgba(255, 255, 255, 0.3); }
+:root[data-theme="light"] .tp-btn { background: rgba(47, 111, 228, 0.07); }
+:root[data-theme="light"] .tp-btn:hover { background: rgba(47, 111, 228, 0.14); }
+:root[data-theme="light"] .tp-btn.primary { background: linear-gradient(135deg, #2f6fe4, #4f8cff); color: #fff; }
+:root[data-theme="light"] .tp-input, :root[data-theme="light"] .tp-select, :root[data-theme="light"] .tp-textarea,
+:root[data-theme="light"] .tp-input:focus, :root[data-theme="light"] .tp-select:focus, :root[data-theme="light"] .tp-textarea:focus { background: #fff; }
+:root[data-theme="light"] .tp-input.on { background: rgba(47, 111, 228, 0.08); }
+:root[data-theme="light"] .tp-select option { background: #fff; color: var(--tp-fg); }
+:root[data-theme="light"] .tp-note { background: rgba(47, 111, 228, 0.07); color: #26406e; }
+:root[data-theme="light"] .tp-note.warn { background: rgba(224, 172, 8, 0.1); color: #5c4506; }
+:root[data-theme="light"] .tp-filters { background: rgba(255, 255, 255, 0.75); }
+:root[data-theme="light"] .tp-card { box-shadow: 0 8px 26px rgba(20, 40, 80, 0.08); }
+:root[data-theme="light"] .tp-grid6 .cell, :root[data-theme="light"] .tp-formula,
+:root[data-theme="light"] .kpi .k, :root[data-theme="light"] .conf { background: #f5f8fc; }
+:root[data-theme="light"] .tp-formula .term { background: rgba(47, 111, 228, 0.05); }
+:root[data-theme="light"] .tp-formula select.op { background: rgba(47, 111, 228, 0.1); }
+:root[data-theme="light"] .tp-scroll { background: #fff; }
+:root[data-theme="light"] .tp-scroll::-webkit-scrollbar-track { background: #eef2f8; }
+:root[data-theme="light"] .tp-scroll::-webkit-scrollbar-thumb { background: rgba(30, 60, 120, 0.25); border-color: #eef2f8; }
+:root[data-theme="light"] .tp-table th, :root[data-theme="light"] .tp-table td { border-inline-start-color: rgba(30, 60, 120, 0.07); }
+:root[data-theme="light"] .tp-table thead th { background: #e6edf8; color: #1f3155; }
+:root[data-theme="light"] .tp-table thead tr.group th { background: #dfe7f4; }
+:root[data-theme="light"] .tp-table thead tr.flt th { background: #e9eff9; }
+:root[data-theme="light"] .tp-table tbody tr:hover td { background: rgba(47, 111, 228, 0.05); }
+:root[data-theme="light"] .tp-table td.console, :root[data-theme="light"] .tp-table th.console { background: #f5f8fc; }
+:root[data-theme="light"] .tp-table th.stick, :root[data-theme="light"] .tp-table td.stick { background: #f3f6fb; box-shadow: 2px 0 10px -6px rgba(20, 40, 80, 0.25); }
+:root[data-theme="light"] tr.drawer td { background: #f5f8fc !important; }
+:root[data-theme="light"] .drawer-in th, :root[data-theme="light"] .drawer-in td { border-bottom-color: rgba(30, 60, 120, 0.14); }
+:root[data-theme="light"] .tp-mx thead th { background: #e6edf8; }
+:root[data-theme="light"] .tp-mx tbody td.name { background: #f3f6fb; }
+:root[data-theme="light"] .chip.ok { background: rgba(22, 163, 74, 0.1); border-color: rgba(22, 163, 74, 0.4); color: #15803d; }
+:root[data-theme="light"] .chip.warn { background: rgba(224, 172, 8, 0.12); border-color: rgba(224, 172, 8, 0.45); color: #7a5a05; }
+:root[data-theme="light"] .chip.bad { background: rgba(214, 58, 63, 0.1); border-color: rgba(214, 58, 63, 0.4); color: #b91c1c; }
+:root[data-theme="light"] .chip.info { background: rgba(47, 111, 228, 0.1); border-color: rgba(47, 111, 228, 0.4); color: #1d4ed8; }
+:root[data-theme="light"] .chip.mock { background: rgba(232, 116, 42, 0.1); border-color: rgba(232, 116, 42, 0.45); color: #b45309; }
+:root[data-theme="light"] .st-reg { color: #475569; }
+:root[data-theme="light"] .st-apr { color: #15803d; }
+:root[data-theme="light"] .st-run { color: #1d4ed8; }
+:root[data-theme="light"] .st-cls { color: #52525b; }
+:root[data-theme="light"] .st-hold { color: #7a5a05; }
+:root[data-theme="light"] .st-stop { color: #b91c1c; }
+:root[data-theme="light"] .b-idle { background: rgba(47, 111, 228, 0.05); }
+:root[data-theme="light"] .b-empty { background: #fff; border-color: #c7d2e5; }
+:root[data-theme="light"] .b-muted { background: rgba(100, 110, 130, 0.1); }
+:root[data-theme="light"] .box .cnt { color: #b45309; text-shadow: none; }
+:root[data-theme="light"] .bar-load { background: rgba(47, 111, 228, 0.12); }
+:root[data-theme="light"] .tp-login .err, :root[data-theme="light"] .conf .old { color: #b91c1c; }
+:root[data-theme="light"] .conf .new { color: #15803d; }
+:root[data-theme="light"] .filexp.warn { color: #7a5a05; }
+:root[data-theme="light"] body.tp-drop-over::after { color: var(--tp-fg); background: rgba(255, 255, 255, 0.7); border-color: rgba(47, 111, 228, 0.6); }
+/* رنگ‌های روشنی که در خودِ کد صفحه (style="…") نوشته شده‌اند، روی زمینهٔ سفید تیره می‌شوند */
+:root[data-theme="light"] [style*="#fca5a5"] { color: #b91c1c !important; }
+:root[data-theme="light"] [style*="#fcd34d"] { color: #7a5a05 !important; }
+:root[data-theme="light"] [style*="#6ee7b7"], :root[data-theme="light"] [style*="rgb(110, 231, 183)"] { color: #15803d !important; }

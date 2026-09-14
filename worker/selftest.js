@@ -10,6 +10,7 @@
  */
 import { telegram } from "./telegram.js";
 import { storage } from "./storage.js";
+import { MODEL } from "./extract.js";
 
 const ms = (t0) => Math.round(Date.now() - t0);
 
@@ -94,7 +95,7 @@ export async function selfTest(env) {
       const r = await fetch("https://api.anthropic.com/v1/messages", {
         method: "POST",
         headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({ model: env.AI_MODEL || "claude-sonnet-5", max_tokens: 64, messages: [{ role: "user", content: "فقط این یک کلمه را بنویس: سالم" }] }),
+        body: JSON.stringify({ model: env.AI_MODEL || MODEL, max_tokens: 64, messages: [{ role: "user", content: "فقط این یک کلمه را بنویس: سالم" }] }),
       });
       const d = await r.json().catch(() => ({}));
       if (!r.ok) throw new Error(`${r.status}: ${String(d.error && d.error.message).slice(0, 200)}`);

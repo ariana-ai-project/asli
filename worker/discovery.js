@@ -22,7 +22,10 @@ import { HttpError } from "./http.js";
 import { itemKeys, searchSupplierStmts } from "./records.js";
 
 const API_BASE = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
-const MODEL = "claude-sonnet-5";
+/* تصمیم مدیر (شهریور ۱۴۰۵): Haiku 4.5. سقف خروجیِ این مدل ۶۴ هزار توکن است (MAX_TOKENS زیرش است)
+   و فیلتر پویای جستجو (نسخه‌های 2026) را ندارد؛ پیش‌فرض همان ابزارهای پایه است. کمینهٔ کش آن
+   ۴۰۹۶ توکن است، پس پرامپت سیستمِ کوتاهِ کشف کش نمی‌شود — هزینه‌اش با قیمت پایین مدل جبران می‌شود. */
+export const MODEL = "claude-haiku-4-5-20251001";
 export const DISCOVERY_PROMPT_VERSION = "supplier-discovery/3.0";
 
 /* «بازار تأمین کالا» — یک فهرست، بی تفکیک محل پروژه و بازار تجاری.
@@ -226,7 +229,10 @@ export function shapeResult(raw, meta = {}) {
 /* قیمت فهرستی هر میلیون توکن به دلار — برای برآورد هزینهٔ هر اجرا از usage واقعی.
    کش: خواندن ۰٫۱ و نوشتن ۱٫۲۵ برابرِ ورودی. جستجوی وب ۱۰ دلار برای هر هزار جستجو؛
    خواندن صفحه هزینهٔ جدا ندارد و فقط توکن‌هایش حساب می‌شود. */
-const PRICES = { "claude-sonnet-5": { in: 2, out: 10 }, "claude-opus-5": { in: 5, out: 25 } };
+const PRICES = {
+  "claude-haiku-4-5-20251001": { in: 1, out: 5 }, "claude-haiku-4-5": { in: 1, out: 5 },
+  "claude-sonnet-5": { in: 2, out: 10 }, "claude-opus-5": { in: 5, out: 25 },
+};
 const SEARCH_USD = 0.01;
 
 export function runCost(model, u) {

@@ -12,7 +12,8 @@
  * خروجی با «ابزار» گرفته می‌شود نه با متن آزاد، تا همیشه JSON معتبرِ هم‌شکل باشد.
  */
 
-export const MODEL = "claude-sonnet-5";
+/* تصمیم مدیر (شهریور ۱۴۰۵): هر سه کار مدل — استخراج، جستجوی هوشمند و نامه — با Haiku 4.5 */
+export const MODEL = "claude-haiku-4-5-20251001";
 /* ANTHROPIC_API_BASE فقط در توسعهٔ محلی ست می‌شود (مدل بدلی)؛ همان قاعدهٔ discovery.js */
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 const MAX_TOKENS = 8000;
