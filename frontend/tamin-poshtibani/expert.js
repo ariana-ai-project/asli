@@ -446,11 +446,15 @@
   /* بررسی دستیِ پیام‌رسان هر شماره — همان مدل دمو: «—» بررسی‌نشده، یک کلیک ✓، کلیک دوم ✗.
      فعلاً فقط در همین صفحه می‌ماند؛ انتقالش به پایگاه داده مرحلهٔ بعد است. */
   const TRI = { unk: ["—", "unk"], ok: ["✓", "ok"], no: ["✗", "no"] };
-  const siteLink = (u) => {
+  /* ستون وب‌سایت فشرده است (تصمیم مدیر): یک کادر «وبسایت» با فلش ↗ سمت راست و کرهٔ زمین
+     سمت چپ؛ نشانی کامل در title است و با کلیک همان لینک باز می‌شود. */
+  const ICO_GLOBE = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>`;
+  const ICO_ARROW = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M9 7h8v8"/></svg>`;
+  const siteBtn = (u) => {
     const x = String(u || "").trim();
     if (!x) return "—";
     const href = /^https?:\/\//i.test(x) ? x : `https://${x}`;
-    return `<a href="${esc(href)}" target="_blank" rel="noopener" dir="ltr" style="color:var(--tp-accent)">${esc(x.replace(/^https?:\/\//i, "").replace(/\/$/, ""))}</a>`;
+    return `<a class="sitebtn" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(x)}"><span class="arr">${ICO_ARROW}</span><span>وبسایت</span><span class="glb">${ICO_GLOBE}</span></a>`;
   };
 
   function vSmart(it) {
@@ -488,13 +492,13 @@
           <td>${esc(supMarket(s) || "—")}</td>
           <td class="rt">${phones.length ? `<div class="phcell"><button class="tp-btn xs hamb ${open ? "on" : ""}" data-chopen="${esc(key)}" title="بررسی تلگرام، واتساپ، بله و روبیکا">☰</button><div>${phones.map((ph) => `<div class="num" dir="ltr">${esc(ph)}</div>`).join("")}</div></div>` : "—"}</td>
           <td class="rt" dir="ltr" style="text-align:right">${emails.length ? emails.map((x) => `<div>${esc(x)}</div>`).join("") : "—"}</td>
-          <td class="rt">${siteLink(s.website)}</td>
+          <td>${siteBtn(s.website)}</td>
           <td class="rt">${esc(supPrice(s) || "—")}</td>
           <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
             <button class="tp-btn xs" data-sm-msg="${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>${checks}`;
       }).join("");
       main = `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table smres"><thead><tr>
-          <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th class="rt">وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
+          <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th>وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="9"><div class="empty">مدل تأمین‌کننده‌ای برنگرداند.</div></td></tr>`}</tbody></table></div>
         ${d.cost != null ? `<div class="dim smcost">هزینهٔ این جستجو: ${faDigits(Number(d.cost).toFixed(2))} دلار</div>` : ""}`;
     }
@@ -520,7 +524,7 @@
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (پیش‌فرض غیررسمی؛ با خواندن پیش‌فاکتور، رسمی). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
+        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (خط دستی: غیررسمی؛ خوانده‌شده از پیش‌فاکتور: رسمی، مگر سند خلافش را بگوید). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
@@ -532,8 +536,8 @@
           <td><select class="tp-select ${q.pay ? "" : "bad"}" data-qf="${q.id}|pay"><option value="">—</option>${PAYS.map((v) => `<option ${q.pay === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td><select class="tp-select ${q.vat ? "" : "bad"}" data-qf="${q.id}|vat" title="اجباری — قیمتِ ردیف باید بدون ارزش افزوده باشد؛ ارزش افزوده ته جدول جدا حساب می‌شود"><option value="">—</option>${VATS.map((v) => `<option ${q.vat === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td><select class="tp-select" data-qf="${q.id}|deal" title="اختیاری — تصمیم داخلی؛ از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td style="min-width:170px"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
-            ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" style="margin-top:4px;width:100%">` : ""}</td>
+          <td style="min-width:170px"><div class="stack"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
+            ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}">` : ""}</div></td>
           <td class="num">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
           <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<span class="chip ok" title="${esc(S.d.proformas.find((p) => p.supplier_name === q.supplier_name).filename || "")}">ثبت شد</span>` : `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`}</td>
           <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<button class="tp-btn xs" data-extract="${q.id}">استخراج</button>` : `<span class="chip">—</span>`}</td>

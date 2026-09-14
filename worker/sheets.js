@@ -12,10 +12,14 @@
  *
  * فرم هشت بلوک تأمین‌کننده و دوازده ردیف قلم دارد؛ اگر بیشتر لازم شد، بلوک و ردیف
  * با همان قالب اضافه می‌شود و چاپ همچنان در یک صفحه جا می‌گیرد (fitToPage).
- * «کد، شماره بازنگری، تاریخ تنظیم سند» شناسنامهٔ خودِ فرم‌اند و ثابت می‌مانند.
+ * «شماره بازنگری، تاریخ تنظیم سند» شناسنامهٔ خودِ فرم‌اند و ثابت می‌مانند؛ عددِ آخرِ
+ * «کد» (TSA-PS-FO-n) شمارهٔ ترتیبی جدول‌های کمیسیونِ ساخته‌شده است (تصمیم مدیر).
  */
 import { Sheet, buildXlsx, sheetHtml, cellRef } from "./xlsx.js";
 import { COMMISSION_LOGO_PNG, COMMISSION_LOGO_URL } from "./logo.js";
+
+/* کد فرم: TSA-PS-FO-n — n شمارهٔ ترتیبی جدول‌های کمیسیونِ ساخته‌شده (bundle.js:markCommission) */
+const formCode = (d) => `TSA-PS-FO-${d.commission_no || (d.assignment && d.assignment.commission_no) || "—"}`;
 
 /* همهٔ اندازه‌ها نصفِ فایل نمونه‌اند (قلم ۳۶ و ۲۴ به‌جای ۷۲ و ۴۸، عرض و ارتفاع هم نصف):
    تناسب و ظاهرِ چاپ دقیقاً همان است، ولی «جا دادن در یک صفحه» به بزرگ‌نمایی ~۲۰٪ می‌رسد.
@@ -84,7 +88,7 @@ export function commissionSheet(d) {
 
   /* ---- سربرگ ---- */
   const H = (h, v, wrap = true) => ({ font: F72, h, v: v || "center", wrap });
-  sh.merge(1, 1, 1, X - 6, "کد: TSA-PS-FO-02                         شماره بازنگری:                                      تاریخ تنظیم سند :1405/02/07", { ...H("center"), border: box(M, t, M, M) });
+  sh.merge(1, 1, 1, X - 6, `کد: ${formCode(d)}                         شماره بازنگری:                                      تاریخ تنظیم سند :1405/02/07`, { ...H("center"), border: box(M, t, M, M) });
   sh.merge(1, X - 5, 1, X + 3, "مقایسه استعلام بها", { ...H("center"), border: box(M, t, M, M) });
   sh.merge(1, cD2, 3, cR, null, { ...H("center"), border: box(M, M, M, M) });
   sh.image({ png: COMMISSION_LOGO_PNG, src: COMMISSION_LOGO_URL, cell: { r: 1, c: cD2 },

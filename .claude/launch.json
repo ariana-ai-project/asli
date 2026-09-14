@@ -6,6 +6,14 @@
       "runtimeExecutable": "powershell",
       "runtimeArgs": ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", "scripts/static-server.ps1", "-Root", "frontend", "-Port", "8090"],
       "port": 8090
+    },
+    {
+      "name": "api-dev",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["wrangler", "dev", "-c", "wrangler.dev.toml", "--port", "8788",
+        "--var", "MANAGER_CODE:1234", "--var", "TG_BOT_TOKEN:test-token", "--var", "TG_WEBHOOK_SECRET:sekret",
+        "--var", "ANTHROPIC_API_KEY:test", "--var", "ANTHROPIC_API_BASE:http://127.0.0.1:8801"],
+      "port": 8788
     }
   ]
 }

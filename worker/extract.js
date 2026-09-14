@@ -13,11 +13,12 @@
  */
 
 export const MODEL = "claude-sonnet-5";
-const API = "https://api.anthropic.com/v1/messages";
+/* ANTHROPIC_API_BASE فقط در توسعهٔ محلی ست می‌شود (مدل بدلی)؛ همان قاعدهٔ discovery.js */
+const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 const MAX_TOKENS = 8000;
 
 /** نسخهٔ دستور — در کنار خروجی ذخیره می‌شود تا بعداً بشود فهمید با چه چیزی استخراج شده (INV-15، PRV-05) */
-export const PROMPT_VERSION = "pf-extract/1.2";
+export const PROMPT_VERSION = "pf-extract/1.3";
 
 /* ------------------------------------------------------------------ */
 /* قرارداد خروجی                                                       */
@@ -62,7 +63,11 @@ export const SCHEMA = {
       description: "آیا عددی که در unit_price نوشته‌ای، ارزش افزوده را در خودش دارد؟ اگر پیش‌فاکتور ارزش افزوده را جداگانه ته فاکتور آورده، false.",
     },
     vat_rate: { type: ["number", "null"], description: "درصد ارزش افزودهٔ نوشته‌شده در سند، مثلاً ۱۰. اگر ننوشته null." },
-    invoice_type: { type: ["string", "null"], enum: ["رسمی", "غیر رسمی", null] },
+    invoice_type: {
+      type: ["string", "null"],
+      enum: ["رسمی", "غیر رسمی", null],
+      description: "فرض شرکت: هر پیش‌فاکتور فاکتور رسمی می‌دهد مگر خلافش در سند ثابت شود. «غیر رسمی» فقط وقتی که خودِ سند صریح نوشته باشد فاکتور غیر رسمی است یا فاکتور رسمی صادر نمی‌شود؛ وگرنه null (سامانه «رسمی» می‌گذارد).",
+    },
     pay_terms: { type: ["string", "null"], description: "شرایط تسویه، عیناً همان‌طور که در سند نوشته شده" },
     pay_class: {
       type: ["string", "null"],
@@ -145,6 +150,11 @@ vat_status هم بگو معامله اصلاً ارزش افزوده دارد ی
 اگر اصلاً چیزی ننوشته ← null، نه «سایر».
 «محل معامله» (کارگاه / دفتر مرکزی) تصمیم داخلی شرکت است و در پیش‌فاکتور نوشته نمی‌شود؛ سراغش نرو.
 
+اصل دهم — فاکتور رسمی است مگر خلافش ثابت شود.
+فرض شرکت این است که هر پیش‌فاکتور، فاکتور رسمی می‌دهد. invoice_type را فقط وقتی «غیر رسمی» بگذار که خودِ سند صریحاً
+نوشته باشد فاکتور غیر رسمی است یا فاکتور رسمی صادر نمی‌شود. نبودِ مهر، نبودِ کد اقتصادی، نبودِ ارزش افزوده یا
+سادگیِ سند دلیلِ غیر رسمی بودن نیست. اگر سند چیزی نگفته، null بگذار — سامانه خودش «رسمی» می‌نویسد.
+
 زبان همهٔ متن‌های خروجی فارسی است، مگر آنکه در خود سند لاتین نوشته شده باشد.`;
 
 /** پیام کاربر: فهرست اقلام درخواست + خود سند */
@@ -215,7 +225,7 @@ async function onePass(env, { fileUrl, mime, items, request }) {
     messages: [{ role: "user", content: userContent(fileUrl, mime, items, request) }],
   };
 
-  const r = await fetch(API, {
+  const r = await fetch(API(env), {
     method: "POST",
     headers: {
       "content-type": "application/json",

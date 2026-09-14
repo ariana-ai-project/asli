@@ -424,13 +424,5 @@ export async function searchById(env, id) {
   return { search_id: row.id, item_id: row.item_id, assignment_id: row.assignment_id, expert_id: row.expert_id, result, created_at: row.created_at };
 }
 
-/** پرکردن قالب پیام با فیلدهای یک تأمین‌کنندهٔ نتیجهٔ جستجو — همان جای‌خالی‌های پنل */
-export function fillTemplate(body, { supplier, item, expertName }) {
-  return String(body || "")
-    .replace(/\{تامین‌کننده\}/g, supplier || "")
-    .replace(/\{عنوان قلم\}/g, item && item.title || "")
-    .replace(/\{مقدار\}/g, item && item.qty != null ? String(item.qty) : "")
-    .replace(/\{واحد\}/g, item && item.unit || "")
-    .replace(/\{مشخصات فنی\}/g, item && item.spec || "—")
-    .replace(/\{نام کارشناس\}/g, expertName || "");
-}
+/* پرکردن قالب پیام به worker/templates.js رفته (مشترکِ پنل و بات) */
+export { fillTemplate } from "./templates.js";

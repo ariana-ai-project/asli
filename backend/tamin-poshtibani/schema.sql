@@ -70,8 +70,15 @@ CREATE TABLE IF NOT EXISTS assignments (
   dispatched_at INTEGER,                  -- NULL = هنوز ارسال نشده
   viewed_at     INTEGER,                  -- مرحلهٔ «مشاهده»
   commission_at INTEGER,                  -- مرحلهٔ «جدول کمیسیون»
+  commission_no INTEGER,                  -- شمارهٔ ترتیبی فرم (کد TSA-PS-FO-n)؛ یک بار، هنگام اولین تولید
   created_at    INTEGER NOT NULL,
   UNIQUE(request_id, expert_id)
+);
+
+-- شمارنده‌های سراسری (فعلاً فقط 'commission': آخرین شمارهٔ جدول کمیسیون)
+CREATE TABLE IF NOT EXISTS counters (
+  key   TEXT PRIMARY KEY,
+  value INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_assign_expert ON assignments(expert_id, dispatched_at);
 
@@ -259,7 +266,7 @@ CREATE TABLE IF NOT EXISTS smart_jobs (
 );
 CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
 
--- ---------- قالب‌های پیام ----------
+-- ---------- قالب‌های پیام (پنل و بات؛ worker/templates.js) ----------
 CREATE TABLE IF NOT EXISTS templates (
   id         INTEGER PRIMARY KEY,
   expert_id  INTEGER REFERENCES experts(id),   -- NULL = مشترک

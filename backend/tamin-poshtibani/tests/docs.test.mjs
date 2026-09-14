@@ -111,7 +111,7 @@ test("برگهٔ درخواست فقط از دادهٔ فایل اکسل پر م
 test("جدول کمیسیون فقط قلم‌های تیک‌خورده را دارد، و xlsx واقعی با لوگوست", async () => {
   const items = [1, 2, 3, 4, 5, 6, 7].map((n) => ({ id: n, title: "قلم " + n, qty: 1, unit: "عدد" }));
   const quotes = items.map((it) => ({ item_id: it.id, supplier_name: "آریا", saved: 1, final: it.id === 2 || it.id === 5 ? 1 : 0, price: 1000 * it.id, qty: 1, vat: "دارد" }));
-  const d = { request: { id: "R" }, items, quotes, notes: "", expert: "x", company: "c", date: "1405/06/19" };
+  const d = { request: { id: "R" }, items, quotes, notes: "", expert: "x", company: "c", date: "1405/06/19", commission_no: 7 };
   const html = commissionHtml(d);
   /* HTML رقم فارسی دارد، مثل قلمِ B Nazanin در اکسل */
   const cells = html.replace(/<[^>]+>/g, "|");
@@ -119,7 +119,9 @@ test("جدول کمیسیون فقط قلم‌های تیک‌خورده را د
   for (const n of ["۱", "۳", "۴", "۶", "۷"]) assert.ok(!cells.includes(`|قلم ${n}|`), `قلم ${n} نباید باشد`);
   assert.ok(html.includes("۷٬۰۰۰"), "جمع = ۲۰۰۰ + ۵۰۰۰");
   assert.ok(!html.includes("۲۸٬۰۰۰"), "جمعِ هفت قلم نباید باشد");
-  assert.ok(html.includes("مقایسه استعلام بها") && html.includes("TSA-PS-FO-۰۲"), "سربرگ فرم");
+  /* کد فرم: شمارهٔ ترتیبی جدول‌های کمیسیون (تصمیم مدیر)، نه شمارهٔ ثابت ۰۲ */
+  assert.ok(html.includes("مقایسه استعلام بها") && html.includes("TSA-PS-FO-۷") && !html.includes("TSA-PS-FO-۰۲"), "سربرگ فرم با شمارهٔ ترتیبی");
+  assert.ok(commissionHtml({ ...d, commission_no: null }).includes("TSA-PS-FO-—"), "پیش از تولید، شماره ندارد");
   const buf = Buffer.from(await (await commissionXlsx(d)).arrayBuffer());
   assert.deepEqual([...buf.slice(0, 2)], [0x50, 0x4b]);
   const names = (await unzip(buf)).map((e) => e.name);

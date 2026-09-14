@@ -45,6 +45,8 @@ export async function bundleData(env, aid, settings, company) {
     quotes: quotes.results || [],
     letter,
     expert: a.expert_label || a.expert_name,
+    expertName: a.expert_name,
+    commission_no: a.commission_no || null,
     company,
     vatRate: typeof settings.vatRate === "number" ? settings.vatRate : 0.1,
     date: jStr(Date.now()),
@@ -83,6 +85,34 @@ export async function commissionGuard(env, aid, settings) {
   const missing = (items.results || []).filter((i) => (byItem.get(i.id) || 0) < need).map((i) => ({ title: i.title, n: byItem.get(i.id) || 0 }));
   return { need, missing, finals: (fin && fin.n) || 0 };
 }
+
+/**
+ * ثبتِ «جدول کمیسیون ساخته شد» + شمارهٔ ترتیبی فرم.
+ *
+ * کد بالای فرم (TSA-PS-FO-n) یک شمارندهٔ سراسری است که هر جدول کمیسیونی که ساخته
+ * می‌شود یکی جلو می‌رود (تصمیم مدیر). هر ارجاع فقط یک بار شماره می‌گیرد: ساختن دوبارهٔ
+ * جدول همان درخواست، همان شماره را نگه می‌دارد. پنل، بات و «تحویل» همه از همین‌جا
+ * رد می‌شوند تا شماره یک جا داده شود. شماره را برمی‌گرداند.
+ */
+export async function markCommission(env, aid, at) {
+  const t = at || Date.now();
+  const a = await env.DB.prepare("SELECT commission_no FROM assignments WHERE id=?").bind(aid).first();
+  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
+  if (a.commission_no) {
+    await env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid).run();
+    return a.commission_no;
+  }
+  const c = await env.DB.prepare(
+    "INSERT INTO counters (key,value) VALUES ('commission',1) ON CONFLICT(key) DO UPDATE SET value=value+1 RETURNING value",
+  ).first();
+  const no = Number(c && c.value) || 1;
+  await env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?), commission_no=COALESCE(commission_no,?) WHERE id=?").bind(t, no, aid).run();
+  const row = await env.DB.prepare("SELECT commission_no FROM assignments WHERE id=?").bind(aid).first();
+  return (row && row.commission_no) || no;
+}
+
+/** کد فرم کمیسیون روی برگه؛ پیش از تولید، شماره ندارد */
+export const commissionCode = (no) => `TSA-PS-FO-${no ? String(no) : "—"}`;
 
 /** چه چیزی هنوز آماده نیست — پیش از تحویل به کارشناس گفته می‌شود، نه بعدش */
 export function readiness(d) {

@@ -22,7 +22,7 @@ import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
-import { bundleData, readiness, commissionGuard } from "./bundle.js";
+import { bundleData, readiness, commissionGuard, markCommission } from "./bundle.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
 import { MARKETS, MAX_MARKETS, smartSearch, lastSearch } from "./discovery.js";
@@ -122,6 +122,7 @@ CREATE TABLE IF NOT EXISTS smart_searches (id INTEGER PRIMARY KEY, item_id INTEG
 CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
 CREATE TABLE IF NOT EXISTS smart_jobs (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, params_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', search_id INTEGER, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
+CREATE TABLE IF NOT EXISTS counters (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -160,6 +161,8 @@ const COLUMN_MIGRATIONS = [
   ["proformas", "item_ids", "TEXT"],          /* JSON: پیش‌فاکتور فقط برای همین اقلام (بات)؛ خالی = همه */
   ["tg_flows", "asked_at", "INTEGER"],        /* آخرین باری که این گفت‌وگو از کارشناس چیزی پرسید */
   ["tg_uploads", "asked_at", "INTEGER"],
+  /* شمارهٔ ترتیبی جدول کمیسیون (کد فرم TSA-PS-FO-n) — یک بار، هنگام اولین تولید (bundle.js:markCommission) */
+  ["assignments", "commission_no", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -789,8 +792,10 @@ async function commission(env, ex, aid) {
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
   if (g.missing.length) throw new HttpError(`مدیر حداقل ${g.need} استعلام برای هر قلم را الزامی کرده.`, 422, { missing: g.missing, need: g.need });
-  await env.DB.batch([env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(now(), aid), ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid })]);
-  return { ok: true };
+  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود */
+  const no = await markCommission(env, aid, now());
+  await env.DB.batch([ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid, commission_no: no })]);
+  return { ok: true, commission_no: no };
 }
 
 /* تصمیم کارشناس و تأیید/ردِ مدیر: worker/decisions.js */

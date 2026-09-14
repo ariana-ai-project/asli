@@ -52,12 +52,18 @@ export function managerCard(row, colors, opts = {}) {
   const changes = (opts.changed || []).map((i) =>
     `${DOT[colors[i]] || "⚪"} <b>${esc(STAGE_NAMES[i])}</b> → ${esc(WORD[colors[i]] || colors[i])}`).join("\n");
 
+  /* تصمیم مدیر: کنار هر اعلان، شمار خطوط استعلام و پیش‌فاکتورهای واردشده هم بیاید */
+  const counts = row.lines != null || row.proformas != null
+    ? `🧾 خطوط استعلام: <b>${M(row.lines || 0)}</b>${row.quotes != null ? ` (${M(row.quotes)} ثبت‌شده)` : ""} · 📎 پیش‌فاکتور: <b>${M(row.proformas || 0)}</b>\n`
+    : "";
+
   return `${head}\n\n`
     + `درخواست <b>${esc(row.request_id)}</b>\n`
     + `${esc(short(row.party, 60))}\n`
     + `<b>${M(row.item_count == null ? items.length : row.item_count)} قلم</b>`
     + (row.deadline_at ? ` · مهلت تا ${esc(fmtFa(row.deadline_at))}` : "")
     + `\n\n👤 کارشناس: <b>${esc(row.expert_label || row.expert_name || "—")}</b>\n`
+    + counts
     + (changes ? `\n<b>تغییر:</b>\n${changes}\n` : "")
     + `\n${statusBar(colors)}\n`
     + (list ? `\n<b>اقلام:</b>\n${list}\n` : "")
@@ -75,6 +81,7 @@ const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadlin
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist,
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart,
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
+        (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
         (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
    FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
   WHERE a.dispatched_at IS NOT NULL
@@ -170,7 +177,10 @@ export async function notifyClosed(env, aid, managerChat, actor) {
   const row = await env.DB.prepare(
     `SELECT a.id, a.request_id, a.deadline_at, a.dispatched_at, e.name AS expert_name, e.label AS expert_label, r.party,
             (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count,
-            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold')) AS live
+            (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold')) AS live,
+            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
+            (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
+            (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
        FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id WHERE a.id=?`,
   ).bind(aid).first();
   if (!row || row.live > 0) return { ok: true, queued: 0 };   /* هنوز قلم بازی مانده — خاتمهٔ جزئی */

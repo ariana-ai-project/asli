@@ -30,7 +30,7 @@ import { REFUSAL_FA } from "./extract.js";
 import { runExtraction, extractFor, saveExtraction, applyExtraction, lineUnitPrice, idList } from "./proforma.js";
 import { transcribe, writeLetter, letterSubject } from "./letter.js";
 import { renderLetter } from "./docx.js";
-import { bundleData, readiness, commissionGuard } from "./bundle.js";
+import { bundleData, readiness, commissionGuard, markCommission } from "./bundle.js";
 import { commissionXlsx } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
@@ -39,7 +39,8 @@ import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory, activeImport } from "./history.js";
-import { MARKETS, MAX_MARKETS, smartSearch, searchById, fillTemplate } from "./discovery.js";
+import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
+import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -350,6 +351,7 @@ async function onMessage(env, msg) {
     return { ok: true };
   }
   if (text === "/kartabl") return kartabl(env, api, chat, ex);
+  if (text === "/ghaleb") return templateList(env, api, chat, ex, null, "");
   /* میان‌بُرها به همان مسیرهای منو می‌رسند؛ فقط «کدام درخواست؟» را اول می‌پرسند */
   if (SHORTCUTS[text]) return kartabl(env, api, chat, ex, { target: SHORTCUTS[text] });
 
@@ -385,6 +387,7 @@ const HELP_TEXT = "چه کاری می‌خواهید بکنید؟\n\n"
   + "/tozihat — توضیحات جدول کمیسیون\n"
   + "/nameh — نامهٔ پیوست (صوتی یا نوشتاری)\n"
   + "/tahvil — تحویل اسناد\n"
+  + "/ghaleb — قالب‌های پیام به تأمین‌کننده (ساخت و ویرایش)\n"
   + "/stop — قطع اتصال\n\n"
   + "<i>هر فایلی که بیرون از «دریافت پیش‌فاکتور» یا «پیوست‌ها»ی تحویل بفرستید، پیش‌فاکتور حساب می‌شود.</i>";
 
@@ -416,6 +419,9 @@ async function onFlowText(env, api, chat, ex, f, text) {
     if (text.length > 120) { await api.sendMessage(chat, "نام تأمین‌کننده خیلی بلند است."); return { ok: true }; }
     return manualItems(env, api, chat, ex, f, { ...d, supplier: text }, null);
   }
+
+  /* قالب پیام: عنوان یا متنِ قالبِ تازه، یا ویرایشِ یکی از قبلی‌ها */
+  if (f.kind === "tpl") return onTemplateText(env, api, chat, ex, f, d, text);
   return { ok: true };
 }
 
@@ -549,7 +555,10 @@ async function requestMenu(env, api, chat, ex, aid, { mid = null, head = "" } = 
   ];
   if (s.lines) kb.push([{ text: "🧾 تب استعلامات", callback_data: `qt:${aid}` }]);
   if (s.quotes) kb.push([{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
-  if (s.commission_at) kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }]);
+  if (s.commission_at) {
+    kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "✉️ تولید نامه", callback_data: `rq:${aid}:l` }]);
+    kb.push([{ text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }]);
+  }
   kb.push([KARTABL_BTN]);
   return show(api, chat, mid, text, kb);
 }
@@ -921,6 +930,8 @@ async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
   /* اجباری‌ها هر کدام یک ردیف؛ اختیاری‌ها دوتا-دوتا تا کارت بلند نشود */
   const kb = kbReq.map((b) => [b]);
   for (let i = 0; i < kbOpt.length; i += 2) kb.push(kbOpt.slice(i, i + 2));
+  /* تصمیم مدیر: حتی وقتی نام تأمین‌کننده دستی وارد شده، بقیهٔ فیلدها می‌تواند از پیش‌فاکتور بیاید */
+  kb.push([{ text: "📎 دریافت پیش‌فاکتور (بقیه از فایل خوانده شود)", callback_data: `qw:${q0.id}:0` }]);
   kb.push([{ text: "✏️ اصلاح یک فیلد پرشده", callback_data: `qe:${q0.id}:0` }]);
   if (!allSaved) kb.push([{ text: missReq.length ? "✅ ثبت موقت (اول ❌ها را پر کنید)" : "✅ ثبت موقت", callback_data: `qs:${q0.id}:0` }]);
   if (a && a.saved_all > 0) kb.push([{ text: "📊 تولید جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
@@ -1112,26 +1123,28 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   const st = readiness(d);
   const finals = d.quotes.filter((q) => q.final && q.saved);
   const t = now();
+  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) پیش از ساختن فایل داده می‌شود تا روی خودِ برگه بنشیند */
+  d.commission_no = await markCommission(env, aid, t);
   await env.DB.batch([
-    env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, channel: "telegram" })),
+      .bind(t, `expert:${ex.id}`, "commission_table", d.request.id, JSON.stringify({ assignment_id: aid, lines: finals.length, commission_no: d.commission_no, channel: "telegram" })),
   ]);
   if (messageId) await api.editMessageText(chat, messageId, `📊 جدول کمیسیون درخواست <b>${esc(d.request.id)}</b> با <b>${M(finals.length)}</b> خط ساخته شد.`).catch(() => {});
 
   let sent = true;
   try {
     await api.sendDocument(chat, `کمیسیون-${d.request.id}.xlsx`, await commissionXlsx({ ...d, notes: d.assignment.notes }),
-      `📊 <b>جدول مقایسه استعلام بها — ${esc(d.request.id)}</b>\n${M(finals.length)} خط · ${M(st.suppliers)} تأمین‌کننده`);
+      `📊 <b>جدول مقایسه استعلام بها — ${esc(d.request.id)}</b> · کد TSA-PS-FO-${M(d.commission_no)}\n${M(finals.length)} خط · ${M(st.suppliers)} تأمین‌کننده`);
   } catch (e) { sent = false; }
 
   const warn = [];
   if (!sent) warn.push("⚠️ فایل به تلگرام نرسید؛ در «تحویل» یا پنل دوباره می‌گیرید.");
   if (st.itemsMissing.length) warn.push(`⚠️ ${M(st.itemsMissing.length)} قلم هنوز قیمت تأییدشده ندارد: ${esc(st.itemsMissing.slice(0, 4).join("، "))}`);
   if (!st.hasNotes) warn.push("📝 توضیحات جدول خالی است — «جدول کمیسیون» ← «درج توضیحات».");
+  /* تصمیم مدیر: کنار «تحویل»، همان‌جا «تولید نامه» هم هست */
   return show(api, chat, null, `✅ <b>جدول کمیسیون تولید شد.</b>${warn.length ? "\n" + warn.join("\n") : ""}\n\nدرخواست تا «خاتمه» در کارتابل می‌ماند. قدم بعد؟`, [
-    [{ text: "📦 تحویل", callback_data: `dvo:${aid}` }],
+    [{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "✉️ تولید نامه", callback_data: `rq:${aid}:l` }],
     [{ text: "🔒 خاتمه (تأیید کمیسیون)", callback_data: `cm:${aid}:card:0` }],
     [{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }],
     navRow(aid),
@@ -1380,9 +1393,10 @@ async function onVoice(env, msg, ex) {
 /** بعد از تأیید متن: موضوع نامه = «گزارش خرید» + اقلامِ انتخابی با «و» میانشان */
 async function letterSubjectCard(env, api, chat, ex, L, mid) {
   const its = (await env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=? ORDER BY line_no LIMIT 40").bind(L.assignment_id).all()).results || [];
+  const a = await env.DB.prepare("SELECT request_id FROM assignments WHERE id=?").bind(L.assignment_id).first();
   /* پیش‌فرض: اقلامی که در جدول کمیسیون تأیید نهایی دارند */
   const fin = new Set(((await env.DB.prepare("SELECT DISTINCT item_id FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(L.assignment_id).all()).results || []).map((r) => r.item_id));
-  const f = await newFlow(env, ex, chat, "lsub", "pick", L.assignment_id, { letterId: L.id, sel: its.filter((i) => fin.has(i.id)).map((i) => i.id) });
+  const f = await newFlow(env, ex, chat, "lsub", "pick", L.assignment_id, { letterId: L.id, rid: a ? a.request_id : "", sel: its.filter((i) => fin.has(i.id)).map((i) => i.id) });
   return letterSubjectRender(api, chat, f, flowData(f), its, mid);
 }
 
@@ -1393,7 +1407,7 @@ function letterSubjectRender(api, chat, f, d, its, mid) {
   kb.push([{ text: `✍️ نوشتن نامه${sel.size ? ` (${M(sel.size)} قلم)` : ""}`, callback_data: `ls:${f.id}:go:0` }]);
   const titles = its.filter((i) => sel.has(i.id)).map((i) => i.title);
   return show(api, chat, mid, "✉️ <b>موضوع نامه</b>\n\nنامه دربارهٔ کدام اقلام است؟ هر چند قلم را تیک بزنید.\n\n"
-    + `<b>موضوع:</b> ${titles.length ? esc(letterSubject(titles)) : "—"}`, kb);
+    + `<b>موضوع:</b> ${titles.length ? esc(letterSubject(titles, d.rid)) : "—"}`, kb);
 }
 
 /** نگارش نامه و ساخت فایل Word روی سربرگ؛ اگر تحویلی منتظرش بود، همان‌جا ادامه می‌دهد */
@@ -1412,7 +1426,7 @@ async function makeLetter(env, api, chat, ex, letterId, subjectTitles) {
     /* همان قاعدهٔ جدول کمیسیون: فقط استعلام‌های تیک‌خورده و قلم‌هایی که آن‌ها قیمت داده‌اند */
     out = await writeLetter(env, {
       transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes, allItems: d.items,
-      notes: d.assignment.notes, expert: d.expert, company: d.company, subjectTitles,
+      notes: d.assignment.notes, expert: d.expert, expertName: d.expertName, company: d.company, subjectTitles,
     });
   } catch (e) {
     await env.DB.prepare("UPDATE letters SET state='failed', updated_at=? WHERE id=?").bind(now(), L.id).run();
@@ -1730,10 +1744,39 @@ async function qtabRender(env, api, chat, f, d, asg, mid, head) {
   if (rows.length) kb.push([{ text: `📎 دریافت پیش‌فاکتور${sel.size ? ` (${M(sel.size)} خط)` : ""}`, callback_data: `qx:${f.id}:pf:0` }]);
   kb.push([{ text: "➕ خط استعلام دستی", callback_data: `qx:${f.id}:new:0` }]);
   if (rows.length) kb.push([{ text: "✏️ پرکردن و اصلاح فیلدها", callback_data: `qx:${f.id}:ed:0` }]);
+  /* تصمیم مدیر: چند خط را تیک بزند و یک‌جا حذف کند */
+  if (rows.length) kb.push([{ text: `🗑 حذف خط‌های انتخابی${sel.size ? ` (${M(sel.size)})` : ""}`, callback_data: `qx:${f.id}:del:0` }]);
   if (rows.some((q) => q.saved)) kb.push([{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }]);
   kb.push(navRow(aid));
   return show(api, chat, mid, `${head ? head + "\n\n" : ""}🧾 <b>تب استعلامات — درخواست ${esc(asg.request_id)}</b>\n\n${list}`
-    + (rows.length ? "\n\nخط‌هایی را که منتظر پیش‌فاکتورشان هستید تیک بزنید و «دریافت پیش‌فاکتور» را بزنید؛ فایل‌های بعدی بی‌پرسش به همان‌ها می‌نشینند." : ""), kb);
+    + (rows.length ? "\n\nخط‌هایی را که منتظر پیش‌فاکتورشان هستید تیک بزنید و «دریافت پیش‌فاکتور» را بزنید؛ فایل‌های بعدی بی‌پرسش به همان‌ها می‌نشینند. با همان تیک‌ها می‌توانید خط‌ها را حذف هم بکنید." : ""), kb);
+}
+
+/** تأیید حذفِ خط‌های تیک‌خورده — فهرستشان یک بار دیده می‌شود، بعد «حذف» */
+async function qtabDeleteConfirm(env, api, chat, f, d, mid) {
+  const rows = (await qtabRows(env, f.assignment_id)).filter((q) => (d.sel || []).includes(q.id));
+  if (!rows.length) return { ok: true };
+  const list = rows.map((q) => `• <b>${esc(short(q.supplier_name, 26))}</b> — ${esc(short(q.title, 24))}${q.saved ? " ✅" : ""}`).join("\n");
+  return show(api, chat, mid, `🗑 <b>حذف ${M(rows.length)} خط استعلام؟</b>\n\n${list}\n\n`
+    + "این خط‌ها با قیمت و فیلدهایشان پاک می‌شوند؛ فایل پیش‌فاکتورِ تأمین‌کننده می‌ماند.",
+  [[{ text: `🗑 حذف ${M(rows.length)} خط`, callback_data: `qx:${f.id}:delok:0` }], [{ text: "↩️ بازگشت", callback_data: `qx:${f.id}:back:0` }]]);
+}
+
+async function qtabDelete(env, api, chat, ex, f, d, asg, mid) {
+  const ids = (await qtabRows(env, f.assignment_id)).filter((q) => (d.sel || []).includes(q.id)).map((q) => q.id);
+  if (!ids.length) return qtabRender(env, api, chat, f, { sel: [] }, asg, mid);
+  const t = now();
+  const r = await env.DB.prepare(
+    `DELETE FROM quotes WHERE assignment_id=? AND id IN (${ids.map(() => "?").join(",")}) AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
+  ).bind(f.assignment_id, ...ids, ex.id).run();
+  const n = (r.meta && r.meta.changes) || 0;
+  d.sel = [];
+  await env.DB.batch([
+    env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+      .bind(t, `expert:${ex.id}`, "quote_deleted", asg.request_id, JSON.stringify({ assignment_id: f.assignment_id, quote_ids: ids, deleted: n, channel: "telegram" })),
+  ]);
+  return qtabRender(env, api, chat, f, d, asg, mid, `🗑 ${M(n)} خط استعلام حذف شد.`);
 }
 
 /** تب استعلامات ← «دریافت پیش‌فاکتور»: خط‌های تیک‌خورده به تفکیک تأمین‌کننده منتظر فایل می‌مانند */
@@ -1794,12 +1837,15 @@ async function manualItems(env, api, chat, ex, f, d, mid) {
   }]);
   if (its.length > 1) kb.push([{ text: sel.size === its.length ? "☐ هیچ" : "☑ همه", callback_data: `mn:${f.id}:all:0` }]);
   kb.push([{ text: `✅ ساختن خط استعلام${sel.size ? ` (${M(sel.size)} قلم)` : ""}`, callback_data: `mn:${f.id}:go:0` }]);
+  /* تصمیم مدیر: نام را کارشناس نوشته، ولی بقیهٔ فیلدها می‌تواند از پیش‌فاکتور خوانده شود */
+  kb.push([{ text: "📎 ساختن خط و دریافت پیش‌فاکتور", callback_data: `mn:${f.id}:pf:0` }]);
   kb.push([{ text: "✖️ لغو", callback_data: `mn:${f.id}:x:0` }]);
   return show(api, chat, mid, `✍️ <b>خط استعلام دستی — «${esc(short(d.supplier, 40))}»</b>\n\n`
-    + "برای کدام اقلام؟ تیک بزنید و «ساختن خط استعلام» را بزنید؛ بعد همهٔ فیلدها را روی کارت استعلام پر می‌کنید.", kb);
+    + "برای کدام اقلام؟ تیک بزنید و «ساختن خط استعلام» را بزنید؛ بعد همهٔ فیلدها را روی کارت استعلام پر می‌کنید.\n"
+    + "اگر پیش‌فاکتورش را دارید، «ساختن خط و دریافت پیش‌فاکتور» را بزنید تا فیلدها از خودِ فایل خوانده شود.", kb);
 }
 
-async function manualCreate(env, api, chat, ex, f, d, mid) {
+async function manualCreate(env, api, chat, ex, f, d, mid, thenAwait) {
   const its = await itemsOf(env, f.assignment_id);
   const ids = (d.sel || []).filter((x) => its.some((i) => i.id === x));
   const t = now();
@@ -1810,7 +1856,25 @@ async function manualCreate(env, api, chat, ex, f, d, mid) {
       .bind(t, `expert:${ex.id}`, "manual_quote", null, JSON.stringify({ assignment_id: f.assignment_id, supplier: d.supplier, items: ids, channel: "telegram" })),
   ]);
   await show(api, chat, mid, `✅ خط استعلام «${esc(d.supplier)}» برای ${M(ids.length)} قلم ساخته شد.`, []);
-  return quoteCard(env, api, chat, f.assignment_id, d.supplier, null, "فیلدها را پر کنید — ❌ اجباری، ⚪ اختیاری — و بعد «ثبت موقت».");
+  if (thenAwait) return awaitSupplier(env, api, chat, ex, f.assignment_id, d.supplier, null);
+  return quoteCard(env, api, chat, f.assignment_id, d.supplier, null,
+    "فیلدها را پر کنید — ❌ اجباری، ⚪ اختیاری — و بعد «ثبت موقت»؛ یا «دریافت پیش‌فاکتور» را بزنید تا بقیه از فایل خوانده شود.");
+}
+
+/**
+ * حالت «دریافت پیش‌فاکتور» برای یک تأمین‌کنندهٔ مشخص — از کارت استعلام یا خط دستی.
+ * همان حالتی که تب استعلامات با تیکِ خط‌ها باز می‌کند؛ این‌جا همهٔ خط‌های همین
+ * تأمین‌کننده منتظر می‌مانند و فایل بعدی بی‌پرسش روی آن‌ها می‌نشیند.
+ */
+async function awaitSupplier(env, api, chat, ex, aid, supplier, mid) {
+  const asg = await ownOpenAssignment(env, ex.id, aid);
+  if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
+  const lines = await supplierLines(env, aid, supplier);
+  if (!lines.length) { await api.sendMessage(chat, "برای این تأمین‌کننده خط استعلامی نیست.").catch(() => {}); return { ok: true }; }
+  const items = [...new Set(lines.map((q) => q.item_id))];
+  await endModes(env, ex.id, null);
+  const w = await newFlow(env, ex, chat, "await_pf", "wait", aid, { want: [{ s: supplier, items, got: 0 }] }, MODE_TTL);
+  return awaitStatus(env, api, chat, w, mid);
 }
 
 /* ------------------------------------------------------------------ */
@@ -1983,6 +2047,106 @@ async function smartSelOpen(env, api, chat, ex, searchId, mid) {
 }
 
 /* ------------------------------------------------------------------ */
+/* قالب‌های پیام به تأمین‌کننده — همان قالب‌های پنل، ساخت و ویرایش از بات  */
+/*                                                                      */
+/* فهرست ← نمایش یک قالب (متن با جای‌خالی‌ها) ← ویرایش عنوان/متن یا حذف؛   */
+/* «قالب جدید» عنوان و بعد متن را می‌پرسد. `ctx` (شناسهٔ جستجو و ردیف     */
+/* تأمین‌کننده) اگر باشد، «بازگشت» به همان انتخابِ قالب برمی‌گردد.         */
+/* ------------------------------------------------------------------ */
+
+const ctxOf = (sid, i) => (sid ? `:${sid}:${i}` : "");
+const tokensLine = () => TEMPLATE_TOKENS.map((t) => `<code>{${t}}</code>`).join(" ");
+
+/** انتخاب قالب برای یک تأمین‌کنندهٔ نتیجهٔ جستجو (sg:p) */
+async function templatePick(env, api, chat, ex, sr, i, s2, mid) {
+  const tpls = (await ensureTemplates(env, ex.id, env.COMPANY)).slice(0, 12);
+  const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b> — <i>${esc(short(t2.body.replace(/\s+/g, " "), 60))}</i>`).join("\n");
+  const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}` }]);
+  kb.push([{ text: "🗂 قالب‌های پیام (جدید / ویرایش)", callback_data: `tp:ls:0${ctxOf(sr.search_id, i)}` }]);
+  return show(api, chat, null, `✉️ پیام برای <b>${esc(short(s2.name, 36))}</b>\nکدام قالب؟\n\n${desc}`, kb);
+}
+
+async function templateList(env, api, chat, ex, ctx, mid, head) {
+  const tpls = await ensureTemplates(env, ex.id, env.COMPANY);
+  const list = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n   <i>${esc(short(t2.body.replace(/\s+/g, " "), 70))}</i>`).join("\n");
+  const kb = tpls.slice(0, 20).map((t2) => [{ text: `📄 ${short(t2.title, 30)}`, callback_data: `tp:v:${t2.id}${ctx || ""}` }]);
+  kb.push([{ text: "➕ قالب جدید", callback_data: `tp:new:0${ctx || ""}` }]);
+  if (ctx) { const [, sid, i] = ctx.split(":"); kb.push([{ text: "↩️ بازگشت به انتخاب قالب", callback_data: `sg:${sid}:p:${i}` }]); }
+  return show(api, chat, mid, `${head ? head + "\n\n" : ""}🗂 <b>قالب‌های پیام</b> — ${M(tpls.length)} قالب\n\n${list}\n\n`
+    + `جای‌خالی‌ها هنگام ارسال با دادهٔ همان قلم و تأمین‌کننده پر می‌شوند: ${tokensLine()}`, kb);
+}
+
+async function templateView(env, api, chat, ex, id, ctx, mid, head) {
+  const t2 = await ownTemplate(env, ex.id, id);
+  if (!t2) return templateList(env, api, chat, ex, ctx, mid, "این قالب دیگر نیست.");
+  const kb = [
+    [{ text: "✏️ ویرایش عنوان", callback_data: `tp:et:${id}${ctx || ""}` }, { text: "✏️ ویرایش متن", callback_data: `tp:eb:${id}${ctx || ""}` }],
+    [{ text: "🗑 حذف این قالب", callback_data: `tp:dl:${id}${ctx || ""}` }],
+    [{ text: "🗂 فهرست قالب‌ها", callback_data: `tp:ls:0${ctx || ""}` }],
+  ];
+  return show(api, chat, mid, `${head ? head + "\n\n" : ""}📄 <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n\n<code>${esc(t2.body)}</code>\n\n`
+    + `<i>ساختار قالب همین است؛ جای‌خالی‌ها هنگام ارسال پر می‌شوند.</i>`, kb);
+}
+
+/** پرسیدن عنوان یا متن: پاسخِ متنیِ بعدیِ کارشناس همین را پر می‌کند */
+async function templateAsk(env, api, chat, ex, step, data, prompt) {
+  await closeInputs(env, ex.id);
+  const f = await newFlow(env, ex, chat, "tpl", step, null, data);
+  await api.sendMessage(chat, prompt, [[{ text: "✖️ بی‌خیال", callback_data: `fl:${f.id}:x:0` }]]).catch(() => {});
+  return { ok: true };
+}
+const bodyPrompt = (title) => `📝 <b>متن قالب «${esc(title)}»</b> را بنویسید.\n\nهر جا لازم است، جای‌خالی‌ها را عیناً بگذارید: ${tokensLine()}\n<i>مثال: «برای {عنوان قلم} به مقدار {مقدار} {واحد} استعلام قیمت نیاز داریم.»</i>`;
+
+async function onTemplateText(env, api, chat, ex, f, d, text) {
+  if (text.length > 2000) { await api.sendMessage(chat, "خیلی بلند است؛ کوتاه‌ترش کنید.").catch(() => {}); return { ok: true }; }
+  const t = now();
+  if (f.step === "need_title") {
+    d.title = short(text, 80);
+    await env.DB.prepare("UPDATE tg_flows SET step='need_body', data_json=?, asked_at=? WHERE id=?").bind(JSON.stringify(d), t, f.id).run();
+    await api.sendMessage(chat, bodyPrompt(d.title), [[{ text: "✖️ بی‌خیال", callback_data: `fl:${f.id}:x:0` }]]).catch(() => {});
+    return { ok: true };
+  }
+  if (f.step === "need_body") {
+    const r = await env.DB.prepare("INSERT INTO templates (expert_id,title,body,created_at) VALUES (?,?,?,?)").bind(ex.id, d.title || "بدون عنوان", text, t).run();
+    await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id).run();
+    return templateView(env, api, chat, ex, r.meta.last_row_id, d.ctx || "", null, "✅ قالب ساخته شد.");
+  }
+  if (f.step === "edit_title" || f.step === "edit_body") {
+    const col = f.step === "edit_title" ? "title" : "body";
+    const r = await env.DB.prepare(`UPDATE templates SET ${col}=? WHERE id=? AND (expert_id IS NULL OR expert_id=?)`)
+      .bind(col === "title" ? short(text, 80) : text, d.id, ex.id).run();
+    await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(t, f.id).run();
+    if (!r.meta.changes) { await api.sendMessage(chat, "این قالب دیگر نیست.").catch(() => {}); return { ok: true }; }
+    return templateView(env, api, chat, ex, d.id, d.ctx || "", null, `✅ ${col === "title" ? "عنوان" : "متن"} قالب ذخیره شد.`);
+  }
+  return { ok: true };
+}
+
+async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
+  const step = parts[1], id = parseInt(parts[2], 10) || 0;
+  const ctx = parts[3] ? `:${parts[3]}:${parts[4] || 0}` : "";
+  if (step === "ls") { await ack(); return templateList(env, api, chat, ex, ctx, mid); }
+  if (step === "v") { await ack(); return templateView(env, api, chat, ex, id, ctx, mid); }
+  if (step === "new") { await ack(); return templateAsk(env, api, chat, ex, "need_title", { ctx }, "➕ <b>قالب جدید</b>\n\nعنوان قالب را بنویسید (مثلاً «زمان تحویل»):"); }
+  const t2 = id ? await ownTemplate(env, ex.id, id) : null;
+  if (!t2) { await ack("این قالب دیگر نیست.", true); return { ok: true }; }
+  if (step === "et") { await ack(); return templateAsk(env, api, chat, ex, "edit_title", { id, ctx }, `✏️ عنوان تازهٔ قالب «${esc(t2.title)}» را بنویسید:`); }
+  if (step === "eb") { await ack(); return templateAsk(env, api, chat, ex, "edit_body", { id, ctx }, `${bodyPrompt(t2.title)}\n\nمتن فعلی:\n<code>${esc(t2.body)}</code>`); }
+  if (step === "dl") {
+    await ack();
+    return show(api, chat, mid, `🗑 قالب «<b>${esc(t2.title)}</b>» حذف شود؟`,
+      [[{ text: "🗑 بله، حذف شود", callback_data: `tp:dk:${id}${ctx}` }], [{ text: "↩️ بازگشت", callback_data: `tp:v:${id}${ctx}` }]]);
+  }
+  if (step === "dk") {
+    await env.DB.prepare("DELETE FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(id, ex.id).run();
+    await ack("حذف شد");
+    return templateList(env, api, chat, ex, ctx, mid, `🗑 قالب «${esc(t2.title)}» حذف شد.`);
+  }
+  await ack();
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
 /* تحویل — انتخاب اسناد، ساختنِ آنچه نیست، پیوست‌ها، و فرستادن همه با هم  */
 /*                                                                      */
 /* درخواست خرید و جدول کمیسیون همان لحظه ساخته می‌شوند؛ نامه اگر نیست     */
@@ -2083,7 +2247,11 @@ async function deliverSend(env, api, chat, ex, f, d, mid) {
   const finals = b.quotes.filter((q) => q.final && q.saved);
   if (d.docs.table) {
     if (!finals.length) notes.push("⚠️ جدول کمیسیون خطِ «تأیید نهایی» ندارد و فرستاده نشد.");
-    else files.push({ name: `کمیسیون-${id}.xlsx`, blob: await commissionXlsx({ ...b, notes: b.assignment.notes }) });
+    else {
+      /* جدولی که این‌جا ساخته می‌شود همان تولید جدول است: شمارهٔ فرم (اگر هنوز ندارد) همین‌جا داده می‌شود */
+      b.commission_no = await markCommission(env, aid, now());
+      files.push({ name: `کمیسیون-${id}.xlsx`, blob: await commissionXlsx({ ...b, notes: b.assignment.notes }) });
+    }
   }
   const atts = d.docs.att ? ((await env.DB.prepare(
     "SELECT * FROM tg_uploads WHERE expert_id=? AND state='attach' AND done_at IS NULL AND json_extract(options_json,'$.flow')=? ORDER BY id LIMIT ?",
@@ -2092,9 +2260,8 @@ async function deliverSend(env, api, chat, ex, f, d, mid) {
   const t = now();
   const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
     .bind(t, `expert:${ex.id}`, "deliver", id, JSON.stringify({ assignment_id: aid, files: files.map((x) => x.name), attachments: atts.length, channel: "telegram" }))];
-  /* جدولی که این‌جا ساخته و فرستاده شد، همان تولید جدول است — مرحله سبز می‌شود */
+  /* جدولی که این‌جا ساخته و فرستاده شد، همان تولید جدول است — مرحله سبز می‌شود (commission_at را markCommission زد) */
   if (d.docs.table && finals.length) {
-    stmts.push(env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?) WHERE id=?").bind(t, aid));
     stmts.push(env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid));
   }
   if (atts.length) stmts.push(env.DB.prepare(`UPDATE tg_uploads SET state='done', done_at=? WHERE id IN (${atts.map(() => "?").join(",")})`).bind(t, ...atts.map((a) => a.id)));
@@ -2138,7 +2305,8 @@ const FLOW_TTL = 2 * 3600000;
 const MODE_TTL = 24 * 3600000;
 
 const INPUT_STEPS = `((kind='field' AND step='need_value') OR (kind='notes' AND step='need_notes')
-  OR (kind='manual' AND step='need_supplier') OR (kind='smart' AND step IN ('need_brand','need_specs','need_notes2')))`;
+  OR (kind='manual' AND step='need_supplier') OR (kind='smart' AND step IN ('need_brand','need_specs','need_notes2'))
+  OR (kind='tpl' AND step IN ('need_title','need_body','edit_title','edit_body')))`;
 
 /** آخرین پرسشِ متنیِ باز همین کارشناس */
 async function inputFlow(env, expertId) {
@@ -2441,26 +2609,29 @@ async function onCallback(env, cq) {
       const i = parseInt(aRaw, 10); const s2 = sup[i];
       if (!s2) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
       await ack();
-      const tpls = (await env.DB.prepare("SELECT id,title,body FROM templates WHERE expert_id IS NULL OR expert_id=? ORDER BY id LIMIT 12").bind(ex.id).all()).results || [];
-      if (!tpls.length) { await api.sendMessage(chat, "هنوز قالب پیامی ساخته نشده؛ از پنل، «قالب‌های پیام» را باز کنید.").catch(() => {}); return { ok: true }; }
-      const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>`).join("\n");
-      const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}` }]);
-      await api.sendMessage(chat, `✉️ پیام برای <b>${esc(short(s2.name, 36))}</b>\nکدام قالب؟\n\n${desc}`, kb).catch(() => {});
-      return { ok: true };
+      return templatePick(env, api, chat, ex, sr, i, s2, mid);
     }
     if (step === "t") {
       const i = parseInt(aRaw, 10), tplId = parseInt(bRaw, 10);
       const s2 = sup[i];
-      const tpl = await env.DB.prepare("SELECT * FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(tplId, ex.id).first();
+      const tpl = await ownTemplate(env, ex.id, tplId);
       if (!s2 || !tpl) { await ack("پیدا نشد.", true); return { ok: true }; }
       const itRow = await env.DB.prepare("SELECT title, qty, unit, spec FROM items WHERE id=?").bind(sr.item_id).first() || {};
       await ack();
       const text = fillTemplate(tpl.body, { supplier: s2.name, item: itRow, expertName: ex.name });
-      await api.sendMessage(chat, `✉️ <b>متن آماده برای ${esc(short(s2.name, 36))}</b> — کپی کنید و در کانال دلخواه بفرستید:\n\n<code>${esc(text)}</code>`).catch(() => {});
+      /* همان «کپی پیام» پنل: دکمهٔ کپیِ تلگرام متن را عیناً در کلیپ‌بورد می‌گذارد (سقف ۲۵۶ نویسه)؛
+         متن بلندتر با لمسِ بلوکِ <code> کپی می‌شود. */
+      const kb = [];
+      if (text.length <= 256) kb.push([{ text: "📋 کپی پیام", copy_text: { text } }]);
+      kb.push([{ text: "✉️ قالب دیگر", callback_data: `sg:${sr.search_id}:p:${i}` }, { text: "🗂 قالب‌های پیام", callback_data: `tp:ls:0:${sr.search_id}:${i}` }]);
+      await api.sendMessage(chat, `✉️ <b>${esc(tpl.title)}</b> — برای ${esc(short(s2.name, 36))}\n\n<code>${esc(text)}</code>\n\n<i>${text.length <= 256 ? "«کپی پیام» را بزنید" : "روی متن بزنید تا کپی شود"} و در کانال دلخواه بفرستید.</i>`, kb).catch(() => {});
       return { ok: true };
     }
     await ack(); return { ok: true };
   }
+
+  /* قالب‌های پیام: tp:<step>:<id>[:sid:i] — ls فهرست · v نمایش · new · et/eb ویرایش عنوان/متن · dl/dk حذف */
+  if (action === "tp") return onTemplateAction(env, api, chat, ex, parts, mid, ack);
 
   /* تب استعلامات: qt:<aid> · qx:<flow>:t:<quote> · all · pf (دریافت پیش‌فاکتور) · new (خط دستی) · ed (کارت‌ها) · back */
   if (action === "qt") { await ack(); return quotesTab(env, api, chat, ex, num(1), null); }
@@ -2483,6 +2654,12 @@ async function onCallback(env, cq) {
       await ack("منتظر پیش‌فاکتور");
       return awaitStart(env, api, chat, ex, f, d, mid);
     }
+    if (step === "del") {
+      if (!(d.sel || []).length) { await ack("اول خط‌هایی را که می‌خواهید حذف شوند تیک بزنید.", true); return { ok: true }; }
+      await ack();
+      return qtabDeleteConfirm(env, api, chat, f, d, mid);
+    }
+    if (step === "delok") { await ack("در حال حذف…"); return qtabDelete(env, api, chat, ex, f, d, asg, mid); }
     if (step === "new") { await ack(); return manualStart(env, api, chat, ex, f.assignment_id); }
     if (step === "ed") {
       const firsts = [];
@@ -2543,13 +2720,21 @@ async function onCallback(env, cq) {
       await ack();
       return manualItems(env, api, chat, ex, f, d, mid);
     }
-    if (step === "go") {
+    if (step === "go" || step === "pf") {
       if (!(d.sel || []).length) { await ack("دست‌کم یک قلم را تیک بزنید.", true); return { ok: true }; }
-      await ack();
-      return manualCreate(env, api, chat, ex, f, d, mid);
+      await ack(step === "pf" ? "منتظر پیش‌فاکتور" : "");
+      return manualCreate(env, api, chat, ex, f, d, mid, step === "pf");
     }
     await ack();
     return { ok: true };
+  }
+
+  /* «دریافت پیش‌فاکتور» از روی کارت استعلام: qw:<quote> — همهٔ خط‌های همان تأمین‌کننده منتظر فایل می‌مانند */
+  if (action === "qw") {
+    const q = await ownQuote(env, ex.id, num(1));
+    if (!q) { await ack("این خط استعلام پیدا نشد.", true); return { ok: true }; }
+    await ack("منتظر پیش‌فاکتور");
+    return awaitSupplier(env, api, chat, ex, q.assignment_id, q.supplier_name, null);
   }
 
   /* کارت استعلامِ تأمین‌کنندهٔ یک پیش‌فاکتور: qk:<proforma> */
@@ -2786,7 +2971,7 @@ async function onCallback(env, cq) {
       const claim = await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=? AND done_at IS NULL").bind(now(), f.id).run();
       if (!claim.meta.changes) { await ack(); return { ok: true }; }
       await ack("در حال نوشتن…");
-      await show(api, chat, mid, `✉️ <b>موضوع:</b> ${esc(letterSubject(titles))}`, []);
+      await show(api, chat, mid, `✉️ <b>موضوع:</b> ${esc(letterSubject(titles, d.rid))}`, []);
       return makeLetter(env, api, chat, ex, d.letterId, titles);
     }
     if (step === "t") { const v = num(3); if (its.some((i) => i.id === v)) d.sel = toggleIn(d.sel, v); }

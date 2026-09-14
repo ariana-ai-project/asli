@@ -184,6 +184,15 @@ test("نوع فاکتور اگر در سند نبود «رسمی» است", asyn
   assert.equal(inserts(DB)[0].invoice, "رسمی");
 });
 
+test("فاکتور رسمی است مگر سند صریح «غیر رسمی» گفته باشد", async () => {
+  let DB = fakeDb({ items: ITEMS, quotes: [] });
+  await applyExtraction({ DB }, proforma({ invoice_type: "غیر رسمی" }), {});
+  assert.equal(inserts(DB)[0].invoice, "غیر رسمی", "خلافش ثابت شد");
+  DB = fakeDb({ items: ITEMS, quotes: [] });
+  await applyExtraction({ DB }, proforma({ invoice_type: "چیز دیگر" }), {});
+  assert.equal(inserts(DB)[0].invoice, "رسمی", "هر چیزی جز «غیر رسمی» صریح، رسمی است");
+});
+
 test("وقتی مدل شرایط تسویه را در فهرست نریخته، متن خامش می‌نشیند", async () => {
   const DB = fakeDb({ items: ITEMS, quotes: [] });
   await applyExtraction({ DB }, proforma({ pay_class: null }), {});
