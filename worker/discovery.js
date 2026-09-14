@@ -19,6 +19,7 @@
  */
 
 import { HttpError } from "./http.js";
+import { itemKeys, searchSupplierStmts } from "./records.js";
 
 const API_BASE = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 const MODEL = "claude-sonnet-5";
@@ -389,13 +390,15 @@ export async function smartSearch(env, it, ex, params, channel) {
   };
   const out = await runDiscovery(env, p);
   const t = Date.now(), u = out.usage;
+  const k = itemKeys(it);
   const r = await env.DB.prepare(`INSERT INTO smart_searches (item_id,assignment_id,expert_id,params_json,result_json,model,prompt_version,
-      in_tokens,out_tokens,cache_read,cache_write,searches,fetches,cost_usd,created_at)
-    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
+      in_tokens,out_tokens,cache_read,cache_write,searches,fetches,cost_usd,created_at,item_code,hist_code,title_n,request_id)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`)
     .bind(it.id, it.aid || null, ex ? ex.id : null, JSON.stringify(p), JSON.stringify(out.result), out.model, out.promptVersion,
-      u.input, u.output, u.cacheRead, u.cacheWrite, u.searches, u.fetches, out.cost, t).run();
-  /* اجرای واقعی جستجو همان انجامِ مرحله است */
+      u.input, u.output, u.cacheRead, u.cacheWrite, u.searches, u.fetches, out.cost, t, k.item_code, k.hist_code, k.title_n || "", it.request_id || null).run();
+  /* اجرای واقعی جستجو همان انجامِ مرحله است؛ هر تأمین‌کننده و شماره هم ردیفِ خودش را می‌گیرد */
   await env.DB.batch([
+    ...searchSupplierStmts(env, r.meta.last_row_id, it, ex, out.result, t),
     env.DB.prepare("UPDATE items SET smart_done_at=COALESCE(smart_done_at,?) WHERE id=?").bind(t, it.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=2 AND fired_at IS NULL").bind(t, it.aid || 0),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)")
@@ -405,23 +408,13 @@ export async function smartSearch(env, it, ex, params, channel) {
   return { search_id: r.meta.last_row_id, result: out.result, model: out.model, usage: u, cost: out.cost, created_at: t };
 }
 
-export async function lastSearch(env, itemId) {
-  const row = await env.DB.prepare("SELECT * FROM smart_searches WHERE item_id=? ORDER BY id DESC LIMIT 1").bind(itemId).first();
-  if (!row) return null;
-  let result = null, params = null;
-  try { result = JSON.parse(row.result_json); } catch (_) { /* خراب */ }
-  try { params = JSON.parse(row.params_json); } catch (_) { /* خراب */ }
-  return { search_id: row.id, result, params, created_at: row.created_at, model: row.model, cost: row.cost_usd, usage: usageOf(row) };
-}
-
-const usageOf = (row) => ({ input: row.in_tokens, output: row.out_tokens, cacheRead: row.cache_read, cacheWrite: row.cache_write, searches: row.searches, fetches: row.fetches });
-
 export async function searchById(env, id) {
   const row = await env.DB.prepare("SELECT * FROM smart_searches WHERE id=?").bind(id).first();
   if (!row) return null;
   let result = null;
   try { result = JSON.parse(row.result_json); } catch (_) { /* خراب */ }
-  return { search_id: row.id, item_id: row.item_id, assignment_id: row.assignment_id, expert_id: row.expert_id, result, created_at: row.created_at };
+  return { search_id: row.id, item_id: row.item_id, assignment_id: row.assignment_id, expert_id: row.expert_id, result, created_at: row.created_at,
+    item_code: row.item_code, hist_code: row.hist_code, title_n: row.title_n };
 }
 
 /* پرکردن قالب پیام به worker/templates.js رفته (مشترکِ پنل و بات) */

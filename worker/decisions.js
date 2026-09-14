@@ -17,6 +17,7 @@ import { getSettings } from "./settings.js";
 import { queueStmt } from "./queue.js";
 import { notifyClosed, managerCard } from "./manager.js";
 import { esc } from "./telegram.js";
+import { closureStmt } from "./records.js";
 
 const now = () => Date.now();
 const int = (v, d = null) => { const n = parseInt(v, 10); return isNaN(n) ? d : n; };
@@ -104,29 +105,31 @@ async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemId
  * اعمال تصمیم. خاتمه فقط قلم‌های داده‌شده را می‌بندد.
  * برمی‌گرداند چند قلم بسته شد و آیا درخواست به‌کل بسته شده.
  */
-export async function applyDecision(env, actor, aid, action, payload) {
+export async function applyDecision(env, actor, aid, action, payload, decisionId) {
   const t = now();
   let closed = 0;
-  if (action === "end") {
-    const ids = Array.isArray(payload && payload.item_ids) ? payload.item_ids.map((x) => int(x)).filter(Boolean) : [];
-    if (ids.length) {
-      const r = await env.DB.prepare(`UPDATE items SET state='closed', state_at=? WHERE assignment_id=? AND state='open' AND id IN (${ids.map(() => "?").join(",")})`)
-        .bind(t, aid, ...ids).run();
-      closed = (r.meta && r.meta.changes) || 0;
-    } else {
-      const r = await env.DB.prepare("UPDATE items SET state='closed', state_at=? WHERE assignment_id=? AND state='open' AND commission_ok=1").bind(t, aid).run();
-      closed = (r.meta && r.meta.changes) || 0;
-    }
-  } else {
-    await env.DB.prepare("UPDATE items SET state=?, state_at=? WHERE assignment_id=? AND state='open'").bind(action, t, aid).run();
-  }
+  /* اقلامی که همین تصمیم تغییرشان می‌دهد — پیش از UPDATE خوانده می‌شوند تا در closures بمانند */
+  const ids = Array.isArray(payload && payload.item_ids) ? payload.item_ids.map((x) => int(x)).filter(Boolean) : [];
+  const where = action === "end"
+    ? (ids.length ? `assignment_id=? AND state='open' AND id IN (${ids.map(() => "?").join(",")})` : "assignment_id=? AND state='open' AND commission_ok=1")
+    : "assignment_id=? AND state='open'";
+  const args = action === "end" && ids.length ? [aid, ...ids] : [aid];
+  const touched = ((await env.DB.prepare(`SELECT id FROM items WHERE ${where}`).bind(...args).all()).results || []).map((r) => r.id);
+  const r = await env.DB.prepare(`UPDATE items SET state=?, state_at=? WHERE ${where}`).bind(action === "end" ? "closed" : action, t, ...args).run();
+  if (action === "end") closed = (r.meta && r.meta.changes) || 0;
   const c = await context(env, aid);
   const live = await env.DB.prepare("SELECT COUNT(*) AS n FROM items WHERE assignment_id=? AND state IN ('open','hold')").bind(aid).first();
   const fullyClosed = !live || live.n === 0;
-  const stmts = [ev(env, actor, action === "end" ? "close" : action, c && c.request_id, { assignment_id: aid, closed, fully_closed: fullyClosed })];
+  const stmts = [
+    ev(env, actor, action === "end" ? "close" : action, c && c.request_id, { assignment_id: aid, closed, fully_closed: fullyClosed }),
+    /* تاریخ خاتمه (یا تعلیق/توقف) با اقلام و تأییدکننده */
+    closureStmt(env, { assignment_id: aid, request_id: c && c.request_id, expert_id: c && c.expert_id, action, item_ids: touched,
+      closed: action === "end" ? closed : touched.length, fully_closed: fullyClosed, actor, decision_id: decisionId, at: t }),
+  ];
   if (fullyClosed) {
     /* هشدارهای مانده بی‌معنی‌اند */
     stmts.push(env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid));
+    if (action === "end") stmts.push(env.DB.prepare("UPDATE assignments SET closed_at=COALESCE(closed_at,?) WHERE id=?").bind(t, aid));
   }
   await env.DB.batch(stmts);
 
@@ -153,7 +156,7 @@ export async function applyDecision(env, actor, aid, action, payload) {
 export async function approveDecision(env, decisionId, via) {
   const d = await env.DB.prepare("SELECT * FROM decisions WHERE id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(decisionId).first();
   if (!d) throw new HttpError("تصمیم پیدا نشد یا قبلاً رسیدگی شده.", 404);
-  const res = await applyDecision(env, "manager", d.assignment_id, d.action, JSON.parse(d.payload_json || "{}"));
+  const res = await applyDecision(env, "manager", d.assignment_id, d.action, JSON.parse(d.payload_json || "{}"), d.id);
   await env.DB.prepare("UPDATE decisions SET approved_at=?, note=? WHERE id=?").bind(now(), via || null, d.id).run();
   await tellExpert(env, d, true, null, res);
   return { ok: true, ...res };

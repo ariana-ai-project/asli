@@ -225,6 +225,86 @@ CREATE INDEX IF NOT EXISTS ix_ph_item  ON purchase_history(item_code);
 CREATE INDEX IF NOT EXISTS ix_ph_title ON purchase_history(title_n);
 CREATE INDEX IF NOT EXISTS ix_ph_sup   ON purchase_history(supplier_n);
 
+-- ============================================================
+-- ثبت‌های سامانه (worker/records.js) — تصمیم مدیر، شهریور ۱۴۰۵:
+-- تغییرات مهم با تاریخ و عامل می‌مانند، نه فقط آخرین وضعیت.
+-- ============================================================
+
+-- هر تأمین‌کنندهٔ هر جستجوی هوشمند، ردیف‌به‌ردیف (نتیجهٔ کامل همچنان در smart_searches.result_json)
+CREATE TABLE IF NOT EXISTS search_suppliers (
+  id            INTEGER PRIMARY KEY,
+  search_id     INTEGER NOT NULL,          -- smart_searches.id
+  idx           INTEGER NOT NULL,          -- ردیف در نتیجه
+  item_id       INTEGER, assignment_id INTEGER, request_id TEXT, expert_id INTEGER,
+  name          TEXT,
+  name_n        TEXT,                      -- نام نرمال‌شده
+  type          TEXT, market TEXT, website TEXT,
+  emails_json   TEXT,
+  price_text    TEXT, price_unit TEXT,
+  created_at    INTEGER NOT NULL
+);
+
+-- هر شمارهٔ تلفنِ پیداشده، به تفکیک؛ phone کلید نرمال (+پیش‌شماره و رقم)
+CREATE TABLE IF NOT EXISTS supplier_phones (
+  id INTEGER PRIMARY KEY, search_id INTEGER NOT NULL, idx INTEGER NOT NULL,
+  phone TEXT NOT NULL, phone_raw TEXT, supplier_name TEXT, market TEXT, created_at INTEGER NOT NULL
+);
+
+-- بررسی پیام‌رسان‌ها: یک ردیف برای هر شماره، یک ستون برای هر پیام‌رسان (ok | no | unk)،
+-- مشترک بین همهٔ کارشناسان — هر کس همان شماره را ببیند، وضعیت پیش‌پر است.
+-- (جایگزین supplier_channels که کلیدش تأمین‌کننده×قلم بود و هیچ‌وقت پر نشد)
+CREATE TABLE IF NOT EXISTS phone_channels (
+  phone TEXT PRIMARY KEY, telegram TEXT, whatsapp TEXT, bale TEXT, rubika TEXT,
+  updated_by INTEGER, updated_at INTEGER NOT NULL
+);
+-- هر کلیک، با وضعیت قبلی
+CREATE TABLE IF NOT EXISTS phone_channel_log (
+  id INTEGER PRIMARY KEY, phone TEXT NOT NULL, platform TEXT NOT NULL, state TEXT NOT NULL,
+  prev_state TEXT, expert_id INTEGER, at INTEGER NOT NULL
+);
+
+-- تاریخچهٔ ارجاع: assign | unassign | reassign | days | dispatch — با کارشناس، مهلت و منبع (manual | smart)
+CREATE TABLE IF NOT EXISTS assignment_log (
+  id INTEGER PRIMARY KEY, at INTEGER NOT NULL, action TEXT NOT NULL,
+  request_id TEXT, assignment_id INTEGER, expert_id INTEGER, from_expert_id INTEGER,
+  days INTEGER, deadline_at INTEGER, item_ids_json TEXT, source TEXT, actor TEXT
+);
+
+-- هر تغییرِ تنظیمات مدیر (آستانه‌ها، ضرایب ارجاع و مهلت هوشمند، …) با مقدار قبلی
+CREATE TABLE IF NOT EXISTS settings_history (
+  id INTEGER PRIMARY KEY, key TEXT NOT NULL, value_json TEXT, prev_json TEXT, at INTEGER NOT NULL, actor TEXT
+);
+-- هر تغییرِ امتیاز کارشناس (kind=score) یا ضریب گروه/پروژه (kind=weight) با مقدار قبلی
+CREATE TABLE IF NOT EXISTS scores_history (
+  id INTEGER PRIMARY KEY, kind TEXT NOT NULL, expert_id INTEGER, score_kind TEXT, key TEXT,
+  value REAL, prev REAL, at INTEGER NOT NULL, actor TEXT
+);
+
+-- خط‌های استعلامِ حذف‌شده: از quotes (و از تب و بات) کامل می‌روند، نسخهٔ کاملشان این‌جا
+CREATE TABLE IF NOT EXISTS quotes_deleted (
+  id INTEGER PRIMARY KEY, quote_id INTEGER NOT NULL, assignment_id INTEGER, request_id TEXT,
+  item_id INTEGER, supplier_name TEXT, row_json TEXT NOT NULL,
+  deleted_at INTEGER NOT NULL, deleted_by INTEGER, channel TEXT
+);
+
+-- هر جدول کمیسیونِ ساخته‌شده: شماره، زمان، کارشناس، خط‌های تأییدنهایی و توضیحات
+CREATE TABLE IF NOT EXISTS commission_tables (
+  id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, commission_no INTEGER,
+  expert_id INTEGER, at INTEGER NOT NULL, channel TEXT, quote_ids_json TEXT, lines_json TEXT, notes TEXT
+);
+
+-- تصمیم‌های اعمال‌شده: end (خاتمه) | hold | stop — اقلام، تاریخ، تأییدکننده
+CREATE TABLE IF NOT EXISTS closures (
+  id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, expert_id INTEGER,
+  action TEXT NOT NULL, item_ids_json TEXT, closed INTEGER, fully_closed INTEGER,
+  actor TEXT, decision_id INTEGER, at INTEGER NOT NULL
+);
+
+-- ستون‌های افزوده (COLUMN_MIGRATIONS در api.js):
+--   assignments.closed_at              همهٔ اقلام بسته شد
+--   smart_searches.item_code/hist_code/title_n/request_id   کلید قلم برای جستجوهای قبلیِ همان قلم
+--   quotes.origin (history|smart|manual|proforma), origin_ref (شناسهٔ جستجو), final_at, commission_at
+
 -- ---------- جستجوهای هوشمند (کشف تأمین‌کننده با Claude + جستجوی وب) ----------
 -- هر اجرا یک ردیف: قیدهای کارشناس (بازارها/برند/مشخصات/ملاحظات) و کل خروجی
 -- JSON مدل. نتیجه در پنل و بات از همین‌جا خوانده می‌شود و رفرش چیزی را نمی‌پراند.

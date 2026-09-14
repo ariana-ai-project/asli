@@ -726,7 +726,7 @@
       await loadWorkload();
       const P = planAssign(pend);
       for (const p of P.plan) {
-        await TP.api("/assign", { body: { request_id: p.r.id, expert_id: p.e.id, item_ids: unassignedOpen(p.r).map((i) => i.id) } });
+        await TP.api("/assign", { body: { request_id: p.r.id, expert_id: p.e.id, item_ids: unassignedOpen(p.r).map((i) => i.id), source: "smart" } });
         n++; b.set(`${n} از ${P.plan.length}`);
       }
     } catch (e) { b.close(); WL = null; await refresh(); return TP.modal("ارجاع هوشمند نیمه‌کاره ماند", `${n} درخواست ارجاع شد؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
@@ -739,7 +739,7 @@
     const b = TP.busy("اعمال مهلت هوشمند…", `${list.length} ارجاع`); let n = 0;
     try {
       await loadWorkload();
-      for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days } }); n++; b.set(`${n} از ${list.length}`); }
+      for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days, source: "smart" } }); n++; b.set(`${n} از ${list.length}`); }
     } catch (e) { b.close(); await refresh(); return TP.modal("مهلت هوشمند نیمه‌کاره ماند", `${n} ارجاع مهلت گرفت؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();
     TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاع ارسال‌نشده مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها.`, null, "باشد", "");

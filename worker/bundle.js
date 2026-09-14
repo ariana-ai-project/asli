@@ -15,6 +15,7 @@ import { HttpError } from "./http.js";
 import { commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { jStr, fmtFa } from "./time.js";
+import { commissionRecordStmts } from "./records.js";
 
 /** همهٔ داده‌های لازم برای برگه‌ها، با یک بار خواندن از دیتابیس */
 export async function bundleData(env, aid, settings, company) {
@@ -109,6 +110,18 @@ export async function markCommission(env, aid, at) {
   await env.DB.prepare("UPDATE assignments SET commission_at=COALESCE(commission_at,?), commission_no=COALESCE(commission_no,?) WHERE id=?").bind(t, no, aid).run();
   const row = await env.DB.prepare("SELECT commission_no FROM assignments WHERE id=?").bind(aid).first();
   return (row && row.commission_no) || no;
+}
+
+/**
+ * «جدول کمیسیون ساخته شد» به‌طور کامل: شماره (markCommission) + عکسِ خط‌های داخل جدول با
+ * زمان و کارشناس (commission_tables) + علامتِ commission_at روی همان خط‌ها. پنل، بات و
+ * «تحویل» همه همین را صدا می‌زنند. شماره را برمی‌گرداند.
+ */
+export async function recordCommission(env, aid, { expertId, channel } = {}) {
+  const t = Date.now();
+  const no = await markCommission(env, aid, t);
+  await env.DB.batch(await commissionRecordStmts(env, aid, { no, expertId, channel, t }));
+  return no;
 }
 
 /** کد فرم کمیسیون روی برگه؛ پیش از تولید، شماره ندارد */

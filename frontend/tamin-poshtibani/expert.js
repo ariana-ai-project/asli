@@ -356,7 +356,7 @@
   async function addFromHistory(key) {
     const it = item(), s = supOf(key); if (!s) return;
     try {
-      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name, supplier_code: s.code || "" } });
+      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name, supplier_code: s.code || "", origin: "history" } });
       S.tab = "quotes"; await reload();
     } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
   }
@@ -372,7 +372,13 @@
     authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده", retailer_shop: "فروشگاه",
     marketplace_only: "فقط آگهی", broker_intermediary: "واسطه",
   };
-  const smState = () => S.smart[(item() || {}).id];
+  /* S.smart[itemId] = { searches: [...] } — همهٔ جستجوهای همین قلم (هر درخواست و هر کارشناس)،
+     تازه‌ترین اول. S.smFresh[itemId] جستجویی است که همین حالا اجرا شد و بالای همه برجسته می‌آید.
+     S.chan[phone][platform] وضعیت پیام‌رسان‌های هر شماره است، مشترک بین همه و ذخیره در پایگاه داده. */
+  S.smFresh = {}; S.chan = {}; S.chOpen = {}; S.smOpen = {};
+  const mergeChannels = (ch) => { for (const [ph, v] of Object.entries(ch || {})) S.chan[ph] = { ...(S.chan[ph] || {}), ...v }; };
+  const searchOf = (sid) => { const d = S.smart[(item() || {}).id]; return d && d.searches ? d.searches.find((x) => x.search_id === sid) : null; };
+  const supOfSearch = (sid, idx) => { const s = searchOf(sid); return s && s.result && (s.result.suppliers || [])[idx]; };
 
   async function loadSmart(it) {
     if (S.smart[it.id] !== undefined) return;
@@ -381,9 +387,26 @@
       const r = await TP.api(`/search/smart?item_id=${it.id}`);
       S.marketsMeta = r.markets || S.marketsMeta;
       S.maxMarkets = r.maxMarkets || S.maxMarkets;
-      S.smart[it.id] = r.last || null;
-    } catch (_) { S.smart[it.id] = null; }
+      mergeChannels(r.channels);
+      S.smart[it.id] = { searches: r.searches || [] };
+    } catch (_) { S.smart[it.id] = { searches: [] }; }
     render();
+  }
+
+  /* یک کلیک روی ✓/✗/— : همان لحظه در صفحه عوض می‌شود و در پایگاه داده ثبت می‌شود؛ اگر ثبت نشد برمی‌گردد */
+  async function toggleChannel(phone, platform) {
+    const cur = (S.chan[phone] || {})[platform] || "unk";
+    const next = cur === "unk" ? "ok" : cur === "ok" ? "no" : "unk";
+    S.chan[phone] = { ...(S.chan[phone] || {}), [platform]: next };
+    render();
+    try {
+      const r = await TP.api("/phones/channels", { method: "PUT", body: { phone, platform, state: next } });
+      if (r && r.channels) S.chan[phone] = { ...S.chan[phone], ...r.channels };
+    } catch (e) {
+      S.chan[phone] = { ...(S.chan[phone] || {}), [platform]: cur };
+      render();
+      TP.modal("ثبت نشد", esc(e.message), null, "باشد", "");
+    }
   }
 
   async function runSmart() {
@@ -396,27 +419,30 @@
       /* پاسخ جریانی است: خطای وسط اجرا با وضعیت ۲۰۰ و فیلد error می‌آید */
       if (r && r.error) throw Object.assign(new Error(r.error), { status: r.status });
       b.close();
-      if (r.available === false) { S.smart[it.id] = null; return TP.modal("جستجوی هوشمند", esc(r.message), null, "باشد", ""); }
-      S.smart[it.id] = r; S.smProf = null;
+      if (r.available === false) return TP.modal("جستجوی هوشمند", esc(r.message), null, "باشد", "");
+      /* نتیجهٔ تازه بالای همه؛ جستجوهای قبلی پایینش می‌مانند */
+      mergeChannels(r.channels);
+      const prev = (S.smart[it.id] && S.smart[it.id].searches) || [];
+      S.smart[it.id] = { searches: [{ search_id: r.search_id, item_id: it.id, request_id: r.request_id, expert: r.expert, created_at: r.created_at, cost: r.cost, same_item: true, result: r.result },
+        ...prev.filter((x) => x.search_id !== r.search_id)] };
+      S.smFresh[it.id] = r.search_id;
       if (!it.hist_done_at || !it.smart_done_at) { await reload(); return; }
       render();
     } catch (e) { b.close(); TP.modal("جستجو انجام نشد", esc(e.message), null, "باشد", ""); }
   }
 
-  /* افزودن تأمین‌کنندهٔ کشف‌شده به خط استعلام همین قلم — فقط نام می‌رود */
-  async function addFromSmart(idx) {
-    const it = item(), d = smState();
-    const s = d && d.result && (d.result.suppliers || [])[idx]; if (!s) return;
+  /* افزودن تأمین‌کنندهٔ کشف‌شده به خط استعلام همین قلم — فقط نام می‌رود؛ از کدام جستجو آمده ثبت می‌شود */
+  async function addFromSmart(sid, idx) {
+    const it = item(), s = supOfSearch(sid, idx); if (!s) return;
     try {
-      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name } });
+      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name, origin: "smart", search_id: sid } });
       S.tab = "quotes"; await reload();
     } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
   }
 
   /* پیام آماده برای یک تأمین‌کنندهٔ نتیجه: انتخاب قالب → متنِ پرشده → کپی */
-  async function smartMessage(idx) {
-    const it = item(), d = smState();
-    const s = d && d.result && (d.result.suppliers || [])[idx]; if (!s) return;
+  async function smartMessage(sid, idx) {
+    const s = supOfSearch(sid, idx); if (!s) return;
     await loadTemplates();
     if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(); }
     const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
@@ -444,7 +470,8 @@
   const supPrice = (s) => (s.price && typeof s.price === "object" ? [s.price.text, s.price.unit ? `/ ${s.price.unit}` : ""].filter(Boolean).join(" ") : s.price || "");
   const faDigits = (x) => String(x).replace(/\d/g, (c) => "۰۱۲۳۴۵۶۷۸۹"[+c]).replace(/\./g, "٫");
   /* بررسی دستیِ پیام‌رسان هر شماره — همان مدل دمو: «—» بررسی‌نشده، یک کلیک ✓، کلیک دوم ✗.
-     فعلاً فقط در همین صفحه می‌ماند؛ انتقالش به پایگاه داده مرحلهٔ بعد است. */
+     کلید، خودِ شماره است (برای هر چهار پیام‌رسان): تیکی که یک کارشناس زد، برای هر کارشناسی که
+     همان شماره را در هر جستجویی ببیند پیش‌پر است. */
   const TRI = { unk: ["—", "unk"], ok: ["✓", "ok"], no: ["✗", "no"] };
   /* ستون وب‌سایت فشرده است (تصمیم مدیر): یک کادر «وبسایت» با فلش ↗ سمت راست و کرهٔ زمین
      سمت چپ؛ نشانی کامل در title است و با کلیک همان لینک باز می‌شود. */
@@ -457,50 +484,65 @@
     return `<a class="sitebtn" href="${esc(href)}" target="_blank" rel="noopener" title="${esc(x)}"><span class="arr">${ICO_ARROW}</span><span>وبسایت</span><span class="glb">${ICO_GLOBE}</span></a>`;
   };
 
+  /* جدول نتایج یک جستجو */
+  function smartTable(it, srch) {
+    const sup = (srch.result && srch.result.suppliers) || [], sid = srch.search_id;
+    const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
+    const rows = sup.map((s, i) => {
+      const phones = supPhones(s), keys = s.phone_keys || [], emails = supEmails(s), key = `${sid}|${i}`, open = !!S.chOpen[key];
+      const tri = (ph, p, lab) => {
+        const st = TRI[(S.chan[ph] || {})[p]] ? S.chan[ph][p] : "unk";
+        return `<button class="tri ${TRI[st][1]}" data-ch="${esc(ph)}|${p}" title="${lab}">${TRI[st][0]}</button>`;
+      };
+      /* خلاصهٔ کنار شماره: پیام‌رسان‌هایی که کسی بررسی کرده */
+      const marks = (ph) => PLATS.filter(([p]) => ["ok", "no"].includes((S.chan[ph] || {})[p])).map(([p, l]) => `<span class="chm ${S.chan[ph][p]}" title="${l}">${S.chan[ph][p] === "ok" ? "✓" : "✗"}${l}</span>`).join("");
+      const checks = open && phones.length ? `<tr class="chrow"><td></td><td colspan="8"><table class="chx"><thead><tr><th class="rt">شماره</th>${PLATS.map(([, l]) => `<th>${l}</th>`).join("")}<th class="rt"></th></tr></thead><tbody>
+        ${phones.map((ph, k) => { const pk = keys[k] || ph, c = S.chan[pk] || {};
+          return `<tr><td class="num rt" dir="ltr">${esc(ph)}</td>${PLATS.map(([p, l]) => `<td>${tri(pk, p, l)}</td>`).join("")}
+            <td class="dim rt" style="font-size:.72rem">${c.updated_by ? `آخرین بررسی: ${esc(c.updated_by)}${c.updated_at ? " — " + TP.fmt(c.updated_at) : ""}` : ""}</td></tr>`; }).join("")}
+        </tbody></table></td></tr>` : "";
+      return `<tr>
+        <td class="num">${M(i + 1)}</td>
+        <td class="rt">${esc(s.name || "—")}</td>
+        <td>${esc(ROLE_FA[supType(s)] || supType(s))}</td>
+        <td>${esc(supMarket(s) || "—")}</td>
+        <td class="rt">${phones.length ? `<div class="phcell"><button class="tp-btn xs hamb ${open ? "on" : ""}" data-chopen="${esc(key)}" title="بررسی تلگرام، واتساپ، بله و روبیکا">☰</button><div>${phones.map((ph, k) => `<div class="num" dir="ltr">${esc(ph)}</div>${marks(keys[k] || ph) ? `<div class="chms">${marks(keys[k] || ph)}</div>` : ""}`).join("")}</div></div>` : "—"}</td>
+        <td class="rt" dir="ltr" style="text-align:right">${emails.length ? emails.map((x) => `<div>${esc(x)}</div>`).join("") : "—"}</td>
+        <td>${siteBtn(s.website)}</td>
+        <td class="rt">${esc(supPrice(s) || "—")}</td>
+        <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${sid}|${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
+          <button class="tp-btn xs" data-sm-msg="${sid}|${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>${checks}`;
+    }).join("");
+    return `<div class="tp-scroll" data-keep-scroll><table class="tp-table smres"><thead><tr>
+        <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th>وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
+      <tbody>${rows || `<tr><td colspan="9"><div class="empty">مدل تأمین‌کننده‌ای برنگرداند.</div></td></tr>`}</tbody></table></div>
+      ${srch.cost != null ? `<div class="dim smcost">هزینهٔ این جستجو: ${faDigits(Number(srch.cost).toFixed(2))} دلار</div>` : ""}`;
+  }
+
   function vSmart(it) {
     const d = S.smart[it.id];
     if (d === undefined) { loadSmart(it); }
-    S.chan = S.chan || {}; S.chOpen = S.chOpen || {};
-    const has = d && d !== "loading" && d.result;
+    const list = d && d !== "loading" ? d.searches || [] : [];
+    const fresh = list.find((x) => x.search_id === S.smFresh[it.id]);
+    const older = list.filter((x) => x !== fresh);
     const head = `<div class="toolrow"><b style="font-size:1.02rem">جستجوی هوشمند برای «${esc(it.title)}»</b>
       ${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
       <button class="tp-btn" data-tpl-open title="قالب‌های پیام موجود را ببینید یا قالب تازه بسازید">ایجاد قالب پیام</button>
-      <button class="tp-btn primary" data-run-smart>${has ? "جستجوی دوباره" : "اجرای جستجوی هوشمند"}</button>
+      <button class="tp-btn primary" data-run-smart>${list.length ? "اجرای جستجوی تازه" : "اجرای جستجوی هوشمند"}</button>
       ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart" title="اگر جستجو را بیرون از سامانه انجام داده‌اید">علامت بزن</button>`}</div>`;
+    const meta = (x) => `${TP.fmt(x.created_at)} · ${esc(x.expert || "—")}${x.request_id ? ` · درخواست <span class="num">${esc(x.request_id)}</span>` : ""}${x.same_item ? "" : ` <span class="chip info" title="همین قلم در درخواست دیگری جستجو شده بود">درخواست دیگر</span>`}`;
+    const count = (x) => ((x.result && x.result.suppliers) || []).length;
 
     let main;
-    if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن نتیجهٔ قبلی…</div>`;
-    else if (!has) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
+    if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن جستجوهای قبلی این قلم…</div>`;
+    else if (!list.length) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
       بازارها را در ستون کنار انتخاب کنید و «اجرای جستجوی هوشمند» را بزنید.</div>`;
     else {
-      const sup = d.result.suppliers || [], sid = d.search_id || 0;
-      const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
-      const rows = sup.map((s, i) => {
-        const phones = supPhones(s), emails = supEmails(s), key = `${sid}|${i}`, open = !!S.chOpen[key];
-        const tri = (ph, p, lab) => {
-          const k = `${key}|${ph}|${p}`, st = TRI[S.chan[k]] ? S.chan[k] : "unk";
-          return `<button class="tri ${TRI[st][1]}" data-ch="${esc(k)}" title="${lab}">${TRI[st][0]}</button>`;
-        };
-        const checks = open && phones.length ? `<tr class="chrow"><td></td><td colspan="8"><table class="chx"><thead><tr><th class="rt">شماره</th>${PLATS.map(([, l]) => `<th>${l}</th>`).join("")}</tr></thead><tbody>
-          ${phones.map((ph) => `<tr><td class="num rt" dir="ltr">${esc(ph)}</td>${PLATS.map(([p, l]) => `<td>${tri(ph, p, l)}</td>`).join("")}</tr>`).join("")}
-          </tbody></table></td></tr>` : "";
-        return `<tr>
-          <td class="num">${M(i + 1)}</td>
-          <td class="rt">${esc(s.name || "—")}</td>
-          <td>${esc(ROLE_FA[supType(s)] || supType(s))}</td>
-          <td>${esc(supMarket(s) || "—")}</td>
-          <td class="rt">${phones.length ? `<div class="phcell"><button class="tp-btn xs hamb ${open ? "on" : ""}" data-chopen="${esc(key)}" title="بررسی تلگرام، واتساپ، بله و روبیکا">☰</button><div>${phones.map((ph) => `<div class="num" dir="ltr">${esc(ph)}</div>`).join("")}</div></div>` : "—"}</td>
-          <td class="rt" dir="ltr" style="text-align:right">${emails.length ? emails.map((x) => `<div>${esc(x)}</div>`).join("") : "—"}</td>
-          <td>${siteBtn(s.website)}</td>
-          <td class="rt">${esc(supPrice(s) || "—")}</td>
-          <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
-            <button class="tp-btn xs" data-sm-msg="${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>${checks}`;
-      }).join("");
-      main = `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table smres"><thead><tr>
-          <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th>وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="9"><div class="empty">مدل تأمین‌کننده‌ای برنگرداند.</div></td></tr>`}</tbody></table></div>
-        ${d.cost != null ? `<div class="dim smcost">هزینهٔ این جستجو: ${faDigits(Number(d.cost).toFixed(2))} دلار</div>` : ""}`;
+      /* نتیجهٔ تازه بالا و برجسته؛ جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پایین */
+      main = (fresh ? `<div class="smblock fresh"><div class="smhead"><span class="chip ok">🆕 نتیجهٔ جستجوی تازه</span><b>${M(count(fresh))} تأمین‌کننده</b><span class="dim">${meta(fresh)}</span></div>${smartTable(it, fresh)}</div>` : "")
+        + (older.length ? `<div class="smprev-title">${fresh ? "نتایج جستجوهای قبلی" : "نتایج جستجوهای قبلی این قلم — پیش از اجرای جستجوی تازه ببینید"} <span class="dim">(${M(older.length)})</span></div>` : "")
+        + older.map((x, k) => `<details class="smblock prev" data-sid="${x.search_id}" ${(S.smOpen[x.search_id] ?? k < (fresh ? 1 : 2)) ? "open" : ""}><summary class="smhead"><span class="chip">جستجوی قبلی</span><b>${M(count(x))} تأمین‌کننده</b><span class="dim">${meta(x)}</span></summary>${smartTable(it, x)}</details>`).join("");
     }
     /* ستون قیدها — مهم‌ترین قید، «بازار تأمین کالا»، یک فهرست است */
     const markets = `<div class="grp"><b>بازار تأمین کالا <span class="dim" style="font-weight:400">(حداکثر ${"۰۱۲۳۴۵۶۷۸۹"[S.maxMarkets || 3] || S.maxMarkets})</span></b>${(S.marketsMeta || []).map((x) =>
@@ -792,10 +834,13 @@
     Q("[data-sm]").forEach((el) => el.oninput = (e) => { S.sm[e.target.dataset.sm] = e.target.value; });
     Q("[data-tpl-open]").forEach((b) => b.onclick = pickTemplate);
     Q("[data-chopen]").forEach((b) => b.onclick = () => { S.chOpen[b.dataset.chopen] = !S.chOpen[b.dataset.chopen]; render(); });
-    /* همان چرخهٔ دمو: — ← ✓ ← ✗ ← — */
-    Q("[data-ch]").forEach((b) => b.onclick = () => { const k = b.dataset.ch, c = S.chan[k] || "unk"; S.chan[k] = c === "unk" ? "ok" : c === "ok" ? "no" : "unk"; render(); });
-    Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(+b.dataset.smAdd));
-    Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(+b.dataset.smMsg));
+    /* همان چرخهٔ دمو: — ← ✓ ← ✗ ← — ؛ کلید «شماره|پیام‌رسان»، ذخیره در پایگاه داده */
+    Q("[data-ch]").forEach((b) => b.onclick = () => { const k = b.dataset.ch, i = k.lastIndexOf("|"); toggleChannel(k.slice(0, i), k.slice(i + 1)); });
+    const pair = (v) => v.split("|").map(Number);
+    Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(...pair(b.dataset.smAdd)));
+    Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(...pair(b.dataset.smMsg)));
+    /* باز/بسته کردن جستجوی قبلی نباید با بازرندرِ بعدی برگردد */
+    Q("details.smblock").forEach((el) => el.ontoggle = () => { S.smOpen[el.dataset.sid] = el.open; });
     /* استعلامات */
     const ar = G("[data-add-row]"); if (ar) ar.onclick = () => {
       /* یک تأمین‌کننده معمولاً چند قلم را با هم قیمت می‌دهد، پس اقلام چندانتخابی‌اند؛ برای هر قلم یک خط ساخته می‌شود */
@@ -807,7 +852,7 @@
           const n = d.querySelector("#sup").value.trim(); if (!n) return;
           const ids = [...d.querySelectorAll("[data-supi]:checked")].map((c) => +c.dataset.supi);
           if (!ids.length) { TP.modal("قلمی انتخاب نشد", "دست‌کم یک قلم را تیک بزنید.", null, "باشد", ""); return; }
-          try { const r = await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: ids, supplier_name: n, supplier_code: d.querySelector("#supc").value.trim() } }); S.tab = "quotes"; await reload(); if (r.skipped) TP.modal("توجه", `${M(r.skipped)} قلم برای این تأمین‌کننده از قبل خط داشت و دوباره ساخته نشد.`, null, "باشد", ""); }
+          try { const r = await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: ids, supplier_name: n, supplier_code: d.querySelector("#supc").value.trim(), origin: "manual" } }); S.tab = "quotes"; await reload(); if (r.skipped) TP.modal("توجه", `${M(r.skipped)} قلم برای این تأمین‌کننده از قبل خط داشت و دوباره ساخته نشد.`, null, "باشد", ""); }
           catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
         }, "افزودن");
       const all = d.querySelector("#supall"); if (all) all.onchange = () => d.querySelectorAll("[data-supi]").forEach((c) => { c.checked = all.checked; });

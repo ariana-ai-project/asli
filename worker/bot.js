@@ -30,7 +30,8 @@ import { REFUSAL_FA } from "./extract.js";
 import { runExtraction, extractFor, saveExtraction, applyExtraction, lineUnitPrice, idList } from "./proforma.js";
 import { transcribe, writeLetter, letterSubject } from "./letter.js";
 import { renderLetter } from "./docx.js";
-import { bundleData, readiness, commissionGuard, markCommission } from "./bundle.js";
+import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
+import { deleteQuotes, phoneChannels, withPhoneKeys, itemSearches, titleKey, PLATFORMS } from "./records.js";
 import { commissionXlsx } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
@@ -186,9 +187,10 @@ const hubKb = (aid, back) => [
 const hub = (api, chat, aid, back, mid, head) => show(api, chat, mid, `${head ? head + "\n\n" : ""}قدم بعد؟`, hubKb(aid, back));
 
 /** دو گزینهٔ زیر نتیجهٔ جستجوی هوشمند */
-const smartChoiceKb = (sid) => [
-  [{ text: "➕ انتخاب جهت استعلام", callback_data: `sq:${sid}:open:0` }],
-  [{ text: "✉️ انتخاب جهت ارسال پیام", callback_data: `sg:${sid}:open:0` }],
+/* `itemId` قلمی است که کارشناس الان رویش کار می‌کند — نتیجهٔ جستجوی قبلیِ درخواست دیگر هم به همین قلم می‌رود */
+const smartChoiceKb = (sid, itemId) => [
+  [{ text: "➕ انتخاب جهت استعلام", callback_data: `sq:${sid}:open:${itemId || 0}` }],
+  [{ text: "✉️ انتخاب جهت ارسال پیام", callback_data: `sg:${sid}:open:${itemId || 0}` }],
 ];
 
 /** اگر mid باشد همان پیام ویرایش می‌شود، وگرنه (یا اگر ویرایش نشد) پیام تازه */
@@ -766,13 +768,13 @@ async function nameForUpload(env, api, chat, ex, up, name) {
   return attachProforma(env, api, chat, ex, { aid: up.assignment_id, up, supplier: name, itemIds: o.sel, out: o.read || null, mid: null });
 }
 
-/** خط استعلامِ (تأمین‌کننده × قلم) اگر نیست — خطِ موجود دست نمی‌خورد */
-const lineInserts = (env, aid, supplier, ids, t, source = "telegram") => ids.map((iid) => env.DB.prepare(
-  `INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,created_at,updated_at)
-   SELECT i.assignment_id, i.id, ?, i.unit, i.qty, ?, ?, ?, ? FROM items i
+/** خط استعلامِ (تأمین‌کننده × قلم) اگر نیست — خطِ موجود دست نمی‌خورد. `origin`: proforma | manual */
+const lineInserts = (env, aid, supplier, ids, t, origin = "proforma") => ids.map((iid) => env.DB.prepare(
+  `INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,created_at,updated_at)
+   SELECT i.assignment_id, i.id, ?, i.unit, i.qty, ?, 'telegram', ?, ?, ? FROM items i
    WHERE i.id=? AND i.assignment_id=?
      AND NOT EXISTS (SELECT 1 FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.supplier_name=?)`,
-).bind(supplier, INVOICE_DEFAULT, source, t, t, iid, aid, supplier));
+).bind(supplier, INVOICE_DEFAULT, origin, t, t, iid, aid, supplier));
 
 /**
  * ثبت پیش‌فاکتور روی یک تأمین‌کننده و اقلامش، بعد خواندن خودکار.
@@ -1123,8 +1125,8 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   const st = readiness(d);
   const finals = d.quotes.filter((q) => q.final && q.saved);
   const t = now();
-  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) پیش از ساختن فایل داده می‌شود تا روی خودِ برگه بنشیند */
-  d.commission_no = await markCommission(env, aid, t);
+  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) پیش از ساختن فایل داده می‌شود تا روی خودِ برگه بنشیند؛ عکسِ جدول هم ثبت می‌شود */
+  d.commission_no = await recordCommission(env, aid, { expertId: ex.id, channel: "telegram" });
   await env.DB.batch([
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
@@ -1668,9 +1670,11 @@ async function addSelected(env, api, chat, ex, f, d, mid) {
     if (!o) continue;
     if (have.has(o.name)) { skipped++; continue; }
     have.add(o.name);
-    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,'telegram',?,?)`)
-      .bind(aid, d.itemId, o.name, o.code || null, itRow.unit || null, itRow.qty ?? null, INVOICE_DEFAULT, t, t));
+    /* از کجا آمد: سوابق یا جستجوی هوشمند (با شناسهٔ همان جستجو) */
+    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,origin,origin_ref,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,'telegram',?,?,?,?)`)
+      .bind(aid, d.itemId, o.name, o.code || null, itRow.unit || null, itRow.qty ?? null, INVOICE_DEFAULT,
+        f.kind === "hist" ? "history" : "smart", f.kind === "hist" ? null : (d.searchId || null), t, t));
     added++;
   }
   d.sel = [];
@@ -1698,7 +1702,7 @@ async function supplierCardAction(env, api, chat, ex, f, step, v, mid, ack) {
   if (step === "ls") { await ack(); return hub(api, chat, f.assignment_id, `${f.kind === "hist" ? "h" : "s"}${f.id}`, mid); }
   if (step === "back") {
     await ack();
-    if (f.kind === "smsel") return show(api, chat, mid, "🔎 با نتایج جستجو چه کنم؟", [...smartChoiceKb(d.searchId), navRow(f.assignment_id)]);
+    if (f.kind === "smsel") return show(api, chat, mid, "🔎 با نتایج جستجو چه کنم؟", [...smartChoiceKb(d.searchId, d.itemId), navRow(f.assignment_id)]);
     const hf = d.back === "p" || d.back === "x" ? await ownFlow(env, ex, d.from, "hsel") : null;
     if (hf && d.back === "p") return histPicker(env, api, chat, hf, flowData(hf), mid);
     if (hf) {
@@ -1762,20 +1766,13 @@ async function qtabDeleteConfirm(env, api, chat, f, d, mid) {
   [[{ text: `🗑 حذف ${M(rows.length)} خط`, callback_data: `qx:${f.id}:delok:0` }], [{ text: "↩️ بازگشت", callback_data: `qx:${f.id}:back:0` }]]);
 }
 
+/* حذف: از تب استعلامات و همهٔ گزینه‌های بات کامل بیرون می‌رود؛ نسخه‌اش در quotes_deleted می‌ماند */
 async function qtabDelete(env, api, chat, ex, f, d, asg, mid) {
   const ids = (await qtabRows(env, f.assignment_id)).filter((q) => (d.sel || []).includes(q.id)).map((q) => q.id);
   if (!ids.length) return qtabRender(env, api, chat, f, { sel: [] }, asg, mid);
-  const t = now();
-  const r = await env.DB.prepare(
-    `DELETE FROM quotes WHERE assignment_id=? AND id IN (${ids.map(() => "?").join(",")}) AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
-  ).bind(f.assignment_id, ...ids, ex.id).run();
-  const n = (r.meta && r.meta.changes) || 0;
+  const n = await deleteQuotes(env, { ids, expertId: ex.id, assignmentId: f.assignment_id, channel: "telegram" });
   d.sel = [];
-  await env.DB.batch([
-    env.DB.prepare("UPDATE tg_flows SET data_json=? WHERE id=?").bind(JSON.stringify(d), f.id),
-    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
-      .bind(t, `expert:${ex.id}`, "quote_deleted", asg.request_id, JSON.stringify({ assignment_id: f.assignment_id, quote_ids: ids, deleted: n, channel: "telegram" })),
-  ]);
+  await saveFlow(env, f.id, d);
   return qtabRender(env, api, chat, f, d, asg, mid, `🗑 ${M(n)} خط استعلام حذف شد.`);
 }
 
@@ -1882,8 +1879,8 @@ async function awaitSupplier(env, api, chat, ex, aid, supplier, mid) {
 /* ------------------------------------------------------------------ */
 
 async function smartItemOf(env, exId, itemId) {
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec,
-      a.id AS aid, a.expert_id, a.request_id, r.party
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, i.state,
+      a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=a.request_id WHERE i.id=?`).bind(itemId).first();
   return it && it.expert_id === exId ? it : null;
 }
@@ -1905,7 +1902,9 @@ async function smartPrefsCard(env, api, chat, ex, itemId) {
   if (!it) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
   await closeInputs(env, ex.id);
   const t = now();
-  const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: "", notes: "" };
+  /* جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پیش از خرج کردنِ جستجوی تازه */
+  const prev = (await itemSearches(env, it, 5)).length;
+  const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: "", notes: "", prev };
   const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smart','prefs',?,?,?,?)")
     .bind(ex.id, String(chat), it.aid, JSON.stringify(d), t, t + FLOW_TTL).run();
   const f = { id: r.meta.last_row_id };
@@ -1919,10 +1918,12 @@ function smartPrefsText(d) {
     + `🏷 برند: ${d.brand ? `<b>${esc(d.brand)}</b>` : "—"}\n`
     + `📋 مشخصات فنی: ${d.specs ? esc(short(d.specs, 80)) : "—"}\n`
     + `📝 ملاحظات: ${d.notes ? esc(short(d.notes, 80)) : "—"}\n\n`
+    + (d.prev ? `📜 <b>${M(d.prev)} جستجوی قبلی</b> برای همین قلم ثبت است — پیش از اجرای تازه، «نتایج قبلی» را ببینید.\n\n` : "")
     + "قیدها را تنظیم کنید و «اجرای جستجو» را بزنید؛ بازار تأمین کالا مهم‌ترین قید است.";
 }
-function smartPrefsKb(fid) {
+function smartPrefsKb(fid, d) {
   return [
+    ...(d && d.prev ? [[{ text: `📜 نتایج قبلی این قلم (${M(d.prev)})`, callback_data: `sf:${fid}:pv:0` }]] : []),
     [{ text: "🌍 بازار تأمین کالا", callback_data: `sf:${fid}:mk:0` }],
     [{ text: "🏷 برند", callback_data: `sf:${fid}:br:0` }, { text: "📋 مشخصات فنی", callback_data: `sf:${fid}:sp:0` }],
     [{ text: "📝 ملاحظات", callback_data: `sf:${fid}:no:0` }],
@@ -1931,7 +1932,7 @@ function smartPrefsKb(fid) {
   ];
 }
 async function smartPrefsRender(env, api, chat, f, d, mid) {
-  const text = smartPrefsText(d), kb = smartPrefsKb(f.id);
+  const text = smartPrefsText(d), kb = smartPrefsKb(f.id, d);
   const edited = mid ? await api.editMessageText(chat, mid, text, kb).catch(() => null) : null;
   if (!edited) {
     const msg = await api.sendMessage(chat, text, kb).catch(() => null);
@@ -1961,15 +1962,26 @@ const supPriceBot = (s) => (s.price && typeof s.price === "object" ? [s.price.te
  * نتیجهٔ یک جستجو: فقط فهرست تأمین‌کنندگان، و هزینه در یک خط کوچک. هیچ ردیفی کنار
  * گذاشته نمی‌شود؛ اگر در یک پیام جا نشد (سقف ۴۰۹۶ نویسهٔ تلگرام)، در پیام بعدی می‌آید.
  */
-async function smartResultsMessage(env, api, chat, ex, it, params, out) {
-  const sup = (out.result && out.result.suppliers) || [];
+const PLAT_FA = { telegram: "تلگرام", whatsapp: "واتساپ", bale: "بله", rubika: "روبیکا" };
+
+async function smartResultsMessage(env, api, chat, ex, it, params, out, opts = {}) {
+  const result = withPhoneKeys(out.result) || {};
+  const sup = result.suppliers || [];
+  /* بررسیِ پیام‌رسان‌ها که کارشناس‌ها (در پنل) برای هر شماره ثبت کرده‌اند، کنار همان شماره */
+  const chans = await phoneChannels(env, sup.flatMap((s2) => s2.phone_keys || [])).catch(() => ({}));
+  const marks = (key) => {
+    const c = chans[key];
+    if (!c) return "";
+    const set = PLATFORMS.filter((p) => c[p] === "ok" || c[p] === "no").map((p) => `${c[p] === "ok" ? "✅" : "❌"}${PLAT_FA[p]}`);
+    return set.length ? ` (${set.join(" ")})` : "";
+  };
   const cost = out.cost != null ? `\n\n<i>هزینهٔ این جستجو: ${M(Number(out.cost).toFixed(2))} دلار</i>` : "";
-  const head = `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b> — ${M(sup.length)} تأمین‌کننده`;
+  const head = opts.head || `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b> — ${M(sup.length)} تأمین‌کننده`;
   const card = (s2, i) => {
     const phones = supPhonesBot(s2), emails = supEmailsBot(s2), price = supPriceBot(s2);
     const type = s2.type || s2.role || "unknown", market = s2.market || (s2.location && s2.location.country) || "";
     return `${M(i + 1)}. <b>${esc(s2.name || "—")}</b> — ${esc(ROLE_FA_BOT[type] || type)}${market ? ` · ${esc(market)}` : ""}`
-      + (phones.length ? `\n📞 ${phones.map((p) => `<code>${esc(p)}</code>`).join(" · ")}` : "")
+      + (phones.length ? `\n📞 ${phones.map((p, k) => `<code>${esc(p)}</code>${marks((s2.phone_keys || [])[k])}`).join(" · ")}` : "")
       + (emails.length ? `\n✉️ ${emails.map((x) => esc(x)).join(" · ")}` : "")
       + (s2.website ? `\n🌐 ${esc(s2.website)}` : "")
       + (price ? `\n💰 ${esc(price)}` : "");
@@ -1983,7 +1995,7 @@ async function smartResultsMessage(env, api, chat, ex, it, params, out) {
   parts.push(cur + cost);
   for (const p of parts) await api.sendMessage(chat, p).catch(() => {});
   if (!sup.length) return { ok: true };
-  await api.sendMessage(chat, "با نتایج چه کنم؟", [...smartChoiceKb(out.search_id), navRow(it.aid)]).catch(() => {});
+  await api.sendMessage(chat, "با نتایج چه کنم؟", [...smartChoiceKb(out.search_id, it.id), navRow(it.aid)]).catch(() => {});
   return { ok: true };
 }
 
@@ -2035,14 +2047,39 @@ const ROLE_FA_BOT = {
   marketplace_only: "فقط آگهی", broker_intermediary: "واسطه",
 };
 
+/**
+ * یک جستجو برای کدام قلمِ همین کارشناس به کار می‌آید: خودِ قلمِ جستجو اگر هنوز مال اوست،
+ * وگرنه همان قلم (کد استاندارد، کد راهکاران یا عنوان) در یکی از ارجاع‌های باز او —
+ * تا نتیجهٔ جستجوی قبلیِ کارشناسِ دیگر هم قابل افزودن و پیام دادن باشد.
+ */
+async function searchItemFor(env, ex, sr, preferId) {
+  if (!sr) return null;
+  const live = (it) => it && it.state === "open" && it.dispatched_at;
+  const sameKey = (i) => i.id === sr.item_id || (sr.hist_code && i.hist_code === sr.hist_code) || (sr.item_code && i.code === sr.item_code) || (sr.title_n && titleKey(i.title) === sr.title_n);
+  /* اول قلمی که کارشناس از رویش آمده (دکمه‌ها شناسه‌اش را دارند)، اگر باز است و همان قلمِ جستجوست */
+  if (preferId) {
+    const p = await smartItemOf(env, ex.id, preferId);
+    if (live(p) && sameKey(p)) return p;
+  }
+  /* بعد خودِ قلمِ جستجو — فقط اگر هنوز باز است؛ قلمِ بسته‌شده جای افزودن نیست */
+  const own = await smartItemOf(env, ex.id, sr.item_id);
+  if (live(own)) return own;
+  const rows = (await env.DB.prepare(
+    `SELECT i.id, i.title, i.code, i.hist_code FROM items i JOIN assignments a ON a.id=i.assignment_id
+      WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND i.state='open' ORDER BY i.id DESC LIMIT 300`,
+  ).bind(ex.id).all()).results || [];
+  const hit = rows.find(sameKey);
+  return hit ? smartItemOf(env, ex.id, hit.id) : null;
+}
+
 /** «انتخاب جهت استعلام» زیر نتیجهٔ جستجو — همان کارتِ انتخابِ تأمین‌کنندهٔ سوابق */
-async function smartSelOpen(env, api, chat, ex, searchId, mid) {
+async function smartSelOpen(env, api, chat, ex, searchId, mid, preferId) {
   const sr = await searchById(env, searchId);
-  if (!sr || sr.expert_id !== ex.id) { await api.sendMessage(chat, "این جستجو پیدا نشد.").catch(() => {}); return { ok: true }; }
+  const it = await searchItemFor(env, ex, sr, preferId);
+  if (!it) { await api.sendMessage(chat, "این جستجو پیدا نشد.").catch(() => {}); return { ok: true }; }
   const options = ((sr.result && sr.result.suppliers) || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: "" }));
   if (!options.length) { await api.sendMessage(chat, "تأمین‌کننده‌ای برای انتخاب نیست.").catch(() => {}); return { ok: true }; }
-  const it = await env.DB.prepare("SELECT title FROM items WHERE id=?").bind(sr.item_id).first();
-  const f = await newFlow(env, ex, chat, "smsel", "pick_suppliers", sr.assignment_id, { itemId: sr.item_id, title: it ? it.title : "", searchId, options, sel: [] });
+  const f = await newFlow(env, ex, chat, "smsel", "pick_suppliers", it.aid, { itemId: it.id, title: it.title, searchId, options, sel: [] });
   return supplierCard(env, api, chat, f, flowData(f), mid);
 }
 
@@ -2058,10 +2095,10 @@ const ctxOf = (sid, i) => (sid ? `:${sid}:${i}` : "");
 const tokensLine = () => TEMPLATE_TOKENS.map((t) => `<code>{${t}}</code>`).join(" ");
 
 /** انتخاب قالب برای یک تأمین‌کنندهٔ نتیجهٔ جستجو (sg:p) */
-async function templatePick(env, api, chat, ex, sr, i, s2, mid) {
+async function templatePick(env, api, chat, ex, sr, i, s2, mid, itemId) {
   const tpls = (await ensureTemplates(env, ex.id, env.COMPANY)).slice(0, 12);
   const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b> — <i>${esc(short(t2.body.replace(/\s+/g, " "), 60))}</i>`).join("\n");
-  const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}` }]);
+  const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `sg:${sr.search_id}:t:${i}:${t2.id}${itemId ? `:${itemId}` : ""}` }]);
   kb.push([{ text: "🗂 قالب‌های پیام (جدید / ویرایش)", callback_data: `tp:ls:0${ctxOf(sr.search_id, i)}` }]);
   return show(api, chat, null, `✉️ پیام برای <b>${esc(short(s2.name, 36))}</b>\nکدام قالب؟\n\n${desc}`, kb);
 }
@@ -2249,7 +2286,7 @@ async function deliverSend(env, api, chat, ex, f, d, mid) {
     if (!finals.length) notes.push("⚠️ جدول کمیسیون خطِ «تأیید نهایی» ندارد و فرستاده نشد.");
     else {
       /* جدولی که این‌جا ساخته می‌شود همان تولید جدول است: شمارهٔ فرم (اگر هنوز ندارد) همین‌جا داده می‌شود */
-      b.commission_no = await markCommission(env, aid, now());
+      b.commission_no = await recordCommission(env, aid, { expertId: ex.id, channel: "telegram" });
       files.push({ name: `کمیسیون-${id}.xlsx`, blob: await commissionXlsx({ ...b, notes: b.assignment.notes }) });
     }
   }
@@ -2543,6 +2580,22 @@ async function onCallback(env, cq) {
       return { ok: true };
     }
     if (step === "mk") { await ack(); return smartMarketMenu(env, api, chat, f, d, mid); }
+    /* نتایج جستجوهای قبلیِ همین قلم — بعد کارت قیدها دوباره، تا جستجوی تازه هم ممکن باشد */
+    if (step === "pv") {
+      const it = await smartItemOf(env, ex.id, d.itemId);
+      if (!it) { await ack("این قلم دیگر در دسترس نیست.", true); return { ok: true }; }
+      await ack();
+      const list = (await itemSearches(env, it, 3)).reverse();
+      for (const s of list) {
+        const n = ((s.result && s.result.suppliers) || []).length;
+        await smartResultsMessage(env, api, chat, ex, it, null, { result: s.result, cost: s.cost, search_id: s.search_id }, {
+          head: `📜 <b>جستجوی قبلی «${esc(short(it.title, 40))}»</b> — ${M(n)} تأمین‌کننده\n`
+            + `<i>${esc(fmtFa(s.created_at))} · ${esc(s.expert || "—")}${s.request_id ? ` · درخواست ${esc(s.request_id)}` : ""}</i>`,
+        });
+      }
+      await env.DB.prepare("UPDATE tg_flows SET message_id=NULL WHERE id=?").bind(f.id).run();
+      return smartPrefsRender(env, api, chat, f, d, null);
+    }
     if (step === "m") {
       const k = (MARKETS[parseInt(valRaw, 10)] || {}).key;
       d.markets = d.markets || [];
@@ -2588,20 +2641,22 @@ async function onCallback(env, cq) {
 
   /* نتیجهٔ جستجو: sq:<search>:open (کارت انتخاب) · sq:<flow>:t:<i> · go · ls · back */
   if (action === "sq") {
-    if (parts[2] === "open") { await ack(); return smartSelOpen(env, api, chat, ex, num(1), mid); }
+    if (parts[2] === "open") { await ack(); return smartSelOpen(env, api, chat, ex, num(1), mid, num(3)); }
     const f = await ownFlow(env, ex, num(1), "smsel");
     if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
     return supplierCardAction(env, api, chat, ex, f, parts[2], num(3), mid, ack);
   }
 
   if (action === "sg") {
-    const [, sidRaw, step, aRaw, bRaw] = T(cq.data).split(":");
+    /* sg:<search>:open:<item> · sg:<search>:p:<i>:<item> · sg:<search>:t:<i>:<template>:<item> */
+    const [, sidRaw, step, aRaw, bRaw, cRaw] = T(cq.data).split(":");
     const sr = await searchById(env, parseInt(sidRaw, 10));
-    if (!sr || sr.expert_id !== ex.id) { await ack("این جستجو پیدا نشد.", true); return { ok: true }; }
+    const sit = await searchItemFor(env, ex, sr, parseInt(step === "open" ? aRaw : step === "p" ? bRaw : cRaw, 10) || 0);
+    if (!sit) { await ack("این جستجو پیدا نشد.", true); return { ok: true }; }
     const sup = (sr.result && sr.result.suppliers) || [];
     if (step === "open") {
       await ack();
-      const kb = sup.map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}` }]);
+      const kb = sup.map((s2, i) => [{ text: short(s2.name, 34), callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }]);
       await api.sendMessage(chat, "✉️ پیام برای کدام تأمین‌کننده آماده شود؟", kb).catch(() => {});
       return { ok: true };
     }
@@ -2609,21 +2664,21 @@ async function onCallback(env, cq) {
       const i = parseInt(aRaw, 10); const s2 = sup[i];
       if (!s2) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
       await ack();
-      return templatePick(env, api, chat, ex, sr, i, s2, mid);
+      return templatePick(env, api, chat, ex, sr, i, s2, mid, sit.id);
     }
     if (step === "t") {
       const i = parseInt(aRaw, 10), tplId = parseInt(bRaw, 10);
       const s2 = sup[i];
       const tpl = await ownTemplate(env, ex.id, tplId);
       if (!s2 || !tpl) { await ack("پیدا نشد.", true); return { ok: true }; }
-      const itRow = await env.DB.prepare("SELECT title, qty, unit, spec FROM items WHERE id=?").bind(sr.item_id).first() || {};
+      const itRow = sit;
       await ack();
       const text = fillTemplate(tpl.body, { supplier: s2.name, item: itRow, expertName: ex.name });
       /* همان «کپی پیام» پنل: دکمهٔ کپیِ تلگرام متن را عیناً در کلیپ‌بورد می‌گذارد (سقف ۲۵۶ نویسه)؛
          متن بلندتر با لمسِ بلوکِ <code> کپی می‌شود. */
       const kb = [];
       if (text.length <= 256) kb.push([{ text: "📋 کپی پیام", copy_text: { text } }]);
-      kb.push([{ text: "✉️ قالب دیگر", callback_data: `sg:${sr.search_id}:p:${i}` }, { text: "🗂 قالب‌های پیام", callback_data: `tp:ls:0:${sr.search_id}:${i}` }]);
+      kb.push([{ text: "✉️ قالب دیگر", callback_data: `sg:${sr.search_id}:p:${i}:${sit.id}` }, { text: "🗂 قالب‌های پیام", callback_data: `tp:ls:0:${sr.search_id}:${i}` }]);
       await api.sendMessage(chat, `✉️ <b>${esc(tpl.title)}</b> — برای ${esc(short(s2.name, 36))}\n\n<code>${esc(text)}</code>\n\n<i>${text.length <= 256 ? "«کپی پیام» را بزنید" : "روی متن بزنید تا کپی شود"} و در کانال دلخواه بفرستید.</i>`, kb).catch(() => {});
       return { ok: true };
     }
@@ -2775,16 +2830,17 @@ async function onCallback(env, cq) {
     const aid = num(1), step = parts[2];
     if (step === "t") {
       await env.DB.prepare(
-        `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1
+        `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, final_at=CASE WHEN final=1 THEN NULL ELSE ? END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1
          AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
-      ).bind(now(), num(3), aid, ex.id).run();
+      ).bind(now(), now(), num(3), aid, ex.id).run();
       await ack();
       return tableSelect(env, api, chat, ex, aid, mid);
     }
     if (step === "all" || step === "none") {
       await env.DB.prepare(
-        "UPDATE quotes SET final=?, updated_at=? WHERE assignment_id=? AND saved=1 AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)",
-      ).bind(step === "all" ? 1 : 0, now(), aid, ex.id).run();
+        `UPDATE quotes SET final=?, final_at=${step === "all" ? "COALESCE(CASE WHEN final=1 THEN final_at END, ?)" : "NULL"}, updated_at=?
+         WHERE assignment_id=? AND saved=1 AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)`,
+      ).bind(step === "all" ? 1 : 0, ...(step === "all" ? [now()] : []), now(), aid, ex.id).run();
       await ack();
       return tableSelect(env, api, chat, ex, aid, mid);
     }

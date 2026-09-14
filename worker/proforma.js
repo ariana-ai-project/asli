@@ -169,8 +169,8 @@ export async function applyExtraction(env, p, body) {
            pay=?, vat=?, place=?, place_other=?, low_conf=?, saved=?, source='ai', updated_at=? WHERE id=?`)
         .bind(merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime, merged.valid_days, merged.ship, merged.invoice,
           merged.pay, merged.vat, merged.place, merged.place_other, low, saved, t, old.id)
-      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'ai',?,?)`)
+      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,origin,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'ai','proforma',?,?)`)
         .bind(p.assignment_id, itemId, supplier, merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime,
           merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, low, t, t));
   }

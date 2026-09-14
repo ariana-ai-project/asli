@@ -22,10 +22,11 @@ import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings } from "./settings.js";
-import { bundleData, readiness, commissionGuard, markCommission } from "./bundle.js";
+import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
+import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
-import { MARKETS, MAX_MARKETS, smartSearch, lastSearch } from "./discovery.js";
+import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
@@ -123,6 +124,24 @@ CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
 CREATE TABLE IF NOT EXISTS smart_jobs (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, params_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', search_id INTEGER, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
 CREATE TABLE IF NOT EXISTS counters (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS search_suppliers (id INTEGER PRIMARY KEY, search_id INTEGER NOT NULL, idx INTEGER NOT NULL, item_id INTEGER, assignment_id INTEGER, request_id TEXT, expert_id INTEGER, name TEXT, name_n TEXT, type TEXT, market TEXT, website TEXT, emails_json TEXT, price_text TEXT, price_unit TEXT, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_ssup_search ON search_suppliers(search_id);
+CREATE INDEX IF NOT EXISTS ix_ssup_name ON search_suppliers(name_n);
+CREATE TABLE IF NOT EXISTS supplier_phones (id INTEGER PRIMARY KEY, search_id INTEGER NOT NULL, idx INTEGER NOT NULL, phone TEXT NOT NULL, phone_raw TEXT, supplier_name TEXT, market TEXT, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_sphone_phone ON supplier_phones(phone);
+CREATE TABLE IF NOT EXISTS phone_channels (phone TEXT PRIMARY KEY, telegram TEXT, whatsapp TEXT, bale TEXT, rubika TEXT, updated_by INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS phone_channel_log (id INTEGER PRIMARY KEY, phone TEXT NOT NULL, platform TEXT NOT NULL, state TEXT NOT NULL, prev_state TEXT, expert_id INTEGER, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_pclog_phone ON phone_channel_log(phone, at);
+CREATE TABLE IF NOT EXISTS assignment_log (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, action TEXT NOT NULL, request_id TEXT, assignment_id INTEGER, expert_id INTEGER, from_expert_id INTEGER, days INTEGER, deadline_at INTEGER, item_ids_json TEXT, source TEXT, actor TEXT);
+CREATE INDEX IF NOT EXISTS ix_alog_req ON assignment_log(request_id, at);
+CREATE TABLE IF NOT EXISTS settings_history (id INTEGER PRIMARY KEY, key TEXT NOT NULL, value_json TEXT, prev_json TEXT, at INTEGER NOT NULL, actor TEXT);
+CREATE TABLE IF NOT EXISTS scores_history (id INTEGER PRIMARY KEY, kind TEXT NOT NULL, expert_id INTEGER, score_kind TEXT, key TEXT, value REAL, prev REAL, at INTEGER NOT NULL, actor TEXT);
+CREATE TABLE IF NOT EXISTS quotes_deleted (id INTEGER PRIMARY KEY, quote_id INTEGER NOT NULL, assignment_id INTEGER, request_id TEXT, item_id INTEGER, supplier_name TEXT, row_json TEXT NOT NULL, deleted_at INTEGER NOT NULL, deleted_by INTEGER, channel TEXT);
+CREATE INDEX IF NOT EXISTS ix_qdel_asg ON quotes_deleted(assignment_id);
+CREATE TABLE IF NOT EXISTS commission_tables (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, commission_no INTEGER, expert_id INTEGER, at INTEGER NOT NULL, channel TEXT, quote_ids_json TEXT, lines_json TEXT, notes TEXT);
+CREATE INDEX IF NOT EXISTS ix_ctab_asg ON commission_tables(assignment_id);
+CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, expert_id INTEGER, action TEXT NOT NULL, item_ids_json TEXT, closed INTEGER, fully_closed INTEGER, actor TEXT, decision_id INTEGER, at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -163,6 +182,17 @@ const COLUMN_MIGRATIONS = [
   ["tg_uploads", "asked_at", "INTEGER"],
   /* شمارهٔ ترتیبی جدول کمیسیون (کد فرم TSA-PS-FO-n) — یک بار، هنگام اولین تولید (bundle.js:markCommission) */
   ["assignments", "commission_no", "INTEGER"],
+  ["assignments", "closed_at", "INTEGER"],        /* همهٔ اقلام بسته شد (decisions.js) */
+  /* کلید قلمِ هر جستجو، تا جستجوهای همان قلم در درخواست دیگر پیدا شوند (records.js:itemSearches) */
+  ["smart_searches", "item_code", "TEXT"],
+  ["smart_searches", "hist_code", "TEXT"],
+  ["smart_searches", "title_n", "TEXT"],
+  ["smart_searches", "request_id", "TEXT"],
+  /* خط استعلام از کجا آمد (history | smart | manual | proforma) و شناسهٔ جستجو اگر از جستجو آمد */
+  ["quotes", "origin", "TEXT"],
+  ["quotes", "origin_ref", "INTEGER"],
+  ["quotes", "final_at", "INTEGER"],              /* لحظهٔ تیک «تأیید نهایی» */
+  ["quotes", "commission_at", "INTEGER"],         /* در آخرین جدول کمیسیونِ ساخته‌شده بود */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -198,6 +228,8 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  /* جستجوهای پیش از ستون‌های کلید قلم؛ اگر نشد، فقط جستجوهای قبلی دیرتر پیدا می‌شوند */
+  await backfillSearchKeys(env).catch((e) => console.error("backfillSearchKeys", e && e.message));
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();
   if (!c || !c.n) {
     const t = now();
@@ -307,6 +339,8 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
+    /* ثبت‌های هر درخواست هم با خودش می‌روند — شناسهٔ ارجاع بعد از پاک‌کردن میز دوباره استفاده می‌شود */
+    ...["assignment_log", "quotes_deleted", "commission_tables", "closures"].map((tb) => env.DB.prepare(`DELETE FROM ${tb} WHERE request_id ${where}`).bind(...args)),
     env.DB.prepare(`DELETE FROM requests WHERE id ${where}`).bind(...args),
     /* پاک‌کردن میز خودش یک رویداد است و باید در تاریخچه بماند */
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
@@ -325,8 +359,10 @@ async function deleteRequests(env, ids) {
 
 async function putSettings(env, patch) {
   const t = now(); const stmts = [];
-  for (const [k, v] of Object.entries(patch || {})) {
-    if (!(k in DEFAULTS)) continue;
+  const known = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => k in DEFAULTS));
+  /* هر تغییرِ آستانه‌ها و ضرایب ارجاع/مهلت هوشمند با مقدار قبلی در تاریخچه می‌ماند */
+  stmts.push(...await settingsHistoryStmts(env, known, "manager"));
+  for (const [k, v] of Object.entries(known)) {
     stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(k, JSON.stringify(v), t));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -535,10 +571,12 @@ async function assign(env, body) {
   const rid = T(body.request_id), eid = int(body.expert_id);
   if (!rid) throw new HttpError("request_id لازم است.");
   const t = now();
+  const source = body.source === "smart" ? "smart" : "manual";
   if (!eid) {
     /* حذف کارشناس از اقلام ارسال‌نشده */
     await env.DB.prepare(`UPDATE items SET assignment_id=NULL WHERE request_id=? AND assignment_id IN (SELECT id FROM assignments WHERE request_id=? AND dispatched_at IS NULL)`).bind(rid, rid).run();
     await env.DB.prepare("DELETE FROM assignments WHERE request_id=? AND dispatched_at IS NULL AND id NOT IN (SELECT DISTINCT assignment_id FROM items WHERE assignment_id IS NOT NULL)").bind(rid).run();
+    await assignmentLogStmt(env, { at: t, action: "unassign", request_id: rid, source }).run();
     return { ok: true };
   }
   const ex = await env.DB.prepare("SELECT id FROM experts WHERE id=? AND active=1").bind(eid).first();
@@ -561,15 +599,20 @@ async function assign(env, body) {
   }
   /* ارجاع‌های ارسال‌نشدهٔ بی‌قلم پاک می‌شوند */
   await env.DB.prepare("DELETE FROM assignments WHERE request_id=? AND dispatched_at IS NULL AND id NOT IN (SELECT DISTINCT assignment_id FROM items WHERE assignment_id IS NOT NULL)").bind(rid).run();
+  const mine = ((await env.DB.prepare("SELECT id FROM items WHERE assignment_id=?").bind(a.id).all()).results || []).map((i) => i.id);
+  await assignmentLogStmt(env, { at: t, action: "assign", request_id: rid, assignment_id: a.id, expert_id: eid, days: body.days === undefined ? null : int(body.days), item_ids: mine, source }).run();
   return { ok: true, assignment_id: a.id };
 }
 
 async function setDays(env, body) {
   const aid = int(body.assignment_id); if (!aid) throw new HttpError("assignment_id لازم است.");
-  const a = await env.DB.prepare("SELECT dispatched_at FROM assignments WHERE id=?").bind(aid).first();
+  const a = await env.DB.prepare("SELECT dispatched_at, request_id, expert_id, days FROM assignments WHERE id=?").bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
   if (a.dispatched_at) throw new HttpError("مهلتِ ارجاعِ ارسال‌شده از اینجا تغییر نمی‌کند؛ از «تغییر کارشناس» استفاده کنید.");
-  await env.DB.prepare("UPDATE assignments SET days=? WHERE id=?").bind(int(body.days), aid).run();
+  const days = int(body.days);
+  const stmts = [env.DB.prepare("UPDATE assignments SET days=? WHERE id=?").bind(days, aid)];
+  if (days !== a.days) stmts.push(assignmentLogStmt(env, { action: "days", request_id: a.request_id, assignment_id: aid, expert_id: a.expert_id, days, source: body.source === "smart" ? "smart" : "manual" }));
+  await env.DB.batch(stmts);
   return { ok: true };
 }
 
@@ -590,7 +633,7 @@ async function dispatch(env, body) {
   const itemsBy = new Map();
   if (rows.length) {
     const aids = rows.map((a) => a.id);
-    const its = (await env.DB.prepare(`SELECT assignment_id, title, qty, unit FROM items
+    const its = (await env.DB.prepare(`SELECT id, assignment_id, title, qty, unit FROM items
       WHERE assignment_id IN (${aids.map(() => "?").join(",")}) AND state='open' ORDER BY assignment_id, line_no`).bind(...aids).all()).results || [];
     for (const i of its) { if (!itemsBy.has(i.assignment_id)) itemsBy.set(i.assignment_id, []); itemsBy.get(i.assignment_id).push(i); }
   }
@@ -598,6 +641,9 @@ async function dispatch(env, body) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
     const sched = alertStatements(env, a, settings.thresholds, isHoliday, t);
     stmts.push(...sched);
+    /* تاریخچهٔ ارجاع: لحظهٔ ارسال، کارشناس، مهلت (روز و لحظهٔ پایان) و اقلام */
+    stmts.push(assignmentLogStmt(env, { at: t, action: "dispatch", request_id: a.request_id, assignment_id: a.id, expert_id: a.expert_id, days: a.days,
+      deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt, item_ids: (itemsBy.get(a.id) || []).map((i) => i.id) }));
     /* اعلان «ارجاع جدید» (TG-06). مهلت را از همان زمان‌بندیِ تازه‌ساخته برمی‌داریم
        چون ستون deadline_at هنوز در همین batch نوشته نشده است. */
     if (a.telegram_chat) {
@@ -635,6 +681,8 @@ async function reassign(env, body) {
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
     env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(aid),
     ev(env, "manager", "reassign", a.request_id, null, { from_expert_id: a.expert_id, to_expert_id: eid, notify: "telegram" }),
+    assignmentLogStmt(env, { at: t, action: "reassign", request_id: a.request_id, assignment_id: b.id, expert_id: eid, from_expert_id: a.expert_id,
+      days: int(body.days, b.days || a.days), deadline_at: a.dispatched_at ? alertSchedule(t, int(body.days, b.days || a.days), (await getSettings(env)).thresholds, await holidayFn(env)).deadlineAt : null }),
     ...fresh,
   ]);
   return { ok: true, assignment_id: b.id };
@@ -652,6 +700,7 @@ async function unassign(env, body) {
     env.DB.prepare("DELETE FROM alerts WHERE assignment_id=?").bind(aid),
     env.DB.prepare("DELETE FROM assignments WHERE id=? AND dispatched_at IS NULL").bind(aid),
     ev(env, "manager", "unassign", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id }),
+    assignmentLogStmt(env, { action: "unassign", request_id: a.request_id, assignment_id: aid, expert_id: a.expert_id }),
   ]);
   return { ok: true };
 }
@@ -747,11 +796,14 @@ async function quoteCreate(env, ex, body) {
   const fresh = wanted.filter((id) => its.has(id) && !have.has(id));
   if (!fresh.length) throw new HttpError("این تأمین‌کننده برای همین قلم قبلاً اضافه شده است.", 409);
   const t = now();
+  /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو) یا دستی */
+  const origin = ["history", "smart", "manual"].includes(body.origin) ? body.origin : "manual";
+  const originRef = origin === "smart" ? int(body.search_id) : null;
   const stmts = fresh.map((item) => {
     const it = its.get(item);
-    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,source,origin,origin_ref,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'panel',?,?,?,?)`)
       .bind(aid, item, supplier, T(body.supplier_code) || null, T(body.spec) || null, T(body.unit) || it.unit || null,
-        num(body.qty) ?? it.qty ?? null, num(body.price), INVOICE_DEFAULT, t, t);
+        num(body.qty) ?? it.qty ?? null, num(body.price), INVOICE_DEFAULT, origin, originRef, t, t);
   });
   const res = await env.DB.batch(stmts);
   const ids = res.map((r) => r.meta.last_row_id);
@@ -768,6 +820,8 @@ async function quoteUpdate(env, ex, id, body) {
      خاموشش می‌کند. مسیر تلگرام از اول همین‌طور بود. */
   /* نوع فاکتوری که کارشناس خودش انتخاب کرده، با خواندن پیش‌فاکتور بعدی عوض نمی‌شود */
   if ("invoice" in body) sets.push("invoice_src='manual'");
+  /* لحظهٔ تیک «تأیید نهایی» ثبت می‌شود؛ برداشتنِ تیک پاکش می‌کند */
+  if ("final" in body) { sets.push("final_at=?"); args.push(int(body.final, 0) ? (q.final ? q.final_at || now() : now()) : null); }
   const contentEdited = Object.keys(body).some((f) => QUOTE_FIELDS.includes(f) && f !== "final");
   if (body.save === true) {
     const merged = { ...q, ...body };
@@ -780,9 +834,9 @@ async function quoteUpdate(env, ex, id, body) {
   await env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args).run();
   return { ok: true };
 }
+/* حذف: از تب و بات کامل بیرون می‌رود، نسخه‌اش در quotes_deleted می‌ماند (records.js) */
 async function quoteDelete(env, ex, id) {
-  const r = await env.DB.prepare("DELETE FROM quotes WHERE id=? AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)").bind(id, ex.id).run();
-  return { ok: true, deleted: r.meta.changes };
+  return { ok: true, deleted: await deleteQuotes(env, { ids: [id], expertId: ex.id, channel: "panel" }) };
 }
 
 /* جدول کمیسیون: نگهبان حداقل استعلام برای هر قلم + حداقل یک تأیید نهایی */
@@ -792,8 +846,8 @@ async function commission(env, ex, aid) {
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
   if (g.missing.length) throw new HttpError(`مدیر حداقل ${g.need} استعلام برای هر قلم را الزامی کرده.`, 422, { missing: g.missing, need: g.need });
-  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود */
-  const no = await markCommission(env, aid, now());
+  /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود؛ عکسِ جدول هم ثبت می‌شود */
+  const no = await recordCommission(env, aid, { expertId: ex.id, channel: "panel" });
   await env.DB.batch([ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid, commission_no: no })]);
   return { ok: true, commission_no: no };
 }
@@ -803,19 +857,6 @@ async function commission(env, ex, aid) {
 /* ------------------------------------------------------------------ */
 /* مشترک: کانال‌ها، قالب‌ها، امتیازها                                     */
 /* ------------------------------------------------------------------ */
-async function channelsGet(env, url) {
-  const title = url.searchParams.get("item_title");
-  const rows = title ? (await env.DB.prepare("SELECT * FROM supplier_channels WHERE item_title=?").bind(title).all()).results
-    : (await env.DB.prepare("SELECT * FROM supplier_channels ORDER BY updated_at DESC LIMIT 2000").all()).results;
-  return { channels: rows || [] };
-}
-async function channelsPut(env, who, body) {
-  const st = body.state; if (!["ok", "no", "unk"].includes(st)) throw new HttpError("state باید ok/no/unk باشد.");
-  await env.DB.prepare(`INSERT INTO supplier_channels (supplier_code,item_title,platform,state,updated_by,updated_at) VALUES (?,?,?,?,?,?)
-    ON CONFLICT(supplier_code,item_title,platform) DO UPDATE SET state=excluded.state, updated_by=excluded.updated_by, updated_at=excluded.updated_at`)
-    .bind(T(body.supplier_code), T(body.item_title), T(body.platform), st, who.expert ? who.expert.id : null, now()).run();
-  return { ok: true };
-}
 async function templatesList(env, who) {
   const rows = (await env.DB.prepare("SELECT * FROM templates WHERE expert_id IS NULL OR expert_id=? ORDER BY id").bind(who.expert ? who.expert.id : -1).all()).results || [];
   return { templates: rows };
@@ -826,7 +867,8 @@ async function scoresGet(env) {
   return { scores, weights };
 }
 async function scoresPut(env, body) {
-  const stmts = [];
+  /* هر تغییرِ امتیاز کارشناس یا ضریب گروه/پروژه با مقدار قبلی در تاریخچه می‌ماند */
+  const stmts = await scoresHistoryStmts(env, body || {}, "manager");
   for (const s of body.scores || []) stmts.push(env.DB.prepare("INSERT INTO expert_scores (expert_id,kind,key,score) VALUES (?,?,?,?) ON CONFLICT(expert_id,kind,key) DO UPDATE SET score=excluded.score").bind(int(s.expert_id), T(s.kind), T(s.key), Math.max(0, Math.min(5, int(s.score, 0)))));
   for (const w of body.weights || []) stmts.push(env.DB.prepare("INSERT INTO weights (kind,key,w) VALUES (?,?,?) ON CONFLICT(kind,key) DO UPDATE SET w=excluded.w").bind(T(w.kind), T(w.key), Number(w.w) || 1));
   for (let i = 0; i < stmts.length; i += 100) await env.DB.batch(stmts.slice(i, i + 100));
@@ -1190,8 +1232,16 @@ async function route(request, env, ctx) {
     }
 
     /* --- مشترک --- */
-    if (path === "/channels" && m === "GET") { await requireAny(request, env); return json(await channelsGet(env, url)); }
-    if (path === "/channels" && m === "PUT") { const who = await requireAny(request, env); return json(await channelsPut(env, who, await readJson(request))); }
+    /* پیام‌رسان‌های هر شماره — مشترک بین همهٔ کارشناسان؛ هر کلیک با تاریخچه (records.js) */
+    if (path === "/phones/channels" && m === "GET") {
+      await requireAny(request, env);
+      return json({ channels: await phoneChannels(env, T(url.searchParams.get("phones")).split(",").map(T).filter(Boolean)) });
+    }
+    if (path === "/phones/channels" && m === "PUT") {
+      const who = await requireAny(request, env); const b = await readJson(request);
+      try { return json({ ok: true, phone: T(b.phone), channels: await setPhoneChannel(env, who.expert ? who.expert.id : null, T(b.phone), T(b.platform), T(b.state)) }); }
+      catch (e) { throw new HttpError(e.message, e.status || 400); }
+    }
     if (path === "/templates" && m === "GET") { const who = await requireAny(request, env); return json(await templatesList(env, who)); }
     if (path === "/templates" && m === "POST") { const who = await requireAny(request, env); const b = await readJson(request); const r = await env.DB.prepare("INSERT INTO templates (expert_id,title,body,created_at) VALUES (?,?,?,?)").bind(b.shared && who.role === "manager" ? null : (who.expert ? who.expert.id : null), T(b.title) || "بدون عنوان", T(b.body), now()).run(); return json({ ok: true, id: r.meta.last_row_id }); }
     if ((mm = /^\/templates\/(\d+)$/.exec(path)) && m === "PUT") { const who = await requireAny(request, env); const b = await readJson(request); await env.DB.prepare("UPDATE templates SET title=?, body=? WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(T(b.title) || "بدون عنوان", T(b.body), int(mm[1]), who.expert ? who.expert.id : -1).run(); return json({ ok: true }); }
@@ -1205,7 +1255,11 @@ async function route(request, env, ctx) {
     if (path === "/search/smart" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, last: await lastSearch(env, it.id) });
+      /* همهٔ جستجوهای همین قلم (در هر درخواست و دست هر کارشناس)، تازه‌ترین اول، با وضعیتِ
+         پیام‌رسان‌های شماره‌هایشان — پیش از آنکه جستجوی تازه‌ای خرج شود */
+      const searches = await itemSearches(env, it);
+      const keys = searches.flatMap((s) => ((s.result && s.result.suppliers) || []).flatMap((x) => x.phone_keys || []));
+      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, keys) });
     }
     if (path === "/search/smart" && m === "POST") {
       const who = await requireAny(request, env);
@@ -1215,7 +1269,13 @@ async function route(request, env, ctx) {
       /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
          یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را
          عوض نمی‌کند، پس در خود JSON می‌آید و پنل همان error را نشان می‌دهد. */
-      return streamJson(() => smartSearch(env, it, who.expert || null, b, "panel"));
+      return streamJson(async () => {
+        const out = await smartSearch(env, it, who.expert || null, b, "panel");
+        const result = withPhoneKeys(out.result);
+        const keys = (result.suppliers || []).flatMap((x) => x.phone_keys || []);
+        const ex = who.expert;
+        return { ...out, result, request_id: it.request_id, expert: ex ? ex.label || ex.name : "", same_item: true, channels: await phoneChannels(env, keys) };
+      });
     }
     /* سوابق خرید (IMP-13): بارگذاری سه‌مرحله‌ای از تب مدیر، خواندن از تب کارشناس.
        begin جدول را از نو می‌سازد، chunkها ردیف‌ها را می‌ریزند و finish نمایه‌ها
