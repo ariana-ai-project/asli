@@ -265,6 +265,89 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .tp-mx .tri.ok { background: rgba(34,197,94,.16); border-color: var(--tp-ok); color: #4ade80; }
 .tp-mx .tri.unk { border-style: dashed; }
 :root[data-theme="light"] .tp-mx .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }
+/* جدول کارشناسان: عرض ستون‌ها از colgroup (manager.js:EX_W) — چهار ستون راست ثابت‌اند */
+.tp-mx.ex-mx { table-layout: fixed; }
+.tp-mx.ex-mx th, .tp-mx.ex-mx td { overflow: hidden; text-overflow: ellipsis; }
+.tp-mx.ex-mx thead th:first-child { inset-inline-end: auto; position: sticky; }
+.tp-mx.ex-mx th.sen { white-space: nowrap; font-size: .8rem; }
+.tp-mx.ex-mx td.nm { white-space: nowrap; }
+.tp-mx.ex-mx input[type=checkbox] { width: 16px; height: 16px; cursor: pointer; }
+.tp-mx.ex-mx input[type=checkbox][disabled] { cursor: not-allowed; opacity: .55; }
+
+/* تب تنظیم اعلانات: شش خانهٔ مرحله هم‌قد و هم‌تراز — نام مرحله در یک کادر ثابت، کادر درصد ته خانه */
+.tp-grid6 .cell { display: flex; flex-direction: column; justify-content: space-between; gap: 6px; min-height: 86px; }
+.tp-grid6 .cell > label { display: flex; gap: 6px; align-items: center; justify-content: center; min-height: 2.6em; margin: 0 !important; cursor: pointer; line-height: 1.3; }
+.tp-grid6 .cell > label b { margin: 0 !important; }
+.tp-grid6.ticks-only .cell { min-height: 0; justify-content: center; }
+/* ردیف فیلدهای عددی زیر مرحله‌ها: عنوان‌ها هم‌ارتفاع، کادرها روی یک خط */
+.tp-fields3 { display: grid; grid-template-columns: repeat(3, minmax(180px, 260px)) auto; gap: 16px; align-items: end; margin-bottom: 14px; }
+.tp-fields3 .tp-field { display: flex; flex-direction: column; justify-content: flex-end; height: 100%; }
+.tp-fields3 .tp-field b { min-height: 2.8em; display: flex; align-items: flex-end; line-height: 1.4; }
+.tp-fields3 .tp-input { width: 110px; text-align: center; }
+@media (max-width: 720px) { .tp-fields3 { grid-template-columns: 1fr; } }
+
+/* ============================================================
+   تب گزارش‌ها (manager.js:vReports) — «کاغذ» سفید مثل اکسل در هر دو حالت شب و روز
+   ============================================================ */
+.rp-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.rp-head h2 { margin: 0; }
+.rp-seg { display: inline-flex; border: 1px solid var(--tp-line-2); border-radius: 12px; overflow: hidden; }
+.rp-seg button { border: 0; background: transparent; color: var(--tp-muted); padding: 8px 20px; font-weight: 700; font-size: .95rem; }
+.rp-seg button.on { background: linear-gradient(135deg, #2f6fe4, #4f8cff); color: #fff; }
+.rp-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+.rp-sp { flex: 1; }
+.rp-sheets { display: inline-flex; gap: 2px; border-bottom: 2px solid #217346; }
+.rp-sheets.bottom { margin: 8px 0 6px; }
+.rp-sheet { border: 1px solid #c8c8c8; border-bottom: 0; background: #f0f0f0; color: #333; padding: 4px 16px; border-radius: 6px 6px 0 0; font-size: .88rem; }
+.rp-sheet.on { background: #fff; color: #217346; font-weight: 800; box-shadow: inset 0 -3px 0 #217346; }
+.rp-count { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; font-size: .9rem; }
+.rp-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; }
+@media (max-width: 1100px) { .rp-grid { grid-template-columns: 1fr; } }
+.rp-paper { background: #fff; color: #000; border: 1px solid #c8c8c8; border-radius: 6px; }
+.rp-scroll { overflow: auto; max-height: calc(100vh - 330px); }
+.rp-t { border-collapse: collapse; table-layout: fixed; font-family: "B Mitra", "B Nazanin", Vazirmatn, Tahoma, sans-serif; font-size: 14px; }
+.rp-t th, .rp-t td { border: 1px solid #fff; padding: 2px 6px; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; height: 26px; }
+.rp-t thead th { position: sticky; top: 0; z-index: 2; background: #bfbfbf; color: #fff; font-weight: 800; }
+.rp-general tbody tr:nth-child(odd) td { background: #f8cbad; }
+.rp-general tbody tr:nth-child(even) td { background: #fce4d6; }
+.rp-t td.w { white-space: nowrap; }
+.rp-t .hid { color: #7f7f7f; font-style: italic; }
+.rp-t thead th.hid { background: #d9d9d9; }
+.rp-daily { font-family: "B Nazanin", Vazirmatn, Tahoma, sans-serif; font-size: 13px; }
+.rp-daily th, .rp-daily td { border: 1px solid #7f7f7f; height: 32px; }
+.rp-daily thead th { background: #808080; color: #002060; white-space: normal; height: 58px; line-height: 1.3; }
+.rp-daily thead tr.flt th { top: 58px; background: #e7e7e7; height: auto; padding: 3px; }
+.rp-daily thead tr.flt input { width: 100%; font-size: .78rem; padding: 2px 5px; background: #fff; color: #000; border-color: #bbb; }
+.rp-none { padding: 24px !important; color: #555; background: #fff !important; }
+.rp-more { padding: 8px; display: flex; gap: 10px; align-items: center; color: #333; font-size: .85rem; background: #fff; }
+.rp-slicers { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; max-width: 760px; }
+.slicer { width: 170px; background: #fff; color: #000; border: 2px solid #ed7d31; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,.18); }
+.slicer.wide { width: 330px; }
+.slicer .slh { display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; border-bottom: 1px solid #f4b183; }
+.slicer .slh b { font-size: .88rem; }
+.slicer .slx { border: 1px solid #ccc; background: #fff; color: #c00; border-radius: 3px; width: 24px; height: 22px; padding: 0; line-height: 1; }
+.slicer .slx[disabled] { color: #bbb; cursor: default; }
+.slicer .sll { display: flex; flex-direction: column; gap: 3px; padding: 6px; max-height: 520px; overflow: auto; }
+.slicer .sli { border: 1px solid #d0d0d0; background: #fff; color: #000; border-radius: 2px; padding: 2px 6px; font-size: .8rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.slicer .sli.on { background: #f8cbad; border-color: #ed7d31; }
+.slicer .sli.nodata { color: #b0b0b0; background: #f7f7f7; border-color: #e3e3e3; }
+.slicer .sli.on.nodata { background: #fbe5d6; }
+.rp-form { display: grid; gap: 10px; border: 1px solid var(--tp-line); border-radius: 12px; padding: 12px 14px; background: var(--tp-surface-2); margin-bottom: 10px; }
+.rp-field > b { display: block; font-size: .82rem; color: var(--tp-muted); margin-bottom: 5px; }
+.rp-ticks { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rp-ticks .lab { color: var(--tp-muted); font-size: .85rem; }
+.rp-tick { cursor: pointer; padding: 4px 12px; font-size: .88rem; display: inline-flex; gap: 6px; align-items: center; }
+.rp-tick.on { border-color: var(--tp-accent); color: var(--tp-fg); background: rgba(79,140,255,.12); }
+.rp-period { margin-inline-start: 10px; font-size: .92rem; }
+.rp-months { display: grid !important; grid-template-columns: repeat(3, 1fr); }
+.rp-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rp-result-head { margin: 6px 0 0; font-size: .92rem; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.rp-book { padding: 10px; max-height: calc(100vh - 260px); }
+.rp-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 12px; margin-top: 12px; }
+.rp-chart { background: #fff; border-radius: 8px; padding: 6px; }
+.rp-chart svg { width: 100%; height: auto; display: block; }
+.rp-ptable td { padding: 3px 4px; }
+.rp-ptable input.tp-input { font-size: .82rem; padding: 3px 6px; }
 
 /* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
 .tp-theme { min-width: 34px; }

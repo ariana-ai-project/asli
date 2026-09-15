@@ -181,15 +181,21 @@
   function delegateDialog(aid, fromId) {
     const team = (S.team && S.team.team) || (S.expert.team || []);
     const opts = [...team.map((e) => [e.id, e.label || e.name]), [S.expert.id, `${S.expert.label || S.expert.name} (خودم)`]].filter(([id]) => id !== +fromId && (fromId || id !== S.expert.id));
-    if (!opts.length) return TP.modal("ارجاع به تیم", "کارشناسی برای ارجاع نیست.", null, "باشد", "");
-    const d = TP.modal("ارجاع به تیم", `<div class="tp-field"><b>به کدام کارشناس؟</b>
+    const title = fromId ? "تغییر کارشناس" : "ارجاع به تیم";
+    if (!opts.length) return TP.modal(title, "کارشناس دیگری در تیم شما نیست.", null, "باشد", "");
+    const d = TP.modal(title, `<div class="tp-field"><b>به کدام کارشناس؟</b>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:6px">${opts.map(([id, l], i) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="radio" name="dlg" value="${id}" ${i === 0 ? "checked" : ""}> ${esc(l)}</label>`).join("")}</div></div>
       <div class="tp-field" style="margin-top:10px"><b>مهلت (روز کاری) — خالی یعنی همان مهلت فعلی</b><input class="tp-input" id="dlg-days" inputmode="numeric" style="width:110px;text-align:center"></div>
       <p class="dim" style="margin-top:10px;font-size:.85rem">اقلام، استعلام‌ها و پیش‌فاکتورها منتقل می‌شوند، ساعت‌شمار از نو شروع می‌شود و به کارشناس تازه در تلگرام خبر می‌رود. درخواست از کارتابل شما به تب «تیم کارشناسی» می‌رود.</p>`,
       async () => {
         const eid = +((d.querySelector("input[name=dlg]:checked") || {}).value || 0), days = +d.querySelector("#dlg-days").value || undefined;
         if (!eid) return;
-        try { await TP.api("/team/delegate", { body: { assignment_id: aid, expert_id: eid, days } }); await Promise.all([loadTray(), loadTeam(true)]); }
+        try {
+          await TP.api("/team/delegate", { body: { assignment_id: aid, expert_id: eid, days } });
+          /* از نمای فقط‌خواندنیِ درخواستِ زیرمجموعه: ارجاعِ قبلی دیگر معتبر نیست، به تب تیم برمی‌گردیم */
+          if (S.screen === "detail") { S.screen = "list"; S.d = null; S.tab = "team"; S.fromTeam = false; }
+          await Promise.all([loadTray(), loadTeam(true)]);
+        }
         catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
       }, "ارسال");
   }
@@ -199,7 +205,7 @@
     const ticks = S.expert.alert_stages || [true, false, false, false, true, true];
     return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تنظیم اعلانات تیم</h2>
       <p class="lead">مرحله‌هایی را تیک بزنید که تغییر وضعیتشان برای کارشناسان تیم شما در گروه تلگرام تیم اعلام شود. عبور از مهلت و بسته شدن درخواست همیشه اعلام می‌شود.</p>
-      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label style="display:flex;gap:6px;align-items:center;justify-content:center;cursor:pointer"><input type="checkbox" data-sstage="${i}" ${ticks[i] ? "checked" : ""}> <b style="margin:0">${st}</b></label></div>`).join("")}</div>
+      <div class="tp-grid6 ticks-only">${TP.STAGES.map((st, i) => `<div class="cell"><label><input type="checkbox" data-sstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label></div>`).join("")}</div>
       <div class="tp-sect"><h3>گروه تلگرام تیم <span>${S.expert.team_connected ? "وصل است" : "هنوز وصل نیست"}</span></h3>
         <p class="lead">یک گروه در تلگرام بسازید و با دکمهٔ زیر همین بات را به آن اضافه کنید؛ اعلان‌های زیرمجموعه‌های شما به آن گروه می‌رود. اعلان‌های خودتان همچنان در گفت‌وگوی خصوصی بات می‌آید.</p>
         <button class="tp-btn ${S.expert.team_connected ? "" : "primary"}" data-team-link>${S.expert.team_connected ? "اتصال به گروه دیگر" : "اتصال گروه تیم"}</button></div></div></div>`;
@@ -236,7 +242,7 @@
     const dl = TP.endN(a.dispatched_at, a.days || 1), left = Math.max(0, b - el), dd = new Date(dl);
     const done = flagsOf(a, its, qCount(), pCount());
     return `<div class="tp-wrap" style="padding-bottom:24px"><div class="tp-card">
-      <div class="head"><div><button class="tp-btn sm" data-back>→ کارتابل</button>${mine ? "" : `<div class="chip warn" style="margin-top:6px">ارجاعِ ${esc(a.expert_label || a.expert_name)} — فقط‌خواندنی</div>`}</div>
+      <div class="head"><div><button class="tp-btn sm" data-back>→ کارتابل</button>${mine ? "" : `<div class="chip warn" style="margin-top:6px">ارجاعِ ${esc(a.expert_label || a.expert_name)} — فقط‌خواندنی</div>${isSenior() ? ` <button class="tp-btn xs" data-delegate="${a.id}" data-from="${a.expert_id}" title="این درخواست به کارشناس دیگری از تیم شما (یا خودتان) داده شود" style="margin-top:6px">تغییر کارشناس</button>` : ""}`}</div>
         <div><h2>درخواست <span class="num">${esc(r.id)}</span></h2>
           <div class="kpi" style="margin-top:8px"><div class="k" style="text-align:right;min-width:auto;max-width:360px"><b>طرف مقابل</b><span style="font-size:.9rem;font-weight:500">${esc(r.party)}</span></div>
             <div class="k"><b>اقلام</b><span>${its.length}</span></div><div class="k"><b>تاریخ ثبت</b><span class="num" style="font-size:.95rem">${esc(r.date)}</span></div>

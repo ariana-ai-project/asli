@@ -38,6 +38,8 @@
     ["سطح اول",                 "lvl1",      false],
     ["سطح دوم",                 "lvl2",      false],
     ["سطح سوم",                 "lvl3",      false],
+    /* اختیاری: اگر فایل «کارشناس خرید» داشته باشد، گزارش سه‌ماهه مبلغ فاکتورها را به گروه‌ها می‌بخشد */
+    ["کارشناس خرید",            "expert",    false],
   ];
   const namesOf = (c) => (Array.isArray(c[0]) ? c[0] : [c[0]]);
 
@@ -158,7 +160,7 @@
         dkey, date, ym, itemCode: T(g("itemCode")), code2, title,
         qty, unit: T(g("unit")), unitPrice, amount,
         supplier, idx: idxVal, amount1404: a1404, unit1404: u1404,
-        lvl1: T(g("lvl1")), lvl2: T(g("lvl2")), lvl3: T(g("lvl3")),
+        lvl1: T(g("lvl1")), lvl2: T(g("lvl2")), lvl3: T(g("lvl3")), expert: T(g("expert")),
       });
       stats.rows++;
       sup.add(TP.nrm(supplier)); if (code2) codes.add(code2); titles.add(TP.nrm(title));

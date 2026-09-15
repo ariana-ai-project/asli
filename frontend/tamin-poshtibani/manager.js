@@ -246,7 +246,7 @@
   /* ---------- سرآیند و تب‌ها ---------- */
   function vTop() {
     const R = S.data.requests, items = R.reduce((a, r) => a + r.items.length, 0);
-    const TABS = [["desk", "میز ارجاع"], ["experts", "کارشناسان"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["log", "تصمیم‌ها و رویدادها"]];
+    const TABS = [["desk", "میز ارجاع"], ["experts", "کارشناسان"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["reports", "گزارش‌ها"], ["log", "تصمیم‌ها و رویدادها"]];
     return `<header class="tp-top">
       <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>میز ارجاع خرید</h1><div class="sub">${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}</div></div></div>
       <span class="spacer"></span>
@@ -403,20 +403,37 @@
      ستون اول نام (کلیک = ویرایش)، ✕ حذف (غیرفعال)، ★ کارشناس ارشد — ارشدها ستون می‌شوند و در
      خانهٔ (کارشناس × ارشد) تیک سبز یعنی زیر نظر اوست؛ هر کارشناس فقط یک سرپرست.
      «مشاهده اعلانات» می‌گوید پایشِ آن کارشناس برای مدیر بیاید یا فقط برای ارشدش. */
+  /* چینش ثابت از راست: «اعلان به مدیر» (تیک، کم‌عرض) · ✕ · ★ · نام — این چهار ستون عرض و جای ثابت
+     دارند و با افزودن ارشد تکان نمی‌خورند؛ ستون ارشدها از پنجم به بعد، و «کد ورود» و «بار باز» ته جدول.
+     table-layout:fixed + colgroup: عرض هر ستون از خودِ colgroup می‌آید نه از محتوایش. */
+  const EX_W = { notify: 58, del: 40, star: 40, name: 230, senior: 120, code: 84, load: 66 };
   function vExperts() {
-    const E = expertsSorted(), seniors = E.filter((e) => e.senior);
+    const E = expertsSorted(), seniors = E.filter((e) => e.senior), W = EX_W;
+    const total = W.notify + W.del + W.star + W.name + seniors.length * W.senior + W.code + W.load;
     const nameCell = (e) => S.editName === e.id
-      ? `<input class="tp-input" data-ename="${e.id}" value="${esc(e.label || e.name)}" style="width:170px" autofocus>`
-      : `<span class="ename" data-ename-edit="${e.id}" title="برای ویرایش نام کلیک کنید">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</span>`;
+      ? `<input class="tp-input" data-ename="${e.id}" value="${esc(e.label || e.name)}" style="width:100%" autofocus>`
+      : `<span class="ename" data-ename-edit="${e.id}" title="برای ویرایش نام کلیک کنید">${esc(e.label || e.name)}</span>`;
+    const notifyCell = (e) => {
+      const hasSenior = !!(e.senior_id && seniors.some((s) => s.id === e.senior_id));
+      const tip = hasSenior ? (e.notify_to === "senior" ? "اعلان‌های این کارشناس فقط برای کارشناس ارشدش می‌رود — تیک بزنید تا برای شما هم بیاید" : "اعلان‌های این کارشناس برای شما هم می‌آید — تیک را بردارید تا فقط برای ارشدش برود")
+        : "این کارشناس زیر نظر ارشدی نیست؛ اعلان‌هایش همیشه برای شما می‌آید";
+      return `<input type="checkbox" data-enotify="${e.id}" ${!hasSenior || e.notify_to !== "senior" ? "checked" : ""} ${hasSenior ? "" : "disabled"} title="${tip}">`;
+    };
     return `<div class="tp-card tp-pane" style="max-width:none"><h2>کارشناسان</h2>
-      <p class="lead">روی نام هر کارشناس کلیک کنید و عوضش کنید. <b>★</b> او را کارشناس ارشد می‌کند و نامش ستونی می‌شود که زیرِ آن، کارشناسان تیمش را تیک می‌زنید (هر کارشناس فقط زیر نظر یک ارشد). <b>✕</b> کارشناس را از فهرست برمی‌دارد. «مشاهده اعلانات» می‌گوید اعلان‌های پایش آن کارشناس برای شما بیاید یا فقط برای کارشناس ارشدش.</p>
-      <div class="tp-scroll" data-keep-scroll style="max-height:60vh"><table class="tp-mx"><thead><tr><th>مشاهده اعلانات</th><th style="min-width:230px">کارشناس</th><th>کد ورود</th><th>بار باز</th>${seniors.map((s) => `<th class="rt" style="min-width:120px">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}</tr></thead><tbody>
+      <p class="lead">روی نام هر کارشناس کلیک کنید و عوضش کنید. <b>★</b> او را کارشناس ارشد می‌کند و نامش ستونی می‌شود که زیرِ آن، کارشناسان تیمش را تیک می‌زنید (هر کارشناس فقط زیر نظر یک ارشد). <b>✕</b> کارشناس را از فهرست برمی‌دارد. تیکِ «اعلان به مدیر» یعنی اعلان‌های پایش آن کارشناس برای شما هم بیاید؛ بی‌تیک، فقط برای کارشناس ارشدش می‌رود.</p>
+      <div class="tp-scroll" data-keep-scroll style="max-height:60vh"><table class="tp-mx ex-mx" style="width:${total}px"><colgroup>
+          <col style="width:${W.notify}px"><col style="width:${W.del}px"><col style="width:${W.star}px"><col style="width:${W.name}px">
+          ${seniors.map(() => `<col style="width:${W.senior}px">`).join("")}<col style="width:${W.code}px"><col style="width:${W.load}px"></colgroup>
+        <thead><tr><th title="اعلان‌های پایش این کارشناس برای مدیر هم بیاید">اعلان به<br>مدیر</th><th title="حذف از فهرست">✕</th><th title="کارشناس ارشد">★</th><th class="rt">کارشناس</th>
+          ${seniors.map((s) => `<th class="sen" title="${esc(s.label || s.name)}">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}<th>کد ورود</th><th>بار باز</th></tr></thead><tbody>
         ${E.map((e) => `<tr>
-          <td><select class="tp-select" data-enotify="${e.id}" ${e.senior_id || e.senior ? "" : 'title="این کارشناس زیر نظر ارشدی نیست؛ اعلان‌ها به هر حال برای شما می‌آید"'}><option value="manager" ${e.notify_to !== "senior" ? "selected" : ""}>مدیر</option><option value="senior" ${e.notify_to === "senior" ? "selected" : ""}>فقط کارشناس ارشد</option></select></td>
-          <td class="name" style="white-space:nowrap">${nameCell(e)} <button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button> <button class="tp-btn xs danger" data-edel="${e.id}" title="حذف از فهرست">✕</button></td>
-          <td class="num">${esc(e.code)}</td><td class="num">${M(e.open_load || 0)}</td>
-          ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}</tr>`).join("")}
-        <tr><td></td><td colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
+          <td>${notifyCell(e)}</td>
+          <td><button class="tp-btn xs danger" data-edel="${e.id}" title="حذف از فهرست">✕</button></td>
+          <td><button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button></td>
+          <td class="rt nm">${nameCell(e)}</td>
+          ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}
+          <td class="num">${esc(e.code)}</td><td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
+        <tr><td colspan="3"></td><td class="rt" colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
       </tbody></table></div>
       <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام.</div></div>`;
   }
@@ -538,13 +555,13 @@
     const s = settings(), ticks = Array.isArray(s.mgrStages) && s.mgrStages.length === 6 ? s.mgrStages : [true, false, false, false, true, true];
     return `<div class="tp-card tp-pane"><h2>تنظیم اعلانات</h2>
       <p class="lead">تیکِ بالای هر مرحله یعنی تغییر وضعیت آن مرحله در تلگرام شما اعلام شود. هر درصد یعنی چند درصد از مهلت کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود. خالی = هشدار آن مرحله خاموش.</p>
-      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label style="display:flex;gap:6px;align-items:center;justify-content:center;cursor:pointer;margin-bottom:6px" title="اعلان این مرحله در تلگرام مدیر"><input type="checkbox" data-mstage="${i}" ${ticks[i] ? "checked" : ""}> <b style="margin:0">${st}</b></label><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
+      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label title="اعلان این مرحله در تلگرام مدیر"><input type="checkbox" data-mstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
       <div id="thrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
-      <div class="tp-row">
-        <div class="tp-field"><b>مهلت ارسال توسط مدیر (روز کاری از لحظهٔ بارگذاری)</b><input class="tp-input" id="ddays" value="${s.dispatchDays}" inputmode="numeric" style="width:110px;text-align:center"></div>
-        <div class="tp-field"><b>حداقل تأمین‌کننده به ازای هر قلم</b><input class="tp-input" id="minsup" value="${s.minSuppliers}" inputmode="numeric" style="width:110px;text-align:center"></div>
-        <div class="tp-field"><b>ظرفیت درخواست باز هر کارشناس (بار کاری)</b><input class="tp-input" id="capacity" value="${s.capacity}" inputmode="numeric" style="width:110px;text-align:center"></div>
-        ${AUTOSAVED}</div>
+      <div class="tp-fields3">
+        <div class="tp-field"><b>مهلت ارسال توسط مدیر (روز کاری از لحظهٔ بارگذاری)</b><input class="tp-input" id="ddays" value="${s.dispatchDays}" inputmode="numeric"></div>
+        <div class="tp-field"><b>حداقل تأمین‌کننده به ازای هر قلم</b><input class="tp-input" id="minsup" value="${s.minSuppliers}" inputmode="numeric"></div>
+        <div class="tp-field"><b>ظرفیت درخواست باز هر کارشناس (بار کاری)</b><input class="tp-input" id="capacity" value="${s.capacity}" inputmode="numeric"></div>
+        <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
       <div class="tp-note">«جدول کمیسیون» روی ۱۰۰ هرگز زرد نمی‌شود و مستقیم قرمز می‌شود. برای هشدار زودتر عددی کمتر بگذارید.</div>
       <div class="tp-note">کارشناس تا وقتی هر قلم به تعداد «حداقل تأمین‌کننده» استعلامِ ثبت‌شده نداشته باشد، نمی‌تواند جدول کمیسیون بسازد.</div></div>`;
   }
@@ -659,6 +676,226 @@
       </tbody></table></div></div></div>`;
   }
 
+  /* ---------- گزارش‌ها ----------
+     دو بخش: «وضعیت درخواست‌ها» (جدول با برش‌دهنده‌های وضعیت / طرف مقابل / کارشناس خرید، مثل فایل
+     اکسل واحد، و برگهٔ «گزارش روزانه» با فیلتر ستون‌ها) و «گزارش سه ماهه» (تیک برگه‌ها، سال/فصل/ماه
+     چندانتخابی، پیش‌نمایش همان برگه‌ها و نمودارهایی که در فایل می‌رود). ساخت داده و فایل در worker/reports.js. */
+  const RP = { part: "status", meta: null, metaLoading: false, status: null, loading: false, sheet: "general", sl: { 2: [], 7: [], 11: [] }, hidden: false, limit: 300,
+    dq: ["", "", "", "", "", ""], dLimit: 300, pop: null, season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false } };
+  const SL = [[2, "وضعیت"], [7, "طرف مقابل"], [11, "کارشناس خرید"]];
+  const RP_ST_ORDER = ["بسته شده", "تایید شده", "ثبت شده", "در جریان", "بررسی مجدد", "متوقف شده", "معلق"];
+  const RP_MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
+  const RP_SEASONS = ["بهار", "تابستان", "پاییز", "زمستان"];
+  const RP_BLANK = "(blank)";
+  const slKey = (v) => (v === "" || v == null ? RP_BLANK : String(v));
+
+  async function loadRepMeta() {
+    RP.metaLoading = true;
+    try {
+      RP.meta = await TP.api("/reports/meta");
+      const s = RP.season;
+      if (!s.years) { s.years = [RP.meta.today.year]; s.seasons = [Math.floor((RP.meta.today.month - 1) / 3) + 1]; }
+      if (!s.sheets) s.sheets = RP.meta.sheets.map((x) => x.key);
+    } catch (e) { RP.err = e.message; }
+    RP.metaLoading = false; render();
+  }
+  async function loadRepStatus() {
+    RP.loading = true;
+    try { RP.status = await TP.api("/reports/status"); RP.err = ""; } catch (e) { RP.err = e.message; }
+    RP.loading = false; render();
+  }
+  /* دانلود فایل از مسیرهای گزارش — TP.api فقط JSON می‌خواند */
+  async function repDownload(path, body, fallback) {
+    const b = TP.busy("ساخت فایل اکسل…", "چند ثانیه طول می‌کشد.");
+    try {
+      const headers = { "X-Manager-Code": TP.manager.get() }; if (body) headers["Content-Type"] = "application/json";
+      const res = await fetch((CFG.apiBase || "/tamin-poshtibani/api") + path, { method: body ? "POST" : "GET", headers, body: body ? JSON.stringify(body) : undefined });
+      if (!res.ok) { let msg = `خطای سرور ${res.status}`; try { msg = (await res.json()).error || msg; } catch (_) { /* متن غیر JSON */ } throw new Error(msg); }
+      const m = /filename\*=UTF-8''([^;]+)/.exec(res.headers.get("content-disposition") || "");
+      const blob = await res.blob(), link = document.createElement("a");
+      link.href = URL.createObjectURL(blob); link.download = m ? decodeURIComponent(m[1]) : fallback;
+      document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+      b.close();
+    } catch (e) { b.close(); TP.modal("دانلود نشد", esc(e.message), null, "باشد", ""); }
+  }
+
+  /* برش‌دهنده‌ها مثل اکسل: هیچ انتخابی = همه؛ خانه‌ای که با فیلترِ برش‌دهنده‌های دیگر ردیفی ندارد کم‌رنگ می‌شود */
+  const repRows = (except) => RP.status.general.filter((r) => SL.every(([c]) => c === except || !RP.sl[c].length || RP.sl[c].includes(slKey(r[c]))));
+  function slicerItems(c) {
+    const all = new Map(); RP.status.general.forEach((r) => all.set(slKey(r[c]), 0));
+    repRows(c).forEach((r) => { const k = slKey(r[c]); all.set(k, all.get(k) + 1); });
+    const keys = [...all.keys()].sort((a, b) => (a === RP_BLANK ? 1 : b === RP_BLANK ? -1 : c === 2 ? (RP_ST_ORDER.indexOf(a) + 99) % 99 - (RP_ST_ORDER.indexOf(b) + 99) % 99 || a.localeCompare(b, "fa") : a.localeCompare(b, "fa")));
+    return keys.map((k) => ({ k, n: all.get(k) }));
+  }
+  const RP_GW = [8.66, 16.33, 10.33, 17.33, 20.44, 36.33, 16.33, 50.1, 10.44, 19.33, 26.44, 14.66];
+  const RP_DW = [9.1, 20.1, 15.3, 21.4, 14.8, 17.2];
+  const px = (w) => Math.round(w * 7 + 5);
+
+  function vReports() {
+    const part = RP.part;
+    return `<div class="tp-card tp-pane rp" style="max-width:none">
+      <div class="rp-head"><h2>گزارش‌ها</h2>
+        <div class="rp-seg"><button class="${part === "status" ? "on" : ""}" data-rpart="status">وضعیت درخواست‌ها</button><button class="${part === "season" ? "on" : ""}" data-rpart="season">گزارش سه ماهه</button></div></div>
+      ${RP.err ? `<div class="tp-note warn">${esc(RP.err)}</div>` : ""}
+      ${part === "status" ? vRepStatus() : vRepSeason()}</div>`;
+  }
+
+  function vRepStatus() {
+    const D = RP.status;
+    if (!D) { if (!RP.loading) loadRepStatus(); return `<div class="empty">در حال ساخت گزارش وضعیت درخواست‌ها…</div>`; }
+    const tabs = [["general", "درخواست کلی"], ["daily", "گزارش روزانه"]].map(([k, l]) => `<button class="rp-sheet ${RP.sheet === k ? "on" : ""}" data-rsheet="${k}">${l}</button>`).join("");
+    return `<div class="rp-tools"><div class="rp-sheets">${tabs}</div><span class="rp-sp"></span>
+        ${RP.sheet === "general" ? `<label class="chip" style="cursor:pointer;padding:3px 10px"><input type="checkbox" data-rhidden ${RP.hidden ? "checked" : ""}> ستون‌های پنهان فایل را هم نشان بده</label>` : ""}
+        <button class="tp-btn sm" data-rstatus-reload title="ساخت دوباره از آخرین داده‌ها">↻ به‌روزرسانی</button>
+        <button class="tp-btn sm primary" data-rstatus-xlsx>دانلود اکسل (هر دو برگه)</button>
+        <span class="dim" style="font-size:.8rem">ساخته‌شده ${TP.fmt(D.generatedAt)}</span></div>
+      ${RP.sheet === "general" ? vRepGeneral() : vRepDaily()}`;
+  }
+  function vRepGeneral() {
+    const D = RP.status, rows = repRows(null);
+    const cols = D.columns.map((h, i) => ({ h, i })).filter((x) => RP.hidden || !D.hidden.includes(x.i + 1));
+    const any = SL.some(([c]) => RP.sl[c].length);
+    const table = `<div class="rp-paper rp-scroll" data-keep-scroll><table class="rp-t rp-general"><colgroup>${cols.map((x) => `<col style="width:${px(RP_GW[x.i])}px">`).join("")}</colgroup>
+      <thead><tr>${cols.map((x) => `<th class="${D.hidden.includes(x.i + 1) ? "hid" : ""}">${esc(x.h)}</th>`).join("")}</tr></thead>
+      <tbody>${rows.slice(0, RP.limit).map((r) => `<tr>${cols.map((x) => `<td class="${x.i === 7 || x.i === 8 ? "w" : ""}${D.hidden.includes(x.i + 1) ? " hid" : ""}">${esc(r[x.i])}</td>`).join("")}</tr>`).join("")}
+      ${rows.length ? "" : `<tr><td colspan="${cols.length}" class="rp-none">با این برش‌ها درخواستی نیست.</td></tr>`}</tbody></table>
+      ${rows.length > RP.limit ? `<div class="rp-more"><button class="tp-btn sm" data-rmore>${M(Math.min(300, rows.length - RP.limit))} ردیف بیشتر</button> <span>${M(RP.limit)} از ${M(rows.length)} ردیف نمایش داده شد</span></div>` : ""}</div>`;
+    const slicers = SL.map(([c, cap]) => {
+      const items = slicerItems(c), sel = RP.sl[c];
+      return `<div class="slicer ${c === 7 ? "wide" : ""}"><div class="slh"><b>${cap}</b><button class="slx" data-slclear="${c}" ${sel.length ? "" : "disabled"} title="پاک کردن فیلتر">⊘</button></div>
+        <div class="sll">${items.map((it) => `<button class="sli ${!sel.length || sel.includes(it.k) ? "on" : ""} ${it.n ? "" : "nodata"}" data-sl="${c}" data-k="${esc(it.k)}" title="${M(it.n)} درخواست">${esc(it.k)}</button>`).join("")}</div></div>`;
+    }).join("");
+    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.general.length)} درخواست ${any ? `<button class="tp-btn xs" data-slall>پاک کردن همهٔ برش‌ها</button>` : ""}
+        <span class="dim">روی هر گزینهٔ برش‌دهنده بزنید تا فقط همان بماند؛ گزینه‌های بعدی به انتخاب اضافه می‌شوند.</span></div>
+      <div class="rp-grid">${table}<div class="rp-slicers">${slicers}</div></div>`;
+  }
+  function vRepDaily() {
+    const D = RP.status, rows = D.daily.filter((r) => RP.dq.every((q, i) => !q || TP.hit(String(r[i] == null ? "" : r[i]), q)));
+    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.daily.length)} ارجاع ارسال‌شده · به ترتیب تاریخ تحویل به کارشناس</div>
+      <div class="rp-paper rp-scroll" data-keep-scroll style="max-width:${RP_DW.reduce((a, w) => a + px(w), 0) + 180}px"><table class="rp-t rp-daily"><colgroup>${RP_DW.map((w) => `<col style="width:${px(w)}px">`).join("")}<col style="width:124px"></colgroup>
+        <thead><tr>${D.dailyColumns.map((h) => `<th>${esc(h)}</th>`).join("")}<th></th></tr>
+        <tr class="flt">${D.dailyColumns.map((_, i) => `<th>${i ? `<input class="tp-input" data-dq="${i}" value="${esc(RP.dq[i])}" placeholder="فیلتر">` : ""}</th>`).join("")}<th></th></tr></thead>
+        <tbody>${rows.slice(0, RP.dLimit).map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}<td></td></tr>`).join("")}
+        ${rows.length ? "" : `<tr><td colspan="7" class="rp-none">ارجاعی با این فیلترها نیست.</td></tr>`}</tbody></table>
+        ${rows.length > RP.dLimit ? `<div class="rp-more"><button class="tp-btn sm" data-dmore>${M(Math.min(300, rows.length - RP.dLimit))} ردیف بیشتر</button></div>` : ""}</div>`;
+  }
+
+  /* نام دوره — همان قاعدهٔ worker/reports.js:parsePeriod */
+  function repMonths(s) { const set = new Set(s.months); (s.seasons || []).forEach((q) => { for (let m = (q - 1) * 3 + 1; m <= q * 3; m++) set.add(m); }); return set.size ? [...set].sort((a, b) => a - b) : [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]; }
+  function repPeriodLabel(s) {
+    if (!s.years || !s.years.length) return "سالی انتخاب نشده";
+    const months = repMonths(s); let rest = months.slice(); const parts = [];
+    if (months.length === 12) parts.push("سال");
+    else { for (let q = 1; q <= 4; q++) { const sm = [(q - 1) * 3 + 1, (q - 1) * 3 + 2, q * 3]; if (sm.every((m) => rest.includes(m))) { parts.push(`فصل ${RP_SEASONS[q - 1]}`); rest = rest.filter((m) => !sm.includes(m)); } } rest.forEach((m) => parts.push(RP_MONTHS[m - 1])); }
+    const j = (a) => (a.length <= 1 ? a.join("") : a.slice(0, -1).join("، ") + " و " + a[a.length - 1]);
+    return `${j(parts)} ${M([...s.years].sort((a, b) => a - b).join(" و "))}`;
+  }
+  function vRepSeason() {
+    const meta = RP.meta, s = RP.season;
+    if (!meta) { if (!RP.metaLoading) loadRepMeta(); return `<div class="empty">در حال خواندن سال‌ها و پروژه‌ها…</div>`; }
+    const pop = (kind, label, active, body) => `<span class="fwrap"><button class="tp-btn sm ${active ? "primary" : ""}" data-rpop="${kind}">${label} ▾</button>${RP.pop === kind ? `<div class="fpop" data-pop>${body}
+      <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-rpclear="${kind}">پاک کردن</button><button class="tp-btn xs primary" data-rpclose>بستن</button></div></div>` : ""}</span>`;
+    const yBody = `<div class="fpop-list">${meta.years.map((y) => `<label><input type="checkbox" data-ry="${y}" ${s.years.includes(y) ? "checked" : ""}> ${M(y)}</label>`).join("") || `<span class="dim">درخواستی در سامانه نیست.</span>`}</div>`;
+    const qBody = `<div class="fpop-list">${RP_SEASONS.map((n, i) => `<label><input type="checkbox" data-rq="${i + 1}" ${s.seasons.includes(i + 1) ? "checked" : ""}> ${n} <span class="dim" style="font-size:.78rem">(${RP_MONTHS.slice(i * 3, i * 3 + 3).join("، ")})</span></label>`).join("")}</div>`;
+    const mBody = `<div class="fpop-list rp-months">${RP_MONTHS.map((n, i) => `<label><input type="checkbox" data-rm="${i + 1}" ${s.months.includes(i + 1) ? "checked" : ""}> ${n}</label>`).join("")}</div>`;
+    const yl = s.years.length ? s.years.slice().sort().map((y) => M(y)).join("، ") : "انتخاب کنید";
+    const ql = s.seasons.length ? s.seasons.map((q) => RP_SEASONS[q - 1]).join("، ") : "همه";
+    const ml = s.months.length ? (s.months.length > 3 ? `${M(s.months.length)} ماه` : s.months.map((m) => RP_MONTHS[m - 1]).join("، ")) : "همه";
+    const R = s.result, sh = R && R.sheets[Math.min(s.idx, R.sheets.length - 1)];
+    return `<div class="rp-form">
+        <div class="rp-field"><b>برگه‌های گزارش</b><div class="rp-ticks">${meta.sheets.map((x) => `<label class="chip rp-tick ${s.sheets.includes(x.key) ? "on" : ""}"><input type="checkbox" data-rsh="${x.key}" ${s.sheets.includes(x.key) ? "checked" : ""}> ${esc(x.name)}</label>`).join("")}</div></div>
+        <div class="rp-field"><b>بازهٔ زمانی</b><div class="rp-ticks">
+          <span class="lab">سال</span>${pop("y", yl, s.years.length, yBody)}
+          <span class="lab">فصل</span>${pop("q", ql, s.seasons.length, qBody)}
+          <span class="lab">ماه</span>${pop("m", ml, s.months.length, mBody)}
+          <span class="rp-period">دوره: <b>${esc(repPeriodLabel(s))}</b></span></div>
+          <div class="dim" style="font-size:.8rem;margin-top:4px">فصل‌ها و ماه‌های انتخابی با هم جمع می‌شوند و در هر سالِ انتخابی شمرده می‌شوند؛ اگر نه فصلی تیک خورده نه ماهی، کل سال. ستون «پیش از دوره» از فروردین همان سال تا ماهِ پیش از دوره است.</div></div>
+        <div class="rp-actions"><button class="tp-btn primary" data-rgen ${s.busy ? "disabled" : ""}>${s.busy ? "در حال ساخت…" : "نمایش گزارش"}</button>
+          <button class="tp-btn" data-rgenx ${s.busy ? "disabled" : ""}>دانلود اکسل</button>
+          <button class="tp-btn sm" data-rproj title="نام پروژه‌ها، شهر، مدیر پروژه و کلیدواژهٔ تطبیق با «طرف مقابل»">پروژه‌ها و مدیران پروژه</button></div></div>
+      ${R ? `<style>${R.css}</style>
+        <div class="rp-result-head">گزارش <b>${esc(R.label)}</b> · مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری${R.hasExpertAmounts ? "" : ` · <span class="chip warn">مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد</span>`}</div>
+        <div class="rp-sheets bottom">${R.sheets.map((x, i) => `<button class="rp-sheet ${i === s.idx ? "on" : ""}" data-rtab="${i}">${esc(x.name)}</button>`).join("")}</div>
+        ${(sh.notes || []).map((n) => `<div class="tp-note warn">${esc(n)}</div>`).join("")}
+        <div class="rp-paper rp-scroll rp-book" data-keep-scroll>${sh.html}</div>
+        ${sh.charts.length ? `<div class="rp-charts">${sh.charts.map((c) => `<div class="rp-chart">${c.svg}</div>`).join("")}</div>` : ""}`
+      : s.busy ? `<div class="empty">در حال ساخت گزارش…</div>` : `<div class="empty"><b>برگه‌ها و بازه را انتخاب کنید و «نمایش گزارش» را بزنید.</b>همان برگه‌ها و نمودارهایی نمایش داده می‌شود که در فایل اکسل می‌رود.</div>`}`;
+  }
+  async function genSeason(asFile) {
+    const s = RP.season;
+    if (!s.years.length) return TP.modal("سال انتخاب نشده", "دست‌کم یک سال را تیک بزنید.", null, "باشد", "");
+    if (!s.sheets.length) return TP.modal("برگه‌ای انتخاب نشده", "دست‌کم یک برگهٔ گزارش را تیک بزنید.", null, "باشد", "");
+    const body = { years: s.years, seasons: s.seasons, months: s.months, sheets: s.sheets };
+    RP.pop = null;
+    if (asFile) return repDownload("/reports/season.xlsx", body, "گزارش سه ماهه.xlsx");
+    s.busy = true; render();
+    try { s.result = await TP.api("/reports/season", { body }); s.idx = 0; RP.err = ""; }
+    catch (e) { TP.modal("گزارش ساخته نشد", esc(e.message), null, "باشد", ""); }
+    s.busy = false; render();
+  }
+
+  /* چارچوب ثابت گزارش: پروژه‌ها (بلوک جمع کل، شهر، مدیر، نام در برگهٔ مدیران، کلیدواژه‌ها) و ترتیب مدیران */
+  function projectsDialog(list) {
+    const meta = RP.meta, P = list || meta.projects;
+    const row = (p) => `<tr data-prow><td><input class="tp-input" data-pf="block" value="${esc(p.block)}" inputmode="numeric" style="width:46px;text-align:center"></td>
+      <td><input class="tp-input" data-pf="name" value="${esc(p.name)}" style="width:100%"></td><td><input class="tp-input" data-pf="city" value="${esc(p.city || "")}" style="width:100%"></td>
+      <td><input class="tp-input" data-pf="manager" value="${esc(p.manager || "")}" style="width:100%"></td><td><input class="tp-input" data-pf="managerLabel" value="${esc(p.managerLabel || "")}" placeholder="همان مدیر" style="width:100%"></td>
+      <td><input class="tp-input" data-pf="keys" value="${esc((p.keys || []).join("، "))}" style="width:100%"></td>
+      <td style="text-align:center"><input type="checkbox" data-pf="noSystem" ${p.noSystem ? "checked" : ""} title="درخواست سیستمی ندارد — ردیف قرمز با «-»"></td>
+      <td><button class="tp-btn xs danger" data-prdel title="حذف">✕</button></td></tr>`;
+    const d = TP.modal("پروژه‌ها و مدیران پروژه — چارچوب گزارش سه ماهه", `<p style="margin:0 0 8px">هر درخواست با <b>کلیدواژه‌ها</b> (با «،» جدا) در «طرف مقابل» و اگر نخورد در «مرکز درخواست کننده» به پروژه وصل می‌شود؛ طولانی‌ترین کلیدواژهٔ پیداشده برنده است.
+        پروژه‌های هم‌<b>بلوک</b> زیر یک «جمع کل» می‌آیند. «نام در برگهٔ مدیران» برای جدا کردن یک مدیر در دو شهر است (مثل مهندس محمدی ماهشهر و کرج).</p>
+      <div style="max-height:46vh;overflow:auto;border:1px solid var(--tp-line);border-radius:10px"><table class="tp-mx rp-ptable"><thead><tr><th>بلوک</th><th>نام پروژه</th><th>شهر/کشور</th><th>مدیر پروژه</th><th>نام در برگهٔ مدیران</th><th style="width:30%">کلیدواژه‌ها</th><th>بی‌سیستم</th><th></th></tr></thead>
+        <tbody data-pbody>${P.map(row).join("")}</tbody></table></div>
+      <div class="tp-row" style="margin:8px 0 0;gap:8px"><button class="tp-btn sm" data-padd>＋ پروژه</button><button class="tp-btn sm" data-preset>بازگشت به پیش‌فرض فایل نمونه</button></div>
+      <div class="tp-field" style="margin-top:10px"><b>ترتیب مدیران در برگهٔ «نمودار درصد مدیر پروژه ها» (هر خط یک نام)</b><textarea class="tp-input" data-pmgr rows="4" style="width:100%">${esc((meta.managers || []).join("\n"))}</textarea></div>
+      ${meta.unmatched && meta.unmatched.length ? `<div class="tp-note warn" style="max-width:none;margin-top:10px"><b>طرف‌مقابل‌هایی که هنوز به هیچ پروژه‌ای وصل نیستند</b> (در گزارش در ردیف «سایر» می‌آیند):<br>
+        ${meta.unmatched.slice(0, 25).map((u) => `${esc(u.party || u.center || "—")} <span class="dim">(${M(u.n)})</span>`).join(" · ")}</div>` : ""}`,
+      async () => {
+        const rows = [...d.querySelectorAll("[data-prow]")].map((tr) => { const v = (k) => tr.querySelector(`[data-pf="${k}"]`); return {
+          block: +v("block").value || 1, name: v("name").value.trim(), city: v("city").value.trim(), manager: v("manager").value.trim(), managerLabel: v("managerLabel").value.trim() || undefined,
+          keys: v("keys").value.split(/[،,]/).map((x) => x.trim()).filter(Boolean), noSystem: v("noSystem").checked || undefined }; }).filter((p) => p.name);
+        const managers = d.querySelector("[data-pmgr]").value.split("\n").map((x) => x.trim()).filter(Boolean);
+        const old = meta.projects.find((p) => p.note); rows.forEach((p) => { const o = meta.projects.find((x) => x.name === p.name && x.note); if (o && p.noSystem) p.note = o.note; });
+        try { await TP.api("/settings", { method: "PUT", body: { reportProjects: rows, reportManagers: managers } }); RP.meta = null; RP.season.result = null; render(); }
+        catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
+        void old;
+      }, "ذخیره");
+    d.querySelector(".tp-modal").style.maxWidth = "1180px";
+    const body = d.querySelector("[data-pbody]");
+    const wireRows = () => body.querySelectorAll("[data-prdel]").forEach((b) => b.onclick = () => b.closest("tr").remove());
+    wireRows();
+    d.querySelector("[data-padd]").onclick = () => { body.insertAdjacentHTML("beforeend", row({ block: (P[P.length - 1] || {}).block + 1 || 1, name: "", keys: [] })); wireRows(); };
+    d.querySelector("[data-preset]").onclick = () => { body.innerHTML = meta.defaults.projects.map(row).join(""); d.querySelector("[data-pmgr]").value = meta.defaults.managers.join("\n"); wireRows(); };
+  }
+
+  function wireReports(Q, G) {
+    Q("[data-rpart]").forEach((b) => b.onclick = () => { RP.part = b.dataset.rpart; RP.pop = null; render(); });
+    Q("[data-rsheet]").forEach((b) => b.onclick = () => { RP.sheet = b.dataset.rsheet; render(); });
+    const rh = G("[data-rhidden]"); if (rh) rh.onchange = (e) => { RP.hidden = e.target.checked; render(); };
+    const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; render(); };
+    const rx = G("[data-rstatus-xlsx]"); if (rx) rx.onclick = () => repDownload("/reports/status.xlsx", null, "وضعیت درخواست ها.xlsx");
+    Q("[data-sl]").forEach((b) => b.onclick = () => { const sel = RP.sl[+b.dataset.sl], k = b.dataset.k, i = sel.indexOf(k); if (!sel.length) sel.push(k); else if (i >= 0) sel.splice(i, 1); else sel.push(k); RP.limit = 300; render(); });
+    Q("[data-slclear]").forEach((b) => b.onclick = () => { RP.sl[+b.dataset.slclear] = []; render(); });
+    const sa = G("[data-slall]"); if (sa) sa.onclick = () => { SL.forEach(([c]) => { RP.sl[c] = []; }); render(); };
+    const mo = G("[data-rmore]"); if (mo) mo.onclick = () => { RP.limit += 300; render(); };
+    const dm = G("[data-dmore]"); if (dm) dm.onclick = () => { RP.dLimit += 300; render(); };
+    Q("[data-dq]").forEach((i) => i.oninput = (e) => { RP.dq[+e.target.dataset.dq] = e.target.value; RP.dLimit = 300; TP.keepFocus(e.target, "dq", render); });
+    /* گزارش سه ماهه */
+    const s = RP.season, tog = (arr, v, on) => { const i = arr.indexOf(v); if (on && i < 0) arr.push(v); if (!on && i >= 0) arr.splice(i, 1); arr.sort((a, b) => a - b); };
+    Q("[data-rpop]").forEach((b) => b.onclick = () => { RP.pop = RP.pop === b.dataset.rpop ? null : b.dataset.rpop; render(); });
+    Q("[data-rpclose]").forEach((b) => b.onclick = () => { RP.pop = null; render(); });
+    Q("[data-rpclear]").forEach((b) => b.onclick = () => { const k = b.dataset.rpclear; if (k === "y") s.years = []; if (k === "q") s.seasons = []; if (k === "m") s.months = []; render(); });
+    Q("[data-ry]").forEach((c) => c.onchange = (e) => { tog(s.years, +e.target.dataset.ry, e.target.checked); render(); });
+    Q("[data-rq]").forEach((c) => c.onchange = (e) => { tog(s.seasons, +e.target.dataset.rq, e.target.checked); render(); });
+    Q("[data-rm]").forEach((c) => c.onchange = (e) => { tog(s.months, +e.target.dataset.rm, e.target.checked); render(); });
+    Q("[data-rsh]").forEach((c) => c.onchange = (e) => { const k = e.target.dataset.rsh, i = s.sheets.indexOf(k); if (e.target.checked && i < 0) s.sheets.push(k); if (!e.target.checked && i >= 0) s.sheets.splice(i, 1); const order = RP.meta.sheets.map((x) => x.key); s.sheets.sort((a, b) => order.indexOf(a) - order.indexOf(b)); render(); });
+    const gn = G("[data-rgen]"); if (gn) gn.onclick = () => genSeason(false);
+    const gx = G("[data-rgenx]"); if (gx) gx.onclick = () => genSeason(true);
+    const pj = G("[data-rproj]"); if (pj) pj.onclick = () => projectsDialog();
+    Q("[data-rtab]").forEach((b) => b.onclick = () => { s.idx = +b.dataset.rtab; render(); });
+  }
+
   /* ---------- رندر ---------- */
   function render() {
     const app = document.getElementById("app");
@@ -667,7 +904,7 @@
     app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
-        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : vLog()}</div>`);
+        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : S.tab === "reports" ? vReports() : vLog()}</div>`);
     wire();
     TP.stickHeader(app.querySelector("table.tp-table"));
     restore();
@@ -724,7 +961,7 @@
     Q("[data-edel]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.edel);
       TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, () => expertPatch(e.id, { active: false }), "حذف"); });
     Q("[data-eteam]").forEach((b) => b.onclick = () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); expertPatch(eid, { senior_id: e.senior_id === sid ? null : sid }); });
-    Q("[data-enotify]").forEach((s) => s.onchange = (e) => expertPatch(+e.target.dataset.enotify, { notify_to: e.target.value }));
+    Q("[data-enotify]").forEach((s) => s.onchange = (e) => expertPatch(+e.target.dataset.enotify, { notify_to: e.target.checked ? "manager" : "senior" }));
     const ea = G("[data-eadd]"); if (ea) ea.onclick = addExpertDialog;
     Q("[data-mstage]").forEach((c) => c.onchange = () => autoSave("mstages", () => saveQuiet({ mgrStages: [...Q("[data-mstage]")].map((x) => x.checked) })));
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
@@ -797,6 +1034,7 @@
       await TP.api(`/decisions/${id}/approve`, { body: {} }); await refresh();
     });
     const le = G("[data-load-events]"); if (le) le.onclick = loadEvents;
+    wireReports(Q, G);
   }
 
   async function save(patch) { try { S.data.settings = await TP.api("/settings", { method: "PUT", body: patch }); render(); } catch (e) { TP.modal("خطا در ذخیره", esc(e.message), null, "باشد", ""); } }

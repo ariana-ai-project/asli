@@ -55,13 +55,15 @@ const N = (v) => { const s = String(v == null ? "" : v).replace(/,/g, "").trim()
 /* ------------------------------------------------------------------ */
 
 const COLS = ["import_id", "dkey", "order_date", "ym", "item_code", "code2", "title", "title_n", "qty", "unit",
-  "unit_price", "amount", "supplier", "supplier_n", "idx_val", "amount_1404", "unit_1404", "lvl1", "lvl2", "lvl3"];
+  "unit_price", "amount", "supplier", "supplier_n", "idx_val", "amount_1404", "unit_1404", "lvl1", "lvl2", "lvl3", "expert"];
 
+/* expert: ستون اختیاریِ «کارشناس خرید» (خروجی اقلام سفارش راهکاران) — گزارش سه‌ماهه مبلغ فاکتورها را
+   با آن به گروه هر کارشناس ارشد می‌بخشد؛ فایل بی این ستون هم پذیرفته می‌شود */
 export const HISTORY_TABLE = "CREATE TABLE IF NOT EXISTS purchase_history ("
   + "id INTEGER PRIMARY KEY, import_id INTEGER NOT NULL, dkey TEXT, order_date TEXT, ym INTEGER,"
   + " item_code TEXT, code2 TEXT, title TEXT, title_n TEXT, qty REAL, unit TEXT,"
   + " unit_price REAL, amount REAL, supplier TEXT, supplier_n TEXT,"
-  + " idx_val REAL, amount_1404 REAL, unit_1404 REAL, lvl1 TEXT, lvl2 TEXT, lvl3 TEXT)";
+  + " idx_val REAL, amount_1404 REAL, unit_1404 REAL, lvl1 TEXT, lvl2 TEXT, lvl3 TEXT, expert TEXT)";
 
 const HISTORY_INDEXES = [
   "CREATE INDEX IF NOT EXISTS ix_ph_code2 ON purchase_history(code2)",
@@ -123,7 +125,7 @@ export async function historyChunk(env, body) {
     for (const r of part) {
       args.push(importId, T(r.dkey), T(r.date), Number(r.ym) || null, T(r.itemCode), T(r.code2), T(r.title), nrm(r.title),
         N(r.qty), T(r.unit), N(r.unitPrice), N(r.amount), T(r.supplier), nrm(r.supplier),
-        N(r.idx), N(r.amount1404), N(r.unit1404), T(r.lvl1), T(r.lvl2), T(r.lvl3));
+        N(r.idx), N(r.amount1404), N(r.unit1404), T(r.lvl1), T(r.lvl2), T(r.lvl3), T(r.expert));
     }
     stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO purchase_history (${COLS.join(",")}) VALUES ${part.map(() => tuple).join(",")}`).bind(...args));
   }

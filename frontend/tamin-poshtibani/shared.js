@@ -163,11 +163,11 @@
   .tp-modal{background:#0b1730;color:#eef4ff;border:1px solid rgba(158,197,255,.22);border-radius:16px;max-width:600px;width:100%;padding:22px 24px;max-height:86vh;overflow:auto;box-shadow:0 24px 70px rgba(0,0,0,.55)}
   .tp-modal h3{margin:0 0 10px;font-size:1.1rem}.tp-modal .tp-body{color:#b7c6e6;line-height:1.9}
   .tp-modal .tp-acts{display:flex;gap:8px;margin-top:18px;flex-wrap:wrap}
-  .tp-btn{border:1px solid rgba(158,197,255,.3);background:rgba(120,165,255,.08);color:#eef4ff;border-radius:10px;padding:8px 16px;cursor:pointer;font:inherit}
-  .tp-btn:hover{background:rgba(120,165,255,.16)}
-  .tp-btn.primary{background:linear-gradient(135deg,#2f6fe4,#4f8cff);border-color:#4f8cff;font-weight:700}
-  .tp-btn.primary:hover{filter:brightness(1.1)}
-  .tp-btn[disabled]{opacity:.45;cursor:not-allowed}
+  :where(.tp-btn){border:1px solid rgba(158,197,255,.3);background:rgba(120,165,255,.08);color:#eef4ff;border-radius:10px;padding:8px 16px;cursor:pointer;font:inherit}
+  :where(.tp-btn:hover){background:rgba(120,165,255,.16)}
+  :where(.tp-btn.primary){background:linear-gradient(135deg,#2f6fe4,#4f8cff);border-color:#4f8cff;font-weight:700}
+  :where(.tp-btn.primary:hover){filter:brightness(1.1)}
+  :where(.tp-btn[disabled]){opacity:.45;cursor:not-allowed}
   .jdp{position:fixed;z-index:950;background:#0b1730;color:#eef4ff;border:1px solid rgba(158,197,255,.3);border-radius:12px;box-shadow:0 12px 34px rgba(0,0,0,.5);padding:10px;width:240px;font-size:.9rem}
   .jdp-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px}
   .jdp-head button{border:1px solid rgba(158,197,255,.3);background:none;color:inherit;border-radius:6px;padding:2px 9px;cursor:pointer}
@@ -187,8 +187,17 @@
   :root[data-theme="light"] .jdp-head button,:root[data-theme="light"] .jdp-foot button{border-color:rgba(30,60,120,.25)}
   :root[data-theme="light"] .jdp-grid .wd,:root[data-theme="light"] .jdp-sel{color:#4a5a78}
   :root[data-theme="light"] .jdp-grid button:hover{background:rgba(47,111,228,.1)}`;
+  /* باگ «کمرنگ شدن کادرها در حالت روز تا رفرش»: این CSS قبلاً با اولین مودال/تقویم/پنجرهٔ «در حال کار»
+     به تهِ <head> اضافه می‌شد، یعنی بعد از panel.css. قاعده‌های عمومی .tp-btn اینجا (متن سفید، کادر
+     آبی کم‌رنگ) با همان وزن ولی دیرتر می‌آمدند و رنگ حالت روزِ panel.css را می‌پوشاندند؛ فقط رفرش
+     آن <style> را برمی‌داشت. حالا همان اول بارگذاری و «پیش از» همهٔ برگه‌های سبک پنل می‌نشیند و
+     قاعده‌های عمومی‌اش با :where() وزن صفر دارند، پس هر سبک پنل همیشه برنده است. */
   let cssDone = false;
-  function ensureCss() { if (cssDone) return; cssDone = true; const s = document.createElement("style"); s.textContent = SHARED_CSS; document.head.appendChild(s); }
+  function ensureCss() {
+    if (cssDone || typeof document === "undefined" || !document.head) return; cssDone = true;
+    const s = document.createElement("style"); s.id = "tp-shared-css"; s.textContent = SHARED_CSS;
+    document.head.insertBefore(s, document.head.firstChild);
+  }
 
   /* ---------- حالت شب و روز ----------
      انتخاب در مرورگر همان کاربر می‌ماند (localStorage) و پیش از رندر پنل روی <html> می‌نشیند
@@ -209,7 +218,7 @@
   TP.themeBtn = () => { const [ic, lab] = themeLabel(); return `<button class="tp-btn sm tp-theme" data-theme-toggle title="${lab}" aria-label="${lab}">${ic} ${lab}</button>`; };
   /* تست‌ها همین فایل را بیرون از مرورگر اجرا می‌کنند — بی document یا با document ساختگی */
   const inBrowser = typeof document !== "undefined" && !!document.documentElement && typeof document.addEventListener === "function";
-  if (inBrowser) TP.theme.apply(TP.theme.get());
+  if (inBrowser) { TP.theme.apply(TP.theme.get()); ensureCss(); }
   if (inBrowser) document.addEventListener("click", (e) => {
     const b = e.target && e.target.closest && e.target.closest("[data-theme-toggle]");
     if (!b) return;

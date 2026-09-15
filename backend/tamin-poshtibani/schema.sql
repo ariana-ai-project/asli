@@ -231,7 +231,8 @@ CREATE TABLE IF NOT EXISTS purchase_history (
   idx_val     REAL,                    -- شاخص تعدیل
   amount_1404 REAL,                    -- قیمت کل (۱۴۰۴) = idx_val × amount ÷ ۱۰۰
   unit_1404   REAL,                    -- قیمت واحد (۱۴۰۴)
-  lvl1 TEXT, lvl2 TEXT, lvl3 TEXT      -- سطح اول/دوم/سوم طبقه‌بندی
+  lvl1 TEXT, lvl2 TEXT, lvl3 TEXT,     -- سطح اول/دوم/سوم طبقه‌بندی
+  expert      TEXT                     -- «کارشناس خرید» اگر فایل سوابق این ستون را داشت (گزارش سه‌ماهه: مبلغ فاکتور هر گروه)
 );
 CREATE INDEX IF NOT EXISTS ix_ph_code2 ON purchase_history(code2);
 CREATE INDEX IF NOT EXISTS ix_ph_item  ON purchase_history(item_code);

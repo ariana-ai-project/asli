@@ -31,6 +31,7 @@ import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
+import { statusData, statusBook, seasonData, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { handleUpdate, makeLink, makeTeamLink, scheduled, dispatchText, drainOutbox, seenKb } from "./bot.js";
 import { queueStmt } from "./queue.js";
@@ -160,6 +161,7 @@ CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
    SCHEMA فقط CREATE TABLE IF NOT EXISTS دارد و روی جدول موجود اثری ندارد،
    پس افزودن ستون جدید باید صریح و یک‌بار انجام شود. */
 const COLUMN_MIGRATIONS = [
+  ["purchase_history", "expert", "TEXT"],     /* کارشناس خرید فایل سوابق — گزارش سه‌ماهه، مبلغ فاکتور هر گروه */
   ["assignments", "deadline_at", "INTEGER"],  /* لحظهٔ پایان مهلت (SLA-02) */
   ["assignments", "budget_h", "REAL"],        /* بودجهٔ مهلت به ساعت کاری */
   ["assignments", "thr_snapshot", "TEXT"],    /* آستانه‌ها در لحظهٔ ارسال (SLA-04) */
@@ -1458,6 +1460,24 @@ async function route(request, env, ctx) {
     /* سوابق خرید (IMP-13): بارگذاری سه‌مرحله‌ای از تب مدیر، خواندن از تب کارشناس.
        begin جدول را از نو می‌سازد، chunkها ردیف‌ها را می‌ریزند و finish نمایه‌ها
        و آمار مرجع (از جمله فاصلهٔ قدیمی‌ترین خرید) را می‌سازد. */
+    /* گزارش‌های مدیر (reports.js): «وضعیت درخواست ها» و «گزارش سه ماهه» — JSON برای نمایش در پنل،
+       .xlsx با همان ساختار فایل‌های نمونهٔ واحد. سه‌ماهه POST است چون انتخاب سال/فصل/ماه/برگه‌ها در بدنه است. */
+    if (path.startsWith("/reports/")) {
+      requireManager(request, env);
+      const settings = await getSettings(env);
+      const xlsx = (bytes, name) => new Response(bytes, { headers: { "content-type": XLSX_MIME, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, "cache-control": "private, no-store" } });
+      if (path === "/reports/meta" && m === "GET") return json(await reportMeta(env, settings));
+      if (path === "/reports/status" && m === "GET") return json(await statusData(env, settings));
+      if (path === "/reports/status.xlsx" && m === "GET") return xlsx(await bookFile(statusBook(await statusData(env, settings))), `وضعیت درخواست ها ${jStr(now()).replace(/\//g, "-")}.xlsx`);
+      if ((path === "/reports/season" || path === "/reports/season.xlsx") && m === "POST") {
+        const b = await readJson(request);
+        const D = await seasonData(env, settings, b);
+        const book = seasonBook(D, Array.isArray(b.sheets) ? b.sheets : null);
+        if (path.endsWith(".xlsx")) return xlsx(await bookFile(book), `گزارش ${D.period.label}.xlsx`);
+        return json({ label: D.period.label, priorLabel: D.period.priorLabel, workDays: D.workDays, hasExpertAmounts: D.hasExpertAmounts, unmatched: D.unmatched, sheets: bookPreview(book), css: BOOK_CSS });
+      }
+      throw new HttpError("گزارش ناشناخته.", 404);
+    }
     if (path === "/history/status" && m === "GET") { await requireAny(request, env); return json(await historyStatus(env)); }
     if (path === "/history/begin" && m === "POST") { requireManager(request, env); return json(await historyBegin(env, await readJson(request))); }
     if (path === "/history/chunk" && m === "POST") { requireManager(request, env); return json(await historyChunk(env, await readJson(request))); }
