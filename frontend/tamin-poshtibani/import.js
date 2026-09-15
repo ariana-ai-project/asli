@@ -31,6 +31,11 @@
     ["نوع طرف مقابل",       "partyType", false],
     ["طرف مقابل",           "party",     true],
     ["نوع درخواست خرید",    "reqType",   false],
+    /* ستون‌های خروجی تازهٔ راهکاران (شهریور ۱۴۰۵) — همه اختیاری تا فایل قدیمی هم خوانده شود */
+    ["نوع مبنا",            "basisType", false],
+    ["شماره مبنا",          "basisNo",   false],
+    ["نوع الگو سند قراردادی", "contractKind", false],
+    ["شماره قرارداد/تفاهم نامه", "contractNo", false],
     ["کد قلم خریدنی",       "code",      false],   // خروجی روزانهٔ راهکاران کد قلم ندارد؛ کلید قلم روی عنوان است
     ["عنوان قلم خریدنی",    "title",     true],
     ["مشخصه فنی",           "spec",      false],
@@ -38,8 +43,13 @@
     ["واحد",                "unit",      true],
     ["تاریخ نیاز",          "needDate",  false],
     ["مصرف کننده",          "consumer",  false],
+    ["ارز",                 "currency",  false],
+    ["نرخ ارز",             "rate",      false],
+    ["فی",                  "fee",       false],
+    ["مبلغ",                "amount",    false],
     ["نوع خرید",            "buyType",   false],
     ["روند خرید",           "buyFlow",   false],
+    ["مهلت استعلام",        "quoteDeadline", false],
     ["کارشناس خرید",        "expert",    false],
     ["رمز فوریت",           "urgency",   false],
     ["توضیحات",             "note",      false],
@@ -128,7 +138,11 @@
         req = {
           id, date: TP.jNorm(get("date")), party: get("party"), partyType: get("partyType"), center: get("center"),
           requester: get("requester"), reqType: get("reqType"), buyType: get("buyType"), buyFlow: get("buyFlow"),
-          urgency: get("urgency"), items: [], _parties: new Set(), _dates: new Set(),
+          urgency: get("urgency"),
+          /* برای برگهٔ درخواست خرید: واحد/رمز تامین و نوع قلم؛ مبنا و قرارداد فقط بایگانی */
+          supplyUnit: get("unitSrc"), itemType: get("itemType"), basisType: get("basisType"), basisNo: get("basisNo"),
+          contractKind: get("contractKind"), contractNo: get("contractNo"),
+          items: [], _parties: new Set(), _dates: new Set(),
         };
         byId.set(id, req);
       }
@@ -145,6 +159,7 @@
         lineNo: req.items.length + 1,
         code: get("code"), title: get("title"), spec: get("spec"), qty, unit: get("unit"),
         needDate: TP.jNorm(get("needDate")), consumer: get("consumer"), note: get("note"),
+        quoteDeadline: TP.jNorm(get("quoteDeadline")), currency: get("currency"), fee: TP.num(get("fee")), amount: TP.num(get("amount")),
         srcStatus, srcExpert: get("expert"), state: state || "open",
       });
       parties.add(get("party"));

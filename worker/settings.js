@@ -9,6 +9,9 @@ export const DEFAULTS = {
   assign: { a: 40, b: 30, c: 30, op1: "+", op2: "−" },
   deadline: { base: 3, we: 1, wp: 1, wi: 1, op1: "×", op2: "×", op3: "×" },
   capacity: 8, window: "3d",
+  /* تیکِ هر مرحله در تب «تنظیم اعلانات»: اعلانِ تغییر وضعیت آن مرحله در تلگرام مدیر می‌رود
+     (پیش‌فرض همان سه‌تایی که مدیر می‌خواست: مشاهده، پیش‌فاکتور، جدول کمیسیون) */
+  mgrStages: [true, false, false, false, true, true],
 };
 
 

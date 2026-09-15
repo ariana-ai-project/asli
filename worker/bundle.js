@@ -21,7 +21,8 @@ import { commissionRecordStmts } from "./records.js";
 export async function bundleData(env, aid, settings, company) {
   const a = await env.DB.prepare(
     `SELECT a.*, e.name AS expert_name, e.label AS expert_label, r.id AS req_id, r.date AS req_date, r.party,
-            r.party_type, r.center, r.requester, r.req_type, r.buy_type, r.buy_flow, r.urgency
+            r.party_type, r.center, r.requester, r.req_type, r.buy_type, r.buy_flow, r.urgency,
+            r.supply_unit, r.item_type, r.basis_type, r.basis_no, r.contract_kind, r.contract_no
      FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id WHERE a.id=?`,
   ).bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
@@ -38,6 +39,7 @@ export async function bundleData(env, aid, settings, company) {
       id: a.req_id, date: a.req_date, party: a.party, party_type: a.party_type,
       center: a.center, requester: a.requester, buy_type: a.buy_type, buy_flow: a.buy_flow,
       head_req_type: a.req_type, urgency: a.urgency, head_deal_type: null, head_site: null,
+      supply_unit: a.supply_unit, item_type: a.item_type, basis_type: a.basis_type, basis_no: a.basis_no, contract_kind: a.contract_kind, contract_no: a.contract_no,
       /* «مهلت استعلام» در فرمِ چاپی همان مهلتِ ارجاع است */
       deadline: a.deadline_at ? jStr(a.deadline_at) : "",
       deadlineFull: a.deadline_at ? fmtFa(a.deadline_at) : "",

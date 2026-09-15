@@ -25,7 +25,13 @@ CREATE TABLE IF NOT EXISTS experts (
   code          TEXT NOT NULL UNIQUE,     -- کد ورود
   active        INTEGER NOT NULL DEFAULT 1,
   speed         REAL    NOT NULL DEFAULT 1.0,   -- ضریب سرعت (مهلت هوشمند)
-  telegram_chat TEXT,                     -- زیرساخت اعلان تلگرام (بعداً)
+  telegram_chat TEXT,                     -- گفت‌وگوی خصوصی بات با کارشناس
+  -- تیم کارشناسی (تصمیم مدیر، شهریور ۱۴۰۵؛ تب «کارشناسان» پنل مدیر)
+  senior        INTEGER,                  -- ۱ = کارشناس ارشد (ستاره)
+  senior_id     INTEGER,                  -- سرپرست این کارشناس (یک ارشد)
+  notify_to     TEXT,                     -- manager | senior — اعلان‌های پایش این کارشناس برای مدیر بیاید یا فقط ارشدش
+  team_chat     TEXT,                     -- گروه تلگرام تیمِ ارشد (اعلان زیرمجموعه‌ها)
+  alert_stages  TEXT,                     -- JSON شش تیک: کدام مرحله‌ها به گروه تیم اعلام شود
   created_at    INTEGER NOT NULL
 );
 
@@ -56,7 +62,12 @@ CREATE TABLE IF NOT EXISTS requests (
   -- سرآیند فرم کمیسیون (قابل ویرایش کارشناس)
   head_req_type   TEXT DEFAULT 'عادی',
   head_deal_type  TEXT DEFAULT 'خرید',
-  head_site       TEXT
+  head_site       TEXT,
+  -- ستون‌های خروجی تازهٔ راهکاران (شهریور ۱۴۰۵) — برگهٔ درخواست خرید از این‌ها پر می‌شود
+  supply_unit     TEXT,                   -- واحد رمز/تامین
+  item_type       TEXT,                   -- نوع قلم (کالا / خدمت)
+  basis_type      TEXT, basis_no TEXT,    -- نوع مبنا / شماره مبنا
+  contract_kind   TEXT, contract_no TEXT  -- نوع الگو سند قراردادی / شماره قرارداد
 );
 CREATE INDEX IF NOT EXISTS ix_requests_date  ON requests(date);
 CREATE INDEX IF NOT EXISTS ix_requests_party ON requests(party);
@@ -107,6 +118,8 @@ CREATE TABLE IF NOT EXISTS items (
   hist_done_at   INTEGER,                 -- مرحلهٔ «بررسی سوابق»
   smart_done_at  INTEGER,                 -- مرحلهٔ «جستجوی هوشمند»
   commission_ok  INTEGER NOT NULL DEFAULT 0,  -- تأیید کمیسیون این قلم
+  quote_deadline TEXT,                    -- مهلت استعلام (ستون فایل راهکاران)
+  currency       TEXT, fee REAL, amount REAL,  -- ارز / فی / مبلغ (بایگانی)
   UNIQUE(request_id, item_key)
 );
 CREATE INDEX IF NOT EXISTS ix_items_request ON items(request_id);

@@ -66,3 +66,38 @@ export function emptyOptional(q) {
 
 /** آیا این خط می‌تواند «ثبت موقت» شود؟ */
 export const canSave = (q) => missingRequired(q).length === 0;
+
+/* ------------------------------------------------------------------ */
+/* قالب فیلدها (تصمیم مدیر): اشتباه = خطا، نه ثبتِ بی‌صدا                */
+/* ------------------------------------------------------------------ */
+const DIG = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
+/* ممیز فارسی «٫» هم ممیز است؛ جداکنندهٔ هزارگان (ویرگول لاتین و «٬») دور ریخته می‌شود */
+const NUMBER = (s) => DIG(s).replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
+const isNumber = (s) => /^\d+(\.\d+)?$/.test(NUMBER(s));
+/** عددِ فیلد (قیمت/مقدار) با هر دستگاه رقم و ممیز؛ نامعتبر → null */
+export const toNumber = (s) => { const x = NUMBER(s); return x && /^\d+(\.\d+)?$/.test(x) ? Number(x) : null; };
+const isInt = (s) => /^\d+$/.test(NUMBER(s));
+const jalali = (s) => { const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(DIG(s).trim()); return !!m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31; };
+/* «۱۰»، «10 روز»، «۷ روز کاری»، «2 هفته» — عددِ مدت با یک واحدِ اختیاری */
+const DAYS_RE = /^(\d+)\s*(روز کاری|روز|هفته|ماه)?$/;
+const isDuration = (s) => DAYS_RE.test(NUMBER(s).replace(/\s+/g, " "));
+
+/** زمان تحویل: تاریخ شمسی (سال/ماه/روز) یا مدت به عدد (با واحد اختیاری) */
+export const validDtime = (s) => { const x = T(s); return !x || jalali(x) || isDuration(x); };
+/** همان مقدار، با رقم لاتین و فاصلهٔ یکدست — تا جدول کمیسیون و مرتب‌سازی یکجور ببینند */
+export const normalizeDtime = (s) => { const x = T(s); if (!x) return null; return jalali(x) ? DIG(x).trim() : NUMBER(x).replace(/\s+/g, " "); };
+
+/**
+ * فیلدهای داده‌شده را می‌سنجد؛ فقط فیلدهایی که در `q` هستند و خالی نیستند.
+ * خروجی: [{field, message}] — خالی یعنی همه درست.
+ */
+export function validateQuote(q) {
+  const out = [];
+  const has = (f) => f in q && T(q[f]) !== "";
+  if (has("price") && !isNumber(q.price)) out.push({ field: "price", message: "قیمت واحد باید عدد باشد (اعشار مجاز است)." });
+  if (has("qty") && !isNumber(q.qty)) out.push({ field: "qty", message: "مقدار باید عدد باشد." });
+  if (has("valid_days") && !isInt(q.valid_days)) out.push({ field: "valid_days", message: "اعتبار پیش‌فاکتور باید عدد (روز) باشد." });
+  if (has("dtime") && !validDtime(q.dtime)) out.push({ field: "dtime", message: "زمان تحویل باید تاریخ شمسی (۱۴۰۵/۰۷/۱۰) یا عدد روز (مثلاً ۱۰ یا ۱۰ روز کاری) باشد." });
+  for (const f of ["invoice", "vat", "pay", "deal", "place"]) if (has(f) && !ENUMS[f].includes(T(q[f]))) out.push({ field: f, message: `${LABELS[f]} باید یکی از گزینه‌های فهرست باشد.` });
+  return out;
+}

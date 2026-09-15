@@ -152,7 +152,7 @@ function itemsSection(dt) {
     C(8, "", { align: "right" }),
     C(9, it.expert || "", { align: "right" }),
     C(10, dt.buy_flow || ""),
-    C(11, ""),
+    C(11, it.quote_deadline || ""),
   ], { cantSplit: true, height: 360 }));
   return tbl(g, [head, ...rows], { insideH: 4 });
 }
@@ -245,11 +245,13 @@ export function requestSheetData(d) {
       requester: d.request.requester,
       party: d.request.party,
       party_type: d.request.party_type,
-      supplyUnit: d.request.supply_unit || d.request.buy_type || "",
-      item_type: d.request.head_req_type || d.request.req_type || "",
+      /* «واحد/رمز تامین» و «نوع قلم» از ستون‌های خودِ فایل راهکاران (شهریور ۱۴۰۵) */
+      supplyUnit: d.request.supply_unit || "",
+      item_type: d.request.item_type || d.request.req_type || "",
       note: notes.join("\n"),
     },
-    items: (d.items || []).map((i) => ({ ...i, expert: i.src_expert || "" })),
+    /* «روند خرید» و «مهلت استعلام» ستون‌های فایل‌اند و روی هر قلم می‌نشینند */
+    items: (d.items || []).map((i) => ({ ...i, expert: i.src_expert || "", quote_deadline: i.quote_deadline || "" })),
   };
 }
 
@@ -300,7 +302,7 @@ export function requestHtml(d) {
       <thead><tr>${REQUEST_COLUMNS.map(([t]) => `<th>${t}</th>`).join("")}</tr></thead><tbody>
       ${dt.items.map((it, i) => `<tr><td>${i + 1}</td><td>${lat(it.code)}</td><td class="rt">${txt(it.title)}</td><td>${it.qty == null ? "" : faD(Number(it.qty).toLocaleString("en-US"))}</td>`
         + `<td>${txt(it.unit)}</td><td>${txt(it.need_date)}</td><td class="rt">${txt(it.consumer)}</td><td>${txt(it.src_status)}</td>`
-        + `<td class="rt"></td><td class="rt">${txt(it.expert)}</td><td>${txt(dt.buy_flow)}</td><td></td></tr>`).join("")}
+        + `<td class="rt"></td><td class="rt">${txt(it.expert)}</td><td>${txt(dt.buy_flow)}</td><td>${txt(it.quote_deadline)}</td></tr>`).join("")}
       </tbody></table></td></tr>
     <tr class="s4"><td></td></tr>
     <tr class="s5"><td><table class="rq-sign">${cols([0.11, 0.20, 0.11, 0.20])}<tbody>

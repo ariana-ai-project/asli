@@ -32,9 +32,9 @@ import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
-import { handleUpdate, makeLink, scheduled, dispatchText, drainOutbox, seenKb } from "./bot.js";
+import { handleUpdate, makeLink, makeTeamLink, scheduled, dispatchText, drainOutbox, seenKb } from "./bot.js";
 import { queueStmt } from "./queue.js";
-import { missingRequired, INVOICE_DEFAULT } from "./quote-rules.js";
+import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -67,9 +67,21 @@ function requireManager(request, env) {
 async function requireExpert(request, env) {
   const code = T(request.headers.get("X-Expert-Code"));
   if (!code) throw new HttpError("وارد نشده‌اید.", 401);
-  const ex = await env.DB.prepare("SELECT id,name,label,code,active FROM experts WHERE code=?").bind(code).first();
+  const ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,alert_stages FROM experts WHERE code=?").bind(code).first();
   if (!ex || !ex.active) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
+  ex.senior = ex.senior ? 1 : 0;
+  ex.alert_stages = stageTicks(ex.alert_stages);
   return ex;
+}
+
+/* شش تیکِ مرحله‌ها (JSON آرایهٔ بولی). پیش‌فرض همان سه مرحله‌ای که مدیر تا حالا می‌خواست:
+   مشاهده، پیش‌فاکتور، جدول کمیسیون. */
+const DEFAULT_STAGES = [true, false, false, false, true, true];
+function stageTicks(v) {
+  let a = v;
+  if (typeof v === "string") { try { a = JSON.parse(v); } catch (_) { a = null; } }
+  if (!Array.isArray(a) || a.length !== 6) return DEFAULT_STAGES.slice();
+  return a.map(Boolean);
 }
 /* مدیر یا کارشناس — برای خواندن‌های مشترک */
 async function requireAny(request, env) {
@@ -193,6 +205,24 @@ const COLUMN_MIGRATIONS = [
   ["quotes", "origin_ref", "INTEGER"],
   ["quotes", "final_at", "INTEGER"],              /* لحظهٔ تیک «تأیید نهایی» */
   ["quotes", "commission_at", "INTEGER"],         /* در آخرین جدول کمیسیونِ ساخته‌شده بود */
+  /* تیم کارشناسی (تصمیم مدیر، شهریور ۱۴۰۵): کارشناس ارشد، سرپرستِ هر کارشناس، مقصد اعلان‌های پایش
+     (manager | senior)، گروه تلگرامِ تیمِ کارشناس ارشد، و مرحله‌هایی که او اعلانشان را می‌خواهد */
+  ["experts", "senior", "INTEGER"],
+  ["experts", "senior_id", "INTEGER"],
+  ["experts", "notify_to", "TEXT"],
+  ["experts", "team_chat", "TEXT"],
+  ["experts", "alert_stages", "TEXT"],
+  /* ستون‌های تازهٔ خروجی راهکاران (شهریور ۱۴۰۵) — برای برگهٔ درخواست خرید و بایگانی */
+  ["requests", "supply_unit", "TEXT"],           /* واحد رمز/تامین */
+  ["requests", "item_type", "TEXT"],             /* نوع قلم (کالا / خدمت) */
+  ["requests", "basis_type", "TEXT"],            /* نوع مبنا */
+  ["requests", "basis_no", "TEXT"],              /* شماره مبنا */
+  ["requests", "contract_kind", "TEXT"],         /* نوع الگو سند قراردادی */
+  ["requests", "contract_no", "TEXT"],           /* شماره قرارداد/تفاهم نامه */
+  ["items", "quote_deadline", "TEXT"],           /* مهلت استعلام (ستون فایل) */
+  ["items", "currency", "TEXT"],
+  ["items", "fee", "REAL"],                      /* فی */
+  ["items", "amount", "REAL"],                   /* مبلغ */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -405,11 +435,16 @@ async function importChunk(env, body) {
   for (const r of reqs) {
     const id = T(r.id); if (!id) continue;
     if (!existing.has(id)) newRequests++;
-    stmts.push(env.DB.prepare(`INSERT INTO requests (id,date,party,party_type,center,requester,req_type,buy_type,buy_flow,urgency,first_import_id,last_import_id)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    stmts.push(env.DB.prepare(`INSERT INTO requests (id,date,party,party_type,center,requester,req_type,buy_type,buy_flow,urgency,first_import_id,last_import_id,
+        supply_unit,item_type,basis_type,basis_no,contract_kind,contract_no)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET date=excluded.date, party=excluded.party, party_type=excluded.party_type, center=excluded.center,
-        requester=excluded.requester, req_type=excluded.req_type, buy_type=excluded.buy_type, buy_flow=excluded.buy_flow, urgency=excluded.urgency, last_import_id=excluded.last_import_id`)
-      .bind(id, T(r.date), T(r.party), T(r.partyType) || null, T(r.center) || null, T(r.requester) || null, T(r.reqType) || null, T(r.buyType) || null, T(r.buyFlow) || null, T(r.urgency) || null, importId, importId));
+        requester=excluded.requester, req_type=excluded.req_type, buy_type=excluded.buy_type, buy_flow=excluded.buy_flow, urgency=excluded.urgency, last_import_id=excluded.last_import_id,
+        supply_unit=COALESCE(excluded.supply_unit, requests.supply_unit), item_type=COALESCE(excluded.item_type, requests.item_type),
+        basis_type=COALESCE(excluded.basis_type, requests.basis_type), basis_no=COALESCE(excluded.basis_no, requests.basis_no),
+        contract_kind=COALESCE(excluded.contract_kind, requests.contract_kind), contract_no=COALESCE(excluded.contract_no, requests.contract_no)`)
+      .bind(id, T(r.date), T(r.party), T(r.partyType) || null, T(r.center) || null, T(r.requester) || null, T(r.reqType) || null, T(r.buyType) || null, T(r.buyFlow) || null, T(r.urgency) || null, importId, importId,
+        T(r.supplyUnit) || null, T(r.itemType) || null, T(r.basisType) || null, T(r.basisNo) || null, T(r.contractKind) || null, T(r.contractNo) || null));
     /* کلید قلم = عنوانِ نرمال‌شده (+ شمارنده برای عنوان تکراری در همان درخواست).
        خروجی روزانهٔ راهکاران کد قلم ندارد و خروجی کامل دارد؛ کلیدِ عنوانی در هر دو یکی است
        و بارگذاری دوباره (یا هر دو فرمت پشت‌سرهم) قلم را تکرار نمی‌کند. */
@@ -434,14 +469,17 @@ async function importChunk(env, body) {
       /* وضعیت راهکاران فقط برای قلمِ تازه اعمال می‌شود؛ برای قلم موجود، state سامانه دست‌نخورده می‌ماند
          و اختلاف در مرحلهٔ finish به‌عنوان پیشنهاد به مدیر برمی‌گردد (ملاک فایل جدید است، اعمال با تأیید).
          ستون‌هایی که فایل روزانه ندارد (کد، مشخصه، تاریخ نیاز، …) با COALESCE از فایل کامل قبلی حفظ می‌شوند. */
-      stmts.push(env.DB.prepare(`INSERT INTO items (request_id,item_key,line_no,code,title,spec,qty,unit,need_date,consumer,note,src_status,src_expert,state,state_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+      stmts.push(env.DB.prepare(`INSERT INTO items (request_id,item_key,line_no,code,title,spec,qty,unit,need_date,consumer,note,src_status,src_expert,state,state_at,quote_deadline,currency,fee,amount)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         ON CONFLICT(request_id,item_key) DO UPDATE SET line_no=excluded.line_no, title=excluded.title,
           code=COALESCE(excluded.code, items.code), spec=COALESCE(excluded.spec, items.spec), qty=excluded.qty, unit=excluded.unit,
           need_date=COALESCE(excluded.need_date, items.need_date), consumer=COALESCE(excluded.consumer, items.consumer), note=COALESCE(excluded.note, items.note),
-          src_status=excluded.src_status, src_expert=COALESCE(excluded.src_expert, items.src_expert)`)
+          src_status=excluded.src_status, src_expert=COALESCE(excluded.src_expert, items.src_expert),
+          quote_deadline=COALESCE(excluded.quote_deadline, items.quote_deadline), currency=COALESCE(excluded.currency, items.currency),
+          fee=COALESCE(excluded.fee, items.fee), amount=COALESCE(excluded.amount, items.amount)`)
         .bind(id, key, int(it.lineNo, 1), T(it.code) || null, T(it.title), T(it.spec) || null, num(it.qty), T(it.unit) || null, T(it.needDate) || null,
-          T(it.consumer) || null, T(it.note) || null, T(it.srcStatus) || null, T(it.srcExpert) || null, ["open", "hold", "stop", "closed"].includes(it.state) ? it.state : "open", t));
+          T(it.consumer) || null, T(it.note) || null, T(it.srcStatus) || null, T(it.srcExpert) || null, ["open", "hold", "stop", "closed"].includes(it.state) ? it.state : "open", t,
+          T(it.quoteDeadline) || null, T(it.currency) || null, num(it.fee), num(it.amount)));
       newItems++;
     }
   }
@@ -560,10 +598,105 @@ async function workload(env) {
   return { assignments: [...by.values()] };
 }
 
+/* کارشناس‌های ارشد اول، بعد بقیه — همان ترتیبی که فهرست انتخاب کارشناس در میز باید داشته باشد */
 async function listExperts(env) {
-  return (await env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,
+  const rows = (await env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,e.senior,e.senior_id,e.notify_to,e.team_chat,e.alert_stages,
       (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND i.state IN ('open','hold')) AS open_load
-    FROM experts e ORDER BY e.active DESC, e.name`).all()).results || [];
+    FROM experts e ORDER BY e.active DESC, e.senior DESC, e.name`).all()).results || [];
+  return rows.map((e) => ({ ...e, senior: e.senior ? 1 : 0, notify_to: e.notify_to === "senior" ? "senior" : "manager", alert_stages: stageTicks(e.alert_stages), team_connected: !!e.team_chat, team_chat: undefined }));
+}
+
+/**
+ * جدول کارشناسان مدیر (تب «کارشناسان»): نام، ستاره (ارشد)، سرپرست، مقصد اعلان.
+ * ستاره برداشته شود → زیرمجموعه‌هایش بی‌سرپرست می‌شوند، نه اینکه به کس دیگری بروند.
+ */
+async function updateExpert(env, id, b) {
+  const cur = await env.DB.prepare("SELECT * FROM experts WHERE id=?").bind(id).first();
+  if (!cur) throw new HttpError("کارشناس پیدا نشد.", 404);
+  const sets = [], args = [], extra = [];
+  if ("speed" in b) { sets.push("speed=?"); args.push(Number(b.speed) || 1); }
+  if ("active" in b) {
+    sets.push("active=?"); args.push(b.active ? 1 : 0);
+    if (!b.active) { sets.push("senior=0"); extra.push(env.DB.prepare("UPDATE experts SET senior_id=NULL WHERE senior_id=?").bind(id)); }
+  }
+  if ("telegram_chat" in b) { sets.push("telegram_chat=?"); args.push(T(b.telegram_chat) || null); }
+  if ("name" in b) {
+    const name = nrm(b.name);
+    if (!name) throw new HttpError("نام کارشناس خالی است.");
+    const dup = await env.DB.prepare("SELECT id FROM experts WHERE name=? AND id<>?").bind(name, id).first();
+    if (dup) throw new HttpError("کارشناسی با همین نام از قبل هست.", 409);
+    sets.push("name=?, label=?"); args.push(name, T(b.label) || name);
+  } else if ("label" in b) { sets.push("label=?"); args.push(T(b.label) || cur.name); }
+  if ("senior" in b) {
+    sets.push("senior=?"); args.push(b.senior ? 1 : 0);
+    if (!b.senior) extra.push(env.DB.prepare("UPDATE experts SET senior_id=NULL WHERE senior_id=?").bind(id));
+    if (b.senior) { sets.push("senior_id=NULL"); }              /* ارشد زیرِ کسی نیست */
+  }
+  if ("senior_id" in b) {
+    const sid = int(b.senior_id);
+    if (sid) {
+      if (sid === id) throw new HttpError("کارشناس نمی‌تواند سرپرست خودش باشد.");
+      const s = await env.DB.prepare("SELECT id FROM experts WHERE id=? AND active=1 AND senior=1").bind(sid).first();
+      if (!s) throw new HttpError("کارشناس ارشد معتبر نیست.");
+    }
+    sets.push("senior_id=?"); args.push(sid || null);
+  }
+  if ("notify_to" in b) { sets.push("notify_to=?"); args.push(b.notify_to === "senior" ? "senior" : "manager"); }
+  if ("alert_stages" in b) { sets.push("alert_stages=?"); args.push(JSON.stringify(stageTicks(b.alert_stages))); }
+  if (sets.length) { args.push(id); await env.DB.batch([env.DB.prepare(`UPDATE experts SET ${sets.join(",")} WHERE id=?`).bind(...args), ...extra]); }
+  return { ok: true };
+}
+
+/* آیا `who` (مدیر یا کارشناس) این ارجاع را می‌بیند؟ کارشناس: مال خودش یا مال زیرمجموعه‌اش */
+async function canSee(env, who, expertId) {
+  if (who.role === "manager") return true;
+  if (who.expert.id === expertId) return true;
+  if (!who.expert.senior) return false;
+  const e = await env.DB.prepare("SELECT id FROM experts WHERE id=? AND senior_id=?").bind(expertId, who.expert.id).first();
+  return !!e;
+}
+
+/**
+ * تب «تیم کارشناسی» کارشناس ارشد: زیرمجموعه‌ها و همهٔ ارجاع‌هایشان که قلم باز/معلق دارند
+ * (یا در سی روز اخیر ارسال شده‌اند) — همان ردیف‌های میز مدیر، فقط برای تیم او.
+ */
+async function teamDesk(env, ex) {
+  const team = (await env.DB.prepare("SELECT id,name,label,active FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(ex.id).all()).results || [];
+  if (!team.length) return { team: [], requests: [], settings: await getSettings(env) };
+  const ids = team.map((e) => e.id), q = ids.map(() => "?").join(",");
+  const assigns = (await env.DB.prepare(`SELECT a.*, e.name AS expert_name, e.label AS expert_label, r.date, r.party, r.center,
+      (SELECT COUNT(*) FROM quotes x WHERE x.assignment_id=a.id AND x.saved=1) AS quote_count,
+      (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count
+    FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
+    WHERE a.expert_id IN (${q}) AND (EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold')) OR a.dispatched_at > ?)
+    ORDER BY a.dispatched_at DESC, a.id DESC LIMIT 400`).bind(...ids, now() - 30 * DAY).all()).results || [];
+  const aids = assigns.map((a) => a.id);
+  const items = aids.length ? (await env.DB.prepare(`SELECT * FROM items WHERE assignment_id IN (${aids.map(() => "?").join(",")}) ORDER BY request_id, line_no`).bind(...aids).all()).results || [] : [];
+  const byReq = new Map();
+  for (const a of assigns) {
+    if (!byReq.has(a.request_id)) byReq.set(a.request_id, { id: a.request_id, date: a.date, party: a.party, center: a.center, items: [], assignments: [] });
+    byReq.get(a.request_id).assignments.push(a);
+  }
+  for (const i of items) { const r = byReq.get(i.request_id); if (r) r.items.push(i); }
+  return { team, requests: [...byReq.values()], settings: await getSettings(env) };
+}
+
+/**
+ * «ارجاع به تیم»: کارشناس ارشد یکی از ارجاع‌های خودش (یا زیرمجموعه‌اش) را به یکی از
+ * زیرمجموعه‌هایش (یا به خودش) می‌دهد. همان تغییر کارشناسِ مدیر است؛ ساعت‌شمار از نو،
+ * و اگر ارسال شده بود، به کارشناس تازه اعلان «ارجاع جدید» می‌رود.
+ */
+async function delegate(env, ex, body, ctx) {
+  if (!ex.senior) throw new HttpError("فقط کارشناس ارشد می‌تواند ارجاع را به تیم بدهد.", 403);
+  const aid = int(body.assignment_id), eid = int(body.expert_id);
+  const a = await env.DB.prepare("SELECT * FROM assignments WHERE id=?").bind(aid).first();
+  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
+  if (!(await canSee(env, { role: "expert", expert: ex }, a.expert_id))) throw new HttpError("این ارجاع متعلق به تیم شما نیست.", 403);
+  const target = eid === ex.id ? { id: ex.id } : await env.DB.prepare("SELECT id FROM experts WHERE id=? AND senior_id=? AND active=1").bind(eid, ex.id).first();
+  if (!target) throw new HttpError("کارشناس انتخابی در تیم شما نیست.");
+  const r = await reassign(env, { assignment_id: aid, expert_id: eid, days: body.days }, `expert:${ex.id}`);
+  flush(env, ctx, 1);
+  return r;
 }
 
 /* ارجاع: (درخواست، کارشناس) → اقلام */
@@ -662,30 +795,41 @@ async function dispatch(env, body) {
 }
 
 /* تغییر کارشناس: ارجاع جدید، انتقال اقلام و کارهای انجام‌شده، ساعت‌شمار از نو */
-async function reassign(env, body) {
+async function reassign(env, body, actor = "manager") {
   const aid = int(body.assignment_id), eid = int(body.expert_id);
-  const a = await env.DB.prepare("SELECT * FROM assignments WHERE id=?").bind(aid).first();
+  const a = await env.DB.prepare("SELECT a.*, r.party FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=?").bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
   if (a.expert_id === eid) return { ok: true, assignment_id: aid };
+  const target = await env.DB.prepare("SELECT id, name, label, telegram_chat FROM experts WHERE id=? AND active=1").bind(eid).first();
+  if (!target) throw new HttpError("کارشناس معتبر نیست.");
   const t = now();
+  const days = int(body.days, a.days);
   let b = await env.DB.prepare("SELECT * FROM assignments WHERE request_id=? AND expert_id=?").bind(a.request_id, eid).first();
-  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, int(body.days, a.days), a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days: int(body.days, a.days) }; }
+  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, days, a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days }; }
+  const items = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all()).results || [];
   /* ساعت‌شمار کارشناس جدید از نو شروع می‌شود، پس زمان‌بندی هشدارها هم از نو ساخته می‌شود */
-  const fresh = a.dispatched_at
-    ? alertStatements(env, { id: b.id, days: int(body.days, b.days || a.days) }, (await getSettings(env)).thresholds, await holidayFn(env), t)
-    : [];
-  await env.DB.batch([
+  const [settings, isHoliday] = a.dispatched_at ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
+  const fresh = a.dispatched_at ? alertStatements(env, { id: b.id, days: int(body.days, b.days || a.days) }, settings.thresholds, isHoliday, t) : [];
+  const deadlineAt = a.dispatched_at ? alertSchedule(t, int(body.days, b.days || a.days), settings.thresholds, isHoliday).deadlineAt : null;
+  const stmts = [
     env.DB.prepare("UPDATE items SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE quotes SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE proformas SET assignment_id=? WHERE assignment_id=? AND supplier_name NOT IN (SELECT supplier_name FROM proformas WHERE assignment_id=?)").bind(b.id, aid, b.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
     env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(aid),
-    ev(env, "manager", "reassign", a.request_id, null, { from_expert_id: a.expert_id, to_expert_id: eid, notify: "telegram" }),
-    assignmentLogStmt(env, { at: t, action: "reassign", request_id: a.request_id, assignment_id: b.id, expert_id: eid, from_expert_id: a.expert_id,
-      days: int(body.days, b.days || a.days), deadline_at: a.dispatched_at ? alertSchedule(t, int(body.days, b.days || a.days), (await getSettings(env)).thresholds, await holidayFn(env)).deadlineAt : null }),
+    ev(env, actor, "reassign", a.request_id, null, { from_expert_id: a.expert_id, to_expert_id: eid, notify: target.telegram_chat && a.dispatched_at ? "telegram" : "none" }),
+    assignmentLogStmt(env, { at: t, action: actor === "manager" ? "reassign" : "delegate", request_id: a.request_id, assignment_id: b.id, expert_id: eid, from_expert_id: a.expert_id,
+      days: int(body.days, b.days || a.days), deadline_at: deadlineAt, item_ids: items.map((i) => i.id), actor }),
     ...fresh,
-  ]);
-  return { ok: true, assignment_id: b.id };
+  ];
+  /* کارشناس تازه همان پیام «ارجاع جدید» را می‌گیرد که با «ارسال» مدیر می‌رفت */
+  if (a.dispatched_at && target.telegram_chat) {
+    stmts.push(queueStmt(env, `dispatch:${b.id}:${t}`, target.telegram_chat,
+      dispatchText({ request_id: a.request_id, party: a.party, item_count: items.length, days: int(body.days, b.days || a.days), items, dispatched_at: t, deadline_at: deadlineAt }),
+      seenKb(b.id)));
+  }
+  await env.DB.batch(stmts);
+  return { ok: true, assignment_id: b.id, notified: !!(a.dispatched_at && target.telegram_chat) };
 }
 
 /* مدیر کارشناسِ یک ارجاعِ ارسال‌نشده را برمی‌دارد: اقلامش دوباره «بدون کارشناس»
@@ -744,7 +888,8 @@ async function tray(env, ex) {
 async function assignmentDetail(env, aid, who) {
   const a = await env.DB.prepare("SELECT a.*, e.name AS expert_name, e.label AS expert_label FROM assignments a JOIN experts e ON e.id=a.expert_id WHERE a.id=?").bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
-  if (who.role === "expert" && a.expert_id !== who.expert.id) throw new HttpError("این ارجاع متعلق به شما نیست.", 403);
+  /* کارشناس ارشد ارجاع‌های تیمش را هم می‌بیند (فقط‌خواندنی؛ نوشتن‌ها همچنان با ownAssignment) */
+  if (!(await canSee(env, who, a.expert_id))) throw new HttpError("این ارجاع متعلق به شما نیست.", 403);
   const request = await env.DB.prepare("SELECT * FROM requests WHERE id=?").bind(a.request_id).first();
   const items = (await env.DB.prepare("SELECT * FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
@@ -812,8 +957,11 @@ async function quoteCreate(env, ex, body) {
 async function quoteUpdate(env, ex, id, body) {
   const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
   if (!q) throw new HttpError("استعلام پیدا نشد.", 404);
+  /* قالبِ فیلدها (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد، اعتبار عدد — وگرنه خطا */
+  const bad = validateQuote(body);
+  if (bad.length) throw new HttpError(bad.map((x) => x.message).join(" "), 422, { invalid: bad.map((x) => x.field) });
   const sets = [], args = [];
-  for (const f of QUOTE_FIELDS) if (f in body) { sets.push(`${f}=?`); args.push(["qty", "price"].includes(f) ? num(body[f]) : ["final", "low_conf", "item_id"].includes(f) ? int(body[f], 0) : (T(body[f]) || null)); }
+  for (const f of QUOTE_FIELDS) if (f in body) { sets.push(`${f}=?`); args.push(["qty", "price"].includes(f) ? toNumber(body[f]) : ["final", "low_conf", "item_id"].includes(f) ? int(body[f], 0) : (f === "dtime" ? normalizeDtime(body[f]) : f === "valid_days" ? String(toNumber(body[f]) ?? "") || null : T(body[f]) || null)); }
   /* هر ویرایشِ فیلدِ محتوایی، «ثبت موقت» را برمی‌دارد؛ save صریح آن را می‌گذارد.
      «تأیید نهایی» ویرایش محتوا نیست — تیکش نباید ثبت موقت را باطل کند، وگرنه
      همان تیکی که باید دکمهٔ کمیسیون را روشن کند (saved=1 AND final=1)
@@ -827,6 +975,9 @@ async function quoteUpdate(env, ex, id, body) {
     const merged = { ...q, ...body };
     const miss = missingRequired(merged);
     if (miss.length) throw new HttpError("این فیلدها خالی‌اند و ثبت موقت انجام نشد.", 422, { missing: miss });
+    /* خطی که از خواندن پیش‌فاکتور پر شده هم باید قالب درست داشته باشد تا به جدول برسد */
+    const badSaved = validateQuote(merged);
+    if (badSaved.length) throw new HttpError(badSaved.map((x) => x.message).join(" "), 422, { invalid: badSaved.map((x) => x.field) });
     sets.push("saved=1");
   } else if (contentEdited) sets.push("saved=0");
   if (!sets.length) return { ok: true };
@@ -972,11 +1123,19 @@ async function route(request, env, ctx) {
     if (path === "/login" && m === "POST") {
       const b = await readJson(request);
       if (b.role === "manager") { requireManager({ headers: new Headers({ "X-Manager-Code": T(b.code) }) }, env); return json({ role: "manager" }); }
-      const ex = await env.DB.prepare("SELECT id,name,label,code FROM experts WHERE code=? AND active=1").bind(T(b.code)).first();
+      const ex = await env.DB.prepare("SELECT id,name,label,code,senior FROM experts WHERE code=? AND active=1").bind(T(b.code)).first();
       if (!ex) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
-      return json({ role: "expert", expert: ex });
+      return json({ role: "expert", expert: { ...ex, senior: ex.senior ? 1 : 0 } });
     }
-    if (path === "/me") { const who = await requireAny(request, env); return json(who); }
+    if (path === "/me") {
+      const who = await requireAny(request, env);
+      if (who.expert) {
+        /* زیرمجموعه‌های کارشناس ارشد — برای «ارجاع به تیم» و تب تیم */
+        const team = who.expert.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(who.expert.id).all()).results || [] : [];
+        return json({ ...who, expert: { ...who.expert, team_connected: !!who.expert.team_chat, team_chat: undefined }, team });
+      }
+      return json(who);
+    }
 
     /* --- تنظیمات و کارشناسان --- */
     if (path === "/settings" && m === "GET") { await requireAny(request, env); return json(await getSettings(env)); }
@@ -1034,12 +1193,31 @@ async function route(request, env, ctx) {
     }
     let mm;
     if ((mm = /^\/experts\/(\d+)$/.exec(path)) && m === "PUT") {
-      requireManager(request, env); const b = await readJson(request); const sets = [], args = [];
-      if ("speed" in b) { sets.push("speed=?"); args.push(Number(b.speed) || 1); }
-      if ("active" in b) { sets.push("active=?"); args.push(b.active ? 1 : 0); }
-      if ("telegram_chat" in b) { sets.push("telegram_chat=?"); args.push(T(b.telegram_chat) || null); }
-      if (sets.length) { args.push(int(mm[1])); await env.DB.prepare(`UPDATE experts SET ${sets.join(",")} WHERE id=?`).bind(...args).run(); }
-      return json({ ok: true });
+      requireManager(request, env);
+      return json(await updateExpert(env, int(mm[1]), await readJson(request)));
+    }
+    /* تنظیم اعلانات خودِ کارشناس ارشد (تیک مرحله‌ها) و لینک اتصال گروه تیمش */
+    if (path === "/me/alerts" && m === "PUT") {
+      const ex = await requireExpert(request, env);
+      if (!ex.senior) throw new HttpError("فقط کارشناس ارشد تنظیم اعلانات دارد.", 403);
+      const b = await readJson(request);
+      await env.DB.prepare("UPDATE experts SET alert_stages=? WHERE id=?").bind(JSON.stringify(stageTicks(b.alert_stages)), ex.id).run();
+      return json({ ok: true, alert_stages: stageTicks(b.alert_stages) });
+    }
+    if (path === "/tg/team-link" && m === "POST") {
+      const ex = await requireExpert(request, env);
+      if (!ex.senior) throw new HttpError("فقط کارشناس ارشد گروه تیم دارد.", 403);
+      if (!env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
+      return json(await makeTeamLink(env, ex.id));
+    }
+    if (path === "/team" && m === "GET") {
+      const ex = await requireExpert(request, env);
+      if (!ex.senior) throw new HttpError("فقط کارشناس ارشد تیم دارد.", 403);
+      return json(await teamDesk(env, ex));
+    }
+    if (path === "/team/delegate" && m === "POST") {
+      const ex = await requireExpert(request, env);
+      return json(await delegate(env, ex, await readJson(request), ctx));
     }
     if (path === "/scores" && m === "GET") { await requireAny(request, env); return json(await scoresGet(env)); }
     if (path === "/scores" && m === "PUT") { requireManager(request, env); return json(await scoresPut(env, await readJson(request))); }
@@ -1057,7 +1235,7 @@ async function route(request, env, ctx) {
     if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
-    if (path === "/reassign" && m === "POST") { requireManager(request, env); return json(await reassign(env, await readJson(request))); }
+    if (path === "/reassign" && m === "POST") { requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
     if (path === "/items/state" && m === "POST") { requireManager(request, env); return json(await setState(env, await readJson(request), "manager")); }
     if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }

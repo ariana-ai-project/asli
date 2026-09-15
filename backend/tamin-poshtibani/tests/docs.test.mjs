@@ -58,7 +58,7 @@ test("بدنهٔ نامه: تاریخ داخل متن هم run چپ‌به‌ر�
 /* ---------- برگهٔ درخواست خرید ---------- */
 const D = {
   company: "تونل سد آریانا", date: "1405/06/19", expert: "آقای بهمنی",
-  request: { id: "3400976", date: "1405/06/19", center: "", requester: "", party: "مرکز هزینه ایستگاه پمپاژ", party_type: "مرکز هزینه", buy_flow: "جزئی", head_req_type: "کالا", deadline: "1405/06/24" },
+  request: { id: "3400976", date: "1405/06/19", center: "", requester: "", party: "مرکز هزینه ایستگاه پمپاژ", party_type: "مرکز هزینه", buy_flow: "جزئی", req_type: "کالا", head_req_type: "فوری", deadline: "1405/06/24" },
   items: [{ id: 1, code: "K1", title: "تابلو برق 1/5*1", qty: 1, unit: "عدد", need_date: "1405/06/19", consumer: "پمپاژ", src_status: "ثبت شده" },
     { id: 2, code: "K2", title: "تابلو برق 50*40", qty: 1, unit: "عدد", need_date: "1405/06/19", consumer: "پمپاژ", src_status: "ثبت شده" }],
   quotes: [{ item_id: 1, supplier_name: "آریا صنعت", saved: 1, final: 1 }],
@@ -104,7 +104,14 @@ test("برگهٔ درخواست فقط از دادهٔ فایل اکسل پر م
   assert.ok(!text.includes("۱۴۰۵/۰۶/۲۴") && !text.includes("1405/06/24"), "مهلت ارجاع در برگه نیست");
   assert.ok(!text.includes("کارشناسِ ارجاع") && !text.includes("آقای بهمنی"), "کارشناسِ ارجاع در برگه نیست");
   assert.ok(text.includes("ابوذر بهمنی"), "کارشناسِ ستون فایل در برگه هست");
-  assert.equal(dt.request.item_type, "کالا");
+  assert.equal(dt.request.item_type, "کالا", "بی ستونِ «نوع قلم»، نوع درخواست فایل می‌نشیند — نه «فوری/عادی» سرآیند کمیسیون");
+  /* ستون‌های خروجی تازهٔ راهکاران: واحد/رمز تامین و نوع قلم روی درخواست، مهلت استعلام روی هر قلم */
+  const dt2 = requestSheetData({ ...d, request: { ...d.request, supply_unit: "دفتر مرکزی", item_type: "خدمت" }, items: d.items.map((i) => ({ ...i, quote_deadline: "1405/06/20" })) });
+  assert.equal(dt2.request.supplyUnit, "دفتر مرکزی");
+  assert.equal(dt2.request.item_type, "خدمت");
+  const xml2 = requestDocumentXml(dt2);
+  const t2 = [...xml2.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("|");
+  assert.ok(t2.includes("دفتر مرکزی") && t2.includes("۱۴۰۵/۰۶/۲۰"), "واحد تامین و مهلت استعلامِ فایل روی برگه هست");
 });
 
 /* ---------- جدول کمیسیون ---------- */

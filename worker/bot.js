@@ -34,10 +34,10 @@ import { bundleData, readiness, commissionGuard, recordCommission } from "./bund
 import { deleteQuotes, phoneChannels, withPhoneKeys, itemSearches, titleKey, PLATFORMS } from "./records.js";
 import { commissionXlsx } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
-import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired } from "./quote-rules.js";
+import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired, validateQuote, validDtime, normalizeDtime } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
-import { stageWatch, markManagerSeen } from "./manager.js";
+import { stageWatch, markManagerSeen, recipients, RECIPIENT_COLS, RECIPIENT_JOIN } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory, activeImport } from "./history.js";
 import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
@@ -217,7 +217,7 @@ export async function runAlerts(env, limit = 20) {
   const rows = (await env.DB.prepare(
     `SELECT al.id AS alert_id, al.kind, al.stage, al.fire_at,
             a.id AS aid, a.request_id, a.days, a.deadline_at, a.viewed_at, a.commission_at,
-            e.id AS expert_id, e.name, e.label, e.telegram_chat,
+            e.id AS expert_id, e.name, e.label, e.telegram_chat, ${RECIPIENT_COLS},
             r.party,
             (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
             (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist_count,
@@ -227,7 +227,7 @@ export async function runAlerts(env, limit = 20) {
      FROM alerts al
      JOIN assignments a ON a.id=al.assignment_id
      JOIN experts e ON e.id=a.expert_id
-     JOIN requests r ON r.id=a.request_id
+     JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN}
      WHERE al.fired_at IS NULL AND al.canceled_at IS NULL AND al.fire_at<=?
      ORDER BY al.fire_at LIMIT ?`,
   ).bind(now(), limit).all()).results || [];
@@ -251,9 +251,9 @@ export async function runAlerts(env, limit = 20) {
         stageAlertText(row, row.stage), row.stage === 0 ? seenKb(row.aid) : reqKb(row.aid)));
       queued++;
     } else {
-      /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر (SLA-05، TG-04) */
+      /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر و/یا گروه کارشناس ارشدش (SLA-05، TG-04) */
       if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), reqKb(row.aid))); queued++; }
-      if (managerChat) { stmts.push(queueStmt(env, `over-mgr:${row.aid}:${row.fire_at}`, managerChat, managerOverdueText(row))); queued++; }
+      for (const rc of recipients(row, null, managerChat)) { stmts.push(queueStmt(env, `over-${rc.tag}:${row.aid}:${row.fire_at}`, rc.chat, managerOverdueText(row))); queued++; }
     }
   }
   await env.DB.batch(stmts);
@@ -282,6 +282,40 @@ export async function makeLink(env, expertId) {
   ]);
   const user = T(env.TG_BOT_USERNAME) || "ArianaSupplyBot";
   return { url: `https://t.me/${user}?start=${token}`, expires_at: t + TOKEN_TTL };
+}
+
+/**
+ * لینک اتصال گروه تیم کارشناس ارشد. `startgroup` یعنی تلگرام از او می‌پرسد بات را به کدام
+ * گروه اضافه کند و بعد `/start <token>` را در همان گروه می‌فرستد؛ توکن با پیشوند «tm» از
+ * توکن اتصال شخصی جدا می‌شود. همان بات است — فقط اعلان‌های زیرمجموعهٔ او به این گروه می‌رود.
+ */
+export async function makeTeamLink(env, expertId) {
+  const token = "tm" + crypto.randomUUID().replace(/-/g, "").slice(0, 22);
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM tg_tokens WHERE (expert_id=? AND token LIKE 'tm%') OR expires_at<?").bind(expertId, t),
+    env.DB.prepare("INSERT INTO tg_tokens (token,expert_id,created_at,expires_at) VALUES (?,?,?,?)").bind(token, expertId, t, t + TOKEN_TTL),
+  ]);
+  const user = T(env.TG_BOT_USERNAME) || "ArianaSupplyBot";
+  return { url: `https://t.me/${user}?startgroup=${token}`, expires_at: t + TOKEN_TTL };
+}
+
+/** `/start tm…` در گروه: این گروه، گروه اعلان‌های تیمِ همان کارشناس ارشد می‌شود */
+async function bindTeam(env, api, chat, token) {
+  const t = now();
+  const row = await env.DB.prepare("SELECT * FROM tg_tokens WHERE token=?").bind(token).first();
+  if (!row || row.used_at || row.expires_at < t) { await api.sendMessage(chat, "این لینک معتبر نیست یا منقضی شده است؛ از پنل، لینک تازه بگیرید.").catch(() => {}); return { ok: true }; }
+  const ex = await env.DB.prepare("SELECT id,name,label,senior,active FROM experts WHERE id=?").bind(row.expert_id).first();
+  if (!ex || !ex.active || !ex.senior) { await api.sendMessage(chat, "این کارشناس، کارشناس ارشد نیست.").catch(() => {}); return { ok: true }; }
+  await env.DB.batch([
+    env.DB.prepare("UPDATE experts SET team_chat=NULL WHERE team_chat=?").bind(String(chat)),
+    env.DB.prepare("UPDATE experts SET team_chat=? WHERE id=?").bind(String(chat), ex.id),
+    env.DB.prepare("UPDATE tg_tokens SET used_at=? WHERE token=?").bind(t, token),
+  ]);
+  await api.sendMessage(chat, `✅ این گروه به‌عنوان گروه اعلان‌های تیم <b>${esc(ex.label || ex.name)}</b> ثبت شد.\n\n`
+    + "از این پس تغییر وضعیت مراحل، عبور از مهلت و بسته شدن درخواست‌های کارشناسان زیرمجموعهٔ ایشان این‌جا اعلام می‌شود.\n"
+    + "<i>کدام مرحله‌ها؟ در پنل کارشناس، تب «تنظیم اعلانات».</i>").catch(() => {});
+  return { ok: true };
 }
 
 /* ------------------------------------------------------------------ */
@@ -313,6 +347,17 @@ async function onMessage(env, msg) {
      همان‌جا می‌نویسد. (در گروه با حالت خصوصیِ بات، فقط پاسخ‌های مستقیم به پیامِ
      بات می‌رسند؛ برای همین از او خواسته می‌شود Reply کند.) */
   if (chat && msg.chat.type !== "private") {
+    const gtext = T(msg.text);
+    /* گروه تیم کارشناس ارشد: لینک startgroup پنل همین را می‌فرستد (بات ممکن است @نام داشته باشد) */
+    const st = /^\/start(?:@\w+)?\s+(tm\w+)/.exec(gtext);
+    if (st) return bindTeam(env, telegram(env), chat, st[1]);
+    /* «/manager» در گروه: همین‌جا کانال مدیر می‌شود — برای وقتی گروه مدیر عوض شده */
+    if (/^\/manager(?:@\w+)?$/.test(gtext)) {
+      await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+        .bind(JSON.stringify(String(chat)), now()).run();
+      await telegram(env).sendMessage(chat, "✅ این‌جا کانال اعلان مدیر واحد پشتیبانی شد.").catch(() => {});
+      return { ok: true };
+    }
     const mgr = await settingValue(env, "managerChat");
     const pend = mgr && String(chat) === String(mgr) ? await settingValue(env, "mgrReject") : null;
     if (pend && pend.decision_id && T(msg.text)) {
@@ -1019,6 +1064,11 @@ async function onFieldText(env, api, chat, f, text) {
     if (n == null) { await api.sendMessage(chat, "عدد را نفهمیدم. فقط رقم بنویسید — مثلاً <code>2500000</code>."); return { ok: true }; }
     v = d.field === "valid_days" ? String(Math.round(n)) : n;
   } else if (text.length > 200) { await api.sendMessage(chat, "خیلی بلند است؛ کوتاه‌ترش کنید."); return { ok: true }; }
+  /* زمان تحویل فقط تاریخ شمسی یا عدد روز (تصمیم مدیر) — همان قاعدهٔ پنل */
+  if (d.field === "dtime") {
+    if (!validDtime(text)) { await api.sendMessage(chat, "زمان تحویل باید تاریخ شمسی (مثلاً <code>1405/07/10</code>) یا عدد روز (مثلاً <code>10</code> یا «۱۰ روز کاری») باشد."); return { ok: true }; }
+    v = normalizeDtime(text);
+  }
   await setField(env, q, d.field, v);
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
   return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, null, `✅ ${esc(fieldLabel(d.field))} ثبت شد.`);
@@ -1045,6 +1095,7 @@ async function saveSupplier(env, api, chat, ex, q, messageId) {
   for (const l of lines) {
     const miss = missingRequired(l);
     if (miss.length) problems.push(`• ${esc(short(l.item_title, 24))}: ${esc(miss.map(fieldLabel).join("، "))}`);
+    for (const b of validateQuote(l)) problems.push(`• ${esc(short(l.item_title, 24))}: ${esc(b.message)}`);
   }
   if (problems.length) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `⛔ <b>ثبت موقت نشد</b> — این‌ها خالی‌اند:\n${problems.join("\n")}`);
   const t = now();
@@ -1879,7 +1930,7 @@ async function awaitSupplier(env, api, chat, ex, aid, supplier, mid) {
 /* ------------------------------------------------------------------ */
 
 async function smartItemOf(env, exId, itemId) {
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, i.state,
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, i.note, i.state,
       a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=a.request_id WHERE i.id=?`).bind(itemId).first();
   return it && it.expert_id === exId ? it : null;
@@ -1904,7 +1955,8 @@ async function smartPrefsCard(env, api, chat, ex, itemId) {
   const t = now();
   /* جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پیش از خرج کردنِ جستجوی تازه */
   const prev = (await itemSearches(env, it, 5)).length;
-  const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: "", notes: "", prev };
+  /* مشخصهٔ فنی و توضیحاتِ فایل راهکاران، پیش‌فرضِ قیدهای جستجو (تصمیم مدیر) — قابل ویرایش */
+  const d = { itemId, title: it.title, markets: ["IR"], brand: "", specs: T(it.spec).slice(0, 500), notes: T(it.note).slice(0, 500), prev };
   const r = await env.DB.prepare("INSERT INTO tg_flows (expert_id,chat_id,kind,step,assignment_id,data_json,created_at,expires_at) VALUES (?,?,'smart','prefs',?,?,?,?)")
     .bind(ex.id, String(chat), it.aid, JSON.stringify(d), t, t + FLOW_TTL).run();
   const f = { id: r.meta.last_row_id };
@@ -3080,6 +3132,17 @@ async function onChatMember(env, m) {
      نمی‌گرفت و جایی هم نمی‌دید چرا. */
   const joined = status === "administrator" || (status === "member" && chat.type !== "channel");
   if (joined) {
+    /* گروه‌های تیمِ کارشناس‌های ارشد هم همین بات را اضافه می‌کنند (لینک startgroup پنل)؛
+       آن‌ها نباید کانال مدیر را بدزدند. اگر کانال مدیر از قبل هست، این گروه فقط با
+       «/manager» صریح مدیر می‌شود؛ گروه تیم با «/start tm…» که تلگرام خودش می‌فرستد ثبت می‌شود. */
+    const cur = await settingValue(env, "managerChat");
+    if (cur && String(cur) !== String(chat.id)) {
+      const isTeam = await env.DB.prepare("SELECT id FROM experts WHERE team_chat=?").bind(String(chat.id)).first();
+      if (!isTeam) {
+        try { await telegram(env).sendMessage(chat.id, "بات اضافه شد. اگر این گروهِ تیمِ یک کارشناس ارشد است، از لینک «اتصال گروه تیم» در پنل او استفاده کنید؛ اگر می‌خواهید کانال مدیر همین‌جا باشد، <b>/manager</b> بفرستید."); } catch (_) { /* شاید اجازه ندارد */ }
+      }
+      return { ok: true };
+    }
     await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
       .bind(JSON.stringify(String(chat.id)), now()).run();
     try {
@@ -3094,6 +3157,7 @@ async function onChatMember(env, m) {
   } else if (["left", "kicked"].includes(status)) {
     const cur = await settingValue(env, "managerChat");
     if (cur === String(chat.id)) await env.DB.prepare("DELETE FROM settings WHERE key='managerChat'").run();
+    await env.DB.prepare("UPDATE experts SET team_chat=NULL WHERE team_chat=?").bind(String(chat.id)).run();
   }
   return { ok: true };
 }

@@ -72,10 +72,32 @@ export function managerCard(row, colors, opts = {}) {
 
 /* ------------------------------------------------------------------ */
 
+/**
+ * گیرنده‌های اعلان‌های پایشِ یک ارجاع (تصمیم مدیر، شهریور ۱۴۰۵):
+ *   • گروه تیمِ کارشناس ارشدِ آن کارشناس — همیشه، اگر وصل باشد
+ *   • کانال مدیر — مگر مدیر برای آن کارشناس «فقط کارشناس ارشد» را انتخاب کرده و ارشدش گروه دارد
+ * `stage` اگر داده شود، تیکِ همان مرحله (مدیر: settings.mgrStages؛ ارشد: experts.alert_stages) سنجیده می‌شود.
+ * خروجی: [{chat, tag}] — tag برای کلید یکتایی صف.
+ */
+const ticks = (v, dflt) => { let a = v; if (typeof v === "string") { try { a = JSON.parse(v); } catch (_) { a = null; } } return Array.isArray(a) && a.length === 6 ? a.map(Boolean) : dflt; };
+const MGR_DEFAULT = [true, false, false, false, true, true];
+export function recipients(row, settings, managerChat, stage) {
+  const out = [];
+  const seniorOk = stage == null || ticks(row.senior_stages, MGR_DEFAULT)[stage];
+  if (row.team_chat && seniorOk) out.push({ chat: row.team_chat, tag: "team" });
+  const onlySenior = row.notify_to === "senior" && row.team_chat;
+  const mgrOk = stage == null || ticks(settings && settings.mgrStages, MGR_DEFAULT)[stage];
+  if (managerChat && !onlySenior && mgrOk) out.push({ chat: managerChat, tag: "mgr" });
+  return out;
+}
+/* ستون‌های کارشناس و ارشدش که recipients لازم دارد — در هر کوئریِ اعلان الحاق می‌شوند */
+export const RECIPIENT_COLS = `e.notify_to, s.team_chat, s.alert_stages AS senior_stages`;
+export const RECIPIENT_JOIN = `LEFT JOIN experts s ON s.id=e.senior_id AND s.active=1 AND s.senior=1`;
+
 /** ارجاع‌هایی که هنوز زنده‌اند، با هر چیزی که برای رنگ‌ها لازم است */
 const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadline_at, a.viewed_at,
         a.commission_at, a.thr_snapshot, a.mgr_colors,
-        e.name AS expert_name, e.label AS expert_label, r.party,
+        e.name AS expert_name, e.label AS expert_label, r.party, ${RECIPIENT_COLS},
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count,
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist,
@@ -83,7 +105,7 @@ const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadlin
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
         (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
-   FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
+   FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN}
   WHERE a.dispatched_at IS NOT NULL
     AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold'))
   ORDER BY a.deadline_at LIMIT ?`;
@@ -121,21 +143,24 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
     if (!row.mgr_colors) continue;                    /* اولین عکس — خبر نیست */
 
     const before = row.mgr_colors.split(",");
-    /* تصمیم مدیر: از مراحل میانی (بررسی سوابق ۱، جستجوی هوشمند ۲، استعلامات ۳)
-       نه خبرِ انجام می‌خواهد نه خبرِ گذشتن از آستانه — فقط مشاهده، پیش‌فاکتور و
-       جدول کمیسیون. هشدارهای خود کارشناس برای همهٔ مراحل سر جایشان‌اند
-       (bot.js:runAlerts). عکسِ رنگ‌ها بالاتر کامل ذخیره شد تا مقایسهٔ بعدی
-       نلغزد؛ فقط پیام فیلتر می‌شود. */
-    const MGR_STAGES = [0, 4, 5];
-    const diff = colors.map((c, i) => (c === before[i] ? -1 : i)).filter((i) => i >= 0 && MGR_STAGES.includes(i));
-    if (diff.length) news.push({ row, colors, key, diff });
+    /* هر گیرنده فقط مرحله‌هایی را می‌گیرد که در تب «تنظیم اعلانات» خودش تیک زده
+       (مدیر: settings.mgrStages؛ کارشناس ارشد: alert_stages). هشدارهای خود کارشناس
+       برای همهٔ مراحل سر جایشان‌اند (bot.js:runAlerts). عکسِ رنگ‌ها بالاتر کامل
+       ذخیره شد تا مقایسهٔ بعدی نلغزد؛ فقط پیام فیلتر می‌شود. */
+    const changed = colors.map((c, i) => (c === before[i] ? -1 : i)).filter((i) => i >= 0);
+    const targets = new Map();
+    for (const i of changed) for (const rc of recipients(row, settings, managerChat, i)) {
+      if (!targets.has(rc.chat)) targets.set(rc.chat, { ...rc, diff: [] });
+      targets.get(rc.chat).diff.push(i);
+    }
+    if (targets.size) news.push({ row, colors, key, targets: [...targets.values()] });
   }
 
   /* اقلام فقط برای همان‌هایی که عوض شده‌اند خوانده می‌شوند — معمولاً صفر تا دو
      ارجاع در هر اجرا. آوردنشان در کوئری اصلی یعنی یک join روی همهٔ ارجاع‌های
      باز، برای چیزی که اغلب لازم نمی‌شود. */
   const items = new Map();
-  if (news.length && managerChat) {
+  if (news.length) {
     const ids = news.map((n) => n.row.id);
     const rs = (await env.DB.prepare(
       `SELECT assignment_id, title, qty, unit FROM items WHERE assignment_id IN (${ids.map(() => "?").join(",")})
@@ -149,15 +174,16 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
 
   let queued = 0;
   for (const n of news) {
-    if (!managerChat) continue;
-    /* کلید یکتایی: شناسهٔ ارجاع + لحظهٔ ارسال + خودِ رنگ‌ها.
-       لحظهٔ ارسال لازم است چون شناسهٔ ارجاع بعد از پاک‌کردن میز دوباره استفاده
-       می‌شود و ردیفِ قدیمیِ صف، اعلانِ ارجاعِ تازه را بی‌صدا می‌خورد. */
-    stmts.push(queueStmt(env, `mgr:${n.row.id}:${n.row.dispatched_at}:${n.key}`, managerChat,
-      managerCard({ ...n.row, items: items.get(n.row.id) || [] }, n.colors, {
-        head: "🔄 <b>تغییر وضعیت</b>", changed: n.diff,
-      })));
-    queued++;
+    for (const rc of n.targets) {
+      /* کلید یکتایی: شناسهٔ ارجاع + لحظهٔ ارسال + خودِ رنگ‌ها (+ گیرنده).
+         لحظهٔ ارسال لازم است چون شناسهٔ ارجاع بعد از پاک‌کردن میز دوباره استفاده
+         می‌شود و ردیفِ قدیمیِ صف، اعلانِ ارجاعِ تازه را بی‌صدا می‌خورد. */
+      stmts.push(queueStmt(env, `${rc.tag}:${n.row.id}:${n.row.dispatched_at}:${n.key}`, rc.chat,
+        managerCard({ ...n.row, items: items.get(n.row.id) || [] }, n.colors, {
+          head: "🔄 <b>تغییر وضعیت</b>", changed: rc.diff,
+        })));
+      queued++;
+    }
   }
   if (stmts.length) await env.DB.batch(stmts);
   return { checked: rows.length, changed: news.length, queued };
@@ -173,27 +199,28 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
  * برداشته شود.
  */
 export async function notifyClosed(env, aid, managerChat, actor) {
-  if (!managerChat) return { ok: true, queued: 0 };
   const row = await env.DB.prepare(
-    `SELECT a.id, a.request_id, a.deadline_at, a.dispatched_at, e.name AS expert_name, e.label AS expert_label, r.party,
+    `SELECT a.id, a.request_id, a.deadline_at, a.dispatched_at, e.name AS expert_name, e.label AS expert_label, r.party, ${RECIPIENT_COLS},
             (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count,
             (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold')) AS live,
             (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
             (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
             (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
-       FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id WHERE a.id=?`,
+       FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN} WHERE a.id=?`,
   ).bind(aid).first();
   if (!row || row.live > 0) return { ok: true, queued: 0 };   /* هنوز قلم بازی مانده — خاتمهٔ جزئی */
+  const to = recipients(row, null, managerChat);
+  if (!to.length) return { ok: true, queued: 0 };
 
   const items = (await env.DB.prepare("SELECT title, qty, unit FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
   const done = ["done", "done", "done", "done", "done", "done"];
   const text = managerCard({ ...row, items }, done, { head: "✅ <b>درخواست بسته شد</b>" })
-    + `\n<i>${esc(actor || "کارشناس")} کار را خاتمه داد. تا «مشاهده کردم» را نزنید، در میز کار شما می‌ماند.</i>`;
+    + `\n<i>${esc(actor || "کارشناس")} کار را خاتمه داد.</i>`;
 
-  await env.DB.batch([
-    queueStmt(env, `closed:${aid}:${row.dispatched_at}`, managerChat, text, [[{ text: "✅ مشاهده کردم", callback_data: `mseen:${aid}` }]]),
-  ]);
-  return { ok: true, queued: 1 };
+  await env.DB.batch(to.map((rc) => rc.tag === "mgr"
+    ? queueStmt(env, `closed:${aid}:${row.dispatched_at}`, rc.chat, text + "\n<i>تا «مشاهده کردم» را نزنید، در میز کار شما می‌ماند.</i>", [[{ text: "✅ مشاهده کردم", callback_data: `mseen:${aid}` }]])
+    : queueStmt(env, `closed-team:${aid}:${row.dispatched_at}`, rc.chat, text)));
+  return { ok: true, queued: to.length };
 }
 
 /** مدیر «مشاهده کردم» را زد — درخواست از میز کارش می‌رود */

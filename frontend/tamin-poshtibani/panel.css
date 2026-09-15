@@ -251,6 +251,21 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .filexp { font-size: .74rem; color: var(--tp-dim); margin-top: 3px; line-height: 1.45; white-space: normal; text-align: right; }
 .filexp.warn { color: #fcd34d; }
 
+/* فیلترهای چندانتخابی میز مدیر (کارشناس با متن، وضعیت) — کادر بازشونده زیر دکمه */
+.fwrap { position: relative; display: inline-block; }
+.fpop { position: absolute; top: calc(100% + 6px); inset-inline-start: 0; z-index: 45; min-width: 260px; background: #0b1730; border: 1px solid var(--tp-line-2); border-radius: 12px; padding: 10px; box-shadow: 0 14px 40px rgba(0,0,0,.5); }
+.fpop-list { display: flex; flex-direction: column; gap: 4px; max-height: 300px; overflow: auto; }
+.fpop-list label { display: flex; gap: 8px; align-items: center; font-size: .88rem; cursor: pointer; padding: 2px 4px; border-radius: 6px; }
+.fpop-list label:hover { background: rgba(120,165,255,.1); }
+:root[data-theme="light"] .fpop { background: #fff; box-shadow: 0 14px 40px rgba(20,40,80,.2); }
+/* تب کارشناسان: نام قابل کلیک، تیک تیم */
+.ename { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
+.ename:hover { color: var(--tp-accent); }
+.tp-mx .tri { width: 30px; height: 24px; border: 1px solid var(--tp-line-2); border-radius: 4px; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer; color: inherit; }
+.tp-mx .tri.ok { background: rgba(34,197,94,.16); border-color: var(--tp-ok); color: #4ade80; }
+.tp-mx .tri.unk { border-style: dashed; }
+:root[data-theme="light"] .tp-mx .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }
+
 /* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
 .tp-theme { min-width: 34px; }
 

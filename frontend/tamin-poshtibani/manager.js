@@ -16,7 +16,10 @@
     tab: "desk", now: Date.now(),
     data: { requests: [], experts: [], settings: null }, scores: { scores: [], weights: [] },
     decisions: [], events: [], hist: null,
-    filter: { expert: "", status: "", state: "", window: CFG.defaults.window || "3d" },
+    /* فیلتر کارشناس و وضعیت چندانتخابی‌اند (تصمیم مدیر). وضعیت پیش‌فرض: هرچه بسته/متوقف نیست. */
+    filter: { experts: [], expertText: "", statuses: null, state: "", window: CFG.defaults.window || "3d" },
+    pop: null,                                   // فیلتر بازشده: "expert" | "status"
+    editName: null,                              // کارشناسی که نامش در تب کارشناسان در حال ویرایش است
     q: { id: "", date: "", party: "", item: "" },
     page: { limit: 300, offset: 0, total: 0 },   // صفحه‌بندی سمت سرور برای بازه‌های بزرگ
     open: {},            // کشوی اقلام هر درخواست
@@ -175,14 +178,34 @@
 
   /* ---------- فیلتر (بازه و صفحه سمت سرور؛ جستجوی ستونی سمت کلاینت روی همان صفحه) ---------- */
   const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
+  /* وضعیتِ مؤثر هر قلم: وضعیت سامانه اگر از «باز» بیرون رفته (بسته/متوقف/معلق)، «در جریان» اگر
+     ارسال شده، وگرنه وضعیت خامِ فایل (ثبت شده / تایید شده / …). فیلتر وضعیت روی همین است. */
+  const STATUS_ALL = ["ثبت شده", "تایید شده", "در جریان", "بررسی مجدد", "معلق", "متوقف شده", "بسته شده"];
+  const STATUS_DEFAULT = ["ثبت شده", "تایید شده", "در جریان", "بررسی مجدد", "معلق"];
+  const statusOf = (r, i) => {
+    if (i.state === "closed") return "بسته شده";
+    if (i.state === "stop") return "متوقف شده";
+    if (i.state === "hold") return "معلق";
+    const a = r.assignments.find((x) => x.id === i.assignment_id);
+    if (a && a.dispatched_at) return "در جریان";
+    return i.src_status || "ثبت شده";
+  };
+  const statusSel = () => (S.filter.statuses || STATUS_DEFAULT);
+  const needsAllScope = () => statusSel().some((s) => s === "بسته شده" || s === "متوقف شده");
+  /* نام‌های کارشناس‌ها، ارشدها اول — همان ترتیبِ فهرست انتخاب کارشناس */
+  const expertsSorted = () => [...S.data.experts.filter((e) => e.active)].sort((a, b) => (b.senior || 0) - (a.senior || 0) || String(a.label || a.name).localeCompare(String(b.label || b.name), "fa"));
+  const expertOpts = (sel) => expertsSorted().map((e) => `<option value="${e.id}" ${e.id === sel ? "selected" : ""}>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</option>`).join("");
   function visible() {
     return S.data.requests.filter((r) => {
       if (!TP.hit(r.id, S.q.id)) return false;
       const L = dateList(); if (L.length && !L.includes(r.date)) return false;
       if (!TP.hit(r.party, S.q.party)) return false;
       if (S.q.item && !r.items.some((i) => TP.hit(i.title, S.q.item) || TP.hit(i.code, S.q.item))) return false;
-      if (S.filter.expert) { const eid = +S.filter.expert; if (!r.assignments.some((a) => a.expert_id === eid)) return false; }
-      if (S.filter.status && !r.items.some((i) => i.src_status === S.filter.status)) return false;
+      /* کارشناس: تیک‌ها یا متنِ نوشته‌شده (هرکدام که هست) */
+      if (S.filter.experts.length && !r.assignments.some((a) => S.filter.experts.includes(a.expert_id))) return false;
+      if (S.filter.expertText && !r.assignments.some((a) => TP.hit(a.expert_label || a.expert_name, S.filter.expertText) || TP.hit(a.expert_name, S.filter.expertText))) return false;
+      const sel = statusSel();
+      if (sel.length < STATUS_ALL.length && !r.items.some((i) => sel.includes(statusOf(r, i)))) return false;
       const anyPending = r.assignments.some((a) => !a.dispatched_at) || unassignedOpen(r).length > 0;
       const anySent = r.assignments.some((a) => a.dispatched_at);
       if (S.filter.state === "pending" && !anyPending) return false;
@@ -195,10 +218,12 @@
 
   /* ---------- بارگذاری داده ---------- */
   async function refresh() {
-    S.loading = true; S.error = ""; WL = null; WL_ERR = null; render();
+    S.loading = true; S.error = ""; WL = null; WL_ERR = null;
+    if (!S.data.requests.length) render();   /* بازخوانیِ پس‌زمینه جدول را چشمک نمی‌زند */
     try {
       S.now = Date.now();
-      const qs = `?from=${encodeURIComponent(fromDate())}&limit=${S.page.limit}&offset=${S.page.offset}`;
+      /* بسته‌ها و متوقف‌ها از سرور فقط وقتی می‌آیند که فیلتر وضعیت آن‌ها را خواسته باشد */
+      const qs = `?from=${encodeURIComponent(fromDate())}&limit=${S.page.limit}&offset=${S.page.offset}${needsAllScope() ? "&scope=all" : ""}`;
       const [d, sc, dec] = await Promise.all([TP.api("/desk" + qs), TP.api("/scores"), TP.api("/decisions")]);
       S.data = d; S.scores = sc; S.decisions = dec.decisions || [];
       S.page.total = d.total || d.requests.length;
@@ -221,7 +246,7 @@
   /* ---------- سرآیند و تب‌ها ---------- */
   function vTop() {
     const R = S.data.requests, items = R.reduce((a, r) => a + r.items.length, 0);
-    const TABS = [["desk", "میز ارجاع"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["log", "تصمیم‌ها و رویدادها"]];
+    const TABS = [["desk", "میز ارجاع"], ["experts", "کارشناسان"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["log", "تصمیم‌ها و رویدادها"]];
     return `<header class="tp-top">
       <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>میز ارجاع خرید</h1><div class="sub">${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}</div></div></div>
       <span class="spacer"></span>
@@ -238,12 +263,26 @@
   }
 
   /* ---------- میز ارجاع ---------- */
+  /* فیلتر چندانتخابیِ کارشناس (تیک + متن) و وضعیت (تیک) — کادر بازشونده زیر دکمه */
+  function vPop(kind) {
+    if (S.pop !== kind) return "";
+    if (kind === "expert") {
+      const E = expertsSorted().filter((e) => TP.hit(e.label || e.name, S.filter.expertText) || TP.hit(e.name, S.filter.expertText));
+      return `<div class="fpop" data-pop><input class="tp-input" data-ftext placeholder="نام کارشناس را بنویسید…" value="${esc(S.filter.expertText)}" style="width:100%;margin-bottom:6px">
+        <div class="fpop-list">${E.map((e) => `<label><input type="checkbox" data-fexp="${e.id}" ${S.filter.experts.includes(e.id) ? "checked" : ""}> ${e.senior ? "★ " : ""}${esc(e.label || e.name)}</label>`).join("") || `<span class="dim">کارشناسی با این نام نیست.</span>`}</div>
+        <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-fclear="expert">پاک کردن</button><button class="tp-btn xs primary" data-fclose>بستن</button></div></div>`;
+    }
+    const sel = statusSel();
+    return `<div class="fpop" data-pop><div class="fpop-list">${STATUS_ALL.map((s) => `<label><input type="checkbox" data-fst="${esc(s)}" ${sel.includes(s) ? "checked" : ""}> <span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span></label>`).join("")}</div>
+      <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-fclear="status">پیش‌فرض</button><button class="tp-btn xs" data-fall>همه</button><button class="tp-btn xs primary" data-fclose>بستن</button></div></div>`;
+  }
   function vFilters() {
-    const E = S.data.experts.filter((e) => e.active);
-    const statuses = [...new Set(S.data.requests.flatMap((r) => r.items.map((i) => i.src_status)).filter(Boolean))];
+    const nE = S.filter.experts.length, txt = S.filter.expertText;
+    const expLabel = nE || txt ? `${nE ? `${M(nE)} کارشناس` : ""}${nE && txt ? " · " : ""}${txt ? `«${esc(txt)}»` : ""}` : "همه";
+    const sel = statusSel(), stLabel = sel.length === STATUS_ALL.length ? "همه" : sel.length === STATUS_DEFAULT.length && STATUS_DEFAULT.every((s) => sel.includes(s)) ? "بازها (پیش‌فرض)" : sel.join("، ");
     return `<div class="tp-filters">
-      <span class="lab">کارشناس</span><select class="tp-select" data-f="expert"><option value="">همه</option>${E.map((e) => `<option value="${e.id}" ${String(S.filter.expert) === String(e.id) ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>
-      <span class="lab">وضعیت مبدأ</span><select class="tp-select" data-f="status"><option value="">همه</option>${statuses.map((s) => `<option ${S.filter.status === s ? "selected" : ""}>${esc(s)}</option>`).join("")}</select>
+      <span class="lab">کارشناس</span><span class="fwrap"><button class="tp-btn sm ${nE || txt ? "primary" : ""}" data-fopen="expert">${expLabel} ▾</button>${vPop("expert")}</span>
+      <span class="lab">وضعیت</span><span class="fwrap"><button class="tp-btn sm ${sel.length !== STATUS_DEFAULT.length || !STATUS_DEFAULT.every((s) => sel.includes(s)) ? "primary" : ""}" data-fopen="status" title="${esc(sel.join("، "))}">${stLabel.length > 40 ? stLabel.slice(0, 38) + "…" : stLabel} ▾</button>${vPop("status")}</span>
       <span class="lab">مرحله</span><select class="tp-select" data-f="state"><option value="">همه</option>
         <option value="pending" ${S.filter.state === "pending" ? "selected" : ""}>ارسال‌نشده</option><option value="ready" ${S.filter.state === "ready" ? "selected" : ""}>آماده ارسال</option>
         <option value="sent" ${S.filter.state === "sent" ? "selected" : ""}>ارسال‌شده</option><option value="closed" ${S.filter.state === "closed" ? "selected" : ""}>بسته/متوقف</option></select>
@@ -292,18 +331,17 @@
     const rows = visible();
     /* نتیجهٔ خالیِ فیلتر هم سرآیند و ردیف فیلترها را نگه می‌دارد؛ وگرنه کادرهای جستجو
        ناپدید می‌شدند و راهی جز «پاک کردن فیلترها» برای برگشتن نمی‌ماند. */
-    const noRows = rows.length ? "" : `<tr><td colspan="18"><div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
+    const noRows = rows.length ? "" : `<tr><td colspan="19"><div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
       ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div></td></tr>`;
-    const E = S.data.experts.filter((e) => e.active);
     let h = `<div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 300px)"><table class="tp-table"><thead>
-      <tr class="group"><th colspan="6">داده فایل ورودی</th><th colspan="3" class="sep">تصمیم مدیر</th><th colspan="7" class="console sep">پایش مراحل</th><th colspan="2" class="sep">اقدام</th></tr>
-      <tr><th class="stick"></th><th>شماره<br>درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>اقلام</th><th>وضعیت</th>
+      <tr class="group"><th colspan="7">داده فایل ورودی</th><th colspan="3" class="sep">تصمیم مدیر</th><th colspan="7" class="console sep">پایش مراحل</th><th colspan="2" class="sep">اقدام</th></tr>
+      <tr><th class="stick"></th><th>شماره<br>درخواست</th><th>تاریخ</th><th>تاریخ نیاز</th><th class="rt">طرف مقابل</th><th>اقلام</th><th>وضعیت</th>
         <th class="sep">کارشناس خرید<br><button class="tp-btn xs" data-auto="asg" title="ارجاع هوشمند روی همه درخواست‌های ارسال‌نشده">خودکار</button></th>
         <th>مهلت (روز کاری)<br><button class="tp-btn xs" data-auto="dl" title="مهلت هوشمند روی همه ارسال‌نشده‌های کارشناس‌دار">خودکار</button></th><th>قلم</th>
         <th class="console sep">ارسال</th>${TP.STAGES.map((s) => `<th class="console">${s.replace(" ", "<br>")}</th>`).join("")}
         <th class="sep">وضعیت و اقدام</th><th>پنل</th></tr>
       <tr class="flt"><th class="stick"></th><th><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" placeholder="جستجو"></th>
-        <th><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" readonly></th>
+        <th><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" readonly></th><th></th>
         <th><input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" placeholder="جستجو"></th>
         <th><input class="tp-input ${S.q.item ? "on" : ""}" data-q="item" value="${esc(S.q.item)}" placeholder="عنوان یا کد قلم"></th>
         <th></th><th class="sep"></th><th></th><th></th><th class="console sep"></th>${TP.STAGES.map(() => `<th class="console"></th>`).join("")}<th class="sep"></th><th></th></tr>
@@ -314,20 +352,22 @@
       if (!units.length) units.push({ none: true });
       const n = units.length, rs = ` rowspan="${n}"`;
       const st = reqState(r), STL = TP.STATES[st];
-      const srcChips = [...new Set(r.items.map((i) => i.src_status).filter(Boolean))].map((s) => `<span class="st ${TP.SRC_CLS[s] || "st-reg"}">${esc(s)}</span>`).join(" ");
+      /* وضعیتِ مؤثر (بسته/در جریان/ثبت شده…) — همان که فیلتر وضعیت روی آن کار می‌کند */
+      const srcChips = [...new Set(r.items.map((i) => statusOf(r, i)))].map((s) => `<span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span>`).join(" ");
+      const need = r.items.map((i) => i.need_date).filter(Boolean).sort()[0] || "";
       units.forEach((u, k) => {
         h += `<tr>`;
         if (k === 0) {
           h += `<td class="stick"${rs}><button class="tp-btn xs" data-toggle="${esc(r.id)}" title="اقلام">${S.open[r.id] ? "▾" : "◂"} ${r.items.length}</button>
               <button class="tp-btn xs danger" data-del="${esc(r.id)}" title="حذف این درخواست از سامانه">✕</button></td>
-            <td class="id num"${rs}>${esc(r.id)}</td><td class="num"${rs}>${esc(r.date)}</td>
+            <td class="id num"${rs}>${esc(r.id)}</td><td class="num"${rs}>${esc(r.date)}</td><td class="num"${rs} title="نزدیک‌ترین تاریخ نیاز اقلام">${esc(need)}</td>
             <td class="party"${rs}>${esc(r.party)}${r.center ? `<div class="dim" style="font-size:.75rem">${esc(r.center)}</div>` : ""}</td>
             <td class="item"${rs}><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.items.map((i) => i.title).join(" · "))}">${esc(r.items[0] ? r.items[0].title : "")}</div>${r.items.length > 1 ? `<div class="dim" style="font-size:.75rem">و ${r.items.length - 1} قلم دیگر</div>` : ""}</td>
             <td${rs}>${srcChips}</td>`;
         }
         if (u.a) {
           const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
-          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${E.map((e) => `<option value="${e.id}" ${e.id === a.expert_id ? "selected" : ""}>${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(its, a.expert_name)}</td>
+          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}</td>
             <td><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}></td>
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
@@ -337,7 +377,7 @@
               ${its.some((i) => i.state === "hold") ? `<button class="tp-btn xs" data-act="open|${a.id}">بازگشت</button>` : ""}</td>
             <td><button class="tp-btn xs" data-open="${a.id}">مشاهده</button> <button class="tp-btn xs" data-move="${a.id}" ${a.dispatched_at ? "" : "disabled"}>تغییر</button></td>`;
         } else if (u.un) {
-          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}"><option value="">— انتخاب کارشناس —</option>${E.map((e) => `<option value="${e.id}">${esc(e.label || e.name)}</option>`).join("")}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
+          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
             <td><input class="tp-input num unset" style="width:64px;text-align:center" disabled placeholder="—"></td><td class="num">${u.un.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, null, S.now)}"></div></td>
             ${TP.STAGES.map(() => `<td class="console"><div class="box b-idle"></div></td>`).join("")}
@@ -349,14 +389,49 @@
         h += `</tr>`;
       });
       if (S.open[r.id]) {
-        h += `<tr class="drawer"><td colspan="18"><div class="drawer-in"><table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th><th>توضیحات</th></tr></thead><tbody>
-          ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td class="num">${esc(i.need_date || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
+        h += `<tr class="drawer"><td colspan="19"><div class="drawer-in"><table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
+          ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="dim">${esc(i.note || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td class="num">${esc(i.need_date || "")}</td><td class="num">${esc(i.quote_deadline || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
             <td><span class="st ${TP.SRC_CLS[i.src_status] || "st-reg"}">${esc(i.src_status || "")}</span></td><td class="dim">${esc(i.src_expert || "—")}</td><td><span class="st ${TP.STATES[i.state].cls}">${TP.STATES[i.state].label}</span></td>
-            <td>${a ? esc(a.expert_label || a.expert_name) : (i.state === "open" ? `<span class="chip warn">بدون کارشناس</span>` : "—")}</td><td class="dim">${esc(i.note || "")}</td></tr>`; }).join("")}
+            <td>${a ? esc(a.expert_label || a.expert_name) : (i.state === "open" ? `<span class="chip warn">بدون کارشناس</span>` : "—")}</td></tr>`; }).join("")}
           </tbody></table></div></td></tr>`;
       }
     }
     return h + noRows + `</tbody></table></div>`;
+  }
+
+  /* ---------- کارشناسان ----------
+     ستون اول نام (کلیک = ویرایش)، ✕ حذف (غیرفعال)، ★ کارشناس ارشد — ارشدها ستون می‌شوند و در
+     خانهٔ (کارشناس × ارشد) تیک سبز یعنی زیر نظر اوست؛ هر کارشناس فقط یک سرپرست.
+     «مشاهده اعلانات» می‌گوید پایشِ آن کارشناس برای مدیر بیاید یا فقط برای ارشدش. */
+  function vExperts() {
+    const E = expertsSorted(), seniors = E.filter((e) => e.senior);
+    const nameCell = (e) => S.editName === e.id
+      ? `<input class="tp-input" data-ename="${e.id}" value="${esc(e.label || e.name)}" style="width:170px" autofocus>`
+      : `<span class="ename" data-ename-edit="${e.id}" title="برای ویرایش نام کلیک کنید">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</span>`;
+    return `<div class="tp-card tp-pane" style="max-width:none"><h2>کارشناسان</h2>
+      <p class="lead">روی نام هر کارشناس کلیک کنید و عوضش کنید. <b>★</b> او را کارشناس ارشد می‌کند و نامش ستونی می‌شود که زیرِ آن، کارشناسان تیمش را تیک می‌زنید (هر کارشناس فقط زیر نظر یک ارشد). <b>✕</b> کارشناس را از فهرست برمی‌دارد. «مشاهده اعلانات» می‌گوید اعلان‌های پایش آن کارشناس برای شما بیاید یا فقط برای کارشناس ارشدش.</p>
+      <div class="tp-scroll" data-keep-scroll style="max-height:60vh"><table class="tp-mx"><thead><tr><th>مشاهده اعلانات</th><th style="min-width:230px">کارشناس</th><th>کد ورود</th><th>بار باز</th>${seniors.map((s) => `<th class="rt" style="min-width:120px">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}</tr></thead><tbody>
+        ${E.map((e) => `<tr>
+          <td><select class="tp-select" data-enotify="${e.id}" ${e.senior_id || e.senior ? "" : 'title="این کارشناس زیر نظر ارشدی نیست؛ اعلان‌ها به هر حال برای شما می‌آید"'}><option value="manager" ${e.notify_to !== "senior" ? "selected" : ""}>مدیر</option><option value="senior" ${e.notify_to === "senior" ? "selected" : ""}>فقط کارشناس ارشد</option></select></td>
+          <td class="name" style="white-space:nowrap">${nameCell(e)} <button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button> <button class="tp-btn xs danger" data-edel="${e.id}" title="حذف از فهرست">✕</button></td>
+          <td class="num">${esc(e.code)}</td><td class="num">${M(e.open_load || 0)}</td>
+          ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}</tr>`).join("")}
+        <tr><td></td><td colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
+      </tbody></table></div>
+      <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام.</div></div>`;
+  }
+  async function expertPatch(id, body) {
+    try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); }
+    catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+  function addExpertDialog() {
+    const d = TP.modal("کارشناس جدید", `<div class="tp-field"><b>نام و نام خانوادگی</b><input class="tp-input" id="ne-name" style="width:100%"></div>
+      <div class="tp-field" style="margin-top:8px"><b>نام کوتاه (مثلاً «آقای بهمنی») — اختیاری</b><input class="tp-input" id="ne-label" style="width:100%"></div>
+      <div class="tp-field" style="margin-top:8px"><b>کد ورود (فقط رقم)</b><input class="tp-input" id="ne-code" inputmode="numeric" style="width:160px"></div>`,
+      async () => {
+        try { await TP.api("/experts", { body: { name: d.querySelector("#ne-name").value, label: d.querySelector("#ne-label").value, code: d.querySelector("#ne-code").value } }); S.data.experts = (await TP.api("/experts")).experts; render(); }
+        catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+      }, "افزودن");
   }
 
   /* ---------- سوابق خرید ---------- */
@@ -460,10 +535,10 @@
 
   /* ---------- تنظیم اعلانات ---------- */
   function vAlerts() {
-    const s = settings();
+    const s = settings(), ticks = Array.isArray(s.mgrStages) && s.mgrStages.length === 6 ? s.mgrStages : [true, false, false, false, true, true];
     return `<div class="tp-card tp-pane"><h2>تنظیم اعلانات</h2>
-      <p class="lead">هر درصد یعنی چند درصد از مهلت کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود. خالی = هشدار آن مرحله خاموش.</p>
-      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><b>${st}</b><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
+      <p class="lead">تیکِ بالای هر مرحله یعنی تغییر وضعیت آن مرحله در تلگرام شما اعلام شود. هر درصد یعنی چند درصد از مهلت کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود. خالی = هشدار آن مرحله خاموش.</p>
+      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label style="display:flex;gap:6px;align-items:center;justify-content:center;cursor:pointer;margin-bottom:6px" title="اعلان این مرحله در تلگرام مدیر"><input type="checkbox" data-mstage="${i}" ${ticks[i] ? "checked" : ""}> <b style="margin:0">${st}</b></label><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
       <div id="thrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
       <div class="tp-row">
         <div class="tp-field"><b>مهلت ارسال توسط مدیر (روز کاری از لحظهٔ بارگذاری)</b><input class="tp-input" id="ddays" value="${s.dispatchDays}" inputmode="numeric" style="width:110px;text-align:center"></div>
@@ -501,7 +576,8 @@
         </tbody></table></div></div>`;
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی همه درخواست‌های بی‌کارشناس (${pend.length})</button>
+        <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی درخواست‌های بی‌کارشناس (${pend.length})</button>
+        <span class="dim" style="font-size:.85rem">کارشناسی که خودتان انتخاب کرده‌اید دست نمی‌خورد و در بارِ فعلی حساب شده است.</span>
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
       <h2>ارجاع هوشمند</h2><p class="lead">پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس <b>با هم</b> ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های کالایی، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه. پیشنهاد الزام‌آور نیست و مدیر هرکدام را می‌تواند عوض کند.</p>
       <div class="tp-formula"><span class="eq">امتیاز =</span>
@@ -522,7 +598,7 @@
   /* ---------- مهلت هوشمند ---------- */
   function vDeadline() {
     const E = S.data.experts.filter((e) => e.active), D = settings().deadline;
-    const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at).map((a) => ({ r, a })));
+    const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && !(Number(a.days) > 0)).map((a) => ({ r, a })));
     const parties = [...new Set(S.data.requests.map((r) => r.party))];
     const opSel = (k, v) => `<select class="tp-select op" data-dl-op="${k}">${["×", "÷", "+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
     const shortP = (p) => p.replace(/^مرکز هزینه\s*/, "").slice(0, 30) + (p.length > 36 ? "…" : "");
@@ -538,7 +614,7 @@
         </tbody></table></div></div>` : "";
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-dl ${list.length && WL ? "" : "disabled"}>اعمال روی همه ارجاع‌های ارسال‌نشده (${list.length})</button>
+        <button class="tp-btn primary" data-apply-dl ${list.length && WL ? "" : "disabled"}>اعمال روی ارجاع‌های ارسال‌نشدهٔ بی‌مهلت (${list.length})</button>
         ${x0 ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: فرمول ${x0.base.toFixed(2)} × √اقلام ${x0.size.toFixed(2)} × اشغال ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></span>` : ""}
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
       <h2>مهلت هوشمند</h2><p class="lead">مهلت هر ارجاع با فرض تأیید همهٔ ارجاع‌ها حساب می‌شود: فرمول زیر (پایه، سرعت کارشناس، ضریب پروژه، و میانگین ضریب گروه کالایی اقلام) × ریشهٔ دوم تعداد اقلام × ضریب اشغال کارشناس. اشغال، بار همهٔ ارجاع‌های باز اوست بر ظرفیتش؛ تا ظرفیت، ضریبش ۱ است و بالاتر از آن مهلت به همان نسبت بلندتر می‌شود. نتیجه گرد و حداقل ۱ روز است.</p>
@@ -591,7 +667,7 @@
     app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
-        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : vLog()}</div>`);
+        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : vLog()}</div>`);
     wire();
     TP.stickHeader(app.querySelector("table.tp-table"));
     restore();
@@ -624,6 +700,33 @@
       if (S.tab === "hist") askHistoryImport(f); else importFile(f);
     };
     Q("[data-f]").forEach((s) => s.onchange = (e) => { S.filter[e.target.dataset.f] = e.target.value; if (e.target.dataset.f === "window") { S.page.offset = 0; refresh(); } else render(); });
+    /* فیلترهای چندانتخابی کارشناس و وضعیت */
+    Q("[data-fopen]").forEach((b) => b.onclick = () => { S.pop = S.pop === b.dataset.fopen ? null : b.dataset.fopen; render(); });
+    Q("[data-fclose]").forEach((b) => b.onclick = () => { S.pop = null; render(); });
+    const ft = G("[data-ftext]"); if (ft) ft.oninput = (e) => { S.filter.expertText = e.target.value; TP.keepFocus(e.target, "ftext", render); };
+    Q("[data-fexp]").forEach((c) => c.onchange = (e) => { const id = +e.target.dataset.fexp; const i = S.filter.experts.indexOf(id); if (e.target.checked && i < 0) S.filter.experts.push(id); if (!e.target.checked && i >= 0) S.filter.experts.splice(i, 1); render(); });
+    Q("[data-fst]").forEach((c) => c.onchange = (e) => {
+      const s = e.target.dataset.fst, cur = statusSel().slice(); const i = cur.indexOf(s);
+      if (e.target.checked && i < 0) cur.push(s); if (!e.target.checked && i >= 0) cur.splice(i, 1);
+      const wasAll = needsAllScope(); S.filter.statuses = cur;
+      if (needsAllScope() !== wasAll) refresh(); else render();
+    });
+    const fa = G("[data-fall]"); if (fa) fa.onclick = () => { const was = needsAllScope(); S.filter.statuses = STATUS_ALL.slice(); if (!was) refresh(); else render(); };
+    Q("[data-fclear]").forEach((b) => b.onclick = () => { if (b.dataset.fclear === "expert") { S.filter.experts = []; S.filter.expertText = ""; render(); } else { const was = needsAllScope(); S.filter.statuses = null; if (was) refresh(); else render(); } });
+    /* تب کارشناسان */
+    Q("[data-ename-edit]").forEach((x) => x.onclick = () => { S.editName = +x.dataset.enameEdit; render(); const i = G("[data-ename]"); if (i) { i.focus(); i.select(); } });
+    Q("[data-ename]").forEach((i) => {
+      const done = async () => { const id = +i.dataset.ename, e = S.data.experts.find((x) => x.id === id); const v = i.value.trim(); S.editName = null; if (!v || v === (e.label || e.name)) return render(); await expertPatch(id, { name: v, label: v }); };
+      i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editName = null; render(); } };
+      i.onblur = done;
+    });
+    Q("[data-estar]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); expertPatch(e.id, { senior: !e.senior }); });
+    Q("[data-edel]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.edel);
+      TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, () => expertPatch(e.id, { active: false }), "حذف"); });
+    Q("[data-eteam]").forEach((b) => b.onclick = () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); expertPatch(eid, { senior_id: e.senior_id === sid ? null : sid }); });
+    Q("[data-enotify]").forEach((s) => s.onchange = (e) => expertPatch(+e.target.dataset.enotify, { notify_to: e.target.value }));
+    const ea = G("[data-eadd]"); if (ea) ea.onclick = addExpertDialog;
+    Q("[data-mstage]").forEach((c) => c.onchange = () => autoSave("mstages", () => saveQuiet({ mgrStages: [...Q("[data-mstage]")].map((x) => x.checked) })));
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
     Q("[data-del]").forEach((b) => b.onclick = () => askDelete([b.dataset.del]));
     const pg = G("[data-purge]"); if (pg) pg.onclick = () => askDelete(null);
@@ -633,7 +736,7 @@
         if (!d.requests.length) return TP.modal("پیدا نشد", `درخواست «${esc(b.dataset.lookup)}» در سامانه نیست. اگر در راهکاران هست، فایل روزانه را دوباره بارگذاری کنید.`, null, "باشد", "");
         d.requests.forEach((r) => { if (!S.data.requests.some((x) => x.id === r.id)) S.data.requests.unshift(r); }); render(); }
       catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } });
-    const cl = G("[data-clear]"); if (cl) cl.onclick = () => { const w = S.filter.window; S.filter = { expert: "", status: "", state: "", window: w }; S.q = { id: "", date: "", party: "", item: "" }; render(); };
+    const cl = G("[data-clear]"); if (cl) cl.onclick = () => { const w = S.filter.window, was = needsAllScope(); S.filter = { experts: [], expertText: "", statuses: null, state: "", window: w }; S.q = { id: "", date: "", party: "", item: "" }; S.pop = null; if (was) refresh(); else render(); };
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     Q("[data-toggle]").forEach((b) => b.onclick = () => { S.open[b.dataset.toggle] = !S.open[b.dataset.toggle]; render(); });
     Q("select[data-assign]").forEach((s) => s.onchange = async (e) => {
@@ -734,16 +837,18 @@
     b.close(); await refresh(); S.tab = "desk"; render();
     TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد — توزیع با فرض تأیید همه متوازن شده است. هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
   }
+  /* فقط ارجاع‌های ارسال‌نشده‌ای که هنوز مهلت ندارند (تصمیم مدیر): مهلتی که خودِ مدیر گذاشته نمی‌پرد
+     و در اشغالِ کارشناس (بار همهٔ ارجاع‌های باز) از قبل حساب شده است */
   async function applyDeadlineAll() {
-    const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at).map((a) => ({ r, a })));
-    if (!list.length) return TP.modal("مهلت هوشمند", "ارجاع ارسال‌نشده‌ای نیست.", null, "باشد", "");
+    const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && !(Number(a.days) > 0)).map((a) => ({ r, a })));
+    if (!list.length) return TP.modal("مهلت هوشمند", "ارجاع ارسال‌نشده‌ای بدون مهلت نیست؛ مهلت‌هایی که خودتان گذاشته‌اید دست نمی‌خورند.", null, "باشد", "");
     const b = TP.busy("اعمال مهلت هوشمند…", `${list.length} ارجاع`); let n = 0;
     try {
       await loadWorkload();
       for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days, source: "smart" } }); n++; b.set(`${n} از ${list.length}`); }
     } catch (e) { b.close(); await refresh(); return TP.modal("مهلت هوشمند نیمه‌کاره ماند", `${n} ارجاع مهلت گرفت؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاع ارسال‌نشده مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها.`, null, "باشد", "");
+    TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاعِ بی‌مهلت مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها. مهلت‌هایی که خودتان گذاشته بودید دست نخورد.`, null, "باشد", "");
   }
   function doDispatch() {
     const list = readyAssignments(); const by = {};
@@ -764,9 +869,9 @@
   }
   function moveDialog(aid) {
     const r = S.data.requests.find((x) => x.assignments.some((a) => a.id === aid)); const a = r.assignments.find((x) => x.id === aid);
-    const E = S.data.experts.filter((e) => e.active && e.id !== a.expert_id);
+    const E = expertsSorted().filter((e) => e.id !== a.expert_id);
     const d = TP.modal(`تغییر کارشناس — درخواست ${esc(r.id)}`, `کارشناس فعلی: <b>${esc(a.expert_label || a.expert_name)}</b><br><br>
-      <select class="tp-select" id="mv-exp" style="width:100%"><option value="">— کارشناس جدید —</option>${E.map((e) => `<option value="${e.id}">${esc(e.label || e.name)}</option>`).join("")}</select>
+      <select class="tp-select" id="mv-exp" style="width:100%"><option value="">— کارشناس جدید —</option>${E.map((e) => `<option value="${e.id}">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</option>`).join("")}</select>
       <div class="tp-field" style="margin-top:10px"><b>مهلت جدید (روز کاری)</b><input class="tp-input" id="mv-days" value="${a.days || ""}" inputmode="numeric" style="width:110px;text-align:center"></div>
       <p class="dim" style="margin-top:10px;font-size:.85rem">اقلام، استعلام‌ها و پیش‌فاکتورها منتقل می‌شوند، ساعت‌شمار از نو شروع می‌شود و به هر دو کارشناس اعلان می‌رود.</p>`,
       /* مودال پیش از اجرای onYes از DOM جدا می‌شود؛ مقدارها را از خودِ عنصر مودال می‌خوانیم، نه document */
@@ -807,7 +912,7 @@
         busy.set("بررسی تعارض با وضعیت فعلی سامانه…");
         const fin = await TP.api("/import/finish", { body: { import_id, closedIds: payload.closedIds } });
         busy.close();
-        S.filter = { expert: "", status: "", state: "", window: "3d" }; S.q = { id: "", date: "", party: "", item: "" }; S.page.offset = 0; S.tab = "desk";
+        S.filter = { experts: [], expertText: "", statuses: null, state: "", window: "3d" }; S.q = { id: "", date: "", party: "", item: "" }; S.page.offset = 0; S.tab = "desk";
         await refresh();
         const unknown = Object.entries(st.unknownStatuses || {});
         const summary = `<b>${M(st.requests)}</b> درخواست · <b>${M(st.itemRows)}</b> سطر قلم · <b>${st.parties}</b> طرف مقابل · بازه ${esc(st.dateMin)} تا ${esc(st.dateMax)}<br>${st.closedItemsSkipped ? `<span class="dim"><b>${M(st.closedItemsSkipped)}</b> قلم «بسته شده» وارد نمی‌شود${st.partlyClosed ? ` (${M(st.partlyClosed)} درخواست فقط بخشی از اقلامش بسته است)` : ""} — <b>${M(st.liveItemRows)}</b> قلم وارد پنل می‌شود.</span><br>` : ""}
@@ -864,5 +969,8 @@
 
   /* ---------- شروع ---------- */
   if (TP.manager.get()) refresh(); else render();
+  window.addEventListener("tp-theme", render);
   setInterval(() => { if (S.tab === "desk" && TP.manager.get()) { S.now = Date.now(); render(); } }, 60000);
+  /* به‌روزرسانی خودکار میز (تصمیم مدیر): کاری که کارشناس در تلگرام کرد، بی رفرشِ دستی دیده می‌شود */
+  TP.autoRefresh(async () => { if (S.tab === "desk" && TP.manager.get() && !S.loading && !S.pop && S.editName == null) await refresh(); }, 30000);
 })();

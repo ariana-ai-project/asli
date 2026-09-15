@@ -57,11 +57,11 @@ test("عددِ بزرگی که مدل خودش نوشته، مشکوک علام�
 });
 
 test("نسخهٔ دستور عوض شده تا خروجی‌های قدیمی قابل تشخیص باشند", () => {
-  assert.equal(LETTER_PROMPT_VERSION, "letter/3.0", "v3: سبک نامه‌های واحد، موضوع با شمارهٔ درخواست، سلام و امضای ثابت");
+  assert.equal(LETTER_PROMPT_VERSION, "letter/3.1", "v3.1: از زبان خودِ کارشناس، مخاطب مدیر امور پشتیبانی");
 });
 
 test("مخاطب ثابت، موضوع از اقلامِ انتخابی با «و» و شمارهٔ درخواست، و «با تشکر» ته نامه سمت چپ", () => {
-  assert.equal(LETTER_TO, "مدیر محترم کمیسیون معاملات، جناب دکتر صفری");
+  assert.equal(LETTER_TO, "جناب آقای کوشاری، مدیر محترم امور پشتیبانی");
   assert.equal(LETTER_SALUTATION, "با سلام و احترام؛");
   assert.equal(letterSubject(["سیم جوش زیر پودری", "الکترود نمره 4", "سیم جوش زیر پودری"]), "گزارش خرید سیم جوش زیر پودری و الکترود نمره 4");
   /* الگوی نامه‌های واحد: «موضوع: خرید …، درخواست شماره …» */
@@ -70,7 +70,7 @@ test("مخاطب ثابت، موضوع از اقلامِ انتخابی با «�
   const xml = buildDocumentXml(tpl, { to: LETTER_TO, subject: letterSubject(["پودر جوشکاری"], "3101202"), salutation: LETTER_SALUTATION, paragraphs: ["بند"], closing: "خواهشمند است دستور فرمایید.", thanks: "با تشکر", signature: "ارسلان کوشاری" });
   const paras = [...xml.matchAll(/<w:p>([\s\S]*?)<\/w:p>/g)].map((m) => m[1]);
   const textOf = (p) => [...p.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g)].map((m) => m[1]).join("");
-  assert.equal(textOf(paras[0]), "مدیر محترم کمیسیون معاملات، جناب دکتر صفری");
+  assert.equal(textOf(paras[0]), "جناب آقای کوشاری، مدیر محترم امور پشتیبانی");
   assert.equal(textOf(paras[1]), "موضوع: گزارش خرید پودر جوشکاری، درخواست شماره ۳۱۰۱۲۰۲");
   assert.equal(textOf(paras[2]), "با سلام و احترام؛");
   const thanks = paras.findIndex((p) => textOf(p) === "با تشکر");

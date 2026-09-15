@@ -216,6 +216,8 @@
     TP.theme.toggle();
     const [ic, lab] = themeLabel();
     document.querySelectorAll("[data-theme-toggle]").forEach((x) => { x.textContent = `${ic} ${lab}`; x.title = lab; x.setAttribute("aria-label", lab); });
+    /* پنل‌ها با این رویداد از نو رندر می‌کنند تا هیچ عنصری با رنگ‌های حالت قبلی نماند */
+    window.dispatchEvent(new Event("tp-theme"));
   });
 
   /* ---------- مودال تأیید ---------- */
@@ -318,6 +320,38 @@
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
     if (!res.ok) { const e = new Error((data && (data.error || data.detail)) || `خطای سرور ${res.status}`); e.status = res.status; e.data = data; throw e; }
     return data;
+  };
+
+  /* ---------- قالب فیلدهای خط استعلام (همان قاعدهٔ worker/quote-rules.js) ----------
+     قیمت و مقدار عدد (اعشار مجاز)، اعتبار عدد روز، زمان تحویل تاریخ شمسی یا عدد روز.
+     خطا برمی‌گرداند یا null. */
+  const dig = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  const numTxt = (s) => dig(s).replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
+  TP.quoteFieldError = function (f, v) {
+    const x = String(v == null ? "" : v).trim(); if (!x) return null;
+    if (f === "price" && !/^\d+(\.\d+)?$/.test(numTxt(x))) return "قیمت واحد باید عدد باشد (اعشار مجاز است).";
+    if (f === "qty" && !/^\d+(\.\d+)?$/.test(numTxt(x))) return "مقدار باید عدد باشد.";
+    if (f === "valid_days" && !/^\d+$/.test(numTxt(x))) return "اعتبار پیش‌فاکتور باید عدد (روز) باشد.";
+    if (f === "dtime") {
+      const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(dig(x));
+      const date = m && +m[2] >= 1 && +m[2] <= 12 && +m[3] >= 1 && +m[3] <= 31;
+      const dur = /^(\d+)\s*(روز کاری|روز|هفته|ماه)?$/.test(numTxt(x).replace(/\s+/g, " "));
+      if (!date && !dur) return "زمان تحویل باید تاریخ شمسی (۱۴۰۵/۰۷/۱۰) یا عدد روز (مثلاً ۱۰ یا ۱۰ روز کاری) باشد.";
+    }
+    return null;
+  };
+
+  /* ---------- به‌روزرسانی خودکار ----------
+     هر چند ثانیه یک بار `fn` صدا زده می‌شود — مگر کارشناس وسط تایپ باشد، پنجره‌ای باز
+     باشد، یا تب مرورگر پنهان باشد؛ آن وقت رندرِ تازه کار او را خراب می‌کرد. */
+  TP.autoRefresh = function (fn, ms) {
+    const idle = () => {
+      const a = document.activeElement;
+      const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && a.type !== "range";
+      return !typing && !document.querySelector(".tp-modal-bg, .jdp, .chart-bg") && document.visibilityState !== "hidden";
+    };
+    let busy = false;
+    setInterval(async () => { if (busy || !idle()) return; busy = true; try { await fn(); } catch (_) { /* نوبت بعد */ } busy = false; }, ms || 20000);
   };
 
   /* ---------- کوچک‌های UI ---------- */
