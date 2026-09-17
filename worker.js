@@ -8,7 +8,7 @@
  * `scheduled` همان چرخهٔ هشدار و صف پیام بات است (ADR-0032): Worker پروسهٔ دائمی
  * ندارد، پس یادآوری مهلت‌ها با Cron Trigger کار می‌کند نه با یک حلقهٔ همیشه‌روشن.
  */
-import { route as apiRoute } from "./worker/api.js";
+import { route as apiRoute, ensureSchema } from "./worker/api.js";
 import { scheduled as botTick } from "./worker/bot.js";
 
 export default {
@@ -20,7 +20,9 @@ export default {
 
   async scheduled(event, env, ctx) {
     if (!env.TG_BOT_TOKEN) return; /* بات هنوز ست نشده — چیزی برای فرستادن نیست */
-    ctx.waitUntil(botTick(env, event.cron).then(
+    /* طرحِ دیتابیس پیش از Cron: اگر اولین اجرا بعد از استقرار Cron باشد نه یک درخواست، ستون‌های تازه
+       (مثل outbox.bot) هنوز ساخته نشده‌اند. با اثر انگشتِ طرح، روی دیتابیس به‌روز فقط یک کوئری است. */
+    ctx.waitUntil(ensureSchema(env).then(() => botTick(env, event.cron)).then(
       (r) => console.log("bot tick", JSON.stringify(r)),
       (e) => console.error("bot tick failed", e && e.message),
     ));

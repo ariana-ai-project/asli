@@ -89,16 +89,51 @@
   }
   /* ساعت کاری مانده تا مهلت — منفی یعنی مهلت گذشته */
   const trayLeft = (a) => TP.budget(a.dispatched_at, a.days || 1) - TP.wh(a.dispatched_at, S.now);
-  /* نوار تب‌های کارشناس ارشد: کارتابل خودش، تیم کارشناسی، تنظیم اعلانات تیم */
+  /* نوار تب‌های صفحهٔ کارشناس: کارتابل، (ارشد: تیم کارشناسی و تنظیم اعلانات)، و «حساب من» برای همه */
+  const LIST_TABS = ["team", "alerts", "account"];
   function vSeniorTabs() {
-    if (!isSenior()) return "";
-    const T = [["tray", "کارتابل من"], ["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]];
-    return `<div class="tp-tabs" style="padding-top:12px">${T.map(([k, l]) => `<button class="tp-tab ${(S.tab === k || (k === "tray" && !["team", "alerts"].includes(S.tab))) ? "on" : ""}" data-stab="${k}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div>`;
+    const T = [["tray", "کارتابل من"], ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
+    return `<div class="tp-tabs" style="padding-top:12px">${T.map(([k, l]) => `<button class="tp-tab ${(S.tab === k || (k === "tray" && !LIST_TABS.includes(S.tab))) ? "on" : ""}" data-stab="${k}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div>`;
+  }
+  /* باکس‌های تب تیم با آستانه‌های تیم (ارشد اگر گذاشته، وگرنه مدیر) — جدا از آستانه‌های کارتابل خودش */
+  const teamThr = () => ((S.team && S.team.settings) || settings()).thresholds;
+
+  /* ---------- حساب من: کد ورود (رمز پنل) ---------- */
+  function vAccount() {
+    const e = S.expert, tg = S.tg || {};
+    const k = (lab, val) => `<div class="k"><b>${lab}</b><span style="font-size:.95rem">${val}</span></div>`;
+    return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>حساب من</h2>
+      <div class="kpi">${k("نام", esc(e.name))}${k("نام کوتاه", esc(e.label || e.name))}${k("نقش", isSenior() ? "کارشناس ارشد" : "کارشناس خرید")}
+        ${tg.botConfigured ? k("تلگرام کارشناسی", tg.connected ? "✅ وصل" : "وصل نیست") : ""}${isSenior() ? k("تلگرام تیمی", e.team_connected ? "✅ وصل" : "وصل نیست") : ""}</div>
+      <div class="tp-sect"><h3>تغییر کد ورود</h3>
+        <p class="lead">کد ورود، رمز پنل شماست: ۴ تا ۸ رقم. بعد از تغییر، همین مرورگر وارد می‌ماند و دفعهٔ بعد با کد تازه وارد می‌شوید. مدیر هم هر وقت لازم باشد می‌تواند کد شما را عوض کند.</p>
+        <div class="tp-fields3">
+          <div class="tp-field"><b>کد فعلی</b><input class="tp-input" id="acc-cur" type="password" inputmode="numeric" autocomplete="current-password"></div>
+          <div class="tp-field"><b>کد تازه</b><input class="tp-input" id="acc-new" type="password" inputmode="numeric" autocomplete="new-password"></div>
+          <div class="tp-field"><b>تکرار کد تازه</b><input class="tp-input" id="acc-rep" type="password" inputmode="numeric" autocomplete="new-password"></div>
+          <div style="padding-bottom:2px"><button class="tp-btn primary" data-acc-save>تغییر کد</button></div></div>
+        <div id="acc-msg" style="min-height:22px;font-size:.9rem"></div></div></div></div>`;
+  }
+  async function saveCode() {
+    const G = (s) => document.querySelector(s), msg = G("#acc-msg");
+    const say = (t, bad) => { msg.textContent = t; msg.style.color = bad ? "#fca5a5" : "#6ee7b7"; };
+    const digits = (s) => String(s || "").trim().replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+    const cur = digits(G("#acc-cur").value), nw = digits(G("#acc-new").value), rp = digits(G("#acc-rep").value);
+    if (!cur) return say("کد فعلی را بنویسید.", true);
+    if (!/^\d{4,8}$/.test(nw)) return say("کد تازه باید ۴ تا ۸ رقم باشد.", true);
+    if (nw !== rp) return say("کد تازه و تکرارش یکی نیستند.", true);
+    try {
+      const r = await TP.api("/me/code", { method: "PUT", body: { current: cur, code: nw } });
+      S.expert.code = r.code; TP.session.set(S.expert);
+      ["#acc-cur", "#acc-new", "#acc-rep"].forEach((id) => { G(id).value = ""; });
+      say(r.unchanged ? "کد تازه همان کد فعلی است." : "کد ورود عوض شد ✓");
+    } catch (e) { say(e.message, true); }
   }
 
   function vList() {
     if (isSenior() && S.tab === "team") return vSeniorTabs() + vTeam();
     if (isSenior() && S.tab === "alerts") return vSeniorTabs() + vSeniorAlerts();
+    if (S.tab === "account") return vSeniorTabs() + vAccount();
     const rows = trayRows();
     /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
     if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
@@ -126,7 +161,7 @@
   /* ---------- تیم کارشناسی (کارشناس ارشد) ----------
      همان ردیف‌های میز مدیر، فقط برای زیرمجموعه‌های او: کارت هر کارشناس بالا، «همه» هم هست. */
   async function loadTeam(quiet) {
-    try { const t = await TP.api("/team"); S.team = t; if (t.settings) S.settings = t.settings; S.now = Date.now(); }
+    try { const t = await TP.api("/team"); S.team = t; S.now = Date.now(); }
     catch (e) { if (!quiet) TP.modal("خطا", esc(e.message), null, "باشد", ""); S.team = S.team || { team: [], requests: [] }; }
     render();
   }
@@ -139,7 +174,7 @@
     const its = r.items.filter((i) => i.assignment_id === a.id);
     const A = { dispatchedAt: a.dispatched_at, days: a.days, active: !!a.dispatched_at && its.some((i) => i.state === "open"),
       done: [!!a.viewed_at, its.some((i) => i.hist_done_at), its.some((i) => i.smart_done_at), a.quote_count > 0, a.proforma_count > 0, !!a.commission_at] };
-    return TP.STAGES.map((s, i) => `<td class="console"><div class="box b-${TP.stageColor(A, i, settings().thresholds, S.now)}" title="${s}">${i === 3 && a.quote_count ? `<span class="cnt">${a.quote_count}</span>` : i === 4 && a.proforma_count ? `<span class="cnt">${a.proforma_count}</span>` : ""}</div></td>`).join("");
+    return TP.STAGES.map((s, i) => `<td class="console"><div class="box b-${TP.stageColor(A, i, teamThr(), S.now)}" title="${s}">${i === 3 && a.quote_count ? `<span class="cnt">${a.quote_count}</span>` : i === 4 && a.proforma_count ? `<span class="cnt">${a.proforma_count}</span>` : ""}</div></td>`).join("");
   }
   function vTeam() {
     if (!S.team) { loadTeam(); return `<div class="tp-wrap"><div class="empty">در حال خواندن تیم…</div></div>`; }
@@ -200,24 +235,59 @@
       }, "ارسال");
   }
 
-  /* تنظیم اعلانات کارشناس ارشد: تیک مرحله‌ها + اتصال گروه تلگرام تیم */
+  /* تنظیم اعلانات کارشناس ارشد — همان تب مدیر، برای تیم خودش: تیکِ بالای هر مرحله یعنی تغییر وضعیتش
+     در «تلگرام تیمی» اعلام شود، و درصد زیرش آستانهٔ هشدارِ همان مرحله برای کارشناسان زیر نظر اوست.
+     تا وقتی ارشد درصدی عوض نکرده، آستانه‌های مدیر برقرار است؛ با اولین تغییر، شش درصدِ او جایش
+     می‌نشیند و باکس‌های پایش و هشدارهای کارشناسان تیمش همه‌جا با همان سنجیده می‌شوند. */
   function vSeniorAlerts() {
     const ticks = S.expert.alert_stages || [true, false, false, false, true, true];
+    const own = S.expert.alert_thresholds;
+    const mgr = (S.settings && S.settings.thresholds) || CFG.defaults.thresholds;
+    const thr = own || mgr;
+    const tg = S.tg || {};
     return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تنظیم اعلانات تیم</h2>
-      <p class="lead">مرحله‌هایی را تیک بزنید که تغییر وضعیتشان برای کارشناسان تیم شما در گروه تلگرام تیم اعلام شود. عبور از مهلت و بسته شدن درخواست همیشه اعلام می‌شود.</p>
-      <div class="tp-grid6 ticks-only">${TP.STAGES.map((st, i) => `<div class="cell"><label><input type="checkbox" data-sstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label></div>`).join("")}</div>
-      <div class="tp-sect"><h3>گروه تلگرام تیم <span>${S.expert.team_connected ? "وصل است" : "هنوز وصل نیست"}</span></h3>
-        <p class="lead">یک گروه در تلگرام بسازید و با دکمهٔ زیر همین بات را به آن اضافه کنید؛ اعلان‌های زیرمجموعه‌های شما به آن گروه می‌رود. اعلان‌های خودتان همچنان در گفت‌وگوی خصوصی بات می‌آید.</p>
-        <button class="tp-btn ${S.expert.team_connected ? "" : "primary"}" data-team-link>${S.expert.team_connected ? "اتصال به گروه دیگر" : "اتصال گروه تیم"}</button></div></div></div>`;
+      <p class="lead">تیکِ بالای هر مرحله یعنی تغییر وضعیت آن مرحله برای کارشناسان تیم شما در «تلگرام تیمی» اعلام شود. هر درصد یعنی چند درصد از مهلتِ کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود و باکسش زرد شود. خالی = هشدار آن مرحله خاموش. عبور از مهلت و بسته شدن درخواست همیشه اعلام می‌شود.</p>
+      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label title="اعلان این مرحله در تلگرام تیمی"><input type="checkbox" data-sstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label>
+        <input class="tp-input" data-sthr="${i}" value="${thr[i] === "" || thr[i] == null ? "" : thr[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
+      <div id="sthrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
+      <div class="tp-row" style="align-items:center;gap:10px">
+        ${own ? `<span class="chip ok">آستانه‌های شما برای تیم فعال است</span><button class="tp-btn sm" data-sthr-reset>بازگشت به آستانه‌های مدیر (${esc(mgr.map((x) => (x === "" ? "—" : M(x))).join("، "))})</button>`
+          : `<span class="chip">اکنون همان آستانه‌های مدیر برقرار است؛ با تغییر هر درصد، آستانه‌های شما جایگزین می‌شود</span>`}
+        <span class="dim" data-sthr-saved style="font-size:.85rem"></span></div>
+      <div class="tp-sect"><h3>تلگرام تیمی <span>${S.expert.team_connected ? "✅ وصل است" : "هنوز وصل نیست"}</span></h3>
+        <p class="lead">اعلان‌های پایش کارشناسان تیم شما — همان پیام‌هایی که برای مدیر واحد می‌رود — ${tg.teamBot ? `با بات <b dir="ltr">@${esc(tg.teamBot)}</b>` : "با بات تیمی"} برای شما فرستاده می‌شود. ارجاع‌های خودتان همچنان در «تلگرام کارشناسی» می‌آید.</p>
+        <button class="tp-btn ${S.expert.team_connected ? "" : "primary"}" data-team-link>${S.expert.team_connected ? "اتصال دوباره / گفت‌وگوی دیگر" : "اتصال تلگرام تیمی"}</button></div></div></div>`;
   }
   async function teamLink() {
     try {
       const r = await TP.api("/tg/team-link", { method: "POST" });
-      if (r.available === false) return TP.modal("گروه تیم", esc(r.message), null, "باشد", "");
-      TP.modal("اتصال گروه تیم", `روی دکمهٔ زیر بزنید؛ تلگرام می‌پرسد بات به کدام گروه اضافه شود. گروه را انتخاب کنید و تأیید کنید.
-        <br><br><a class="tp-btn primary" href="${esc(r.url)}" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">افزودن بات به گروه تیم</a>
+      if (r.available === false) return TP.modal("تلگرام تیمی", esc(r.message), null, "باشد", "");
+      if (r.via !== "team") {
+        return TP.modal("اتصال گروه تیم", `روی دکمهٔ زیر بزنید؛ تلگرام می‌پرسد بات به کدام گروه اضافه شود. گروه را انتخاب کنید و تأیید کنید.
+          <br><br><a class="tp-btn primary" href="${esc(r.url)}" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">افزودن بات به گروه تیم</a>
+          <br><br><span class="dim" style="font-size:.85rem">این لینک ۱۵ دقیقه اعتبار دارد و یک بار کار می‌کند. بعد از اتصال، دکمهٔ ↻ را بزنید.</span>`, null, "بستم", "");
+      }
+      TP.modal("تلگرام تیمی", `${S.expert.team_connected ? "<b>تلگرام تیمی شما وصل است.</b> اگر می‌خواهید اعلان‌ها به گفت‌وگوی دیگری برود، از همین لینک استفاده کنید.<br><br>" : ""}
+        اعلان‌های پایش کارشناسان تیم شما — مشاهده، دریافت پیش‌فاکتور و بقیهٔ مرحله‌هایی که در «تنظیم اعلانات» تیک زده‌اید، عبور از مهلت و بسته شدن درخواست — با بات <b dir="ltr">@${esc(r.bot)}</b> برای شما فرستاده می‌شود.
+        <br><br><a class="tp-btn primary" href="${esc(r.url)}" target="_blank" rel="noopener" style="display:inline-block;text-decoration:none">باز کردن @${esc(r.bot)} و زدن START</a>
+        ${r.group ? `<br><br><span class="dim" style="font-size:.85rem">اگر می‌خواهید اعلان‌ها در یک گروه تلگرام بیاید: <a href="${esc(r.group)}" target="_blank" rel="noopener">افزودن همین بات به گروه</a></span>` : ""}
         <br><br><span class="dim" style="font-size:.85rem">این لینک ۱۵ دقیقه اعتبار دارد و یک بار کار می‌کند. بعد از اتصال، دکمهٔ ↻ را بزنید.</span>`, null, "بستم", "");
     } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+  /* ذخیرهٔ خودکار آستانه‌های تیم بعد از مکث؛ درصدهای نامعتبر فرستاده نمی‌شوند */
+  let thrTimer = null;
+  function saveSeniorThr(vals) {
+    clearTimeout(thrTimer);
+    thrTimer = setTimeout(async () => {
+      try {
+        const r = await TP.api("/me/alerts", { method: "PUT", body: { alert_thresholds: vals } });
+        const hadOwn = !!S.expert.alert_thresholds;
+        S.expert.alert_thresholds = r.alert_thresholds; TP.session.set(S.expert); S.team = null;
+        if (!hadOwn || !vals) render();
+        const el = document.querySelector("[data-sthr-saved]");
+        if (el) el.textContent = `ذخیره شد ✓${r.rescheduled ? ` — هشدارهای ${M(r.rescheduled)} ارجاعِ باز تیم با آستانه‌های تازه چیده شد` : ""}`;
+      } catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
+    }, vals ? 700 : 0);
   }
 
   /* ---------- جزئیات ---------- */
@@ -878,8 +948,9 @@
 
   async function loadTray() {
     try {
-      const [t, tg, me] = await Promise.all([TP.api("/tray"), TP.api("/tg/status").catch(() => null), TP.api("/me").catch(() => null)]);
-      S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = tg;
+      /* یک درخواست به‌جای سه: کارتابل، وضعیت تلگرام و «من» (سرعت — هر درخواست رفت‌وبرگشت شبکهٔ خودش را دارد) */
+      const t = await TP.api("/tray?full=1"), me = t.me;
+      S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = t.tg || null;
       /* ارشد بودن، زیرمجموعه‌ها و تیک اعلان‌ها را مدیر هر لحظه ممکن است عوض کند؛ از سرور تازه می‌شود */
       if (me && me.expert) { S.expert = { ...S.expert, ...me.expert, team: me.team || [] }; TP.session.set(S.expert); }
       if (isSenior() && !S.team) loadTeam(true);
@@ -898,13 +969,23 @@
   }
   const reload = () => openDetail(A().id, true);
 
+  /* دکمه‌های تلگرام نوار بالا. کارشناس ارشد دو تلگرام دارد (تصمیم مدیر): «تلگرام کارشناسی» — همان
+     بات کارشناسان برای ارجاع‌های خودش (با «ارجاع به تیم» کنار «مشاهده») — و «تلگرام تیمی» برای
+     اعلان‌های پایش کارشناسان زیر نظرش. */
+  function tgButtons() {
+    const tg = S.tg || {};
+    const exp = tg.botConfigured ? `<button class="tp-btn sm ${tg.connected ? "" : "primary"}" data-tg title="${tg.connected ? "ارجاع‌ها و یادآوری مهلت در تلگرام شما می‌آید" : "دریافت ارجاع‌ها و یادآوری مهلت در تلگرام"}">${tg.connected ? "✅ " : ""}${isSenior() ? "تلگرام کارشناسی" : tg.connected ? "تلگرام" : "اتصال به تلگرام"}</button>` : "";
+    const team = isSenior() && (tg.teamBotConfigured || tg.botConfigured) ? `<button class="tp-btn sm ${S.expert.team_connected ? "" : "primary"}" data-team-link title="اعلان‌های پایش کارشناسان تیم شما">${S.expert.team_connected ? "✅ " : ""}تلگرام تیمی</button>` : "";
+    return exp + team;
+  }
+
   /* ---------- رندر ---------- */
   function render() {
     const app = document.getElementById("app");
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${S.tg && S.tg.botConfigured ? `<button class="tp-btn sm ${S.tg.connected ? "" : "primary"}" data-tg title="${S.tg.connected ? "اعلان‌های تلگرام فعال است" : "دریافت ارجاع‌ها و یادآوری مهلت در تلگرام"}">${S.tg.connected ? "✅ تلگرام" : "اتصال به تلگرام"}</button>` : ""}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
@@ -932,7 +1013,20 @@
       try { const r = await TP.api("/me/alerts", { method: "PUT", body: { alert_stages: ticks } }); S.expert.alert_stages = r.alert_stages; TP.session.set(S.expert); }
       catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
     });
-    const tl = G("[data-team-link]"); if (tl) tl.onclick = teamLink;
+    Q("[data-team-link]").forEach((b) => b.onclick = teamLink);
+    /* حساب من */
+    const acs = G("[data-acc-save]"); if (acs) acs.onclick = saveCode;
+    Q("#acc-cur, #acc-new, #acc-rep").forEach((i) => i.onkeydown = (e) => { if (e.key === "Enter") saveCode(); });
+    /* آستانه‌های تیم (کارشناس ارشد) */
+    Q("[data-sthr]").forEach((i) => i.oninput = (e) => {
+      e.target.value = e.target.value.replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[^0-9]/g, "");
+      const vals = [...Q("[data-sthr]")].map((x) => (x.value === "" ? "" : +x.value));
+      const act = vals.filter((v) => v !== "");
+      const ok = act.every((v, k) => k === 0 || v > act[k - 1]) && act.every((v) => v >= 1 && v <= 100);
+      const er = G("#sthrErr"); if (er) er.textContent = ok ? "" : "درصدها باید صعودی و بین ۱ تا ۱۰۰ باشند.";
+      if (ok) saveSeniorThr(vals);
+    });
+    const tr = G("[data-sthr-reset]"); if (tr) tr.onclick = () => saveSeniorThr(null);
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
     const ts = G("[data-tsort]"); if (ts) ts.onclick = () => { S.traySort = !S.traySort; try { localStorage.setItem("tp.traySort", S.traySort ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };

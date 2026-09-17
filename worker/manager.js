@@ -84,14 +84,15 @@ const MGR_DEFAULT = [true, false, false, false, true, true];
 export function recipients(row, settings, managerChat, stage) {
   const out = [];
   const seniorOk = stage == null || ticks(row.senior_stages, MGR_DEFAULT)[stage];
-  if (row.team_chat && seniorOk) out.push({ chat: row.team_chat, tag: "team" });
+  /* تلگرام تیمیِ ارشد: اگر با بات تیمی (Supply Senior) وصل شده، صف با همان بات می‌فرستد */
+  if (row.team_chat && seniorOk) out.push({ chat: row.team_chat, tag: "team", bot: row.team_via === "team" ? "team" : null });
   const onlySenior = row.notify_to === "senior" && row.team_chat;
   const mgrOk = stage == null || ticks(settings && settings.mgrStages, MGR_DEFAULT)[stage];
   if (managerChat && !onlySenior && mgrOk) out.push({ chat: managerChat, tag: "mgr" });
   return out;
 }
 /* ستون‌های کارشناس و ارشدش که recipients لازم دارد — در هر کوئریِ اعلان الحاق می‌شوند */
-export const RECIPIENT_COLS = `e.notify_to, s.team_chat, s.alert_stages AS senior_stages`;
+export const RECIPIENT_COLS = `e.notify_to, s.team_chat, s.team_via, s.alert_stages AS senior_stages`;
 export const RECIPIENT_JOIN = `LEFT JOIN experts s ON s.id=e.senior_id AND s.active=1 AND s.senior=1`;
 
 /** ارجاع‌هایی که هنوز زنده‌اند، با هر چیزی که برای رنگ‌ها لازم است */
@@ -108,7 +109,10 @@ const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadlin
    FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN}
   WHERE a.dispatched_at IS NOT NULL
     AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold'))
-  ORDER BY a.deadline_at LIMIT ?`;
+  ORDER BY COALESCE(a.watch_at, 0), a.deadline_at LIMIT ?`;
+/* باگ قبلی: «ORDER BY deadline_at LIMIT 40» — با بیش از ۴۰ ارجاعِ باز، ارجاع‌هایی که مهلتشان دیرتر است
+   هیچ‌وقت سنجیده نمی‌شدند و اعلان تغییر وضعیتشان (برای مدیر و تلگرام تیمی) نمی‌رفت. حالا هر اجرا
+   کم‌تازه‌ترین‌ها را برمی‌دارد و watch_at را می‌زند، پس همه به نوبت سنجیده می‌شوند. */
 
 const flagsOf = (row) => [
   !!row.viewed_at, row.hist > 0, row.smart > 0, row.quotes > 0, row.proformas > 0, !!row.commission_at,
@@ -126,7 +130,7 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
   if (!rows.length) return { checked: 0, changed: 0, queued: 0 };
 
   const t = now();
-  const stmts = [];
+  const stmts = [env.DB.prepare(`UPDATE assignments SET watch_at=? WHERE id IN (${rows.map(() => "?").join(",")})`).bind(t, ...rows.map((r) => r.id))];
   const news = [];
   for (const row of rows) {
     let thr = settings.thresholds;
@@ -181,7 +185,7 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
       stmts.push(queueStmt(env, `${rc.tag}:${n.row.id}:${n.row.dispatched_at}:${n.key}`, rc.chat,
         managerCard({ ...n.row, items: items.get(n.row.id) || [] }, n.colors, {
           head: "🔄 <b>تغییر وضعیت</b>", changed: rc.diff,
-        })));
+        }), null, rc.bot));
       queued++;
     }
   }
@@ -219,7 +223,7 @@ export async function notifyClosed(env, aid, managerChat, actor) {
 
   await env.DB.batch(to.map((rc) => rc.tag === "mgr"
     ? queueStmt(env, `closed:${aid}:${row.dispatched_at}`, rc.chat, text + "\n<i>تا «مشاهده کردم» را نزنید، در میز کار شما می‌ماند.</i>", [[{ text: "✅ مشاهده کردم", callback_data: `mseen:${aid}` }]])
-    : queueStmt(env, `closed-team:${aid}:${row.dispatched_at}`, rc.chat, text)));
+    : queueStmt(env, `closed-team:${aid}:${row.dispatched_at}`, rc.chat, text, null, rc.bot)));
   return { ok: true, queued: to.length };
 }
 

@@ -315,6 +315,11 @@ CREATE TABLE IF NOT EXISTS closures (
 );
 
 -- ستون‌های افزوده (COLUMN_MIGRATIONS در api.js):
+--   experts.alert_thresholds           JSON شش‌تایی: آستانه‌های پایشی که کارشناس ارشد برای کارشناسان تیمش گذاشته (null = مدیر)
+--   experts.team_via                   «team» = تلگرام تیمی با بات Supply Senior؛ خالی = گروهِ بات اصلی
+--   outbox.bot                         پیام با کدام بات برود: خالی = بات اصلی، «team» = بات تیمی
+--   assignments.watch_at               آخرین سنجش رنگ‌ها — پایش چرخشی همهٔ ارجاع‌های باز (manager.js)
+--   counters['schema_fp']              اثر انگشت طرح: isolate سرد با یک کوئری از ensureSchema می‌گذرد
 --   assignments.closed_at              همهٔ اقلام بسته شد
 --   smart_searches.item_code/hist_code/title_n/request_id   کلید قلم برای جستجوهای قبلیِ همان قلم
 --   quotes.origin (history|smart|manual|proforma), origin_ref (شناسهٔ جستجو), final_at, commission_at

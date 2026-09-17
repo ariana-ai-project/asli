@@ -20,8 +20,17 @@ export const DEFAULTS = {
 
 
 export async function getSettings(env) {
-  const rows = (await env.DB.prepare("SELECT key,value FROM settings").all()).results || [];
+  return settingsFromRows((await env.DB.prepare("SELECT key,value FROM settings").all()).results || []);
+}
+
+/** ردیف‌های جدول settings → شیء تنظیمات با پیش‌فرض‌ها. جدا از getSettings تا میز ارجاع همین
+    کوئری را در batch بقیهٔ خواندن‌هایش بفرستد. فقط کلیدهای DEFAULTS به پنل می‌رسند — شناسهٔ
+    کانال مدیر و نشانی وبهوک‌ها که در همین جدول‌اند، تنظیمِ نمایشی نیستند. */
+export function settingsFromRows(rows) {
   const s = JSON.parse(JSON.stringify(DEFAULTS));
-  for (const r of rows) { try { s[r.key] = JSON.parse(r.value); } catch (_) { /* مقدار خراب — پیش‌فرض می‌ماند */ } }
+  for (const r of rows || []) {
+    if (!(r.key in DEFAULTS)) continue;
+    try { s[r.key] = JSON.parse(r.value); } catch (_) { /* مقدار خراب — پیش‌فرض می‌ماند */ }
+  }
   return s;
 }

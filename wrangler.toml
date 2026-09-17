@@ -20,6 +20,8 @@ compatibility_date = "2026-09-03"
 [vars]
 # نام کاربری بات؛ راز نیست و برای ساختن لینک t.me لازم است
 TG_BOT_USERNAME = "ArianaSupplyBot"
+# بات تیمیِ کارشناسان ارشد (اعلان‌های پایش تیم). توکنش راز است: wrangler secret put TG_TEAM_BOT_TOKEN
+TG_TEAM_BOT_USERNAME = "Supply_SeniorBot"
 
 # انبار فایل پیش‌فاکتور — سطل خصوصی روی Supabase. آدرس راز نیست؛ کلید سرویس
 # با wrangler secret put SUPABASE_SERVICE_KEY ست می‌شود. تا وقتی کلید نباشد،

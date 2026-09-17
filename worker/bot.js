@@ -42,6 +42,8 @@ import { expertDecision, approveDecision, rejectDecision } from "./decisions.js"
 import { itemHistory, activeImport } from "./history.js";
 import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
+import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
+export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -79,13 +81,16 @@ export async function drainOutbox(env, limit = 20) {
   ).bind(t, limit).all()).results || [];
   if (!rows.length) return { sent: 0, failed: 0 };
 
-  const api = telegram(env);
+  /* هر ردیف با بات خودش می‌رود: خالی = بات کارشناسان/کانال مدیر، «team» = بات تیمی کارشناسان ارشد.
+     اگر توکن آن بات ست نشده باشد، خطای موقت (۵۰۳) است و پیام تا سقف تلاش‌ها منتظر می‌ماند. */
+  const apis = new Map();
+  const apiFor = (bot) => { const k = bot === "team" ? "team" : "main"; if (!apis.has(k)) apis.set(k, telegram(env, k === "team" ? "team" : undefined)); return apis.get(k); };
   const done = [];
   let sent = 0, failed = 0;
   for (const row of rows) {
     const p = JSON.parse(row.payload_json);
     try {
-      await api.sendMessage(row.target, p.text, p.keyboard);
+      await apiFor(row.bot).sendMessage(row.target, p.text, p.keyboard);
       sent++;
       done.push(env.DB.prepare("UPDATE outbox SET status='sent', sent_at=?, attempts=attempts+1 WHERE id=?").bind(now(), row.id));
     } catch (e) {
@@ -108,27 +113,8 @@ export async function drainOutbox(env, limit = 20) {
 /* متن پیام‌ها (TG-06)                                                  */
 /* ------------------------------------------------------------------ */
 
-const SIGN = "\n\n<i>ارجاع از سوی مدیر واحد پشتیبانی</i>";
-
-/**
- * پیام «ارجاع جدید». اقلام هم ردیف‌به‌ردیف می‌آیند — با مقدار و واحد — تا کارشناس
- * بی‌آنکه پنل را باز کند بداند این درخواست چقدر کار است و اولویتش را بسنجد.
- * سقف ۲۰ قلم: پیام تلگرام ۴۰۹۶ نویسه جا دارد و درخواست‌های بزرگ‌تر در پنل خوانده می‌شوند.
- */
-const DISPATCH_MAX_ITEMS = 20;
-export function dispatchText(a) {
-  const its = a.items || [];
-  const list = its.slice(0, DISPATCH_MAX_ITEMS).map((i, k) =>
-    `${M(k + 1)}. ${esc(short(i.title, 48))}${i.qty != null ? ` — <b>${M(i.qty)}</b> ${esc(i.unit || "")}` : ""}`).join("\n");
-  return `🔔 <b>ارجاع جدید</b>\n\n`
-    + `درخواست <b>${esc(a.request_id)}</b>\n`
-    + `${esc(a.party || "")}\n\n`
-    + `<b>${M(a.item_count)} قلم</b> · مهلت ${M(a.days)} روز کاری\n`
-    + `تا <b>${esc(fmtFa(a.deadline_at))}</b>`
-    + (list ? `\n\n<b>اقلام:</b>\n${list}` : "")
-    + (its.length > DISPATCH_MAX_ITEMS ? `\n<i>و ${M(its.length - DISPATCH_MAX_ITEMS)} قلم دیگر — در پنل</i>` : "")
-    + SIGN;
-}
+/* پیام «ارجاع جدید» و دکمه‌هایش (مشاهده / ارجاع به تیم) در worker/assign.js اند —
+   ارسال مدیر، تغییر کارشناس و ارجاعِ ارشد همه همان را می‌فرستند. */
 
 export function stageAlertText(row, stage) {
   const left = Math.max(0, workHours(now(), row.deadline_at));
@@ -158,13 +144,12 @@ export function managerOverdueText(row) {
 /* دکمه‌های راهبری — یک جا، تا هر منو همان برچسب‌ها را داشته باشد       */
 /* ------------------------------------------------------------------ */
 
-/** پیام ارجاع فقط یک دکمه دارد؛ بقیهٔ مسیر بعد از «مشاهده» باز می‌شود */
-export const seenKb = (aid) => [[{ text: "👁 مشاهده", callback_data: `seen:a:${aid}` }]];
 
-/** بعد از «مشاهده»: دو کار اول، و کارتابل */
-const firstStepsKb = (aid) => [
+/** بعد از «مشاهده»: دو کار اول، (برای کارشناس ارشدِ تیم‌دار «ارجاع به تیم»)، و کارتابل */
+const firstStepsKb = (aid, team) => [
   [{ text: "📚 بررسی سوابق", callback_data: `hs:a:${aid}` }],
   [{ text: "🔎 جستجوی هوشمند", callback_data: `sm:a:${aid}` }],
+  ...(team ? [[{ text: "👥 ارجاع به تیم", callback_data: `dg:${aid}:n` }]] : []),
   [{ text: "📋 کارتابل", callback_data: "kt:n" }],
 ];
 
@@ -253,7 +238,7 @@ export async function runAlerts(env, limit = 20) {
     } else {
       /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر و/یا گروه کارشناس ارشدش (SLA-05، TG-04) */
       if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), reqKb(row.aid))); queued++; }
-      for (const rc of recipients(row, null, managerChat)) { stmts.push(queueStmt(env, `over-${rc.tag}:${row.aid}:${row.fire_at}`, rc.chat, managerOverdueText(row))); queued++; }
+      for (const rc of recipients(row, null, managerChat)) { stmts.push(queueStmt(env, `over-${rc.tag}:${row.aid}:${row.fire_at}`, rc.chat, managerOverdueText(row), null, rc.bot)); queued++; }
     }
   }
   await env.DB.batch(stmts);
@@ -285,9 +270,11 @@ export async function makeLink(env, expertId) {
 }
 
 /**
- * لینک اتصال گروه تیم کارشناس ارشد. `startgroup` یعنی تلگرام از او می‌پرسد بات را به کدام
- * گروه اضافه کند و بعد `/start <token>` را در همان گروه می‌فرستد؛ توکن با پیشوند «tm» از
- * توکن اتصال شخصی جدا می‌شود. همان بات است — فقط اعلان‌های زیرمجموعهٔ او به این گروه می‌رود.
+ * «تلگرام تیمی» کارشناس ارشد. با بات تیمی (Supply Senior، TG_TEAM_BOT_TOKEN) لینک عادیِ
+ * `start` است: کارشناس ارشد در گفت‌وگوی خصوصی با آن بات START می‌زند و از آن پس اعلان‌های
+ * پایشِ کارشناسان تیمش — همان پیام‌هایی که به کانال مدیر می‌رود — آن‌جا می‌آید. لینک
+ * `startgroup` هم برمی‌گردد برای وقتی بخواهد همین بات را به یک گروه اضافه کند.
+ * اگر بات تیمی ست نشده باشد (محیط قدیمی)، همان گروهِ بات اصلی مثل قبل.
  */
 export async function makeTeamLink(env, expertId) {
   const token = "tm" + crypto.randomUUID().replace(/-/g, "").slice(0, 22);
@@ -296,25 +283,84 @@ export async function makeTeamLink(env, expertId) {
     env.DB.prepare("DELETE FROM tg_tokens WHERE (expert_id=? AND token LIKE 'tm%') OR expires_at<?").bind(expertId, t),
     env.DB.prepare("INSERT INTO tg_tokens (token,expert_id,created_at,expires_at) VALUES (?,?,?,?)").bind(token, expertId, t, t + TOKEN_TTL),
   ]);
+  if (env.TG_TEAM_BOT_TOKEN) {
+    const user = T(env.TG_TEAM_BOT_USERNAME) || "Supply_SeniorBot";
+    return { url: `https://t.me/${user}?start=${token}`, group: `https://t.me/${user}?startgroup=${token}`, bot: user, via: "team", expires_at: t + TOKEN_TTL };
+  }
   const user = T(env.TG_BOT_USERNAME) || "ArianaSupplyBot";
-  return { url: `https://t.me/${user}?startgroup=${token}`, expires_at: t + TOKEN_TTL };
+  return { url: `https://t.me/${user}?startgroup=${token}`, bot: user, via: "main", expires_at: t + TOKEN_TTL };
 }
 
-/** `/start tm…` در گروه: این گروه، گروه اعلان‌های تیمِ همان کارشناس ارشد می‌شود */
-async function bindTeam(env, api, chat, token) {
+/**
+ * وبهوک بات تیمی را روی همین دامنه ثبت می‌کند، اگر هنوز نشده (نشانی ثبت‌شده در settings می‌ماند
+ * تا هر لینک‌گرفتنی دوباره به تلگرام نرود). `force` از /tg/setup مدیر.
+ */
+export async function ensureTeamWebhook(env, origin, force) {
+  const want = `${origin}/tamin-poshtibani/api/tg/team-webhook`;
+  if (!force && (await settingValue(env, "teamWebhook")) === want) return { ok: true, url: want, cached: true };
+  const api = telegram(env, "team");
+  await api.setWebhook(want, env.TG_WEBHOOK_SECRET);
+  await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('teamWebhook',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(JSON.stringify(want), now()).run();
+  return { ok: true, url: want, me: force ? await api.getMe().catch(() => null) : undefined };
+}
+
+/**
+ * `/start tm…`: این گفت‌وگو (خصوصی با بات تیمی، یا گروه) مقصد اعلان‌های تیمِ همان کارشناس ارشد
+ * می‌شود. `via`: «team» اگر از بات تیمی آمده — صف با همان بات می‌فرستد.
+ */
+async function bindTeam(env, api, chat, token, via) {
   const t = now();
   const row = await env.DB.prepare("SELECT * FROM tg_tokens WHERE token=?").bind(token).first();
   if (!row || row.used_at || row.expires_at < t) { await api.sendMessage(chat, "این لینک معتبر نیست یا منقضی شده است؛ از پنل، لینک تازه بگیرید.").catch(() => {}); return { ok: true }; }
   const ex = await env.DB.prepare("SELECT id,name,label,senior,active FROM experts WHERE id=?").bind(row.expert_id).first();
   if (!ex || !ex.active || !ex.senior) { await api.sendMessage(chat, "این کارشناس، کارشناس ارشد نیست.").catch(() => {}); return { ok: true }; }
   await env.DB.batch([
-    env.DB.prepare("UPDATE experts SET team_chat=NULL WHERE team_chat=?").bind(String(chat)),
-    env.DB.prepare("UPDATE experts SET team_chat=? WHERE id=?").bind(String(chat), ex.id),
+    env.DB.prepare("UPDATE experts SET team_chat=NULL, team_via=NULL WHERE team_chat=?").bind(String(chat)),
+    env.DB.prepare("UPDATE experts SET team_chat=?, team_via=? WHERE id=?").bind(String(chat), via || null, ex.id),
     env.DB.prepare("UPDATE tg_tokens SET used_at=? WHERE token=?").bind(t, token),
   ]);
-  await api.sendMessage(chat, `✅ این گروه به‌عنوان گروه اعلان‌های تیم <b>${esc(ex.label || ex.name)}</b> ثبت شد.\n\n`
-    + "از این پس تغییر وضعیت مراحل، عبور از مهلت و بسته شدن درخواست‌های کارشناسان زیرمجموعهٔ ایشان این‌جا اعلام می‌شود.\n"
-    + "<i>کدام مرحله‌ها؟ در پنل کارشناس، تب «تنظیم اعلانات».</i>").catch(() => {});
+  const team = (await env.DB.prepare("SELECT name, label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(ex.id).all()).results || [];
+  const where = String(chat).startsWith("-") ? "این گروه" : "این گفت‌وگو";
+  await api.sendMessage(chat, `✅ ${where} تلگرام تیمی <b>${esc(ex.label || ex.name)}</b> شد.\n\n`
+    + "از این پس همان اعلان‌هایی که برای مدیر واحد می‌رود — تغییر وضعیت مراحل (مثل مشاهده و دریافت پیش‌فاکتور)، عبور از مهلت و بسته شدن درخواست — "
+    + "این‌جا می‌آید، فقط برای کارشناسانی که مدیر زیر نظر شما گذاشته است"
+    + (team.length ? `:\n${team.map((x) => `• ${esc(x.label || x.name)}`).join("\n")}` : ". (هنوز کسی زیر نظر شما نیست.)")
+    + "\n\n<i>کدام مرحله‌ها و با چه آستانه‌ای؟ پنل کارشناس ← تب «تنظیم اعلانات». ارجاع‌های خودتان همچنان در بات کارشناسان می‌آید.</i>").catch(() => {});
+  return { ok: true };
+}
+
+/**
+ * آپدیت‌های بات تیمی. این بات گفت‌وگوی کاری ندارد: فقط اتصال (/start tm…)، راهنما و قطع (/stop).
+ * همیشه بی‌استثنا برمی‌گردد تا تلگرام آپدیت را دوباره نفرستد.
+ */
+export async function handleTeamUpdate(env, u) {
+  try {
+    const api = telegram(env, "team");
+    const msg = u.message;
+    if (msg && msg.chat) {
+      const chat = msg.chat.id, text = T(msg.text);
+      const st = /^\/start(?:@\w+)?(?:\s+(tm\w+))?/.exec(text);
+      if (st && st[1]) return await bindTeam(env, api, chat, st[1], "team");
+      if (/^\/stop(?:@\w+)?$/.test(text)) {
+        await env.DB.prepare("UPDATE experts SET team_chat=NULL, team_via=NULL WHERE team_chat=? AND team_via='team'").bind(String(chat)).run();
+        await api.sendMessage(chat, "اتصال تلگرام تیمی قطع شد. برای وصل شدن دوباره، از پنل کارشناس «تلگرام تیمی» را بزنید.").catch(() => {});
+        return { ok: true };
+      }
+      if (msg.chat.type !== "private" && !st) return { ok: true };   /* گروه: فقط دستورها */
+      const bound = await env.DB.prepare("SELECT name, label FROM experts WHERE team_chat=? AND team_via='team' AND active=1").bind(String(chat)).first();
+      await api.sendMessage(chat, bound
+        ? `این‌جا تلگرام تیمی <b>${esc(bound.label || bound.name)}</b> است و اعلان‌های پایش کارشناسان تیم ایشان این‌جا می‌آید.\n\n/stop — قطع اتصال`
+        : "این بات فقط اعلان‌های پایش تیم را برای کارشناسان ارشد واحد پشتیبانی می‌فرستد.\n\nبرای اتصال، در پنل کارشناس دکمهٔ «تلگرام تیمی» را بزنید و روی لینکش کلیک کنید.").catch(() => {});
+      return { ok: true };
+    }
+    const m = u.my_chat_member;
+    if (m && m.chat && ["left", "kicked"].includes(m.new_chat_member && m.new_chat_member.status)) {
+      await env.DB.prepare("UPDATE experts SET team_chat=NULL, team_via=NULL WHERE team_chat=? AND team_via='team'").bind(String(m.chat.id)).run();
+    }
+  } catch (e) {
+    console.error("team bot update failed", e && e.message);
+  }
   return { ok: true };
 }
 
@@ -338,7 +384,7 @@ export async function handleUpdate(env, u, ctx) {
 }
 
 async function expertOfChat(env, chatId) {
-  return env.DB.prepare("SELECT id,name,label,code,active,telegram_chat FROM experts WHERE telegram_chat=?").bind(String(chatId)).first();
+  return env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.telegram_chat,e.senior, ${TEAM_SIZE_SQL} AS team_n FROM experts e WHERE e.telegram_chat=?`).bind(String(chatId)).first();
 }
 
 async function onMessage(env, msg) {
@@ -350,7 +396,7 @@ async function onMessage(env, msg) {
     const gtext = T(msg.text);
     /* گروه تیم کارشناس ارشد: لینک startgroup پنل همین را می‌فرستد (بات ممکن است @نام داشته باشد) */
     const st = /^\/start(?:@\w+)?\s+(tm\w+)/.exec(gtext);
-    if (st) return bindTeam(env, telegram(env), chat, st[1]);
+    if (st) return bindTeam(env, telegram(env), chat, st[1], null);
     /* «/manager» در گروه: همین‌جا کانال مدیر می‌شود — برای وقتی گروه مدیر عوض شده */
     if (/^\/manager(?:@\w+)?$/.test(gtext)) {
       await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
@@ -606,8 +652,27 @@ async function requestMenu(env, api, chat, ex, aid, { mid = null, head = "" } = 
     kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "✉️ تولید نامه", callback_data: `rq:${aid}:l` }]);
     kb.push([{ text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }]);
   }
+  /* کارشناس ارشدِ تیم‌دار: همین درخواست را به یکی از کارشناسان زیر نظرش بدهد */
+  if (ex.senior && ex.team_n > 0) kb.push([{ text: "👥 ارجاع به تیم", callback_data: `dg:${aid}:m` }]);
   kb.push([KARTABL_BTN]);
   return show(api, chat, mid, text, kb);
+}
+
+/**
+ * «ارجاع به تیم» در بات کارشناس ارشد. dg:<aid>:<n|m> فهرست کارشناسان تیم را روی همان پیام
+ * می‌گذارد (n = زیر پیام «ارجاع جدید»، m = منوی درخواست)؛ dgt:<aid>:<expert>:<n|m> ارجاع می‌دهد
+ * — همان مسیرِ پنل: اقلام و کارهای انجام‌شده منتقل، ساعت‌شمار از نو، و پیام «ارجاع جدید» به
+ * تلگرامِ کارشناس تازه؛ درخواست از کارتابل ارشد به تب «تیم کارشناسی» پنلش می‌رود.
+ */
+async function delegateMenu(env, api, chat, ex, aid, from, mid, text) {
+  const a = await env.DB.prepare(`SELECT a.id, a.request_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id
+      WHERE a.id=? AND a.expert_id=? AND a.dispatched_at IS NOT NULL AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')`).bind(aid, ex.id).first();
+  if (!a) return show(api, chat, mid, "این درخواست دیگر در کارتابل شما نیست.", [[KARTABL_BTN]]);
+  const team = await teamOf(env, ex.id);
+  if (!team.length) return show(api, chat, mid, "هنوز کارشناسی زیر نظر شما نیست؛ مدیر در تب «کارشناسان» تیم شما را مشخص می‌کند.", [[reqBtn(aid)]]);
+  const kb = team.map((e) => [{ text: `👤 ${e.label || e.name}`, callback_data: `dgt:${aid}:${e.id}:${from}` }]);
+  kb.push([{ text: "↩️ بازگشت", callback_data: from === "n" ? `dgb:${aid}` : `rq:${aid}:m:e` }]);
+  return show(api, chat, mid, `${text ? text + "\n\n" : ""}👥 <b>ارجاع درخواست ${esc(a.request_id)} به کدام کارشناس تیم؟</b>\n${esc(short(a.party, 60))}`, kb);
 }
 
 /* ------------------------------------------------------------------ */
@@ -2528,7 +2593,32 @@ async function onCallback(env, cq) {
     await ack("ثبت شد ✅");
     if (cq.message) {
       await api.editMessageText(chat, mid, cq.message.text
-        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", firstStepsKb(id)).catch(() => {});
+        ? esc(cq.message.text) + "\n\n<i>✅ مشاهده ثبت شد</i>" : "✅ مشاهده ثبت شد", firstStepsKb(id, ex.senior && ex.team_n > 0)).catch(() => {});
+    }
+    return { ok: true };
+  }
+
+  /* ارجاع به تیم (کارشناس ارشد): dg فهرست تیم · dgt ارجاع به یک نفر · dgb برگشت به پیامِ ارجاع */
+  if (action === "dg" || action === "dgb" || action === "dgt") {
+    if (!ex.senior) { await ack("فقط کارشناس ارشد می‌تواند به تیم ارجاع دهد.", true); return { ok: true }; }
+    const aid = num(1);
+    /* متنِ پیامِ ارجاع می‌ماند؛ فقط دکمه‌هایش عوض می‌شوند (متن HTML ندارد، پس گریز لازم است) */
+    const base = cq.message && cq.message.text ? esc(cq.message.text.split("\n\n👥")[0]) : "";
+    if (action === "dg") { await ack(); return delegateMenu(env, api, chat, ex, aid, parts[2] === "m" ? "m" : "n", mid, parts[2] === "m" ? "" : base); }
+    if (action === "dgb") {
+      await ack();
+      const a = await env.DB.prepare("SELECT viewed_at FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+      return show(api, chat, mid, base || "↩️", a && a.viewed_at ? firstStepsKb(aid, ex.team_n > 0) : seenKb(aid, ex.team_n > 0));
+    }
+    try {
+      const r = await delegateAssignment(env, ex, { assignment_id: aid, expert_id: num(2) });
+      await ack("ارجاع شد ✅");
+      const who = r.expert ? r.expert.label || r.expert.name : "کارشناس تیم";
+      await show(api, chat, mid, `${base ? base + "\n\n" : ""}✅ <b>به ${esc(who)} ارجاع شد.</b>\n`
+        + `<i>${r.notified ? "در تلگرام و پنل ایشان رفت" : "در پنل ایشان رفت (تلگرامشان وصل نیست)"}؛ از این پس در تب «تیم کارشناسی» پنل شما دیده می‌شود.</i>`, [[KARTABL_BTN]]);
+      await drainOutbox(env, 10).catch(() => {});
+    } catch (e) {
+      await ack(String(e.message || "ارجاع نشد").slice(0, 180), true);
     }
     return { ok: true };
   }
@@ -3157,7 +3247,8 @@ async function onChatMember(env, m) {
   } else if (["left", "kicked"].includes(status)) {
     const cur = await settingValue(env, "managerChat");
     if (cur === String(chat.id)) await env.DB.prepare("DELETE FROM settings WHERE key='managerChat'").run();
-    await env.DB.prepare("UPDATE experts SET team_chat=NULL WHERE team_chat=?").bind(String(chat.id)).run();
+    /* فقط گروهِ تیمی که با همین بات اصلی وصل شده بود؛ گفت‌وگوی بات تیمی مال بات دیگری است */
+    await env.DB.prepare("UPDATE experts SET team_chat=NULL, team_via=NULL WHERE team_chat=? AND (team_via IS NULL OR team_via<>'team')").bind(String(chat.id)).run();
   }
   return { ok: true };
 }

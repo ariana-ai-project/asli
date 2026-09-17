@@ -21,7 +21,7 @@ import { telegram } from "./telegram.js";
 import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial } from "./extract.js";
 import { HttpError } from "./http.js";
-import { DEFAULTS, getSettings } from "./settings.js";
+import { DEFAULTS, getSettings, settingsFromRows } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
@@ -33,7 +33,8 @@ import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { statusData, statusBook, seasonData, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
-import { handleUpdate, makeLink, makeTeamLink, scheduled, dispatchText, drainOutbox, seenKb } from "./bot.js";
+import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
+import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
 
@@ -68,10 +69,11 @@ function requireManager(request, env) {
 async function requireExpert(request, env) {
   const code = T(request.headers.get("X-Expert-Code"));
   if (!code) throw new HttpError("وارد نشده‌اید.", 401);
-  const ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,alert_stages FROM experts WHERE code=?").bind(code).first();
+  const ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,team_via,alert_stages,alert_thresholds FROM experts WHERE code=?").bind(code).first();
   if (!ex || !ex.active) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
   ex.senior = ex.senior ? 1 : 0;
   ex.alert_stages = stageTicks(ex.alert_stages);
+  ex.alert_thresholds = parseThresholds(ex.alert_thresholds);
   return ex;
 }
 
@@ -225,6 +227,14 @@ const COLUMN_MIGRATIONS = [
   ["items", "currency", "TEXT"],
   ["items", "fee", "REAL"],                      /* فی */
   ["items", "amount", "REAL"],                   /* مبلغ */
+  /* (شهریور ۱۴۰۵) آستانه‌های پایشی که کارشناس ارشد برای کارشناسان تیمش می‌گذارد (JSON شش‌تایی)،
+     و اینکه گفت‌وگوی اعلان تیمش با کدام بات است: «team» = بات Supply Senior، خالی = گروهِ بات اصلی */
+  ["experts", "alert_thresholds", "TEXT"],
+  ["experts", "team_via", "TEXT"],
+  /* پیامِ صف با کدام بات برود: خالی = بات کارشناسان و کانال مدیر، «team» = بات تیمیِ کارشناسان ارشد */
+  ["outbox", "bot", "TEXT"],
+  /* آخرین باری که پایش رنگ‌ها این ارجاع را سنجید — تا همهٔ ارجاع‌های باز به نوبت سنجیده شوند (manager.js) */
+  ["assignments", "watch_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -253,10 +263,24 @@ const SEED_EXPERTS = [
 ];
 
 
+/* اثر انگشتِ طرح: هر تغییری در SCHEMA، ستون‌های افزوده، تغییرنام‌ها یا جدول‌های حذفی این عدد را
+   عوض می‌کند. isolate تازه (که در سایت کم‌ترافیک زیاد پیش می‌آید) اول فقط همین را از counters
+   می‌خواند؛ اگر همان بود طرح از قبل اعمال شده و ~۲۰ رفت‌وبرگشتِ CREATE/PRAGMA به D1 — که هر
+   درخواستِ سرد تا حالا می‌پرداخت — لازم نیست. استقرارِ نسخهٔ تازه با طرحِ تازه، یک بار مسیر کامل را می‌رود. */
+const SCHEMA_FP = (() => {
+  const s = SCHEMA + JSON.stringify([COLUMN_MIGRATIONS, COLUMN_RENAMES, DROPPED_TABLES]);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
+  return (h >>> 0) * 1000 + (s.length % 1000);
+})();
 let schemaReady = false;
 async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
+  try {
+    const fp = await env.DB.prepare("SELECT value FROM counters WHERE key='schema_fp'").first();
+    if (fp && Number(fp.value) === SCHEMA_FP) { schemaReady = true; return; }
+  } catch (_) { /* دیتابیس تازه — جدول counters هنوز ساخته نشده؛ مسیر کامل */ }
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
@@ -268,6 +292,7 @@ async function ensureSchema(env) {
     await env.DB.batch(SEED_EXPERTS.map(([code, name, label]) =>
       env.DB.prepare("INSERT OR IGNORE INTO experts (code,name,label,active,speed,created_at) VALUES (?,?,?,1,1.0,?)").bind(code, nrm(name), label, t)));
   }
+  await env.DB.prepare("INSERT INTO counters (key,value) VALUES ('schema_fp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(SCHEMA_FP).run();
   schemaReady = true;
 }
 
@@ -290,45 +315,8 @@ async function migrateColumns(env) {
   }
 }
 
-/* تعطیلات رسمی — در هر isolate کش می‌شود؛ خیلی کم تغییر می‌کند و
-   Cron در پلن رایگان فقط ۵۰ subrequest دارد، پس هر کوئری اضافه مهم است. */
-let holidayCache = null;
-async function holidayFn(env) {
-  if (!holidayCache || now() - holidayCache.at > 5 * 60000) {
-    const rows = (await env.DB.prepare("SELECT date_j FROM holidays").all()).results || [];
-    holidayCache = { at: now(), set: new Set(rows.map((r) => r.date_j)) };
-  }
-  const s = holidayCache.set;
-  return (d) => s.has(d);
-}
-
-/**
- * زمان‌بندی هشدارهای یک ارجاعِ ارسال‌شده را می‌سازد.
- *
- * چرا در لحظهٔ ارسال و نه در لحظهٔ هشدار: `SLA-04` می‌گوید تغییر آستانه‌ها نباید
- * ارجاع‌های در جریان را تکان بدهد، و Cron پلن رایگان (۱۰ms CPU) توان محاسبهٔ
- * ساعات کاری برای ده‌ها ارجاع را ندارد. این‌جا یک بار حساب، بعد فقط SELECT.
- *
- * خروجی: آرایه‌ای از statement ها تا در همان batchِ صدازننده اجرا شوند.
- */
-function alertStatements(env, a, thresholds, isHoliday, at) {
-  const s = alertSchedule(at, a.days, thresholds, isHoliday);
-  const st = [
-    env.DB.prepare("UPDATE assignments SET deadline_at=?, budget_h=?, thr_snapshot=? WHERE id=?")
-      .bind(s.deadlineAt, s.budget, JSON.stringify(thresholds), a.id),
-    /* هشدارهای قبلیِ همین ارجاع (مثلاً بعد از تغییر کارشناس) بی‌اثر می‌شوند */
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(at, a.id),
-  ];
-  for (const r of s.rows) {
-    st.push(env.DB.prepare(`INSERT INTO alerts (assignment_id,kind,stage,fire_at) VALUES (?,'stage',?,?)
-      ON CONFLICT(assignment_id,kind,stage) DO UPDATE SET fire_at=excluded.fire_at, fired_at=NULL, canceled_at=NULL`)
-      .bind(a.id, r.stage, r.fireAt));
-  }
-  st.push(env.DB.prepare(`INSERT INTO alerts (assignment_id,kind,stage,fire_at) VALUES (?,'over',-1,?)
-    ON CONFLICT(assignment_id,kind,stage) DO UPDATE SET fire_at=excluded.fire_at, fired_at=NULL, canceled_at=NULL`)
-    .bind(a.id, s.deadlineAt));
-  return st;
-}
+/* تعطیلات، زمان‌بندی هشدارها، تغییر کارشناس و آستانه‌های مؤثر در worker/assign.js اند —
+   بات تلگرام («ارجاع به تیم» از تلگرامِ کارشناس ارشد) هم همان‌ها را صدا می‌زند. */
 
 /**
  * حذف درخواست‌ها و هر چیزی که به آن‌ها آویزان است.
@@ -560,28 +548,48 @@ async function desk(env, url) {
     if (from) { conds.push("r.date >= ?"); args.push(from); }
   }
   const where = conds.length ? conds.join(" AND ") : "1=1";
-  const totalRow = await env.DB.prepare(`SELECT COUNT(*) AS n FROM requests r WHERE ${where}`).bind(...args).first();
-  const total = totalRow ? totalRow.n : 0;
-  // all_total: همان شمارش بدون فیلتر تاریخ — تا وقتی بازهٔ انتخابی خالی است، پنل به‌جای
-  // «فایلی بارگذاری نشده» بگوید درخواست‌ها در تاریخ‌های قدیمی‌تر هستند
-  let all_total = total;
-  if (from && !id) { const a = await env.DB.prepare(`SELECT COUNT(*) AS n FROM requests r WHERE ${scope !== "all" ? scopeSql : "1=1"}`).bind(...(scope !== "all" ? [now() - 30 * DAY] : [])).first(); all_total = a ? a.n : total; }
-  const reqs = (await env.DB.prepare(`SELECT r.*, im.imported_at AS imported_at FROM requests r LEFT JOIN imports im ON im.id=r.first_import_id WHERE ${where} ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?`).bind(...args, limit, offset).all()).results || [];
-  if (!reqs.length) return { requests: [], total, all_total, limit, offset, experts: await listExperts(env), settings: await getSettings(env) };
+  /* سرعت: همهٔ خواندن‌های مستقلِ میز در یک batch — یک رفت‌وبرگشت به D1 به‌جای ۶ تا ۱۲ رفت‌وبرگشتِ
+     پشت‌سرهم. هر رفت‌وبرگشت وقتی Worker و دیتابیس در یک منطقه نباشند ده‌ها تا صدها میلی‌ثانیه است.
+     with=all: امتیازها و تصمیم‌های در انتظار هم در همین پاسخ (پنل مدیر قبلاً سه درخواست می‌فرستاد). */
+  const withAll = url.searchParams.get("with") === "all";
+  const allArgs = scope !== "all" ? [now() - 30 * DAY] : [];
+  const first = [
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM requests r WHERE ${where}`).bind(...args),
+    // all_total: همان شمارش بدون فیلتر تاریخ — تا وقتی بازهٔ انتخابی خالی است، پنل به‌جای
+    // «فایلی بارگذاری نشده» بگوید درخواست‌ها در تاریخ‌های قدیمی‌تر هستند
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM requests r WHERE ${from && !id ? (scope !== "all" ? scopeSql : "1=1") : where}`).bind(...(from && !id ? allArgs : args)),
+    env.DB.prepare(`SELECT r.*, im.imported_at AS imported_at FROM requests r LEFT JOIN imports im ON im.id=r.first_import_id WHERE ${where} ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?`).bind(...args, limit, offset),
+    listExpertsStmt(env),
+    env.DB.prepare("SELECT key,value FROM settings"),
+    ...(withAll ? [
+      env.DB.prepare("SELECT * FROM expert_scores"), env.DB.prepare("SELECT * FROM weights"),
+      env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at"),
+    ] : []),
+  ];
+  const [cnt, allCnt, reqRes, expRes, setRes, scRes, wRes, decRes] = await env.DB.batch(first);
+  const total = (cnt.results[0] || {}).n || 0, all_total = (allCnt.results[0] || {}).n || total;
+  const reqs = reqRes.results || [];
+  const extra = {
+    limit, offset, total, all_total,
+    experts: expertRows(expRes.results || []),
+    settings: settingsFromRows(setRes.results || []),
+    ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [] } : {}),
+  };
+  if (!reqs.length) return { requests: [], ...extra };
   const ids = reqs.map((r) => r.id);
-  const items = [], assigns = [];
+  const second = [];
   for (let i = 0; i < ids.length; i += 90) {
     const part = ids.slice(i, i + 90), q = part.map(() => "?").join(",");
-    items.push(...((await env.DB.prepare(`SELECT * FROM items WHERE request_id IN (${q}) ORDER BY request_id, line_no`).bind(...part).all()).results || []));
-    assigns.push(...((await env.DB.prepare(`SELECT a.*, e.name AS expert_name, e.label AS expert_label,
+    second.push(env.DB.prepare(`SELECT * FROM items WHERE request_id IN (${q}) ORDER BY request_id, line_no`).bind(...part));
+    second.push(env.DB.prepare(`SELECT a.*, e.name AS expert_name, e.label AS expert_label,
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quote_count,
         (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count
-      FROM assignments a JOIN experts e ON e.id=a.expert_id WHERE a.request_id IN (${q})`).bind(...part).all()).results || []));
+      FROM assignments a JOIN experts e ON e.id=a.expert_id WHERE a.request_id IN (${q})`).bind(...part));
   }
+  const res2 = await env.DB.batch(second);
   const byReq = new Map(reqs.map((r) => [r.id, { ...r, items: [], assignments: [] }]));
-  items.forEach((i) => byReq.get(i.request_id)?.items.push(i));
-  assigns.forEach((a) => byReq.get(a.request_id)?.assignments.push(a));
-  return { requests: [...byReq.values()], total, all_total, limit, offset, experts: await listExperts(env), settings: await getSettings(env) };
+  res2.forEach((r, k) => (r.results || []).forEach((x) => { const g = byReq.get(x.request_id); if (g) (k % 2 ? g.assignments : g.items).push(x); }));
+  return { requests: [...byReq.values()], ...extra };
 }
 
 /* بار باز کارشناسان برای ارجاع و مهلت هوشمند: همهٔ ارجاع‌هایی که قلم باز یا معلق دارند —
@@ -602,10 +610,70 @@ async function workload(env) {
 
 /* کارشناس‌های ارشد اول، بعد بقیه — همان ترتیبی که فهرست انتخاب کارشناس در میز باید داشته باشد */
 async function listExperts(env) {
-  const rows = (await env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,e.senior,e.senior_id,e.notify_to,e.team_chat,e.alert_stages,
+  return expertRows((await listExpertsStmt(env).all()).results || []);
+}
+/* کوئری و شکلِ خروجیِ فهرست کارشناسان جدا شده‌اند تا میز ارجاع آن را در همان batch بقیهٔ
+   خواندن‌هایش بفرستد (یک رفت‌وبرگشت به D1 به‌جای چند تا). */
+const listExpertsStmt = (env) => env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,e.senior,e.senior_id,e.notify_to,e.team_chat,e.team_via,e.alert_stages,e.alert_thresholds,
       (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND i.state IN ('open','hold')) AS open_load
-    FROM experts e ORDER BY e.active DESC, e.senior DESC, e.name`).all()).results || [];
-  return rows.map((e) => ({ ...e, senior: e.senior ? 1 : 0, notify_to: e.notify_to === "senior" ? "senior" : "manager", alert_stages: stageTicks(e.alert_stages), team_connected: !!e.team_chat, team_chat: undefined }));
+    FROM experts e ORDER BY e.active DESC, e.senior DESC, e.name`);
+const expertRows = (rows) => rows.map((e) => ({ ...e, senior: e.senior ? 1 : 0, notify_to: e.notify_to === "senior" ? "senior" : "manager", alert_stages: stageTicks(e.alert_stages),
+  alert_thresholds: parseThresholds(e.alert_thresholds), team_connected: !!e.team_chat, team_bot: e.team_via === "team", team_chat: undefined, team_via: undefined }));
+
+/* ------------------------------------------------------------------ */
+/* کد ورود کارشناس                                                       */
+/* ------------------------------------------------------------------ */
+const CODE_RE = /^\d{4,8}$/;
+/* کدِ کارشناسِ حذف‌شده (غیرفعال) کنار می‌رود تا همان کد دوباره قابل استفاده باشد؛ غیرفعال که وارد
+   نمی‌شود و رقم ندارد، پس با هیچ کد ورودی برابر نمی‌شود. نام و کد در جدول UNIQUE اند. */
+const retiredCode = (id) => `x${id}-${now()}`;
+
+/**
+ * مدیر یا خودِ کارشناس کد ورود را عوض می‌کند. کدِ کارشناسِ فعالِ دیگر قابل گرفتن نیست؛
+ * کدِ یک کارشناسِ حذف‌شده آزاد می‌شود. `reveal` (فقط مدیر) نام صاحبِ کد را در خطا می‌گوید.
+ */
+async function setExpertCode(env, id, raw, { reveal } = {}) {
+  const code = T(raw).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
+  if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.", 409);
+  const holder = await env.DB.prepare("SELECT id,name,active FROM experts WHERE code=?").bind(code).first();
+  if (holder && holder.id === id) return { ok: true, code, unchanged: true };
+  if (holder && holder.active) throw new HttpError(reveal ? `این کد ورودِ «${holder.name}» است؛ کد دیگری بدهید.` : "این کد را کارشناس دیگری دارد؛ کد دیگری انتخاب کنید.", 409);
+  const stmts = [];
+  if (holder) stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(retiredCode(holder.id), holder.id));
+  stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(code, id));
+  await env.DB.batch(stmts);
+  return { ok: true, code };
+}
+
+/**
+ * افزودن کارشناس از تب «کارشناسان». باگ قبلی: «حذف» فقط غیرفعال می‌کند و ردیف با همان نام و
+ * کد می‌ماند، پس افزودنِ دوبارهٔ همان نفر با همان کد خطای «از قبل هست» می‌داد. حالا:
+ *   • نام یا کد مالِ کارشناسِ فعال باشد ← خطای روشن
+ *   • همان نام، حذف‌شده ← همان ردیف برمی‌گردد (سوابق ارجاع‌هایش هم با او) با کد و نام کوتاه تازه
+ *   • کد مالِ کارشناسِ حذف‌شدهٔ دیگری ← کد از او آزاد می‌شود و به این نفر می‌رسد
+ */
+async function addExpert(env, b) {
+  const name = nrm(b.name), label = T(b.label) || T(b.name);
+  const code = T(b.code).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+  if (!name || !code) throw new HttpError("نام و کد ورود لازم است.");
+  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
+  if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری بدهید.", 409);
+  const rows = (await env.DB.prepare("SELECT id,name,code,active FROM experts WHERE name=? OR code=?").bind(name, code).all()).results || [];
+  const byCode = rows.find((r) => r.active && r.code === code);
+  if (byCode) throw new HttpError(`کد ورود ${code} مالِ «${byCode.name}» است؛ کد دیگری بدهید.`, 409);
+  if (rows.some((r) => r.active && r.name === name)) throw new HttpError(`«${name}» از قبل در فهرست کارشناسان هست.`, 409);
+  const back = rows.find((r) => r.name === name) || null;
+  const stmts = rows.filter((r) => r.code === code && (!back || r.id !== back.id))
+    .map((r) => env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(retiredCode(r.id), r.id));
+  if (back) {
+    stmts.push(env.DB.prepare("UPDATE experts SET active=1, code=?, label=?, senior=0, senior_id=NULL, notify_to=NULL WHERE id=?").bind(code, label || name, back.id));
+    await env.DB.batch(stmts);
+    return { ok: true, id: back.id, name, code, restored: true };
+  }
+  stmts.push(env.DB.prepare("INSERT INTO experts (name,label,code,active,speed,created_at) VALUES (?,?,?,1,1.0,?)").bind(name, label || name, code, now()));
+  const res = await env.DB.batch(stmts);
+  return { ok: true, id: res[res.length - 1].meta.last_row_id, name, code };
 }
 
 /**
@@ -616,6 +684,8 @@ async function updateExpert(env, id, b) {
   const cur = await env.DB.prepare("SELECT * FROM experts WHERE id=?").bind(id).first();
   if (!cur) throw new HttpError("کارشناس پیدا نشد.", 404);
   const sets = [], args = [], extra = [];
+  /* کد ورود: مدیر هر وقت بخواهد عوضش می‌کند (کارشناس هم از صفحهٔ «حساب من») */
+  if ("code" in b) await setExpertCode(env, id, b.code, { reveal: true });
   if ("speed" in b) { sets.push("speed=?"); args.push(Number(b.speed) || 1); }
   if ("active" in b) {
     sets.push("active=?"); args.push(b.active ? 1 : 0);
@@ -680,7 +750,9 @@ async function teamDesk(env, ex) {
     byReq.get(a.request_id).assignments.push(a);
   }
   for (const i of items) { const r = byReq.get(i.request_id); if (r) r.items.push(i); }
-  return { team, requests: [...byReq.values()], settings: await getSettings(env) };
+  /* باکس‌های تیم با آستانه‌های خودِ ارشد (اگر گذاشته) */
+  const s = await getSettings(env);
+  return { team, requests: [...byReq.values()], settings: ex.alert_thresholds ? { ...s, thresholds: ex.alert_thresholds } : s };
 }
 
 /**
@@ -689,14 +761,7 @@ async function teamDesk(env, ex) {
  * و اگر ارسال شده بود، به کارشناس تازه اعلان «ارجاع جدید» می‌رود.
  */
 async function delegate(env, ex, body, ctx) {
-  if (!ex.senior) throw new HttpError("فقط کارشناس ارشد می‌تواند ارجاع را به تیم بدهد.", 403);
-  const aid = int(body.assignment_id), eid = int(body.expert_id);
-  const a = await env.DB.prepare("SELECT * FROM assignments WHERE id=?").bind(aid).first();
-  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
-  if (!(await canSee(env, { role: "expert", expert: ex }, a.expert_id))) throw new HttpError("این ارجاع متعلق به تیم شما نیست.", 403);
-  const target = eid === ex.id ? { id: ex.id } : await env.DB.prepare("SELECT id FROM experts WHERE id=? AND senior_id=? AND active=1").bind(eid, ex.id).first();
-  if (!target) throw new HttpError("کارشناس انتخابی در تیم شما نیست.");
-  const r = await reassign(env, { assignment_id: aid, expert_id: eid, days: body.days }, `expert:${ex.id}`);
+  const r = await delegateAssignment(env, ex, body);   /* همان مسیری که دکمهٔ «ارجاع به تیم» در بات می‌رود */
   flush(env, ctx, 1);
   return r;
 }
@@ -755,13 +820,15 @@ async function setDays(env, body) {
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
   if (!ids.length) throw new HttpError("هیچ ارجاعی انتخاب نشده.");
-  const rows = (await env.DB.prepare(`SELECT a.*, e.name, e.label, e.telegram_chat, r.party,
+  const rows = (await env.DB.prepare(`SELECT a.*, e.name, e.label, e.telegram_chat, e.senior, ${TEAM_SIZE_SQL} AS team_n, r.party,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count
     FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
     WHERE a.id IN (${ids.map(() => "?").join(",")}) AND a.dispatched_at IS NULL AND a.days>0`).bind(...ids).all()).results || [];
   const t = now(); const stmts = []; let notified = 0;
-  /* آستانه‌ها و تعطیلات یک بار خوانده می‌شوند و برای همهٔ ارجاع‌های این دسته به کار می‌روند */
+  /* آستانه‌ها و تعطیلات یک بار خوانده می‌شوند و برای همهٔ ارجاع‌های این دسته به کار می‌روند.
+     آستانهٔ هر ارجاع، آستانهٔ مؤثرِ کارشناسش است: ارشدش اگر برای تیم گذاشته، وگرنه مدیر. */
   const [settings, isHoliday] = rows.length ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
+  const thrBy = rows.length ? await thresholdsByExpert(env, rows.map((a) => a.expert_id), settings) : new Map();
   /* اقلامِ همهٔ ارجاع‌های این دسته با یک کوئری — پیام ارجاع باید خودِ اقلام را
      بگوید تا کارشناس بتواند سبک‌سنگین کند، و سقف ۵۰ زیردرخواست هم اجازهٔ یک
      کوئری برای هر ارجاع نمی‌داد. */
@@ -774,11 +841,12 @@ async function dispatch(env, body) {
   }
   for (const a of rows) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
-    const sched = alertStatements(env, a, settings.thresholds, isHoliday, t);
+    const thr = thrBy.get(a.expert_id) || settings.thresholds;
+    const sched = alertStatements(env, a, thr, isHoliday, t);
     stmts.push(...sched);
     /* تاریخچهٔ ارجاع: لحظهٔ ارسال، کارشناس، مهلت (روز و لحظهٔ پایان) و اقلام */
     stmts.push(assignmentLogStmt(env, { at: t, action: "dispatch", request_id: a.request_id, assignment_id: a.id, expert_id: a.expert_id, days: a.days,
-      deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt, item_ids: (itemsBy.get(a.id) || []).map((i) => i.id) }));
+      deadline_at: alertSchedule(t, a.days, thr, isHoliday).deadlineAt, item_ids: (itemsBy.get(a.id) || []).map((i) => i.id) }));
     /* اعلان «ارجاع جدید» (TG-06). مهلت را از همان زمان‌بندیِ تازه‌ساخته برمی‌داریم
        چون ستون deadline_at هنوز در همین batch نوشته نشده است. */
     if (a.telegram_chat) {
@@ -786,8 +854,8 @@ async function dispatch(env, body) {
          دوباره از ۱ شروع می‌شود و ردیفِ قدیمیِ «dispatch:3» اعلانِ ارجاعِ تازه را
          بی‌صدا می‌خورد (ON CONFLICT DO NOTHING) — همین در تست محلی اتفاق افتاد. */
       stmts.push(queueStmt(env, `dispatch:${a.id}:${t}`, a.telegram_chat,
-        dispatchText({ ...a, items: itemsBy.get(a.id) || [], dispatched_at: t, deadline_at: alertSchedule(t, a.days, settings.thresholds, isHoliday).deadlineAt }),
-        seenKb(a.id)));
+        dispatchText({ ...a, items: itemsBy.get(a.id) || [], dispatched_at: t, deadline_at: alertSchedule(t, a.days, thr, isHoliday).deadlineAt }),
+        seenKb(a.id, a.senior && a.team_n > 0)));
       notified++;
     }
     stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: a.telegram_chat ? "telegram" : "none" }));
@@ -796,43 +864,7 @@ async function dispatch(env, body) {
   return { ok: true, dispatched: rows.length, notified };
 }
 
-/* تغییر کارشناس: ارجاع جدید، انتقال اقلام و کارهای انجام‌شده، ساعت‌شمار از نو */
-async function reassign(env, body, actor = "manager") {
-  const aid = int(body.assignment_id), eid = int(body.expert_id);
-  const a = await env.DB.prepare("SELECT a.*, r.party FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=?").bind(aid).first();
-  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
-  if (a.expert_id === eid) return { ok: true, assignment_id: aid };
-  const target = await env.DB.prepare("SELECT id, name, label, telegram_chat FROM experts WHERE id=? AND active=1").bind(eid).first();
-  if (!target) throw new HttpError("کارشناس معتبر نیست.");
-  const t = now();
-  const days = int(body.days, a.days);
-  let b = await env.DB.prepare("SELECT * FROM assignments WHERE request_id=? AND expert_id=?").bind(a.request_id, eid).first();
-  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, days, a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days }; }
-  const items = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all()).results || [];
-  /* ساعت‌شمار کارشناس جدید از نو شروع می‌شود، پس زمان‌بندی هشدارها هم از نو ساخته می‌شود */
-  const [settings, isHoliday] = a.dispatched_at ? await Promise.all([getSettings(env), holidayFn(env)]) : [null, null];
-  const fresh = a.dispatched_at ? alertStatements(env, { id: b.id, days: int(body.days, b.days || a.days) }, settings.thresholds, isHoliday, t) : [];
-  const deadlineAt = a.dispatched_at ? alertSchedule(t, int(body.days, b.days || a.days), settings.thresholds, isHoliday).deadlineAt : null;
-  const stmts = [
-    env.DB.prepare("UPDATE items SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
-    env.DB.prepare("UPDATE quotes SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
-    env.DB.prepare("UPDATE proformas SET assignment_id=? WHERE assignment_id=? AND supplier_name NOT IN (SELECT supplier_name FROM proformas WHERE assignment_id=?)").bind(b.id, aid, b.id),
-    env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
-    env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(aid),
-    ev(env, actor, "reassign", a.request_id, null, { from_expert_id: a.expert_id, to_expert_id: eid, notify: target.telegram_chat && a.dispatched_at ? "telegram" : "none" }),
-    assignmentLogStmt(env, { at: t, action: actor === "manager" ? "reassign" : "delegate", request_id: a.request_id, assignment_id: b.id, expert_id: eid, from_expert_id: a.expert_id,
-      days: int(body.days, b.days || a.days), deadline_at: deadlineAt, item_ids: items.map((i) => i.id), actor }),
-    ...fresh,
-  ];
-  /* کارشناس تازه همان پیام «ارجاع جدید» را می‌گیرد که با «ارسال» مدیر می‌رفت */
-  if (a.dispatched_at && target.telegram_chat) {
-    stmts.push(queueStmt(env, `dispatch:${b.id}:${t}`, target.telegram_chat,
-      dispatchText({ request_id: a.request_id, party: a.party, item_count: items.length, days: int(body.days, b.days || a.days), items, dispatched_at: t, deadline_at: deadlineAt }),
-      seenKb(b.id)));
-  }
-  await env.DB.batch(stmts);
-  return { ok: true, assignment_id: b.id, notified: !!(a.dispatched_at && target.telegram_chat) };
-}
+/* تغییر کارشناس (reassign) در worker/assign.js است — مدیر از این‌جا، کارشناس ارشد از پنل و بات */
 
 /* مدیر کارشناسِ یک ارجاعِ ارسال‌نشده را برمی‌دارد: اقلامش دوباره «بدون کارشناس»
    می‌شوند و با «ارسال» جایی نمی‌روند. فقط همان ارجاع، نه بقیهٔ کارشناس‌های همین درخواست. */
@@ -870,9 +902,24 @@ async function setState(env, body, actor) {
 /* ------------------------------------------------------------------ */
 /* پنل کارشناس                                                          */
 /* ------------------------------------------------------------------ */
-async function tray(env, ex) {
-  /* ارجاع‌های ارسال‌شده که حداقل یک قلم باز دارند (معلق/متوقف/بسته در کارتابل نیستند) */
-  const rows = (await env.DB.prepare(`SELECT a.*, r.date, r.party, r.party_type, r.center,
+/* خودِ کارشناس برای پنلش — کد ورود و شناسهٔ گفت‌وگوها بیرون نمی‌رود */
+const meOut = (ex) => ({ ...ex, code: undefined, team_connected: !!ex.team_chat, team_bot: ex.team_via === "team", team_chat: undefined, team_via: undefined });
+
+/**
+ * آستانه‌های مؤثر برای باکس‌های پایشِ یک کارشناس: اگر ارشدش برای تیم آستانه گذاشته، همان؛
+ * وگرنه آستانه‌های مدیر. پنل‌ها رنگ باکس را با settings.thresholds می‌سازند، پس همان را عوض می‌کنیم.
+ */
+async function settingsFor(env, expertId, settings) {
+  const s = settings || await getSettings(env);
+  const thr = (await thresholdsByExpert(env, [expertId], s)).get(expertId);
+  return thr ? { ...s, thresholds: thr } : s;
+}
+
+async function tray(env, ex, url) {
+  /* full=1: کارتابل، وضعیت تلگرام و «من» در یک درخواست — پنل کارشناس قبلاً سه‌چهار درخواست
+     موازی می‌فرستاد و هر کدام رفت‌وبرگشت شبکه و احراز هویتِ خودش را داشت */
+  const full = url && url.searchParams.get("full") === "1";
+  const [res, settings] = await Promise.all([env.DB.prepare(`SELECT a.*, r.date, r.party, r.party_type, r.center,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist_count,
@@ -883,8 +930,14 @@ async function tray(env, ex) {
     FROM assignments a JOIN requests r ON r.id=a.request_id
     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
-    ORDER BY a.dispatched_at DESC`).bind(ex.id).all()).results || [];
-  return { assignments: rows, settings: await getSettings(env) };
+    ORDER BY a.dispatched_at DESC`).bind(ex.id).all(), getSettings(env)]);
+  const out = { assignments: res.results || [], settings: await settingsFor(env, ex.id, settings) };
+  if (!full) return out;
+  const tg = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(ex.id).first();
+  const team = ex.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(ex.id).all()).results || [] : [];
+  return { ...out, me: { role: "expert", expert: meOut(ex), team },
+    tg: { connected: !!(tg && tg.telegram_chat), botConfigured: !!env.TG_BOT_TOKEN, bot: env.TG_BOT_USERNAME || null,
+      teamBotConfigured: !!env.TG_TEAM_BOT_TOKEN, teamBot: env.TG_TEAM_BOT_USERNAME || null } };
 }
 
 async function assignmentDetail(env, aid, who) {
@@ -897,7 +950,7 @@ async function assignmentDetail(env, aid, who) {
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
   const decisions = (await env.DB.prepare("SELECT * FROM decisions WHERE assignment_id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(aid).all()).results || [];
-  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await getSettings(env) };
+  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id) };
 }
 
 /* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
@@ -1066,6 +1119,20 @@ async function route(request, env, ctx) {
       return json({ ok: true });
     }
 
+    /* وبهوکِ بات تیمی (Supply Senior): فقط ثبتِ گفت‌وگوی تیم کارشناس ارشد و /stop. همان راز. شناسهٔ
+       آپدیتِ دو بات از هم مستقل است، پس در tg_seen با علامت منفی جدا نگه داشته می‌شود. */
+    if (path === "/tg/team-webhook" && m === "POST") {
+      if (!env.TG_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TG_WEBHOOK_SECRET) {
+        return new Response("forbidden", { status: 403 });
+      }
+      const u = await request.json().catch(() => null);
+      if (!u || !u.update_id) return json({ ok: true });
+      const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(-Math.abs(u.update_id), now()).run();
+      if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
+      await handleTeamUpdate(env, u);
+      return json({ ok: true });
+    }
+
     /* کارشناس لینک اتصال می‌گیرد (TG-03) */
     if (path === "/tg/link" && m === "POST") {
       const ex = await requireExpert(request, env);
@@ -1093,7 +1160,9 @@ async function route(request, env, ctx) {
       if (!env.TG_BOT_TOKEN || !env.TG_WEBHOOK_SECRET) return NOT_CONNECTED("بات تلگرام");
       const api = telegram(env);
       await api.setWebhook(`${url.origin}${PREFIX}/tg/webhook`, env.TG_WEBHOOK_SECRET);
-      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo() });
+      /* بات تیمی کارشناسان ارشد هم اگر توکنش ست شده */
+      const team = env.TG_TEAM_BOT_TOKEN ? await ensureTeamWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
+      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team });
     }
     if (path === "/tg/setup" && m === "GET") {
       requireManager(request, env);
@@ -1134,7 +1203,7 @@ async function route(request, env, ctx) {
       if (who.expert) {
         /* زیرمجموعه‌های کارشناس ارشد — برای «ارجاع به تیم» و تب تیم */
         const team = who.expert.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(who.expert.id).all()).results || [] : [];
-        return json({ ...who, expert: { ...who.expert, team_connected: !!who.expert.team_chat, team_chat: undefined }, team });
+        return json({ ...who, expert: meOut(who.expert), team });
       }
       return json(who);
     }
@@ -1146,16 +1215,14 @@ async function route(request, env, ctx) {
     /* افزودن کارشناس — کارکنان عوض می‌شوند و نباید برای هر نفر تازه استقرار لازم باشد */
     if (path === "/experts" && m === "POST") {
       requireManager(request, env);
+      return json(await addExpert(env, await readJson(request)));
+    }
+    /* کارشناس کد ورود خودش را عوض می‌کند (صفحهٔ «حساب من»): کد فعلی لازم است */
+    if (path === "/me/code" && m === "PUT") {
+      const ex = await requireExpert(request, env);
       const b = await readJson(request);
-      const name = T(b.name), code = T(b.code);
-      if (!name || !code) throw new HttpError("نام و کد کارشناسی لازم است.");
-      if (!/^\d{3,8}$/.test(code)) throw new HttpError("کد کارشناسی باید فقط رقم باشد.");
-      const dup = await env.DB.prepare("SELECT id FROM experts WHERE code=? OR name=?").bind(code, nrm(name)).first();
-      if (dup) throw new HttpError("کارشناسی با همین کد یا نام از قبل هست.", 409);
-      const r = await env.DB.prepare(
-        "INSERT INTO experts (name,label,code,active,speed,created_at) VALUES (?,?,?,1,1.0,?)",
-      ).bind(nrm(name), T(b.label) || name, code, now()).run();
-      return json({ ok: true, id: r.meta.last_row_id, name, code });
+      if (T(b.current) !== String(ex.code)) throw new HttpError("کد فعلی درست نیست.", 403);
+      return json(await setExpertCode(env, ex.id, b.code));
     }
 
     /* خودآزمون سرویس‌های بیرونی — تلگرام، انبار فایل، تبدیل صوت، مدل، دیتابیس */
@@ -1190,7 +1257,7 @@ async function route(request, env, ctx) {
       const stmts = [env.DB.prepare("DELETE FROM holidays")];
       for (const [d, title] of rows) stmts.push(env.DB.prepare("INSERT OR REPLACE INTO holidays (date_j,title,updated_at) VALUES (?,?,?)").bind(d, title, t));
       await env.DB.batch(stmts);
-      holidayCache = null; /* کش این isolate باطل می‌شود؛ بقیه حداکثر ۵ دقیقه بعد تازه می‌شوند */
+      resetHolidayCache(); /* کش این isolate باطل می‌شود؛ بقیه حداکثر ۵ دقیقه بعد تازه می‌شوند */
       return json({ ok: true, count: rows.length });
     }
     let mm;
@@ -1199,17 +1266,34 @@ async function route(request, env, ctx) {
       return json(await updateExpert(env, int(mm[1]), await readJson(request)));
     }
     /* تنظیم اعلانات خودِ کارشناس ارشد (تیک مرحله‌ها) و لینک اتصال گروه تیمش */
+    /* تنظیم اعلانات کارشناس ارشد — همان تب مدیر برای تیم خودش: تیک مرحله‌هایی که در تلگرام تیمی
+       اعلام شود، و آستانه‌های پایش (درصد مهلت) که برای کارشناسان زیر نظرش جای آستانه‌های مدیر را
+       می‌گیرد. alert_thresholds: null یعنی «همان آستانه‌های مدیر». */
     if (path === "/me/alerts" && m === "PUT") {
       const ex = await requireExpert(request, env);
       if (!ex.senior) throw new HttpError("فقط کارشناس ارشد تنظیم اعلانات دارد.", 403);
       const b = await readJson(request);
-      await env.DB.prepare("UPDATE experts SET alert_stages=? WHERE id=?").bind(JSON.stringify(stageTicks(b.alert_stages)), ex.id).run();
-      return json({ ok: true, alert_stages: stageTicks(b.alert_stages) });
+      const sets = [], args = [];
+      if ("alert_stages" in b) { sets.push("alert_stages=?"); args.push(JSON.stringify(stageTicks(b.alert_stages))); }
+      let thr = ex.alert_thresholds, thrChanged = false;
+      if ("alert_thresholds" in b) {
+        thr = b.alert_thresholds == null ? null : parseThresholds(b.alert_thresholds);
+        if (b.alert_thresholds != null && !thr) throw new HttpError("درصدها باید صعودی و بین ۱ تا ۱۰۰ باشند.");
+        thrChanged = JSON.stringify(thr) !== JSON.stringify(ex.alert_thresholds);
+        sets.push("alert_thresholds=?"); args.push(thr ? JSON.stringify(thr) : null);
+      }
+      if (sets.length) await env.DB.prepare(`UPDATE experts SET ${sets.join(",")} WHERE id=?`).bind(...args, ex.id).run();
+      /* هشدارهای ارجاع‌های زندهٔ تیم با آستانه‌های تازه از نو چیده می‌شوند */
+      const r = thrChanged ? await rescheduleTeam(env, ex.id, thr) : { rescheduled: 0 };
+      return json({ ok: true, alert_stages: "alert_stages" in b ? stageTicks(b.alert_stages) : ex.alert_stages, alert_thresholds: thr, ...r });
     }
+    /* «تلگرام تیمی» کارشناس ارشد: لینک یک‌بارمصرفِ بات تیمی (Supply Senior). وبهوکِ آن بات، اگر
+       هنوز روی همین دامنه ثبت نشده، همین‌جا ثبت می‌شود تا بعد از استقرار کار دستی لازم نباشد. */
     if (path === "/tg/team-link" && m === "POST") {
       const ex = await requireExpert(request, env);
-      if (!ex.senior) throw new HttpError("فقط کارشناس ارشد گروه تیم دارد.", 403);
-      if (!env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
+      if (!ex.senior) throw new HttpError("فقط کارشناس ارشد تلگرام تیمی دارد.", 403);
+      if (!env.TG_TEAM_BOT_TOKEN && !env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
+      if (env.TG_TEAM_BOT_TOKEN && env.TG_WEBHOOK_SECRET) await ensureTeamWebhook(env, url.origin).catch((e) => console.error("team webhook", e && e.message));
       return json(await makeTeamLink(env, ex.id));
     }
     if (path === "/team" && m === "GET") {
@@ -1250,7 +1334,7 @@ async function route(request, env, ctx) {
     if (path === "/events" && m === "GET") { requireManager(request, env); const since = int(url.searchParams.get("since"), 0); return json({ events: (await env.DB.prepare("SELECT * FROM events WHERE at>? ORDER BY at DESC LIMIT 300").bind(since).all()).results || [] }); }
 
     /* --- پنل کارشناس --- */
-    if (path === "/tray" && m === "GET") { const ex = await requireExpert(request, env); return json(await tray(env, ex)); }
+    if (path === "/tray" && m === "GET") { const ex = await requireExpert(request, env); return json(await tray(env, ex, url)); }
     if ((mm = /^\/assignments\/(\d+)$/.exec(path)) && m === "GET") { const who = await requireAny(request, env); return json(await assignmentDetail(env, int(mm[1]), who)); }
     if ((mm = /^\/assignments\/(\d+)\/viewed$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); await ownAssignment(env, ex, int(mm[1])); await env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(now(), int(mm[1])).run(); return json({ ok: true }); }
     if ((mm = /^\/assignments\/(\d+)\/commission$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await commission(env, ex, int(mm[1]))); }
@@ -1533,4 +1617,4 @@ function streamJson(work) {
   return new Response(readable, { headers: { "content-type": "application/json; charset=utf-8", "cache-control": "no-store" } });
 }
 
-export { route };
+export { route, ensureSchema };

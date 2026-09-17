@@ -17,10 +17,11 @@ export const STAGE_NAMES = ["مشاهده", "بررسی سوابق", "جستجو
  * `idem` کلید یکتای رویداد است: اگر همان رویداد دوبار به صف برود — مثلاً چون
  * تلگرام آپدیت را دوباره فرستاد یا Cron همزمان دوبار اجرا شد — فقط یکی می‌ماند.
  */
-export function queueStmt(env, idem, chat, text, keyboard) {
+export function queueStmt(env, idem, chat, text, keyboard, bot) {
   const t = Date.now();
+  /* bot: خالی = بات اصلی؛ «team» = بات تیمی کارشناسان ارشد (bot.js:drainOutbox) */
   return env.DB.prepare(
-    `INSERT INTO outbox (idem,channel,target,payload_json,status,next_at,created_at)
-     VALUES (?,'telegram',?,?,'pending',?,?) ON CONFLICT(idem) DO NOTHING`,
-  ).bind(idem, String(chat), JSON.stringify({ text, keyboard: keyboard || null }), t, t);
+    `INSERT INTO outbox (idem,channel,target,payload_json,status,next_at,created_at,bot)
+     VALUES (?,'telegram',?,?,'pending',?,?,?) ON CONFLICT(idem) DO NOTHING`,
+  ).bind(idem, String(chat), JSON.stringify({ text, keyboard: keyboard || null }), t, t, bot === "team" ? "team" : null);
 }

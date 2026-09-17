@@ -223,9 +223,10 @@
     try {
       S.now = Date.now();
       /* بسته‌ها و متوقف‌ها از سرور فقط وقتی می‌آیند که فیلتر وضعیت آن‌ها را خواسته باشد */
-      const qs = `?from=${encodeURIComponent(fromDate())}&limit=${S.page.limit}&offset=${S.page.offset}${needsAllScope() ? "&scope=all" : ""}`;
-      const [d, sc, dec] = await Promise.all([TP.api("/desk" + qs), TP.api("/scores"), TP.api("/decisions")]);
-      S.data = d; S.scores = sc; S.decisions = dec.decisions || [];
+      /* with=all: امتیازها و تصمیم‌های در انتظار در همان پاسخ میز — یک درخواست به‌جای سه (سرعت) */
+      const qs = `?from=${encodeURIComponent(fromDate())}&limit=${S.page.limit}&offset=${S.page.offset}${needsAllScope() ? "&scope=all" : ""}&with=all`;
+      const d = await TP.api("/desk" + qs);
+      S.data = d; S.scores = d.scores || { scores: [], weights: [] }; S.decisions = d.decisions || [];
       S.page.total = d.total || d.requests.length;
     } catch (e) {
       if (e.status === 401 || e.status === 503) { TP.manager.clear(); S.error = e.message; }
@@ -313,11 +314,19 @@
     return `<div class="filexp ${differs ? "warn" : ""}" title="${differs ? "کارشناس فایل راهکاران با کارشناس انتخاب‌شده فرق دارد" : "کارشناس خرید در فایل راهکاران"}">${differs ? "⚠ " : ""}فایل: ${esc(names.join("، "))}</div>`;
   }
 
+  /* آستانه‌های پایشِ هر کارشناس: اگر کارشناس ارشدش برای تیم آستانه گذاشته همان، وگرنه آستانه‌های مدیر
+     (تصمیم مدیر، شهریور ۱۴۰۵) — همان چیزی که سرور برای هشدارهای همان کارشناس به کار می‌برد */
+  function thrFor(expertId) {
+    const E = S.data.experts, e = E.find((x) => x.id === expertId);
+    const s = e && e.senior_id ? E.find((x) => x.id === e.senior_id && x.senior && x.active) : null;
+    return (s && s.alert_thresholds) || settings().thresholds;
+  }
   function stageBoxes(r, a) {
     const A = { dispatchedAt: a.dispatched_at, days: a.days, done: doneFlags(r, a), active: isActive(r, a) };
+    const thr = thrFor(a.expert_id);
     return TP.STAGES.map((s, i) => {
       let lab = ""; if (i === 3 && a.quote_count) lab = `<span class="cnt">${a.quote_count}</span>`; if (i === 4 && a.proforma_count) lab = `<span class="cnt">${a.proforma_count}</span>`;
-      return `<td class="console"><div class="box b-${TP.stageColor(A, i, settings().thresholds, S.now)}" title="${s}">${lab}</div></td>`;
+      return `<td class="console"><div class="box b-${TP.stageColor(A, i, thr, S.now)}" title="${s}">${lab}</div></td>`;
     }).join("");
   }
 
@@ -432,7 +441,9 @@
           <td><button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button></td>
           <td class="rt nm">${nameCell(e)}</td>
           ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}
-          <td class="num">${esc(e.code)}</td><td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
+          <td class="num">${S.editCode === e.id
+            ? `<input class="tp-input num" data-ecode="${e.id}" value="${esc(e.code)}" inputmode="numeric" maxlength="8" style="width:100%;text-align:center" title="۴ تا ۸ رقم؛ Enter برای ذخیره">`
+            : `<span class="ename" data-ecode-edit="${e.id}" title="کد ورود (رمز پنل) — برای تغییر کلیک کنید">${esc(e.code)}</span>`}</td><td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
         <tr><td colspan="3"></td><td class="rt" colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
       </tbody></table></div>
       <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام.</div></div>`;
@@ -468,7 +479,8 @@
       ${h && h.loading ? `<div class="tp-note warn">یک بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)} هست («${esc(h.loading.filename || "")}»). تا پایان نگرفتنش، سوابق قبلی در دسترس نیست — فایل را دوباره بارگذاری کنید.</div>` : ""}
       <div class="tp-row"><button class="tp-btn primary" data-hist-import>بارگذاری فایل سوابق (.xlsx)</button>
         <span class="dim" style="font-size:.85rem">یا فایل را وقتی روی همین تب هستید روی صفحه رها کنید.</span></div>
-      <div class="tp-note">ستون‌های لازم: <b>تاریخ سفارش</b> · <b>عنوان قلم خریدنی</b> · <b>تامین کننده</b> · <b>مبلغ به ارز عملیاتی</b> · <b>شاخص تعدیل</b> · <b>کد قلم جدید</b>.
+      <div class="tp-note">ساختار فایل: همان «Savabegh.xlsx» شهریور ۱۴۰۵ (۲۵ ستون). ستون‌های لازم: <b>تاریخ سفارش</b> · <b>عنوان قلم خریدنی</b> · <b>تامین کننده</b> · <b>مبلغ به ارز عملیاتی</b> · <b>شاخص تعدیل</b> · <b>کد قلم جدید</b>.
+        ستون <b>کارشناس خرید</b> هم خوانده می‌شود و گزارش سه‌ماهه مبلغ فاکتورها را با آن به گروه هر کارشناس ارشد می‌بخشد. قیمت واحد از ستون «قیمت واحد» (ریال) خوانده می‌شود، نه «فی» (ارزِ سفارش).
         ستون‌های «قیمت کل (۱۴۰۴)» و «قیمت واحد (۱۴۰۴)» در فایل فرمول‌اند؛ اگر مقدارِ ذخیره‌شده نداشته باشند، از روی مبلغ × شاخص تعدیل ساخته می‌شوند.
         بارگذاری تازه <b>جای فایل قبلی را می‌گیرد</b>.</div>
       <div class="tp-sect"><h3>نرمال‌سازی اقلام <span>مرحلهٔ بعد</span></h3>
@@ -955,6 +967,22 @@
     Q("[data-ename]").forEach((i) => {
       const done = async () => { const id = +i.dataset.ename, e = S.data.experts.find((x) => x.id === id); const v = i.value.trim(); S.editName = null; if (!v || v === (e.label || e.name)) return render(); await expertPatch(id, { name: v, label: v }); };
       i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editName = null; render(); } };
+      i.onblur = done;
+    });
+    /* کد ورود: کلیک → کادر؛ Enter ذخیره، Esc انصراف. تکراری بودنش را سرور می‌گوید */
+    Q("[data-ecode-edit]").forEach((x) => x.onclick = () => { S.editCode = +x.dataset.ecodeEdit; render(); const i = G("[data-ecode]"); if (i) { i.focus(); i.select(); } });
+    Q("[data-ecode]").forEach((i) => {
+      let busy = false;
+      const done = async () => {
+        if (busy) return; busy = true;
+        const id = +i.dataset.ecode, e = S.data.experts.find((x) => x.id === id);
+        const v = i.value.trim().replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+        S.editCode = null;
+        if (!v || v === String(e.code)) return render();
+        if (!/^\d{4,8}$/.test(v)) { render(); return TP.modal("کد نامعتبر", "کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.", null, "باشد", ""); }
+        await expertPatch(id, { code: v });
+      };
+      i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editCode = null; render(); } };
       i.onblur = done;
     });
     Q("[data-estar]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); expertPatch(e.id, { senior: !e.senior }); });
