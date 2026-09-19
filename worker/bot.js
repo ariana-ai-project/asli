@@ -43,6 +43,7 @@ import { itemHistory, activeImport } from "./history.js";
 import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
+import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -300,6 +301,14 @@ export async function ensureTeamWebhook(env, origin, force) {
   if (!force && (await settingValue(env, "teamWebhook")) === want) return { ok: true, url: want, cached: true };
   const api = telegram(env, "team");
   await api.setWebhook(want, env.TG_WEBHOOK_SECRET);
+  /* منوی دستورهای بات — تا کارشناس ارشد «وضعیت تیم» را در خودِ تلگرام ببیند و
+     لازم نباشد یادش بماند. شکستش کار را نمی‌خواباند، فقط منو خالی می‌ماند. */
+  await api.call("setMyCommands", {
+    commands: [
+      { command: "tim", description: "وضعیت تیم — کارشناسان و درخواست‌هایشان" },
+      { command: "stop", description: "قطع اتصال تلگرام تیمی" },
+    ],
+  }).catch((e) => console.error("team setMyCommands", e && e.message));
   await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('teamWebhook',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
     .bind(JSON.stringify(want), now()).run();
   return { ok: true, url: want, me: force ? await api.getMe().catch(() => null) : undefined };
@@ -326,17 +335,22 @@ async function bindTeam(env, api, chat, token, via) {
     + "از این پس همان اعلان‌هایی که برای مدیر واحد می‌رود — تغییر وضعیت مراحل (مثل مشاهده و دریافت پیش‌فاکتور)، عبور از مهلت و بسته شدن درخواست — "
     + "این‌جا می‌آید، فقط برای کارشناسانی که مدیر زیر نظر شما گذاشته است"
     + (team.length ? `:\n${team.map((x) => `• ${esc(x.label || x.name)}`).join("\n")}` : ". (هنوز کسی زیر نظر شما نیست.)")
-    + "\n\n<i>کدام مرحله‌ها و با چه آستانه‌ای؟ پنل کارشناس ← تب «تنظیم اعلانات». ارجاع‌های خودتان همچنان در بات کارشناسان می‌آید.</i>").catch(() => {});
+    + "\n\nهر وقت خواستید وضعیت تیم را ببینید، <b>/tim</b> بفرستید یا دکمهٔ زیر را بزنید."
+    + "\n\n<i>کدام مرحله‌ها و با چه آستانه‌ای؟ پنل کارشناس ← تب «تنظیم اعلانات». ارجاع‌های خودتان همچنان در بات کارشناسان می‌آید.</i>",
+    via === "team" ? teamMenuKb() : null).catch(() => {});
   return { ok: true };
 }
 
 /**
- * آپدیت‌های بات تیمی. این بات گفت‌وگوی کاری ندارد: فقط اتصال (/start tm…)، راهنما و قطع (/stop).
+ * آپدیت‌های بات تیمی: اتصال (/start tm…)، قطع (/stop)، و منوی پایش تیم — فهرست کارشناسان
+ * زیر نظر همان ارشد، درخواست‌های هر کدام و مرحله‌ای که رویش مانده‌اند (worker/team.js).
+ * این بات فقط می‌خواند؛ کار کارشناسی و ارجاع همچنان در بات کارشناسان است.
  * همیشه بی‌استثنا برمی‌گردد تا تلگرام آپدیت را دوباره نفرستد.
  */
 export async function handleTeamUpdate(env, u) {
   try {
     const api = telegram(env, "team");
+    if (u.callback_query) return await handleTeamCallback(env, api, u.callback_query);
     const msg = u.message;
     if (msg && msg.chat) {
       const chat = msg.chat.id, text = T(msg.text);
@@ -347,11 +361,18 @@ export async function handleTeamUpdate(env, u) {
         await api.sendMessage(chat, "اتصال تلگرام تیمی قطع شد. برای وصل شدن دوباره، از پنل کارشناس «تلگرام تیمی» را بزنید.").catch(() => {});
         return { ok: true };
       }
+      /* «وضعیت تیم» — در گروه هم کار می‌کند، چون گفت‌وگوی تیم ممکن است گروه باشد */
+      if (/^\/(tim|team)(?:@\w+)?$/.test(text)) {
+        const senior = await seniorOfChat(env, chat);
+        if (!senior) { await api.sendMessage(chat, "این گفت‌وگو به هیچ کارشناس ارشدی وصل نیست. از پنل کارشناس «تلگرام تیمی» را بزنید.").catch(() => {}); return { ok: true }; }
+        return await sendTeamMenu(env, api, chat, senior);
+      }
       if (msg.chat.type !== "private" && !st) return { ok: true };   /* گروه: فقط دستورها */
       const bound = await env.DB.prepare("SELECT name, label FROM experts WHERE team_chat=? AND team_via='team' AND active=1").bind(String(chat)).first();
       await api.sendMessage(chat, bound
-        ? `این‌جا تلگرام تیمی <b>${esc(bound.label || bound.name)}</b> است و اعلان‌های پایش کارشناسان تیم ایشان این‌جا می‌آید.\n\n/stop — قطع اتصال`
-        : "این بات فقط اعلان‌های پایش تیم را برای کارشناسان ارشد واحد پشتیبانی می‌فرستد.\n\nبرای اتصال، در پنل کارشناس دکمهٔ «تلگرام تیمی» را بزنید و روی لینکش کلیک کنید.").catch(() => {});
+        ? `این‌جا تلگرام تیمی <b>${esc(bound.label || bound.name)}</b> است و اعلان‌های پایش کارشناسان تیم ایشان این‌جا می‌آید.\n\n/tim — وضعیت تیم\n/stop — قطع اتصال`
+        : "این بات فقط برای کارشناسان ارشد واحد پشتیبانی است: اعلان پایش کارشناسان تیم، و دیدن وضعیت آن‌ها.\n\nبرای اتصال، در پنل کارشناس دکمهٔ «تلگرام تیمی» را بزنید و روی لینکش کلیک کنید.",
+        bound ? teamMenuKb() : null).catch(() => {});
       return { ok: true };
     }
     const m = u.my_chat_member;

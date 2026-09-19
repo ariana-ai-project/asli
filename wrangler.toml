@@ -10,8 +10,10 @@
 #
 # رازها در مخزن نیستند (مخزن عمومی است) و با wrangler secret put ست می‌شوند:
 #   MANAGER_CODE       کد ورود مدیر
-#   TG_BOT_TOKEN       توکن بات تلگرام (@ArianaSupplyBot)
+#   TG_BOT_TOKEN       توکن بات کارشناسان (@ArianaSupplyBot)
+#   TG_TEAM_BOT_TOKEN  توکن بات کارشناسان ارشد (@Supply_SeniorBot) — اعلان پایش تیم و منوی /tim
 #   TG_WEBHOOK_SECRET  رازی که تلگرام در هدر X-Telegram-Bot-Api-Secret-Token برمی‌گرداند
+#                      (یک راز برای هر دو بات؛ وبهوکشان جداست)
 # ============================================================
 name = "asli"
 main = "worker.js"
