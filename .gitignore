@@ -3,3 +3,6 @@
 node_modules/
 frontend/tamin-poshtibani/_test.xlsx
 frontend/tamin-poshtibani/_test2.xlsx
+
+# فایل‌های موقت ابزار خط فرمان Supabase
+backend/hoghooghi/supabase/.temp/

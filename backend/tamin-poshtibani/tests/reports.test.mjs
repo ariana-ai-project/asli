@@ -66,6 +66,18 @@ test("نام کوتاه و تطبیق «کارشناس خرید» راهکارا
   assert.equal(m("ک-م"), null);
 });
 
+test("تطبیق نام کامل سوابق: یک کلمهٔ مشترک کافی نیست؛ برچسب کارشناس تازه بر رکورد غیرفعال مقدم", () => {
+  const E = [{ id: 1, name: "مریم محمودی اصل زاده", label: "خانم محمودی", active: 1 }, { id: 2, name: "حسین احسانی", label: "آقای احسانی", active: 1 },
+    { id: 3, name: "سید حمید رسولی طاهر", label: "آقای رسولی", active: 0 }, { id: 4, name: "آقای رسولی", label: "آقای رسولی", active: 1 },
+    { id: 5, name: "مهدی طراوتی", label: "آقای طراوتی", active: 0 }, { id: 6, name: "آقای شیری", label: "آقای شیری", active: 1 }];
+  const m = expertMatcher(E);
+  for (const n of ["محمدرضا عسکری زاده جزی", "مریم معافی", "حسین مدرس", "سیدحمید حسینی"]) assert.equal(m(n), null, n);
+  assert.equal(m("مریم  محمودی اصل زاده").id, 1);
+  assert.equal(m("سید حمید رسولی طاهر").id, 4);
+  assert.equal(m("مهدی شیری آغول بیک").id, 6);
+  assert.equal(m("طراوتی").id, 5);
+});
+
 const EXPERTS = [
   { id: 1, name: "ارسلان کوشاری", label: "آقای کوشاری", senior: 1, active: 1 },
   { id: 2, name: "حمید رسولی", label: "آقای رسولی", senior: 1, active: 1 },

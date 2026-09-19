@@ -29,7 +29,7 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 //
 // ۱. کاربر چند «قرارداد مرجع» (role=reference) و دقیقاً یک «قرارداد
 //    پیش‌نویس» در حال بررسی (role=draft) آپلود می‌کند (base64).
-// ۲. فایل‌ها به همراه دستورالعمل مقایسه‌ای برای claude-opus-4-8 ارسال
+// ۲. فایل‌ها به همراه دستورالعمل مقایسه‌ای برای claude-opus-5 ارسال
 //    می‌شود.
 // ۳. مدل دیگر HTML تولید نمی‌کند؛ فقط یک آرایه ساختاریافته از «مواد
 //    مفقود» برمی‌گرداند: هر مورد شامل شماره قرارداد مرجع (referenceIndex)،
@@ -49,7 +49,7 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 //
 // نکته مهم دربارهٔ نحوه ارسال پاسخ (Server-Sent Events): همان معماری
 // heartbeat نسخه قبلی برای جلوگیری از قطع اتصال توسط پلتفرم میزبانی حفظ
-// شده است، چون تحلیل توسط claude-opus-4-8 می‌تواند طولانی باشد.
+// شده است، چون تحلیل توسط claude-opus-5 می‌تواند طولانی باشد.
 //
 // نکته مهم دربارهٔ راست‌به‌چپ بودن متن: تمام پاراگراف‌ها و سلول‌های جدول
 // با alignment=RIGHT و bidirectional=true و rightToLeft=true روی هر
@@ -62,12 +62,23 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 // ═══════════════════════════════════════════════════════════════════════
 const COMPANY_NAME = "شرکت تونل سد آریانا";
 const COMPANY_SUBTITLE = "اداره حقوقی";
-const MODEL_NAME = "claude-opus-4-8";
+const MODEL_NAME = "claude-opus-5";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
-// حداکثر توکن خروجی مدل. اگر با خطای "max_tokens" مواجه شدید افزایش دهید؛
-// پیش از آن سقف مجاز خروجی claude-opus-4-8 را در docs.claude.com بررسی کنید.
-const MAX_OUTPUT_TOKENS = 16000;
+// روی claude-opus-5 «تفکر» به‌صورت پیش‌فرض روشن است و توکن‌های آن هم از سهم
+// max_tokens برداشته می‌شود؛ پس سقف خروجی باید بالاتر از مدل‌های قبلی باشد.
+// عمق تفکر با output_config.effort تنظیم می‌شود (پیش‌فرض high) و پارامتر
+// قدیمی budget_tokens روی این مدل خطای ۴۰۰ می‌دهد.
+const THINKING = { type: "adaptive" } as const;
+
+// اگر طبقه‌بندی‌کننده‌های ایمنی درخواستی را رد کنند، سرور به‌جای برگرداندن خطا
+// همان درخواست را روی مدل جایگزینِ مناسب اجرا می‌کند. «default» یعنی انتخاب
+// جایگزین با خود Anthropic باشد تا با تغییر مدل‌ها این کد دست‌نخورده بماند.
+const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
+// حداکثر توکن خروجی مدل (شاملِ توکن‌های تفکر). پاسخ جریانی گرفته می‌شود،
+// پس این عدد باعث تایم‌اوت درخواست نمی‌شود.
+const MAX_OUTPUT_TOKENS = 32000;
 
 // شبکه ایمنی در برابر تعلیق دائمی درخواست به Claude.
 const CLAUDE_REQUEST_TIMEOUT_MS = 600_000; // ۱۰ دقیقه
@@ -260,6 +271,59 @@ function buildUserContentBlocks(question: string, referenceFiles: FileContent[],
   return blocks;
 }
 
+/**
+ * خواندن پاسخ جریانیِ Claude (SSE) و چسباندن تکه‌های متن به هم.
+ * تنها بلوک‌های متنی جمع می‌شوند؛ بلوک تفکر روی این مدل متن خام برنمی‌گرداند.
+ */
+async function readClaudeStream(
+  response: Response,
+): Promise<{ text: string; stopReason: string | null }> {
+  if (!response.body) throw new Error("پاسخ سرویس هوش مصنوعی کلود بدنه‌ای نداشت.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let stopReason: string | null = null;
+  let streamError: string | null = null;
+
+  const handle = (raw: string) => {
+    // deno-lint-ignore no-explicit-any
+    let ev: any;
+    try {
+      ev = JSON.parse(raw);
+    } catch {
+      return; // بستهٔ ناقص یا خط غیرداده — نادیده گرفته می‌شود
+    }
+    if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+      text += ev.delta.text ?? "";
+    } else if (ev.type === "message_delta" && ev.delta?.stop_reason) {
+      stopReason = ev.delta.stop_reason;
+    } else if (ev.type === "error") {
+      streamError = ev.error?.message ?? "خطای نامشخص در جریان پاسخ";
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data:")) handle(line.slice(5).trim());
+      }
+    }
+  }
+
+  if (streamError) {
+    throw new Error(`خطا در ارتباط با سرویس هوش مصنوعی کلود: ${streamError}`);
+  }
+  return { text, stopReason };
+}
+
 async function callClaudeForAnalysis(
   apiKey: string,
   question: string,
@@ -279,10 +343,14 @@ async function callClaudeForAnalysis(
         "content-type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": FALLBACK_BETA,
       },
       body: JSON.stringify({
         model: MODEL_NAME,
         max_tokens: MAX_OUTPUT_TOKENS,
+        thinking: THINKING,
+        fallbacks: "default",
+        stream: true,
         system: FULL_SYSTEM_PROMPT,
         messages: [
           {

@@ -96,16 +96,30 @@ export function shortNames(experts) {
   const cnt = {}; for (const v of last.values()) cnt[v] = (cnt[v] || 0) + 1;
   return new Map(experts.map((e) => [e.id, cnt[last.get(e.id)] > 1 ? words(e.label || e.name).join(" ") : last.get(e.id)]));
 }
+/** «کارشناس خرید» فایل‌ها → کارشناس. یک کلمهٔ مشترک کافی نیست («زاده»، «مریم»، «حسین» نام‌های بیرون از
+    فهرست را به کارشناس دیگری می‌چسباند)؛ فقط: نام کامل برابر، یا همهٔ کلمه‌های نام/برچسب کارشناس درون نام،
+    یا نامِ تک‌کلمه‌ای برابر نام خانوادگی (یا پیشوند دست‌کم ۴ حرفی آن). کارشناس فعال مقدم است. */
 export function expertMatcher(experts) {
-  const toks = experts.map((e) => ({ e, w: new Set([...words(e.name), ...words(e.label)].filter((x) => x.length >= 3)) }));
+  const E = experts.map((e) => {
+    const nw = words(e.name), lw = words(e.label);
+    return { e, full: nw.join(" "), sets: [nw, lw].filter((s) => s.length), last: [...new Set([...lw, ...(nw.length > 1 ? nw.slice(1) : nw)])].filter((x) => x.length >= 3) };
+  });
+  const first = (...lists) => { for (const l of lists) { const h = l.find((t) => t.e.active) || l[0]; if (h) return h.e; } return null; };
   const memo = new Map();
   return (raw) => {
-    const key = nrm(raw); if (!key) return null;
+    const w = words(raw), key = w.join(" ");
+    if (!key) return null;
     if (memo.has(key)) return memo.get(key);
     let found = null;
-    for (const p of words(key).filter((x) => x.length >= 3)) {
-      const hit = toks.filter((t) => t.w.has(p) || (p.length >= 4 && [...t.w].some((w) => w.startsWith(p) || p.startsWith(w) && w.length >= 4)));
-      if (hit.length) { found = (hit.find((h) => h.e.active) || hit[0]).e; break; }
+    if (w.length > 1) {
+      const rs = new Set(w);
+      const exact = E.filter((t) => t.full === key), sub = E.filter((t) => t.sets.some((s) => s.every((x) => rs.has(x))));
+      const act = (l) => l.filter((t) => t.e.active);
+      found = first(act(exact), act(sub), exact, sub);
+    } else if (w[0].length >= 3) {
+      const p = w[0];
+      found = first(E.filter((t) => t.last.includes(p)),
+        p.length >= 4 ? E.filter((t) => t.last.some((x) => x.length >= 4 && (x.startsWith(p) || p.startsWith(x)))) : []);
     }
     memo.set(key, found);
     return found;
@@ -300,9 +314,10 @@ export function computeSeason({ P, rows, experts, holidays, amounts, settings, t
   const enrich = (r) => { const e = r.eid ? byId.get(r.eid) : match(r.sx); return { ...r, cls: purchaseClass(r), expert: e || null, group: groupOf(e), project: projectOf(projects, r.party, r.center) }; };
   const R = inP.map(enrich);
 
-  /* گروه‌ها: ارشدهای فعال به ترتیب تب کارشناسان؛ «بدون سرگروه» فقط اگر درخواستی داشته باشد */
+  /* گروه‌ها: ارشدهای فعال به ترتیب تب کارشناسان؛ «بدون سرگروه» فقط اگر درخواست یا مبلغی داشته باشد */
   const groups = seniors.map((s) => ({ id: s.id, name: T(s.name) }));
-  if (R.some((r) => r.expert && r.group === 0) || !groups.length) groups.push({ id: 0, name: groups.length ? "بدون سرگروه" : "همه کارشناسان" });
+  const amountNoGroup = amounts.some((a) => P.keys.has(a.ym) && T(a.expert) && Number(a.amt) && groupOf(match(a.expert)) === 0);
+  if (R.some((r) => r.expert && r.group === 0) || amountNoGroup || !groups.length) groups.push({ id: 0, name: groups.length ? "بدون سرگروه" : "همه کارشناسان" });
   const gStat = groups.map((g) => {
     const mine = R.filter((r) => r.expert && (groups.length === 1 && g.id === 0 ? true : r.group === g.id));
     return { ...g, open: mine.filter((r) => r.cls === "open").length, bought: mine.filter((r) => r.cls === "bought").length, stopped: mine.filter((r) => r.cls === "stopped").length,

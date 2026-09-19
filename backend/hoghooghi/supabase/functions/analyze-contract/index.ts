@@ -32,7 +32,7 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 // ═══════════════════════════════════════════════════════════════════════
 // ۱. یک فایل (معمولاً PDF) از کاربر دریافت می‌شود (base64).
 // ۲. فایل به همراه دستورالعمل تحلیلی «تیدا» + یک قرارداد خروجی فنی (JSON)
-//    مستقیماً برای مدل claude-opus-4-8 ارسال می‌شود.
+//    مستقیماً برای مدل claude-opus-5 ارسال می‌شود.
 // ۳. مدل فقط یک شیء JSON برمی‌گرداند که شامل متادیتای گزارش + بدنهٔ گزارش
 //    به صورت HTML ساختاریافته (فقط تگ‌های ساده) است.
 // ۴. آن HTML با یک پارسر DOM واقعی (deno-dom) خوانده می‌شود و به عناصر
@@ -42,7 +42,7 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 //    ساخته می‌شود.
 //
 // نکته مهم دربارهٔ نحوه ارسال پاسخ (Server-Sent Events):
-// از آنجا که تحلیل توسط claude-opus-4-8 روی اسناد حقوقی می‌تواند از حد
+// از آنجا که تحلیل توسط claude-opus-5 روی اسناد حقوقی می‌تواند از حد
 // معمول (چند ده ثانیه تا چند دقیقه) طول بکشد و بسیاری از پلتفرم‌های
 // میزبانی Edge Function در صورت عدم دریافت هیچ داده‌ای از سرور در یک بازه
 // زمانی مشخص، اتصال را با خطا قطع می‌کنند، این تابع پاسخ را به‌صورت یک
@@ -72,17 +72,25 @@ import { encodeBase64 } from "jsr:@std/encoding/base64";
 // ═══════════════════════════════════════════════════════════════════════
 const COMPANY_NAME = "شرکت تونل سد آریانا";
 const COMPANY_SUBTITLE = "اداره حقوقی";
-const MODEL_NAME = "claude-opus-4-8";
+const MODEL_NAME = "claude-opus-5";
 const ANTHROPIC_API_URL = "https://api.anthropic.com/v1/messages";
 
-// حداکثر توکن خروجی مدل. اگر گزارش‌های شما طولانی‌تر از حد معمول هستند و با
-// خطای "max_tokens" مواجه می‌شوید، این عدد را افزایش دهید؛ اما پیش از آن
-// در مستندات رسمی docs.claude.com سقف مجاز خروجی برای مدل claude-opus-4-8
-// را بررسی کنید (این سقف بسته به نسخه مدل متفاوت است و ممکن است نیاز به
-// هدر anthropic-beta جداگانه داشته باشد). همچنین توجه کنید Edge Function ها
-// سقف زمانی اجرا دارند؛ اگر با تایم‌اوت پلتفرم Supabase مواجه شدید، این
-// عدد را کاهش دهید یا معماری را به حالت صف/استریم تغییر دهید.
-const MAX_OUTPUT_TOKENS = 16000;
+// روی claude-opus-5 «تفکر» به‌صورت پیش‌فرض روشن است و توکن‌های آن هم از سهم
+// max_tokens برداشته می‌شود؛ پس سقف خروجی باید بالاتر از مدل‌های قبلی باشد.
+// عمق تفکر با output_config.effort تنظیم می‌شود (پیش‌فرض high) و پارامتر
+// قدیمی budget_tokens روی این مدل خطای ۴۰۰ می‌دهد.
+const THINKING = { type: "adaptive" } as const;
+
+// اگر طبقه‌بندی‌کننده‌های ایمنی درخواستی را رد کنند، سرور به‌جای برگرداندن خطا
+// همان درخواست را روی مدل جایگزینِ مناسب اجرا می‌کند. «default» یعنی انتخاب
+// جایگزین با خود Anthropic باشد تا با تغییر مدل‌ها این کد دست‌نخورده بماند.
+const FALLBACK_BETA = "server-side-fallback-2026-07-01";
+
+// حداکثر توکن خروجی مدل (شاملِ توکن‌های تفکر). سقف claude-opus-5 برابر
+// ۱۲۸ هزار است؛ این عدد فضای کافی برای یک گزارش بلند می‌دهد و اگر باز هم
+// پاسخ ناتمام ماند می‌توان افزایشش داد. پاسخ به‌صورت جریانی (stream) از
+// Claude گرفته می‌شود، پس این عدد باعث تایم‌اوت درخواست نمی‌شود.
+const MAX_OUTPUT_TOKENS = 32000;
 
 // این تایم‌اوت دیگر مسئول اصلی جلوگیری از خطای تایم‌اوت پلتفرم نیست (آن
 // نقش را heartbeat جریان SSE بر عهده دارد)؛ این فقط یک «شبکهٔ ایمنی» است
@@ -308,6 +316,59 @@ function buildUserContentBlocks(question: string, files: FileContent[]) {
   return blocks;
 }
 
+/**
+ * خواندن پاسخ جریانیِ Claude (SSE) و چسباندن تکه‌های متن به هم.
+ * تنها بلوک‌های متنی جمع می‌شوند؛ بلوک تفکر روی این مدل متن خام برنمی‌گرداند.
+ */
+async function readClaudeStream(
+  response: Response,
+): Promise<{ text: string; stopReason: string | null }> {
+  if (!response.body) throw new Error("پاسخ سرویس هوش مصنوعی کلود بدنه‌ای نداشت.");
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let text = "";
+  let stopReason: string | null = null;
+  let streamError: string | null = null;
+
+  const handle = (raw: string) => {
+    // deno-lint-ignore no-explicit-any
+    let ev: any;
+    try {
+      ev = JSON.parse(raw);
+    } catch {
+      return; // بستهٔ ناقص یا خط غیرداده — نادیده گرفته می‌شود
+    }
+    if (ev.type === "content_block_delta" && ev.delta?.type === "text_delta") {
+      text += ev.delta.text ?? "";
+    } else if (ev.type === "message_delta" && ev.delta?.stop_reason) {
+      stopReason = ev.delta.stop_reason;
+    } else if (ev.type === "error") {
+      streamError = ev.error?.message ?? "خطای نامشخص در جریان پاسخ";
+    }
+  };
+
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of chunk.split("\n")) {
+        if (line.startsWith("data:")) handle(line.slice(5).trim());
+      }
+    }
+  }
+
+  if (streamError) {
+    throw new Error(`خطا در ارتباط با سرویس هوش مصنوعی کلود: ${streamError}`);
+  }
+  return { text, stopReason };
+}
+
 async function callClaudeForAnalysis(
   apiKey: string,
   question: string,
@@ -326,10 +387,14 @@ async function callClaudeForAnalysis(
         "content-type": "application/json",
         "x-api-key": apiKey,
         "anthropic-version": "2023-06-01",
+        "anthropic-beta": FALLBACK_BETA,
       },
       body: JSON.stringify({
         model: MODEL_NAME,
         max_tokens: MAX_OUTPUT_TOKENS,
+        thinking: THINKING,
+        fallbacks: "default",
+        stream: true,
         system: FULL_SYSTEM_PROMPT,
         messages: [
           {
@@ -358,21 +423,21 @@ async function callClaudeForAnalysis(
     );
   }
 
-  const data = await response.json();
+  const result = await readClaudeStream(response);
 
-  if (data?.stop_reason === "max_tokens") {
+  if (result.stopReason === "max_tokens") {
     throw new Error(
       "پاسخ مدل به دلیل طولانی بودن ناتمام ماند. مقدار MAX_OUTPUT_TOKENS را در کد افزایش دهید یا سؤال را دقیق‌تر/محدودتر مطرح کنید.",
     );
   }
 
-  // deno-lint-ignore no-explicit-any
-  const rawText: string = (data?.content ?? [])
-    .filter((block: any) => block.type === "text")
-    .map((block: any) => block.text as string)
-    .join("\n")
-    .trim();
+  if (result.stopReason === "refusal") {
+    throw new Error(
+      "سرویس هوش مصنوعی پاسخ‌گویی به این درخواست را نپذیرفت. لطفاً صورت سؤال را بازنویسی کنید یا سند دیگری را بررسی کنید.",
+    );
+  }
 
+  const rawText = result.text.trim();
   if (!rawText) {
     throw new Error("پاسخ خالی از مدل هوش مصنوعی دریافت شد.");
   }
