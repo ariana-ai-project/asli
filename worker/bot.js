@@ -1471,9 +1471,33 @@ async function startLetter(env, api, chat, ex, aid, { skip } = {}) {
 /* تأیید متن پیش از نگارش: اگر رونویسی اشتباه شنیده باشد، نامه هم غلط می‌شود */
 const letterConfirmKb = (L) => [
   [{ text: "✅ درست است — انتخاب اقلامِ موضوع", callback_data: `lt:${L.id}:go:0` }],
+  [{ text: "📝 ویرایش همین متن", callback_data: `lt:${L.id}:ed:0` }],
   [{ text: "✏️ از نو می‌گویم", callback_data: `lt:${L.assignment_id}:ask:0` }],
   [{ text: "✖️ بی‌خیال", callback_data: `lt:${L.assignment_id}:x:0` }],
 ];
+
+/**
+ * ویرایش دستیِ متنِ شنیده‌شده: رونویسی گاهی یک کلمه را اشتباه می‌شنود و از نو
+ * گفتنِ کل حرف برای یک کلمه منطقی نیست. تلگرام اجازه نمی‌دهد متن را در کادر
+ * تایپِ کاربر بگذاریم، پس متن را در یک بلوک «کپی با یک لمس» می‌فرستیم؛ کارشناس
+ * همان را برمی‌دارد، اصلاح می‌کند و می‌فرستد. مسیرِ متنِ آزاد (onLetterText)
+ * همان را جای متن قبلی می‌نشاند و دوباره برای تأیید نشان می‌دهد.
+ */
+async function letterEdit(env, api, chat, ex, letterId) {
+  const L = await env.DB.prepare("SELECT * FROM letters WHERE id=? AND expert_id=?").bind(letterId, ex.id).first();
+  if (!L || !L.transcript || !["transcribed", "need_voice"].includes(L.state)) {
+    await api.sendMessage(chat, "این نامه دیگر منتظر متن نیست.");
+    return { ok: true };
+  }
+  await env.DB.prepare("UPDATE letters SET state='need_voice', updated_at=? WHERE id=?").bind(now(), L.id).run();
+  await api.sendMessage(chat, `<code>${esc(L.transcript)}</code>`);
+  await api.sendMessage(chat,
+    "👆 روی متن بالا بزنید تا کپی شود؛ همان را اصلاح کنید و همین‌جا بفرستید.\n\n"
+    + "<i>هرچه بفرستید — نوشته یا صوت تازه — جای متن قبلی می‌نشیند و دوباره برای تأیید نشانتان می‌دهم.</i>",
+    [[{ text: "✅ همین متن خوب است — ادامه", callback_data: `lt:${L.id}:go:0` }],
+     [{ text: "✖️ بی‌خیال", callback_data: `lt:${L.assignment_id}:x:0` }]]);
+  return { ok: true };
+}
 
 /**
  * همان جای صوت، ولی نوشته. بعضی کارشناس‌ها جایی هستند که نمی‌شود حرف زد، یا
@@ -3177,11 +3201,12 @@ async function onCallback(env, cq) {
     return onExtract(env, api, chat, ex, num(1), step, parts[3], mid);
   }
 
-  /* نامه: lt:<aid>:ask (از نو) · lt:<aid>:x (لغو) · lt:<letter>:go (انتخاب اقلامِ موضوع) */
+  /* نامه: lt:<aid>:ask (از نو) · lt:<aid>:x (لغو) · lt:<letter>:ed (ویرایش متن) · lt:<letter>:go (انتخاب اقلامِ موضوع) */
   if (action === "lt") {
     const n = num(1), step = parts[2];
     await ack();
     if (step === "ask") return startLetter(env, api, chat, ex, n);
+    if (step === "ed") return letterEdit(env, api, chat, ex, n);
     if (step === "x") {
       await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND expert_id=? AND state IN ('need_voice','transcribed')")
         .bind(now(), n, ex.id).run();

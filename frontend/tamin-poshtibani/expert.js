@@ -56,6 +56,8 @@
   const openItems = () => items().filter((i) => i.state === "open");
   const qCount = () => S.d.quotes.filter((q) => q.saved).length;
   const pCount = () => S.d.proformas.length;
+  /* پیش‌فاکتورِ یک خط استعلام — پیوندشان نام تأمین‌کننده است (همان قاعدهٔ بات) */
+  const pfOf = (q) => S.d.proformas.find((p) => p.supplier_name === q.supplier_name) || null;
   const isSenior = () => !!(S.expert && S.expert.senior);
   /* قیدهای جستجوی هر قلم: بار اول از مشخصهٔ فنی و توضیحاتِ فایل راهکاران پر می‌شود (تصمیم مدیر)، بعد هرچه کارشناس نوشت */
   const smOf = (it) => {
@@ -750,6 +752,107 @@
   }
 
   /* ---------- تب استعلامات (واقعی) ---------- */
+  /* ستون «پیش‌فاکتور»: فایلِ ذخیره‌شده، یا دکمهٔ بارگذاری. ردیف‌های قدیمیِ بی‌فایل هم
+     باید دوباره بارگذاری شوند، چون استخراج بدون خودِ فایل کاری نمی‌تواند بکند. */
+  function pfCell(q) {
+    const p = pfOf(q);
+    if (p && p.storage_key) return `<span class="chip ok" title="${esc(p.filename || "")}">ثبت شد</span> <button class="tp-btn xs" data-pf="${esc(q.supplier_name)}" title="جایگزینی فایل">\u21bb</button>`;
+    if (p) return `<span class="chip warn" title="فقط نامش ثبت شده بود">بی فایل</span> <button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`;
+    return `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`;
+  }
+  /* ستون «استخراج»: همان کاری که بات روی پیش‌فاکتور تلگرام می‌کند */
+  function exCell(q) {
+    const p = pfOf(q);
+    if (!p || !p.storage_key) return `<span class="chip">—</span>`;
+    const read = p.extract_state === "ok" && p.extracted_json;
+    return `<button class="tp-btn xs ${read ? "" : "primary"}" data-extract="${p.id}">${read ? "دیدن خوانده‌شده" : "استخراج"}</button>`
+      + (p.extract_state === "refused" ? `<div><span class="chip warn">خوانا نبود</span></div>` : "")
+      + (p.extract_state === "failed" ? `<div><span class="chip warn">ناموفق</span></div>` : "");
+  }
+
+  /* ---------- بارگذاری و استخراج پیش‌فاکتور ---------- */
+  const REFUSAL_FA = { handwritten: "دست‌نویس است", low_quality_scan: "کیفیت اسکن پایین است", unclear_structure: "ساختارش روشن نیست", not_a_proforma: "پیش‌فاکتور نیست", password_protected: "فایل رمز دارد", empty: "خالی است" };
+
+  /* بدنهٔ خام می‌رود، پس TP.api (که JSON می‌فرستد) به کار نمی‌آید */
+  async function uploadProforma(supplier, file) {
+    const ex = TP.session.get();
+    const qs = `?assignment_id=${A().id}&supplier_name=${encodeURIComponent(supplier)}&filename=${encodeURIComponent(file.name)}`;
+    const res = await fetch((CFG.apiBase || "/tamin-poshtibani/api") + "/proformas/upload" + qs, {
+      method: "POST",
+      headers: { "Content-Type": file.type || "application/octet-stream", ...(ex && ex.code ? { "X-Expert-Code": ex.code } : {}) },
+      body: file,
+    });
+    let data = null; const txt = await res.text();
+    try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
+    if (!res.ok) throw new Error((data && data.error) || `خطای سرور ${res.status}`);
+    return data || {};
+  }
+
+  /* همان خلاصه‌ای که بات در تلگرام نشان می‌دهد، در قالب پنل */
+  function extractView(r) {
+    if (!r.extractable) {
+      return `<b>نتوانستم مطمئن بخوانم.</b><br><br>دلیل: <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>`
+        + (r.notes ? `<br><br>${esc(r.notes)}` : "") + `<br><br>فیلدهای این ردیف را دستی پر کنید.`;
+    }
+    const titles = new Map(items().map((i) => [i.id, i.title]));
+    const matched = (r.lines || []).filter((l) => l.matched_item_id);
+    const other = (r.lines || []).filter((l) => !l.matched_item_id);
+    const cur = r.currency || "نامشخص";
+    const rows = matched.map((l) => `<tr><td class="rt">${esc(titles.get(l.matched_item_id) || l.title || "\u2014")}</td>
+      <td class="num">${l.qty == null ? "\u2014" : M(l.qty)}</td>
+      <td class="num">${l.unit_price == null ? "\u2014" : M(l.unit_price)}</td>
+      <td>${l.confidence === "high" ? `<span class="chip ok">مطمئن</span>` : `<span class="chip warn">مطمئن نیست</span>`}</td></tr>`).join("");
+    const line = (lab, v) => (v ? `<div><span class="dim">${lab}:</span> ${esc(v)}</div>` : "");
+    return (r.orientation && r.orientation !== "upright" ? `<div><span class="chip warn">اسکن چرخیده بود</span></div>` : "")
+      + `<div>${r.supplier_name ? `<span class="dim">تأمین‌کننده:</span> <b>${esc(r.supplier_name)}</b> \u00b7 ` : ""}<span class="dim">واحد پول:</span> <b>${esc(cur)}</b></div>`
+      + (matched.length ? `<table class="tp-table" style="margin-top:10px"><thead><tr><th>قلم</th><th>مقدار</th><th>قیمت واحد</th><th>اطمینان</th></tr></thead><tbody>${rows}</tbody></table>`
+        : `<div style="margin-top:10px"><b>هیچ سطری با اقلام این درخواست تطبیق نخورد.</b></div>`)
+      + (other.length ? `<div class="dim" style="margin-top:6px">${M(other.length)} سطر دیگر در فاکتور بود که به اقلام این درخواست نمی‌خورد و ثبت نمی‌شود.</div>` : "")
+      + `<div style="margin-top:10px">${line("اعتبار", r.valid_days ? r.valid_days + " روز" : "")}${line("تحویل", r.delivery_date)}${line("تسویه", r.pay_terms)}${line("حمل", r.ship_method)}${line("نوع فاکتور", r.invoice_type)}${line("محل تحویل", r.place === "سایر" && r.place_other ? r.place_other : r.place)}</div>`
+      + ((r.unreadable_fields || []).length ? `<div style="margin-top:8px"><span class="chip warn">خوانا نبود</span> ${esc(r.unreadable_fields.join("، "))}</div>` : "")
+      + (r.notes ? `<div class="dim" style="margin-top:8px">${esc(r.notes)}</div>` : "")
+      + (r.currency ? "" : `<div style="margin-top:12px"><b>واحد پول در سند مشخص نبود.</b> خودتان انتخاب کنید:
+          <select class="tp-select" data-ex-cur style="margin-inline-start:8px"><option value="ریال">ریال</option><option value="تومان">تومان</option></select></div>`);
+  }
+
+  /* خواندن (یا نمایش خوانده‌شدهٔ قبلی) و بعد ثبت در جدول استعلام */
+  async function showExtract(pid, reread) {
+    const p = S.d.proformas.find((x) => x.id === +pid);
+    let out = null;
+    if (!reread && p && p.extract_state === "ok" && p.extracted_json) {
+      try { out = JSON.parse(p.extracted_json); } catch (_) { out = null; }
+    }
+    if (!out) {
+      const busy = TP.busy("خواندن پیش‌فاکتور", "مدل دارد سند را می‌خواند؛ چند ثانیه طول می‌کشد\u2026");
+      try { out = await TP.api(`/proformas/${pid}/extract`, { body: {} }); }
+      catch (e) { busy.close(); return TP.modal("استخراج انجام نشد", esc(e.message), null, "باشد", ""); }
+      busy.close();
+      if (out.available === false) return TP.modal("استخراج", esc(out.message || "هنوز وصل نیست."), null, "باشد", "");
+      await reload();
+    }
+    const r = out.result || out;
+    const d = TP.modal("خوانده\u200cشده از پیش‌فاکتور", extractView(r), r.extractable ? async () => {
+      const cur = d.querySelector("[data-ex-cur]");
+      const busy = TP.busy("ثبت در جدول استعلام", "\u2026");
+      try {
+        const res = await TP.api(`/proformas/${pid}/apply`, { body: cur ? { currency: cur.value } : {} });
+        busy.close();
+        await reload();
+        TP.modal("ثبت شد", `${M(res.applied || 0)} خط پر شد${res.created ? ` (${M(res.created)} خط تازه ساخته شد)` : ""}.`
+          + (res.saved ? `<br>${M(res.saved)} خط «ثبت موقت» شد.` : "")
+          + (res.unsaved ? `<br><span class="chip warn">${M(res.unsaved)} خط هنوز فیلد اجباری خالی دارد</span>${(res.missing || []).length ? `: ${esc(res.missing.map((f) => LBL[f] || f).join("، "))}` : ""}` : "")
+          + (res.vatStripped ? `<br>ارزش افزوده از قیمت‌ها کم شد.` : "")
+          + `<br><br>عددها را با خود سند بسنجید؛ این‌ها پیش‌نویس‌اند.`, null, "باشد", "");
+      } catch (e) { busy.close(); TP.modal("ثبت نشد", esc(e.message), null, "باشد", ""); }
+    } : null, r.extractable ? "ثبت در جدول استعلام" : "باشد", "بستن");
+    if (r.extractable) {
+      const again = document.createElement("button");
+      again.className = "tp-btn"; again.textContent = "دوباره بخوان";
+      again.onclick = () => { d.remove(); showExtract(pid, true); };
+      d.querySelector(".tp-acts").appendChild(again);
+    }
+  }
+
   function vQuotes() {
     const r = S.d.request, its = items(), Q = S.d.quotes;
     return `<div class="pad">
@@ -770,8 +873,8 @@
           <td style="min-width:170px"><div class="stack"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
             ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}">` : ""}</div></td>
           <td class="num">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
-          <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<span class="chip ok" title="${esc(S.d.proformas.find((p) => p.supplier_name === q.supplier_name).filename || "")}">ثبت شد</span>` : `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`}</td>
-          <td>${S.d.proformas.find((p) => p.supplier_name === q.supplier_name) ? `<button class="tp-btn xs" data-extract="${q.id}">استخراج</button>` : `<span class="chip">—</span>`}</td>
+          <td>${pfCell(q)}</td>
+          <td>${exCell(q)}</td>
           <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
           <td><button class="tp-btn xs danger" data-del="${q.id}">حذف</button></td></tr>`).join("")}
         </tbody></table></div>
@@ -1108,10 +1211,22 @@
     Q("[data-del]").forEach((b) => b.onclick = () => TP.modal("حذف استعلام", "این ردیف حذف شود؟", async () => { await TP.api(`/quotes/${b.dataset.del}`, { method: "DELETE" }); await reload(); }, "حذف"));
     Q("[data-pf]").forEach((b) => b.onclick = () => {
       const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,.jpg,.jpeg,.png";
-      inp.onchange = async () => { const f = inp.files && inp.files[0]; if (!f) return; const r = await TP.api("/proformas", { body: { assignment_id: A().id, supplier_name: b.dataset.pf, filename: f.name } }); await reload(); TP.modal("پیش‌فاکتور", `${esc(r.message || "ثبت شد.")} <span class="chip mock">ذخیرهٔ فایل — در انتظار اتصال R2</span>`, null, "باشد", ""); };
+      inp.onchange = async () => {
+        const f = inp.files && inp.files[0]; if (!f) return;
+        const busy = TP.busy("بارگذاری پیش‌فاکتور", esc(f.name));
+        try {
+          const r = await uploadProforma(b.dataset.pf, f);
+          busy.close();
+          await reload();
+          if (r.available === false) return TP.modal("پیش‌فاکتور", esc(r.message || "انبار فایل وصل نیست."), null, "باشد", "");
+          /* فایل که نشست، همان‌جا بخوانیمش \u2014 همان کاری که بات با فایل تلگرام می‌کند */
+          const p = S.d.proformas.find((x) => x.supplier_name === b.dataset.pf);
+          if (p) showExtract(p.id, true);
+        } catch (e) { busy.close(); TP.modal("بارگذاری نشد", esc(e.message), null, "باشد", ""); }
+      };
       inp.click();
     });
-    Q("[data-extract]").forEach((b) => b.onclick = async () => { const r = await TP.api(`/proformas/${b.dataset.extract}/extract`, { body: {} }); TP.modal("استخراج از پیش‌فاکتور", `${esc(r.message)} <span class="chip mock">در انتظار اتصال به مدل</span><br><br>تا آن زمان، فیلدهای زمان تحویل، اعتبار، تسویه و نوع فاکتور را دستی وارد کنید.`, null, "باشد", ""); });
+    Q("[data-extract]").forEach((b) => b.onclick = () => showExtract(b.dataset.extract, false));
     Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; S.sheets = null; render(); });
     const mc = G("[data-make-comm]"); if (mc) mc.onclick = async () => { try { await TP.api(`/assignments/${A().id}/commission`, { body: {} }); S.tab = "comm"; await reload(); } catch (e) { TP.modal("تولید جدول کمیسیون", esc(e.message) + (e.data && e.data.missing && e.data.missing.length ? `<br><br>${e.data.missing.map((m) => `• ${esc(m.title)} (${m.n} از ${e.data.need})`).join("<br>")}` : ""), null, "باشد", ""); } };
     Q("[data-dl]").forEach((b) => b.onclick = () => downloadSheet(b.dataset.dl));
@@ -1148,12 +1263,6 @@
   /* ---------- شروع ---------- */
   if (S.expert) { S.screen = "list"; loadTray(); } else render();
   window.addEventListener("tp-theme", render);
-  setInterval(() => { if (S.expert) { S.now = Date.now(); render(); } }, 60000);
-  /* به‌روزرسانی خودکار (تصمیم مدیر): تغییری که از تلگرام آمده بی رفرشِ دستی دیده می‌شود.
-     سوابق و نتایج جستجو در حافظهٔ صفحه (S.hist/S.smart) می‌مانند و با این بازخوانی نمی‌پرند. */
-  TP.autoRefresh(async () => {
-    if (!S.expert) return;
-    if (S.screen === "detail" && S.d) await reload();
-    else if (S.screen === "list") await (S.tab === "team" && isSenior() ? loadTeam(true) : loadTray());
-  }, 20000);
+  /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه با دکمهٔ ↻ یا با کار
+     خود کارشناس تازه می‌شود، تا وسط پر کردن استعلام چیزی جابه‌جا نشود. */
 })();

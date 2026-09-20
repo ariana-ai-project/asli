@@ -375,6 +375,11 @@ CREATE TABLE IF NOT EXISTS templates (
 );
 
 -- ---------- تنظیمات مدیر (کلید/مقدار JSON) ----------
+-- کلیدهای نمایشی در worker/settings.js (DEFAULTS) فهرست شده‌اند و فقط همان‌ها به پنل می‌رسند.
+-- کلیدهای غیرنمایشی که در همین جدول می‌نشینند:
+--   managerChat / teamWebhook / webhook  — شناسهٔ کانال مدیر و نشانی وبهوک‌ها
+--   siteCards     — وضعیت کارت‌های صفحهٔ اول: {"mali":"soon", ...} با سه حالت active|soon|off (worker/site.js)
+--   sitePassHash  — SHA-256 رمز مشترک تب «پشتیبانی» صفحهٔ اول؛ خود رمز ذخیره نمی‌شود
 CREATE TABLE IF NOT EXISTS settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,               -- JSON

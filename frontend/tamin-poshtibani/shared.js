@@ -350,19 +350,6 @@
     return null;
   };
 
-  /* ---------- به‌روزرسانی خودکار ----------
-     هر چند ثانیه یک بار `fn` صدا زده می‌شود — مگر کارشناس وسط تایپ باشد، پنجره‌ای باز
-     باشد، یا تب مرورگر پنهان باشد؛ آن وقت رندرِ تازه کار او را خراب می‌کرد. */
-  TP.autoRefresh = function (fn, ms) {
-    const idle = () => {
-      const a = document.activeElement;
-      const typing = a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.type !== "checkbox" && a.type !== "range";
-      return !typing && !document.querySelector(".tp-modal-bg, .jdp, .chart-bg") && document.visibilityState !== "hidden";
-    };
-    let busy = false;
-    setInterval(async () => { if (busy || !idle()) return; busy = true; try { await fn(); } catch (_) { /* نوبت بعد */ } busy = false; }, ms || 20000);
-  };
-
   /* ---------- کوچک‌های UI ---------- */
   /* جای اسکرولِ جدول‌ها را پیش از بازرندر نگه می‌دارد و تابعِ برگرداندنش را می‌دهد.
      بدون این، هر ذخیرهٔ یک فیلد در تب استعلامات (که کل صفحه را از نو می‌سازد)

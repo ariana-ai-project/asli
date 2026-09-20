@@ -33,6 +33,7 @@ import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { statusData, statusBook, seasonData, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
+import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
@@ -1191,6 +1192,14 @@ async function route(request, env, ctx) {
     if (path === "/tg/tick" && m === "POST") { requireManager(request, env); return json(await scheduled(env)); }
 
     /* --- ورود --- */
+    /* تب «پشتیبانی» صفحهٔ اول: وضعیت کارت‌ها برای همه خواندنی است، نوشتن با رمز تب */
+    if (path === "/site" && m === "GET") return json(await siteState(env));
+    if (path === "/site/login" && m === "POST") { const b = await readJson(request); return json(await siteLogin(env, b.code)); }
+    if (path === "/site" && m === "PUT") {
+      const b = await readJson(request);
+      return json(await putSite(env, b, request.headers.get("X-Site-Code") || b.code));
+    }
+
     if (path === "/login" && m === "POST") {
       const b = await readJson(request);
       if (b.role === "manager") { requireManager({ headers: new Headers({ "X-Manager-Code": T(b.code) }) }, env); return json({ role: "manager" }); }

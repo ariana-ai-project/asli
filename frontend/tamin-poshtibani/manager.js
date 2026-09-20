@@ -1236,7 +1236,7 @@
   /* ---------- شروع ---------- */
   if (TP.manager.get()) refresh(); else render();
   window.addEventListener("tp-theme", render);
-  setInterval(() => { if (S.tab === "desk" && TP.manager.get()) { S.now = Date.now(); render(); } }, 60000);
-  /* به‌روزرسانی خودکار میز (تصمیم مدیر): کاری که کارشناس در تلگرام کرد، بی رفرشِ دستی دیده می‌شود */
-  TP.autoRefresh(async () => { if (S.tab === "desk" && TP.manager.get() && !S.loading && !S.pop && S.editName == null) await refresh(); }, 30000);
+  /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه فقط با کار خود کاربر
+     یا دکمهٔ ↻ تازه می‌شود، تا وسط کار جابه‌جا نشود. همین‌طور ساعت رنگ باکس‌ها هم با
+     هر بازخوانی به‌روز می‌شود، نه با تایمر. */
 })();
