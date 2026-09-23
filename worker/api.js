@@ -182,8 +182,8 @@ const COLUMN_MIGRATIONS = [
   ["assignments", "mgr_colors", "TEXT"],      /* عکسِ شش رنگِ پایش، برای تشخیص تغییر (اعلان مدیر) */
   ["assignments", "mgr_seen_at", "INTEGER"],  /* مدیر خاتمه را دید — از میز کارش می‌رود */
   ["decisions", "note", "TEXT"],              /* دلیلِ ردِ مدیر (یا مسیرِ تأیید) */
-  /* «کد قلم جدید» فایل سوابق. تا وقتی «نرمال‌سازی اقلام» ساخته نشده NULL می‌ماند و
-     تطبیق سوابق با کد راهکاران یا عنوان انجام می‌شود (worker/history.js:resolveItem). */
+  /* «کد قلم جدید» قالب قبلی فایل سوابق. دیگر خوانده نمی‌شود: ساختار قلم حالا از فهرست اقلام
+     (کد راهکاران) یا نرمال‌سازیِ تأییدشده (items.norm_json) می‌آید — worker/history.js:resolveScope */
   ["items", "hist_code", "TEXT"],
   /* جستجوی هوشمند: مصرف واقعی و هزینهٔ هر اجرا (worker/discovery.js:runCost) */
   ["smart_searches", "cache_read", "INTEGER"],
