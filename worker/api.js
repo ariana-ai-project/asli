@@ -19,7 +19,9 @@
 import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
 import { telegram } from "./telegram.js";
 import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
-import { extractProforma, toRial } from "./extract.js";
+import { extractProforma, toRial, ExtractError } from "./extract.js";
+import { transcribe, writeLetter } from "./letter.js";
+import { renderLetter } from "./docx.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings, settingsFromRows } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
@@ -1090,6 +1092,47 @@ async function scoresPut(env, body) {
 const NOT_CONNECTED = (what) => json({ available: false, message: `${what} هنوز به سامانه وصل نشده است؛ زیرساختش آماده است و در مرحلهٔ بعد فعال می‌شود.` }, 200);
 
 /* ------------------------------------------------------------------ */
+/* نامهٔ پیوست کمیسیون — همان مسیر بات، این بار از پنل                    */
+/*                                                                      */
+/* ضبط یا بارگذاری صوت ← ElevenLabs ← متنِ قابل ویرایش برای تأیید ←      */
+/* انتخاب اقلامِ موضوع ← نگارش و فایل Word روی سربرگ.                    */
+/*                                                                      */
+/* منطقش همان منطق بات است (ADR-0008: هر دو ورودی یک اعتبارسنجی و یک     */
+/* قاعده دارند): نگارش و رونویسی در worker/letter.js و ساخت فایل در      */
+/* worker/docx.js است و این‌جا فقط همان ارکستراسیونی است که              */
+/* bot.js:startLetter…makeLetter برای تلگرام دارد. وضعیت‌ها و جدول       */
+/* `letters` هم یکی است، پس نامه‌ای که در پنل شروع شود در تلگرام هم       */
+/* همان است و برعکس.                                                    */
+/* ------------------------------------------------------------------ */
+const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/* همان دو مرزی که بات می‌گذارد: کمتر از این نامه نمی‌شود، بیشتر از این برای مدل زیادی است */
+const LETTER_MIN = 15, LETTER_MAX = 4000;
+/* نامه‌ای که هنوز متنش را می‌شود عوض کرد. `failed` هم هست چون وقتی نگارش شکست
+   می‌خورد (کلید مدل، سقف نرخ) متنِ کارشناس سالم است و نباید دوباره بگویدش. */
+const LETTER_OPEN = ["need_voice", "transcribed", "failed"];
+/* پسوند کلیدِ انبار از نوع صوت — مرورگر webm/mp4 می‌دهد، تلگرام ogg */
+const AUDIO_EXT = { "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/mp4": ".m4a", "audio/mpeg": ".mp3", "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/aac": ".aac", "audio/flac": ".flac" };
+const audioExt = (type) => AUDIO_EXT[String(type || "").split(";")[0].trim().toLowerCase()] || ".webm";
+
+const letterView = (L) => ({
+  id: L.id, state: L.state, transcript: L.transcript,
+  body: L.letter_json ? JSON.parse(L.letter_json) : null,
+  meta: L.meta_json ? JSON.parse(L.meta_json) : null,
+  hasFile: !!L.docx_key, hasVoice: !!L.voice_key, updated_at: L.updated_at,
+});
+
+/** نامهٔ خواسته‌شده (یا آخرین نامهٔ همین ارجاع) — شناسه همیشه با ارجاع سنجیده می‌شود (INV-11) */
+async function letterOf(env, aid, id) {
+  const L = id
+    ? await env.DB.prepare("SELECT * FROM letters WHERE id=? AND assignment_id=?").bind(id, aid).first()
+    : await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? ORDER BY id DESC LIMIT 1").bind(aid).first();
+  if (!L) throw new HttpError("نامه‌ای برای این ارجاع باز نشده است.", 404);
+  return L;
+}
+/* خطای letter.js/extract.js پیام فارسیِ آمادهٔ نمایش دارد؛ بدون این، پنل «خطای داخلی» می‌بیند */
+const asHttp = (e) => (e instanceof ExtractError ? new HttpError(e.message, e.status || 502) : e);
+
+/* ------------------------------------------------------------------ */
 /* روتر                                                                 */
 /* ------------------------------------------------------------------ */
 async function route(request, env, ctx) {
@@ -1404,8 +1447,117 @@ async function route(request, env, ctx) {
       const ex = await requireExpert(request, env);
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
       const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? ORDER BY id DESC LIMIT 1").bind(aid).first();
-      if (!L) return json({ letter: null });
-      return json({ letter: { id: L.id, state: L.state, transcript: L.transcript, body: L.letter_json ? JSON.parse(L.letter_json) : null, hasFile: !!L.docx_key, updated_at: L.updated_at } });
+      if (!L) return json({ letter: null, stt: !!env.ELEVENLABS_API_KEY });
+      return json({ letter: letterView(L), stt: !!env.ELEVENLABS_API_KEY });
+    }
+    /* شروع (یا از نو شروع کردنِ) نامه — همان کاری که /nameh در بات می‌کند:
+       نامهٔ نیمه‌کارهٔ قبلی لغو می‌شود تا صوتِ بعدی سراغ دو نامه نرود. */
+    if ((mm = /^\/assignments\/(\d+)\/letter$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const t = now();
+      await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND state IN ('need_voice','transcribed','failed')").bind(t, aid).run();
+      const L = await env.DB.prepare(
+        "INSERT INTO letters (assignment_id,expert_id,state,created_at,updated_at) VALUES (?,?,'need_voice',?,?) RETURNING *",
+      ).bind(aid, ex.id, t, t).first();
+      return json({ letter: letterView(L) });
+    }
+    /* بی‌خیالِ نامه */
+    if ((mm = /^\/assignments\/(\d+)\/letter\/cancel$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND state IN ('need_voice','transcribed','failed')").bind(now(), aid).run();
+      return json({ ok: true });
+    }
+    /* صوتِ ضبط‌شده یا بارگذاری‌شده در پنل. بدنه خام و جریانی است (همان قاعدهٔ
+       /proformas/upload) و بایت‌ها از حافظهٔ Worker رد نمی‌شوند؛ ElevenLabs خودش
+       فایل را از لینک امضاشده برمی‌دارد، پس انبار باید Supabase باشد. */
+    if ((mm = /^\/assignments\/(\d+)\/letter\/voice$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const L = await letterOf(env, aid, int(url.searchParams.get("letter_id")));
+      if (!LETTER_OPEN.includes(L.state)) throw new HttpError("این نامه دیگر منتظر متن نیست.", 409);
+      const store = storage(env);
+      if (!store) return NOT_CONNECTED("انبار فایل");
+      if (!store.signedUrl) throw new HttpError("انبار فعلی لینک امضاشده نمی‌سازد؛ تبدیل صوت به متن فقط با Supabase کار می‌کند.", 503);
+      if (!env.ELEVENLABS_API_KEY) return NOT_CONNECTED("تبدیل صوت به متن");
+      const size = int(request.headers.get("content-length"), 0);
+      if (size > MAX_BYTES) throw new HttpError(`حجم صوت بیشتر از ${Math.round(MAX_BYTES / 1048576)} مگابایت است؛ کوتاه‌ترش کنید.`, 413);
+      const type = request.headers.get("content-type") || "audio/webm";
+      const key = storageKey(aid, `voice-${L.id}${audioExt(type)}`);
+      await store.put(key, request.body, { contentType: type, size: size || undefined });
+      const secs = num(url.searchParams.get("secs"));
+      let text;
+      try { text = (await transcribe(env, await store.signedUrl(key, 900))).text; }
+      catch (e) {
+        /* صوت سر جایش می‌ماند و نامه منتظر: کارشناس یا دوباره ضبط می‌کند یا تایپ */
+        await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, state='need_voice', updated_at=? WHERE id=?").bind(key, secs, now(), L.id).run();
+        throw asHttp(e);
+      }
+      if (!text || text.length < LETTER_MIN) {
+        await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, state='need_voice', updated_at=? WHERE id=?").bind(key, secs, now(), L.id).run();
+        throw new HttpError("چیزی نشنیدم یا خیلی کوتاه بود. یک بار دیگر و کمی واضح‌تر بگویید.", 422);
+      }
+      await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, transcript=?, state='transcribed', updated_at=? WHERE id=?")
+        .bind(key, secs, text, now(), L.id).run();
+      return json({ letter: letterView(await letterOf(env, aid, L.id)) });
+    }
+    /* متنِ تأییدشده — چه تایپِ مستقیم باشد چه اصلاحِ رونویسی. رونویسی گاهی یک
+       کلمه را اشتباه می‌شنود و از نو گفتنِ کل حرف برای یک کلمه منطقی نیست. */
+    if ((mm = /^\/assignments\/(\d+)\/letter\/transcript$/.exec(path)) && m === "PUT") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const b = await readJson(request);
+      const L = await letterOf(env, aid, int(b.letter_id));
+      if (!LETTER_OPEN.includes(L.state)) throw new HttpError("این نامه دیگر منتظر متن نیست.", 409);
+      const text = T(b.transcript);
+      if (text.length < LETTER_MIN) throw new HttpError("کمی بیشتر توضیح بدهید تا بشود از آن نامه ساخت.");
+      if (text.length > LETTER_MAX) throw new HttpError("متن خیلی بلند است؛ خلاصه‌ترش کنید.");
+      await env.DB.prepare("UPDATE letters SET transcript=?, state='transcribed', updated_at=? WHERE id=?").bind(text, now(), L.id).run();
+      return json({ letter: letterView(await letterOf(env, aid, L.id)) });
+    }
+    /* نگارش نامه و ساخت فایل Word — دوقلوی HTTPیِ makeLetter در بات */
+    if ((mm = /^\/assignments\/(\d+)\/letter\/write$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      const b = await readJson(request);
+      const L = await letterOf(env, aid, int(b.letter_id));
+      if (!L.transcript || L.state !== "transcribed") throw new HttpError("این نامه قبلاً نوشته یا لغو شده است.", 409);
+      if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("نگارش نامه");
+      const subjectTitles = (Array.isArray(b.subject_titles) ? b.subject_titles : []).map(T).filter(Boolean);
+      const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
+      let out;
+      try {
+        /* همان قاعدهٔ جدول کمیسیون: فقط استعلام‌های تیک‌خورده و اقلامی که قیمت دارند */
+        out = await writeLetter(env, {
+          transcript: L.transcript, request: d.request, items: d.items, quotes: d.quotes, allItems: d.items,
+          notes: d.assignment.notes, expert: d.expert, expertName: d.expertName, company: d.company, subjectTitles,
+        });
+      } catch (e) {
+        await env.DB.prepare("UPDATE letters SET state='failed', updated_at=? WHERE id=?").bind(now(), L.id).run();
+        throw asHttp(e);
+      }
+      const letter = { ...out.letter, date: d.date, number: null };
+      const store = storage(env);
+      let docxKey = null, fileError = null;
+      try {
+        if (!store) throw new Error("انبار فایل وصل نیست.");
+        const tpl = await store.get("_templates/letterhead.docx");
+        if (!tpl) throw new Error("سربرگ در انبار پیدا نشد.");
+        const blob = await renderLetter(await new Response(tpl.body).arrayBuffer(), letter);
+        docxKey = storageKey(aid, `letter-${L.id}.docx`);
+        await store.put(docxKey, blob, { contentType: DOCX_MIME });
+      } catch (e) {
+        /* نامه نوشته شده ولی فایلش ساخته نشد — متن را از دست ندهیم */
+        fileError = e.message;
+      }
+      await env.DB.batch([
+        env.DB.prepare("UPDATE letters SET letter_json=?, docx_key=?, meta_json=?, state='written', updated_at=? WHERE id=?")
+          .bind(JSON.stringify(letter), docxKey, JSON.stringify(out.meta), now(), L.id),
+        env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
+          .bind(now(), `expert:${ex.id}`, "letter", d.request.id, JSON.stringify({ assignment_id: aid, letter_id: L.id, channel: "panel" })),
+      ]);
+      return json({ letter: letterView(await letterOf(env, aid, L.id)), fileError });
     }
     if ((mm = /^\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") {
       const who = await requireAny(request, env);

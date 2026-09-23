@@ -211,7 +211,16 @@
        تمام‌عرض روی یک خط، از سلول بیرون می‌زد و روی ستون‌های کناری می‌افتاد */
     .q td .stack { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
     .q td .stack .tp-input { width: 100%; box-sizing: border-box; min-width: 0; }
-    @media (max-width: 900px) { .two { flex-direction: column; } .two .side { flex: none; width: 100%; } }
+    /* پیش‌نمایش نامهٔ کمیسیون — همان چیدمانی که روی سربرگ Word می‌نشیند:
+       مخاطب و موضوع بالا، بندها با تورفتگی، «با تشکر» و امضا سمت چپ. */
+    .letterpaper { border: 1px solid var(--tp-line); border-radius: 12px; background: rgba(3,8,20,.35); padding: 22px 26px; line-height: 2.1; font-size: .95rem; }
+    .letterpaper .lt-to { font-weight: 700; }
+    .letterpaper .lt-sub { margin-top: 10px; }
+    .letterpaper .lt-sal { margin-top: 10px; }
+    .letterpaper p { margin: 10px 0 0; text-align: justify; text-indent: 1.6em; }
+    .letterpaper .lt-sign { margin-top: 22px; text-align: left; line-height: 1.9; }
+    :root[data-theme="light"] .letterpaper { background: #fff; }
+    @media (max-width: 900px) { .two { flex-direction: column; } .two .side { flex: none; width: 100%; } .letterpaper { padding: 16px; } }
   </style>
 </head>
 <body class="tp-body">

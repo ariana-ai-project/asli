@@ -1,7 +1,8 @@
 /* ============================================================
    پنل کارشناس خرید
    ورود با کد → کارتابل (ارجاع‌های ارسال‌شده به این کارشناس) → جزئیات درخواست
-   با چهار تب: بررسی سوابق · جستجوی هوشمند · استعلامات · جدول کمیسیون
+   با پنج تب: بررسی سوابق · جستجوی هوشمند · استعلامات · جدول کمیسیون ·
+   نامهٔ کمیسیون (صدا → متن → نامهٔ رسمی؛ همان مسیر بات تلگرام)
 
    استعلامات و جدول کمیسیون واقعی و ذخیره‌شده‌اند (D1). سوابق و جستجوی
    هوشمند و ارسال پیام، زیرساخت‌شان (UI + endpoint) هست و تا اتصال منبع
@@ -50,6 +51,10 @@
     normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
     hmode: "exact",                    // «عین قلم» (exact) یا «نوع قلم» (head) — از localStorage
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
+    letter: null,          // وضعیت نامهٔ ارجاع باز: {aid, letter, stt} — از /assignments/:id/letter
+    /* ضبط صدای نامه: rec = MediaRecorder باز، draft = متنِ در حال ویرایش (که
+       بازرندرِ تیک‌های موضوع نباید ببلعدش)، sel = اقلامِ موضوع */
+    lt: { rec: null, chunks: [], on: false, abort: false, t0: 0, timer: 0, draft: null, draftFor: 0, sel: null, selAid: 0 },
   };
   try { S.traySort = localStorage.getItem("tp.traySort") === "1"; } catch (_) { /* حالت خصوصی */ }
   const settings = () => S.settings || CFG.defaults;
@@ -333,8 +338,9 @@
         <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">بررسی سوابق</button>
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
-        <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : vComm()}
+        <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
+        <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">نامهٔ کمیسیون</button></div>
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
@@ -1134,6 +1140,276 @@
     Promise.all([...doc.images].map((im) => (im.complete ? 0 : new Promise((ok) => { im.onload = im.onerror = ok; })))).then(() => setTimeout(go, 150));
   }
 
+  /* ---------- تب نامهٔ پیوست کمیسیون ----------
+     همان مسیری که بات تلگرام دارد، این بار در پنل: ضبط با میکروفون یا بارگذاری
+     فایل صوتی ← رونویسی فارسی (ElevenLabs) ← متنِ قابل ویرایش برای تأیید ←
+     انتخاب اقلامِ موضوع ← نامهٔ رسمی روی سربرگ (Word).
+
+     جدول و وضعیت‌ها همان `letters` سرور است، پس نامه‌ای که این‌جا ساخته شود در
+     تلگرام و در «تحویل» هم همان یکی است، نه یک نسخهٔ موازی. مخاطب، «موضوع»،
+     سلام، «با تشکر» و امضا را سرور می‌گذارد و عددها از جدول کمیسیون می‌آیند. */
+  const LT_MIN = 15, LT_MAX = 4000, LT_MAXB = 20 * 1024 * 1024;
+  /* مرورگرها یک قالب صوتی مشترک ندارند: کروم webm/opus می‌دهد و سافاری mp4 */
+  const REC_TYPES = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  const recType = () => (window.MediaRecorder ? REC_TYPES.find((t) => { try { return MediaRecorder.isTypeSupported(t); } catch (_) { return false; } }) : null) || "";
+  /* میکروفون فقط روی HTTPS (یا localhost) در دسترس است */
+  const canRecord = () => !!(navigator.mediaDevices && navigator.mediaDevices.getUserMedia && recType());
+  const EXT_MIME = { ogg: "audio/ogg", oga: "audio/ogg", opus: "audio/ogg", mp3: "audio/mpeg", m4a: "audio/mp4", mp4: "audio/mp4", wav: "audio/wav", webm: "audio/webm", aac: "audio/aac", flac: "audio/flac" };
+  const blobType = (b) => b.type || EXT_MIME[String(b.name || "").split(".").pop().toLowerCase()] || "audio/mpeg";
+  /* همان قاعدهٔ worker/letter.js — تا موضوعی که این‌جا نشان داده می‌شود همان باشد که نوشته می‌شود */
+  const subjectFa = (titles, rid) => {
+    const list = [...new Set(titles.map((t) => String(t == null ? "" : t).trim()).filter(Boolean))];
+    return `گزارش خرید ${list.join(" و ")}`.trim() + (rid ? `، درخواست شماره ${rid}` : "");
+  };
+  const LT_OPEN = ["need_voice", "transcribed", "failed"];
+
+  const letterFor = () => (S.letter && S.d && S.letter.aid === A().id ? S.letter : null);
+  /* متنِ سرور همیشه حرف آخر را می‌زند؛ پیش‌نویسِ نیمه‌تایپ‌شده با آن پاک می‌شود */
+  function setLetter(l) {
+    S.lt.draft = null; S.lt.draftFor = 0;
+    S.letter = { ...(letterFor() || {}), aid: A().id, letter: l };
+  }
+  async function loadLetter() {
+    const aid = A().id;
+    S.letter = { aid, loading: true };
+    try { const r = await TP.api(`/assignments/${aid}/letter`); if (S.letter && S.letter.aid === aid) S.letter = { aid, ...r }; }
+    catch (e) { S.letter = { aid, error: e.message }; }
+    render();
+  }
+  /* اقلامِ موضوع — پیش‌فرض همان اقلامی که در جدول کمیسیون تأیید نهایی دارند (قاعدهٔ بات) */
+  function subjSel() {
+    const aid = A().id;
+    if (!S.lt.sel || S.lt.selAid !== aid) {
+      const fin = new Set(S.d.quotes.filter((q) => q.saved && q.final).map((q) => q.item_id));
+      const pick = items().filter((i) => fin.has(i.id)).map((i) => i.id);
+      S.lt.sel = pick.length ? pick : items().map((i) => i.id);
+      S.lt.selAid = aid;
+    }
+    return S.lt.sel;
+  }
+
+  /* --- ضبط --- */
+  async function recStart() {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const type = recType();
+      const mr = new MediaRecorder(stream, type ? { mimeType: type } : undefined);
+      S.lt.chunks = []; S.lt.abort = false;
+      mr.ondataavailable = (e) => { if (e.data && e.data.size) S.lt.chunks.push(e.data); };
+      mr.onstop = () => {
+        stream.getTracks().forEach((t) => t.stop());
+        clearInterval(S.lt.timer); S.lt.timer = 0;
+        const secs = Math.max(1, Math.round((Date.now() - S.lt.t0) / 1000));
+        const parts = S.lt.chunks, abort = S.lt.abort;
+        const blob = new Blob(parts, { type: (parts[0] && parts[0].type) || type || "audio/webm" });
+        S.lt.rec = null; S.lt.on = false; S.lt.chunks = []; S.lt.abort = false;
+        render();
+        if (!abort) sendVoice(blob, secs);
+      };
+      S.lt.rec = mr; S.lt.on = true; S.lt.t0 = Date.now();
+      mr.start();
+      render();
+      /* شمارنده مستقیم روی همان span نوشته می‌شود؛ بازرندرِ هر ثانیه، کلیک و فوکوس را می‌پراند */
+      S.lt.timer = setInterval(() => {
+        const el = document.querySelector("[data-rec-time]"); if (!el) return;
+        const s = Math.round((Date.now() - S.lt.t0) / 1000);
+        el.textContent = `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+      }, 500);
+    } catch (e) {
+      TP.modal("میکروفون در دسترس نیست", `اجازهٔ میکروفون داده نشد یا مرورگر پشتیبانی نمی‌کند.<br><br><span class="dim">${esc(e.message)}</span><br><br>به‌جایش می‌توانید فایل صوتی بارگذاری کنید یا توضیحتان را تایپ کنید.`, null, "باشد", "");
+    }
+  }
+  function recStop(abort) {
+    if (!S.lt.rec) return;
+    S.lt.abort = !!abort;
+    try { S.lt.rec.stop(); }
+    catch (_) { clearInterval(S.lt.timer); S.lt.timer = 0; S.lt.rec = null; S.lt.on = false; render(); }
+  }
+  function pickVoiceFile() {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = "audio/*,.ogg,.m4a,.mp3,.wav,.webm";
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) sendVoice(f, null); };
+    inp.click();
+  }
+
+  /* بدنهٔ خام می‌رود (TP.api فقط JSON می‌فرستد) — همان قاعدهٔ بارگذاری پیش‌فاکتور */
+  async function uploadVoice(letterId, blob, secs) {
+    const ex = TP.session.get();
+    const qs = `?letter_id=${letterId}${secs ? `&secs=${secs}` : ""}`;
+    const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${A().id}/letter/voice${qs}`, {
+      method: "POST",
+      headers: { "Content-Type": blobType(blob), ...(ex && ex.code ? { "X-Expert-Code": ex.code } : {}) },
+      body: blob,
+    });
+    let data = null; const txt = await res.text();
+    try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
+    if (!res.ok) throw new Error((data && data.error) || `خطای سرور ${res.status}`);
+    return data || {};
+  }
+  async function sendVoice(blob, secs) {
+    const box = letterFor(), L = box && box.letter;
+    if (!L) return;
+    if (!blob || blob.size < 1200) return TP.modal("چیزی ضبط نشد", "صدایی در این فایل نبود یا ضبط خیلی کوتاه بود. دوباره تلاش کنید یا توضیحتان را تایپ کنید.", null, "باشد", "");
+    if (blob.size > LT_MAXB) return TP.modal("صوت خیلی بلند است", `حجم صوت بیشتر از ${M(20)} مگابایت است؛ کوتاه‌ترش کنید.`, null, "باشد", "");
+    const busy = TP.busy("در حال گوش دادن…", "صوت برای رونویسی فارسی فرستاده شد؛ چند ثانیه طول می‌کشد.");
+    try {
+      const r = await uploadVoice(L.id, blob, secs);
+      busy.close();
+      if (r.available === false) return TP.modal("تبدیل صوت به متن", esc(r.message), null, "باشد", "");
+      setLetter(r.letter); render();
+    } catch (e) {
+      busy.close();
+      await loadLetter();
+      TP.modal("صوت به متن تبدیل نشد", `${esc(e.message)}<br><br>می‌توانید دوباره ضبط کنید یا همان توضیح را تایپ کنید.`, null, "باشد", "");
+    }
+  }
+
+  /* --- متن و نگارش --- */
+  async function letterStart() {
+    try { const r = await TP.api(`/assignments/${A().id}/letter`, { body: {} }); setLetter(r.letter); render(); }
+    catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+  function letterCancel() {
+    TP.modal("بی‌خیال نامه", "متنی که گفته‌اید کنار گذاشته می‌شود و نامه‌ای ساخته نمی‌شود. مطمئنید؟", async () => {
+      try { await TP.api(`/assignments/${A().id}/letter/cancel`, { body: {} }); await loadLetter(); }
+      catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+    }, "بی‌خیال");
+  }
+  const ltTooShort = (t) => (t.length < LT_MIN ? "کمی بیشتر توضیح بدهید تا بشود از آن نامه ساخت." : t.length > LT_MAX ? "متن خیلی بلند است؛ خلاصه‌ترش کنید." : "");
+  async function letterTyped() {
+    const box = document.querySelector("[data-lt-type]"); if (!box) return;
+    const text = box.value.trim(), bad = ltTooShort(text);
+    if (bad) return TP.modal("متن مناسب نیست", esc(bad), null, "باشد", "");
+    try { const r = await TP.api(`/assignments/${A().id}/letter/transcript`, { method: "PUT", body: { letter_id: letterFor().letter.id, transcript: text } }); setLetter(r.letter); render(); }
+    catch (e) { TP.modal("ثبت نشد", esc(e.message), null, "باشد", ""); }
+  }
+  async function letterWrite() {
+    const L = letterFor().letter;
+    const el = document.querySelector("[data-lt-text]");
+    const text = (el ? el.value : String(L.transcript || "")).trim();
+    const bad = ltTooShort(text);
+    if (bad) return TP.modal("متن مناسب نیست", esc(bad), null, "باشد", "");
+    const sel = subjSel();
+    const titles = items().filter((i) => sel.includes(i.id)).map((i) => i.title);
+    if (!titles.length) return TP.modal("موضوع نامه", "دست‌کم یک قلم را برای موضوع نامه تیک بزنید.", null, "باشد", "");
+    const busy = TP.busy("در حال نوشتن نامه…", "مدل نامه را می‌نویسد و روی سربرگ می‌نشاند؛ چند ثانیه طول می‌کشد.");
+    try {
+      /* اصلاحِ متن پیش از نگارش ذخیره می‌شود تا آنچه نوشته می‌شود همان باشد که روی صفحه است */
+      if (text !== String(L.transcript || "")) await TP.api(`/assignments/${A().id}/letter/transcript`, { method: "PUT", body: { letter_id: L.id, transcript: text } });
+      const r = await TP.api(`/assignments/${A().id}/letter/write`, { body: { letter_id: L.id, subject_titles: titles } });
+      busy.close();
+      if (r.available === false) return TP.modal("نگارش نامه", esc(r.message), null, "باشد", "");
+      setLetter(r.letter); render();
+      if (r.fileError) TP.modal("فایل Word ساخته نشد", `نامه نوشته شد و متنش همین‌جاست، ولی فایل Word ساخته نشد:<br><br><b>${esc(r.fileError)}</b>`, null, "باشد", "");
+    } catch (e) { busy.close(); await loadLetter(); TP.modal("نگارش نامه انجام نشد", esc(e.message), null, "باشد", ""); }
+  }
+  /* لینک مستقیم هدر احراز هویت را نمی‌فرستد — همان کاری که دانلود برگه‌ها می‌کند */
+  async function downloadLetter() {
+    const aid = A().id, rid = S.d.request.id;
+    const b = TP.busy("آماده‌سازی فایل…", "نامهٔ Word روی سربرگ شرکت");
+    try {
+      const ex = TP.session.get();
+      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/letter/file`, { headers: ex && ex.code ? { "X-Expert-Code": ex.code } : {} });
+      if (!res.ok) { let msg = `خطای سرور ${res.status}`; try { msg = (await res.json()).error || msg; } catch (_) { /* متن خام */ } throw new Error(msg); }
+      const blob = await res.blob();
+      const link = document.createElement("a");
+      link.href = URL.createObjectURL(blob); link.download = `نامه-${rid}.docx`;
+      document.body.appendChild(link); link.click(); link.remove();
+      setTimeout(() => URL.revokeObjectURL(link.href), 5000);
+      b.close();
+    } catch (err) { b.close(); TP.modal("دانلود نشد", esc(err.message), null, "باشد", ""); }
+  }
+
+  /* --- نماها --- */
+  function vLetter() {
+    const box = letterFor();
+    if (!box) { loadLetter(); return `<div class="pad"><div class="empty">در حال خواندن وضعیت نامه…</div></div>`; }
+    if (box.loading) return `<div class="pad"><div class="empty">در حال خواندن وضعیت نامه…</div></div>`;
+    if (box.error) return `<div class="pad"><div class="tp-note warn">وضعیت نامه خوانده نشد: ${esc(box.error)}</div></div>`;
+    const L = box.letter, open = L && LT_OPEN.includes(L.state);
+    return `<div class="pad">
+      <div class="toolrow"><b>نامهٔ پیوست کمیسیون — درخواست <span class="num">${esc(S.d.request.id)}</span></b>
+        <span style="margin-inline-start:auto"></span>
+        ${open ? `<button class="tp-btn sm" data-lt-cancel>بی‌خیال</button>` : ""}</div>
+      ${L && L.state === "written" ? vLetterDone(L)
+        : L && L.transcript && (L.state === "transcribed" || L.state === "failed") ? vLetterConfirm(L)
+        : open ? vLetterAsk(L, box) : vLetterIntro(L)}</div>`;
+  }
+  function vLetterIntro(L) {
+    return `<div class="tp-note" style="display:block">
+      <b>نامه را با حرف زدن بسازید.</b>
+      <p class="lead" style="margin:8px 0 0">توضیح بدهید در جریان این خرید چه اتفاقی افتاده: چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید. محاوره‌ای و به زبان خودتان بگویید — متنِ رسمی را سامانه می‌نویسد و روی سربرگ شرکت می‌گذارد.</p>
+      <p class="lead" style="margin:8px 0 0">مخاطب، «موضوع: گزارش خرید …»، «با سلام و احترام» و امضا را سامانه می‌گذارد و عددها از جدول کمیسیون برداشته می‌شوند، نه از حرف شما.</p>
+      <div style="margin-top:12px"><button class="tp-btn primary" data-lt-start>${L ? "شروع دوبارهٔ نامه" : "شروع نامه"}</button></div></div>`;
+  }
+  function vLetterAsk(L, box) {
+    const stt = box.stt !== false, rec = canRecord();
+    return `<div class="tp-note" style="display:block">
+        <b>۱ — توضیحتان را بگویید</b>
+        <p class="lead" style="margin:6px 0 0">چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید. یک تا دو دقیقه کافی است.</p>
+        ${stt ? "" : `<div class="tp-note warn" style="margin-top:10px">سرویس تبدیل صوت به متن هنوز وصل نیست؛ فعلاً توضیحتان را تایپ کنید.</div>`}
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+          ${S.lt.on
+            ? `<button class="tp-btn danger" data-lt-stop>⏹ پایان ضبط و ارسال</button>
+               <span class="chip warn">🔴 در حال ضبط — <span class="num" data-rec-time>0:00</span></span>
+               <button class="tp-btn sm" data-lt-abort>انصراف</button>`
+            : `<button class="tp-btn primary" data-lt-rec ${rec && stt ? "" : "disabled"}>🎤 ضبط صدا</button>
+               <button class="tp-btn" data-lt-file ${stt ? "" : "disabled"}>📁 بارگذاری فایل صوتی</button>
+               ${L.hasVoice ? `<span class="chip warn">صوت قبلی ذخیره شد ولی رونویسی نشد</span>` : ""}`}
+        </div>
+        ${rec ? "" : `<div class="dim" style="font-size:.85rem;margin-top:8px">ضبط مستقیم در این مرورگر در دسترس نیست (میکروفون فقط روی HTTPS کار می‌کند). فایل صوتی بارگذاری کنید یا تایپ کنید.</div>`}
+      </div>
+      <div class="tp-note" style="display:block;margin-top:10px">
+        <b>یا همین‌جا تایپ کنید</b>
+        <p class="lead" style="margin:6px 0 0">جایی که نمی‌شود حرف زد، بنویسید؛ از این نقطه به بعد مسیر یکی است.</p>
+        <textarea class="tp-input" data-lt-type rows="5" maxlength="${LT_MAX}" placeholder="مثلاً: برای این قلم از پنج تأمین‌کننده استعلام گرفتیم، سه‌تا جواب دادند…" style="width:100%;margin-top:8px;resize:vertical;font-family:inherit"></textarea>
+        <div style="margin-top:8px"><button class="tp-btn primary" data-lt-typed>ثبت متن</button></div>
+      </div>`;
+  }
+  function vLetterConfirm(L) {
+    const sel = subjSel(), its = items();
+    const titles = its.filter((i) => sel.includes(i.id)).map((i) => i.title);
+    const text = S.lt.draftFor === L.id && S.lt.draft != null ? S.lt.draft : String(L.transcript || "");
+    return `${L.state === "failed" ? `<div class="tp-note warn">نگارش نامه بار قبل انجام نشد؛ متن شما سر جایش است و می‌توانید دوباره بزنید.</div>` : ""}
+      <div class="tp-note" style="display:block">
+        <b>۱ — این را شنیدم</b>
+        <p class="lead" style="margin:6px 0 0">اگر کلمه‌ای اشتباه شنیده شده همین‌جا اصلاحش کنید؛ نامه از روی همین متن نوشته می‌شود.</p>
+        <textarea class="tp-input" data-lt-text rows="7" maxlength="${LT_MAX}" style="width:100%;margin-top:8px;resize:vertical;font-family:inherit">${esc(text)}</textarea>
+        <div style="margin-top:8px"><button class="tp-btn sm" data-lt-again>✏️ از نو می‌گویم</button></div>
+      </div>
+      <div class="tp-note" style="display:block;margin-top:10px">
+        <b>۲ — موضوع نامه</b>
+        <p class="lead" style="margin:6px 0 0">نامه دربارهٔ کدام اقلام است؟ پیش‌فرض، اقلامی است که در جدول کمیسیون «تأیید نهایی» دارند.</p>
+        <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:34vh;overflow:auto">
+          ${its.map((i) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-lt-sub="${i.id}" ${sel.includes(i.id) ? "checked" : ""}><span>${esc(i.title)}</span>${i.qty == null ? "" : `<span class="dim" style="font-size:.8rem">— ${M(i.qty)} ${esc(i.unit || "")}</span>`}</label>`).join("")}
+        </div>
+        <div style="margin-top:10px"><span class="dim">موضوع:</span> <b>${titles.length ? esc(subjectFa(titles, S.d.request.id)) : "—"}</b></div>
+      </div>
+      <div style="margin-top:12px"><button class="tp-btn primary" data-lt-write>✍️ نوشتن نامه</button></div>`;
+  }
+  function vLetterDone(L) {
+    const b = L.body || {}, mt = L.meta || {}, warn = [];
+    if ((b.uncertain || []).length) warn.push(`<div><b>این‌ها در صحبتتان روشن نبود و در نامه نیامد:</b><br>${b.uncertain.map((u) => "• " + esc(u)).join("<br>")}</div>`);
+    if ((mt.suspicious || []).length) warn.push(`<div><b>عددهایی که از دادهٔ سامانه نیامده‌اند:</b> ${esc(mt.suspicious.join("، "))}</div>`);
+    if ((mt.unresolved || []).length) warn.push(`<div><b>جای‌خالیِ حل‌نشده (با «—» پر شد):</b> ${esc(mt.unresolved.join("، "))}</div>`);
+    return `<div class="toolrow"><span class="chip ok">نامه آماده است</span>
+        <span class="dim" style="font-size:.85rem">بر پایهٔ ${M(mt.items || 0)} قلمِ تیک‌خورده و ${M(mt.suppliers || 0)} تأمین‌کننده — همان جدول کمیسیون</span>
+        <span style="margin-inline-start:auto"></span>
+        <button class="tp-btn sm primary" data-lt-dl ${L.hasFile ? "" : "disabled"}>⬇️ دانلود نامه (Word)</button>
+        <button class="tp-btn sm" data-lt-start>نامهٔ تازه</button></div>
+      ${L.hasFile ? "" : `<div class="tp-note warn">فایل Word این نامه ساخته نشد؛ متنش را از همین‌جا بردارید.</div>`}
+      ${warn.length ? `<div class="tp-note warn" style="display:block"><b>⚠️ پیش از پیوست کردن این‌ها را چک کنید:</b><div style="margin-top:6px">${warn.join("<br>")}</div></div>` : ""}
+      <div class="letterpaper">
+        <div class="lt-to">${esc(b.to || "")}</div>
+        <div class="lt-sub"><b>موضوع:</b> ${esc(b.subject || "")}</div>
+        <div class="lt-sal">${esc(b.salutation || "")}</div>
+        ${(b.paragraphs || []).map((p) => `<p>${esc(p)}</p>`).join("")}
+        ${b.closing ? `<p>${esc(b.closing)}</p>` : ""}
+        <div class="lt-sign"><b>${esc(b.thanks || "")}</b><br><b>${esc(b.signature || "")}</b></div>
+      </div>
+      <div class="tp-note">همین متن در فایل Word روی سربرگ شرکت نشسته است. اگر جایی را می‌خواهید عوض کنید فایل را دانلود و در Word اصلاحش کنید، یا «نامهٔ تازه» بزنید و دوباره توضیح بدهید.</div>`;
+  }
+
   /* ---------- قالب‌های پیام (واقعی، ذخیره در D1) ---------- */
   const DEFAULT_TPL = [
     { title: "زمان تحویل", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\nبرای {عنوان قلم} به مقدار {مقدار} {واحد} استعلام قیمت نیاز داریم.\nلطفاً زودترین زمان تحویل ممکن را اعلام بفرمایید.\n{نام کارشناس}` },
@@ -1207,7 +1483,11 @@
     try { const d = await TP.api(`/assignments/${aid}`);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
-      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail"; render();
+      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
+      /* نامه را بات تلگرام هم جلو می‌برد، پس ↻ باید وضعیتش را از نو بگیرد؛
+         تب نامه خودش تنبلانه دوباره می‌خواند. */
+      S.letter = null;
+      render();
       /* ارجاعِ زیرمجموعه فقط‌خواندنی است: «مشاهده» را کارشناس خودش ثبت می‌کند */
       if (!S.d.assignment.viewed_at && S.d.assignment.expert_id === S.expert.id) { await TP.api(`/assignments/${aid}/viewed`, { body: {} }); S.d.assignment.viewed_at = Date.now(); render(); } }
     catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
@@ -1275,9 +1555,9 @@
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
     const ts = G("[data-tsort]"); if (ts) ts.onclick = () => { S.traySort = !S.traySort; try { localStorage.setItem("tp.traySort", S.traySort ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };
-    const bk = G("[data-back]"); if (bk) bk.onclick = () => { S.screen = "list"; S.d = null; if (S.fromTeam) { S.tab = "team"; S.fromTeam = false; loadTeam(true); } loadTray(); };
+    const bk = G("[data-back]"); if (bk) bk.onclick = () => { if (S.lt.on) recStop(true); S.screen = "list"; S.d = null; S.letter = null; if (S.fromTeam) { S.tab = "team"; S.fromTeam = false; loadTeam(true); } loadTray(); };
     Q("[data-item]").forEach((x) => x.onclick = () => { S.itemIdx = +x.dataset.item; render(); });
-    Q("[data-tab]").forEach((x) => x.onclick = () => { S.tab = x.dataset.tab; render(); });
+    Q("[data-tab]").forEach((x) => x.onclick = () => { if (S.lt.on && x.dataset.tab !== "letter") recStop(true); S.tab = x.dataset.tab; render(); });
     Q("[data-idone]").forEach((c) => c.onchange = async (e) => { try { await TP.api(`/items/${e.target.dataset.idone}/commission`, { body: { ok: e.target.checked } }); await reload(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } });
     Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
     const tp = G("[data-tpl]"); if (tp) tp.onclick = pickTemplate;
@@ -1423,6 +1703,26 @@
       } catch (e) { msg.textContent = e.message; }
     };
     const pr = G("[data-print]"); if (pr) pr.onclick = printSheets;
+    /* نامهٔ کمیسیون */
+    const lStart = G("[data-lt-start]"); if (lStart) lStart.onclick = letterStart;
+    const lAgain = G("[data-lt-again]"); if (lAgain) lAgain.onclick = letterStart;
+    const lCancel = G("[data-lt-cancel]"); if (lCancel) lCancel.onclick = letterCancel;
+    const lRec = G("[data-lt-rec]"); if (lRec) lRec.onclick = recStart;
+    const lStop = G("[data-lt-stop]"); if (lStop) lStop.onclick = () => recStop(false);
+    const lAbort = G("[data-lt-abort]"); if (lAbort) lAbort.onclick = () => recStop(true);
+    const lFile = G("[data-lt-file]"); if (lFile) lFile.onclick = pickVoiceFile;
+    const lTyped = G("[data-lt-typed]"); if (lTyped) lTyped.onclick = letterTyped;
+    const lWrite = G("[data-lt-write]"); if (lWrite) lWrite.onclick = letterWrite;
+    const lDl = G("[data-lt-dl]"); if (lDl) lDl.onclick = downloadLetter;
+    /* اصلاحِ نیمه‌کارهٔ متن نباید با تیک زدنِ اقلامِ موضوع (که بازرندر می‌کند) گم شود */
+    const keepDraft = () => { const t = G("[data-lt-text]"), b = letterFor(); if (t && b && b.letter) { S.lt.draft = t.value; S.lt.draftFor = b.letter.id; } };
+    const lText = G("[data-lt-text]"); if (lText) lText.oninput = keepDraft;
+    Q("[data-lt-sub]").forEach((c) => c.onchange = () => {
+      keepDraft();
+      S.lt.sel = [...Q("[data-lt-sub]")].filter((x) => x.checked).map((x) => +x.dataset.ltSub);
+      S.lt.selAid = A().id;
+      render();
+    });
   }
 
   function doExpertAct(act) {
