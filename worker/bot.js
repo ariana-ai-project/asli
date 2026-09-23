@@ -1744,13 +1744,16 @@ function histSection(it, h, no, budget) {
   const rows = h.suppliers || [];
   if (!rows.length) {
     const why = h.excluded && h.excluded.length
-      ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${h.excluded[0].name}» ثبت شده و تأمین‌کنندهٔ نام‌داری ندارد.`
+      ? `هرچه از این قلم ثبت شده زیر «${h.excluded[0].name}» است (${h.excluded[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"}) و تأمین‌کنندهٔ نام‌داری ندارد.`
       : (h.message || "سابقه‌ای در فایل مرجع پیدا نشد.");
     return `${title}\n${esc(why)}`;
   }
   const unit = h.item && h.item.unit ? ` ${h.item.unit}` : "";
-  let s = `${title}\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}`
-    + (h.item && h.item.mixedUnits ? `\n⚠️ <i>واحدها یکدست نیستند (${esc(h.item.units || "")})؛ جمع مقدار را با احتیاط بخوانید.</i>` : "");
+  /* «عین قلم» در بات: همان نوع قلم با همان لایه‌ها؛ مقدارها به واحد مرجعِ نوع قلم برده شده‌اند */
+  const conv = (h.rates || []).filter((r) => r.rate != null);
+  let s = `${title}\n<i>عین قلم — ${esc(h.struct ? h.struct.head : "")}</i>\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}`
+    + (conv.length ? `\n<i>به واحد مرجع (${esc(h.item.unit)}) برده شد: ${conv.map((r) => `${esc(r.unit)}×${M(RQ(r.rate))}`).join("، ")}</i>` : "")
+    + (h.unconverted ? `\n⚠️ <i>${M(h.unconverted)} خرید واحدی داشت که نرخ تبدیل ندارد و در جمع مقدار نیامد.</i>` : "");
   let shown = 0;
   for (const [i, x] of rows.entries()) {
     const line = `\n${M(i + 1)}. <b>${esc(short(x.name, 36))}</b>\n`
@@ -2557,7 +2560,7 @@ const toggleIn = (arr, v) => { const a = Array.isArray(arr) ? [...arr] : []; con
 /** اقلام باز یک ارجاع، به ترتیب سطر */
 async function itemsOf(env, aid) {
   return (await env.DB.prepare(
-    "SELECT id, line_no, title, qty, unit, spec, code, hist_code FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
+    "SELECT id, line_no, title, qty, unit, spec, code, hist_code, norm_json FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
   ).bind(aid).all()).results || [];
 }
 

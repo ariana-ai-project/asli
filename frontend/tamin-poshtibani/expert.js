@@ -46,6 +46,9 @@
     marketsMeta: [{ key: "IR", fa: "ایران" }, { key: "TJ", fa: "تاجیکستان" }, { key: "TM", fa: "ترکمنستان" }, { key: "UZ", fa: "ازبکستان" }, { key: "KZ", fa: "قزاقستان" }, { key: "AM", fa: "ارمنستان" }, { key: "CN", fa: "چین" }, { key: "AE", fa: "امارات" }, { key: "TR", fa: "ترکیه" }],
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
+    norm: {},                          // نرمال‌سازی هر قلم: {loading, error, data, draft}
+    normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
+    hmode: "exact",                    // «عین قلم» (exact) یا «نوع قلم» (head) — از localStorage
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
   };
   try { S.traySort = localStorage.getItem("tp.traySort") === "1"; } catch (_) { /* حالت خصوصی */ }
@@ -336,17 +339,43 @@
   }
 
   /* ---------- تب بررسی سوابق ----------
-     مبنای مقایسهٔ تأمین‌کنندگان (تصمیم مدیر) سه ستون است، نه قیمت:
-     دفعات خرید، جمع مقدار، و «گشتاور» — همان جمع مقدار وقتی خریدِ تازه‌تر
-     سنگین‌تر شمرده شود (شیب از نوار ۱..۱۰). قیمت‌ها فقط در ریز خریدها و کارت
-     تأمین‌کننده نمایش داده می‌شوند. رتبه‌ها را سرور می‌سازد تا پنل و بات تلگرام
-     یک عدد بگویند؛ این‌جا فقط ستون مرتب‌سازی انتخاب می‌شود (پیش‌فرض: گشتاور).
-     گروه «خرید قلم در پروژه» تا رسیدن ستون پروژه به فایل مرجع خاموش است. */
-  const MOM_KEY = "tp.mom";
-  try { S.mom = Math.min(10, Math.max(1, +(localStorage.getItem(MOM_KEY) || 5))); } catch (_) { /* حالت خصوصی */ }
+     دو حالت (Task.txt، مهر ۱۴۰۵): «عین قلم» — همان نوع قلم با دقیقاً همان لایه‌های
+     ویژگی — و «نوع قلم» — همهٔ اقلام همان نوع. ساختار قلم (نوع و لایه‌ها) یا از فهرست
+     اقلام می‌آید (کد راهکاران)، یا با تیک «نرمال‌سازی اقلام» پیشنهاد و با تأیید
+     کارشناس ثبت می‌شود؛ نرخ‌های تبدیل واحد همان‌جا قابل ویرایش‌اند.
+     مبنای مقایسهٔ تأمین‌کنندگان (تصمیم مدیر) سه ستون است، نه قیمت: دفعات خرید، جمع
+     مقدار (به واحد مرجع) و «گشتاور» — همان جمع مقدار وقتی خریدِ تازه‌تر سنگین‌تر
+     شمرده شود (شیب از نوار ۱..۱۰). در امتیاز برابر، ردهٔ بالاتر (A، B، C) جلوتر است.
+     رتبه‌ها را سرور می‌سازد تا پنل و بات تلگرام یک عدد بگویند. قیمت‌ها (به زمستان
+     ۱۴۰۴) فقط در ریز خریدها و کارت تأمین‌کننده‌اند. گروه «خرید قلم در پروژه» تا رسیدن
+     ستون پروژه به فایل مرجع خاموش است. */
+  const MOM_KEY = "tp.mom", NORM_KEY = "tp.norm", HMODE_KEY = "tp.hmode";
+  try {
+    S.mom = Math.min(10, Math.max(1, +(localStorage.getItem(MOM_KEY) || 5)));
+    S.normOn = localStorage.getItem(NORM_KEY) === "1";
+    S.hmode = localStorage.getItem(HMODE_KEY) === "head" ? "head" : "exact";
+  } catch (_) { /* حالت خصوصی */ }
   const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدار بدون زبالهٔ اعشار شناور */
-  const MATCH = { normalized: "کد استاندارد", code: "کد قلم راهکاران", title: "عنوان قلم", none: "بی‌سابقه" };
   const HSORT = { m: "rankM", qty: "rankQty", n: "rankN" };
+  const HMODE_FA = { exact: "عین قلم", head: "نوع قلم" };
+  /* چرا یک نام در سهم و رتبه نیامده (worker/history.js:excludedWhy) */
+  const EXCL_WHY = {
+    bucket: "نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
+    employer: "مصالحِ تحویلیِ کارفرما است با قیمت اسمی، نه خرید از تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
+  };
+  const CONF_CLS = { "قطعی": "ok", "بالا": "ok", "متوسط": "info", "پایین": "warn", "کارشناس": "info" };
+  const SRC_FA = { catalog: "از فهرست اقلام", cache: "پیشنهاد مدل (همین عنوان قبلاً تفکیک شده)", model: "پیشنهاد مدل", manual: "ویرایش کارشناس" };
+  /* نرخ تبدیل با تا چهار رقم اعشار — ۰٫۰۸۳۳ برای «متر → شاخه» معنا دارد، گرد کردنش به ۰٫۰۸ نه */
+  const fmtRate = (r) => (r == null ? "—" : Number(r).toLocaleString("en-US", { maximumFractionDigits: 4 }));
+  /* عدد تایپ‌شده با کیبورد فارسی: «۰٫۵» و «0.5» یکی‌اند؛ خالی = null */
+  const numIn = (v) => {
+    const s = String(v == null ? "" : v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
+      .replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
+    return s === "" ? null : Number(s);
+  };
+  /* پارامترهای جستجو: حالت، و اینکه بر ساختار تأییدشدهٔ نرمال‌سازی باشد یا فقط کد راهکاران */
+  const histQuery = (it) => `item_id=${it.id}&k=${S.mom}&mode=${S.hmode}&norm=${S.normOn ? 1 : 0}`;
+  const normReady = (it) => { const n = S.norm[it.id]; return !!(n && n.data && n.data.confirmed); };
   const CHART_COLORS = ["#4f8cff", "#ff8c42", "#22c55e", "#e5484d", "#a78bfa", "#f2c230", "#2dd4bf", "#f472b6", "#93c5fd", "#fb923c", "#86efac", "#fca5a5"];
 
   const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]
@@ -359,15 +388,16 @@
     const c = p.contact || {};
     const unit = d.item && d.item.unit ? " " + d.item.unit : "";
     const f = (lab, val, cls) => `<div class="f"><b>${lab}</b><span class="${cls || ""}">${val == null || val === "" ? "—" : esc(val)}</span></div>`;
-    return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.code ? `<span class="chip num">${esc(p.code)}</span>` : ""}
+    const per = d.item && d.item.unit ? ` · هر ${esc(d.item.unit)}` : "";
+    return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.grade ? `<span class="chip grade g${esc(p.grade)}" title="ردهٔ تأمین‌کننده">رده ${esc(p.grade)}</span>` : ""}${p.code ? `<span class="chip num" title="کد تأمین‌کننده">${esc(p.code)}</span>` : ""}
         <button class="tp-btn xs" data-close-prof style="margin-inline-start:auto">بستن</button></div>
       <div class="gridp">
-        ${f("دفعات خرید این قلم", `${M(p.n)} بار (رتبه ${M(p.rankN)})`, "num")}
+        ${f("دفعات خرید", `${M(p.n)} بار (رتبه ${M(p.rankN)})`, "num")}
         ${f("جمع مقدار", `${M(RQ(p.qty))}${unit} (رتبه ${M(p.rankQty)})`, "num")}
         ${f("امتیاز گشتاوری", `${M(RQ(p.qtyM))}${unit} (رتبه ${M(p.rankM)})`, "num")}
         ${f("نخستین خرید", p.firstDate, "num")}${f("آخرین خرید", p.lastDate, "num")}
-        ${f("قیمت واحد میانگین (۱۴۰۴)", p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
-        ${f("کمینه / بیشینه قیمت واحد (۱۴۰۴)", p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
+        ${f(`قیمت واحد میانگین (${d.base.priceLabel || "زمستان ۱۴۰۴"}${per})`, p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
+        ${f(`کمینه / بیشینه قیمت واحد (${d.base.priceLabel || "زمستان ۱۴۰۴"})`, p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
         ${f("شهر", c.city)}${f("تلفن همراه", c.phone, "num")}${f("تلفن ثابت", c.tel2, "num")}${f("ایمیل", c.email)}${f("وب‌سایت", c.site)}</div>
       ${c.note ? `<div class="desc"><b>توضیحات مدیر:</b> ${esc(c.note)}</div>` : ""}
       <div class="dim" style="font-size:.82rem;margin-top:8px">${p.contact ? "راه‌های تماس از دفترچهٔ تأمین‌کنندگان خوانده شده‌اند."
@@ -382,8 +412,9 @@
   const jParts = (ms) => TP.fmtD(ms).split("/").map(Number);
   const jMonth = (y, m) => TP.jStr2ms(`${y + Math.floor((m - 1) / 12)}/${((m - 1) % 12 + 12) % 12 + 1}/01`);
 
+  const seriesKey = (it) => `${it.id}|${S.hmode}|${S.normOn ? 1 : 0}`;
   function chartBody(it, d) {
-    const se = S.series[it.id];
+    const se = S.series[seriesKey(it)];
     if (se === "loading") return `<div class="empty">در حال خواندن نقاط نمودار…</div>`;
     const pts = ((se && se.points) || []).map((p) => ({ ...p, t: TP.jStr2ms(p.date) })).filter((p) => p.t != null && p.qty > 0);
     if (!pts.length) return `<div class="tp-note warn">هیچ خرید مقدارداری برای نمودار نیست.</div>`;
@@ -422,7 +453,7 @@
       for (const p of g.pts) svg += `<circle cx="${X(p.t).toFixed(1)}" cy="${Y(p.qty).toFixed(1)}" r="6.5" fill="${g.color}" stroke="#0b1730" stroke-width="1.5"><title>${esc(g.name)} — ${esc(p.date)} — ${fmtQ(p.qty)}</title></circle>`;
     }
     svg += `</svg>`;
-    const unit = d && d.item && d.item.unit ? ` (${esc(d.item.unit)})` : "";
+    const u = (se && se.unit) || (d && d.item && d.item.unit), unit = u ? ` (${esc(u)} — واحد مرجع)` : "";
     return `<div class="dim" style="font-size:1.05rem;margin-bottom:10px">افقی: زمان از ${esc(TP.fmtD(tMin))} تا ${esc(TP.fmtD(tMax))} · عمودی: مقدار${unit} · هر نقطه یک خرید است.</div>
       ${svg}
       <div class="chlegend">${groups.map((g) => `<span><i style="background:${g.color}"></i>${esc(g.name)}</span>`).join("")}</div>`;
@@ -436,7 +467,7 @@
     function draw() {
       const bg = document.getElementById("tp-chart"); if (!bg) return;
       bg.innerHTML = `<div class="chart-box" role="dialog" aria-modal="true">
-        <div class="chart-head"><b>روند خرید «${esc(it.title)}»</b><button class="tp-btn" data-chart-close>بستن</button></div>
+        <div class="chart-head"><b>روند خرید «${esc(it.title)}» — ${HMODE_FA[S.hmode]}</b><button class="tp-btn" data-chart-close>بستن</button></div>
         ${chartBody(it, d)}</div>`;
       bg.querySelector("[data-chart-close]").onclick = close;
     }
@@ -445,16 +476,58 @@
     bg.onclick = (ev) => { if (ev.target === bg) close(); };
     document.body.appendChild(bg);
     document.addEventListener("keydown", onKey);
-    if (S.series[it.id] && S.series[it.id] !== "loading") { draw(); return; }
-    S.series[it.id] = "loading"; draw();
-    TP.api(`/suppliers/history/series?item_id=${it.id}`)
-      .then((r) => { S.series[it.id] = r; draw(); })
-      .catch((err) => { S.series[it.id] = null; close(); TP.modal("خطا", esc(err.message), null, "باشد", ""); });
+    const sk = seriesKey(it);
+    if (S.series[sk] && S.series[sk] !== "loading") { draw(); return; }
+    S.series[sk] = "loading"; draw();
+    TP.api(`/suppliers/history/series?${histQuery(it)}`)
+      .then((r) => { S.series[sk] = r; draw(); })
+      .catch((err) => { S.series[sk] = null; close(); TP.modal("خطا", esc(err.message), null, "باشد", ""); });
+  }
+
+  /* پنل «نرمال‌سازی اقلام» زیر عنوان قلم: نوع قلم، لایه‌ها، و نرخ‌های تبدیل — همه قابل
+     ویرایش. تا کارشناس «تأیید» را نزند، جستجو بر آن انجام نمی‌شود. ویرایش‌ها بی‌بازرندر در
+     draft می‌نشینند تا فوکوس نپرد. */
+  function vNorm(it) {
+    const n = S.norm[it.id];
+    if (!n || n.loading) return `<div class="normbox"><div class="dim">در حال تفکیک عنوان قلم به نوع قلم و لایه‌های ویژگی…</div></div>`;
+    if (n.error) return `<div class="normbox"><div class="tp-note warn" style="margin:0 0 8px">${esc(n.error)}</div><button class="tp-btn sm" data-norm-redo>تلاش دوباره</button></div>`;
+    const d = n.data, dr = n.draft, rv = d.rates || { ref: null, units: [] };
+    const names = d.layerNames || [];
+    const opt = (sel) => names.map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+    const cands = [...new Set([d.head, ...(d.candidates || [])].filter(Boolean))];
+    return `<div class="normbox">
+      <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
+        <span class="chip ${d.confirmed ? "ok" : "warn"}">${d.confirmed ? "تأییدشده — جستجو بر همین است" : "تأیید نشده"}</span>
+        <span class="chip info">${esc(SRC_FA[d.source] || d.source)}${d.code ? ` · کد ${esc(d.code)}` : ""}</span>
+        ${d.source === "model" && d.cost != null ? `<span class="chip" title="هزینهٔ همین یک فراخوانی مدل">${d.cost.toFixed(4)} دلار</span>` : ""}
+        ${d.known === false ? `<span class="chip warn" title="جستجو چیزی پیدا نمی‌کند مگر نوع قلمِ موجود را انتخاب کنید">این نوع قلم در فهرست نیست — سابقه‌ای ندارد</span>` : ""}</div>
+      <div class="normgrid">
+        <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%">
+          <datalist id="nh-${it.id}">${cands.map((c) => `<option value="${esc(c)}">`).join("")}</datalist></label>
+        <div class="tp-field"><b>لایه‌های ویژگی</b>
+          ${dr.layers.map(([k, v], i) => `<div class="normlayer"><select class="tp-input" data-norm-lk="${i}">${opt(k)}</select>
+            <input class="tp-input" data-norm-lv="${i}" value="${esc(v)}"><button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button></div>`).join("")
+            || `<div class="dim" style="font-size:.85rem">لایه‌ای ندارد.</div>`}
+          <button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button></div>
+      </div>
+      ${d.residual ? `<div class="dim" style="font-size:.85rem;margin-top:6px">بخشی از عنوان که به هیچ لایه‌ای نخورد: <b>${esc(d.residual)}</b></div>` : ""}
+      ${rv.ref ? `<div class="tp-field" style="margin-top:10px"><b>نرخ تبدیل به واحد مرجع («${esc(rv.ref)}»)</b>
+        ${rv.units.length ? `<table class="tp-mx" style="width:auto"><thead><tr><th>واحد ثبت‌شده در سوابق</th><th>نرخ</th><th>مبنا</th><th>اطمینان</th></tr></thead><tbody>
+          ${rv.units.map((u) => `<tr><td>${esc(u.unit)}</td>
+            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${dr.rates[u.unit] != null ? dr.rates[u.unit] : u.rate == null ? "" : u.rate}" inputmode="decimal" style="width:110px"></td>
+            <td class="rt" style="white-space:normal">${esc(u.basis)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td></tr>`).join("")}
+        </tbody></table>
+        <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ. نرخی را که عوض کنید، در جستجو بر همهٔ نرخ‌های دیگر مقدم است؛ خالی گذاشتن یعنی همان نرخ فایل.</div>`
+        : `<div class="dim" style="font-size:.85rem">همهٔ خریدهای این نوع قلم با واحد مرجع ثبت شده‌اند؛ تبدیلی لازم نیست.</div>`}</div>` : ""}
+      <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm>${d.confirmed ? "ذخیرهٔ تغییرات" : "تأیید"}</button>
+        <button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود (هزینه دارد)">تفکیک دوباره با مدل</button>
+        ${d.confirmed ? `<button class="tp-btn" data-norm-clear title="قلم به حالت پیش‌فرض (فقط کد راهکاران) برمی‌گردد">برداشتن تأیید</button>` : ""}</div></div>`;
   }
 
   function vHistory(it) {
     const d = S.hist[it.id];
     const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
+    const gated = S.normOn && !normReady(it);
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
       ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
@@ -463,80 +536,149 @@
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
       <button class="tp-btn" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده — در پنجرهٔ بزرگ وسط صفحه">نمودار روند</button>
-      <button class="tp-btn primary" data-run-hist>${d ? "محاسبهٔ دوباره" : "جستجوی سوابق این قلم"}</button>
-      ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>`;
+      <button class="tp-btn primary" data-run-hist ${gated ? `disabled title="اول ساختار نرمال‌شدهٔ قلم را تأیید کنید"` : ""}>${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
+      ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>
+      <div class="toolrow">
+        <label class="chkline" title="عنوان قلم به نوع قلم و لایه‌های ویژگیِ استاندارد تفکیک و پیش از جستجو تأیید می‌شود"><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
+        <span class="seg" role="radiogroup" aria-label="حالت جستجو">
+          <button class="tp-btn sm ${S.hmode === "exact" ? "primary" : ""}" data-hmode="exact" title="همان نوع قلم با دقیقاً همان لایه‌های ویژگی">عین قلم</button>
+          <button class="tp-btn sm ${S.hmode === "head" ? "primary" : ""}" data-hmode="head" title="همهٔ اقلام همین نوع — مثلاً هر پیچی که تا حالا خریده‌ایم">نوع قلم</button></span>
+        ${gated ? `<span class="dim" style="font-size:.85rem">ساختار قلم را بررسی و «تأیید» کنید، بعد «بررسی سوابق» را بزنید.</span>` : ""}</div>
+      ${S.normOn ? vNorm(it) : ""}`;
 
     if (!d) return `<div class="pad">${head}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
-      دکمهٔ «جستجوی سوابق این قلم» را بزنید. رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
+      ${S.normOn ? "ساختار قلم را تأیید کنید، حالت «عین قلم» یا «نوع قلم» را انتخاب کنید و «بررسی سوابق» را بزنید." : "حالت «عین قلم» یا «نوع قلم» را انتخاب کنید و «بررسی سوابق» را بزنید. اگر کد این قلم در فهرست اقلام نیست، «نرمال‌سازی اقلام» را روشن کنید."}
+      رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
     if (d.available === false) return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div></div>`;
+    const st = d.struct || {}, mt = d.match || {};
+    const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
+    const structChips = st.head ? `<div class="toolrow">
+        <span class="chip ok" title="حالت جستجو">${HMODE_FA[mt.mode] || ""}${mt.codes != null ? ` — ${M(mt.codes)} قلم از ${M(mt.headItems)} قلمِ «${esc(st.head)}»` : ""}</span>
+        ${Object.entries(st.layers || {}).map(([k, v]) => `<span class="chip" title="لایهٔ ویژگی">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}
+        <span class="chip info">واحد مرجع: ${esc(st.refUnit || "—")}</span>
+        ${(d.rates || []).map((r) => `<span class="chip ${CONF_CLS[r.conf] || ""}" title="${esc(r.basis)} — ${M(r.rows)} خرید${r.varied ? ` — نرخ ویژهٔ هر قلم، از ${fmtRate(r.min)} تا ${fmtRate(r.max)}` : ""}">${esc(r.unit)} × ${fmtRate(r.rate)}${r.varied ? " (متغیر)" : ""}</span>`).join("")}
+        ${d.unconverted ? `<span class="chip warn" title="واحدی که نرخ تبدیل ندارد در جمع مقدار نمی‌آید؛ نرخش را در پنل نرمال‌سازی بدهید">${M(d.unconverted)} خرید بی‌نرخ تبدیل</span>` : ""}
+        ${d.lowConf ? `<span class="chip warn" title="نرخ تبدیلِ این خریدها اطمینان «پایین» دارد و می‌تواند جمع را جابه‌جا کند">${M(d.lowConf)} خرید با نرخ کم‌اطمینان</span>` : ""}</div>` : "";
     const exc = d.excluded || [];
     const rows = histRows(d);
-    if (!rows.length) return `<div class="pad">${head}<div class="tp-note warn">${exc.length
-      ? `هرچه از این قلم خریده شده زیر نام تجمیعی «${esc(exc[0].name)}» ثبت شده (${M(exc[0].n)} خرید) و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
+    if (!rows.length) return `<div class="pad">${head}${structChips}<div class="tp-note warn">${exc.length
+      ? `هرچه از این قلم ثبت شده زیر «${esc(exc[0].name)}» است (${M(exc[0].n)} خرید) — ${exc[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"} — و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
       : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div></div>`;
 
     const added = new Set(S.d.quotes.filter((q) => q.item_id === it.id).map((q) => TP.nrm(q.supplier_name)));
-    const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
     /* رتبه در ستونِ باریکِ زردِ بعد از هر عدد؛ کلیک روی هر ستون رتبه، کل جدول را مرتب می‌کند */
     const rk = (k) => `<th class="rkcol ${S.hsort === k ? "sorted" : ""}" data-hsort="${k}" title="مرتب‌سازی کل جدول بر اساس همین رتبه">رتبه${S.hsort === k ? " ▾" : ""}</th>`;
     const rc = (k, v) => `<td class="rkcol num" data-hsort="${k}" title="مرتب‌سازی کل جدول بر اساس همین رتبه">${M(v)}</td>`;
     return `<div class="pad">
       ${vProfile(it)}
       ${head}
+      ${structChips}
       <div class="toolrow">
         <span class="chip ok">خرید قلم — فعال</span>
         <span class="chip mock" title="ستون پروژه هنوز در فایل مرجع نیست">خرید قلم در پروژه — در انتظار ساختار داده</span>
         <span class="chip">${M(rows.length)} تأمین‌کننده · ${M(d.totals.n)} خرید · جمع مقدار ${M(RQ(d.totals.qty))}${unit}</span>
-        <span class="chip info">تطبیق با ${MATCH[d.match.by] || esc(d.match.by)}${d.match.code2 ? ` · ${esc(d.match.code2)}` : ""}</span>
-        ${d.item && d.item.mixedUnits ? `<span class="chip warn" title="جمع مقدار وقتی معنا دارد که واحد یکی باشد">واحدها یکدست نیستند: ${esc(d.item.units || "")}</span>` : ""}
-        ${exc.map((x) => `<span class="chip warn" title="نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده">«${esc(x.name)}» کنار گذاشته شد — ${M(x.n)} خرید</span>`).join("")}</div>
+        ${exc.map((x) => `<span class="chip warn" title="${EXCL_WHY[x.why] || EXCL_WHY.bucket}">«${esc(x.name)}» کنار گذاشته شد — ${M(x.n)} خرید</span>`).join("")}</div>
+      ${(d.titles || []).length ? `<details class="histitems"><summary>اقلامِ شمرده‌شده (${M(d.titles.length)}${mt.codes > d.titles.length ? "+" : ""})</summary>
+        ${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${v}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)} خرید</span></span>`).join("")}</details>` : ""}
       <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
-        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
+        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
           : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
-        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span></td>
+        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${s.code ? ` <span class="dim num" style="font-size:.8rem" title="کد تأمین‌کننده">${esc(s.code)}</span>` : ""}${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل؛ در مقدار نیامده‌اند">${M(s.unconverted)}</span>` : ""}</td>
+        <td>${s.grade ? `<span class="chip grade g${esc(s.grade)}">${esc(s.grade)}</span>` : `<span class="dim">—</span>`}</td>
         <td class="num">${M(s.n)}</td>${rc("n", s.rankN)}
-        <td class="num">${M(RQ(s.qty))}${unit}</td>${rc("qty", s.rankQty)}
+        <td class="num">${M(RQ(s.qty))}</td>${rc("qty", s.rankQty)}
         <td class="num">${s.share.toFixed(1)}٪</td>
         <td class="num" style="font-weight:700">${M(RQ(s.qtyM))}</td>${rc("m", s.rankM)}
         <td><button class="tp-btn xs" data-buys="${esc(s.key)}">${M(s.n)}</button></td></tr>`).join("")}
       </tbody></table></div>
-      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>امتیاز گشتاوری</b> است و قیمت در آن اثری ندارد؛ قیمت‌ها را در «خریدها» و کارت تأمین‌کننده ببینید.
-        <b>امتیاز گشتاوری عدد است، نه درصد</b>: جمعِ مقدارِ هر خرید ضرب در ضریب تازگی‌اش. ضریب برای خرید در ${esc(d.base.label)} یک است و با هر ماه فاصله کم می‌شود — با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ — و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد؛ پس از دو مقدار برابر، آن‌که تازه‌تر فروخته امتیاز بالاتری دارد.
-        عددهای برابر رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). «سهم» رتبهٔ جدا ندارد چون همان رتبهٔ مقدار است. ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
+      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>امتیاز گشتاوری</b> است و قیمت در آن اثری ندارد؛ <b>در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، بعد B، بعد C) جلوتر است</b>. قیمت‌ها (به ${esc(d.base.priceLabel || "زمستان ۱۴۰۴")}) را در «خریدها» و کارت تأمین‌کننده ببینید.
+        <b>مقدارها به واحد مرجعِ نوع قلم («${esc(st.refUnit || "")}») برده شده‌اند</b> تا خریدهای با واحدهای مختلف قابل جمع باشند.
+        <b>امتیاز گشتاوری عدد است، نه درصد</b>: جمعِ مقدارِ هر خرید ضرب در ضریب تازگی‌اش. ضریب برای خرید در ${esc(d.base.label)} یک است و با هر ماه فاصله کم می‌شود — با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ — و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد.
+        عددهای برابر (با ردهٔ برابر) رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
   }
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
 
   async function runHist() {
     const it = item(); if (!it) return;
-    const b = TP.busy("خواندن سوابق…", esc(it.title));
-    try { S.hist[it.id] = await TP.api(`/suppliers/history?item_id=${it.id}&k=${S.mom}`); S.prof = null; }
+    if (S.normOn && !normReady(it)) return TP.modal("اول تأیید", "ساختار نرمال‌شدهٔ این قلم (نوع قلم و لایه‌ها) هنوز تأیید نشده است. آن را بررسی و «تأیید» کنید.", null, "باشد", "");
+    const b = TP.busy("خواندن سوابق…", `${esc(it.title)} — ${HMODE_FA[S.hmode]}`);
+    try { S.hist[it.id] = await TP.api(`/suppliers/history?${histQuery(it)}`); S.prof = null; }
     catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); return; }
     b.close();
     /* خواندنِ سوابق خودش همان «بررسی سوابق» است — باکس دوم پایش مدیر سبز می‌شود */
-    if (!it.hist_done_at && S.hist[it.id].available) {
+    if (!it.hist_done_at && S.hist[it.id].available && (S.hist[it.id].suppliers || []).length) {
       try { await TP.api(`/items/${it.id}/progress`, { body: { stage: "hist" } }); await reload(); return; }
       catch (_) { /* نمایش جدول مهم‌تر از سبزشدن باکس است */ }
     }
     render();
   }
 
-
   async function showBuys(key) {
     const it = item(), s = supOf(key); if (!s) return;
     try {
-      const r = await TP.api(`/suppliers/history/buys?item_id=${it.id}&supplier=${encodeURIComponent(s.name)}`);
+      const r = await TP.api(`/suppliers/history/buys?${histQuery(it)}&supplier=${encodeURIComponent(s.name)}`);
+      const d = S.hist[it.id] || {}, pl = (d.base && d.base.priceLabel) || "زمستان ۱۴۰۴", ref = r.unit || "";
       TP.modal(`سوابق خرید — ${esc(s.name)}`, r.buys.length
         ? `<div class="tp-scroll" style="max-height:56vh"><table class="tp-mx" style="width:100%"><thead><tr>
-            <th>تاریخ</th><th>عنوان در فایل</th><th>مقدار</th><th>واحد</th><th>قیمت واحد روز</th><th>قیمت واحد (۱۴۰۴)</th><th>مبلغ (۱۴۰۴)</th></tr></thead><tbody>
+            <th>تاریخ</th><th>عنوان در فایل</th><th>مقدار ثبت‌شده</th><th>به واحد مرجع (${esc(ref)})</th><th>قیمت واحد روز (ریال)</th>
+            <th>قیمت هر ${esc(ref)} (${esc(pl)})</th><th>مبلغ (${esc(pl)})</th></tr></thead><tbody>
           ${r.buys.map((x) => `<tr><td class="num">${esc(x.order_date)}</td><td class="rt" style="white-space:normal">${esc(x.title)}</td>
-            <td class="num">${x.qty == null ? "—" : M(x.qty)}</td><td>${esc(x.unit || "")}</td>
+            <td class="num">${x.qty == null ? "—" : `${M(x.qty)} ${esc(x.unit || "")}`}</td>
+            <td class="num">${x.qty_ref == null ? `<span class="chip warn" title="این واحد نرخ تبدیل ندارد">بی‌نرخ</span>` : M(RQ(x.qty_ref))}</td>
             <td class="num">${x.unit_price == null ? "—" : M(Math.round(x.unit_price))}</td>
-            <td class="num">${x.unit_1404 == null ? "—" : M(Math.round(x.unit_1404))}</td>
-            <td class="num">${x.amount_1404 == null ? "—" : M(Math.round(x.amount_1404))}</td></tr>`).join("")}
+            <td class="num">${x.unit_adj == null ? "—" : M(Math.round(x.unit_adj))}</td>
+            <td class="num">${x.amount_adj == null ? "—" : M(Math.round(x.amount_adj))}</td></tr>`).join("")}
           </tbody></table></div>` : "ردیفی پیدا نشد.", null, "بستن", "");
+    } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+  }
+
+  /* ---------- نرمال‌سازی اقلام ---------- */
+  /* پاسخ سرور → پیش‌نویسِ قابل ویرایش. نرخ‌ها فقط وقتی در پیش‌نویس‌اند که کارشناس خودش
+     عوض کرده باشد؛ وگرنه نرخ فایل (که برای اقلامِ مختلف یک نوع می‌تواند فرق کند) دست نمی‌خورد. */
+  function normDraft(d) {
+    const rates = {};
+    for (const u of (d.rates && d.rates.units) || []) if (u.src === "user") rates[u.unit] = u.rate;
+    return { head: d.head || "", layers: Object.entries(d.layers || {}), rates };
+  }
+
+  async function runNormalize(force) {
+    const it = item(); if (!it) return;
+    S.norm[it.id] = { loading: true }; render();
+    try {
+      const d = await TP.api(`/items/${it.id}/normalize`, { body: { force: !!force } });
+      S.norm[it.id] = { data: d, draft: normDraft(d) };
+    } catch (e) { S.norm[it.id] = { error: e.message }; }
+    if (item() && item().id === it.id) render();
+  }
+
+  async function confirmNormUI() {
+    const it = item(), n = it && S.norm[it.id]; if (!n || !n.draft) return;
+    const dr = n.draft, layers = {};
+    for (const [k, v] of dr.layers) if (String(v || "").trim()) {
+      if (layers[k] != null) return TP.modal("لایهٔ تکراری", `لایهٔ «${esc(k)}» دو بار آمده است؛ یکی را حذف کنید.`, null, "باشد", "");
+      layers[k] = v;
+    }
+    try {
+      const r = await TP.api(`/items/${it.id}/norm`, { method: "PUT", body: { head: dr.head, layers, rates: dr.rates, residual: n.data.residual, source: n.data.source, code: n.data.code } });
+      const d = { ...n.data, ...r.norm, confirmed: true, known: r.known, rates: r.rates };
+      S.norm[it.id] = { data: d, draft: normDraft(d) };
+      /* ساختار عوض شد، پس نتیجهٔ قبلی و نقاط نمودارش کهنه‌اند */
+      delete S.hist[it.id]; Object.keys(S.series).forEach((k) => { if (k.startsWith(`${it.id}|`)) delete S.series[k]; });
+      const row = items().find((x) => x.id === it.id); if (row) row.norm_json = JSON.stringify(r.norm);
+      render();
+    } catch (e) { TP.modal("تأیید نشد", esc(e.message), null, "باشد", ""); }
+  }
+
+  async function clearNormUI() {
+    const it = item(); if (!it) return;
+    try {
+      await TP.api(`/items/${it.id}/norm`, { method: "DELETE" });
+      delete S.hist[it.id];
+      const row = items().find((x) => x.id === it.id); if (row) row.norm_json = null;
+      await runNormalize(false);
     } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
   }
 
@@ -1146,6 +1288,45 @@
       mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
     }
     const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
+    /* نرمال‌سازی اقلام و حالت جستجو */
+    const nOn = G("[data-norm-on]");
+    if (nOn) nOn.onchange = (e) => {
+      S.normOn = e.target.checked;
+      try { localStorage.setItem(NORM_KEY, S.normOn ? "1" : "0"); } catch (_) { /* حالت خصوصی */ }
+      const it = item(); if (it) delete S.hist[it.id];   /* مبنای جستجو عوض شد؛ نتیجهٔ قبلی دیگر معتبر نیست */
+      render();
+    };
+    Q("[data-hmode]").forEach((b) => b.onclick = () => {
+      if (S.hmode === b.dataset.hmode) return;
+      S.hmode = b.dataset.hmode;
+      try { localStorage.setItem(HMODE_KEY, S.hmode); } catch (_) { /* حالت خصوصی */ }
+      const it = item();
+      if (it && S.hist[it.id] && !(S.normOn && !normReady(it))) runHist(); else render();
+    });
+    /* ویرایش پیش‌نویس بی‌بازرندر، تا فوکوس و مکان‌نما نپرند */
+    const nd = () => { const it = item(); return it && S.norm[it.id] && S.norm[it.id].draft; };
+    const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) d.head = e.target.value; };
+    Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) d.layers[+e.target.dataset.normLk][0] = e.target.value; });
+    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) d.layers[+e.target.dataset.normLv][1] = e.target.value; });
+    Q("[data-norm-ldel]").forEach((x) => x.onclick = () => { const d = nd(); if (d) { d.layers.splice(+x.dataset.normLdel, 1); render(); } });
+    const nla = G("[data-norm-ladd]");
+    if (nla) nla.onclick = () => {
+      const n = S.norm[item().id]; if (!n || !n.draft) return;
+      const used = new Set(n.draft.layers.map((l) => l[0]));
+      n.draft.layers.push([(n.data.layerNames || []).find((x) => !used.has(x)) || "", ""]); render();
+    };
+    Q("[data-norm-rate]").forEach((x) => x.oninput = (e) => {
+      const n = S.norm[item().id]; if (!n || !n.draft) return;
+      const u = e.target.dataset.normRate, v = numIn(e.target.value);
+      const orig = ((n.data.rates && n.data.rates.units) || []).find((r) => r.unit === u);
+      /* فقط نرخی که واقعاً عوض شده «نرخ کارشناس» می‌شود؛ خالی یا برابرِ فایل یعنی همان نرخ فایل */
+      if (v == null || (orig && orig.src !== "user" && v === orig.rate)) delete n.draft.rates[u]; else n.draft.rates[u] = v;
+    });
+    const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = confirmNormUI;
+    const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => runNormalize(true);
+    const ncl = G("[data-norm-clear]"); if (ncl) ncl.onclick = clearNormUI;
+    /* تیک روشن است و این قلم هنوز پیشنهادی ندارد → خودکار تفکیک می‌شود (Task.txt: «به شکل خودکار») */
+    if (S.screen === "detail" && S.tab === "history" && S.normOn && item() && !S.norm[item().id]) runNormalize(false);
     const chb = G("[data-chart]"); if (chb) chb.onclick = () => openChart(item());
     Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });

@@ -106,6 +106,22 @@
     .chart-box .chlegend i { width: 15px; height: 15px; }
     /* کارت تأمین‌کننده */
     .prof { border: 1px solid var(--tp-accent); border-radius: 12px; background: rgba(79,140,255,.08); padding: 14px 16px; margin-bottom: 14px; }
+    /* نرمال‌سازی اقلام — پنل زیر عنوان قلم در تب سوابق */
+    .normbox { border: 1px dashed var(--tp-line-2); border-radius: 12px; background: rgba(3,8,20,.35); padding: 12px 14px; margin: 6px 0 12px; }
+    .normgrid { display: grid; grid-template-columns: minmax(180px, 260px) 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 760px) { .normgrid { grid-template-columns: 1fr; } }
+    .normlayer { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
+    .normlayer select { width: 150px; }
+    .normlayer input { flex: 1; min-width: 120px; }
+    .seg { display: inline-flex; gap: 4px; }
+    .chkline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+    .chip.grade { font-weight: 800; min-width: 1.8em; text-align: center; }
+    .chip.gA { background: rgba(34,197,94,.16); border-color: rgba(34,197,94,.5); color: #6ee7b7; }
+    .chip.gB { background: rgba(79,140,255,.16); border-color: rgba(79,140,255,.5); color: #bcd6ff; }
+    .chip.gC { background: rgba(242,194,48,.14); border-color: rgba(242,194,48,.45); color: #fcd34d; }
+    details.histitems { margin: 4px 0 10px; }
+    details.histitems summary { cursor: pointer; color: var(--tp-dim); font-size: .88rem; margin-bottom: 6px; }
+    details.histitems .chip { margin: 2px; white-space: normal; }
     .prof .top { display: flex; align-items: baseline; gap: 12px; }
     .prof h4 { margin: 0; font-size: 1.05rem; }
     .prof .gridp { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 22px; margin-top: 10px; }
@@ -172,6 +188,10 @@
     :root[data-theme="light"] .chart-box svg line { stroke: rgba(30,60,120,.2); }
     :root[data-theme="light"] .chart-box svg circle { stroke: #fff; }
     :root[data-theme="light"] .prof { background: rgba(47,111,228,.06); }
+    :root[data-theme="light"] .normbox { background: rgba(47,111,228,.04); }
+    :root[data-theme="light"] .chip.gA { background: rgba(22,163,74,.1); border-color: rgba(22,163,74,.4); color: #15803d; }
+    :root[data-theme="light"] .chip.gB { background: rgba(47,111,228,.1); border-color: rgba(47,111,228,.4); color: #1d4ed8; }
+    :root[data-theme="light"] .chip.gC { background: rgba(224,172,8,.12); border-color: rgba(224,172,8,.45); color: #7a5a05; }
     :root[data-theme="light"] .hamb.on { background: rgba(47,111,228,.14); }
     :root[data-theme="light"] .chrow > td { background: #f5f8fc; }
     :root[data-theme="light"] .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }

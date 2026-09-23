@@ -25,7 +25,9 @@ import { DEFAULTS, getSettings, settingsFromRows } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
-import { HISTORY_TABLE, historyBegin, historyChunk, historyFinish, historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
+import { historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
+import { CATALOG_DDL, catalogBegin, catalogChunk, catalogFinish } from "./catalog.js";
+import { normalizeItem, confirmNorm, clearNorm } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
@@ -134,7 +136,8 @@ CREATE INDEX IF NOT EXISTS ix_flows_open ON tg_flows(expert_id) WHERE done_at IS
 CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, expert_id INTEGER NOT NULL, voice_key TEXT, voice_secs REAL, transcript TEXT, letter_json TEXT, docx_key TEXT, state TEXT NOT NULL DEFAULT 'need_voice', meta_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
 CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT);
-${HISTORY_TABLE};
+${CATALOG_DDL.join(";\n")};
+CREATE TABLE IF NOT EXISTS norm_cache (title_n TEXT PRIMARY KEY, result TEXT NOT NULL, model TEXT, cost_usd REAL, created_at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS smart_searches (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER, params_json TEXT, result_json TEXT, model TEXT, prompt_version TEXT, in_tokens INTEGER, out_tokens INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
 CREATE TABLE IF NOT EXISTS smart_jobs (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, params_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', search_id INTEGER, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER);
@@ -164,7 +167,6 @@ CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
    SCHEMA فقط CREATE TABLE IF NOT EXISTS دارد و روی جدول موجود اثری ندارد،
    پس افزودن ستون جدید باید صریح و یک‌بار انجام شود. */
 const COLUMN_MIGRATIONS = [
-  ["purchase_history", "expert", "TEXT"],     /* کارشناس خرید فایل سوابق — گزارش سه‌ماهه، مبلغ فاکتور هر گروه */
   ["assignments", "deadline_at", "INTEGER"],  /* لحظهٔ پایان مهلت (SLA-02) */
   ["assignments", "budget_h", "REAL"],        /* بودجهٔ مهلت به ساعت کاری */
   ["assignments", "thr_snapshot", "TEXT"],    /* آستانه‌ها در لحظهٔ ارسال (SLA-04) */
@@ -183,9 +185,6 @@ const COLUMN_MIGRATIONS = [
   /* «کد قلم جدید» فایل سوابق. تا وقتی «نرمال‌سازی اقلام» ساخته نشده NULL می‌ماند و
      تطبیق سوابق با کد راهکاران یا عنوان انجام می‌شود (worker/history.js:resolveItem). */
   ["items", "hist_code", "TEXT"],
-  /* هویت ردیف سوابق، برای بارگذاری افزایشی (worker/history.js). ردیف‌های
-     بارگذاری‌شده پیش از این ستون NULL دارند و یک بار جدول از نو ساخته می‌شود. */
-  ["purchase_history", "dkey", "TEXT"],
   /* جستجوی هوشمند: مصرف واقعی و هزینهٔ هر اجرا (worker/discovery.js:runCost) */
   ["smart_searches", "cache_read", "INTEGER"],
   ["smart_searches", "cache_write", "INTEGER"],
@@ -236,6 +235,10 @@ const COLUMN_MIGRATIONS = [
   ["outbox", "bot", "TEXT"],
   /* آخرین باری که پایش رنگ‌ها این ارجاع را سنجید — تا همهٔ ارجاع‌های باز به نوبت سنجیده شوند (manager.js) */
   ["assignments", "watch_at", "INTEGER"],
+  /* (مهر ۱۴۰۵) «نرمال‌سازی اقلام»: ساختاری که کارشناس برای قلم تأیید کرده — نوع قلم، لایه‌های ویژگی
+     و نرخ‌های تبدیلی که عوض کرده (worker/normalize.js). «بررسی سوابق» بر همین جستجو می‌کند. */
+  ["items", "norm_json", "TEXT"],
+  ["items", "norm_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -243,11 +246,12 @@ const COLUMN_MIGRATIONS = [
    درست‌تر است. جدول هنوز خالی است، پس تغییر نام بی‌خطر است. */
 const COLUMN_RENAMES = [["proformas", "r2_key", "storage_key"]];
 
-/* جدول‌های پیاده‌سازیِ قبلیِ سوابق. جایشان را purchase_history و hist_imports
-   گرفته‌اند و دیگر هیچ کدی نمی‌خواندشان؛ اگر بمانند فقط فضای D1 را می‌گیرند و
-   آدم را سرِ خواندنِ طرح دیتابیس گمراه می‌کنند.
-   یک‌بارمصرف است: بعد از استقرارِ بعدی روی همهٔ محیط‌ها، این آرایه و حلقه‌اش
-   را می‌شود برداشت. */
+/* جدول‌های پیاده‌سازی‌های قبلیِ سوابق که دیگر هیچ کدی نمی‌خواندشان؛ اگر بمانند فقط
+   فضای D1 را می‌گیرند و آدم را سرِ خواندنِ طرح دیتابیس گمراه می‌کنند.
+   `purchase_history` (قالب قبلی سوابق، با شاخص تعدیلِ درون هر ردیف) هم دیگر خوانده
+   نمی‌شود — جایش purchases و فهرست اقلام است (worker/catalog.js). عمداً این‌جا نیست:
+   مستندات D1 نمی‌گوید DROP یک جدول ۷۱ هزار ردیفی چقدر از سهمیهٔ روزانهٔ نوشتن کم
+   می‌کند، پس روزِ بعد از ورود داده‌های تازه جدا حذف و مصرفش اندازه گرفته می‌شود. */
 const DROPPED_TABLES = ["supply_history", "history_batches"];
 
 /* کارشناسان اولیه — همان config.js؛ اینجا تکرار شده تا سرور به فایل استاتیک وابسته نباشد.
@@ -958,7 +962,7 @@ async function assignmentDetail(env, aid, who) {
    مدیر هر قلمی را می‌بیند (پنل فقط‌خواندنی‌اش همین را لازم دارد). */
 async function ownItem(env, who, itemId) {
   if (!itemId) throw new HttpError("item_id لازم است.");
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.norm_json, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
     FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (who.role === "expert" && it.expert_id !== who.expert.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
@@ -1572,25 +1576,43 @@ async function route(request, env, ctx) {
       throw new HttpError("گزارش ناشناخته.", 404);
     }
     if (path === "/history/status" && m === "GET") { await requireAny(request, env); return json(await historyStatus(env)); }
-    if (path === "/history/begin" && m === "POST") { requireManager(request, env); return json(await historyBegin(env, await readJson(request))); }
-    if (path === "/history/chunk" && m === "POST") { requireManager(request, env); return json(await historyChunk(env, await readJson(request))); }
-    if (path === "/history/finish" && m === "POST") { requireManager(request, env); return json(await historyFinish(env, await readJson(request))); }
-    if (path === "/items/normalize") { requireManager(request, env); return NOT_CONNECTED("نرمال‌سازی اقلام"); }
+    /* بارگذاری چهار فایل مرجع (اقلام، شاخص تعدیل، نرخ تبدیل، سوابق) — worker/catalog.js */
+    if (path === "/catalog/begin" && m === "POST") { requireManager(request, env); return json(await catalogBegin(env, await readJson(request))); }
+    if (path === "/catalog/chunk" && m === "POST") { requireManager(request, env); return json(await catalogChunk(env, await readJson(request))); }
+    if (path === "/catalog/finish" && m === "POST") { requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
+    /* نرمال‌سازی اقلام: پیشنهاد (از فهرست یا مدل)، تأیید کارشناس، و برداشتن تأیید — worker/normalize.js */
+    if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(mm[1]));
+      const b = await readJson(request);
+      return json(await normalizeItem(env, it, { force: !!b.force }));
+    }
+    if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(mm[1]));
+      return json(m === "PUT" ? await confirmNorm(env, it, await readJson(request)) : await clearNorm(env, it));
+    }
+    /* «عین قلم» (mode=exact) یا «نوع قلم» (mode=head)؛ norm=1 یعنی بر ساختار تأییدشدهٔ نرمال‌سازی،
+       norm=0 یعنی فقط با کد راهکاران در فهرست اقلام */
+    const histOpts = () => ({
+      k: url.searchParams.get("k"), mode: url.searchParams.get("mode") === "head" ? "head" : "exact",
+      norm: url.searchParams.get("norm") === "1" ? true : url.searchParams.get("norm") === "0" ? false : undefined,
+    });
     if (path === "/suppliers/history" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      return json(await itemHistory(env, it, { k: url.searchParams.get("k") }));
+      return json(await itemHistory(env, it, histOpts()));
     }
     if (path === "/suppliers/history/buys" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      return json(await supplierBuys(env, it, url.searchParams.get("supplier")));
+      return json(await supplierBuys(env, it, url.searchParams.get("supplier"), histOpts()));
     }
-    /* نقاط نمودار روند خرید قلم (تاریخ × مقدار، به تفکیک تأمین‌کننده) */
+    /* نقاط نمودار روند خرید قلم (تاریخ × مقدار به واحد مرجع، به تفکیک تأمین‌کننده) */
     if (path === "/suppliers/history/series" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      return json(await itemSeries(env, it));
+      return json(await itemSeries(env, it, histOpts()));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }
     if (/^\/proformas\/\d+\/extract$/.test(path)) { await requireAny(request, env); return NOT_CONNECTED("استخراج از پیش‌فاکتور"); }

@@ -293,13 +293,10 @@ export async function seasonData(env, settings, sel) {
     loadRequestRows(env, P.years), loadExperts(env),
     env.DB.prepare("SELECT date_j FROM holidays").all().then((x) => new Set((x.results || []).map((h) => h.date_j))).catch(() => new Set()),
   ]);
-  let amounts = [];
   const yq = P.years.map(() => "?").join(",");
-  try {
-    amounts = (await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, expert, SUM(amount) AS amt FROM purchase_history WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1,2`).bind(...P.years.map(String)).all()).results || [];
-  } catch (_) {
-    amounts = ((await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, NULL AS expert, SUM(amount) AS amt FROM purchase_history WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1`).bind(...P.years.map(String)).all().catch(() => ({ results: [] }))).results) || [];
-  }
+  /* سوابق خرید (worker/catalog.js:purchases) — تا بارگذاری نشده، جدول نیست و مبلغ‌ها خالی می‌ماند */
+  const amounts = ((await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, expert, SUM(amount) AS amt FROM purchases WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1,2`)
+    .bind(...P.years.map(String)).all().catch(() => ({ results: [] }))).results) || [];
   return computeSeason({ P, rows, experts, holidays: hol, amounts, settings, todayJ: jStr(Date.now()) });
 }
 
@@ -646,7 +643,13 @@ export async function reportMeta(env, settings) {
   const years = new Set();
   const ry = (await env.DB.prepare("SELECT DISTINCT substr(date,1,4) AS y FROM requests WHERE date IS NOT NULL").all()).results || [];
   ry.forEach((x) => { if (/^\d{4}$/.test(x.y)) years.add(+x.y); });
-  try { ((await env.DB.prepare("SELECT DISTINCT substr(order_date,1,4) AS y FROM purchase_history").all()).results || []).forEach((x) => { if (/^\d{4}$/.test(x.y)) years.add(+x.y); }); } catch (_) { /* سوابق بارگذاری نشده */ }
+  /* سال‌های سوابق از آمار آخرین بارگذاری (بازهٔ ym)، نه با پیمایش ۷۱ هزار ردیف در هر بار باز شدن تب */
+  try {
+    const imp = await env.DB.prepare("SELECT stats_json FROM hist_imports WHERE state='ready' ORDER BY id DESC LIMIT 1").first();
+    const s = imp ? JSON.parse(imp.stats_json || "{}") : {};
+    const yOf = (ym) => Math.floor((ym - 1) / 12);
+    if (s.minYm && s.maxYm) for (let y = yOf(s.minYm); y <= yOf(s.maxYm); y++) years.add(y);
+  } catch (_) { /* سوابق بارگذاری نشده */ }
   const projects = reportProjects(settings);
   const parties = (await env.DB.prepare("SELECT party, center, COUNT(*) AS n FROM requests GROUP BY party, center ORDER BY n DESC LIMIT 400").all()).results || [];
   const unmatched = parties.filter((p) => !projectOf(projects, p.party, p.center)).slice(0, 60);
