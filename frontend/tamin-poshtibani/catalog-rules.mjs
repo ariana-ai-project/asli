@@ -534,7 +534,12 @@ export function effectiveHead(head, rule, mat) {
   return nameOf(`${head} ${mat}`);
 }
 
-/** عکسِ effectiveHead: «ورق آهنی» ← {base: «ورق»، mat: «آهنی»، rule} */
+/**
+ * عکسِ effectiveHead: «ورق آهنی» ← {base: «ورق»، mat: «آهنی»، rule}. فقط نامِ استاندارد جنس
+ * (همان که effectiveHead می‌افزاید) جدا می‌شود، نه هر املایش: «تیر آهن» نوع قلمِ خودش است، نه
+ * «تیر» + آهنی.
+ */
+const MAT_BY_NAME = new Map(MATERIAL_NAMES.map((m) => [keyOf(m), m]));
 export function splitHead(name, rules) {
   const h = nameOf(name);
   if (rules[keyOf(h)]) return { base: h, mat: null, rule: rules[keyOf(h)] };
@@ -542,7 +547,7 @@ export function splitHead(name, rules) {
   for (let i = w.length - 1; i >= 1; i--) {
     const base = w.slice(0, i).join(" "), r = rules[keyOf(base)];
     if (!r || r.r !== "f") continue;
-    const m = canonMaterial(w.slice(i).join(" "));
+    const m = MAT_BY_NAME.get(keyOf(w.slice(i).join(" ")));
     if (m) return { base, mat: m, rule: r };
   }
   return { base: h, mat: null, rule: null };

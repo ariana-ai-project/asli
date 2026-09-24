@@ -239,7 +239,9 @@ test("نوع‌های محتمل: واژهٔ کمیاب سنگین‌تر، و �
 
 /* env بی‌فهرست: headData چیزی پیدا نمی‌کند (نوع قلمِ تازه) — صافی باید باز هم درست کار کند */
 const noCatalog = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null }) }) } };
-const META = { layers: [...LAYERS, ["ضخامت", "thickness"], ["قطر", "diameter"], ["طول", "length"], ["پوشش", "coating"]].map(([fa, en]) => ({ fa, en })) };
+const META = { layers: [...LAYERS, ["ضخامت", "thickness"], ["قطر", "diameter"], ["طول", "length"], ["پوشش", "coating"]].map(([fa, en]) => ({ fa, en })), rules: "test" };
+/* فهرستی که پیش از این قواعد بارگذاری شده (meta.rules ندارد) */
+const META_OLD = { layers: META.layers };
 
 test("خروجی مدل تمیز می‌شود: لایهٔ ناشناخته و مقدار خالی کنار می‌رود، جنس با نام استاندارد", async () => {
   const c = await settle(noCatalog, META, { head: " پيچ ", layers: [{ name: "اندازه", value: "M8" }, { name: "ساختگی", value: "x" }, { name: "جنس", value: " " }, { name: "اندازه", value: "M9" }], residual: "آلن", confidence: "wat" }, "پیچ آلن M8");
@@ -278,6 +280,16 @@ test("قاعدهٔ عام ۱ و ۲ در صافیِ خروجی مدل: «ورق 2
   assert.equal(said.head, "ورق استیل");
   /* عدد نامعتبر از فرم کارشناس خطای روشن می‌دهد */
   await assert.rejects(() => settle(noCatalog, META, { head: "ورق", layers: { "ضخامت": { v: "دو", u: "میلی‌متر" } } }, "ورق", { strict: true }), /عدد نیست/);
+});
+
+test("فهرستِ پیش از یکسان‌سازی: درخواست به همان زبانِ کهنه می‌ماند تا ورود دوباره", async () => {
+  const a = await settle(noCatalog, META_OLD, { head: "ورق", layers: [{ name: "ضخامت", value: "2 میل", unit: "", implicit: false }], residual: "", confidence: "high" }, "ورق 2 میل");
+  assert.equal(a.head, "ورق", "«ورق آهنی» در فهرستِ کهنه نیست");
+  assert.deepEqual(plain(a.layers), { "ضخامت": { v: "2", n: [2], u: "میلی‌متر" } }, "عدد و واحد جدا می‌شوند ولی جنسِ ضمنی نه");
+  const b = await settle(noCatalog, META_OLD, { head: "ورق آهنی", layers: [], residual: "", confidence: "high" }, "ورق 2");
+  assert.equal(b.head, "ورق", "نامِ جنس‌دارِ مدل به نامِ پایه برمی‌گردد");
+  const c = await settle(noCatalog, META_OLD, { head: "تیر آهن", layers: [], residual: "", confidence: "high" }, "تیرآهن 16");
+  assert.equal(c.head, "تیر آهن", "«تیر آهن» نوع قلمِ خودش است");
 });
 
 test("پرامپت: عرف‌های پذیرفته‌شده و واحد رایجِ نوع‌های محتمل، و نمونه‌ها با «ضمنی»", () => {

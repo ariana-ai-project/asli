@@ -123,6 +123,7 @@ test("نوع قلمِ مؤثر: جنس جزء نام فقط وقتی بازار 
   assert.deepEqual(R.splitHead("لوله پلی اتیلن", HEAD_RULES).mat, "پلی‌اتیلن");
   assert.equal(R.splitHead("ورق آهنی", HEAD_RULES).base, "ورق");
   assert.equal(R.splitHead("پیچ", HEAD_RULES).mat, null);
+  assert.deepEqual(R.splitHead("تیر آهن", HEAD_RULES), { base: "تیر آهن", mat: null, rule: null }, "فقط نامِ استانداردِ جنس جدا می‌شود؛ «تیر آهن» تیرآهن است");
   assert.equal(R.splitHead("فیلتر روغن", HEAD_RULES).rule, null);
 });
 

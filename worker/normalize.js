@@ -216,10 +216,15 @@ export async function settle(env, meta, raw, text, { strict = false } = {}) {
   }
 
   /* جنس: پوششِ گالوانیزه، یا گفته‌شده (مدل، فرم، یا خودِ عنوان)، یا عرفِ پذیرفته‌شده. نشانه‌های
-     واحدِ عرف («فلنج ۴ اینچ») فقط از واحدهای گفته‌شده در عنوان می‌آیند. */
-  const head = nameOf(raw && raw.head);
-  if (!head) throw new HttpError(strict ? "نوع قلم لازم است." : "مدل نوع قلم را برنگرداند.", strict ? 400 : 502);
-  const sh = RULES.splitHead(head, HEAD_RULES);
+     واحدِ عرف («فلنج ۴ اینچ») فقط از واحدهای گفته‌شده در عنوان می‌آیند.
+     فهرستی که پیش از این قواعد ساخته شده (meta.rules ندارد) نه «ورق آهنی» دارد نه جنسِ ضمنی؛
+     تا ورودِ دوباره‌اش، درخواست هم به همان زبان می‌ماند — وگرنه «ورق آهنی» در فهرستِ کهنه پیدا
+     نمی‌شد و سوابقِ «ورق» از دست می‌رفت. */
+  const head0 = nameOf(raw && raw.head);
+  if (!head0) throw new HttpError(strict ? "نوع قلم لازم است." : "مدل نوع قلم را برنگرداند.", strict ? 400 : 502);
+  const sh0 = RULES.splitHead(head0, HEAD_RULES);
+  const sh = meta.rules ? sh0 : { base: sh0.base, mat: null, rule: null };
+  const head = meta.rules ? head0 : sh0.base;
   const folded = RULES.foldCoating({ ...attrs, ...(said && !said.imp ? { "جنس": said.v } : {}) });
   for (const k of Object.keys(attrs)) if (!(k in folded)) delete attrs[k];   /* پوششِ تاشده */
   let mat = folded["جنس"] || null, how = mat ? "said" : null;
@@ -370,7 +375,8 @@ async function proposal(env, it, meta, { force = false }) {
   const samples = nearestItems(text, top);
   const cands = ranked.slice(0, NAME_HEADS).map((x) => x.head);
 
-  const ans = await askModel(env, it, meta, cands, samples, conventionLines(top));
+  /* عرف‌ها فقط وقتی فهرست با همین قواعد ساخته شده؛ فهرستِ کهنه «ورق آهنی» ندارد */
+  const ans = await askModel(env, it, meta, cands, samples, meta.rules ? conventionLines(top) : []);
   const s = await settle(env, meta, ans.raw, text);
   const split = { v: NORM_V, head: s.head, layers: s.layers, residual: s.residual, confidence: s.confidence };
   await env.DB.prepare(`INSERT INTO norm_cache (title_n,result,model,cost_usd,created_at) VALUES (?,?,?,?,?)
