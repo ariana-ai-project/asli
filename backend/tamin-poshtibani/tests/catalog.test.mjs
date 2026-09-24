@@ -19,7 +19,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { loadTP, sqliteD1 } from "./run.mjs";
 import * as W from "../../../worker/catalog.js";
 import { itemHistory, supplierBuys, itemSeries, resolveScope, excludedWhy } from "../../../worker/history.js";
-import { normalizeItem, confirmNorm, scoreHeads, nearestItems, settle, conventionLines, userPrompt } from "../../../worker/normalize.js";
+import { normalizeItem, confirmNorm, revertEdit, scoreHeads, nearestItems, settle, conventionLines, userPrompt } from "../../../worker/normalize.js";
 
 const TP0 = loadTP();
 const XL = TP0.XLSX;
@@ -114,6 +114,7 @@ test("تطابق با Worker: کلید، نام، تکه و واژه‌ها در
     assert.deepEqual([...B.words(s)], W.words(s), `words: ${s}`);
     assert.equal(B.shardOf("code", String(s)), W.shardOf("code", String(s)));
     assert.equal(B.shardOf("word", String(s)), W.shardOf("word", String(s)));
+    assert.equal(B.shardOf("title", String(s)), W.shardOf("title", String(s)));
   }
   assert.equal(W.keyOf("شركت الف"), W.keyOf("شرکت  الف"), "ك عربی و فاصلهٔ اضافه یک تأمین‌کننده‌اند");
   assert.deepEqual(plain(TP0.TP.catalogGroups), W.GROUPS, "گروه‌بندی جدول‌ها در پنل و سرور یکی است");
@@ -166,6 +167,10 @@ test("اقلام به تفکیک نوع قلم، کد → نوع، واژه → 
   const codes = Object.assign({}, ...out.tables.cat_codes.map(([, d]) => JSON.parse(d)));
   assert.equal(codes["1001"], "پیچ");
   assert.equal(out.tables.cat_codes.find(([s]) => s === W.shardOf("code", "3001"))[1].includes("3001"), true, "کد در تکهٔ خودش");
+  const titles = Object.assign({}, ...out.tables.cat_titles.map(([, d]) => JSON.parse(d)));
+  assert.equal(titles[W.keyOf("پیچ آلن M8 فولادی")], "1001", "عنوان → کد، با همان کلیدِ مقایسه");
+  assert.equal(Object.keys(titles).length, 5);
+  assert.ok(out.tables.cat_titles.every(([s, d]) => Object.keys(JSON.parse(d)).every((k) => W.shardOf("title", k) === s)), "هر عنوان در تکهٔ خودش");
   const words = Object.assign({}, ...out.tables.cat_words.map(([, d]) => JSON.parse(d)));
   assert.deepEqual(plain(words["پیچ"]), ["پیچ"]);
   assert.deepEqual(plain(words["m8"]), ["مهره", "پیچ"].sort());
@@ -335,7 +340,7 @@ test("ورق: «ورق ۲ میل» ← ورق آهنی (ضمنی)، گالوان
 /* ---------------- کل مسیر روی SQLite ---------------- */
 
 const BASE_SQL = [
-  ...W.CATALOG_DDL,
+  ...W.CATALOG_DDL, W.EDITS_DDL,
   "CREATE TABLE hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT)",
   "CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)",
   "CREATE TABLE suppliers (id INTEGER PRIMARY KEY, code TEXT UNIQUE, name TEXT NOT NULL, city TEXT, created_at INTEGER)",
@@ -518,6 +523,139 @@ test("ورق در سوابق: «نوع قلم» یعنی فقط ورق آهنی�
   const o = await itemHistory(env, { id: 42, code: null, title: "ورق 2 میل", norm_json: JSON.stringify(old) }, { norm: true, mode: "exact" });
   assert.equal(o.struct.head, "ورق آهنی");
   assert.deepEqual(o.suppliers.map((s) => s.name), ["آهن‌فروشی الف"]);
+});
+
+/* ---------------- دیتابیس پیش از مدل، و ذخیرهٔ کارشناس در دیتابیس اصلی (تصمیم مدیر، مهر ۱۴۰۵) ---------------- */
+
+/* مدلِ ساختگی که فقط می‌شمارد چند بار صدا زده شد — این بخش نباید هرگز به آن برسد مگر قلمِ تازه */
+async function withModel(env, fn) {
+  env.ANTHROPIC_API_KEY = "test";
+  const calls = [], realFetch = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    calls.push(JSON.parse(init.body));
+    return { ok: true, status: 200, json: async () => ({ model: "claude-haiku-4-5-20251001",
+      content: [{ type: "tool_use", name: "record_split", input: { head: "پیچ", layers: [{ name: "اندازه", value: "M12", unit: "", implicit: false }], residual: "", confidence: "high" } }],
+      usage: { input_tokens: 900, output_tokens: 60 } }) };
+  };
+  try { return await fn(calls); } finally { globalThis.fetch = realFetch; }
+}
+const rowOf = (env, id, it) => { env.DB.raw.prepare("INSERT OR REPLACE INTO items (id,title,code) VALUES (?,?,?)").run(id, it.title, it.code || null); };
+const layersOf = (d) => plain(d.layers);
+
+test("نرمال‌سازی: کد، بعد عنوانِ عیناً همان — هر دو بی مدل، حتی با «تفکیک دوباره»", { skip: SKIP }, async () => {
+  const { env } = await loaded();
+  await withModel(env, async (calls) => {
+    /* قلمِ بی‌کد با عنوانِ یک قلمِ فهرست — با «ي» و «ك» عربی، نیم‌فاصله و فاصلهٔ اضافه هم همان عنوان است */
+    const t = await normalizeItem(env, { id: 60, code: null, title: "  پيچ‌آلن   M8 فولادی " });
+    assert.equal(t.source, "title");
+    assert.equal(t.code, "1001", "ساختار و نرخ‌های همان قلمِ فهرست");
+    assert.deepEqual(layersOf(t), { "اندازه": "M8", "جنس": "آهنی" });
+    /* کدِ بیرون از فهرست ولی عنوانِ فهرست */
+    const u = await normalizeItem(env, { id: 61, code: "7777", title: "پیچ M10" });
+    assert.equal(u.source, "title"); assert.equal(u.code, "1003");
+    /* «تفکیک دوباره با مدل» برای قلمی که در دیتابیس هست به مدل نمی‌رود */
+    const f = await normalizeItem(env, { id: 62, code: "1001", title: "هرچه" }, { force: true });
+    assert.equal(f.source, "catalog");
+    assert.equal(calls.length, 0, "کد یا عنوان در دیتابیس بود → مدل صدا زده نشد");
+    /* فقط قلمی که نه کدش و نه عنوانش در دیتابیس است */
+    const m = await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" });
+    assert.equal(m.source, "model"); assert.equal(calls.length, 1);
+    /* جستجوی سوابق با تیکِ نرمال‌سازی، بی تأیید: ساختارِ دیتابیس (با عنوان) */
+    const h = await itemHistory(env, { id: 60, code: null, title: "پيچ آلن M8 فولادی" }, { norm: true, mode: "exact" });
+    assert.equal(h.match.source, "title"); assert.equal(h.match.codes, 2);
+    const g = await itemHistory(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { norm: true, mode: "head" });
+    assert.match(g.message, /ذخیره/, "پیشنهادِ مدل تا ذخیره نشود مبنای جستجو نیست");
+  });
+});
+
+test("ذخیرهٔ کارشناس در دیتابیس اصلی: درخواستِ بعدیِ همان کد همان را می‌بیند؛ برابرِ فهرست یعنی برداشتن", { skip: SKIP }, async () => {
+  const { env } = await loaded();
+  await withModel(env, async (calls) => {
+    const a = { id: 70, code: "1003", title: "پیچ M10" };
+    rowOf(env, 70, a);
+    const who = { role: "expert", expert: { id: 5, name: "ابوذر بهمنی", label: "آقای بهمنی" } };
+    const r = await confirmNorm(env, a, { head: "پیچ", layers: { "اندازه": "M10", "نمره": "8.8" }, source: "catalog", code: "1003" }, who);
+    assert.equal(r.saved, "created"); assert.equal(r.norm.source, "edit");
+    assert.equal(r.edit.by, "آقای بهمنی");
+    /* درخواستِ دیگر با همان کد — بی تأیید، بی مدل */
+    const b = await normalizeItem(env, { id: 71, code: "1003", title: "پیچ ده" });
+    assert.equal(b.source, "edit");
+    assert.deepEqual(layersOf(b), { "اندازه": "M10", "نمره": "8.8", "جنس": { v: "آهنی", i: 1 } });
+    assert.equal(b.edit.by, "آقای بهمنی");
+    /* همان عنوان بی‌کد هم (عنوان → کد ۱۰۰۳ → ویرایش) */
+    assert.equal((await normalizeItem(env, { id: 72, code: null, title: "پیچ M10" })).source, "edit");
+    assert.equal(calls.length, 0);
+    /* جستجوی «عین قلم» با کدِ ۱۰۰۳ بی تیکِ نرمال‌سازی هم بر لایه‌های تازه است */
+    const sc = await resolveScope(env, { id: 73, code: "1003", title: "x" }, { norm: false, mode: "exact" });
+    assert.equal(sc.struct.layers["نمره"], "8.8", "ساختار از دیتابیس اصلی، نه فهرستِ خام");
+    /* دوباره ذخیره، این بار عیناً همان فهرست: ویرایش برداشته می‌شود */
+    const back = await confirmNorm(env, a, { head: "پیچ", layers: { "اندازه": "M10" }, source: "edit", code: "1003" }, who);
+    assert.equal(back.saved, "reverted");
+    assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM item_edits").get().n, 0);
+    assert.equal((await normalizeItem(env, { id: 74, code: "1003", title: "پیچ ده" })).source, "catalog");
+    /* ذخیرهٔ بی تغییر و بی ویرایشِ قبلی: چیزی نوشته نمی‌شود */
+    assert.equal((await confirmNorm(env, a, { head: "پیچ", layers: { "اندازه": "M10" }, source: "catalog", code: "1003" }, who)).saved, "same");
+  });
+});
+
+test("ذخیرهٔ کارشناس: نوع قلمِ تازه و نرخ تبدیل برای همان کد در جستجوی سوابق", { skip: SKIP }, async () => {
+  const { env } = await loaded();
+  const who = { role: "expert", expert: { id: 5, name: "ک", label: "ک" } };
+  /* ۱۰۰۳ به «مهره» رفت: از «نوع قلم»ِ پیچ بیرون، در «نوع قلم»ِ مهره */
+  const a = { id: 80, code: "1003", title: "پیچ M10" };
+  rowOf(env, 80, a);
+  await confirmNorm(env, a, { head: "مهره", layers: { "اندازه": "M10" }, source: "catalog", code: "1003" }, who);
+  const bolt = await itemHistory(env, it1001, { mode: "head" });
+  const alef = bolt.suppliers.find((s) => s.name === "شرکت الف");
+  assert.equal(alef.qty, 200, "خریدِ «جین»ِ ۱۰۰۳ دیگر زیر پیچ نیست");
+  assert.equal(alef.n, 2); assert.equal(bolt.match.headItems, 2);
+  const nut = await itemHistory(env, { id: 81, code: "2001", title: "مهره M8" }, { mode: "head" });
+  assert.deepEqual(nut.suppliers.map((s) => s.key), [W.keyOf("شرکت الف")], "خریدِ ۱۰۰۳ حالا زیر مهره است (ردیف خریدش هنوز «پیچ» فایل)");
+  assert.equal(nut.match.headItems, 2);
+
+  /* نوع قلمی که فقط کارشناس ساخته: همان قلم با خریدهایش */
+  await confirmNorm(env, a, { head: "پیچ خاص", layers: { "اندازه": "M10" }, source: "edit", code: "1003" }, who);
+  const made = await itemHistory(env, { id: 82, code: "1003", title: "پیچ M10" }, { mode: "head" });
+  assert.equal(made.struct.head, "پیچ خاص");
+  assert.equal(made.totals.n, 1); assert.equal(made.struct.refUnit, "عدد", "واحد مرجعِ جای قبلی");
+  assert.deepEqual((await W.allHeads(env)).includes("پیچ خاص"), true, "در فهرستِ انتخابِ نوع قلم");
+
+  /* نرخ تبدیلِ کارشناس برای ۱۰۰۱ در دیتابیس می‌ماند و درخواستِ بعدی (بی تأیید) با همان جمع می‌زند */
+  const c = { id: 83, code: "1001", title: "پیچ آلن M8 فولادی" };
+  rowOf(env, 83, c);
+  const r = await confirmNorm(env, c, { head: "پیچ", layers: { "اندازه": "M8", "جنس": "آهنی" }, rates: { "کیلو گرم": 60 }, source: "catalog", code: "1001" }, who);
+  assert.equal(r.saved, "created", "لایه‌ها همان فهرست ولی نرخ تازه");
+  const next = await itemHistory(env, { id: 84, code: "1001", title: "پیچ" }, { mode: "exact" });
+  assert.equal(next.suppliers.find((s) => s.name === "شرکت ب").qty, 170, "۲ کیلوگرم × ۶۰ (نرخ کارشناس برای همین کد) + ۵۰");
+  const p = await normalizeItem(env, { id: 85, code: "1001", title: "پیچ" });
+  const kg = p.rates.units.find((u) => u.unit === "کیلو گرم");
+  assert.deepEqual([kg.rate, kg.src], [60, "user"], "در پنل هم نرخِ کارشناس، تا ذخیرهٔ بعدی نگهش دارد");
+
+  /* حذف ویرایش از دیتابیس: ساختارِ فهرست برمی‌گردد */
+  assert.equal((await revertEdit(env, { id: 86, code: "1001", title: "پیچ" })).removed, true);
+  assert.equal((await normalizeItem(env, { id: 86, code: "1001", title: "پیچ" })).source, "catalog");
+  assert.equal((await revertEdit(env, { id: 86, code: "1001", title: "پیچ" })).removed, false);
+});
+
+test("قلمِ بی‌کد: ذخیره با عنوان، و ورقِ گالوانیزه‌ای که کارشناس آهنی دانست در «نوع قلم»ِ ورق آهنی", { skip: SKIP }, async () => {
+  const { env } = await loaded(build({ sheet: true }));
+  const who = { role: "manager" };
+  await withModel(env, async (calls) => {
+    const a = { id: 90, code: null, title: "ورق سیاه نیم میل" };
+    rowOf(env, 90, a);
+    const r = await confirmNorm(env, a, { head: "ورق", layers: { "ضخامت": { v: "0.5", u: "میلی‌متر" } }, source: "manual" }, who);
+    assert.equal(r.saved, "created"); assert.equal(r.norm.head, "ورق آهنی");
+    const b = await normalizeItem(env, { id: 91, code: null, title: "ورق سیاه  نیم میل" });
+    assert.equal(b.source, "edit"); assert.equal(b.head, "ورق آهنی"); assert.equal(b.edit.by, "مدیر");
+    assert.equal(calls.length, 0);
+  });
+  const g = { id: 92, code: "4003", title: "ورق گالوانیزه 0.5 میل" };
+  rowOf(env, 92, g);
+  await confirmNorm(env, g, { head: "ورق آهنی", layers: { "ضخامت": { v: "0.5", u: "میلی‌متر" }, "جنس": "آهنی" }, source: "catalog", code: "4003" }, who);
+  const iron = await itemHistory(env, { id: 93, code: "4001", title: "ورق 2 میل" }, { mode: "head" });
+  assert.deepEqual(iron.suppliers.map((s) => s.name).sort(), ["آهن‌فروشی الف", "آهن‌فروشی ب", "گالوانیزه‌فروشی"].sort());
+  const galv = await W.headData(env, "ورق گالوانیزه");
+  assert.equal(galv.items.length, 0, "از «ورق گالوانیزه» رفت");
 });
 
 /* ---------------- فایل‌های واقعی (اگر در دسترس باشند) ---------------- */

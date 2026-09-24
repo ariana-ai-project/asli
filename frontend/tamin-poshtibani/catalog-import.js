@@ -46,25 +46,26 @@
   const keyOf = (x) => ascii(nameOf(x)).toLowerCase();
   const fnv32 = (s, h = 0x811c9dc5) => { s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
   const hex8 = (n) => (n >>> 0).toString(16).padStart(8, "0");
-  /* تکهٔ ذخیرهٔ کد قلم و واژه — یکنواخت، مستقل از شکل کدها */
-  const CODE_SHARDS = 64, WORD_SHARDS = 32;
+  /* تکهٔ ذخیرهٔ کد قلم، عنوان و واژه — یکنواخت، مستقل از شکل کدها */
+  const CODE_SHARDS = 64, WORD_SHARDS = 32, TITLE_SHARDS = 64;
   const shardOf = (kind, k) => kind === "code"
     ? "c" + String(fnv32(k) % CODE_SHARDS).padStart(2, "0")
-    : "w" + String(fnv32(k) % WORD_SHARDS).padStart(2, "0");
+    : kind === "title" ? "t" + String(fnv32(k) % TITLE_SHARDS).padStart(2, "0")
+      : "w" + String(fnv32(k) % WORD_SHARDS).padStart(2, "0");
   /* واژه‌های عنوان برای یافتن نوع قلم. عددِ تنها و تک‌حرف نشانهٔ نوع قلم نیستند (نمره و
      اندازه‌اند) و فقط شلوغ می‌کنند. «x» جداکننده نیست چون در واژه‌های لاتین هست. */
   const words = (title) => keyOf(title).split(/[\s\-_/\\()[\]{}*×,.،؛:;"'«»+|=!?؟#]+/)
     .filter((w) => w.length >= 2 && !/^\d+([.,/]\d+)*$/.test(w));
-  TP.cat = { ascii, nameOf, keyOf, fnv32, shardOf, words, CODE_SHARDS, WORD_SHARDS };
+  TP.cat = { ascii, nameOf, keyOf, fnv32, shardOf, words, CODE_SHARDS, WORD_SHARDS, TITLE_SHARDS };
   /* گروه‌های جدول — همان worker/catalog.js:GROUPS. هر گروه با یک اثرانگشت تصمیم می‌گیرد
      از نو ساخته شود یا نه، و پنل مدیر پیش از شروع همین را برای برآورد نوشتن نشان می‌دهد. */
   TP.catalogGroups = {
-    catalog: ["cat_heads", "cat_codes", "cat_words", "price_index", "guild_classes"],
+    catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "price_index", "guild_classes"],
     grades: ["supplier_grades"],
     purchases: ["purchases"],
   };
   TP.catalogTableFa = {
-    cat_heads: "اقلام به تفکیک نوع قلم", cat_codes: "نقشهٔ کد قلم", cat_words: "واژه‌نامهٔ یافتن اقلام مشابه",
+    cat_heads: "اقلام به تفکیک نوع قلم", cat_codes: "نقشهٔ کد قلم", cat_titles: "نقشهٔ عنوان قلم", cat_words: "واژه‌نامهٔ یافتن اقلام مشابه",
     price_index: "شاخص‌های تعدیل", guild_classes: "طبقه‌های اصناف", supplier_grades: "کد و ردهٔ تأمین‌کنندگان", purchases: "ردیف‌های خرید",
   };
 
@@ -452,6 +453,17 @@
     }
     const codeRows = [...codeShards.keys()].sort().map((s) => [s, JSON.stringify(codeShards.get(s))]);
 
+    /* ----- عنوان قلم → کد (نرمال‌سازیِ قلمِ بی‌کد یا با کدِ تازه، بی مدل) -----
+       عنوانِ تکراری (همه با یک ساختار) کوچک‌ترین کد را نگه می‌دارد تا خروجی قطعی بماند */
+    const titleShards = new Map();
+    for (const it of [...I.items].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0))) {
+      const k = keyOf(it.title); if (!k) continue;
+      const s = shardOf("title", k);
+      if (!titleShards.has(s)) titleShards.set(s, {});
+      if (!(k in titleShards.get(s))) titleShards.get(s)[k] = it.code;
+    }
+    const titleRows = [...titleShards.keys()].sort().map((s) => [s, JSON.stringify(titleShards.get(s))]);
+
     /* ----- واژه → نوع‌های قلم (یافتن اقلام مشابه برای مدل) ----- */
     const wmap = new Map();
     const addWord = (w, head) => { if (!wmap.has(w)) wmap.set(w, new Set()); wmap.get(w).add(head); };
@@ -480,7 +492,7 @@
               ردیف‌های خرید هم باید از نو ساخته شوند، وگرنه ستون نوع قلم و قیمت تعدیل‌شده کهنه‌اند.
        rows — خودِ ردیف‌ها، مستقل از ترتیب؛ یکی بود → چیزی برای نوشتن نیست. */
     let cat = 0x811c9dc5;
-    for (const set of [headRows, codeRows, wordRows, indexRows, classRows]) for (const r of set) cat = fnv32(r.join("\u0001"), cat);
+    for (const set of [headRows, codeRows, titleRows, wordRows, indexRows, classRows]) for (const r of set) cat = fnv32(r.join("\u0001"), cat);
     cat = fnv32(JSON.stringify(meta), cat);
     let adj = 0x811c9dc5;
     for (const it of [...I.items].sort((a, b) => (a.code < b.code ? -1 : 1))) adj = fnv32(`${it.code}\u0001${it.head}\u0001${classIdx.get(it.cls) || ""}`, adj);
@@ -491,7 +503,7 @@
 
     return {
       meta, fp, stats: { ...st, items: I.items.length, heads: meta.heads, srcHeads: srcN.size, layers: I.layers.length, indices: indexRows.length, classes: classRows.length, norm: N.st },
-      tables: { cat_heads: headRows, cat_codes: codeRows, cat_words: wordRows, price_index: indexRows, guild_classes: classRows, supplier_grades: gradeRows, purchases },
+      tables: { cat_heads: headRows, cat_codes: codeRows, cat_titles: titleRows, cat_words: wordRows, price_index: indexRows, guild_classes: classRows, supplier_grades: gradeRows, purchases },
     };
   };
 

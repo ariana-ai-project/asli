@@ -28,14 +28,14 @@ import { bundleData, readiness, commissionGuard, recordCommission } from "./bund
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
-import { CATALOG_DDL, catalogBegin, catalogChunk, catalogFinish } from "./catalog.js";
-import { normalizeItem, confirmNorm, clearNorm } from "./normalize.js";
+import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allHeads } from "./catalog.js";
+import { normalizeItem, confirmNorm, clearNorm, revertEdit } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
-import { statusData, statusBook, seasonData, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
+import { statusData, statusBook, seasonData, seasonExperts, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
@@ -139,6 +139,7 @@ CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGE
 CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
 CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT);
 ${CATALOG_DDL.join(";\n")};
+${EDITS_DDL};
 CREATE TABLE IF NOT EXISTS norm_cache (title_n TEXT PRIMARY KEY, result TEXT NOT NULL, model TEXT, cost_usd REAL, created_at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS smart_searches (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER, params_json TEXT, result_json TEXT, model TEXT, prompt_version TEXT, in_tokens INTEGER, out_tokens INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
@@ -1719,12 +1720,14 @@ async function route(request, env, ctx) {
       if (path === "/reports/meta" && m === "GET") return json(await reportMeta(env, settings));
       if (path === "/reports/status" && m === "GET") return json(await statusData(env, settings));
       if (path === "/reports/status.xlsx" && m === "GET") return xlsx(await bookFile(statusBook(await statusData(env, settings))), `وضعیت درخواست ها ${jStr(now()).replace(/\//g, "-")}.xlsx`);
+      /* کارشناسانِ بازهٔ انتخابی، برای تیکِ کارشناسانی که در گزارش بیایند */
+      if (path === "/reports/season/experts" && m === "POST") return json(await seasonExperts(env, await readJson(request)));
       if ((path === "/reports/season" || path === "/reports/season.xlsx") && m === "POST") {
         const b = await readJson(request);
         const D = await seasonData(env, settings, b);
         const book = seasonBook(D, Array.isArray(b.sheets) ? b.sheets : null);
         if (path.endsWith(".xlsx")) return xlsx(await bookFile(book), `گزارش ${D.period.label}.xlsx`);
-        return json({ label: D.period.label, priorLabel: D.period.priorLabel, workDays: D.workDays, hasExpertAmounts: D.hasExpertAmounts, unmatched: D.unmatched, sheets: bookPreview(book), css: BOOK_CSS });
+        return json({ label: D.period.label, priorLabel: D.period.priorLabel, workDays: D.workDays, hasExpertAmounts: D.hasExpertAmounts, unmatched: D.unmatched, picked: D.picked, sheets: bookPreview(book), css: BOOK_CSS });
       }
       throw new HttpError("گزارش ناشناخته.", 404);
     }
@@ -1733,7 +1736,8 @@ async function route(request, env, ctx) {
     if (path === "/catalog/begin" && m === "POST") { requireManager(request, env); return json(await catalogBegin(env, await readJson(request))); }
     if (path === "/catalog/chunk" && m === "POST") { requireManager(request, env); return json(await catalogChunk(env, await readJson(request))); }
     if (path === "/catalog/finish" && m === "POST") { requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
-    /* نرمال‌سازی اقلام: پیشنهاد (از فهرست یا مدل)، تأیید کارشناس، و برداشتن تأیید — worker/normalize.js */
+    /* نرمال‌سازی اقلام: ساختار از دیتابیس (کد، بعد عنوان) یا فقط برای قلمِ تازه از مدل؛ ذخیرهٔ کارشناس
+       (روی قلم و در دیتابیس اصلی) و برداشتنش — worker/normalize.js */
     if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
@@ -1743,8 +1747,15 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      return json(m === "PUT" ? await confirmNorm(env, it, await readJson(request)) : await clearNorm(env, it));
+      return json(m === "PUT" ? await confirmNorm(env, it, await readJson(request), who) : await clearNorm(env, it));
     }
+    /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */
+    if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
+      const who = await requireAny(request, env);
+      return json(await revertEdit(env, await ownItem(env, who, int(mm[1]))));
+    }
+    /* نام همهٔ نوع‌های قلم — انتخابِ نوع قلم در پنل نرمال‌سازی */
+    if (path === "/catalog/heads" && m === "GET") { await requireAny(request, env); return json({ heads: await allHeads(env) }); }
     /* «عین قلم» (mode=exact) یا «نوع قلم» (mode=head)؛ norm=1 یعنی بر ساختار تأییدشدهٔ نرمال‌سازی،
        norm=0 یعنی فقط با کد راهکاران در فهرست اقلام */
     const histOpts = () => ({

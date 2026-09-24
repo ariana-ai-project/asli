@@ -6,7 +6,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   parsePeriod, workingDays, projectOf, reportProjects, purchaseClass, requestStatus, shortNames, expertMatcher,
-  computeSeason, seasonBook, statusBook, bookPreview, STATUS_COLUMNS, STATUS_HIDDEN, DAILY_COLUMNS,
+  computeSeason, periodExperts, seasonBook, statusBook, bookPreview, STATUS_COLUMNS, STATUS_HIDDEN, DAILY_COLUMNS,
 } from "../../../worker/reports.js";
 import { buildBook, chartXml, formatValue } from "../../../worker/xlsxbook.js";
 
@@ -111,6 +111,36 @@ test("محاسبهٔ سه‌ماهه: گروه‌ها، ارجاع‌نشده، 
   assert.equal(D.managers.find((m) => m.label === "دکتر پور یزدان خواه").requests, 2);
   assert.ok(D.managers.find((m) => m.label === "مهندس بدریان").noSystem);
   assert.equal(D.workDays, 76);
+});
+
+const plainNames = (D) => JSON.stringify([D.groups, D.experts, D.specials, D.totals]);
+test("تیکِ کارشناسان (تصمیم مدیر، مهر ۱۴۰۵): فهرستِ همان دوره، و گزارش فقط با تیک‌خورده‌ها", () => {
+  const P = parsePeriod({ years: [1404], seasons: [4] });
+  const L = periodExperts({ P, rows: ROWS, experts: EXPERTS });
+  assert.deepEqual(L.map((e) => [e.id, e.requests, e.items]), [[1, 0, 0], [2, 0, 0], [3, 1, 4], [4, 2, 3]],
+    "فعال‌ها همه، با شمارِ درخواست و اقلامِ همین دوره؛ درخواستِ مهر (پیش از دوره) شمرده نشد");
+  const inactive = [...EXPERTS, { id: 9, name: "رفته", label: "رفته", active: 0 }];
+  assert.ok(!periodExperts({ P, rows: ROWS, experts: inactive }).some((e) => e.id === 9), "غیرفعالِ بی درخواست در دوره نمی‌آید");
+  assert.ok(periodExperts({ P, rows: [...ROWS, { id: "9", date: "1404/10/05", n: 1, nc: 0, ns: 0, nh: 0, eid: 9 }], experts: inactive }).some((e) => e.id === 9), "غیرفعالِ با درخواست می‌آید");
+
+  const base = { P, rows: ROWS, experts: EXPERTS, holidays: new Set(), settings: {}, todayJ: "1405/01/01",
+    amounts: [{ ym: "1404/10", expert: "ابوذر بهمنی", amt: 1000 }, { ym: "1404/11", expert: "محمودی", amt: 500 }] };
+  const all = computeSeason(base);
+  assert.equal(all.picked, null);
+  assert.deepEqual(plainNames(computeSeason({ ...base, pick: [1, 2, 3, 4] })), plainNames(all), "همه تیک‌خورده = همان گزارشِ پیشین");
+  /* محمودی و سرگروهش (رسولی) بی‌تیک */
+  const D = computeSeason({ ...base, pick: [1, 3] });
+  assert.deepEqual(D.experts.map((e) => e.name), ["ارسلان کوشاری", "ابوذر بهمنی"]);
+  assert.deepEqual(D.groups.map((g) => [g.name, g.total, g.amount]), [["ارسلان کوشاری", 1, 1000]], "ستونِ گروهی که هیچ عضوِ تیک‌خورده‌ای ندارد نمی‌آید؛ مبلغ محمودی هم نه");
+  assert.equal(D.specials[0].requests, 0, "درخواستِ متوقفِ محمودی در «متوقف شده» نیست");
+  assert.equal(D.unassigned, 1, "ارجاع‌نشده مال هیچ کارشناسی نیست و می‌ماند");
+  assert.equal(D.totals.period.requests, 4, "جمع کلِ دوره همهٔ درخواست‌ها");
+  assert.equal(D.projects.find((p) => p.name === "راغون").requests, 2, "آمار پروژه‌ها همهٔ درخواست‌ها");
+  assert.deepEqual(D.picked, { n: 2, of: 4 });
+  /* سرگروه بی‌تیک ولی عضوش تیک‌خورده: ستونِ گروه می‌ماند، ردیفِ خودِ سرگروه نه */
+  const E = computeSeason({ ...base, pick: [3, 4] });
+  assert.deepEqual(E.groups.map((g) => g.name), ["ارسلان کوشاری", "حمید رسولی"]);
+  assert.deepEqual(E.experts.map((e) => e.name), ["ابوذر بهمنی", "مریم محمودی"]);
 });
 
 test("کارپوشه‌ها: برگه‌های تیک‌خورده، جدول و برش‌دهنده، نمودار، پیش‌نمایش", async () => {

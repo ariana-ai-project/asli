@@ -2,11 +2,14 @@
  * نرمال‌سازی اقلام — تفکیک عنوان قلمِ درخواست به «نوع قلم» و «لایه‌های ویژگی»
  * با همان ساختاری که فهرست استاندارد اقلام (فایل ۱) دارد.
  *
- * سه راه، به ترتیب ارزانی:
- *   ۱. کد راهکاران قلم در فهرست هست (شهریور ۱۴۰۵: ۸۱٪ اقلام درخواست‌ها) → ساختار
- *      مستقیم از فهرست؛ رایگان و قطعی، بی‌مدل.
- *   ۲. همین عنوان قبلاً با مدل تفکیک شده (norm_cache) → همان نتیجه، بی‌هزینهٔ دوباره.
- *   ۳. وگرنه واژه‌های عنوان با فهرست تطبیق داده می‌شوند (cat_words)، چند نوع قلمِ
+ * مدل فقط برای قلمی است که نه کدش و نه عنوانش در دیتابیس هست (تصمیم مدیر، مهر ۱۴۰۵). پس اول
+ * با کد (بی مدل، رایگان و قطعی) دیتابیسِ اصلی گشته می‌شود — فهرست اقلام به‌علاوهٔ آنچه کارشناس‌ها
+ * برای هر کد ذخیره کرده‌اند (worker/catalog.js:headData):
+ *   ۱. کد راهکاران قلم در دیتابیس هست (شهریور ۱۴۰۵: ۸۱٪ اقلام درخواست‌ها) → همان ساختار.
+ *   ۲. وگرنه عنوانِ عیناً همان در دیتابیس هست (cat_titles، یا ویرایشِ کارشناس با همین عنوان) →
+ *      ساختارِ همان قلم.
+ *   ۳. همین عنوان قبلاً با مدل تفکیک شده (norm_cache) → همان نتیجه، بی‌هزینهٔ دوباره.
+ *   ۴. وگرنه واژه‌های عنوان با فهرست تطبیق داده می‌شوند (cat_words)، چند نوع قلمِ
  *      محتمل با نزدیک‌ترین اقلامشان (حداکثر ۲۵ ردیف)، عرف‌های همان نوع‌ها و نام لایه‌های
  *      استاندارد به Haiku می‌رود تا عنوان را با همان ساختار تفکیک کند. پرامپت عمداً کوچک
  *      است: حداقل طول قابل‌کش در Haiku 4.5 چهار هزار توکن است و این پرامپت به آن نمی‌رسد،
@@ -21,12 +24,17 @@
  *   • نوع قلمی که جنس بازارش را جدا می‌کند با جنس نام می‌گیرد («ورق آهنی»).
  * پس مقایسهٔ «عین قلم» میان درخواست و فهرست بر یک زبان است.
  *
- * خروجی راه ۲ و ۳ «پیشنهاد» است و تا کارشناس تأییدش نکند، سوابق بر آن جستجو نمی‌شود.
+ * خروجی راه ۳ و ۴ «پیشنهاد» است و تا کارشناس تأییدش نکند، سوابق بر آن جستجو نمی‌شود؛ ساختارِ
+ * راه ۱ و ۲ خودِ دیتابیس است و جستجو بی تأیید هم بر آن انجام می‌شود.
+ *
+ * ذخیرهٔ کارشناس (confirmNorm) هم روی همین قلمِ درخواست می‌نشیند و هم — اگر با دیتابیس فرق
+ * دارد — در دیتابیس اصلی برای کدِ همین قلم (قلمِ بی‌کد: عنوانش): نوع قلم، لایه‌ها و نرخ‌های تبدیل.
  */
 import { HttpError } from "./http.js";
 import { MODEL } from "./extract.js";
 import { runCost } from "./discovery.js";
-import { nameOf, keyOf, words, catalogMeta, headOfCode, headData, itemOf, wordHeads, rateFor } from "./catalog.js";
+import { ascii, nameOf, keyOf, words, catalogMeta, headOfCode, headData, catalogHead, itemOf, wordHeads, rateFor, layersEqual,
+  codeOfTitle, editIndex, editRows, editKey, resetEditsCache } from "./catalog.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
 
@@ -307,20 +315,50 @@ export async function canonStruct(env, meta, s, it) {
   return { ...s, head: r.head, layers: r.layers, v: NORM_V };
 }
 
-/** ساختار قلم از فهرست، اگر کد راهکارانش آن‌جا باشد — {head, layers, residual, code} یا null */
+/* ویرایشِ کارشناس برای نمایش: کلید، نام کارشناس و زمان */
+const editInfo = (r) => (r ? { k: r.k, by: (r.data && r.data.by) || "", at: r.at } : null);
+
+/** ساختار قلم در دیتابیس اصلی با کد راهکاران — فهرست، یا آنچه کارشناس برای همین کد ذخیره کرده —
+    {hd, struct: {head, layers, residual, code, title}, edit} یا null */
 export async function catalogStruct(env, code) {
-  const head = await headOfCode(env, code);
+  const c = ascii(T(code)); if (!c) return null;
+  const e = (await editIndex(env)).byCode.get(c);
+  const head = e ? e.head : await headOfCode(env, c);
   if (head == null) return null;
   const hd = await headData(env, head);
-  const x = itemOf(hd, code);
-  return hd && x ? { hd, struct: { head: hd.head, layers: x[4] || {}, residual: x[5] || "", code: x[0], title: x[1] } } : null;
+  const x = itemOf(hd, c);
+  if (!hd || !x) return null;
+  return { hd, struct: { head: hd.head, layers: x[4] || {}, residual: x[5] || "", code: x[0], title: x[1] }, edit: e ? editInfo((await editRows(env, [e.k]))[0]) : null };
+}
+
+/**
+ * ساختار قلم از دیتابیس اصلی، بی مدل: ۱) کد، ۲) عنوانِ عیناً همان — قلمِ فهرست با همین عنوان
+ * (با ویرایشِ کارشناس اگر دارد)، وگرنه ویرایشِ کارشناس با همین عنوان (قلمِ بی‌کد یا کدِ بیرون از فهرست).
+ * خروجی: {hd, struct, by: "code"|"title", edit, rates} یا null.
+ */
+export async function dbStruct(env, it) {
+  const byCode = await catalogStruct(env, it && it.code);
+  if (byCode) return { ...byCode, by: "code" };
+  const tn = keyOf(it && it.title); if (!tn) return null;
+  const tc = await codeOfTitle(env, tn);
+  if (tc) { const c = await catalogStruct(env, tc); if (c) return { ...c, by: "title" }; }
+  const e = (await editIndex(env)).byTitle.get(tn);
+  if (e && e.code) { const c = await catalogStruct(env, e.code); if (c) return { ...c, by: "title" }; }
+  if (e) {
+    const [r] = await editRows(env, [e.k]);
+    if (r) {
+      return { hd: await headData(env, r.head), struct: { head: r.head, layers: r.data.layers || {}, residual: r.data.residual || "", code: r.code || null, title: r.data.title || "" },
+        by: "title", edit: editInfo(r), rates: r.data.rates || null };
+    }
+  }
+  return null;
 }
 
 /** واحدهای ثبت‌شده در سوابق این نوع قلم و نرخ هرکدام به واحد مرجع — برای نمایش و ویرایش */
 export function ratesView(hd, code, override) {
   if (!hd) return { ref: null, units: [] };
   const item = code ? itemOf(hd, code) : null;
-  const units = new Set([...Object.keys(hd.hr || {}), ...Object.keys((item && item[6]) || {}), ...Object.keys(override || {})]);
+  const units = new Set([...Object.keys(hd.hr || {}), ...Object.keys((item && item[6]) || {}), ...Object.keys((item && item[7]) || {}), ...Object.keys(override || {})]);
   units.delete(hd.ref);
   return {
     ref: hd.ref,
@@ -339,8 +377,9 @@ export async function costEstimate(env) {
 }
 
 /**
- * پیشنهاد تفکیک یک قلم. `force`: حتی اگر کد در فهرست هست یا عنوان در کش است، از مدل بپرس.
- * خروجی ذخیره نمی‌شود — تأیید کارشناس (confirmNorm) آن را روی قلم می‌نویسد.
+ * پیشنهاد تفکیک یک قلم. `force`: تأییدِ همین قلم و کشِ مدل را نادیده بگیر و از مدل بپرس — ولی
+ * قلمی که کد یا عنوانش در دیتابیس هست هرگز به مدل نمی‌رود.
+ * خروجی ذخیره نمی‌شود — ذخیرهٔ کارشناس (confirmNorm) آن را روی قلم و دیتابیس می‌نویسد.
  */
 export async function normalizeItem(env, it, opts = {}) {
   const meta = await catalogMeta(env);
@@ -358,11 +397,20 @@ async function proposal(env, it, meta, { force = false }) {
     const done0 = normOf(it);
     if (done0) {
       const done = await canonStruct(env, meta, done0, it);
-      const hd = await headData(env, done.head);
-      return { ...done, source: done.source || "manual", confirmed: true, rates: ratesView(hd, done.code, done.rates), known: !!hd };
+      const [hd, db] = await Promise.all([headData(env, done.head), dbStruct(env, it)]);
+      /* edit: ویرایشِ دیتابیسِ اصلی که اکنون برای این قلم هست — پنل دکمهٔ برداشتنش را نشان می‌دهد */
+      return { ...done, source: done.source || "manual", confirmed: true, rates: ratesView(hd, done.code, done.rates), known: !!hd, edit: (db && db.edit) || null };
     }
-    const c = await catalogStruct(env, it.code);
-    if (c) return { source: "catalog", ...c.struct, rates: ratesView(c.hd, c.struct.code), known: true };
+  }
+
+  /* دیتابیس اصلی — با کد، بعد با عنوانِ عیناً همان. این‌جا هرگز مدل صدا زده نمی‌شود. */
+  const db = await dbStruct(env, it);
+  if (db) {
+    return { source: db.edit ? "edit" : db.by === "title" ? "title" : "catalog", by: db.by, ...db.struct, edit: db.edit,
+      rates: ratesView(db.hd, db.struct.code, db.rates), known: !!db.hd };
+  }
+
+  if (!force) {
     const hit = await env.DB.prepare("SELECT result, model FROM norm_cache WHERE title_n=?").bind(keyOf(it.title)).first();
     if (hit) {
       const r = await canonStruct(env, meta, parse(hit.result), it);
@@ -394,12 +442,49 @@ async function proposal(env, it, meta, { force = false }) {
 }
 
 /**
- * تأیید کارشناس: ساختاری که از این پس «بررسی سوابق» بر آن انجام می‌شود، به‌همراه
- * نرخ‌های تبدیلی که عوض کرده. از همان صافیِ خروجی مدل می‌گذرد، پس «۲ میل» که کارشناس
- * تایپ کند همان ۲ میلی‌متر است و «ورق» با جنسِ آهنی همان «ورق آهنی». نوع قلمِ تازه (نه در
- * فهرست) پذیرفته می‌شود ولی سابقه‌ای ندارد.
+ * دیتابیس اصلی: ساختارِ ذخیره‌شدهٔ کارشناس برای کدِ همین قلم (قلمِ بی‌کد: عنوانش). مبنا همین قلم
+ * در فهرستِ بارگذاری‌شده است — با کد، وگرنه با عنوان؛ اگر عیناً همان است (نوع قلم و لایه‌ها، بی
+ * نرخِ کارشناس) چیزی نوشته نمی‌شود و ویرایشِ قبلی هم برداشته می‌شود.
+ * خروجی: «created» | «updated» | «same» | «reverted».
  */
-export async function confirmNorm(env, it, body) {
+async function saveEdit(env, it, s, rates, who) {
+  const k = editKey(it), code = ascii(T(it.code)) || null;
+  let baseCode = code, baseHead = code ? await headOfCode(env, code) : null;
+  if (baseHead == null) { const tc = await codeOfTitle(env, it.title); if (tc) { baseCode = tc; baseHead = await headOfCode(env, tc); } }
+  const base = baseHead != null ? await catalogHead(env, baseHead) : null;
+  const bx = base ? base.items.find((x) => x[0] === baseCode) || null : null;
+  const old = await env.DB.prepare("SELECT k FROM item_edits WHERE k=?").bind(k).first().catch(() => null);
+  if (bx && base.head === s.head && layersEqual(bx[4], s.layers) && !Object.keys(rates).length) {
+    if (!old) return "same";
+    await env.DB.prepare("DELETE FROM item_edits WHERE k=?").bind(k).run();
+    resetEditsCache();
+    return "reverted";
+  }
+  /* جای قبلیِ همین کد در فهرست: ردیف‌های خریدش زیر نوع قلمِ فایلِ همان‌جاست (src) و نرخ ویژهٔ
+     فایل (ir) به واحد مرجعِ همان‌جا (ref) است */
+  const own = code && baseCode === code ? bx : null;
+  const ex = who && who.expert;
+  const data = {
+    title: T(it.title), layers: s.layers, residual: s.residual, rates,
+    cl: own ? own[2] || "" : "", cls: own ? own[3] || "" : "", ir: own ? own[6] || null : null,
+    src: own ? base.src : [""], ref: own ? base.ref : null,
+    by: ex ? T(ex.label || ex.name) : who && who.role === "manager" ? "مدیر" : "",
+  };
+  await env.DB.prepare(`INSERT INTO item_edits (k, code, title_n, head, data, expert_id, at) VALUES (?,?,?,?,?,?,?)
+      ON CONFLICT(k) DO UPDATE SET code=excluded.code, title_n=excluded.title_n, head=excluded.head, data=excluded.data, expert_id=excluded.expert_id, at=excluded.at`)
+    .bind(k, code, keyOf(it.title), s.head, JSON.stringify(data), ex ? ex.id : null, now()).run();
+  resetEditsCache();
+  return old ? "updated" : "created";
+}
+
+/**
+ * ذخیرهٔ کارشناس: ساختاری که از این پس «بررسی سوابق» بر آن انجام می‌شود، به‌همراه
+ * نرخ‌های تبدیلی که عوض کرده — روی همین قلم، و در دیتابیس اصلی برای کدش (saveEdit). از همان
+ * صافیِ خروجی مدل می‌گذرد، پس «۲ میل» که کارشناس تایپ کند همان ۲ میلی‌متر است و «ورق» با
+ * جنسِ آهنی همان «ورق آهنی». نوع قلمِ تازه (نه در فهرست) پذیرفته می‌شود ولی سابقه‌ای ندارد،
+ * مگر اقلامی که کارشناس به آن آورده.
+ */
+export async function confirmNorm(env, it, body, who = null) {
   const meta = await catalogMeta(env);
   if (!meta) throw new HttpError("فهرست اقلام هنوز بارگذاری نشده است.", 409);
   if (!nameOf(body && body.head)) throw new HttpError("نوع قلم لازم است.");
@@ -413,15 +498,34 @@ export async function confirmNorm(env, it, body) {
     rates[nameOf(u)] = n;
   }
   const s = await settle(env, meta, { head: body.head, layers: body.layers, residual: body.residual, confidence: "high" }, textOf(it), { strict: true });
+  const saved = await saveEdit(env, it, s, rates, who);
+  const db = saved === "created" || saved === "updated" ? await dbStruct(env, it) : null;
   const norm = {
-    v: NORM_V, head: s.head, layers: s.layers, residual: T(body.residual), source: ["catalog", "cache", "model", "manual"].includes(body.source) ? body.source : "manual",
+    v: NORM_V, head: s.head, layers: s.layers, residual: T(body.residual),
+    source: saved === "created" || saved === "updated" ? "edit" : saved === "reverted" ? "catalog"
+      : ["catalog", "title", "edit", "cache", "model", "manual"].includes(body.source) ? body.source : "manual",
     code: T(body.code) || null, rates, confirmed_at: now(),
   };
   await env.DB.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=?").bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
-  return { ok: true, norm, known: !!s.hd, rates: ratesView(s.hd, norm.code, rates) };
+  /* نوع قلم پس از ذخیره — اگر قلم به نوع قلمِ دیگری رفت، حالا جزء آن است */
+  const hd = saved === "same" ? s.hd : await headData(env, s.head);
+  return { ok: true, norm, known: !!hd, rates: ratesView(hd, norm.code, rates), saved, edit: (db && db.edit) || null };
 }
 
 export async function clearNorm(env, it) {
   await env.DB.prepare("UPDATE items SET norm_json=NULL, norm_at=NULL WHERE id=?").bind(it.id).run();
   return { ok: true };
+}
+
+/** برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس که اکنون برای این قلم به کار می‌رود پاک می‌شود
+    (و تأییدِ همین قلم، که بر همان بود) */
+export async function revertEdit(env, it) {
+  const db = await dbStruct(env, it);
+  if (!db || !db.edit) return { ok: true, removed: false };
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM item_edits WHERE k=?").bind(db.edit.k),
+    env.DB.prepare("UPDATE items SET norm_json=NULL, norm_at=NULL WHERE id=?").bind(it.id),
+  ]);
+  resetEditsCache();
+  return { ok: true, removed: true };
 }

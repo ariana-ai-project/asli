@@ -743,7 +743,8 @@
   /* ---------- گزارش‌ها ----------
      دو بخش: «وضعیت درخواست‌ها» (جدول با برش‌دهنده‌های وضعیت / طرف مقابل / کارشناس خرید، مثل فایل
      اکسل واحد، و برگهٔ «گزارش روزانه» با فیلتر ستون‌ها) و «گزارش سه ماهه» (تیک برگه‌ها، سال/فصل/ماه
-     چندانتخابی، پیش‌نمایش همان برگه‌ها و نمودارهایی که در فایل می‌رود). ساخت داده و فایل در worker/reports.js. */
+     چندانتخابی، تیکِ کارشناسانِ همان دوره پیش از ساخت، پیش‌نمایش همان برگه‌ها و نمودارهایی که در
+     فایل می‌رود). ساخت داده و فایل در worker/reports.js. */
   const RP = { part: "status", meta: null, metaLoading: false, status: null, loading: false, sheet: "general", sl: { 2: [], 7: [], 11: [] }, hidden: false, limit: 300,
     dq: ["", "", "", "", "", ""], dLimit: 300, pop: null, season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false } };
   const SL = [[2, "وضعیت"], [7, "طرف مقابل"], [11, "کارشناس خرید"]];
@@ -878,19 +879,56 @@
           <button class="tp-btn" data-rgenx ${s.busy ? "disabled" : ""}>دانلود اکسل</button>
           <button class="tp-btn sm" data-rproj title="نام پروژه‌ها، شهر، مدیر پروژه و کلیدواژهٔ تطبیق با «طرف مقابل»">پروژه‌ها و مدیران پروژه</button></div></div>
       ${R ? `<style>${R.css}</style>
-        <div class="rp-result-head">گزارش <b>${esc(R.label)}</b> · مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری${R.hasExpertAmounts ? "" : ` · <span class="chip warn">مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد</span>`}</div>
+        <div class="rp-result-head">گزارش <b>${esc(R.label)}</b> · مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری${R.picked && R.picked.n < R.picked.of ? ` · <span class="chip info" title="کارشناسانی که در پنجرهٔ پیش از ساخت تیک خوردند">${M(R.picked.n)} از ${M(R.picked.of)} کارشناس</span>` : ""}${R.hasExpertAmounts ? "" : ` · <span class="chip warn">مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد</span>`}</div>
         <div class="rp-sheets bottom">${R.sheets.map((x, i) => `<button class="rp-sheet ${i === s.idx ? "on" : ""}" data-rtab="${i}">${esc(x.name)}</button>`).join("")}</div>
         ${(sh.notes || []).map((n) => `<div class="tp-note warn">${esc(n)}</div>`).join("")}
         <div class="rp-paper rp-scroll rp-book" data-keep-scroll>${sh.html}</div>
         ${sh.charts.length ? `<div class="rp-charts">${sh.charts.map((c) => `<div class="rp-chart">${c.svg}</div>`).join("")}</div>` : ""}`
       : s.busy ? `<div class="empty">در حال ساخت گزارش…</div>` : `<div class="empty"><b>برگه‌ها و بازه را انتخاب کنید و «نمایش گزارش» را بزنید.</b>همان برگه‌ها و نمودارهایی نمایش داده می‌شود که در فایل اکسل می‌رود.</div>`}`;
   }
+  /* پیش از ساخت (تصمیم مدیر، مهر ۱۴۰۵): کارشناسانی که در این دوره در گزارش می‌آیند، هر کدام با تیک —
+     پیش‌فرض همه — و گزارش فقط با تیک‌خورده‌ها ساخته می‌شود. خروجی: شناسه‌ها؛ null اگر مدیر انصراف
+     داد؛ undefined اگر کارشناسی در دوره نیست (گزارش همان‌طور ساخته می‌شود). */
+  async function pickExperts(body) {
+    const b = TP.busy("خواندن کارشناسانِ این دوره…", esc(repPeriodLabel(RP.season)));
+    let r;
+    try { r = await TP.api("/reports/season/experts", { body }); }
+    catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); return null; }
+    b.close();
+    const L = r.experts || [];
+    if (!L.length) return undefined;
+    return new Promise((resolve) => {
+      const row = (e) => `<label class="rp-ex"><input type="checkbox" data-rex="${e.id}" checked> <b>${esc(e.name)}</b>
+        <span class="dim">${e.requests ? `${M(e.requests)} درخواست · ${M(e.items)} قلم` : "در این دوره درخواستی نداشته"}${e.active ? "" : " · غیرفعال"}</span></label>`;
+      const d = TP.modal(`کارشناسانِ گزارش ${esc(r.label)}`, `<p style="margin:0 0 8px">تیکِ هر کارشناسی را که نمی‌خواهید در گزارش بیاید بردارید و «تأیید» را بزنید.
+          کارشناسِ بی‌تیک در برگهٔ «کارشناس خرید» و ستون گروه‌ها نمی‌آید؛ آمار پروژه‌ها و جمع کلِ دوره همهٔ درخواست‌ها را می‌شمارد.</p>
+        <div class="rp-ex-tools"><button class="tp-btn xs" data-rexall>همه</button><button class="tp-btn xs" data-rexnone>هیچ‌کدام</button><span class="dim" data-rexn></span></div>
+        <div class="rp-exlist">${L.map(row).join("")}</div>
+        <div class="tp-note warn" data-rexwarn style="display:none;max-width:none;margin:8px 0 0">دست‌کم یک کارشناس را تیک بزنید.</div>`, null, "تأیید", "انصراف");
+      d.querySelector(".tp-modal").style.maxWidth = "760px";
+      const boxes = [...d.querySelectorAll("[data-rex]")];
+      const count = () => { const n = boxes.filter((c) => c.checked).length; d.querySelector("[data-rexn]").textContent = `${M(n)} از ${M(boxes.length)} کارشناس`; return n; };
+      boxes.forEach((c) => { c.onchange = count; }); count();
+      d.querySelector("[data-rexall]").onclick = () => { boxes.forEach((c) => { c.checked = true; }); count(); };
+      d.querySelector("[data-rexnone]").onclick = () => { boxes.forEach((c) => { c.checked = false; }); count(); };
+      d.querySelector("[data-y]").onclick = () => {
+        if (!count()) { d.querySelector("[data-rexwarn]").style.display = ""; return; }
+        d.remove(); resolve(boxes.filter((c) => c.checked).map((c) => +c.dataset.rex));
+      };
+      d.querySelector("[data-n]").onclick = () => { d.remove(); resolve(null); };
+      d.onclick = (e) => { if (e.target === d) { d.remove(); resolve(null); } };
+    });
+  }
+
   async function genSeason(asFile) {
     const s = RP.season;
     if (!s.years.length) return TP.modal("سال انتخاب نشده", "دست‌کم یک سال را تیک بزنید.", null, "باشد", "");
     if (!s.sheets.length) return TP.modal("برگه‌ای انتخاب نشده", "دست‌کم یک برگهٔ گزارش را تیک بزنید.", null, "باشد", "");
     const body = { years: s.years, seasons: s.seasons, months: s.months, sheets: s.sheets };
-    RP.pop = null;
+    if (RP.pop) { RP.pop = null; render(); }
+    const ids = await pickExperts(body);
+    if (ids === null) return;
+    if (ids) body.experts = ids;
     if (asFile) return repDownload("/reports/season.xlsx", body, "گزارش سه ماهه.xlsx");
     s.busy = true; render();
     try { s.result = await TP.api("/reports/season", { body }); s.idx = 0; RP.err = ""; }

@@ -9,6 +9,7 @@
  *   cat_heads       یک ردیف به ازای هر نوع قلم (بخش‌های ≤۴۰KB): واحد مرجع، نرخ‌های
  *                   تبدیل و همهٔ اقلامش با لایه‌ها — به‌جای ۲۳ هزار قلم و ۵۵ هزار لایه
  *   cat_codes       کد قلم → نوع قلم، ۶۴ تکه
+ *   cat_titles      عنوان قلم → کد، ۶۴ تکه (قلمِ بی‌کد یا با کدِ تازه، با عنوانِ عیناً همان)
  *   cat_words       واژهٔ عنوان → نوع‌های قلم، ۳۲ تکه (یافتن اقلام مشابه برای مدل)
  *   price_index     هر شاخص تعدیل یک ردیف با همهٔ فصل‌ها
  *   guild_classes   طبقهٔ اصناف → شاخص
@@ -18,6 +19,11 @@
  *                   پس هیچ ایندکس جانبی ندارد و هر ردیف فقط یک نوشتن است.
  *
  * همه WITHOUT ROWID اند: کلید اصلی خودِ جدول است و ایندکس پنهانِ جدا نمی‌سازد.
+ *
+ * ویرایشِ کارشناس (item_edits، بیرون از بارگذاری): نوع قلم، لایه‌ها و نرخ تبدیلی که کارشناس
+ * در «نرمال‌سازی اقلام» برای یک کد ذخیره کرده. جزء دیتابیس اصلی است: هنگام خواندن روی فهرست
+ * می‌نشیند (headData)، پس هم پیشنهادِ بعدیِ همان کد و هم جستجوی سوابقِ هر دو نوع قلم (قبلی و
+ * تازه) آن را می‌بینند، و بارگذاریِ دوبارهٔ فایل‌ها پاکش نمی‌کند.
  *
  * بارگذاری مرحله‌ای و قابل ازسرگیری است: جدول‌هایی که باید از نو ساخته شوند اول در
  * «<نام>__new» پر می‌شوند و فقط در پایان جابه‌جا می‌شوند، پس تا آن لحظه سوابق قبلی
@@ -42,10 +48,11 @@ export const nameOf = (x) => String(x == null ? "" : x).replace(/ي/g, "ی").rep
   .replace(/[‌‎‏]/g, " ").replace(/\s+/g, " ").trim();
 export const keyOf = (x) => ascii(nameOf(x)).toLowerCase();
 export const fnv32 = (s, h = 0x811c9dc5) => { s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
-export const CODE_SHARDS = 64, WORD_SHARDS = 32;
+export const CODE_SHARDS = 64, WORD_SHARDS = 32, TITLE_SHARDS = 64;
 export const shardOf = (kind, k) => kind === "code"
   ? "c" + String(fnv32(k) % CODE_SHARDS).padStart(2, "0")
-  : "w" + String(fnv32(k) % WORD_SHARDS).padStart(2, "0");
+  : kind === "title" ? "t" + String(fnv32(k) % TITLE_SHARDS).padStart(2, "0")
+    : "w" + String(fnv32(k) % WORD_SHARDS).padStart(2, "0");
 export const words = (title) => keyOf(title).split(/[\s\-_/\\()[\]{}*×,.،؛:;"'«»+|=!?؟#]+/)
   .filter((w) => w.length >= 2 && !/^\d+([.,/]\d+)*$/.test(w));
 
@@ -59,6 +66,8 @@ export const TABLES = {
     ddl: "CREATE TABLE IF NOT EXISTS cat_heads (head TEXT NOT NULL, part INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY (head, part)) WITHOUT ROWID" },
   cat_codes: { per: 1, cols: ["shard", "data"],
     ddl: "CREATE TABLE IF NOT EXISTS cat_codes (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
+  cat_titles: { per: 1, cols: ["shard", "data"],
+    ddl: "CREATE TABLE IF NOT EXISTS cat_titles (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
   cat_words: { per: 1, cols: ["shard", "data"],
     ddl: "CREATE TABLE IF NOT EXISTS cat_words (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
   price_index: { per: 10, cols: ["code", "name", "source", "series"],
@@ -73,12 +82,18 @@ export const TABLES = {
 };
 /* هر گروه با یک اثرانگشت تصمیم می‌گیرد از نو ساخته شود یا نه */
 export const GROUPS = {
-  catalog: ["cat_heads", "cat_codes", "cat_words", "price_index", "guild_classes"],
+  catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "price_index", "guild_classes"],
   grades: ["supplier_grades"],
   purchases: ["purchases"],
 };
 const groupOf = (table) => Object.keys(GROUPS).find((g) => GROUPS[g].includes(table));
 export const CATALOG_DDL = Object.values(TABLES).map((t) => t.ddl);
+/* ویرایشِ کارشناس — بیرون از گروه‌های بارگذاری، پس جابه‌جاییِ جدول‌های فهرست دستش نمی‌زند.
+   k: کد قلم، یا «t:» + کلیدِ عنوان برای قلمِ بی‌کد. data: {title، layers، residual، rates (نرخ‌های
+   کارشناس به واحد مرجعِ نوع قلمِ head)، cl، cls، ir (نرخ ویژهٔ فایل)، src و ref (نوع قلمِ فایل و واحد
+   مرجعِ جای قبلیِ قلم)، by (نام کارشناس)}. ایندکس جانبی ندارد: فهرستِ کوچکِ همهٔ ویرایش‌ها در حافظه
+   است (editIndex) و ردیفِ کامل با کلید اصلی خوانده می‌شود. */
+export const EDITS_DDL = "CREATE TABLE IF NOT EXISTS item_edits (k TEXT PRIMARY KEY, code TEXT, title_n TEXT NOT NULL, head TEXT NOT NULL, data TEXT NOT NULL, expert_id INTEGER, at INTEGER NOT NULL) WITHOUT ROWID";
 const ddlFor = (table, name) => TABLES[table].ddl.replace(`EXISTS ${table} (`, `EXISTS ${name} (`);
 
 /** دستورهای INSERT یک دسته — مشترک میان مسیر بارگذاری و اسکریپت ورود اول */
@@ -213,8 +228,12 @@ const BASE_YM = 1404 * 12 + 12;
 /* در هر isolate پنج دقیقه نگه داشته می‌شود؛ فهرست فقط با بارگذاری عوض می‌شود.
    هر کوئری D1 یک زیردرخواست است و فراخوانی رایگان پنجاه‌تا بیشتر ندارد. */
 const TTL = 5 * 60000;
-let cache = { at: 0, meta: undefined, codes: new Map() };
-export const resetCatalogCache = () => { cache = { at: now(), meta: undefined, codes: new Map() }; };
+/* ویرایش‌های کارشناس زودتر کهنه می‌شوند: کارشناسِ دیگری در isolate دیگر ذخیره می‌کند */
+const EDITS_TTL = 60000;
+let cache = { at: 0, meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined };
+let edits = { at: 0, ix: undefined };
+export const resetCatalogCache = () => { cache = { at: now(), meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined }; edits = { at: 0, ix: undefined }; };
+export const resetEditsCache = () => { edits = { at: 0, ix: undefined }; cache.heads = undefined; };
 const fresh = () => { if (now() - cache.at > TTL) resetCatalogCache(); };
 
 /** نام لایه‌ها، خوشه‌ها و اثرانگشت فهرست — یا null اگر هنوز بارگذاری نشده */
@@ -227,9 +246,12 @@ export async function catalogMeta(env) {
   return cache.meta;
 }
 
-/** نوع قلمِ یک کد راهکاران، یا null */
+/* کد قلم با رقم فارسی هم همان کد است */
+const codeKey = (code) => ascii(T(code));
+
+/** نوع قلمِ یک کد راهکاران در فهرستِ بارگذاری‌شده (بی ویرایشِ کارشناس)، یا null */
 export async function headOfCode(env, code) {
-  const c = T(code); if (!c) return null;
+  const c = codeKey(code); if (!c) return null;
   fresh();
   const s = shardOf("code", c);
   if (!cache.codes.has(s)) {
@@ -240,14 +262,70 @@ export async function headOfCode(env, code) {
   return h == null ? null : h;
 }
 
+/** کدِ قلمِ فهرست با همین عنوان — عیناً همان عنوان، با همان کلیدِ مقایسه (ی/ک عربی، نیم‌فاصله،
+    فاصلهٔ اضافه و رقم فارسی فرقی نمی‌کنند) — یا null. عنوانِ تکراری در فهرست (۹۷ از ۲۲٬۸۶۱ در
+    فایل مهر ۱۴۰۵) همه یک ساختار دارند و کوچک‌ترین کد نگه داشته شده است. */
+export async function codeOfTitle(env, title) {
+  const k = keyOf(title); if (!k) return null;
+  fresh();
+  const s = shardOf("title", k);
+  if (!cache.titles.has(s)) {
+    /* فهرستی که پیش از جدولِ عنوان‌ها بارگذاری شده این جدول را ندارد: یعنی پیدا نشد */
+    const r = await env.DB.prepare("SELECT data FROM cat_titles WHERE shard=?").bind(s).first().catch(() => null);
+    cache.titles.set(s, r ? parse(r.data) : {});
+  }
+  const c = cache.titles.get(s)[k];
+  return c == null ? null : c;
+}
+
+/* ------------------------------------------------------------------ */
+/* ویرایشِ کارشناس                                                      */
+/* ------------------------------------------------------------------ */
+/** فهرستِ کوچکِ همهٔ ویرایش‌ها: {byCode: کد → {k, head, at}، byTitle: کلیدِ عنوان → تازه‌ترین، n} */
+export async function editIndex(env) {
+  if (edits.ix && now() - edits.at < EDITS_TTL) return edits.ix;
+  /* دیتابیسی که هنوز جدول را ندارد (پیش از نخستین طرح) یعنی ویرایشی نیست */
+  let rs = [];
+  try { rs = (await env.DB.prepare("SELECT k, code, title_n, head, at FROM item_edits").bind().all()).results || []; } catch (_) { rs = []; }
+  const byCode = new Map(), byTitle = new Map();
+  for (const r of rs) {
+    if (r.code) byCode.set(r.code, r);
+    const t = byTitle.get(r.title_n);
+    if (!t || r.at > t.at) byTitle.set(r.title_n, r);
+  }
+  edits = { at: now(), ix: { byCode, byTitle, n: rs.length } };
+  return edits.ix;
+}
+/** ردیف‌های کاملِ ویرایش با کلید، با data خوانده‌شده */
+export async function editRows(env, keys) {
+  const out = [];
+  for (let i = 0; i < keys.length; i += 90) {
+    const part = keys.slice(i, i + 90);
+    const rs = (await env.DB.prepare(`SELECT * FROM item_edits WHERE k IN (${part.map(() => "?").join(",")})`).bind(...part).all()).results || [];
+    out.push(...rs.map((r) => ({ ...r, data: parse(r.data) })));
+  }
+  return out;
+}
+export const editKey = (it) => (codeKey(it && it.code) || `t:${keyOf(it && it.title)}`);
+
+/** سرِ نوع قلم (بخش ۰) — واحد مرجع و نوع قلمِ فایل، برای قلمی که کارشناس از آن‌جا به نوع قلمِ دیگری برده */
+async function headTop(env, h) {
+  if (!cache.part0.has(h)) {
+    const r = await env.DB.prepare("SELECT data FROM cat_heads WHERE head=? AND part=0").bind(h).first().catch(() => null);
+    const d = r ? parse(r.data) : null;
+    cache.part0.set(h, d ? { ref: d.ref || "عدد", src: d.src || [h] } : null);
+  }
+  return cache.part0.get(h);
+}
+
 /**
- * یک نوع قلم با همهٔ اقلامش — بخش‌ها سر هم.
+ * یک نوع قلم در فهرستِ بارگذاری‌شده، بی ویرایشِ کارشناس — بخش‌ها سر هم.
  * items: [کد، عنوان، خوشه، طبقهٔ اصناف، لایه‌ها، باقیماندهٔ متن، نرخ ویژهٔ قلم]
  * src: نوع قلمِ فایل (ستون head ردیف‌های خرید) — «ورق آهنی» ← [«ورق»]؛ sub: فقط بخشی از آن است
  * و جستجوی سوابق باید با کدهای خودش محدود شود؛ uc: عرفِ واحدِ هر لایه (خواندن عددِ بی‌واحد).
  * فهرستی که پیش از یکسان‌سازی بارگذاری شده این سه را ندارد: src همان نام، بی sub.
  */
-export async function headData(env, head) {
+export async function catalogHead(env, head) {
   const h = nameOf(head); if (!h) return null;
   const rows = (await env.DB.prepare("SELECT data FROM cat_heads WHERE head=? ORDER BY part").bind(h).all().catch(() => ({ results: [] }))).results || [];
   if (!rows.length) return null;
@@ -260,7 +338,60 @@ export async function headData(env, head) {
   }
   return out;
 }
-export const itemOf = (hd, code) => (hd && hd.items.find((x) => x[0] === T(code))) || null;
+
+/**
+ * نوع قلم در دیتابیس اصلی: فهرست + ویرایش‌های کارشناس. قلمی که کارشناس به نوع قلمِ دیگری برده
+ * از این‌جا می‌رود (out: کدهایش، تا ردیف‌های خریدش هم نیاید) و قلمی که به این‌جا آورده می‌آید
+ * (inc: [{code، src}] — ردیف خریدش زیر نوع قلمِ فایلِ جای قبلی است). لایه‌ها و نرخ‌های کارشناس
+ * جای مقدارِ فهرست می‌نشینند؛ نرخ کارشناس در خانهٔ ۸ قلم (rateFor). نوع قلمی که فقط کارشناس
+ * ساخته (در فهرست نیست) با همان اقلامِ آورده ساخته می‌شود.
+ */
+export async function headData(env, head) {
+  const h = nameOf(head); if (!h) return null;
+  const [base, ix] = await Promise.all([catalogHead(env, h), editIndex(env)]);
+  if (!ix.n) return base;
+  const into = [...ix.byCode.values()].filter((e) => e.head === h);
+  const touched = base ? base.items.some((x) => ix.byCode.has(x[0])) : false;
+  if (!into.length && !touched) return base;
+  const rows = new Map((into.length ? await editRows(env, into.map((e) => e.k)) : []).map((r) => [r.code, r]));
+  const out = base ? { ...base, items: [] } : { head: h, ref: null, n: 0, hr: {}, cr: {}, src: [], sub: true, uc: {}, items: [], made: true };
+  const moved = [], inc = [];
+  const tuple = (x, r, ir) => [r.code, r.data.title || (x && x[1]) || "", x ? x[2] : r.data.cl || "", x ? x[3] : r.data.cls || "",
+    r.data.layers || {}, r.data.residual || "", ir, r.data.rates && Object.keys(r.data.rates).length ? r.data.rates : null];
+  for (const x of base ? base.items : []) {
+    const e = ix.byCode.get(x[0]);
+    if (!e) { out.items.push(x); continue; }
+    if (e.head !== h) { moved.push(x[0]); continue; }
+    const r = rows.get(x[0]);
+    out.items.push(r ? tuple(x, r, x[6]) : x);
+    rows.delete(x[0]);
+  }
+  for (const r of rows.values()) {
+    /* جای قبلیِ قلم در فهرستِ امروز (اگر کد در فهرست هست)، وگرنه همان که هنگام ذخیره بود */
+    const oh = await headOfCode(env, r.code), top = oh ? await headTop(env, oh) : null;
+    const ref = top ? top.ref : r.data.ref || null, src = top ? top.src : r.data.src || [""];
+    if (out.ref == null) out.ref = ref || "عدد";
+    out.items.push(tuple(null, r, ref === out.ref ? r.data.ir || null : null));
+    inc.push({ code: r.code, src });
+  }
+  if (out.ref == null) out.ref = "عدد";
+  out.n = out.items.length;
+  if (moved.length) out.out = moved;
+  if (inc.length) out.inc = inc;
+  return out;
+}
+export const itemOf = (hd, code) => (hd && hd.items.find((x) => x[0] === codeKey(code))) || null;
+
+/** نام همهٔ نوع‌های قلم — فهرست و آنچه کارشناس ساخته — برای انتخابِ نوع قلم در پنل */
+export async function allHeads(env) {
+  fresh();
+  if (cache.heads === undefined) {
+    const rs = (await env.DB.prepare("SELECT head FROM cat_heads WHERE part=0").all().catch(() => ({ results: [] }))).results || [];
+    const ix = await editIndex(env);
+    cache.heads = [...new Set([...rs.map((r) => r.head), ...[...ix.byCode.values(), ...ix.byTitle.values()].map((e) => e.head)])].sort((a, b) => a.localeCompare(b, "fa"));
+  }
+  return cache.heads;
+}
 
 /** واژه → نوع‌های قلم، فقط برای تکه‌های لازم */
 export async function wordHeads(env, ws) {
@@ -288,6 +419,7 @@ const DOWN = { "قطعی": "بالا", "بالا": "متوسط", "متوسط": "
  *   ۴) نرخ نوع قلم (اگر شاهد خوشه بود ولی ضعیف، اطمینان یک پله پایین)
  *   ۵) نرخ خوشه حتی با اطمینان پایین
  * `override`: {واحد: نرخ} که کارشناس در تب سوابق عوض کرده — بر همه مقدم (جز خودِ واحد مرجع).
+ * بعد از آن نرخی که کارشناس برای همین کد در دیتابیس اصلی ذخیره کرده (خانهٔ ۸ قلم، headData).
  * null یعنی راهی برای تبدیل نیست؛ آن ردیف در جمع مقدار نمی‌آید و هشدار می‌گیرد.
  */
 export function rateFor(hd, item, unit, override) {
@@ -295,6 +427,8 @@ export function rateFor(hd, item, unit, override) {
   if (!u || u === hd.ref) return { rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref" };
   const o = override && Number(override[u]);
   if (o > 0) return { rate: o, basis: "تعیین کارشناس", conf: "کارشناس", src: "user" };
+  const er = item && item[7] && Number(item[7][u]);
+  if (er > 0) return { rate: er, basis: "تعیین کارشناس (قلم)", conf: "کارشناس", src: "user" };
   const ir = item && item[6] && item[6][u];
   if (ir) return { rate: ir[0], basis: `${ir[1] || "نرخ ویژه"} (قلم)`, conf: "بالا", src: "item" };
   const cl = item && item[2];

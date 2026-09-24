@@ -9,7 +9,7 @@ $listener.Start()
 Write-Host "Serving $root on http://localhost:$Port/"
 
 $mime = @{
-  ".html"="text/html"; ".htm"="text/html"; ".css"="text/css"; ".js"="application/javascript";
+  ".html"="text/html"; ".htm"="text/html"; ".css"="text/css"; ".js"="application/javascript"; ".mjs"="text/javascript";
   ".json"="application/json"; ".png"="image/png"; ".jpg"="image/jpeg"; ".jpeg"="image/jpeg";
   ".jfif"="image/jpeg"; ".webm"="video/webm"; ".mp4"="video/mp4"; ".svg"="image/svg+xml";
   ".ico"="image/x-icon"; ".webmanifest"="application/manifest+json"

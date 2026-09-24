@@ -9,8 +9,9 @@
  *   «نوع قلم»  — هر قلمی از همان نوع (هر پیچی که تا حالا خریده‌ایم)
  * رتبه‌بندی برای هر حالت جدا حساب می‌شود.
  *
- * ساختار قلم (نوع و لایه‌ها) یا از خود فهرست می‌آید — اگر کد راهکاران قلم آن‌جا باشد —
- * یا از «نرمال‌سازی اقلام» که کارشناس تأیید کرده (worker/normalize.js).
+ * ساختار قلم (نوع و لایه‌ها) یا از دیتابیس اصلی می‌آید — فهرست اقلام و ویرایش‌های کارشناس، با
+ * کد راهکاران یا عنوانِ عیناً همان — یا از «نرمال‌سازی اقلام» که کارشناس تأیید کرده
+ * (worker/normalize.js).
  *
  * مقدارها پیش از جمع به واحد مرجعِ نوع قلم برده می‌شوند (نرخ‌های فایل ۴، با ترتیب
  * اولویت همان فایل؛ کارشناس می‌تواند هر نرخ را عوض کند). بدون این، جمعِ «۳ تن» و
@@ -22,7 +23,7 @@
  */
 import { HttpError } from "./http.js";
 import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor } from "./catalog.js";
-import { normOf, catalogStruct, canonStruct } from "./normalize.js";
+import { normOf, catalogStruct, dbStruct, canonStruct } from "./normalize.js";
 
 export { activeImport } from "./catalog.js";
 
@@ -92,19 +93,29 @@ const IN_MAX = 90;
 
 /**
  * ساختار قلم و محدودهٔ جستجو.
- * `norm`: true = ساختارِ تأییدشده در «نرمال‌سازی اقلام» (پنل وقتی تیکش روشن است)،
- *         false = فقط فهرست با کد راهکاران، undefined = تأییدشده اگر هست وگرنه فهرست (بات).
+ * `norm`: true = ساختارِ ذخیره‌شده در «نرمال‌سازی اقلام» (پنل وقتی تیکش روشن است)، وگرنه دیتابیس
+ *         اصلی با کد یا عنوانِ عیناً همان — همان که پنل بی مدل نشان داده؛ پیشنهادِ مدل بی تأیید نه،
+ *         false = فقط دیتابیس اصلی با کد راهکاران، undefined = ذخیره‌شده اگر هست وگرنه دیتابیس با
+ *         کد یا عنوان (بات).
  * خروجی: {hd, struct, mode, codes, override, source} یا {message}.
  */
 export async function resolveScope(env, it, { norm, mode } = {}) {
   let n = normOf(it);
   let hd, struct, override = {}, source;
-  if (norm === true || (norm == null && n)) {
-    if (!n) return { message: "ساختار نرمال‌شدهٔ این قلم هنوز تأیید نشده است؛ نتیجهٔ «نرمال‌سازی اقلام» را بررسی و تأیید کنید." };
+  if (n && norm !== false) {
     /* تأییدِ پیش از یکسان‌سازی («ورق» با ضخامتِ «2 میل») به زبان امروزِ فهرست برده می‌شود */
     if (n.v !== 2) { const meta = await catalogMeta(env); if (meta) n = await canonStruct(env, meta, n, it); }
     hd = await headData(env, n.head);
     struct = n; override = n.rates || {}; source = "norm";
+  } else if (norm !== false) {
+    const db = await dbStruct(env, it);
+    if (!db) {
+      return { message: norm === true
+        ? "کد و عنوانِ این قلم در دیتابیس نیست؛ ساختاری که «نرمال‌سازی اقلام» پیشنهاد داده را بررسی و «ذخیره» کنید."
+        : T(it.code) ? `کد این قلم (${T(it.code)}) و عنوانش در فهرست اقلام نیست. «نرمال‌سازی اقلام» را روشن کنید تا عنوانش به نوع قلم و لایه‌ها تفکیک و تأیید شود.`
+          : "این قلم کد راهکاران ندارد و عنوانش در فهرست اقلام نیست. «نرمال‌سازی اقلام» را روشن کنید تا عنوانش به نوع قلم و لایه‌ها تفکیک و تأیید شود." };
+    }
+    hd = db.hd; struct = db.struct; override = db.rates || {}; source = db.by === "title" ? "title" : "catalog";
   } else {
     const c = await catalogStruct(env, it.code);
     if (!c) {
@@ -131,21 +142,35 @@ export async function resolveScope(env, it, { norm, mode } = {}) {
  * «ورق» دارد، کنار ورق گالوانیزه. پس «نوع قلم» هم وقتی نوع قلمِ مؤثر فقط بخشی از نوع قلمِ
  * فایل است (hd.sub) با کدهای خودش محدود می‌شود. تکه‌ها بر کد جدا می‌شوند، پس گروه‌بندیِ
  * هر تکه با تکهٔ دیگر هم‌پوشانی ندارد؛ فقط ترتیب و سقفِ نتیجه را فراخوان دوباره می‌سازد.
+ * ویرایشِ کارشناس (worker/catalog.js:headData): قلمی که به نوع قلمِ دیگری رفته (hd.out) از ردیف‌های
+ * نوع قلمِ فایل کنار می‌رود و قلمی که از جای دیگر آمده (hd.inc) با کد و نوع قلمِ فایلِ جای قبلی‌اش
+ * می‌آید.
  * ترتیب پارامترها: `args` (بخش SELECT)، شرط محدوده، `tailArgs` (بخش بعد از WHERE).
  */
 async function scoped(env, sc, select, tail, args = [], tailArgs = []) {
   const run = (where, wargs) => env.DB.prepare(`${select} FROM purchases WHERE ${where} ${tail}`).bind(...args, ...wargs, ...tailArgs).all().then((r) => r.results || []);
-  const src = sc.hd.src && sc.hd.src.length ? sc.hd.src : [sc.hd.head];
-  const inSrc = src.length === 1 ? "head=?" : `head IN (${src.map(() => "?").join(",")})`;
-  const codes = sc.mode === "head" ? (sc.hd.sub ? sc.hd.items.map((x) => x[0]) : null) : sc.codes;
-  if (!codes) return run(inSrc, src);
-  if (!codes.length) return [];
-  const out = [], per = Math.max(1, IN_MAX - src.length);
-  for (let i = 0; i < codes.length; i += per) {
-    const part = codes.slice(i, i + per);
-    out.push(...await run(`${inSrc} AND item_code IN (${part.map(() => "?").join(",")})`, [...src, ...part]));
+  const q = (xs) => xs.map(() => "?").join(",");
+  const hd = sc.hd, inc = hd.inc || [], out = hd.out || [];
+  const src = hd.src && hd.src.length ? hd.src : hd.made ? [] : [hd.head];
+  /* با فهرست کدها: هر کد زیر نوع قلمِ فایلِ خودش */
+  const byCodes = async (codes, heads) => {
+    const res = [], per = Math.max(1, IN_MAX - heads.length);
+    for (let i = 0; i < codes.length; i += per) {
+      const part = codes.slice(i, i + per);
+      res.push(...await run(`head IN (${q(heads)}) AND item_code IN (${q(part)})`, [...heads, ...part]));
+    }
+    return res;
+  };
+  const allSrc = [...new Set([...src, ...inc.flatMap((x) => x.src)])];
+  let codes = sc.mode === "head" ? (hd.sub ? hd.items.map((x) => x[0]) : null) : sc.codes;
+  if (!codes && src.length + out.length > IN_MAX) codes = hd.items.map((x) => x[0]);
+  if (!codes) {
+    const rows = await run(`head IN (${q(src)})${out.length ? ` AND item_code NOT IN (${q(out)})` : ""}`, [...src, ...out]);
+    if (inc.length) rows.push(...await byCodes(inc.map((x) => x.code), [...new Set(inc.flatMap((x) => x.src))]));
+    return rows;
   }
-  return out;
+  if (!codes.length || !allSrc.length) return [];
+  return byCodes(codes, allSrc);
 }
 
 /* ------------------------------------------------------------------ */

@@ -348,6 +348,12 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-chart svg { width: 100%; height: auto; display: block; }
 .rp-ptable td { padding: 3px 4px; }
 .rp-ptable input.tp-input { font-size: .82rem; padding: 3px 6px; }
+/* پنجرهٔ تیکِ کارشناسانِ گزارش سه‌ماهه (manager.js:pickExperts) */
+.rp-ex-tools { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; font-size: .85rem; }
+.rp-exlist { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 4px 12px; max-height: 50vh; overflow: auto;
+  border: 1px solid var(--tp-line); border-radius: 10px; padding: 8px 10px; }
+.rp-ex { display: flex; gap: 6px; align-items: baseline; cursor: pointer; padding: 3px 0; flex-wrap: wrap; }
+.rp-ex .dim { font-size: .78rem; }
 
 /* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
 .tp-theme { min-width: 34px; }
