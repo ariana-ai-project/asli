@@ -10,8 +10,10 @@
  *
  * مسیر کار کارشناس (همان ترتیبی که مدیر خواسته):
  *   ارجاع ← «مشاهده» ← بررسی سوابق · جستجوی هوشمند · کارتابل
- *   سوابق: اقلام (چندانتخابی یا «همه») ← یک پیامِ تفکیک‌شده به قلم ← انتخاب قلم
- *          ← تأمین‌کنندگان (چندانتخابی) ← «افزودن به استعلامات» یا «فهرست»
+ *   سوابق: اقلام (چندانتخابی یا «همه»؛ تک‌قلمی مستقیم) ← «نوع قلم» یا «عین قلم»
+ *          ← چند قلم: پیامِ خلاصه (۵ تأمین‌کنندهٔ اولِ هر قلم) و انتخاب قلم
+ *          ← کارتِ قلم: ۵ تای اول با رتبه و رده · «همهٔ تأمین‌کنندگان» · حالت دیگر · بازگشت
+ *          ← «انتخاب جهت استعلام»: تأمین‌کنندگان (چندانتخابی) ← «افزودن به استعلامات» یا «فهرست»
  *          ← تب استعلامات · جستجوی هوشمند · کارتابل · درخواست · بازگشت
  *   تب استعلامات: خط‌ها (چندانتخابی) ← «دریافت پیش‌فاکتور» · خط استعلام دستی · جدول کمیسیون
  *   جدول کمیسیون (با «درج توضیحات») ← تحویل (درخواست خرید، نامه، جدول، پیوست‌ها) و خاتمه.
@@ -40,6 +42,7 @@ import { STAGE_NAMES, queueStmt } from "./queue.js";
 import { stageWatch, markManagerSeen, recipients, RECIPIENT_COLS, RECIPIENT_JOIN } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory, activeImport } from "./history.js";
+import { showLayer } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
@@ -1650,28 +1653,55 @@ async function makeLetter(env, api, chat, ex, letterId, subjectTitles) {
 /* ------------------------------------------------------------------ */
 /* بررسی سوابق — همان موتور پنل (worker/history.js)                     */
 /*                                                                      */
-/* اقلام چندانتخابی یا «همه اقلام» ← یک پیامِ تفکیک‌شده به قلم ← انتخاب  */
-/* قلم ← تأمین‌کنندگان (چندانتخابی) ← «افزودن به استعلامات» یا «فهرست».  */
-/* درخواستِ تک‌قلمی مستقیم به تأمین‌کنندگان می‌رسد.                      */
+/* اقلام چندانتخابی یا «همه اقلام» (تک‌قلمی: مستقیم) ← کارشناس حالت را   */
+/* برمی‌گزیند: «نوع قلم» یا «عین قلم» (تصمیم مدیر، مهر ۱۴۰۵) ← چند قلم:   */
+/* یک پیامِ خلاصه (۵ تأمین‌کنندهٔ اولِ هر قلم) و انتخاب قلم؛ یک قلم: کارتِ  */
+/* همان قلم. کارتِ قلم ۵ تای اول را با رتبه و رده نشان می‌دهد، با دکمهٔ     */
+/* «همهٔ تأمین‌کنندگان» (صفحه‌به‌صفحه)، رفتن به حالت دیگر، «انتخاب جهت     */
+/* استعلام» و بازگشت — از هر کارت یک قدم به عقب، تا انتخاب اقلام و درخواست. */
 /* ------------------------------------------------------------------ */
 /* ضریب اهمیت گشتاور در بات ثابت است؛ نوارِ ۱ تا ۱۰ مال پنل است. */
 const HIST_K = 5;
 const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* عددها بدون زبالهٔ اعشار شناور */
+/* مقدار و امتیاز با جداکنندهٔ هزارگان — «۱۰٬۷۳۲٬۸۳۰» خواناست، «۱۰۷۳۲۸۳۰» نه */
+const QN = (x) => M(RQ(x).toLocaleString("en-US", { maximumFractionDigits: 2 }).replace(/,/g, "٬"));
 const HIST_MAX_SEL = 24;   /* سقف دکمه‌های تأمین‌کننده در یک کارت */
 /* هر قلم چند کوئری D1 است و هر فراخوانی پلن رایگان ۵۰ زیردرخواست دارد؛ بیش از
    این در یک فراخوانی نمی‌رود و بقیه با «ادامهٔ سوابق» در فراخوانی بعدی می‌آید. */
 const HIST_BATCH = 5;
 const MSG_MAX = 3900;      /* متن تلگرام ۴۰۹۶ نویسه جا دارد */
+/* کارتِ قلم: چند تأمین‌کنندهٔ اول، و در «همهٔ تأمین‌کنندگان» چند تا در هر صفحه */
+const HIST_TOP = 5, HIST_PAGE = 20;
+/* دو حالت جستجو — در callback_data با یک حرف: h نوع قلم، e عین قلم */
+const MODE_FA = { head: "نوع قلم", exact: "عین قلم" };
+const MODE_ICON = { head: "🔹", exact: "🎯" };
+const mCode = (m) => (m === "exact" ? "e" : "h");
+const mOf = (c) => (c === "e" ? "exact" : "head");
+const otherMode = (m) => (m === "exact" ? "head" : "exact");
 
 async function histStart(env, api, chat, ex, aid, mid) {
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
   if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
-  const d = { sel: [], single: its.length === 1 };
+  /* pick: اقلامی که سوابقشان خواسته شده — عوض کردنِ حالت همان‌ها را دوباره می‌سنجد */
+  const d = { sel: [], single: its.length === 1, pick: its.length === 1 ? [its[0].id] : [] };
   const f = await newFlow(env, ex, chat, "hsel", "pick", aid, d);
-  if (d.single) return histRun(env, api, chat, ex, f, d, asg, [its[0].id], null);
+  if (d.single) return histModeCard(api, chat, f, d, its, asg, mid);
   return histSelCard(api, chat, f, d, its, asg, mid);
+}
+
+/** انتخابِ حالت: «نوع قلم» یا «عین قلم» — برای اقلامِ برگزیده (d.pick) */
+function histModeCard(api, chat, f, d, its, asg, mid) {
+  const pick = its.filter((i) => (d.pick || []).includes(i.id));
+  const what = pick.length === 1 ? `«${esc(short(pick[0].title, 50))}»` : `${M(pick.length)} قلم`;
+  return show(api, chat, mid, `📚 <b>سوابق ${what}</b> — درخواست <b>${esc(asg.request_id)}</b>\n\nکدام را ببینم؟\n`
+    + `${MODE_ICON.head} <b>نوع قلم</b>: همهٔ خریدهای همین نوع قلم (مثلاً هر پیچی)؛ ${M(HIST_TOP)} تأمین‌کنندهٔ اول با رتبه و رده، و دکمهٔ «همهٔ تأمین‌کنندگان».\n`
+    + `${MODE_ICON.exact} <b>عین قلم</b>: فقط خریدهای همین قلم با همین مشخصات.\n`
+    + "<i>در کارتِ هر قلم با یک دکمه به حالت دیگر می‌روید.</i>", [
+    [{ text: `${MODE_ICON.head} نوع قلم`, callback_data: `hm:${f.id}:h` }, { text: `${MODE_ICON.exact} عین قلم`, callback_data: `hm:${f.id}:e` }],
+    [KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `hx:${f.id}:back:0` }],
+  ]);
 }
 
 function histSelCard(api, chat, f, d, its, asg, mid) {
@@ -1684,11 +1714,12 @@ function histSelCard(api, chat, f, d, its, asg, mid) {
   kb.push([{ text: "📚 همه اقلام", callback_data: `hx:${f.id}:all:0` }]);
   kb.push(navRow(f.assignment_id));
   return show(api, chat, mid, `📚 <b>بررسی سوابق</b> — درخواست <b>${esc(asg.request_id)}</b>\n\n`
-    + "سوابق کدام اقلام را ببینم؟ چند قلم را تیک بزنید و «سوابق اقلام انتخابی» را بزنید، یا «همه اقلام».", kb);
+    + "سوابق کدام اقلام را ببینم؟ چند قلم را تیک بزنید و «سوابق اقلام انتخابی» را بزنید، یا «همه اقلام»؛ بعد «نوع قلم» یا «عین قلم» را انتخاب می‌کنید.", kb);
 }
 
+/** سوابقِ اقلام `ids` در حالت d.mode — دسته‌دسته (HIST_BATCH)؛ ثبتِ مرحله؛ بعد پیامِ خلاصه یا کارتِ قلم */
 async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
-  const aid = f.assignment_id;
+  const aid = f.assignment_id, mode = d.mode || "head";
   const want = (await itemsOf(env, aid)).filter((i) => ids.includes(i.id));
   const its = want.slice(0, HIST_BATCH);
   d.rest = want.slice(HIST_BATCH).map((i) => i.id);
@@ -1697,12 +1728,16 @@ async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
   if (!cur) return show(api, chat, mid, "📚 فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند.", [navRow(aid)]);
 
   const results = [];
-  for (const it of its) results.push({ it, h: await itemHistory(env, it, { k: HIST_K, cur, brief: true }) });
+  for (const it of its) results.push({ it, h: await itemHistory(env, it, { k: HIST_K, cur, brief: true, mode }) });
 
   const ran = its.map((i) => i.id);
   d.ran = [...new Set([...(d.ran || []), ...ran])];
   d.opts = d.opts || {};
-  for (const { it, h } of results) d.opts[it.id] = (h.suppliers || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
+  d.cnt = d.cnt || {};
+  for (const { it, h } of results) {
+    d.opts[it.id] = (h.suppliers || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
+    d.cnt[it.id] = (h.suppliers || []).length;
+  }
   const t = now();
   /* خواندنِ سوابق همان انجامِ مرحله است — همان رفتار پنل؛ باکس مدیر سبز می‌شود */
   await env.DB.batch([
@@ -1713,8 +1748,10 @@ async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
     env.DB.prepare("UPDATE tg_flows SET step='ran', data_json=? WHERE id=?").bind(JSON.stringify(d), f.id),
   ]);
 
-  if (mid) await api.editMessageText(chat, mid, `📚 سوابق ${M(its.length)} قلم — در پیام بعد.`).catch(() => {});
-  for (const text of histMessages(asg, results)) await api.sendMessage(chat, text).catch(() => {});
+  /* یک قلم: همان کارتِ قلم، به‌جای پیامِ خلاصه */
+  if (d.single) return histItemRender(api, chat, f, d, its[0], results[0].h, mode, 0, mid);
+  if (mid) await api.editMessageText(chat, mid, `📚 سوابق ${M(its.length)} قلم — ${MODE_ICON[mode]} ${MODE_FA[mode]} — در پیام بعد.`).catch(() => {});
+  for (const text of histMessages(asg, results, mode)) await api.sendMessage(chat, text).catch(() => {});
   if (d.rest.length) {
     await api.sendMessage(chat, `⏭ سوابق ${M(d.rest.length)} قلم دیگر مانده.`,
       [[{ text: `📚 ادامهٔ سوابق (${M(d.rest.length)} قلم)`, callback_data: `hx:${f.id}:more:0` }], navRow(aid)]).catch(() => {});
@@ -1724,76 +1761,152 @@ async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
 }
 
 /** یک پیام، به تفکیک قلم؛ فقط اگر از سقف تلگرام بگذرد، سر مرزِ قلم‌ها به چند پیام شکسته می‌شود */
-function histMessages(asg, results) {
-  const head = `📚 <b>سوابق تأمین — درخواست ${esc(asg.request_id)}</b>\n`
-    + `<i>ترتیب با امتیاز گشتاوری است: خریدِ تازه‌تر سنگین‌تر (ضریب ${M(HIST_K)}). عددهای برابر، رتبهٔ برابر دارند.</i>`;
+function histMessages(asg, results, mode = "head") {
+  const head = `📚 <b>سوابق تأمین — درخواست ${esc(asg.request_id)}</b> — ${MODE_ICON[mode]} <b>${MODE_FA[mode]}</b>\n`
+    + `<i>${M(HIST_TOP)} تأمین‌کنندهٔ اولِ هر قلم به ترتیب امتیاز گشتاوری (خریدِ تازه‌تر سنگین‌تر، ضریب ${M(HIST_K)})؛ در امتیاز برابر، ردهٔ بالاتر (A، B، C) جلوتر. «همهٔ تأمین‌کنندگان» و حالت دیگر در کارتِ هر قلم.</i>`;
   const budget = Math.max(450, Math.floor((MSG_MAX - head.length) / results.length) - 4);
   const out = [];
   let cur = head;
   for (const [k, r] of results.entries()) {
-    const s = histSection(r.it, r.h, results.length > 1 ? k + 1 : 0, budget);
+    const s = histSection(r.it, r.h, results.length > 1 ? k + 1 : 0, budget, mode);
     if (cur.length + 2 + s.length > MSG_MAX) { out.push(cur); cur = s; } else cur += "\n\n" + s;
   }
   out.push(cur);
   return out;
 }
 
-function histSection(it, h, no, budget) {
+/** چرا تأمین‌کننده‌ای نیامد: پیامِ سوابق، یا این‌که هرچه هست زیر نام تجمیعی یا تحویلیِ کارفرماست */
+const histWhyEmpty = (h) => (h.excluded && h.excluded.length
+  ? `هرچه از این قلم ثبت شده زیر «${h.excluded[0].name}» است (${h.excluded[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"}) و تأمین‌کنندهٔ نام‌داری ندارد.`
+  : (h.message || "سابقه‌ای در فایل مرجع پیدا نشد."));
+
+/** نوع قلمِ جستجو، و در «عین قلم» لایه‌هایش */
+function histScope(h, mode) {
+  const st = h.struct || {};
+  const ls = mode === "exact" ? Object.entries(st.layers || {}).map(([k, v]) => `${k}: ${showLayer(v)}`).join(" · ") : "";
+  return `${MODE_ICON[mode]} <b>${MODE_FA[mode]}</b>${st.head ? ` — ${esc(st.head)}` : ""}${ls ? ` · ${esc(short(ls, 90))}` : ""}`;
+}
+
+/** یک تأمین‌کننده: کامل (سه عدد با رتبه‌هایشان) یا فشرده برای «همهٔ تأمین‌کنندگان» */
+function supplierLine(x, i, unit, full) {
+  const g = x.grade ? ` · رده ${esc(x.grade)}` : "";
+  if (!full) return `\n${M(i + 1)}. ${esc(short(x.name, 32))}${g} — امتیاز ${QN(x.qtyM)} (رتبه ${M(x.rankM)}) · خرید ${M(x.n)} · مقدار ${QN(x.qty)}`;
+  return `\n${M(i + 1)}. <b>${esc(short(x.name, 36))}</b>${g}\n`
+    + `   دفعات خرید <b>${M(x.n)}</b> (رتبه ${M(x.rankN)}) · مقدار <b>${QN(x.qty)}</b>${esc(unit)} (رتبه ${M(x.rankQty)})\n`
+    + `   امتیاز گشتاوری <b>${QN(x.qtyM)}</b> (رتبه ${M(x.rankM)})`;
+}
+
+function histSection(it, h, no, budget, mode = "head") {
   const title = `━━ ${no ? `${M(no)}. ` : ""}<b>${esc(short(it.title, 60))}</b>`;
   if (!h.available) return `${title}\n${esc(h.message)}`;
   const rows = h.suppliers || [];
-  if (!rows.length) {
-    const why = h.excluded && h.excluded.length
-      ? `هرچه از این قلم ثبت شده زیر «${h.excluded[0].name}» است (${h.excluded[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"}) و تأمین‌کنندهٔ نام‌داری ندارد.`
-      : (h.message || "سابقه‌ای در فایل مرجع پیدا نشد.");
-    return `${title}\n${esc(why)}`;
-  }
+  if (!rows.length) return `${title}\n${esc(histWhyEmpty(h))}`;
   const unit = h.item && h.item.unit ? ` ${h.item.unit}` : "";
-  /* «عین قلم» در بات: همان نوع قلم با همان لایه‌ها؛ مقدارها به واحد مرجعِ نوع قلم برده شده‌اند */
+  /* مقدارها به واحد مرجعِ نوع قلم برده شده‌اند */
   const conv = (h.rates || []).filter((r) => r.rate != null);
-  let s = `${title}\n<i>عین قلم — ${esc(h.struct ? h.struct.head : "")}</i>\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${M(RQ(h.totals.qty))}${esc(unit)}`
+  let s = `${title}\n<i>${histScope(h, mode)}</i>\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${QN(h.totals.qty)}${esc(unit)}`
     + (conv.length ? `\n<i>به واحد مرجع (${esc(h.item.unit)}) برده شد: ${conv.map((r) => `${esc(r.unit)}×${M(RQ(r.rate))}`).join("، ")}</i>` : "")
     + (h.unconverted ? `\n⚠️ <i>${M(h.unconverted)} خرید واحدی داشت که نرخ تبدیل ندارد و در جمع مقدار نیامد.</i>` : "");
   let shown = 0;
-  for (const [i, x] of rows.entries()) {
-    const line = `\n${M(i + 1)}. <b>${esc(short(x.name, 36))}</b>\n`
-      + `   دفعات خرید <b>${M(x.n)}</b> (رتبه ${M(x.rankN)}) · مقدار <b>${M(RQ(x.qty))}</b>${esc(unit)} (رتبه ${M(x.rankQty)})\n`
-      + `   امتیاز گشتاوری <b>${M(RQ(x.qtyM))}</b> (رتبه ${M(x.rankM)})`;
+  for (const [i, x] of rows.slice(0, HIST_TOP).entries()) {
+    const line = supplierLine(x, i, unit, true);
     if (shown && s.length + line.length > budget) break;
     s += line; shown++;
   }
-  if (shown < rows.length) s += `\n<i>و ${M(rows.length - shown)} تأمین‌کنندهٔ دیگر — در پنل</i>`;
+  if (shown < rows.length) s += `\n<i>و ${M(rows.length - shown)} تأمین‌کنندهٔ دیگر — «همهٔ تأمین‌کنندگان» در کارتِ همین قلم</i>`;
   return s;
 }
 
-/** بعد از پیامِ سوابق: یک قلم ← مستقیم تأمین‌کنندگانش؛ چند قلم ← اول انتخاب قلم */
+/**
+ * کارتِ یک قلم در یک حالت. `page`: ۰ = پنج تأمین‌کنندهٔ اول (با رتبه و رده)، ۱.. = صفحه‌های
+ * «همهٔ تأمین‌کنندگان». دکمه‌ها: همه/صفحه‌ها/پنج تای اول، حالت دیگر، انتخاب جهت استعلام، بازگشت
+ * (یک قلم: به انتخابِ حالت؛ چند قلم: به انتخابِ قلم).
+ */
+function histItemRender(api, chat, f, d, it, h, mode, page, mid) {
+  const m = mCode(mode), o = otherMode(mode), base = `hv:${f.id}:${it.id}`;
+  const rows = (h && h.suppliers) || [];
+  let s = `📚 <b>سوابق «${esc(short(it.title, 60))}»</b>\n${h ? histScope(h, mode) : `${MODE_ICON[mode]} <b>${MODE_FA[mode]}</b>`}`;
+  const kb = [];
+  if (!h || !h.available || !rows.length) {
+    s += `\n\n${esc(!h ? "سابقه‌ای در فایل مرجع پیدا نشد." : h.available === false ? h.message : histWhyEmpty(h))}`;
+  } else {
+    const unit = h.item && h.item.unit ? ` ${h.item.unit}` : "";
+    const pages = Math.ceil(rows.length / HIST_PAGE), pg = Math.min(Math.max(page || 0, 0), pages);
+    s += `\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${QN(h.totals.qty)}${esc(unit)}`
+      + `\n<i>ترتیب با امتیاز گشتاوری (خریدِ تازه‌تر سنگین‌تر)؛ در امتیاز برابر، ردهٔ بالاتر (A، B، C) جلوتر.</i>\n`;
+    if (pg === 0) {
+      rows.slice(0, HIST_TOP).forEach((x, i) => { s += supplierLine(x, i, unit, true); });
+      if (rows.length > HIST_TOP) s += `\n\n<i>و ${M(rows.length - HIST_TOP)} تأمین‌کنندهٔ دیگر — «همهٔ تأمین‌کنندگان».</i>`;
+    } else {
+      const from = (pg - 1) * HIST_PAGE;
+      s += `\n<b>همهٔ تأمین‌کنندگان</b>${pages > 1 ? ` — صفحهٔ ${M(pg)} از ${M(pages)}` : ""}`;
+      rows.slice(from, from + HIST_PAGE).forEach((x, i) => { s += supplierLine(x, from + i, unit, false); });
+    }
+    if ((h.excluded || []).length) s += `\n\n<i>در رتبه نیستند: ${h.excluded.map((x) => `«${esc(x.name)}» (${M(x.n)} خرید)`).join("، ")}.</i>`;
+    if (pg === 0 && rows.length > HIST_TOP) kb.push([{ text: `📋 همهٔ تأمین‌کنندگان (${M(rows.length)})`, callback_data: `${base}:${m}:1` }]);
+    if (pg >= 1) {
+      const nav = [];
+      if (pg > 1) nav.push({ text: "⏪ صفحهٔ قبل", callback_data: `${base}:${m}:${pg - 1}` });
+      if (pg < pages) nav.push({ text: "صفحهٔ بعد ⏩", callback_data: `${base}:${m}:${pg + 1}` });
+      if (nav.length) kb.push(nav);
+      kb.push([{ text: `🔝 ${M(HIST_TOP)} تأمین‌کنندهٔ اول`, callback_data: `${base}:${m}:0` }]);
+    }
+    kb.push([{ text: "➕ انتخاب جهت استعلام", callback_data: `hq:${f.id}:${it.id}:${m}` }]);
+  }
+  kb.push([{ text: `${MODE_ICON[o]} ${MODE_FA[o]}`, callback_data: `${base}:${mCode(o)}:0` }]);
+  kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: d.single ? `hx:${f.id}:mode:0` : `hb:p${f.id}` }]);
+  return show(api, chat, mid, s, kb);
+}
+
+/** کارتِ قلم از نو — دکمه‌های کارت، و بازگشت از «انتخاب جهت استعلام» */
+async function histItemCard(env, api, chat, ex, f, d, itemId, mode, page, mid) {
+  const aid = f.assignment_id;
+  if (!(await ownOpenAssignment(env, ex.id, aid))) return show(api, chat, mid, "این درخواست متعلق به شما نیست یا بسته شده.", [[KARTABL_BTN]]);
+  const it = (await itemsOf(env, aid)).find((i) => i.id === itemId);
+  if (!it) return show(api, chat, mid, "این قلم دیگر باز نیست.", [navRow(aid)]);
+  const h = await itemHistory(env, it, { k: HIST_K, brief: true, mode });
+  return histItemRender(api, chat, f, d, it, h, mode, page, mid);
+}
+
+/** بعد از پیامِ سوابق: یک قلم ← کارتِ همان قلم؛ چند قلم ← انتخاب قلم */
 function histAfter(env, api, chat, ex, f, d, mid) {
   const ran = d.ran || [];
-  if (ran.length === 1) return histSupplierCard(env, api, chat, ex, f, d, ran[0], d.single ? "r" : "x", mid);
+  if (d.single && ran.length) return histItemCard(env, api, chat, ex, f, d, ran[0], d.mode || "head", 0, mid);
   return histPicker(env, api, chat, f, d, mid);
 }
 
+/** انتخاب قلم بعد از پیامِ خلاصه: هر قلم ← کارتش؛ همین اقلام در حالت دیگر؛ «فهرست» بی‌انتخاب جلو */
 async function histPicker(env, api, chat, f, d, mid) {
+  /* گفت‌وگوهای پیش از انتخابِ حالت فقط «عین قلم» داشتند */
+  const mode = d.mode || "exact", o = otherMode(mode);
   const its = (await itemsOf(env, f.assignment_id)).filter((i) => (d.ran || []).includes(i.id));
   const kb = its.map((i) => {
-    const n = ((d.opts || {})[i.id] || []).length;
-    return [{ text: `${short(i.title, 30)} · ${n ? `${M(n)} تأمین‌کننده` : "بی‌سابقه"}`, callback_data: `hp:${f.id}:${i.id}` }];
+    const n = (d.cnt || {})[i.id] != null ? d.cnt[i.id] : ((d.opts || {})[i.id] || []).length;
+    return [{ text: `${short(i.title, 30)} · ${n ? `${M(n)} تأمین‌کننده` : "بی‌سابقه"}`, callback_data: `hv:${f.id}:${i.id}:${mCode(mode)}:0` }];
   });
+  kb.push([{ text: `${MODE_ICON[o]} همین اقلام با «${MODE_FA[o]}»`, callback_data: `hm:${f.id}:${mCode(o)}` }]);
   kb.push([{ text: "🗂 فهرست", callback_data: `hp:${f.id}:ls` }]);
-  kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `hx:${f.id}:back:0` }]);
-  return show(api, chat, mid, "📚 <b>تأمین‌کنندگانِ کدام قلم را برای استعلام انتخاب می‌کنید؟</b>\n<i>«فهرست» بی‌انتخاب جلو می‌رود.</i>", kb);
+  kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `hx:${f.id}:mode:0` }]);
+  return show(api, chat, mid, `📚 <b>کارتِ کدام قلم را باز کنم؟</b> — ${MODE_ICON[mode]} ${MODE_FA[mode]}\n`
+    + `<i>در کارتِ هر قلم: ${M(HIST_TOP)} تأمین‌کنندهٔ اول با رتبه و رده، «همهٔ تأمین‌کنندگان»، رفتن به «${MODE_FA[o]}» و «انتخاب جهت استعلام». «فهرست» بی‌انتخاب جلو می‌رود.</i>`, kb);
 }
 
-/** `back`: p انتخاب قلم · x کارت انتخاب اقلام · r منوی درخواست (تک‌قلمی) */
-async function histSupplierCard(env, api, chat, ex, hf, hd, itemId, back, mid) {
+/**
+ * «انتخاب جهت استعلام»: تأمین‌کنندگانِ یک قلم با تیک. `mode` اگر باشد (از کارتِ قلم)، همان حالت
+ * از نو سنجیده می‌شود؛ وگرنه همان که اجرا شده بود. `back`: v کارتِ قلم · p انتخاب قلم ·
+ * x کارت انتخاب اقلام · r منوی درخواست
+ */
+async function histSupplierCard(env, api, chat, ex, hf, hd, itemId, back, mid, mode) {
   const aid = hf.assignment_id;
   const it = (await itemsOf(env, aid)).find((i) => i.id === itemId);
   if (!it) return show(api, chat, mid, "این قلم دیگر باز نیست.", [navRow(aid)]);
-  const options = (hd.opts || {})[itemId] || [];
+  const options = mode
+    ? ((await itemHistory(env, it, { k: HIST_K, brief: true, mode })).suppliers || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }))
+    : (hd.opts || {})[itemId] || [];
   if (!options.length) {
     return hub(api, chat, aid, back === "p" ? `p${hf.id}` : null, mid, `📚 «${esc(short(it.title, 40))}» در سوابق، تأمین‌کنندهٔ نام‌داری ندارد.`);
   }
-  const f = await newFlow(env, ex, chat, "hist", "pick_suppliers", aid, { itemId, title: it.title, options, sel: [], back, from: hf.id });
+  const f = await newFlow(env, ex, chat, "hist", "pick_suppliers", aid, { itemId, title: it.title, options, sel: [], back, from: hf.id, mode: mode || hd.mode || null });
   return supplierCard(env, api, chat, f, flowData(f), mid);
 }
 
@@ -1813,7 +1926,7 @@ async function supplierCard(env, api, chat, f, d, mid, head) {
   kb.push([{ text: `➕ افزودن به استعلامات${sel.size ? ` (${M(sel.size)})` : ""}`, callback_data: `${pre}:${f.id}:go:0` }]);
   kb.push([{ text: "🗂 فهرست", callback_data: `${pre}:${f.id}:ls:0` }]);
   kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: `${pre}:${f.id}:back:0` }]);
-  const r = await show(api, chat, mid, `${head ? head + "\n\n" : ""}${f.kind === "hist" ? "📚" : "🔎"} <b>تأمین‌کنندگانِ «${esc(short(d.title || "", 40))}»</b>\n\n`
+  const r = await show(api, chat, mid, `${head ? head + "\n\n" : ""}${f.kind === "hist" ? "📚" : "🔎"} <b>تأمین‌کنندگانِ «${esc(short(d.title || "", 40))}»</b>${d.mode && MODE_FA[d.mode] ? ` — ${MODE_ICON[d.mode]} ${MODE_FA[d.mode]}` : ""}\n\n`
     + "هر کدام را که می‌خواهید از او استعلام بگیرید تیک بزنید و «افزودن به استعلامات» را بزنید؛ فقط نامش وارد می‌شود و قیمت با پیش‌فاکتور یا ورود دستی می‌آید. «فهرست» بی‌افزودن جلو می‌رود."
     + (have.size ? "\n<i>✓ یعنی از قبل در استعلامات هست.</i>" : ""), kb);
   if (r && r.message_id && r.message_id !== f.message_id) await env.DB.prepare("UPDATE tg_flows SET message_id=? WHERE id=?").bind(r.message_id, f.id).run();
@@ -1867,7 +1980,8 @@ async function supplierCardAction(env, api, chat, ex, f, step, v, mid, ack) {
   if (step === "back") {
     await ack();
     if (f.kind === "smsel") return show(api, chat, mid, "🔎 با نتایج جستجو چه کنم؟", [...smartChoiceKb(d.searchId, d.itemId), navRow(f.assignment_id)]);
-    const hf = d.back === "p" || d.back === "x" ? await ownFlow(env, ex, d.from, "hsel") : null;
+    const hf = d.back === "p" || d.back === "x" || d.back === "v" ? await ownFlow(env, ex, d.from, "hsel") : null;
+    if (hf && d.back === "v") return histItemCard(env, api, chat, ex, hf, flowData(hf), d.itemId, d.mode || "head", 0, mid);
     if (hf && d.back === "p") return histPicker(env, api, chat, hf, flowData(hf), mid);
     if (hf) {
       const asg = await ownOpenAssignment(env, ex.id, hf.assignment_id);
@@ -2705,7 +2819,7 @@ async function onCallback(env, cq) {
     return histStart(env, api, chat, ex, aid, null);
   }
 
-  /* کارت انتخاب اقلامِ سوابق: hx:<flow>:t:<item> · go · all · more · back */
+  /* کارت انتخاب اقلامِ سوابق: hx:<flow>:t:<item> · go · all (← انتخاب حالت) · mode · more · back */
   if (action === "hx") {
     const f = await ownFlow(env, ex, num(1), "hsel");
     if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
@@ -2720,10 +2834,17 @@ async function onCallback(env, cq) {
       return histSelCard(api, chat, f, d, its, asg, mid);
     }
     if (step === "go" || step === "all") {
-      const ids = step === "all" ? its.map((i) => i.id) : (d.sel || []);
+      const ids = step === "all" ? its.map((i) => i.id) : (d.sel || []).filter((x) => its.some((i) => i.id === x));
       if (!ids.length) { await ack("دست‌کم یک قلم را تیک بزنید، یا «همه اقلام».", true); return { ok: true }; }
-      await ack("در حال محاسبه…");
-      return histRun(env, api, chat, ex, f, { ...d, ran: [], opts: {} }, asg, ids, mid);
+      d.pick = ids;
+      await saveFlow(env, f.id, d);
+      await ack();
+      return histModeCard(api, chat, f, d, its, asg, mid);
+    }
+    if (step === "mode") {
+      await ack();
+      if (!(d.pick || []).some((x) => its.some((i) => i.id === x))) return d.single ? requestMenu(env, api, chat, ex, f.assignment_id, { mid }) : histSelCard(api, chat, f, d, its, asg, mid);
+      return histModeCard(api, chat, f, d, its, asg, mid);
     }
     if (step === "more") {
       await ack("در حال محاسبه…");
@@ -2738,13 +2859,45 @@ async function onCallback(env, cq) {
     return { ok: true };
   }
 
-  /* انتخاب قلم بعد از پیامِ سوابق: hp:<flow>:<item> · hp:<flow>:ls (فهرست) */
+  /* انتخاب حالت برای اقلامِ برگزیده: hm:<flow>:h نوع قلم · hm:<flow>:e عین قلم (همین اقلام در حالت دیگر هم) */
+  if (action === "hm") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    const asg = await ownOpenAssignment(env, ex.id, f.assignment_id);
+    if (!asg) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+    const d = flowData(f);
+    const its = await itemsOf(env, f.assignment_id);
+    const ids = (d.pick || []).filter((x) => its.some((i) => i.id === x));
+    if (!ids.length) { await ack("این اقلام دیگر باز نیستند.", true); return d.single ? requestMenu(env, api, chat, ex, f.assignment_id, { mid }) : histSelCard(api, chat, f, d, its, asg, mid); }
+    await ack("در حال محاسبه…");
+    return histRun(env, api, chat, ex, f, { ...d, mode: mOf(parts[2]), ran: [], opts: {}, cnt: {} }, asg, ids, mid);
+  }
+
+  /* کارتِ یک قلم: hv:<flow>:<item>:<h|e>:<صفحه> — ۰ پنج تأمین‌کنندهٔ اول، ۱.. همهٔ تأمین‌کنندگان */
+  if (action === "hv") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    await ack();
+    return histItemCard(env, api, chat, ex, f, flowData(f), num(2), mOf(parts[3]), Math.max(0, num(4) || 0), mid);
+  }
+
+  /* «انتخاب جهت استعلام» از کارتِ قلم: hq:<flow>:<item>:<h|e> — تأمین‌کنندگانِ همان حالت */
+  if (action === "hq") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    if (!(await ownOpenAssignment(env, ex.id, f.assignment_id))) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+    await ack();
+    return histSupplierCard(env, api, chat, ex, f, flowData(f), num(2), "v", mid, mOf(parts[3]));
+  }
+
+  /* انتخاب قلم بعد از پیامِ سوابق: hp:<flow>:<item> (دکمهٔ پیام‌های قدیمی ← کارتِ قلم) · hp:<flow>:ls (فهرست) */
   if (action === "hp") {
     const f = await ownFlow(env, ex, num(1), "hsel");
     if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
     await ack();
     if (parts[2] === "ls") return hub(api, chat, f.assignment_id, `p${f.id}`, mid);
-    return histSupplierCard(env, api, chat, ex, f, flowData(f), num(2), "p", mid);
+    const d = flowData(f);
+    return histItemCard(env, api, chat, ex, f, d, num(2), d.mode || "exact", 0, mid);
   }
 
   /* کارت تأمین‌کنندگانِ سوابق: hf:<flow>:t:<i> · go · ls · back */
