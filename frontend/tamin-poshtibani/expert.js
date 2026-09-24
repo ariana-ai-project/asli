@@ -379,6 +379,16 @@
       .replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
     return s === "" ? null : Number(s);
   };
+  /* قواعد یکسان‌سازی (catalog-rules.mjs، از <script type="module"> صفحه): لایهٔ کمّی عدد و
+     واحدِ جدا، و نمایش «ضمنی». اگر ماژول نرسیده باشد پنل با فیلد متنی ساده کار می‌کند. */
+  const RL = () => (window.TP && TP.rules) || null;
+  const showLayer = (v) => (RL() ? RL().showLayer(v) : typeof v === "string" ? v : v && v.v != null ? `${v.v}${v.u ? " " + v.u : ""}` : String(v == null ? "" : v));
+  const isQuant = (k) => !!(RL() && RL().QUANT[k]);
+  /* واحدهای هم‌بُعدِ یک لایهٔ کمّی (ضخامت: میلی‌متر، سانتی‌متر، اینچ …) */
+  const unitsFor = (k) => { const R = RL(); if (!R || !R.QUANT[k]) return []; const d = R.QUANT[k]; return R.UNIT_NAMES.filter((u) => d.includes("*") || d.includes(R.UNITS[u].dim)); };
+  /* هزینهٔ تقریبیِ یک تفکیک با مدل (Haiku) تا وقتی سرور میانگینِ واقعی را نگفته — همان worker/normalize.js:NORM_COST_EST */
+  const NORM_COST_EST = 0.006;
+  const costTxt = (c) => `≈ ${Number(c).toLocaleString("en-US", { maximumFractionDigits: 4 })} دلار`;
   /* پارامترهای جستجو: حالت، و اینکه بر ساختار تأییدشدهٔ نرمال‌سازی باشد یا فقط کد راهکاران */
   const histQuery = (it) => `item_id=${it.id}&k=${S.mom}&mode=${S.hmode}&norm=${S.normOn ? 1 : 0}`;
   const normReady = (it) => { const n = S.norm[it.id]; return !!(n && n.data && n.data.confirmed); };
@@ -505,16 +515,21 @@
       <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
         <span class="chip ${d.confirmed ? "ok" : "warn"}">${d.confirmed ? "تأییدشده — جستجو بر همین است" : "تأیید نشده"}</span>
         <span class="chip info">${esc(SRC_FA[d.source] || d.source)}${d.code ? ` · کد ${esc(d.code)}` : ""}</span>
-        ${d.source === "model" && d.cost != null ? `<span class="chip" title="هزینهٔ همین یک فراخوانی مدل">${d.cost.toFixed(4)} دلار</span>` : ""}
+        ${d.source === "model" && d.cost != null ? `<span class="chip" title="هزینهٔ همین یک فراخوانی مدل">${Number(d.cost).toLocaleString("en-US", { maximumFractionDigits: 4 })} دلار</span>` : ""}
         ${d.known === false ? `<span class="chip warn" title="جستجو چیزی پیدا نمی‌کند مگر نوع قلمِ موجود را انتخاب کنید">این نوع قلم در فهرست نیست — سابقه‌ای ندارد</span>` : ""}</div>
       <div class="normgrid">
         <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%">
           <datalist id="nh-${it.id}">${cands.map((c) => `<option value="${esc(c)}">`).join("")}</datalist></label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
-          ${dr.layers.map(([k, v], i) => `<div class="normlayer"><select class="tp-input" data-norm-lk="${i}">${opt(k)}</select>
-            <input class="tp-input" data-norm-lv="${i}" value="${esc(v)}"><button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button></div>`).join("")
+          ${dr.layers.map((l, i) => { const qn = isQuant(l.k); return `<div class="normlayer"><select class="tp-input" data-norm-lk="${i}">${opt(l.k)}</select>
+            <input class="tp-input${qn ? " num" : ""}" data-norm-lv="${i}" value="${esc(l.t)}"${qn ? ` placeholder="فقط عدد" title="فقط عدد: ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶ — واحد را از فهرست کنارش انتخاب کنید"` : ""}>
+            ${qn ? `<select class="tp-input nu" data-norm-lu="${i}" title="واحد استاندارد؛ تبدیل و مقایسه بر پایهٔ همین است"><option value="">بی‌واحد</option>${unitsFor(l.k).map((u) => `<option ${u === l.u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : ""}
+            ${l.i ? `<span class="chip info" title="در عنوان گفته نشده؛ از عرفِ پذیرفته‌شدهٔ همین نوع قلم آمده. با ویرایش، صریح می‌شود.">ضمنی</span>` : ""}
+            <button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button></div>`; }).join("")
             || `<div class="dim" style="font-size:.85rem">لایه‌ای ندارد.</div>`}
-          <button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button></div>
+          <button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button>
+          <div class="dim" style="font-size:.8rem;margin-top:4px">در لایهٔ کمّی (قطر، طول، ضخامت …) فقط عدد بنویسید و واحد را از فهرست انتخاب کنید؛ «۲ میل»، «2mm» و «۰٫۲ سانتی‌متر» یکی‌اند.
+            «ضمنی» یعنی در عنوان نیامده و از عرفِ همین نوع قلم آمده (مثلاً ورقِ بی‌جنس ← آهنی).</div></div>
       </div>
       ${d.residual ? `<div class="dim" style="font-size:.85rem;margin-top:6px">بخشی از عنوان که به هیچ لایه‌ای نخورد: <b>${esc(d.residual)}</b></div>` : ""}
       ${rv.ref ? `<div class="tp-field" style="margin-top:10px"><b>نرخ تبدیل به واحد مرجع («${esc(rv.ref)}»)</b>
@@ -527,6 +542,7 @@
         : `<div class="dim" style="font-size:.85rem">همهٔ خریدهای این نوع قلم با واحد مرجع ثبت شده‌اند؛ تبدیلی لازم نیست.</div>`}</div>` : ""}
       <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm>${d.confirmed ? "ذخیرهٔ تغییرات" : "تأیید"}</button>
         <button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود (هزینه دارد)">تفکیک دوباره با مدل</button>
+        <span class="dim normcost" title="هزینهٔ تقریبیِ هر بار تفکیک با مدل (Haiku) — میانگینِ اجراهای اخیر">${costTxt(d.costEst != null ? d.costEst : S.normCost || NORM_COST_EST)}</span>
         ${d.confirmed ? `<button class="tp-btn" data-norm-clear title="قلم به حالت پیش‌فرض (فقط کد راهکاران) برمی‌گردد">برداشتن تأیید</button>` : ""}</div></div>`;
   }
 
@@ -546,6 +562,7 @@
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>
       <div class="toolrow">
         <label class="chkline" title="عنوان قلم به نوع قلم و لایه‌های ویژگیِ استاندارد تفکیک و پیش از جستجو تأیید می‌شود"><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
+        <span class="dim normcost" title="قلمی که کدش در فهرست اقلام است یا عنوانش قبلاً تفکیک شده، بی‌هزینه است؛ فقط عنوانِ تازه به مدل (Haiku) می‌رود">هر تفکیک با مدل ${costTxt(S.normCost || NORM_COST_EST)}</span>
         <span class="seg" role="radiogroup" aria-label="حالت جستجو">
           <button class="tp-btn sm ${S.hmode === "exact" ? "primary" : ""}" data-hmode="exact" title="همان نوع قلم با دقیقاً همان لایه‌های ویژگی">عین قلم</button>
           <button class="tp-btn sm ${S.hmode === "head" ? "primary" : ""}" data-hmode="head" title="همهٔ اقلام همین نوع — مثلاً هر پیچی که تا حالا خریده‌ایم">نوع قلم</button></span>
@@ -560,7 +577,7 @@
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
     const structChips = st.head ? `<div class="toolrow">
         <span class="chip ok" title="حالت جستجو">${HMODE_FA[mt.mode] || ""}${mt.codes != null ? ` — ${M(mt.codes)} قلم از ${M(mt.headItems)} قلمِ «${esc(st.head)}»` : ""}</span>
-        ${Object.entries(st.layers || {}).map(([k, v]) => `<span class="chip" title="لایهٔ ویژگی">${esc(k)}: <b>${esc(v)}</b></span>`).join("")}
+        ${Object.entries(st.layers || {}).map(([k, v]) => `<span class="chip" title="لایهٔ ویژگی">${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("")}
         <span class="chip info">واحد مرجع: ${esc(st.refUnit || "—")}</span>
         ${(d.rates || []).map((r) => `<span class="chip ${CONF_CLS[r.conf] || ""}" title="${esc(r.basis)} — ${M(r.rows)} خرید${r.varied ? ` — نرخ ویژهٔ هر قلم، از ${fmtRate(r.min)} تا ${fmtRate(r.max)}` : ""}">${esc(r.unit)} × ${fmtRate(r.rate)}${r.varied ? " (متغیر)" : ""}</span>`).join("")}
         ${d.unconverted ? `<span class="chip warn" title="واحدی که نرخ تبدیل ندارد در جمع مقدار نمی‌آید؛ نرخش را در پنل نرمال‌سازی بدهید">${M(d.unconverted)} خرید بی‌نرخ تبدیل</span>` : ""}
@@ -585,7 +602,7 @@
         <span class="chip">${M(rows.length)} تأمین‌کننده · ${M(d.totals.n)} خرید · جمع مقدار ${M(RQ(d.totals.qty))}${unit}</span>
         ${exc.map((x) => `<span class="chip warn" title="${EXCL_WHY[x.why] || EXCL_WHY.bucket}">«${esc(x.name)}» کنار گذاشته شد — ${M(x.n)} خرید</span>`).join("")}</div>
       ${(d.titles || []).length ? `<details class="histitems"><summary>اقلامِ شمرده‌شده (${M(d.titles.length)}${mt.codes > d.titles.length ? "+" : ""})</summary>
-        ${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${v}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)} خرید</span></span>`).join("")}</details>` : ""}
+        ${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${showLayer(v)}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)} خرید</span></span>`).join("")}</details>` : ""}
       <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
         <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
@@ -647,7 +664,15 @@
   function normDraft(d) {
     const rates = {};
     for (const u of (d.rates && d.rates.units) || []) if (u.src === "user") rates[u.unit] = u.rate;
-    return { head: d.head || "", layers: Object.entries(d.layers || {}), rates };
+    /* هر لایه: {k: نام، t: متن (در لایهٔ کمّی فقط عدد)، u: واحد استاندارد، i: ضمنی} */
+    const layers = Object.entries(d.layers || {}).map(([k, v]) => {
+      if (Array.isArray(v)) return { k, t: RL() ? RL().layerText(v) : String(v), u: "", i: false };
+      if (v && typeof v === "object") return { k, t: String(v.v == null ? "" : v.v), u: isQuant(k) ? v.u || "" : "", i: !!v.i };
+      /* متنِ کهنه («2 میل»): اگر لایهٔ کمّی است و واحدش خواناست، عدد و واحد جدا می‌شوند */
+      const q = isQuant(k) ? RL().quantWith(k, v, null) : null;
+      return q && !Array.isArray(q) && q.u ? { k, t: q.v, u: q.u, i: false } : { k, t: String(v == null ? "" : v), u: "", i: false };
+    });
+    return { head: d.head || "", layers, rates };
   }
 
   async function runNormalize(force) {
@@ -655,6 +680,7 @@
     S.norm[it.id] = { loading: true }; render();
     try {
       const d = await TP.api(`/items/${it.id}/normalize`, { body: { force: !!force } });
+      if (d.costEst != null) S.normCost = d.costEst;   /* میانگینِ واقعی، کنار چک‌باکس هم */
       S.norm[it.id] = { data: d, draft: normDraft(d) };
     } catch (e) { S.norm[it.id] = { error: e.message }; }
     if (item() && item().id === it.id) render();
@@ -663,9 +689,13 @@
   async function confirmNormUI() {
     const it = item(), n = it && S.norm[it.id]; if (!n || !n.draft) return;
     const dr = n.draft, layers = {};
-    for (const [k, v] of dr.layers) if (String(v || "").trim()) {
-      if (layers[k] != null) return TP.modal("لایهٔ تکراری", `لایهٔ «${esc(k)}» دو بار آمده است؛ یکی را حذف کنید.`, null, "باشد", "");
-      layers[k] = v;
+    for (const l of dr.layers) if (String(l.t || "").trim()) {
+      if (layers[l.k] != null) return TP.modal("لایهٔ تکراری", `لایهٔ «${esc(l.k)}» دو بار آمده است؛ یکی را حذف کنید.`, null, "باشد", "");
+      if (isQuant(l.k) && l.u && !RL().quantWith(l.k, l.t, l.u)) {
+        return TP.modal("عدد نامعتبر", `در «${esc(l.k)}» فقط عدد بنویسید (مثل ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶) و واحد را از فهرست کنارش انتخاب کنید.`, null, "باشد", "");
+      }
+      /* لایهٔ کمّی: عدد و واحد جدا؛ «ضمنی» فقط تا وقتی کارشناس دستش نزده */
+      layers[l.k] = isQuant(l.k) ? { v: l.t, u: l.u || "", ...(l.i ? { i: 1 } : {}) } : l.i ? { v: l.t, i: 1 } : l.t;
     }
     try {
       const r = await TP.api(`/items/${it.id}/norm`, { method: "PUT", body: { head: dr.head, layers, rates: dr.rates, residual: n.data.residual, source: n.data.source, code: n.data.code } });
@@ -1586,14 +1616,23 @@
     /* ویرایش پیش‌نویس بی‌بازرندر، تا فوکوس و مکان‌نما نپرند */
     const nd = () => { const it = item(); return it && S.norm[it.id] && S.norm[it.id].draft; };
     const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) d.head = e.target.value; };
-    Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) d.layers[+e.target.dataset.normLk][0] = e.target.value; });
-    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) d.layers[+e.target.dataset.normLv][1] = e.target.value; });
+    /* نام لایه عوض شد: کمّی یا نبودنش فرق کرد، پس فیلد واحد باید بیاید یا برود (بازرندر) */
+    Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => {
+      const d = nd(); if (!d) return;
+      const l = d.layers[+e.target.dataset.normLk], was = isQuant(l.k);
+      l.k = e.target.value;
+      if (!isQuant(l.k)) l.u = "";
+      if (was !== isQuant(l.k)) render();
+    });
+    /* دستِ کارشناس که به مقدار بخورد، دیگر «ضمنی» نیست */
+    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLv]; l.t = e.target.value; l.i = false; } });
+    Q("[data-norm-lu]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLu]; l.u = e.target.value; l.i = false; } });
     Q("[data-norm-ldel]").forEach((x) => x.onclick = () => { const d = nd(); if (d) { d.layers.splice(+x.dataset.normLdel, 1); render(); } });
     const nla = G("[data-norm-ladd]");
     if (nla) nla.onclick = () => {
       const n = S.norm[item().id]; if (!n || !n.draft) return;
-      const used = new Set(n.draft.layers.map((l) => l[0]));
-      n.draft.layers.push([(n.data.layerNames || []).find((x) => !used.has(x)) || "", ""]); render();
+      const used = new Set(n.draft.layers.map((l) => l.k));
+      n.draft.layers.push({ k: (n.data.layerNames || []).find((x) => !used.has(x)) || "", t: "", u: "", i: false }); render();
     };
     Q("[data-norm-rate]").forEach((x) => x.oninput = (e) => {
       const n = S.norm[item().id]; if (!n || !n.draft) return;

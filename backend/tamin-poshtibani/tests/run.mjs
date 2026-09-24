@@ -13,12 +13,17 @@
    عیناً اجرا می‌کنیم — نه یک کپی که ممکن است واگرا شود.
    ============================================================ */
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import vm from "node:vm";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FRONT = resolve(HERE, "../../../frontend/tamin-poshtibani");
+
+/* قواعد یکسان‌سازی — همان دو ماژولی که صفحهٔ مدیر با <script type="module"> روی TP.rules می‌گذارد */
+const RULES = { ...await import(pathToFileURL(resolve(FRONT, "catalog-rules.mjs")).href),
+  HEAD_RULES: (await import(pathToFileURL(resolve(FRONT, "catalog-head-rules.mjs")).href)).HEAD_RULES };
+export const rulesModule = RULES;
 
 /** یک محیط شبه‌مرورگر می‌سازد و shared.js + import.js واقعی را داخلش اجرا می‌کند. */
 export function loadTP() {
@@ -34,6 +39,7 @@ export function loadTP() {
   if (!sandbox.XLSX) throw new Error("XLSX در سندباکس بار نشد");
   if (!sandbox.TP || !sandbox.TP.importExcel) throw new Error("TP.importExcel بار نشد");
   if (!sandbox.TP.buildCatalog) throw new Error("TP.buildCatalog بار نشد");
+  sandbox.TP.rules = RULES;
   return sandbox;
 }
 

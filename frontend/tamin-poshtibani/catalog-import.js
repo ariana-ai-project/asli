@@ -16,8 +16,17 @@
    • قیمت تعدیل‌شده همین‌جا ساخته می‌شود (فرمول فایل ۲). نرخ تبدیل واحد نه — آن
      را کارشناس هنگام جستجو می‌تواند عوض کند، پس سرور هنگام خواندن اعمالش می‌کند.
 
+   • لایه‌ها پیش از نوشتن یکسان می‌شوند (catalog-rules.mjs): لایهٔ کمّی عدد و واحدِ
+     استانداردِ جدا («2 میل» ← {v: 2، u: میلی‌متر}، عددِ بی‌واحد با واحدِ عرفِ همان نوع قلم و
+     علامت «ضمنی»)، جنس با نام استاندارد، و جنسِ گفته‌نشده با عرفِ نوع قلم
+     (catalog-head-rules.mjs). نوع قلمی که جنس بازارش را جدا می‌کند به نام کامل می‌رود
+     («ورق» ← «ورق آهنی»، «ورق گالوانیزه»)، ولی ردیف خرید همان نوع قلمِ فایل را نگه
+     می‌دارد و نوع قلمِ مؤثر با «src» به آن وصل است — پس تغییر قاعده فقط فهرست اقلام را
+     از نو می‌نویسد، نه ۷۰ هزار ردیف خرید را.
+
    ستون‌ها با «نام» پیدا می‌شوند نه با شماره، تا جابه‌جایی ستون فایل را نشکند.
-   نیاز: window.XLSX (vendor/xlsx.full.min.js) و window.TP (shared.js)
+   نیاز: window.XLSX (vendor/xlsx.full.min.js)، window.TP (shared.js) و TP.rules — دو ماژول
+   catalog-rules.mjs و catalog-head-rules.mjs که صفحه با <script type="module"> رویش می‌گذارد.
    ============================================================ */
 (function () {
   "use strict";
@@ -164,6 +173,54 @@
     return { items, layers: layers.map((fa) => ({ fa, en: en.get(fa) || "" })), clusters };
   }
 
+  /* ---------- یکسان‌سازی لایه‌ها (catalog-rules.mjs) ---------- */
+  /**
+   * هر قلم → {eff: نوع قلمِ مؤثر، attrs: لایه‌های استاندارد}، با آمار برای گزارش ورود. سه گذر:
+   *   ۱. جنس (لایه، پوششِ گالوانیزه، عنوان، یا عرفِ نوع قلم) و نوع قلمِ مؤثر؛ لایه‌های کمّی فقط
+   *      با واحدِ صریح.
+   *   ۲. عرفِ واحدِ هر لایه در هر نوع قلم، از همان مقدارهای صریح — به ازای نوع قلمِ مؤثر و، برای
+   *      جایی که آن‌جا شاهدی نیست، نوع قلمِ فایل.
+   *   ۳. عددِ بی‌واحد با همان عرف («لوله ۲» ← ۲ اینچ، «لوله ۱۰۲۰» ← ۱۰۲۰ میلی‌متر)، علامت «ضمنی».
+   */
+  function canonItems(items, RL) {
+    const rules = RL.HEAD_RULES;
+    const objects = new Set(items.map((it) => keyOf(it.head)));
+    const st = { mat: { layer: 0, title: 0, implied: 0, none: 0 }, ruleItems: 0, qty: { explicit: 0, implicit: 0, unknown: 0, text: 0 }, splitItems: 0 };
+    const pass = items.map((it) => {
+      const rule = rules[keyOf(it.head)] || null;
+      const a = RL.foldCoating(it.attrs || {});
+      const m = RL.materialOf({ head: it.head, title: it.title, attrs: a }, rule, objects);
+      const eff = RL.effectiveHead(it.head, rule, m.mat);
+      const q0 = {};
+      for (const [k, v] of Object.entries(a)) if (RL.QUANT[k]) q0[k] = RL.parseQuant(k, v, false);
+      if (rule) { st.ruleItems++; st.mat[m.how || "none"]++; }
+      if (eff !== it.head) st.splitItems++;
+      return { it, a, m, eff, q0 };
+    });
+    const obs = (key) => pass.flatMap((p) => Object.entries(p.q0).map(([layer, q]) => ({ head: key(p), layer, q })));
+    const ucEff = RL.unitConventions(obs((p) => p.eff)), ucSrc = RL.unitConventions(obs((p) => p.it.head));
+    const conv = (p, k) => (ucEff[p.eff] || {})[k] || (ucSrc[p.it.head] || {})[k] || null;
+    const byCode = new Map(), uc = new Map();
+    for (const p of pass) {
+      const attrs = {};
+      for (const [k, v] of Object.entries(p.a)) {
+        if (k === "جنس") { if (p.m.mat) attrs[k] = p.m.mat; continue; }
+        if (!RL.QUANT[k]) { attrs[k] = v; continue; }
+        const x = RL.quantLayer(k, v, conv(p, k));
+        attrs[k] = x;
+        if (typeof x === "string") st.qty.text++;
+        else for (const y of Array.isArray(x) ? x : [x]) st.qty[!y.u ? "unknown" : y.i ? "implicit" : "explicit"]++;
+      }
+      if (p.m.mat && !("جنس" in attrs)) attrs["جنس"] = p.m.how === "implied" ? { v: p.m.mat, i: 1 } : p.m.mat;
+      byCode.set(p.it.code, { eff: p.eff, attrs: Object.keys(attrs).length ? attrs : null });
+      /* عرفِ واحدِ نوع قلمِ مؤثر برای Worker (خواندن عددِ بی‌واحدِ خروجی مدل) */
+      if (!uc.has(p.eff)) uc.set(p.eff, {});
+      const u = uc.get(p.eff);
+      for (const k of Object.keys(p.q0)) if (!u[k]) { const c = conv(p, k); if (c) u[k] = c.map((x) => ({ u: x.u, n: x.n, lo: x.lo, hi: x.hi })); }
+    }
+    return { byCode, uc, st };
+  }
+
   /* ---------- فایل ۲: شاخص تعدیل ---------- */
   const SEASON = { "بهار": 1, "تابستان": 2, "پاییز": 3, "پائیز": 3, "زمستان": 4 };
   function readIndices(wb) {
@@ -268,8 +325,12 @@
     for (const k of ["items", "indices", "units", "history"]) {
       if (!books[k]) { const e = new Error(`فایل «${TP.catalogKindFa[k]}» انتخاب نشده است.`); e.code = "MISSING"; throw e; }
     }
+    const RL = TP.rules;
+    if (!RL || !RL.HEAD_RULES) { const e = new Error("قواعد یکسان‌سازی (catalog-rules.mjs) بارگذاری نشده است؛ صفحه را یک بار دیگر باز کنید."); e.code = "NO_RULES"; throw e; }
     say("خواندن فهرست اقلام…");
     const I = readItems(books.items);
+    say("یکسان‌سازی لایه‌ها و جنس‌ها…");
+    const N = canonItems(I.items, RL);
     say("خواندن شاخص‌های تعدیل…");
     const X = readIndices(books.indices);
     say("خواندن نرخ‌های تبدیل…");
@@ -339,22 +400,32 @@
 
     /* ----- اقلام به تفکیک نوع قلم ----- */
     say("ساخت نوع‌های قلم…");
-    const heads = new Map();
+    /* نوع قلمِ مؤثر («ورق آهنی») → اقلامش؛ و شمار اقلامِ هر نوع قلمِ فایل، تا معلوم شود
+       نوع قلمِ مؤثر همهٔ نوع قلمِ فایل است یا فقط بخشی از آن */
+    const eff = (it) => N.byCode.get(it.code).eff;
+    const heads = new Map(), srcN = new Map();
     for (const it of I.items) {
-      if (!heads.has(it.head)) heads.set(it.head, []);
-      heads.get(it.head).push(it);
+      if (!heads.has(eff(it))) heads.set(eff(it), []);
+      heads.get(eff(it)).push(it);
+      srcN.set(it.head, (srcN.get(it.head) || 0) + 1);
     }
     const headRows = [];
     for (const head of [...heads.keys()].sort()) {
       const its = heads.get(head).sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0));
+      const src = [...new Set(its.map((x) => x.head))].sort();
+      /* نرخ‌های تبدیل و واحد مرجع مال نوع قلمِ فایل‌اند و به همهٔ بخش‌هایش می‌رسند */
+      const pick = (m) => Object.assign({}, ...src.map((h) => m.get(h) || {}).reverse());
       /* هیچ چیزِ وابسته به فایل سوابق این‌جا نمی‌آید (مثلاً شمار خریدها): وگرنه اثرانگشت فهرست
          با هر ردیف تازهٔ سوابق عوض می‌شد و هر بارگذاری ماهانه کل فهرست را از نو می‌نوشت */
       const top = {
-        ref: U.ref.get(head) || (its.find((x) => x.ref) || {}).ref || "عدد",
-        n: its.length, hr: U.hr.get(head) || {}, cr: U.cr.get(head) || {},
+        ref: src.map((h) => U.ref.get(h)).find(Boolean) || (its.find((x) => x.ref) || {}).ref || "عدد",
+        n: its.length, hr: pick(U.hr), cr: pick(U.cr),
+        /* src: نوع قلمِ فایل (ستون head ردیف‌های خرید)؛ sub: فقط بخشی از آن — جستجو با فهرست کدها */
+        src, ...(src.reduce((s, h) => s + srcN.get(h), 0) !== its.length ? { sub: 1 } : {}),
+        uc: N.uc.get(head) || {},
       };
-      /* [کد، عنوان، خوشه، طبقهٔ اصناف، لایه‌ها، باقیماندهٔ متن، نرخ ویژهٔ قلم] */
-      const tuples = its.map((x) => JSON.stringify([x.code, x.title, x.cl, x.cls, x.attrs, x.residual || "", U.ir.get(x.code) || null]));
+      /* [کد، عنوان، خوشه، طبقهٔ اصناف، لایه‌ها (استاندارد)، باقیماندهٔ متن، نرخ ویژهٔ قلم] */
+      const tuples = its.map((x) => JSON.stringify([x.code, x.title, x.cl, x.cls, N.byCode.get(x.code).attrs, x.residual || "", U.ir.get(x.code) || null]));
       /* بخش ۰ سرِ نوع قلم (واحد مرجع، نرخ‌ها) + نخستین اقلام؛ بخش‌های بعد فقط اقلام.
          تاپل‌ها یک بار stringify شده‌اند، پس JSON بخش دستی سر هم می‌شود. */
       const topJson = JSON.stringify(top);
@@ -377,14 +448,14 @@
     for (const it of I.items) {
       const s = shardOf("code", it.code);
       if (!codeShards.has(s)) codeShards.set(s, {});
-      codeShards.get(s)[it.code] = it.head;
+      codeShards.get(s)[it.code] = eff(it);
     }
     const codeRows = [...codeShards.keys()].sort().map((s) => [s, JSON.stringify(codeShards.get(s))]);
 
     /* ----- واژه → نوع‌های قلم (یافتن اقلام مشابه برای مدل) ----- */
     const wmap = new Map();
     const addWord = (w, head) => { if (!wmap.has(w)) wmap.set(w, new Set()); wmap.get(w).add(head); };
-    for (const it of I.items) { for (const w of words(it.title)) addWord(w, it.head); for (const w of words(it.head)) addWord(w, it.head); }
+    for (const it of I.items) { for (const w of words(it.title)) addWord(w, eff(it)); for (const w of words(eff(it))) addWord(w, eff(it)); }
     const wordShards = new Map();
     for (const w of [...wmap.keys()].sort()) {
       const hs2 = [...wmap.get(w)].sort();
@@ -398,7 +469,10 @@
     const indexRows = X.indices.map((x) => [x.code, x.name, x.source, x.series]);
     const classRows = X.classes.map((x) => [x.code, x.name, x.group_code, x.group_name, x.index_code]);
     const gradeRows = [...grades.values()].sort((a, b) => (a[0] < b[0] ? -1 : 1));
-    const meta = { layers: I.layers, clusters: I.clusters, heads: headRows.filter((r) => r[1] === 0).length, items: I.items.length, words: wmap.size };
+    /* نسخهٔ قواعد در اثرانگشت فهرست: قاعدهٔ تازه (جنس، واحد) فهرست را از نو می‌سازد حتی اگر
+       فایل‌ها همان باشند؛ ردیف‌های خرید دست نمی‌خورند چون نوع قلمِ فایل را نگه می‌دارند */
+    const rulesFp = hex8(fnv32(JSON.stringify([RL.HEAD_RULES, RL.MATERIALS, RL.UNITS, RL.QUANT, RL.LAYER_DEFAULT_UNIT])));
+    const meta = { layers: I.layers, clusters: I.clusters, heads: headRows.filter((r) => r[1] === 0).length, items: I.items.length, words: wmap.size, rules: rulesFp, norm: N.st };
 
     /* ----- اثرانگشت‌ها -----
        cat  — هر چیزی که در جدول‌های فهرست اقلام می‌نشیند؛ عوض شد → فهرست از نو.
@@ -416,7 +490,7 @@
     const fp = { cat: hex8(cat), adj: hex8(adj), rows: `${st.rows}-${hex8(s1)}${hex8(s2)}`, grades: hex8(gr) };
 
     return {
-      meta, fp, stats: { ...st, items: I.items.length, heads: meta.heads, layers: I.layers.length, indices: indexRows.length, classes: classRows.length },
+      meta, fp, stats: { ...st, items: I.items.length, heads: meta.heads, srcHeads: srcN.size, layers: I.layers.length, indices: indexRows.length, classes: classRows.length, norm: N.st },
       tables: { cat_heads: headRows, cat_codes: codeRows, cat_words: wordRows, price_index: indexRows, guild_classes: classRows, supplier_grades: gradeRows, purchases },
     };
   };

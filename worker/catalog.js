@@ -25,6 +25,7 @@
  * (فردا) همان بارگذاری را ادامه می‌دهد و ردیف‌های نوشته‌شده دوباره نوشته نمی‌شوند.
  */
 import { HttpError } from "./http.js";
+import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -242,13 +243,21 @@ export async function headOfCode(env, code) {
 /**
  * یک نوع قلم با همهٔ اقلامش — بخش‌ها سر هم.
  * items: [کد، عنوان، خوشه، طبقهٔ اصناف، لایه‌ها، باقیماندهٔ متن، نرخ ویژهٔ قلم]
+ * src: نوع قلمِ فایل (ستون head ردیف‌های خرید) — «ورق آهنی» ← [«ورق»]؛ sub: فقط بخشی از آن است
+ * و جستجوی سوابق باید با کدهای خودش محدود شود؛ uc: عرفِ واحدِ هر لایه (خواندن عددِ بی‌واحد).
+ * فهرستی که پیش از یکسان‌سازی بارگذاری شده این سه را ندارد: src همان نام، بی sub.
  */
 export async function headData(env, head) {
   const h = nameOf(head); if (!h) return null;
   const rows = (await env.DB.prepare("SELECT data FROM cat_heads WHERE head=? ORDER BY part").bind(h).all().catch(() => ({ results: [] }))).results || [];
   if (!rows.length) return null;
-  const out = { head: h, ref: "عدد", n: 0, hr: {}, cr: {}, items: [] };
-  for (const r of rows) { const d = parse(r.data); for (const k of ["ref", "n", "hr", "cr"]) if (d[k] !== undefined) out[k] = d[k]; out.items.push(...(d.items || [])); }
+  const out = { head: h, ref: "عدد", n: 0, hr: {}, cr: {}, src: [h], sub: false, uc: {}, items: [] };
+  for (const r of rows) {
+    const d = parse(r.data);
+    for (const k of ["ref", "n", "hr", "cr", "src", "uc"]) if (d[k] !== undefined) out[k] = d[k];
+    if (d.sub) out.sub = true;
+    out.items.push(...(d.items || []));
+  }
   return out;
 }
 export const itemOf = (hd, code) => (hd && hd.items.find((x) => x[0] === T(code))) || null;
@@ -303,10 +312,9 @@ export function rateFor(hd, item, unit, override) {
 /* مقدار لایه برای مقایسه: «10*20»، «10×20» و «10 x 20» یکی‌اند */
 export const valueKey = (v) => keyOf(v).replace(/\s/g, "").replace(/[×*]/g, "x");
 
-/** «عین قلم»: همان لایه‌ها با همان مقدارها — نه بیشتر، نه کمتر */
-export function layersEqual(a, b) {
-  const ea = Object.entries(a || {}).filter(([, v]) => T(v)), eb = Object.entries(b || {}).filter(([, v]) => T(v));
-  if (ea.length !== eb.length) return false;
-  const mb = new Map(eb.map(([k, v]) => [nameOf(k), valueKey(v)]));
-  return ea.every(([k, v]) => mb.get(nameOf(k)) === valueKey(v));
-}
+/**
+ * «عین قلم»: همان لایه‌ها با همان مقدارها — نه بیشتر، نه کمتر. مقدار کمّی با عدد و واحد
+ * سنجیده می‌شود («۲ میلی‌متر» = «0.2 سانتی‌متر» = «2mm»)، جنس با نام استاندارد؛ قاعده در
+ * catalog-rules.mjs:layerKey است و متنِ کهنه و مقدارِ استاندارد را یکسان می‌خواند.
+ */
+export const layersEqual = RULES.layersEqual;

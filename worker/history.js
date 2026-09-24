@@ -21,8 +21,8 @@
  * نوار ۱..۱۰ کارشناس). در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، B، C) جلوتر است.
  */
 import { HttpError } from "./http.js";
-import { activeImport, headData, itemOf, keyOf, layersEqual, nameOf, rateFor } from "./catalog.js";
-import { normOf, catalogStruct } from "./normalize.js";
+import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor } from "./catalog.js";
+import { normOf, catalogStruct, canonStruct } from "./normalize.js";
 
 export { activeImport } from "./catalog.js";
 
@@ -97,10 +97,12 @@ const IN_MAX = 90;
  * خروجی: {hd, struct, mode, codes, override, source} یا {message}.
  */
 export async function resolveScope(env, it, { norm, mode } = {}) {
-  const n = normOf(it);
+  let n = normOf(it);
   let hd, struct, override = {}, source;
   if (norm === true || (norm == null && n)) {
     if (!n) return { message: "ساختار نرمال‌شدهٔ این قلم هنوز تأیید نشده است؛ نتیجهٔ «نرمال‌سازی اقلام» را بررسی و تأیید کنید." };
+    /* تأییدِ پیش از یکسان‌سازی («ورق» با ضخامتِ «2 میل») به زبان امروزِ فهرست برده می‌شود */
+    if (n.v !== 2) { const meta = await catalogMeta(env); if (meta) n = await canonStruct(env, meta, n, it); }
     hd = await headData(env, n.head);
     struct = n; override = n.rates || {}; source = "norm";
   } else {
@@ -125,16 +127,23 @@ export async function resolveScope(env, it, { norm, mode } = {}) {
 
 /**
  * کوئری روی ردیف‌های همین محدوده؛ «عین قلم» با فهرست کدها، تکه‌تکه اگر بلند باشد.
+ * ردیف خرید نوع قلمِ فایل را دارد (hd.src)، نه نوع قلمِ مؤثر: «ورق آهنی» ردیف‌هایش را زیر
+ * «ورق» دارد، کنار ورق گالوانیزه. پس «نوع قلم» هم وقتی نوع قلمِ مؤثر فقط بخشی از نوع قلمِ
+ * فایل است (hd.sub) با کدهای خودش محدود می‌شود. تکه‌ها بر کد جدا می‌شوند، پس گروه‌بندیِ
+ * هر تکه با تکهٔ دیگر هم‌پوشانی ندارد؛ فقط ترتیب و سقفِ نتیجه را فراخوان دوباره می‌سازد.
  * ترتیب پارامترها: `args` (بخش SELECT)، شرط محدوده، `tailArgs` (بخش بعد از WHERE).
  */
 async function scoped(env, sc, select, tail, args = [], tailArgs = []) {
   const run = (where, wargs) => env.DB.prepare(`${select} FROM purchases WHERE ${where} ${tail}`).bind(...args, ...wargs, ...tailArgs).all().then((r) => r.results || []);
-  if (sc.mode === "head") return run("head=?", [sc.hd.head]);
-  if (!sc.codes.length) return [];
-  const out = [];
-  for (let i = 0; i < sc.codes.length; i += IN_MAX) {
-    const part = sc.codes.slice(i, i + IN_MAX);
-    out.push(...await run(`head=? AND item_code IN (${part.map(() => "?").join(",")})`, [sc.hd.head, ...part]));
+  const src = sc.hd.src && sc.hd.src.length ? sc.hd.src : [sc.hd.head];
+  const inSrc = src.length === 1 ? "head=?" : `head IN (${src.map(() => "?").join(",")})`;
+  const codes = sc.mode === "head" ? (sc.hd.sub ? sc.hd.items.map((x) => x[0]) : null) : sc.codes;
+  if (!codes) return run(inSrc, src);
+  if (!codes.length) return [];
+  const out = [], per = Math.max(1, IN_MAX - src.length);
+  for (let i = 0; i < codes.length; i += per) {
+    const part = codes.slice(i, i + per);
+    out.push(...await run(`${inSrc} AND item_code IN (${part.map(() => "?").join(",")})`, [...src, ...part]));
   }
   return out;
 }
@@ -267,6 +276,7 @@ export async function itemHistory(env, it, opts = {}) {
 
   /* ۳) کدام اقلامِ فهرست در این نتیجه‌اند — تا کارشناس ببیند «عین قلم» و «نوع قلم» چه چیزهایی را شمرده */
   const titles = opts.brief ? [] : (await scoped(env, sc, "SELECT item_code, MAX(title) AS title, COUNT(*) AS n", "GROUP BY item_code ORDER BY n DESC LIMIT 12"))
+    .sort((a, b) => b.n - a.n).slice(0, 12)
     .map((r) => ({ code: r.item_code, title: (byCode.get(r.item_code) || [])[1] || r.title, n: r.n, layers: (byCode.get(r.item_code) || [])[4] || null }));
 
   return {

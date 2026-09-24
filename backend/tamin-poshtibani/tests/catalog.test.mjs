@@ -19,7 +19,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { loadTP, sqliteD1 } from "./run.mjs";
 import * as W from "../../../worker/catalog.js";
 import { itemHistory, supplierBuys, itemSeries, resolveScope, excludedWhy } from "../../../worker/history.js";
-import { normalizeItem, confirmNorm, scoreHeads, nearestItems, cleanSplit } from "../../../worker/normalize.js";
+import { normalizeItem, confirmNorm, scoreHeads, nearestItems, settle, conventionLines, userPrompt } from "../../../worker/normalize.js";
 
 const TP0 = loadTP();
 const XL = TP0.XLSX;
@@ -35,13 +35,23 @@ const book = (sheets) => {
 };
 
 const LAYERS = [["اندازه", "size"], ["جنس", "material"], ["نمره", "grade_no"]];
+/* ورق: نوع قلمی که جنس بازارش را جدا می‌کند (catalog-head-rules.mjs: «ورق» ← r:"f"، d:"آهنی") —
+   «ورق ۲ میل» بی‌جنس است و باید «ورق آهنی» شود، کنار «ورق آهن ۳ میل»، و جدا از گالوانیزه */
+const SHEET_ITEMS = [
+  ["4001", "ورق 2 میل", { "ضخامت": "2 میلیمتر" }],
+  ["4002", "ورق آهن 3 میل", { "ضخامت": "3" }],
+  ["4003", "ورق گالوانیزه 0.5 میل", { "ضخامت": "0.5 میلی‌متر", "پوشش": "گالوانیزه" }],
+  ["4004", "ورق استیل 1 میل", { "ضخامت": "1 mm", "جنس": "استیل" }],
+];
 const ITEM_HEAD = ["کد قلم", "عنوان قلم", "نوع قلم", "واحد مرجع", "کد خوشه", "کد طبقهٔ اصناف", "باقیماندهٔ متن", "اندازه", "جنس", "نمره", "ویژگی‌ها (JSON)"];
 const item = (code, title, head, ref, cl, cls, attrs) => [code, title, head, ref, cl, cls, "",
   attrs["اندازه"] || "", attrs["جنس"] || "", attrs["نمره"] || "", JSON.stringify(attrs)];
 
-function booksOf({ idxA1402 = 50, extraRow = null } = {}) {
+function booksOf({ idxA1402 = 50, extraRow = null, sheet = false } = {}) {
+  const layers = sheet ? [...LAYERS, ["ضخامت", "thickness"], ["پوشش", "coating"]] : LAYERS;
   const items = book({
     items: [ITEM_HEAD,
+      ...(sheet ? SHEET_ITEMS.map(([code, title, a]) => item(code, title, "ورق", "کیلوگرم", "C09", "300", a)) : []),
       item("1001", "پیچ آلن M8 فولادی", "پیچ", "عدد", "C04", "200", { "اندازه": "M8", "جنس": "فولاد" }),
       item("1002", "پیچ آلن M8 فولاد", "پیچ", "عدد", "C04", "200", { "اندازه": "M8", "جنس": "فولاد" }),
       item("1003", "پیچ M10", "پیچ", "عدد", "C04", "200", { "اندازه": "M10" }),
@@ -49,7 +59,7 @@ function booksOf({ idxA1402 = 50, extraRow = null } = {}) {
       item("3001", "تیرآهن 16", "تیر آهن", "شاخه", "C09", "300", { "نمره": "16" }),
     ],
     item_attributes: [["کد قلم", "نوع قلم", "نام لایهٔ ویژگی", "نام لایه (انگلیسی)", "مقدار لایه"],
-      ...LAYERS.map(([fa, en]) => ["x", "x", fa, en, "x"])],
+      ...layers.map(([fa, en]) => ["x", "x", fa, en, "x"])],
     heads: [["نوع قلم", "واحد مرجع"], ["پیچ", "عدد"]],
     clusters: [["کد خوشه", "نام خوشه"], ["C04", "پیچ، مهره و اتصال‌دهنده‌ها"], ["C09", "مصالح ساختمانی"]],
   });
@@ -82,6 +92,11 @@ function booksOf({ idxA1402 = 50, extraRow = null } = {}) {
     ["6", "1401/01/15", "بسته شده", "کارشناس الف", "2001", "مهره M8", 5, "عدد", 50000, "سایر تامین کنندگان", null, null, 1, "بهار", "1401"],
   ];
   if (extraRow) rows.push(extraRow);
+  if (sheet) rows.push(
+    ["21", "1403/05/01", "بسته شده", "کارشناس الف", "4001", "ورق 2 میل", 100, "کیلوگرم", 4000000, "آهن‌فروشی الف", null, null, 5, "تابستان", "1403"],
+    ["22", "1403/05/02", "بسته شده", "کارشناس الف", "4002", "ورق آهن 3 میل", 50, "کیلوگرم", 2000000, "آهن‌فروشی ب", null, null, 5, "تابستان", "1403"],
+    ["23", "1403/05/03", "بسته شده", "کارشناس الف", "4003", "ورق گالوانیزه 0.5 میل", 30, "کیلوگرم", 2400000, "گالوانیزه‌فروشی", null, null, 5, "تابستان", "1403"],
+    ["24", "1403/05/04", "بسته شده", "کارشناس الف", "4004", "ورق استیل 1 میل", 10, "کیلوگرم", 3000000, "استیل‌فروشی", null, null, 5, "تابستان", "1403"]);
   const history = book({ "حداکثر 500000 رکورد": [H, ...rows] });
   return { items, indices, units, history };
 }
@@ -222,11 +237,85 @@ test("نوع‌های محتمل: واژهٔ کمیاب سنگین‌تر، و �
   assert.ok(s.some((x) => x.head === "مهره"), "هر نوعِ محتمل دست‌کم یک نمونه");
 });
 
-test("خروجی مدل تمیز می‌شود: لایهٔ ناشناخته و مقدار خالی کنار می‌رود", () => {
-  const layers = LAYERS.map(([fa, en]) => ({ fa, en }));
-  const c = cleanSplit({ head: " پيچ ", layers: [{ name: "اندازه", value: "M8" }, { name: "ساختگی", value: "x" }, { name: "جنس", value: " " }, { name: "اندازه", value: "M9" }], residual: "آلن", confidence: "wat" }, layers);
-  assert.deepEqual(c, { head: "پیچ", layers: { "اندازه": "M8" }, residual: "آلن", confidence: "low" });
-  assert.throws(() => cleanSplit({ head: "", layers: [] }, layers), /نوع قلم/);
+/* env بی‌فهرست: headData چیزی پیدا نمی‌کند (نوع قلمِ تازه) — صافی باید باز هم درست کار کند */
+const noCatalog = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [] }), first: async () => null }) }) } };
+const META = { layers: [...LAYERS, ["ضخامت", "thickness"], ["قطر", "diameter"], ["طول", "length"], ["پوشش", "coating"]].map(([fa, en]) => ({ fa, en })) };
+
+test("خروجی مدل تمیز می‌شود: لایهٔ ناشناخته و مقدار خالی کنار می‌رود، جنس با نام استاندارد", async () => {
+  const c = await settle(noCatalog, META, { head: " پيچ ", layers: [{ name: "اندازه", value: "M8" }, { name: "ساختگی", value: "x" }, { name: "جنس", value: " " }, { name: "اندازه", value: "M9" }], residual: "آلن", confidence: "wat" }, "پیچ آلن M8");
+  assert.equal(c.head, "پیچ");
+  assert.deepEqual(plain(c.layers), { "اندازه": "M8", "جنس": { v: "آهنی", i: 1 } }, "پیچِ بی‌جنس: عرفِ پذیرفته‌شده (آهنی)، با علامت ضمنی");
+  assert.equal(c.confidence, "low");
+  await assert.rejects(() => settle(noCatalog, META, { head: "", layers: [] }, ""), /نوع قلم/);
+});
+
+test("قاعدهٔ عام ۱ و ۲ در صافیِ خروجی مدل: «ورق 2 میل» ← ورق آهنی، ضخامت ۲ میلی‌متر", async () => {
+  /* مدل «میل» را در value گذاشته و unit را خالی — صافی خودش جدا می‌کند */
+  const a = await settle(noCatalog, META, { head: "ورق", layers: [{ name: "ضخامت", value: "2 میل", unit: "", implicit: false }], residual: "", confidence: "high" }, "ورق 2 میل");
+  assert.equal(a.head, "ورق آهنی", "جنسِ گفته‌نشده = عرفِ ورق؛ و جنس جزء نام نوع قلم است");
+  assert.deepEqual(plain(a.layers), { "ضخامت": { v: "2", n: [2], u: "میلی‌متر" }, "جنس": { v: "آهنی", i: 1 } });
+  /* گالوانیزه (در پوشش یا جنس) استثنای گفته‌شده است و نوع قلمِ دیگری می‌سازد */
+  const g = await settle(noCatalog, META, { head: "ورق", layers: [{ name: "ضخامت", value: "0.5", unit: "میلی‌متر", implicit: false }, { name: "پوشش", value: "گالوانیزه", unit: "", implicit: false }], residual: "", confidence: "high" }, "ورق گالوانیزه 0.5");
+  assert.equal(g.head, "ورق گالوانیزه");
+  assert.deepEqual(plain(g.layers), { "ضخامت": { v: "0.5", n: [0.5], u: "میلی‌متر", i: 1 }, "جنس": "گالوانیزه" },
+    "پوششِ گالوانیزه به جنس رفت؛ عنوان واحد نگفته، پس میلی‌متر «ضمنی» است (پیش‌فرضِ ضخامت) نه گفته‌شده");
+  /* واحدی که مدل از خودش افزوده پذیرفته نیست: «انکر بولت M24*810» واحدِ طول را نگفته */
+  const bolt = await settle(noCatalog, META, { head: "انکر بولت", layers: [{ name: "قطر", value: "M24", unit: "", implicit: false }, { name: "طول", value: "810", unit: "میلی‌متر", implicit: false }], residual: "", confidence: "high" }, "انکر بولت M24*810");
+  assert.deepEqual(plain(bolt.layers), { "قطر": { v: "M24", n: [24], u: "میلی‌متر" }, "طول": { v: "810", n: [810], u: "" } }, "طول بی‌عرف: نامعلوم، نه حدسِ مدل");
+  /* «1/2» بی‌واحد با عرفِ اینچیِ همان نوع قلم نیم اینچ است، نه ۱٫۲ */
+  const inchEnv = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ data: JSON.stringify({ ref: "عدد", n: 1, uc: { "قطر": [{ u: "اینچ", n: 9, lo: 0.25, hi: 4 }] }, items: [] }) }] }), first: async () => null }) }) } };
+  const nip = await settle(inchEnv, META, { head: "مغزی", layers: [{ name: "قطر", value: "1/2", unit: "", implicit: false }], residual: "", confidence: "high" }, "مغزی 1/2");
+  assert.deepEqual(plain(nip.layers["قطر"]), { v: "1/2", n: [0.5], u: "اینچ", i: 1 });
+  /* مدل خودش «ورق گالوانیزه» را برگزیده ولی عنوان جنسی نگفته: حدس است، عرف (آهنی) می‌ماند */
+  const guess = await settle(noCatalog, META, { head: "ورق گالوانیزه", layers: [], residual: "", confidence: "low" }, "ورق 3");
+  assert.equal(guess.head, "ورق آهنی");
+  /* جنسِ ضمنیِ مدل جای قاعده را نمی‌گیرد: لوله عرفِ جنس ندارد */
+  const pipe = await settle(noCatalog, META, { head: "لوله پلی اتیلن", layers: [{ name: "جنس", value: "پلی‌اتیلن", unit: "", implicit: true }, { name: "قطر", value: "110", unit: "", implicit: false }], residual: "", confidence: "low" }, "لوله 110");
+  assert.equal(pipe.head, "لوله", "حدسِ مدل کنار رفت؛ نوع قلم به نامِ پایه برگشت");
+  assert.equal(pipe.layers["جنس"], undefined);
+  /* جنسِ گفته‌شده در عنوان، حتی اگر مدل لایه‌اش را جا انداخته باشد */
+  const said = await settle(noCatalog, META, { head: "ورق", layers: [], residual: "", confidence: "high" }, "ورق استیل 1 میل");
+  assert.equal(said.head, "ورق استیل");
+  /* عدد نامعتبر از فرم کارشناس خطای روشن می‌دهد */
+  await assert.rejects(() => settle(noCatalog, META, { head: "ورق", layers: { "ضخامت": { v: "دو", u: "میلی‌متر" } } }, "ورق", { strict: true }), /عدد نیست/);
+});
+
+test("پرامپت: عرف‌های پذیرفته‌شده و واحد رایجِ نوع‌های محتمل، و نمونه‌ها با «ضمنی»", () => {
+  const hd = { head: "ورق آهنی", uc: { "ضخامت": [{ u: "میلی‌متر", n: 40, lo: 0.5, hi: 20 }] }, items: [] };
+  const lines = conventionLines([hd, { head: "پیچ", uc: {}, items: [] }, { head: "لوله", uc: {}, items: [] }]);
+  assert.ok(lines.some((l) => /«ورق»: جنس جزء نام نوع قلم است.*جنسِ گفته‌نشده: آهنی/.test(l)), lines.join("\n"));
+  assert.ok(lines.some((l) => /واحدِ رایج در «ورق آهنی»: ضخامت: میلی‌متر \(0\.5 تا 20\)/.test(l)));
+  assert.ok(lines.some((l) => /«پیچ»: جنس لایهٔ ویژگی است/.test(l)));
+  assert.ok(lines.some((l) => /«لوله».*نامعلوم است — حدس نزن/.test(l)), "نوع قلمِ بی‌عرف: صریحاً «حدس نزن»");
+  const u = userPrompt({ title: "ورق 2 میل" }, ["ورق آهنی"], [{ title: "ورق 3", head: "ورق آهنی", layers: { "ضخامت": { v: "3", n: [3], u: "میلی‌متر", i: 1 }, "جنس": { v: "آهنی", i: 1 } } }], lines);
+  assert.match(u, /ضخامت=3 میلی‌متر \(ضمنی\)؛ جنس=آهنی \(ضمنی\)/);
+  assert.match(u, /عرف‌های پذیرفته‌شده:/);
+});
+
+/* ---------------- نوع قلمی که جنس بازارش را جدا می‌کند (ورق) ---------------- */
+
+test("ورق: «ورق ۲ میل» ← ورق آهنی (ضمنی)، گالوانیزه و استیل جدا؛ ردیف خرید نوع قلمِ فایل را نگه می‌دارد", () => {
+  const out = build({ sheet: true });
+  const heads = new Map(out.tables.cat_heads.filter((r) => r[1] === 0).map(([h, , d]) => [h, JSON.parse(d)]));
+  assert.ok(!heads.has("ورق"), "نوع قلمِ «ورق» بی‌جنس نمی‌ماند");
+  const iron = heads.get("ورق آهنی"), galv = heads.get("ورق گالوانیزه"), ss = heads.get("ورق استیل");
+  assert.deepEqual(plain(iron.items.map((x) => x[0])), ["4001", "4002"]);
+  assert.deepEqual(plain(iron.src), ["ورق"]); assert.equal(iron.sub, 1, "بخشی از «ورق» فایل است");
+  const byCode = Object.fromEntries(iron.items.map((x) => [x[0], x[4]]));
+  assert.deepEqual(plain(byCode["4001"]), { "ضخامت": { v: "2", n: [2], u: "میلی‌متر" }, "جنس": { v: "آهنی", i: 1 } }, "«2 میلیمتر» ← ۲ + میلی‌متر؛ جنس ضمنی");
+  assert.deepEqual(plain(byCode["4002"]["جنس"]), "آهنی", "«ورق آهن» جنسِ گفته‌شده است (اسمِ ماده درست بعد از نام نوع قلم)");
+  assert.deepEqual(plain(byCode["4002"]["ضخامت"]), { v: "3", n: [3], u: "میلی‌متر", i: 1 }, "عددِ بی‌واحد ← واحدِ عرفِ ضخامتِ همین نوع قلم، ضمنی");
+  assert.deepEqual(plain(galv.items[0][4]), { "ضخامت": { v: "0.5", n: [0.5], u: "میلی‌متر" }, "جنس": "گالوانیزه" }, "پوششِ گالوانیزه جنس شد و لایهٔ پوشش رفت");
+  assert.deepEqual(plain(ss.items[0][4]["ضخامت"]), { v: "1", n: [1], u: "میلی‌متر" }, "«1 mm» ← میلی‌متر");
+  assert.ok(iron.uc["ضخامت"] && iron.uc["ضخامت"][0].u === "میلی‌متر", "عرف واحد برای خواندن خروجی مدل");
+
+  const codes = Object.assign({}, ...out.tables.cat_codes.map(([, d]) => JSON.parse(d)));
+  assert.equal(codes["4001"], "ورق آهنی"); assert.equal(codes["4003"], "ورق گالوانیزه");
+  const P = out.tables.purchases, C = W.TABLES.purchases.cols;
+  assert.ok(P.filter((r) => r[C.indexOf("item_code")].startsWith("400")).every((r) => r[C.indexOf("head")] === "ورق"),
+    "ردیف خرید «ورق» می‌ماند، پس تغییر قاعده ۷۰ هزار ردیف را از نو نمی‌نویسد");
+  assert.equal(out.fp.adj, build({ sheet: true }).fp.adj);
+  assert.equal(out.stats.norm.mat.implied, 3, "۴۰۰۱، ۱۰۰۳ (پیچ) و ۲۰۰۱ (مهره)");
 });
 
 /* ---------------- کل مسیر روی SQLite ---------------- */
@@ -365,14 +454,14 @@ test("نرمال‌سازی: کد در فهرست ← بی‌مدل؛ عنوان
   try {
     const cat = await normalizeItem(env, it1001);
     assert.equal(cat.source, "catalog");
-    assert.deepEqual(cat.layers, { "اندازه": "M8", "جنس": "فولاد" });
+    assert.deepEqual(plain(cat.layers), { "اندازه": "M8", "جنس": "آهنی" }, "فولاد ← نام استاندارد «آهنی»");
     assert.equal(calls.length, 0, "کد در فهرست بود → مدل صدا زده نشد");
     assert.ok(cat.rates.units.some((u) => u.unit === "کیلو گرم" && u.rate === 50));
 
     const fresh = { id: 9, code: null, title: "پیچ آلن M8 فولادی گالوانیزه", spec: "" };
     const m = await normalizeItem(env, fresh);
     assert.equal(m.source, "model");
-    assert.deepEqual(m.layers, { "اندازه": "M8", "جنس": "فولاد" }, "لایهٔ ناشناخته کنار رفت");
+    assert.deepEqual(plain(m.layers), { "اندازه": "M8", "جنس": "آهنی" }, "لایهٔ ناشناخته کنار رفت؛ جنس با نام استاندارد");
     assert.equal(calls.length, 1);
     const sent = calls[0];
     assert.equal(sent.tool_choice.name, "record_split");
@@ -395,6 +484,26 @@ test("نرمال‌سازی: کد در فهرست ← بی‌مدل؛ عنوان
     await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: { "ساختگی": "x" } }), /لایهٔ استاندارد نیست/);
     await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: {}, rates: { "کیلو گرم": -1 } }), /عدد مثبت/);
   } finally { globalThis.fetch = realFetch; }
+});
+
+test("ورق در سوابق: «نوع قلم» یعنی فقط ورق آهنی، نه گالوانیزه و استیلِ همان «ورق» فایل", { skip: SKIP }, async () => {
+  const { env } = await loaded(build({ sheet: true }));
+  const it = { id: 40, code: "4001", title: "ورق 2 میل", norm_json: null };
+  const head = await itemHistory(env, it, { mode: "head" });
+  assert.equal(head.struct.head, "ورق آهنی");
+  assert.deepEqual(head.suppliers.map((s) => s.name).sort(), ["آهن‌فروشی الف", "آهن‌فروشی ب"].sort(), "گالوانیزه‌فروشی و استیل‌فروشی بیرون");
+  assert.equal(head.match.codes, 2);
+  const exact = await itemHistory(env, it, { mode: "exact" });
+  assert.deepEqual(exact.suppliers.map((s) => s.name), ["آهن‌فروشی الف"], "عین قلم: فقط ضخامت ۲ میلی‌متر");
+  /* درخواستی با «0.2 سانتی‌متر» همان ورقِ ۲ میلی‌متری است */
+  const norm = { v: 2, head: "ورق آهنی", layers: { "ضخامت": { v: "0.2", n: [0.2], u: "سانتی‌متر" }, "جنس": "آهنی" } };
+  const cm = await itemHistory(env, { id: 41, code: null, title: "ورق دو دهم سانت", norm_json: JSON.stringify(norm) }, { norm: true, mode: "exact" });
+  assert.deepEqual(cm.suppliers.map((s) => s.name), ["آهن‌فروشی الف"], "تبدیل بر پایهٔ واحد: ۰٫۲ سانتی‌متر = ۲ میلی‌متر");
+  /* تأییدِ قدیمی (پیش از یکسان‌سازی) هم به زبان امروز خوانده می‌شود */
+  const old = { head: "ورق", layers: { "ضخامت": "2 میل" }, rates: {} };
+  const o = await itemHistory(env, { id: 42, code: null, title: "ورق 2 میل", norm_json: JSON.stringify(old) }, { norm: true, mode: "exact" });
+  assert.equal(o.struct.head, "ورق آهنی");
+  assert.deepEqual(o.suppliers.map((s) => s.name), ["آهن‌فروشی الف"]);
 });
 
 /* ---------------- فایل‌های واقعی (اگر در دسترس باشند) ---------------- */

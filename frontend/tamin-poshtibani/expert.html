@@ -113,6 +113,10 @@
     .normlayer { display: flex; gap: 6px; align-items: center; margin-bottom: 4px; flex-wrap: wrap; }
     .normlayer select { width: 150px; }
     .normlayer input { flex: 1; min-width: 120px; }
+    /* لایهٔ کمّی: عدد و واحدِ جدا — عدد باریک، واحد از فهرستِ واحدهای هم‌بُعد */
+    .normlayer input.num { flex: 0 1 150px; min-width: 90px; }
+    .normlayer select.nu { width: 130px; }
+    .normcost { font-size: .8rem; }
     .seg { display: inline-flex; gap: 4px; }
     .chkline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     .chip.grade { font-weight: 800; min-width: 1.8em; text-align: center; }
@@ -228,6 +232,12 @@
 
   <script src="config.js"></script>
   <script src="shared.js"></script>
+  <script type="module">
+    /* قواعد یکسان‌سازی (عدد و واحد، جنس) — همان دو ماژولی که Worker و ورودگر می‌خوانند */
+    import * as rules from "./catalog-rules.mjs";
+    import { HEAD_RULES } from "./catalog-head-rules.mjs";
+    (window.TP = window.TP || {}).rules = { ...rules, HEAD_RULES };
+  </script>
   <script src="expert.js"></script>
 </body>
 </html>
