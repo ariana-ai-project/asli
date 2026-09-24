@@ -113,6 +113,27 @@ test("ویژگی ضمنی: عرفِ هر نوع قلم — پیش‌فرض، ن�
   assert.deepEqual(im("بلبرینگ", "بلبرینگ 6205"), { mat: null, how: null }, "جنس برای بلبرینگ تعیین‌کننده نیست");
 });
 
+test("تصمیم مدیر (مهر ۱۴۰۵): اتصالِ لوله‌کشیِ اینچی گالوانیزه، «سبز» پلی‌پروپیلن، «پلیکا» PVC، کابل خودنگهدار آلومینیومی", () => {
+  const im = (head, title, attrs = {}) => R.materialOf({ head, title, attrs }, HEAD_RULES[R.keyOf(head)] || null, null);
+  assert.deepEqual(im("سه راهی", "سه راهی 1/2 اینچ"), { mat: "گالوانیزه", how: "implied" });
+  assert.deepEqual(im("تبدیل", "تبدیل 1/2-1*2 اینچ"), { mat: "گالوانیزه", how: "implied" });
+  assert.deepEqual(im("درپوش", "درپوش کالکتور 1 اینچ"), { mat: "گالوانیزه", how: "implied" });
+  assert.deepEqual(im("سه راهی", "سه راه جوشی 2 اینچ"), { mat: "آهنی", how: "implied" }, "اتصالِ جوشی فولادی است، نه گالوانیزه");
+  assert.deepEqual(im("مغزی", "مغزی 1/2 پرچی"), { mat: null, how: null }, "اتصالِ هیدرولیک عرفِ لوله‌کشی را نمی‌گیرد");
+  assert.deepEqual(im("سه راهی", 'سه راهی یکسر مهره بامغزی دوسرکونیک"1/4اطلسی'), { mat: null, how: null }, "واژهٔ چسبیده به عدد هم");
+  assert.deepEqual(im("سه راهی", "سه راهی مانیسمان 1/2 اینچ"), { mat: null, how: null });
+  assert.deepEqual(im("تبدیل", "تبدیل بکس 1/2 به 3/4"), { mat: null, how: null }, "تبدیلِ بکس ابزار است");
+  assert.deepEqual(im("سه راهی", "سه راهی 110"), { mat: null, how: null }, "بی‌اینچ: عرفی نیست");
+  assert.deepEqual(im("لوله", "لوله سبز 20"), { mat: "پلی‌پروپیلن", how: "implied" });
+  assert.deepEqual(im("زانو", "زانو لوله سبز 32"), { mat: "پلی‌پروپیلن", how: "implied" });
+  assert.deepEqual(im("سه راهی", "سه راهی سبز 25"), { mat: "پلی‌پروپیلن", how: "implied" }, "سبز پیش از قاعدهٔ اینچ");
+  assert.deepEqual(im("لوله", "لوله پلیکا 110"), { mat: "PVC", how: "title" });
+  assert.deepEqual(im("سه راهی", "سه راه پولیکا 90 درجه 4 اینچ"), { mat: "PVC", how: "title" }, "جنسِ گفته‌شده بر عرف مقدم است");
+  assert.deepEqual(im("سه راهی", "سه راهی تبدیل گالولانیزه 2*3 اینچ"), { mat: "گالوانیزه", how: "title" }, "غلطِ املایی رایج");
+  assert.deepEqual(im("کابل", "کابل خود نگهدار 16*25*3"), { mat: "آلومینیومی", how: "implied" });
+  assert.deepEqual(im("کابل", "کابل 4*10"), { mat: "مسی", how: "implied" });
+});
+
 test("نوع قلمِ مؤثر: جنس جزء نام فقط وقتی بازار را جدا می‌کند", () => {
   assert.equal(R.effectiveHead("ورق", HEAD_RULES["ورق"], "آهنی"), "ورق آهنی");
   assert.equal(R.effectiveHead("لوله", HEAD_RULES["لوله"], "پلی‌اتیلن"), "لوله پلی اتیلن", "نام با همان نرمال‌سازیِ کلیدِ جدول‌ها");
@@ -134,6 +155,7 @@ test("جدول قاعده‌ها سالم است: هر نقش، جنس و واح
     n++;
     assert.equal(k, R.keyOf(k), `کلید «${k}» با keyOf ساخته شده`);
     assert.ok(r.r === "f" || r.r === "v", `${k}: نقش`);
+    /* جنسِ خالی در نشانه یعنی «این‌جا عرفی نیست» */
     for (const m of [r.d, r.f, ...(r.c || []).map((c) => c[2])].filter(Boolean)) assert.ok(mats.has(m), `${k}: جنسِ ناشناختهٔ «${m}»`);
     for (const [cue, v] of r.c || []) {
       assert.ok(cue === "u" || cue === "w", `${k}: نوع نشانه`);

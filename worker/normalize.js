@@ -104,8 +104,13 @@ export function conventionLines(heads) {
     const { base, rule } = RULES.splitHead(hd.head, HEAD_RULES);
     if (rule && !seen.has(base)) {
       seen.add(base);
-      const when = [];
-      for (const [cue, v, m] of rule.c || []) when.push(cue === "u" ? `اندازه به ${v} ← ${m}` : `«${v}» در عنوان ← ${m}`);
+      /* نشانه‌های پشت‌سرِ هم با یک نتیجه یک‌جا («کونیک»، «پرچی»، … ← نامعلوم) — پرامپتِ کوتاه‌تر */
+      const groups = [];
+      for (const [cue, v, m] of rule.c || []) {
+        const to = m || "نامعلوم", g = groups[groups.length - 1];
+        if (cue === "w" && g && g.cue === "w" && g.to === to) g.vs.push(v); else groups.push({ cue, vs: [v], to });
+      }
+      const when = groups.map((g) => (g.cue === "u" ? `اندازه به ${g.vs[0]} ← ${g.to}` : `${g.vs.map((v) => `«${v}»`).join("، ")} در عنوان ← ${g.to}`));
       const dflt = rule.d ? `جنسِ گفته‌نشده: ${rule.d}`
         : when.length || rule.f ? `جنسِ گفته‌نشده: ${[...when, rule.f ? `وگرنه ${rule.f}` : "وگرنه نامعلوم — حدس نزن"].join("؛ ")}`
           : "جنسِ گفته‌نشده نامعلوم است — حدس نزن";
