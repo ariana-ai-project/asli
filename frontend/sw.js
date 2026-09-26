@@ -7,7 +7,7 @@
    مرورگر فقط وقتی sw.js را کلمه‌به‌کلمه تغییر کرده ببیند مرحلهٔ نصب و
    پیش‌کشِ دوباره را اجرا می‌کند؛ بدون این، کاربرانی که قبلاً سایت را
    باز کرده‌اند تا مدت‌ها نسخهٔ کش‌شدهٔ قدیمی را می‌بینند */
-const CACHE_NAME = "ariana-pwa-v3";
+const CACHE_NAME = "ariana-pwa-v4";
 
 /* پوستهٔ اولیهٔ برنامه — بدون ویدیوها (ویدیوها در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -66,7 +66,12 @@ self.addEventListener("fetch", (event) => {
 
   /* پنل‌های تأمین و پشتیبانی و API آن‌ها هیچ‌وقت کش نمی‌شوند: داده‌شان زنده است و
      کش‌اول باعث می‌شد مدیر بعد از ارجاع، میزِ قبلی را ببیند و کد پنل یک دیپلوی عقب بماند */
-  if (new URL(request.url).pathname.startsWith("/tamin-poshtibani/")) {
+  const path = new URL(request.url).pathname;
+  if (path.startsWith("/tamin-poshtibani/")) {
+    return;
+  }
+  /* API بخش حقوقی (فهرست گفت‌وگوها، متن گفت‌وگو، حافظه) هم زنده است؛ کش‌اول یعنی گفت‌وگوی قدیمی */
+  if (path.startsWith("/hoghooghi/api/")) {
     return;
   }
 
@@ -75,8 +80,12 @@ self.addEventListener("fetch", (event) => {
     event.respondWith(
       fetch(request)
         .then((response) => {
-          const copy = response.clone();
-          caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          /* فقط صفحهٔ اول سایت نسخهٔ آفلاین «./index.html» است؛ صفحهٔ بخش‌های دیگر (مثل /hoghooghi/)
+             نباید جایش بنشیند */
+          if (response.ok && (path === "/" || path === "/index.html")) {
+            const copy = response.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put("./index.html", copy));
+          }
           return response;
         })
         .catch(() => caches.match("./index.html").then((r) => r || caches.match("./")))

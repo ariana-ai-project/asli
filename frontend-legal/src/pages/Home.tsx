@@ -18,6 +18,7 @@ import {
   Clock,
   Compass,
   Ruler,
+  MessagesSquare,
 } from 'lucide-react';
 import PageTransition from '../components/PageTransition';
 
@@ -52,6 +53,16 @@ const FEATURES = [
     tags: ['تطبیق قراردادها', 'استخراج بندهای مفید', 'گزارش Word'],
     href: '/drafting',
     code: 'NQ-02',
+  },
+  {
+    id: 'chat',
+    icon: MessagesSquare,
+    title: 'گفت‌وگوی حقوقی',
+    description:
+      'گفت‌وگو با دستیار هوش مصنوعی حقوقی دربارهٔ پرسش‌ها، اسناد و متن‌های حقوقی؛ هر گفت‌وگو حافظهٔ خودش را دارد و هر وقت بخواهید از همان‌جا ادامه می‌یابد.',
+    tags: ['پرسش و پاسخ حقوقی', 'ارسال فایل', 'حافظهٔ گفت‌وگو'],
+    href: '/chat',
+    code: 'NQ-03',
   },
 ];
 
@@ -830,7 +841,7 @@ export default function Home() {
               ابزارهای سامانه
             </div>
             <h2 className="text-3xl md:text-5xl font-bold text-white mb-5 leading-tight">
-              دو ابزار کاربردی
+              سه ابزار کاربردی
               <span className="text-transparent bg-clip-text bg-gradient-to-l from-sky-300 to-blue-300"> برای دپارتمان حقوقی</span>
             </h2>
             <p className="text-blue-100/70 text-base md:text-lg max-w-2xl mx-auto leading-loose">
@@ -838,18 +849,20 @@ export default function Home() {
             </p>
           </Reveal>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-3xl mx-auto">
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8 max-w-3xl lg:max-w-6xl mx-auto">
             {FEATURES.map((feature, idx) => {
               const Icon = feature.icon;
+              /* در دو ستونهٔ تبلت، کارت سوم زیر دو کارت دیگر و وسط می‌نشیند */
+              const lone = FEATURES.length % 2 === 1 && idx === FEATURES.length - 1;
               return (
-                <Reveal key={feature.id} delay={idx * 120}>
-                  <div className="corner-frame" style={{ ['--cf-color' as any]: 'rgba(94,211,255,0.4)' }}>
+                <Reveal key={feature.id} delay={idx * 120} className={lone ? 'md:col-span-2 md:w-1/2 md:mx-auto lg:col-span-1 lg:w-auto lg:mx-0' : ''}>
+                  <div className="corner-frame h-full" style={{ ['--cf-color' as any]: 'rgba(94,211,255,0.4)' }}>
                     <button
                       onClick={() => navigateWithTransition(feature.href)}
-                      className="group relative block w-full text-right rounded-3xl overflow-hidden glass-panel-light shadow-xl transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl"
+                      className="group relative flex flex-col h-full w-full text-right rounded-3xl overflow-hidden glass-panel-light shadow-xl transition-all duration-300 hover:-translate-y-1.5 hover:shadow-2xl"
                     >
-                      <div className="h-1.5 bg-gradient-to-l from-sky-500 to-blue-700" />
-                      <div className="p-7 flex flex-col">
+                      <div className="h-1.5 w-full bg-gradient-to-l from-sky-500 to-blue-700" />
+                      <div className="p-7 flex flex-col flex-1 w-full">
                         <div className="flex items-start justify-between mb-6">
                           <div className="w-16 h-16 bg-sky-50 rounded-2xl flex items-center justify-center shadow-sm transition-transform duration-300 group-hover:scale-110 group-hover:-rotate-3">
                             <Icon size={30} className="text-sky-700" />
@@ -1014,6 +1027,7 @@ export default function Home() {
                 {[
                   { label: 'تحلیلگر آریانا  ', href: '/fa-analysis' },
                   { label: 'پیش نویس ', href: '/drafting' },
+                  { label: 'گفت‌وگوی حقوقی', href: '/chat' },
                 ].map((link) => (
                   <li key={link.label}>
                     <button

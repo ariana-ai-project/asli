@@ -1,7 +1,5 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
-  X,
-  FileText,
   Loader,
   Download,
   Sparkles,
@@ -15,19 +13,13 @@ import {
   UploadCloud,
   AlertTriangle,
   Clock,
+  Square,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import mammoth from 'mammoth';
-
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  content: string;
-  encoding: 'base64' | 'text';
-  media_type: string;
-}
+import { apiStream, readStream, reportUsage } from '../lib/api';
+import { ACCEPT_DOCS } from '../lib/files';
+import { useUploads } from '../lib/useUploads';
+import FileChip, { FileErrors } from '../components/FileChip';
 
 interface ResultItem {
   id: string;
@@ -38,70 +30,21 @@ interface ResultItem {
   docxUrl?: string;
   docxFilename?: string;
   errorMessage?: string;
+  findings?: number;
 }
 
-function extOf(name: string) {
-  return name.split('.').pop()?.toLowerCase() || '';
-}
-
-function fileAccentColor(name: string) {
-  const ext = extOf(name);
-  if (ext === 'pdf') return { text: 'text-rose-500', bg: 'bg-rose-50', border: 'border-rose-200' };
-  if (ext === 'docx' || ext === 'doc') return { text: 'text-sky-600', bg: 'bg-sky-50', border: 'border-sky-200' };
-  return { text: 'text-navy-500', bg: 'bg-navy-50', border: 'border-navy-200' };
-}
-
-async function fileToUploadedFile(file: File): Promise<UploadedFile> {
-  const ext = file.name.split('.').pop()?.toLowerCase();
-  const arrayBuffer = await file.arrayBuffer();
-
-  if (ext === 'pdf') {
-    const base64 = btoa(
-      new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
-    return {
-      id: Date.now().toString() + Math.random().toString(36),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      content: base64,
-      encoding: 'base64',
-      media_type: 'application/pdf',
-    };
-  }
-
-  if (ext === 'docx' || ext === 'doc') {
-    const result = await mammoth.extractRawText({ arrayBuffer });
-    return {
-      id: Date.now().toString() + Math.random().toString(36),
-      name: file.name,
-      size: file.size,
-      type: file.type,
-      content: result.value,
-      encoding: 'text',
-      media_type: 'text/plain',
-    };
-  }
-
-  const textContent = await file.text();
-  return {
-    id: Date.now().toString() + Math.random().toString(36),
-    name: file.name,
-    size: file.size,
-    type: file.type,
-    content: textContent,
-    encoding: 'text',
-    media_type: 'text/plain',
-  };
-}
+const faNum = (n: number) => n.toLocaleString('fa-IR');
+const clock = (s: number) => `${faNum(Math.floor(s / 60)).padStart(2, '۰')}:${faNum(s % 60).padStart(2, '۰')}`;
 
 export default function DraftReview() {
   const navigate = useNavigate();
 
-  const [referenceFiles, setReferenceFiles] = useState<UploadedFile[]>([]);
-  const [draftFile, setDraftFile] = useState<UploadedFile | null>(null);
+  const refs = useUploads('draft');
+  const draft = useUploads('draft', { single: true });
   const [instructions, setInstructions] = useState('');
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<'sending' | 'thinking' | 'writing'>('sending');
+  const [elapsed, setElapsed] = useState(0);
   const [results, setResults] = useState<ResultItem[]>([]);
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [isDraggingRef, setIsDraggingRef] = useState(false);
@@ -110,78 +53,63 @@ export default function DraftReview() {
   const referenceInputRef = useRef<HTMLInputElement>(null);
   const draftInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const canSubmit = referenceFiles.length > 0 && !!draftFile && !loading;
-  const step1Done = referenceFiles.length > 0;
-  const step2Done = !!draftFile;
+  const draftFile = draft.files[0] || null;
+  const step1Done = refs.ready.length > 0;
+  const step2Done = draft.ready.length > 0;
+  const canSubmit = step1Done && step2Done && !refs.busy && !draft.busy && !loading;
   const progressPct = ((step1Done ? 1 : 0) + (step2Done ? 1 : 0)) * 50;
+
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const t0 = Date.now();
+    const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   const handleLogoClick = () => {
     if (loading) return;
-    if (results.length > 0 || referenceFiles.length > 0 || draftFile) {
+    if (results.length > 0 || refs.files.length > 0 || draftFile) {
       setShowExitConfirm(true);
     } else {
       navigate('/');
     }
   };
 
-  const processReferenceFiles = async (files: File[]) => {
-    if (files.length === 0) return;
-    const uploaded = await Promise.all(files.map(fileToUploadedFile));
-    setReferenceFiles((prev) => [...prev, ...uploaded]);
-  };
-
-  const processDraftFile = async (file?: File) => {
-    if (!file) return;
-    const uploaded = await fileToUploadedFile(file);
-    setDraftFile(uploaded);
-  };
-
-  const handleReferenceUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleReferenceUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    await processReferenceFiles(files);
     if (referenceInputRef.current) referenceInputRef.current.value = '';
+    refs.add(files);
   };
 
-  const handleDraftUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    await processDraftFile(e.target.files?.[0]);
+  const handleDraftUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || []);
     if (draftInputRef.current) draftInputRef.current.value = '';
+    draft.add(files);
   };
 
-  const handleReferenceDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+  const handleReferenceDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDraggingRef(false);
     if (loading) return;
-    await processReferenceFiles(Array.from(e.dataTransfer.files || []));
+    refs.add(Array.from(e.dataTransfer.files || []));
   };
 
-  const handleDraftDrop = async (e: React.DragEvent<HTMLDivElement>) => {
+  const handleDraftDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     setIsDraggingDraft(false);
     if (loading) return;
-    await processDraftFile(e.dataTransfer.files?.[0]);
-  };
-
-  const removeReferenceFile = (id: string) => {
-    setReferenceFiles((prev) => prev.filter((f) => f.id !== id));
-  };
-
-  const removeDraftFile = () => {
-    setDraftFile(null);
-  };
-
-  const resetForm = () => {
-    setReferenceFiles([]);
-    setDraftFile(null);
-    setInstructions('');
+    draft.add(Array.from(e.dataTransfer.files || []).slice(0, 1));
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !draftFile) return;
+    if (!canSubmit) return;
 
     const resultId = Date.now().toString();
-    const referenceNames = referenceFiles.map((f) => f.name);
-    const draftName = draftFile.name;
+    const referenceNames = refs.ready.map((f) => f.name);
+    const draftName = draft.ready[0].name;
 
     setResults((prev) => [
       {
@@ -194,154 +122,52 @@ export default function DraftReview() {
       ...prev,
     ]);
     setLoading(true);
+    setPhase('sending');
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+
+    const update = (p: Partial<ResultItem>) => setResults((prev) => prev.map((r) => (r.id === resultId ? { ...r, ...p } : r)));
 
     try {
-      const fileContents = [
-        ...referenceFiles.map((f) => ({
-          name: f.name,
-          content: f.content,
-          encoding: f.encoding,
-          media_type: f.media_type,
-          role: 'reference' as const,
-        })),
-        {
-          name: draftFile.name,
-          content: draftFile.content,
-          encoding: draftFile.encoding,
-          media_type: draftFile.media_type,
-          role: 'draft' as const,
-        },
-      ];
+      const response = await apiStream('/draft', { question: instructions, references: refs.ids, draft: draft.ids[0] }, ctrl.signal);
+      const call = response.headers.get('x-call');
+      const result = await readStream(response, { onPhase: setPhase });
+      reportUsage(call, result.usage);
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/draft-review`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ question: instructions, fileContents }),
-        }
-      );
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.error || `خطای سرور: ${response.status}`);
+      if (result.stop === 'refusal') throw new Error('مدل به این درخواست پاسخ نداد. لطفاً دوباره تلاش کنید.');
+      if (result.stop === 'max_tokens' || result.stop === 'model_context_window_exceeded') {
+        throw new Error('فهرست مواد از سقف طول خروجی مدل بلندتر شد. قراردادهای مرجع را در چند نوبت بررسی کنید.');
       }
+      if (!result.complete) throw new Error('پاسخ مدل ناتمام ماند؛ لطفاً دوباره تلاش کنید.');
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('استریم در دسترس نیست');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let docxReceived = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(data);
-
-            if (parsed.error) throw new Error(parsed.error);
-
-            if (parsed.docx) {
-              docxReceived = true;
-              const binaryString = atob(parsed.docx);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-              }
-              const blob = new Blob([bytes], {
-                type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-              });
-              const url = URL.createObjectURL(blob);
-              const filename = parsed.filename || 'گزارش-پیش‌نویس-آریانا';
-
-              setResults((prev) =>
-                prev.map((r) =>
-                  r.id === resultId
-                    ? { ...r, status: 'done', docxUrl: url, docxFilename: filename }
-                    : r
-                )
-              );
-            }
-          } catch (e) {
-            if (e instanceof Error && e.message !== data) throw e;
-          }
-        }
-      }
-
-      if (!docxReceived) {
-        setResults((prev) =>
-          prev.map((r) =>
-            r.id === resultId
-              ? { ...r, status: 'error', errorMessage: 'پاسخی دریافت نشد. لطفاً دوباره تلاش کنید.' }
-              : r
-          )
-        );
-      } else {
-        resetForm();
-      }
+      const { parseDraftReport, draftDocx, draftFileName } = await import('../lib/draftDocx');
+      const report = parseDraftReport(result.text, referenceNames.length);
+      const blob = await draftDocx(report, referenceNames, draftName);
+      update({ status: 'done', docxUrl: URL.createObjectURL(blob), docxFilename: draftFileName(report), findings: report.findings.length });
+      /* فرم برای بررسی بعدی خالی می‌شود و فایل‌های این بررسی از سرور هم پاک می‌شوند */
+      refs.clear(true);
+      draft.clear(true);
+      setInstructions('');
     } catch (error) {
-      console.error('Error:', error);
-      setResults((prev) =>
-        prev.map((r) =>
-          r.id === resultId
-            ? {
-                ...r,
-                status: 'error',
-                errorMessage: `خطا در بررسی پیش‌نویس: ${
-                  error instanceof Error ? error.message : 'خطای ناشناخته'
-                }`,
-              }
-            : r
-        )
-      );
+      if ((error as Error)?.name === 'AbortError') {
+        update({ status: 'error', errorMessage: 'بررسی به درخواست شما متوقف شد. فایل‌ها برای بررسی دوباره آماده‌اند.' });
+      } else {
+        console.error('Error:', error);
+        update({
+          status: 'error',
+          errorMessage: `خطا در بررسی پیش‌نویس: ${error instanceof Error ? error.message : 'خطای ناشناخته'}`,
+        });
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   };
 
+  const phaseText = phase === 'writing' ? 'در حال نوشتن فهرست مواد پیشنهادی' : 'در حال تطبیق';
+
   return (
     <div className="chat-screen flex flex-col bg-white" dir="rtl">
-      <style>{`
-        @keyframes drOverviewIn {
-          from { opacity: 0; transform: translateY(8px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
-        @keyframes drChipIn {
-          from { opacity: 0; transform: scale(0.9); }
-          to { opacity: 1; transform: scale(1); }
-        }
-        @keyframes drShimmer {
-          from { background-position: 200% 0; }
-          to { background-position: -200% 0; }
-        }
-        @keyframes drGlowPulse {
-          0%, 100% { box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.35); }
-          50% { box-shadow: 0 0 0 8px rgba(2, 132, 199, 0); }
-        }
-        .dr-fade-in { animation: drOverviewIn 0.35s ease both; }
-        .dr-chip-in { animation: drChipIn 0.22s ease both; }
-        .dr-shimmer {
-          background: linear-gradient(90deg, #e5edf9 25%, #f3f7fd 37%, #e5edf9 63%);
-          background-size: 200% 100%;
-          animation: drShimmer 1.6s ease-in-out infinite;
-        }
-        .dr-glow { animation: drGlowPulse 2.2s ease-in-out infinite; }
-      `}</style>
-
       {/* Header */}
       <div className="border-b border-gray-100 bg-white/90 backdrop-blur-sm px-4 md:px-6 py-3 flex items-center justify-between shadow-sm flex-shrink-0 sticky top-0 z-10">
         <div className="flex items-center gap-2">
@@ -414,7 +240,7 @@ export default function DraftReview() {
               ref={referenceInputRef}
               onChange={handleReferenceUpload}
               multiple
-              accept=".txt,.pdf,.doc,.docx"
+              accept={ACCEPT_DOCS}
               className="hidden"
             />
 
@@ -438,29 +264,14 @@ export default function DraftReview() {
               </span>
             </div>
 
-            {referenceFiles.length > 0 && (
-              <div className="flex flex-wrap gap-2 mt-3">
-                {referenceFiles.map((file) => {
-                  const accent = fileAccentColor(file.name);
-                  return (
-                    <div
-                      key={file.id}
-                      className={`dr-chip-in flex items-center gap-1.5 ${accent.bg} border ${accent.border} rounded-lg px-2.5 py-1.5 text-xs text-navy-700`}
-                    >
-                      <FileText size={12} className={`${accent.text} flex-shrink-0`} />
-                      <span className="truncate max-w-[140px] md:max-w-xs">{file.name}</span>
-                      {!loading && (
-                        <button
-                          onClick={() => removeReferenceFile(file.id)}
-                          className="p-0.5 hover:bg-black/10 rounded-full transition-colors flex-shrink-0"
-                          title="حذف فایل"
-                        >
-                          <X size={11} className="text-navy-500" />
-                        </button>
-                      )}
-                    </div>
-                  );
-                })}
+            {refs.files.length > 0 && (
+              <div className="mt-3">
+                <div className="flex flex-wrap gap-2">
+                  {refs.files.map((file) => (
+                    <FileChip key={file.key} file={file} onRemove={() => refs.remove(file.key)} disabled={loading} />
+                  ))}
+                </div>
+                <FileErrors files={refs.files} />
               </div>
             )}
           </div>
@@ -483,7 +294,7 @@ export default function DraftReview() {
               type="file"
               ref={draftInputRef}
               onChange={handleDraftUpload}
-              accept=".txt,.pdf,.doc,.docx"
+              accept={ACCEPT_DOCS}
               className="hidden"
             />
 
@@ -507,19 +318,24 @@ export default function DraftReview() {
                   بارگذاری قرارداد پیش‌نویس
                 </span>
               </div>
-            ) : (
+            ) : draftFile.status === 'ready' ? (
               <div className="dr-chip-in flex items-center gap-2 bg-sky-50 border border-sky-200 rounded-lg px-3 py-2.5 text-xs text-navy-700">
                 <FileCheck2 size={14} className="text-sky-600 flex-shrink-0" />
                 <span className="truncate flex-1">{draftFile.name}</span>
                 {!loading && (
                   <button
-                    onClick={removeDraftFile}
+                    onClick={() => draft.remove(draftFile.key)}
                     className="p-1 hover:bg-sky-200 rounded-full transition-colors flex-shrink-0"
                     title="حذف فایل"
                   >
                     <Trash2 size={12} className="text-navy-500" />
                   </button>
                 )}
+              </div>
+            ) : (
+              <div>
+                <FileChip file={draftFile} onRemove={() => draft.remove(draftFile.key)} disabled={loading} />
+                <FileErrors files={draft.files} />
               </div>
             )}
           </div>
@@ -559,6 +375,11 @@ export default function DraftReview() {
                   <Loader size={16} className="animate-spin" />
                   در حال بررسی و تطبیق قراردادها...
                 </>
+              ) : refs.busy || draft.busy ? (
+                <>
+                  <Loader size={16} className="animate-spin" />
+                  در حال آماده‌سازی فایل‌ها...
+                </>
               ) : (
                 <>
                   <Send size={16} />
@@ -578,11 +399,21 @@ export default function DraftReview() {
                       <Loader size={15} className="text-navy-600 animate-spin" />
                     </div>
                     <p className="text-xs text-navy-500 leading-relaxed">
-                      در حال تطبیق {r.referenceNames.length} قرارداد مرجع با «{r.draftName}» — این
+                      {phaseText} {faNum(r.referenceNames.length)} قرارداد مرجع با «{r.draftName}» — این
                       فرآیند ممکن است چند دقیقه طول بکشد
                     </p>
                   </div>
                   <div className="h-1.5 rounded-full dr-shimmer mt-3" />
+                  <div className="flex items-center justify-between gap-3 mt-2.5">
+                    <span className="text-[11px] text-navy-300 tabular-nums">زمان سپری‌شده: {clock(elapsed)}</span>
+                    <button
+                      onClick={() => abortRef.current?.abort()}
+                      className="flex items-center gap-1 text-[11px] text-navy-400 hover:text-red-600 transition-colors"
+                    >
+                      <Square size={10} />
+                      توقف
+                    </button>
+                  </div>
                 </div>
               ) : r.status === 'done' && r.docxUrl ? (
                 <div className="max-w-md w-full">
@@ -595,7 +426,9 @@ export default function DraftReview() {
                         <p className="text-sm font-semibold text-white truncate">
                           {r.docxFilename}.docx
                         </p>
-                        <p className="text-xs text-blue-200">گزارش پیش‌نویس Word</p>
+                        <p className="text-xs text-blue-200">
+                          {r.findings ? `${faNum(r.findings)} مادهٔ پیشنهادی — گزارش Word` : 'پیش‌نویس کامل است — گزارش Word'}
+                        </p>
                       </div>
                     </div>
                     <div className="px-4 py-3 flex items-center justify-between gap-3">
@@ -654,7 +487,7 @@ export default function DraftReview() {
             </p>
             <div className="flex gap-3">
               <button
-                onClick={() => { setShowExitConfirm(false); navigate('/'); }}
+                onClick={() => { setShowExitConfirm(false); refs.clear(true); draft.clear(true); navigate('/'); }}
                 className="flex-1 py-2.5 bg-navy-700 hover:bg-navy-800 active:scale-95 text-white rounded-xl text-sm font-semibold transition-all"
               >
                 بله، خروج

@@ -227,3 +227,108 @@ body {
 .cursor-blink {
   animation: blink 1s step-end infinite;
 }
+
+/* ─── ورود نرم عناصر صفحه‌های ابزار (تحلیلگر، پیش‌نویس، گفت‌وگو) ─── */
+@keyframes drOverviewIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes drChipIn {
+  from { opacity: 0; transform: scale(0.9); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes drShimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes drGlowPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(2, 132, 199, 0.35); }
+  50% { box-shadow: 0 0 0 8px rgba(2, 132, 199, 0); }
+}
+.dr-fade-in { animation: drOverviewIn 0.35s ease both; }
+.dr-chip-in { animation: drChipIn 0.22s ease both; }
+.dr-shimmer {
+  background: linear-gradient(90deg, #e5edf9 25%, #f3f7fd 37%, #e5edf9 63%);
+  background-size: 200% 100%;
+  animation: drShimmer 1.6s ease-in-out infinite;
+}
+.dr-glow { animation: drGlowPulse 2.2s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .dr-fade-in, .dr-chip-in, .dr-shimmer, .dr-glow { animation: none; }
+}
+
+/* ─── متن پاسخ مدل (Markdown) در گفت‌وگوی حقوقی ─── */
+.md {
+  font-size: 0.925rem;
+  line-height: 1.95;
+  color: #1f2937;
+  overflow-wrap: anywhere;
+}
+.md > :first-child { margin-top: 0; }
+.md > :last-child { margin-bottom: 0; }
+.md p { margin: 0 0 0.85em; }
+.md h1, .md h2, .md h3, .md h4 {
+  color: #0e1c45;
+  font-weight: 800;
+  line-height: 1.6;
+  margin: 1.3em 0 0.55em;
+}
+.md h1 { font-size: 1.25rem; }
+.md h2 { font-size: 1.1rem; padding-bottom: 0.3em; border-bottom: 1px solid #dce8ff; }
+.md h3 { font-size: 1rem; color: #172f7a; }
+.md h4 { font-size: 0.95rem; color: #172f7a; }
+.md strong { color: #0e1c45; font-weight: 700; }
+.md ul, .md ol { margin: 0 0 0.9em; padding-inline-start: 1.5em; }
+.md ul { list-style: disc; }
+.md ol { list-style: decimal; }
+.md li { margin: 0.25em 0; }
+.md li > ul, .md li > ol { margin: 0.25em 0 0.25em; }
+.md blockquote {
+  margin: 0 0 0.9em;
+  padding: 0.5em 0.9em;
+  border-inline-start: 3px solid #4a7cff;
+  background: #f5f8ff;
+  border-radius: 0.5rem;
+  color: #162960;
+}
+.md hr { border: 0; border-top: 1px solid #dce8ff; margin: 1.2em 0; }
+.md a { color: #1a3d9e; text-decoration: underline; text-underline-offset: 3px; }
+.md code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.85em;
+  background: #eef2ff;
+  border-radius: 0.3rem;
+  padding: 0.1em 0.35em;
+  direction: ltr;
+  unicode-bidi: isolate;
+}
+.md pre {
+  background: #0e1c45;
+  color: #e6edff;
+  border-radius: 0.75rem;
+  padding: 0.9em 1em;
+  overflow-x: auto;
+  margin: 0 0 0.9em;
+  direction: ltr;
+  text-align: left;
+}
+.md pre code { background: transparent; color: inherit; padding: 0; font-size: 0.82rem; }
+.md .md-table { overflow-x: auto; margin: 0 0 1em; border-radius: 0.75rem; border: 1px solid #dce8ff; }
+.md table { width: 100%; border-collapse: collapse; font-size: 0.85rem; line-height: 1.8; }
+.md th { background: #172f7a; color: #fff; font-weight: 700; text-align: start; padding: 0.5em 0.75em; white-space: nowrap; }
+.md td { padding: 0.5em 0.75em; border-top: 1px solid #e8eefc; vertical-align: top; }
+.md tbody tr:nth-child(even) td { background: #f7faff; }
+
+/* نشانگر نوشتن در انتهای پاسخ جریانی */
+.stream-caret > :last-child::after,
+.stream-caret:empty::after {
+  content: '';
+  display: inline-block;
+  width: 0.5em;
+  height: 1.1em;
+  margin-inline-start: 2px;
+  vertical-align: -0.2em;
+  background: #2557d6;
+  border-radius: 2px;
+  animation: blink 1s step-end infinite;
+}

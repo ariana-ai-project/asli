@@ -1,7 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Send,
-  X,
   FileText,
   Loader,
   Plus,
@@ -15,9 +14,13 @@ import {
   BarChart3,
   ClipboardList,
   PenLine,
+  Square,
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import mammoth from 'mammoth';
+import { apiStream, readStream, reportUsage } from '../lib/api';
+import { ACCEPT_DOCS } from '../lib/files';
+import { useUploads } from '../lib/useUploads';
+import FileChip, { FileErrors } from '../components/FileChip';
 
 interface Message {
   id: string;
@@ -28,16 +31,6 @@ interface Message {
   docxUrl?: string;
   docxFilename?: string;
   isError?: boolean;
-}
-
-interface UploadedFile {
-  id: string;
-  name: string;
-  size: number;
-  type: string;
-  content: string;
-  encoding: 'base64' | 'text';
-  media_type: string;
 }
 
 const PRESET_PROMPTS = [
@@ -63,13 +56,19 @@ const PRESET_PROMPTS = [
   },
 ];
 
+const faNum = (n: number) => n.toLocaleString('fa-IR');
+const clock = (s: number) => `${faNum(Math.floor(s / 60)).padStart(2, '۰')}:${faNum(s % 60).padStart(2, '۰')}`;
+
 export default function ContractAnalysis() {
   const navigate = useNavigate();
 
   const [messages, setMessages] = useState<Message[]>([]);
-  const [uploadedFiles, setUploadedFiles] = useState<UploadedFile[]>([]);
+  const uploads = useUploads('analyze');
   const [question, setQuestion] = useState('');
   const [loading, setLoading] = useState(false);
+  const [phase, setPhase] = useState<'sending' | 'thinking' | 'writing'>('sending');
+  const [written, setWritten] = useState(0);
+  const [elapsed, setElapsed] = useState(0);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [conversations, setConversations] = useState<Array<{ id: string; title: string; timestamp: string }>>([]);
   const [customMode, setCustomMode] = useState(false);
@@ -78,11 +77,14 @@ export default function ContractAnalysis() {
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   const [showExitConfirm, setShowExitConfirm] = useState(false);
   const [currentConversationId, setCurrentConversationId] = useState<string>(() => Date.now().toString());
 
-  const showPresets = uploadedFiles.length > 0 && !loading && !customMode && question === '';
+  const hasFiles = uploads.files.length > 0;
+  const canSend = uploads.ready.length > 0 && !uploads.busy && !loading;
+  const showPresets = canSend && !customMode && question === '';
 
   const handleLogoClick = () => {
     if (loading) return;
@@ -95,9 +97,19 @@ export default function ContractAnalysis() {
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+  }, [messages, loading]);
+
+  /* شمارندهٔ زمان تحلیل — تا کاربر بداند کار ادامه دارد */
+  useEffect(() => {
+    if (!loading) return;
+    setElapsed(0);
+    const t0 = Date.now();
+    const id = window.setInterval(() => setElapsed(Math.floor((Date.now() - t0) / 1000)), 1000);
+    return () => window.clearInterval(id);
+  }, [loading]);
 
   const startNewConversation = () => {
+    if (loading) return;
     if (messages.length > 0) {
       const title =
         messages[0]?.files?.[0]?.name || messages[0]?.content?.slice(0, 30) || 'مکالمه جدید';
@@ -108,63 +120,21 @@ export default function ContractAnalysis() {
     }
     setCurrentConversationId(Date.now().toString());
     setMessages([]);
-    setUploadedFiles([]);
+    uploads.clear(true);
     setQuestion('');
     setCustomMode(false);
   };
 
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    for (const file of files) {
-      const ext = file.name.split('.').pop()?.toLowerCase();
-      const arrayBuffer = await file.arrayBuffer();
-
-      let newFile: UploadedFile;
-      if (ext === 'pdf') {
-        const base64 = btoa(
-          new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-        );
-        newFile = {
-          id: Date.now().toString() + Math.random().toString(36),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          content: base64,
-          encoding: 'base64',
-          media_type: 'application/pdf',
-        };
-      } else if (ext === 'docx' || ext === 'doc') {
-        const result = await mammoth.extractRawText({ arrayBuffer });
-        newFile = {
-          id: Date.now().toString() + Math.random().toString(36),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          content: result.value,
-          encoding: 'text',
-          media_type: 'text/plain',
-        };
-      } else {
-        const textContent = await file.text();
-        newFile = {
-          id: Date.now().toString() + Math.random().toString(36),
-          name: file.name,
-          size: file.size,
-          type: file.type,
-          content: textContent,
-          encoding: 'text',
-          media_type: 'text/plain',
-        };
-      }
-      setUploadedFiles((prev) => [...prev, newFile]);
-    }
     if (fileInputRef.current) fileInputRef.current.value = '';
     setCustomMode(false);
     setQuestion('');
+    uploads.add(files);
   };
 
-  const removeFile = (fileId: string) => {
-    setUploadedFiles((prev) => prev.filter((f) => f.id !== fileId));
+  const removeFile = (key: string) => {
+    uploads.remove(key);
     setCustomMode(false);
     setQuestion('');
   };
@@ -181,18 +151,22 @@ export default function ContractAnalysis() {
 
   const handleSendMessage = () => {
     const text = question.trim();
-    if (!text || uploadedFiles.length === 0 || loading) return;
+    if (!text || !canSend) return;
     sendMessage(text);
   };
 
-  const sendMessage = async (text: string) => {
-    if (!text.trim() || uploadedFiles.length === 0 || loading) return;
+  const pushAssistant = (m: Omit<Message, 'role' | 'timestamp'>) =>
+    setMessages((prev) => [...prev, { ...m, role: 'assistant', timestamp: new Date().toLocaleString('fa-IR') }]);
 
+  const sendMessage = async (text: string) => {
+    if (!text.trim() || !canSend) return;
+
+    const files = uploads.ready;
     const userMessage: Message = {
       id: Date.now().toString(),
       role: 'user',
       content: text,
-      files: uploadedFiles.map((f) => ({ name: f.name, size: f.size })),
+      files: files.map((f) => ({ name: f.name, size: f.size })),
       timestamp: new Date().toLocaleString('fa-IR'),
     };
 
@@ -200,119 +174,57 @@ export default function ContractAnalysis() {
     setQuestion('');
     setCustomMode(false);
     setLoading(true);
+    setPhase('sending');
+    setWritten(0);
 
     const assistantMessageId = (Date.now() + 1).toString();
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
 
     try {
-      const fileContents = uploadedFiles.map((f) => ({
-        name: f.name,
-        content: f.content,
-        encoding: f.encoding,
-        media_type: f.media_type,
-      }));
+      const response = await apiStream('/analyze', { question: text, files: uploads.ids }, ctrl.signal);
+      const call = response.headers.get('x-call');
+      const result = await readStream(response, { onPhase: setPhase, onText: (full) => setWritten(full.length) });
+      reportUsage(call, result.usage);
 
-      const response = await fetch(
-        `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/analyze-contract`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${import.meta.env.VITE_SUPABASE_ANON_KEY}`,
-          },
-          body: JSON.stringify({ question: text, fileContents }),
-        }
-      );
-
-      if (!response.ok) {
-        const errData = await response.json().catch(() => null);
-        throw new Error(errData?.error || `خطای سرور: ${response.status}`);
+      if (result.stop === 'refusal') throw new Error('مدل به این درخواست پاسخ نداد. لطفاً درخواست را به شکل دیگری مطرح کنید.');
+      if (result.stop === 'max_tokens' || result.stop === 'model_context_window_exceeded') {
+        throw new Error('گزارش از سقف طول خروجی مدل بلندتر شد. لطفاً درخواست را محدودتر کنید یا سند را در چند بخش تحلیل کنید.');
       }
+      if (!result.complete) throw new Error('پاسخ مدل ناتمام ماند؛ لطفاً دوباره تلاش کنید.');
 
-      const reader = response.body?.getReader();
-      if (!reader) throw new Error('استریم در دسترس نیست');
-
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let docxReceived = false;
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split('\n');
-        buffer = lines.pop() || '';
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue;
-          const data = line.slice(6).trim();
-          if (data === '[DONE]') continue;
-
-          try {
-            const parsed = JSON.parse(data);
-
-            if (parsed.error) throw new Error(parsed.error);
-
-            if (parsed.docx) {
-              docxReceived = true;
-              const binaryString = atob(parsed.docx);
-              const bytes = new Uint8Array(binaryString.length);
-              for (let i = 0; i < binaryString.length; i++) {
-                bytes[i] = binaryString.charCodeAt(i);
-              }
-              const blob = new Blob([bytes], {
-                type: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-              });
-              const url = URL.createObjectURL(blob);
-              const filename = parsed.filename || 'گزارش-آریانا';
-
-              setMessages((prev) => [
-                ...prev,
-                {
-                  id: assistantMessageId,
-                  role: 'assistant',
-                  content: '',
-                  docxUrl: url,
-                  docxFilename: filename,
-                  timestamp: new Date().toLocaleString('fa-IR'),
-                },
-              ]);
-            }
-            // heartbeat events ({ text: "" }) are intentionally ignored
-          } catch (e) {
-            if (e instanceof Error && e.message !== data) throw e;
-          }
-        }
-      }
-
-      if (!docxReceived) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: assistantMessageId,
-            role: 'assistant',
-            content: 'پاسخی دریافت نشد. لطفاً دوباره تلاش کنید.',
-            timestamp: new Date().toLocaleString('fa-IR'),
-            isError: true,
-          },
-        ]);
-      }
+      const { parseReport, reportDocx, sanitizeFileName } = await import('../lib/reportDocx');
+      const report = parseReport(result.text);
+      const blob = await reportDocx(report);
+      pushAssistant({
+        id: assistantMessageId,
+        content: '',
+        docxUrl: URL.createObjectURL(blob),
+        docxFilename: sanitizeFileName(report.reportTitle),
+      });
     } catch (error) {
-      console.error('Error:', error);
-      setMessages((prev) => [
-        ...prev,
-        {
+      if ((error as Error)?.name === 'AbortError') {
+        pushAssistant({ id: assistantMessageId, content: 'تحلیل به درخواست شما متوقف شد.' });
+      } else {
+        console.error('Error:', error);
+        pushAssistant({
           id: assistantMessageId,
-          role: 'assistant',
           content: `متأسفانه در انجام تحلیل خطایی رخ داد: ${error instanceof Error ? error.message : 'خطای ناشناخته'}`,
-          timestamp: new Date().toLocaleString('fa-IR'),
           isError: true,
-        },
-      ]);
+        });
+      }
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   };
+
+  const progressText =
+    phase === 'sending'
+      ? 'در حال ارسال سند به دستیار حقوقی…'
+      : phase === 'thinking'
+      ? 'در حال مطالعه و تحلیل سند — این مرحله ممکن است چند دقیقه طول بکشد'
+      : `در حال نوشتن گزارش — حدود ${faNum(Math.max(1, Math.round(written / 7)))} واژه`;
 
   return (
     <div className="chat-screen flex bg-white" dir="rtl">
@@ -325,7 +237,8 @@ export default function ContractAnalysis() {
         <div className="p-4 border-b border-white/10">
           <button
             onClick={startNewConversation}
-            className="w-full flex items-center justify-center gap-2 bg-navy-800 hover:bg-navy-700 text-white font-semibold px-4 py-3 rounded-xl transition-colors"
+            disabled={loading}
+            className="w-full flex items-center justify-center gap-2 bg-navy-800 hover:bg-navy-700 text-white font-semibold px-4 py-3 rounded-xl transition-colors disabled:opacity-50"
           >
             <Plus size={18} />
             مکالمه جدید
@@ -414,7 +327,7 @@ export default function ContractAnalysis() {
               </p>
               <div className="mt-6 flex items-center gap-2 text-xs text-navy-300">
                 <Paperclip size={14} />
-                <span>پشتیبانی از فرمت‌های PDF، DOCX و TXT</span>
+                <span>پشتیبانی از PDF، Word، متن و تصویر سند</span>
               </div>
             </div>
           )}
@@ -427,7 +340,7 @@ export default function ContractAnalysis() {
               {msg.role === 'user' ? (
                 <div className="max-w-[80%] md:max-w-lg">
                   <div className="bg-navy-700 text-white rounded-2xl rounded-tr-sm px-4 py-3 shadow-sm">
-                    <p className="text-sm leading-relaxed">{msg.content}</p>
+                    <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.content}</p>
                     {msg.files && msg.files.length > 0 && (
                       <div className="mt-2 pt-2 border-t border-white/20 flex flex-wrap gap-2">
                         {msg.files.map((f, i) => (
@@ -443,7 +356,7 @@ export default function ContractAnalysis() {
                 </div>
               ) : msg.docxUrl ? (
                 <div className="max-w-[80%] md:max-w-md">
-                  <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm shadow-sm overflow-hidden">
+                  <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm shadow-sm overflow-hidden dr-fade-in">
                     <div className="bg-gradient-to-l from-navy-700 to-navy-600 px-4 py-3 flex items-center gap-3">
                       <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center flex-shrink-0">
                         <FileText size={18} className="text-white" />
@@ -491,14 +404,24 @@ export default function ContractAnalysis() {
 
           {loading && (
             <div className="flex justify-start">
-              <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
+              <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm max-w-[90%] md:max-w-md dr-fade-in">
                 <div className="flex items-center gap-3">
-                  <div className="flex gap-1">
+                  <div className="flex gap-1 flex-shrink-0">
                     <span className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: '0ms' }} />
                     <span className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: '150ms' }} />
                     <span className="w-2 h-2 rounded-full bg-navy-400 animate-bounce" style={{ animationDelay: '300ms' }} />
                   </div>
-                  <p className="text-xs text-navy-500">در حال تحلیل سند — این فرآیند ممکن است چند دقیقه طول بکشد</p>
+                  <p className="text-xs text-navy-500 leading-relaxed">{progressText}</p>
+                </div>
+                <div className="flex items-center justify-between gap-3 mt-2.5 pt-2.5 border-t border-gray-100">
+                  <span className="text-[11px] text-navy-300 tabular-nums">زمان سپری‌شده: {clock(elapsed)}</span>
+                  <button
+                    onClick={() => abortRef.current?.abort()}
+                    className="flex items-center gap-1 text-[11px] text-navy-400 hover:text-red-600 transition-colors"
+                  >
+                    <Square size={10} />
+                    توقف
+                  </button>
                 </div>
               </div>
             </div>
@@ -533,26 +456,14 @@ export default function ContractAnalysis() {
             </div>
           )}
 
-          {uploadedFiles.length > 0 && (
-            <div className="flex flex-wrap gap-2 mb-3">
-              {uploadedFiles.map((file) => (
-                <div
-                  key={file.id}
-                  className="flex items-center gap-1.5 bg-navy-50 border border-navy-200 rounded-lg px-2.5 py-1.5 text-xs text-navy-700"
-                >
-                  <FileText size={12} className="text-navy-500 flex-shrink-0" />
-                  <span className="truncate max-w-[140px] md:max-w-xs">{file.name}</span>
-                  {!loading && (
-                    <button
-                      onClick={() => removeFile(file.id)}
-                      className="p-0.5 hover:bg-navy-200 rounded transition-colors flex-shrink-0"
-                      title="حذف فایل"
-                    >
-                      <X size={11} className="text-navy-500" />
-                    </button>
-                  )}
-                </div>
-              ))}
+          {hasFiles && (
+            <div className="mb-3">
+              <div className="flex flex-wrap gap-2">
+                {uploads.files.map((file) => (
+                  <FileChip key={file.key} file={file} onRemove={() => removeFile(file.key)} disabled={loading} />
+                ))}
+              </div>
+              <FileErrors files={uploads.files} />
             </div>
           )}
 
@@ -562,7 +473,7 @@ export default function ContractAnalysis() {
               ref={fileInputRef}
               onChange={handleFileUpload}
               multiple
-              accept=".txt,.pdf,.doc,.docx"
+              accept={ACCEPT_DOCS}
               className="hidden"
             />
 
@@ -587,13 +498,15 @@ export default function ContractAnalysis() {
                   }
                 }}
                 placeholder={
-                  uploadedFiles.length === 0
+                  !hasFiles
                     ? 'ابتدا فایل سند خود را آپلود کنید...'
+                    : uploads.busy
+                    ? 'در حال آماده‌سازی و بارگذاری فایل...'
                     : customMode
                     ? 'درخواست تحلیل سفارشی خود را بنویسید...'
                     : 'فایل آپلود شد — نوع تحلیل را از گزینه‌های بالا انتخاب کنید'
                 }
-                disabled={loading || (uploadedFiles.length > 0 && !customMode)}
+                disabled={loading || (hasFiles && !customMode)}
                 rows={1}
                 className="w-full px-4 py-2.5 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-navy-400 focus:border-transparent text-sm resize-none bg-white disabled:bg-gray-50 disabled:text-navy-300 disabled:cursor-default transition-colors"
                 style={{ fontSize: '16px', minHeight: '42px', maxHeight: '120px' }}
@@ -602,7 +515,7 @@ export default function ContractAnalysis() {
 
             <button
               onClick={handleSendMessage}
-              disabled={loading || !question.trim() || uploadedFiles.length === 0}
+              disabled={!canSend || !question.trim()}
               className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-navy-700 hover:bg-navy-800 text-white rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
               title="ارسال"
             >

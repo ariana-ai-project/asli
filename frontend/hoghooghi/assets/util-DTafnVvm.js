@@ -1,0 +1,1 @@
+const c="application/vnd.openxmlformats-officedocument.wordprocessingml.document";function i(n,s="گزارش-حقوقی"){let e=n.replace(/[\\/:*?"<>|]+/g,"-").replace(/\s+/g," ").trim();if(e.length>100){const t=e.lastIndexOf(" ",100);e=e.slice(0,t>60?t:100).trim()}return e||s}export{c as D,i as s};
