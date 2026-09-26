@@ -266,6 +266,13 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .tp-mx .tri.unk { border-style: dashed; }
 :root[data-theme="light"] .tp-mx .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }
 /* جدول کارشناسان: عرض ستون‌ها از colgroup (manager.js:EX_W) — چهار ستون راست ثابت‌اند */
+/* ماتریس‌های بلندِ ارجاع و مهلت هوشمند (۲۵ گروه اصناف، ۳۰ پروژه): هر ستون پهنای خودش را
+   دارد و جدول افقی می‌چرخد — با width:100% سرستون‌ها روی هم می‌افتادند. ستون نام کارشناس
+   (td.name / th:first-child) از قبل چسبیده به لبهٔ راست می‌ماند. */
+.tp-mx.mx-sticky { width: auto; min-width: 100%; }
+.tp-mx.mx-sticky th { min-width: 76px; font-size: .78rem; line-height: 1.25; white-space: normal; }
+.tp-mx.mx-sticky th.rt, .tp-mx.mx-sticky td.rt { min-width: 180px; text-align: right; }
+.tp-mx .rt { text-align: right; }
 .tp-mx.ex-mx { table-layout: fixed; }
 .tp-mx.ex-mx th, .tp-mx.ex-mx td { overflow: hidden; text-overflow: ellipsis; }
 .tp-mx.ex-mx thead th:first-child { inset-inline-end: auto; position: sticky; }
@@ -301,6 +308,11 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-sheet { border: 1px solid #c8c8c8; border-bottom: 0; background: #f0f0f0; color: #333; padding: 4px 16px; border-radius: 6px 6px 0 0; font-size: .88rem; }
 .rp-sheet.on { background: #fff; color: #217346; font-weight: 800; box-shadow: inset 0 -3px 0 #217346; }
 .rp-count { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin: 4px 0 8px; font-size: .9rem; }
+/* بازهٔ گزارش وضعیت درخواست‌ها */
+.rp-range { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; padding: 10px 12px;
+  border: 1px solid var(--tp-line); border-radius: 12px; background: var(--tp-surface-2); }
+.rp-range .lab { color: var(--tp-muted); font-size: .85rem; }
+.rp-range .chip.on { border-color: var(--tp-accent); background: rgba(79,140,255,.12); }
 .rp-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .rp-grid { grid-template-columns: 1fr; } }
 .rp-paper { background: #fff; color: #000; border: 1px solid #c8c8c8; border-radius: 6px; }
@@ -343,9 +355,11 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rp-result-head { margin: 6px 0 0; font-size: .92rem; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rp-book { padding: 10px; max-height: calc(100vh - 260px); }
-.rp-charts { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); gap: 12px; margin-top: 12px; }
-.rp-chart { background: #fff; border-radius: 8px; padding: 6px; }
-.rp-chart svg { width: 100%; height: auto; display: block; }
+/* نمودارها زیر هم و تمام‌عرض (تصمیم مدیر، مهر ۱۴۰۵): کنار هم، هر کدام نصفِ عرض می‌شد و
+   اسم پروژه‌ها و کارشناسان آن‌قدر ریز می‌شد که خوانده نمی‌شد */
+.rp-charts { display: flex; flex-direction: column; gap: 16px; margin-top: 14px; }
+.rp-chart { background: #fff; border-radius: 8px; padding: 10px 12px; max-width: 1150px; margin-inline: auto; width: 100%; }
+.rp-chart svg { width: 100%; height: auto; display: block; margin-inline: auto; }
 .rp-ptable td { padding: 3px 4px; }
 .rp-ptable input.tp-input { font-size: .82rem; padding: 3px 6px; }
 /* پنجرهٔ تیکِ کارشناسانِ گزارش سه‌ماهه (manager.js:pickExperts) */

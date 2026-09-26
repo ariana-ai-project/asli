@@ -60,12 +60,12 @@
   /* گروه‌های جدول — همان worker/catalog.js:GROUPS. هر گروه با یک اثرانگشت تصمیم می‌گیرد
      از نو ساخته شود یا نه، و پنل مدیر پیش از شروع همین را برای برآورد نوشتن نشان می‌دهد. */
   TP.catalogGroups = {
-    catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "price_index", "guild_classes"],
+    catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "cat_guilds", "price_index", "guild_classes"],
     grades: ["supplier_grades"],
     purchases: ["purchases"],
   };
   TP.catalogTableFa = {
-    cat_heads: "اقلام به تفکیک نوع قلم", cat_codes: "نقشهٔ کد قلم", cat_titles: "نقشهٔ عنوان قلم", cat_words: "واژه‌نامهٔ یافتن اقلام مشابه",
+    cat_heads: "اقلام به تفکیک نوع قلم", cat_codes: "نقشهٔ کد قلم", cat_titles: "نقشهٔ عنوان قلم", cat_words: "واژه‌نامهٔ یافتن اقلام مشابه", cat_guilds: "گروه اصناف هر کد قلم",
     price_index: "شاخص‌های تعدیل", guild_classes: "طبقه‌های اصناف", supplier_grades: "کد و ردهٔ تأمین‌کنندگان", purchases: "ردیف‌های خرید",
   };
 
@@ -453,6 +453,23 @@
     }
     const codeRows = [...codeShards.keys()].sort().map((s) => [s, JSON.stringify(codeShards.get(s))]);
 
+    /* ----- کد قلم → گروه اصناف (ارجاع و مهلت هوشمند) -----
+       گروهِ طبقهٔ اصناف همان قلم از فایل اصناف؛ طبقه‌ای که در آن فایل نیست، دو رقم اولش
+       («۱۶۰۱۴۱» ← «۱۶۰۰۰۰») و قلمِ بی‌طبقه، «متفرقه» (۳۰۰۰۰۰) که خودش گروهی از همان فهرست است */
+    const GUILD_MISC = "300000";
+    const groupByClass = new Map(X.classes.map((c) => [T(c.code), T(c.group_code)]));
+    const guildOf = (cls) => {
+      const c = ascii(T(cls)).replace(/\D/g, "");
+      return groupByClass.get(c) || (c.length >= 2 ? c.slice(0, 2) + "0000" : GUILD_MISC);
+    };
+    const guildShards = new Map();
+    for (const it of I.items) {
+      const s = shardOf("code", it.code);
+      if (!guildShards.has(s)) guildShards.set(s, {});
+      guildShards.get(s)[it.code] = guildOf(it.cls);
+    }
+    const guildRows = [...guildShards.keys()].sort().map((s) => [s, JSON.stringify(guildShards.get(s))]);
+
     /* ----- عنوان قلم → کد (نرمال‌سازیِ قلمِ بی‌کد یا با کدِ تازه، بی مدل) -----
        عنوانِ تکراری (همه با یک ساختار) کوچک‌ترین کد را نگه می‌دارد تا خروجی قطعی بماند */
     const titleShards = new Map();
@@ -492,7 +509,7 @@
               ردیف‌های خرید هم باید از نو ساخته شوند، وگرنه ستون نوع قلم و قیمت تعدیل‌شده کهنه‌اند.
        rows — خودِ ردیف‌ها، مستقل از ترتیب؛ یکی بود → چیزی برای نوشتن نیست. */
     let cat = 0x811c9dc5;
-    for (const set of [headRows, codeRows, titleRows, wordRows, indexRows, classRows]) for (const r of set) cat = fnv32(r.join("\u0001"), cat);
+    for (const set of [headRows, codeRows, titleRows, wordRows, guildRows, indexRows, classRows]) for (const r of set) cat = fnv32(r.join("\u0001"), cat);
     cat = fnv32(JSON.stringify(meta), cat);
     let adj = 0x811c9dc5;
     for (const it of [...I.items].sort((a, b) => (a.code < b.code ? -1 : 1))) adj = fnv32(`${it.code}\u0001${it.head}\u0001${classIdx.get(it.cls) || ""}`, adj);
@@ -503,7 +520,7 @@
 
     return {
       meta, fp, stats: { ...st, items: I.items.length, heads: meta.heads, srcHeads: srcN.size, layers: I.layers.length, indices: indexRows.length, classes: classRows.length, norm: N.st },
-      tables: { cat_heads: headRows, cat_codes: codeRows, cat_titles: titleRows, cat_words: wordRows, price_index: indexRows, guild_classes: classRows, supplier_grades: gradeRows, purchases },
+      tables: { cat_heads: headRows, cat_codes: codeRows, cat_titles: titleRows, cat_words: wordRows, cat_guilds: guildRows, price_index: indexRows, guild_classes: classRows, supplier_grades: gradeRows, purchases },
     };
   };
 

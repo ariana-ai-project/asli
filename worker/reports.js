@@ -249,9 +249,14 @@ async function loadExperts(env) {
   return (await env.DB.prepare("SELECT id, name, label, senior, senior_id, active FROM experts ORDER BY COALESCE(senior,0) DESC, name").all()).results || [];
 }
 
-/** درخواست‌ها با شمارش اقلام به تفکیک وضعیت و کارشناسِ اصلی — یک ردیف برای هر درخواست */
-async function loadRequestRows(env, years) {
-  const where = years && years.length ? `WHERE substr(r.date,1,4) IN (${years.map(() => "?").join(",")})` : "";
+/** درخواست‌ها با شمارش اقلام به تفکیک وضعیت و کارشناسِ اصلی — یک ردیف برای هر درخواست.
+    `years` سال‌های گزارش سه‌ماهه، `range` بازهٔ روزِ «وضعیت درخواست ها»؛ هر دو اختیاری. */
+async function loadRequestRows(env, years, range) {
+  const cond = [], args = [];
+  if (years && years.length) { cond.push(`substr(r.date,1,4) IN (${years.map(() => "?").join(",")})`); args.push(...years.map(String)); }
+  if (range && range.from) { cond.push("r.date >= ?"); args.push(range.from); }
+  if (range && range.to) { cond.push("r.date <= ?"); args.push(range.to); }
+  const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
   const sql = `SELECT r.id, r.date, r.supply_unit, r.center, r.requester, r.party_type, r.party, r.req_type, r.buy_type,
       COUNT(i.id) AS n, COALESCE(SUM(i.state='closed'),0) AS nc, COALESCE(SUM(i.state='stop'),0) AS ns, COALESCE(SUM(i.state='hold'),0) AS nh,
       GROUP_CONCAT(DISTINCT CASE WHEN i.state='open' THEN i.src_status END) AS ost, MAX(i.src_status) AS anyst, MAX(i.src_expert) AS sx,
@@ -259,7 +264,7 @@ async function loadRequestRows(env, years) {
       (SELECT a.expert_id FROM assignments a WHERE a.request_id=r.id AND a.dispatched_at IS NOT NULL
         ORDER BY (SELECT COUNT(*) FROM items i2 WHERE i2.assignment_id=a.id) DESC, a.dispatched_at DESC LIMIT 1) AS eid
     FROM requests r LEFT JOIN items i ON i.request_id=r.id ${where} GROUP BY r.id ORDER BY r.date DESC, r.id DESC`;
-  return (await env.DB.prepare(sql).bind(...(years || []).map(String)).all()).results || [];
+  return (await env.DB.prepare(sql).bind(...args).all()).results || [];
 }
 
 /** بایگانیِ درخواست‌ها برای گزارش‌ها: یک ردیف خلاصه برای هر درخواستِ فایل راهکاران، باز و بسته — همان شمارش‌هایی
@@ -294,6 +299,11 @@ async function loadSeasonRows(env, P, onlyPeriod = false) {
     env.DB.prepare(`SELECT id, date, center, party, buy_type, n, nc, ns, nh, sx FROM req_hist WHERE ${where}`).bind(...args).all()
       .then((x) => x.results || []).catch(() => []),   /* پیش از نخستین ensureSchema جدول نیست */
   ]);
+  return mergeDeskHist(live, hist);
+}
+
+/** بایگانی + میز: وضعیت اقلامِ میز جلوتر است، و قلمی که فقط در بایگانی است بسته شمرده می‌شود */
+function mergeDeskHist(live, hist) {
   if (!hist.length) return live;
   const desk = new Map(live.map((r) => [r.id, r]));
   const rows = hist.map((h) => {
@@ -305,6 +315,20 @@ async function loadSeasonRows(env, P, onlyPeriod = false) {
     return { ...h, nc: h.n - l.n + l.nc, ns: l.ns, nh: l.nh, ost: l.ost, eid: l.eid };
   });
   return rows.concat([...desk.values()]);
+}
+
+/** «وضعیت درخواست ها» هم از بایگانی می‌خواند، وگرنه فقط درخواست‌های بازِ روی میز را می‌دید */
+async function loadRangeRows(env, R) {
+  const cond = [], args = [];
+  if (R.from) { cond.push("date >= ?"); args.push(R.from); }
+  if (R.to) { cond.push("date <= ?"); args.push(R.to); }
+  const where = cond.length ? `WHERE ${cond.join(" AND ")}` : "";
+  const [live, hist] = await Promise.all([
+    loadRequestRows(env, null, R),
+    env.DB.prepare(`SELECT id, date, party, center, party_type, requester, req_type, supply_unit, buy_type, n, nc, ns, nh, ost, anyst, sx, note FROM req_hist ${where}`)
+      .bind(...args).all().then((x) => x.results || []).catch(() => []),
+  ]);
+  return mergeDeskHist(live, hist).sort((a, b) => (a.date === b.date ? String(b.id).localeCompare(String(a.id)) : a.date < b.date ? 1 : -1));
 }
 
 /** وضعیت مؤثر درخواست — همان منطقِ فیلتر وضعیت میز مدیر، در سطح درخواست */
@@ -344,19 +368,43 @@ export const STATUS_COLUMNS = ["شماره", "تاریخ درخواست", "وض�
 export const STATUS_HIDDEN = [4, 5, 6, 7, 9, 10, 11];
 export const DAILY_COLUMNS = ["ردیف", "شماره درخواست", "تاریخ درخواست", "نام پروژه/مکان تحویل", "کارشناس خرید", "تاریخ تحویل درخواست به کارشناس"];
 
-export async function statusData(env, settings) {
-  const [rows, experts] = await Promise.all([loadRequestRows(env, null), loadExperts(env)]);
+/** بیشترین ردیفی که در یک گزارش وضعیت می‌آید — بایگانی بیست هزار درخواست دارد و پاسخ باید در
+    حافظهٔ Worker و مرورگر جا شود؛ بیشتر از این یعنی بازه را کوچک‌تر کنید (به مدیر گفته می‌شود). */
+export const STATUS_MAX = 6000;
+const DATE_RE = /^\d{4}\/\d{2}\/\d{2}$/;
+/** بازهٔ گزارش وضعیت: تاریخ شمسیِ صفرپَد؛ پایانِ خالی یعنی «تاکنون» */
+export function parseRange(sel = {}) {
+  const one = (v) => {
+    const s = nrm(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/-/g, "/");
+    const m = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/.exec(s);
+    return m ? `${m[1]}/${p2(+m[2])}/${p2(+m[3])}` : "";
+  };
+  let from = one(sel.from), to = one(sel.to);
+  if (from && to && to < from) { const x = from; from = to; to = x; }
+  if (from && !DATE_RE.test(from)) from = "";
+  if (to && !DATE_RE.test(to)) to = "";
+  return { from, to };
+}
+
+export async function statusData(env, settings, sel = {}) {
+  const R = parseRange(sel);
+  const [all, experts] = await Promise.all([loadRangeRows(env, R), loadExperts(env)]);
   const short = shortNames(experts), match = expertMatcher(experts), byId = new Map(experts.map((e) => [e.id, e]));
   const projects = reportProjects(settings);
+  const rows = all.slice(0, STATUS_MAX);
   const general = rows.map((r) => {
     const e = r.eid ? byId.get(r.eid) : match(r.sx);
     return [r.id, r.date, requestStatus(r), T(r.supply_unit), T(r.center), T(r.requester), T(r.party_type), T(r.party), T(r.note), T(r.req_type), "",
       e ? short.get(e.id) : T(r.sx)];
   });
+  const cond = [], args = [];
+  if (R.from) { cond.push("r.date >= ?"); args.push(R.from); }
+  if (R.to) { cond.push("r.date <= ?"); args.push(R.to); }
   const disp = (await env.DB.prepare(`SELECT a.request_id, a.expert_id, a.dispatched_at, r.date, r.party, r.center FROM assignments a JOIN requests r ON r.id=a.request_id
-    WHERE a.dispatched_at IS NOT NULL ORDER BY a.dispatched_at, a.id`).all()).results || [];
+    WHERE a.dispatched_at IS NOT NULL${cond.length ? ` AND ${cond.join(" AND ")}` : ""} ORDER BY a.dispatched_at, a.id`).bind(...args).all()).results || [];
   const daily = disp.map((a, i) => { const p = projectOf(projects, a.party, a.center); return [i + 1, a.request_id, a.date, p ? p.name : T(a.center) || T(a.party), short.get(a.expert_id) || "", jStr(a.dispatched_at)]; });
-  return { columns: STATUS_COLUMNS, hidden: STATUS_HIDDEN, general, dailyColumns: DAILY_COLUMNS, daily, generatedAt: Date.now() };
+  return { columns: STATUS_COLUMNS, hidden: STATUS_HIDDEN, general, dailyColumns: DAILY_COLUMNS, daily, generatedAt: Date.now(),
+    range: R, total: all.length, capped: all.length > rows.length };
 }
 
 export function statusBook(data) {

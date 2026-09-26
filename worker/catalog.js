@@ -73,6 +73,10 @@ export const TABLES = {
     ddl: "CREATE TABLE IF NOT EXISTS cat_titles (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
   cat_words: { per: 1, cols: ["shard", "data"],
     ddl: "CREATE TABLE IF NOT EXISTS cat_words (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
+  /* کد قلم → کد گروه اصناف (طبقهٔ اصناف همان قلم در فهرست، تا سرِ گروهش)، با همان تکه‌بندی کدها:
+     ارجاع و مهلت هوشمند گروه هر قلم را با یک ردیف می‌خوانند، نه با باز کردن کل نوع قلم */
+  cat_guilds: { per: 1, cols: ["shard", "data"],
+    ddl: "CREATE TABLE IF NOT EXISTS cat_guilds (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
   price_index: { per: 10, cols: ["code", "name", "source", "series"],
     ddl: "CREATE TABLE IF NOT EXISTS price_index (code TEXT PRIMARY KEY, name TEXT, source TEXT, series TEXT NOT NULL) WITHOUT ROWID" },
   guild_classes: { per: 20, cols: ["code", "name", "group_code", "group_name", "index_code"],
@@ -85,7 +89,7 @@ export const TABLES = {
 };
 /* هر گروه با یک اثرانگشت تصمیم می‌گیرد از نو ساخته شود یا نه */
 export const GROUPS = {
-  catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "price_index", "guild_classes"],
+  catalog: ["cat_heads", "cat_codes", "cat_titles", "cat_words", "cat_guilds", "price_index", "guild_classes"],
   grades: ["supplier_grades"],
   purchases: ["purchases"],
 };
@@ -233,9 +237,9 @@ const BASE_YM = 1404 * 12 + 12;
 const TTL = 5 * 60000;
 /* ویرایش‌های کارشناس زودتر کهنه می‌شوند: کارشناسِ دیگری در isolate دیگر ذخیره می‌کند */
 const EDITS_TTL = 60000;
-let cache = { at: 0, meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined };
+let cache = { at: 0, meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined, guilds: new Map(), groups: undefined };
 let edits = { at: 0, ix: undefined };
-export const resetCatalogCache = () => { cache = { at: now(), meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined }; edits = { at: 0, ix: undefined }; };
+export const resetCatalogCache = () => { cache = { at: now(), meta: undefined, codes: new Map(), titles: new Map(), part0: new Map(), heads: undefined, guilds: new Map(), groups: undefined }; edits = { at: 0, ix: undefined }; };
 export const resetEditsCache = () => { edits = { at: 0, ix: undefined }; cache.heads = undefined; };
 const fresh = () => { if (now() - cache.at > TTL) resetCatalogCache(); };
 
@@ -268,6 +272,83 @@ export async function headOfCode(env, code) {
   if (!aliasNeedsItem(h)) return CANON.canonHead(h);
   const x = (await storedItems(env, [h])).find((r) => r.item[0] === c);
   return CANON.canonHead(h, x ? { title: x.item[1], layers: x.item[4] } : null);
+}
+
+/* ------------------------------------------------------------------ */
+/* گروه اصناف هر قلم (ارجاع و مهلت هوشمند)                              */
+/* ------------------------------------------------------------------ */
+/* «متفرقه» — گروهِ واقعیِ فهرست اصناف (۳۰۰۰۰۰)، نه برچسبِ ساختگی: قلمی که در فهرست نیست هم
+   همان‌جا شمرده می‌شود و مدیر می‌تواند برایش امتیاز و ضریب بگذارد. */
+export const GUILD_MISC = "300000";
+/** کد گروه از کد طبقهٔ اصناف: دو رقم اول، مثل ۱۶۰۱۴۱ ← ۱۶۰۰۰۰ (قاعدهٔ خودِ فهرست) */
+export const guildGroupOf = (cls) => { const c = ascii(T(cls)).replace(/\D/g, ""); return c.length >= 2 ? c.slice(0, 2) + "0000" : ""; };
+
+/** گروه‌های اصناف موجود در دیتابیس با شمار طبقه‌هایشان — محورِ ماتریس‌های ارجاع و مهلت هوشمند */
+export async function guildGroups(env) {
+  fresh();
+  if (cache.groups === undefined) {
+    const rows = (await env.DB.prepare("SELECT group_code AS code, group_name AS name, COUNT(*) AS n FROM guild_classes WHERE group_code IS NOT NULL AND group_code<>'' GROUP BY 1,2")
+      .all().catch(() => ({ results: [] }))).results || [];
+    const list = rows.map((r) => ({ code: T(r.code), name: nameOf(r.name) || T(r.code), n: Number(r.n) || 0 }))
+      .sort((a, b) => b.n - a.n || a.name.localeCompare(b.name, "fa"));
+    /* «متفرقه» همیشه در فهرست و همیشه ته آن — اقلامِ بیرون از فهرست آن‌جا می‌افتند */
+    const i = list.findIndex((g) => g.code === GUILD_MISC);
+    const misc = i >= 0 ? list.splice(i, 1)[0] : { code: GUILD_MISC, name: "متفرقه", n: 0 };
+    cache.groups = list.length ? [...list, misc] : [];
+  }
+  return cache.groups;
+}
+
+/** گروه اصناف چند کد قلم با هم: نگاشتِ کد → کد گروه. تکه‌های خوانده‌شده در isolate می‌مانند. */
+export async function guildsOfCodes(env, codes) {
+  fresh();
+  const out = new Map(), want = new Map();
+  for (const raw of codes || []) {
+    const c = codeKey(raw); if (!c || out.has(c)) continue;
+    const s = shardOf("code", c);
+    const have = cache.guilds.get(s);
+    if (have) { if (have[c]) out.set(c, have[c]); continue; }
+    if (!want.has(s)) want.set(s, true);
+  }
+  if (want.size) {
+    const shards = [...want.keys()];
+    for (let i = 0; i < shards.length; i += 60) {
+      const part = shards.slice(i, i + 60);
+      const rows = (await env.DB.prepare(`SELECT shard, data FROM cat_guilds WHERE shard IN (${part.map(() => "?").join(",")})`)
+        .bind(...part).all().catch(() => ({ results: [] }))).results || [];
+      const got = new Map(rows.map((r) => [r.shard, parse(r.data)]));
+      for (const s of part) cache.guilds.set(s, got.get(s) || {});
+    }
+    for (const raw of codes || []) {
+      const c = codeKey(raw); if (!c || out.has(c)) continue;
+      const g = (cache.guilds.get(shardOf("code", c)) || {})[c];
+      if (g) out.set(c, g);
+    }
+  }
+  return out;
+}
+
+/**
+ * گروه اصناف اقلامِ یک فهرست ([{code, title}]) — کد قلم، و اگر کدِ راهکاران در فهرست نبود
+ * عنوانِ عیناً همان (cat_titles). آنچه پیدا نشود «متفرقه» است.
+ * خروجی: آرایهٔ کدِ گروه، هم‌ترتیبِ ورودی.
+ */
+export async function guildsOfItems(env, items) {
+  const list = items || [];
+  if (!list.length) return [];
+  const byCode = await guildsOfCodes(env, list.map((x) => x && x.code));
+  const out = list.map((x) => byCode.get(codeKey(x && x.code)) || "");
+  const missing = list.map((x, i) => (out[i] ? null : T(x && x.title))).filter(Boolean);
+  if (missing.length) {
+    const codes = [];
+    for (const t of [...new Set(missing)]) { const c = await codeOfTitle(env, t); if (c) codes.push([t, c]); }
+    if (codes.length) {
+      const g2 = await guildsOfCodes(env, codes.map((x) => x[1]));
+      const byTitle = new Map(codes.map(([t, c]) => [keyOf(t), g2.get(codeKey(c)) || ""]));
+      list.forEach((x, i) => { if (!out[i]) out[i] = byTitle.get(keyOf(x && x.title)) || ""; });
+    }
+  }
+  return out.map((g) => g || GUILD_MISC);
 }
 
 /* ------------------------------------------------------------------ */

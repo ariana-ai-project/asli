@@ -26,7 +26,11 @@
     /* قواعد یکسان‌سازی (عدد و واحد، جنس) — همان دو ماژولی که Worker و ورودگر می‌خوانند */
     import * as rules from "./catalog-rules.mjs";
     import { HEAD_RULES } from "./catalog-head-rules.mjs";
-    (window.TP = window.TP || {}).rules = { ...rules, HEAD_RULES };
+    /* حساب ارجاع و مهلت هوشمند — همان ماژولی که تست‌ها می‌خوانند */
+    import * as plan from "./assign-rules.mjs";
+    const TP = (window.TP = window.TP || {});
+    TP.rules = { ...rules, HEAD_RULES };
+    TP.plan = plan;
   </script>
   <script src="manager.js"></script>
 </body>

@@ -30,17 +30,31 @@
   const WINDOWS = [["3d", "امروز و دو روز گذشته", 2], ["7d", "هفتهٔ اخیر", 6], ["30d", "ماه اخیر", 29], ["all", "همه تاریخ‌ها", null]];
   const fromDate = () => { const w = WINDOWS.find((x) => x[0] === S.filter.window); return w && w[2] != null ? TP.fmtD(S.now - w[2] * DAY) : ""; };
 
-  /* ---------- گروه کالایی (همان الگوهای مرجع؛ زیرساخت ارجاع/مهلت هوشمند) ---------- */
-  const NORMCAT = [
-    [/آچار|انبردست|پیچ.?گوشتی|پتک|چکش|بکس|گیره/, "ابزار دستی"],
-    [/لوله|زانو|سه.?راه|بوش|شیلنگ|سرشیلنگی|فلنج|شیر|لرزه.?گیر|عایق/, "اتصالات و لوله"],
-    [/تابلو|کابل|کنترلر|برق|حضور و غیاب|لپ.?تاپ|جی پی اس|سرسیم|سیم/, "برق و الکترونیک"],
-    [/پمپ|توربو|ترموستات|جک|بلبرینگ|کلاچ|دیسک|صفحه|انژکتور|سوزن|مهره|واشر|پیچ|دم تیغ|کیت|اورینگ|لوازم|تعمیر|فیلتر|روغن|گریس/, "قطعات ماشین‌آلات"],
-    [/سیفون|مخزن|توالت|دستشویی|درجه|مانومتر|سیمان|آجر|گچ/, "تاسیسات و ساختمانی"],
-  ];
-  const CATS = ["ابزار دستی", "اتصالات و لوله", "برق و الکترونیک", "قطعات ماشین‌آلات", "تاسیسات و ساختمانی", "متفرقه"];
-  function catOf(title) { const t = String(title || ""); for (const [re, c] of NORMCAT) if (re.test(t)) return c; return "متفرقه"; }
-  const reqCat = (r) => catOf((r.items[0] || {}).title);
+  /* ---------- محورهای ارجاع و مهلت هوشمند: گروه اصناف و پروژه ----------
+     هر دو از بک‌اند می‌آیند و ثابت‌اند — گروه هر قلم از فهرست اصناف (کد قلم → طبقه → گروه،
+     worker/catalog.js:guildsOfItems) و پروژهٔ هر درخواست از کلیدواژه‌های پروژهٔ گزارش
+     (worker/reports.js:projectOf). پس ماتریس‌ها یک بار پر می‌شوند و با هر بارگذاری روزانه
+     ستون تازه‌ای پیدا نمی‌کنند؛ پنل هم دیگر گروه را از روی عنوان حدس نمی‌زند. */
+  let AX = null, AX_LOADING = false, AX_ERR = null;
+  function needAxes() {
+    if (AX || AX_LOADING || AX_ERR) return;
+    AX_LOADING = true;
+    TP.api("/axes").then((r) => { AX = r; }).catch((e) => { AX_ERR = e.message; })
+      .finally(() => { AX_LOADING = false; render(); });
+  }
+  const GROUPS = () => (AX && AX.groups) || [];
+  const PROJECTS = () => (AX && AX.projects) || [];
+  const groupName = (code) => { const g = GROUPS().find((x) => x.code === code); return g ? g.name : "متفرقه"; };
+  const PL = () => TP.plan;                                    /* assign-rules.mjs */
+  const Wt = () => PL().tables(S.scores.scores, S.scores.weights);
+  const guildsOf = (its) => its.map((i) => i.g || PL().MISC_GUILD);
+  const projOf = (r) => r.project || PL().NO_PROJECT;
+  /* پروژه‌های ماتریس: همهٔ پروژه‌های گزارش، به‌علاوهٔ «بدون پروژه» اگر درخواستی بی‌پروژه روی میز است */
+  const projectKeys = () => {
+    const L = PROJECTS().map((p) => p.name);
+    if (S.data.requests.some((r) => !r.project) || !L.length) L.push(PL().NO_PROJECT);
+    return L;
+  };
 
   /* ---------- مشتقات ---------- */
   const openItems = (r) => r.items.filter((i) => i.state === "open" || i.state === "hold");
@@ -58,14 +72,13 @@
   const scoreOf = (eid, kind, key) => { const s = S.scores.scores.find((x) => x.expert_id === eid && x.kind === kind && x.key === key); return s ? s.score : 3; };
   const weightOf = (kind, key) => { const w = S.scores.weights.find((x) => x.kind === kind && x.key === key); return w ? w.w : 1; };
   /* ---------- ارجاع و مهلت هوشمند: توزیع متوازن با فرض تأیید مدیر ----------
-     «زحمت» هر ارجاع = ضریب پروژه × (۱ واحد سربار درخواست + جمعِ ضریب گروه کالایی اقلامش)؛
-     پس تعداد درخواست، تعداد اقلام، سختی گروه‌ها و اهمیت پروژه همه در آن هست.
-     ظرفیت هر کارشناس = ظرفیت تنظیمات × زحمت یک درخواست میانگین ÷ ضریب سرعت او (عدد
-     کمتر = سریع‌تر = ظرفیت بیشتر). بار فعلی = همهٔ ارجاع‌های باز، ارسال‌شده و ارسال‌نشده،
-     چون فرض این است که مدیر همهٔ پیشنهادها را تأیید می‌کند. */
-  const REQ_OVERHEAD = 1;
-  const speedOf = (e) => Math.max(0.1, Number(e.speed) || 1);
-  const effortOf = (party, titles) => weightOf("party", party) * (REQ_OVERHEAD + titles.reduce((n, t) => n + weightOf("category", catOf(t)), 0));
+     حساب‌ها در assign-rules.mjs اند (تا بی‌مرورگر آزموده شوند) و این‌جا فقط داده‌شان
+     ساخته می‌شود: «زحمت» هر ارجاع = ضریب پروژه × (۱ واحد سربار + جمعِ ضریب گروه اصناف
+     اقلامش)؛ ظرفیت هر کارشناس از تنظیمات و ضریب سرعت او؛ و دو سقفِ سختِ بار باز
+     (درخواست و قلم) که امتیاز ۵ هم از آن‌ها رد نمی‌شود. بار فعلی = همهٔ ارجاع‌های باز،
+     ارسال‌شده و ارسال‌نشده، چون فرض این است که مدیر همهٔ پیشنهادها را تأیید می‌کند. */
+  const activeExperts = () => S.data.experts.filter((e) => e.active);
+  const asgOpts = () => ({ ...settings().assign, capacity: settings().capacity });
   let WL = null, WL_LOADING = false, WL_ERR = null;          /* پاسخ /workload */
   function needWorkload() {
     if (WL || WL_LOADING || WL_ERR) return;
@@ -74,106 +87,20 @@
       .finally(() => { WL_LOADING = false; render(); });
   }
   async function loadWorkload() { WL = await TP.api("/workload"); WL_ERR = null; return WL; }
-  function baseLoads(E) {
-    const L = new Map(E.map((e) => [e.id, { effort: 0, reqs: 0, items: 0 }]));
-    for (const g of (WL && WL.assignments) || []) {
-      const x = L.get(g.expert_id); if (!x) continue;
-      x.effort += effortOf(g.party, g.titles); x.reqs++; x.items += g.titles.length;
-    }
-    return L;
-  }
-  /* زحمت یک درخواست میانگین — مبنای تبدیل «ظرفیت n درخواست» به واحد زحمت */
-  function unitEffort(extra) {
-    const all = [...((WL && WL.assignments) || []).map((g) => effortOf(g.party, g.titles)), ...(extra || [])];
-    return all.length ? all.reduce((n, x) => n + x, 0) / all.length : REQ_OVERHEAD + 1;
-  }
-  const capOf = (e, U) => Math.max(0.5, (Number(settings().capacity) || 8) * U / speedOf(e));
-
-  /**
-   * برنامهٔ ارجاع برای همهٔ درخواست‌های بی‌کارشناس با هم.
-   * امتیاز کل = Σ تخصص (فرمول مدیر: گروه کالایی، پروژه) − Σ جریمهٔ بار؛ جریمه با مجذورِ
-   * درصدِ اشغال رشد می‌کند، پس هر درخواستِ اضافه برای کارشناسِ پرتر گران‌تر است.
-   * چیدمان اولیه حریصانه از بزرگ‌ترین درخواست، بعد جابه‌جایی و تعویض دوتایی تا وقتی
-   * امتیاز کل بهتر شود.
-   */
+  const baseLoads = (E, W2) => PL().buildLoads(E, (WL && WL.assignments) || [], W2 || Wt());
+  /** درخواست‌های بی‌کارشناس → کارهای ورودیِ چیدمان */
+  const jobsOf = (pend) => pend.map((r) => { const its = unassignedOpen(r); return { id: r.id, r, project: projOf(r), guilds: guildsOf(its), items: its.length }; });
   function planAssign(pend) {
-    const E = S.data.experts.filter((e) => e.active);
-    const A = settings().assign;
-    const wa = (+A.a || 0) / 100, wb = (+A.b || 0) / 100, wc = (+A.c || 0) / 100;
-    const sb = A.op1 === "−" ? -1 : 1, sc = A.op2 === "+" ? 1 : -1;
-    const jobs = pend.map((r) => { const titles = unassignedOpen(r).map((i) => i.title); return { r, titles, effort: effortOf(r.party, titles) }; })
-      .sort((x, y) => y.effort - x.effort);
-    const U = unitEffort(jobs.map((j) => j.effort));
-    const before = baseLoads(E);
-    const cap = E.map((e) => capOf(e, U));
-    const loads = E.map((e) => before.get(e.id).effort);
-    const pen = (k, eff) => { const p = 100 * eff / cap[k]; return p * p / 100; };
-    const fit = jobs.map((j) => E.map((e) => {
-      let ws = 0, ss = 0;
-      for (const t of j.titles) { const c = catOf(t), w = weightOf("category", c); ws += w; ss += w * scoreOf(e.id, "category", c); }
-      const g = ws ? ss / ws : scoreOf(e.id, "category", reqCat(j.r));
-      return wa * (g / 5 * 100) + sb * wb * (scoreOf(e.id, "party", j.r.party) / 5 * 100);
-    }));
-    const at = [];
-    jobs.forEach((j, n) => {
-      let best = 0, bestV = -Infinity;
-      E.forEach((e, k) => {
-        const v = fit[n][k] + sc * wc * (pen(k, loads[k] + j.effort) - pen(k, loads[k]));
-        if (v > bestV + 1e-9 || (Math.abs(v - bestV) <= 1e-9 && loads[k] / cap[k] < loads[best] / cap[best])) { best = k; bestV = v; }
-      });
-      at[n] = best; loads[best] += j.effort;
-    });
-    for (let pass = 0; pass < 40 && E.length > 1; pass++) {
-      let moved = false;
-      for (let n = 0; n < jobs.length; n++) {
-        const k1 = at[n], ef = jobs[n].effort;
-        for (let k2 = 0; k2 < E.length; k2++) {
-          if (k2 === k1) continue;
-          const d = fit[n][k2] - fit[n][k1] + sc * wc * (pen(k1, loads[k1] - ef) - pen(k1, loads[k1]) + pen(k2, loads[k2] + ef) - pen(k2, loads[k2]));
-          if (d > 1e-6) { loads[k1] -= ef; loads[k2] += ef; at[n] = k2; moved = true; break; }
-        }
-      }
-      if (jobs.length <= 400) {
-        for (let n = 0; n < jobs.length; n++) {
-          for (let m = n + 1; m < jobs.length; m++) {
-            const k1 = at[n], k2 = at[m]; if (k1 === k2) continue;
-            const e1 = jobs[n].effort, e2 = jobs[m].effort;
-            const d = fit[n][k2] + fit[m][k1] - fit[n][k1] - fit[m][k2]
-              + sc * wc * (pen(k1, loads[k1] - e1 + e2) - pen(k1, loads[k1]) + pen(k2, loads[k2] - e2 + e1) - pen(k2, loads[k2]));
-            if (d > 1e-6) { loads[k1] += e2 - e1; loads[k2] += e1 - e2; at[n] = k2; at[m] = k1; moved = true; }
-          }
-        }
-      }
-      if (!moved) break;
-    }
-    const plan = jobs.map((j, n) => ({ r: j.r, e: E[at[n]], effort: j.effort, items: j.titles.length }));
-    const after = new Map(E.map((e, k) => [e.id, { effort: loads[k], reqs: before.get(e.id).reqs, items: before.get(e.id).items }]));
-    plan.forEach((p) => { const x = after.get(p.e.id); x.reqs++; x.items += p.items; });
-    return { plan, before, after, U, cap: new Map(E.map((e, k) => [e.id, cap[k]])) };
-  }
-
-  /* مهلت یک ارجاع: فرمول مدیر (پایه، سرعت کارشناس، ضریب پروژه، میانگینِ ضریب گروهِ اقلام)
-     × ریشهٔ دومِ تعداد اقلام × ضریب اشغالِ کارشناس (فقط وقتی از ظرفیتش پرتر است). */
-  const OPS = { "×": (x, y) => x * y, "÷": (x, y) => x / (y || 1), "+": (x, y) => x + y, "−": (x, y) => x - y };
-  function deadlineOf(party, titles, e, loadPct) {
-    const D = settings().deadline, f = (x, op, y) => (OPS[op] || OPS["×"])(x, y);
-    const wi = titles.length ? titles.reduce((n, t) => n + weightOf("category", catOf(t)), 0) / titles.length : 1;
-    let v = f(+D.base || 1, D.op1, speedOf(e) * (+D.we || 1));
-    v = f(v, D.op2, weightOf("party", party) * (+D.wp || 1));
-    v = f(v, D.op3, wi * (+D.wi || 1));
-    const size = Math.sqrt(Math.max(1, titles.length)), busy = Math.max(1, (loadPct || 0) / 100);
-    return { days: Math.max(1, Math.round(v * size * busy)), base: v, size, busy };
+    const W2 = Wt(), E = activeExperts();
+    return PL().planAssign({ jobs: jobsOf(pend), experts: E, load: baseLoads(E, W2), W: W2, A: asgOpts() });
   }
   /* list: ارجاع‌های ارسال‌نشده؛ اشغال هر کارشناس از همهٔ ارجاع‌های بازش (با فرض تأیید همه) */
   function planDeadlines(list) {
-    const E = S.data.experts.filter((e) => e.active);
-    const U = unitEffort(), L = baseLoads(E);
-    return list.map(({ r, a }) => {
-      const e = S.data.experts.find((x) => x.id === a.expert_id); if (!e) return null;
-      const titles = itemsOf(r, a).filter((i) => i.state === "open" || i.state === "hold").map((i) => i.title);
-      const x = L.get(e.id), pct = x ? 100 * x.effort / capOf(e, U) : 0;
-      return { r, a, e, pct, items: titles.length, ...deadlineOf(r.party, titles, e, pct) };
-    }).filter(Boolean);
+    const W2 = Wt(), E = activeExperts();
+    const rows = list.map(({ r, a }) => ({ r, a, expert_id: a.expert_id, project: projOf(r),
+      guilds: guildsOf(itemsOf(r, a).filter((i) => i.state === "open" || i.state === "hold")) }));
+    return PL().planDeadlines({ list: rows, experts: S.data.experts, load: baseLoads(E, W2), W: W2, D: settings().deadline, capacity: settings().capacity })
+      .map((x) => ({ ...x, e: x.expert }));
   }
 
   /* ---------- فیلتر (بازه و صفحه سمت سرور؛ جستجوی ستونی سمت کلاینت روی همان صفحه) ---------- */
@@ -631,27 +558,36 @@
   }
 
   /* ---------- ارجاع هوشمند ---------- */
+  /* ماتریس‌های بلند (۲۵ گروه اصناف، ۳۰ پروژه): ستون کارشناس‌ها ثابت می‌ماند و بقیه می‌چرخند */
+  function scoreMatrix(E, kind, keys, attr, label) {
+    return `<div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx mx-sticky"><thead><tr><th class="rt">کارشناس</th>${keys.map((k) => `<th title="${esc(k.title || k.name)}">${esc(k.name)}</th>`).join("")}</tr></thead><tbody>
+      ${E.map((e) => `<tr><td class="name rt">${esc(e.label || e.name)}</td>${keys.map((k) => `<td><input class="tp-input" data-${attr}="${e.id}|${esc(k.key)}" value="${scoreOf(e.id, kind, k.key)}" inputmode="numeric" title="${esc(`${e.label || e.name} — ${k.name}`)}"></td>`).join("")}</tr>`).join("")}
+      ${E.length ? "" : `<tr><td colspan="${keys.length + 1}" class="dim">کارشناس فعالی نیست.</td></tr>`}</tbody></table></div>
+      ${keys.length ? "" : `<div class="tp-note warn">${label}</div>`}`;
+  }
+  const guildKeys = () => GROUPS().map((g) => ({ key: g.code, name: g.name, title: `${g.name} — کد ${g.code}${g.n ? ` · ${g.n} طبقه` : ""}` }));
+  const projKeys = () => projectKeys().map((p) => ({ key: p, name: p.length > 22 ? p.slice(0, 21) + "…" : p, title: p }));
   function vAssign() {
-    const E = S.data.experts.filter((e) => e.active), A = settings().assign;
+    const E = activeExperts(), A = settings().assign, L = PL().limitsOf(A);
     const pend = S.data.requests.filter((r) => unassignedOpen(r).length);
-    const parties = [...new Set(S.data.requests.map((r) => r.party))];
     const opSel = (k, v) => `<select class="tp-select op" data-asg-op="${k}">${["+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
-    const shortP = (p) => p.replace(/^مرکز هزینه\s*/, "").slice(0, 26) + (p.length > 32 ? "…" : "");
-    needWorkload();
-    const P = WL ? planAssign(pend) : null;
+    needWorkload(); needAxes();
+    const P = WL && AX ? planAssign(pend) : null;
     const pctOf = (x, cap) => (cap ? Math.round(100 * x / cap) : 0);
     const bar = (p) => `<span class="bar-load"><i style="width:${Math.min(100, p)}%"></i></span> ${M(p)}٪`;
-    const preview = WL_ERR ? `<div class="tp-note warn">بار فعلی کارشناسان خوانده نشد: ${esc(WL_ERR)}</div>`
-      : !P ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان…</div>`
+    const capCell = (n, max) => `<span class="${n >= max ? "chip warn" : ""}">${M(n)} از ${M(max)}</span>`;
+    const preview = WL_ERR || AX_ERR ? `<div class="tp-note warn">${esc(WL_ERR || AX_ERR)}</div>`
+      : !P ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان و گروه‌های اصناف…</div>`
       : `<div class="tp-sect"><h3>پیش‌نمایش توزیع <span>${P.plan.length ? `با فرض تأیید همهٔ ${M(P.plan.length)} پیشنهاد` : "درخواست بی‌کارشناسی نیست — بار فعلی"}</span></h3>
-        <div class="tp-scroll" data-keep-scroll style="max-height:380px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>درخواست باز</th><th>اقلام باز</th><th>زحمت</th><th>ظرفیت</th><th>اشغال فعلی</th><th>پیشنهاد تازه</th><th>اشغال بعد از تأیید</th></tr></thead><tbody>
+        ${P.over ? `<div class="tp-note warn">${M(P.over)} درخواست از سقف بار همهٔ کارشناسان گذشت و به کم‌بارترین داده شد (با نشان ⚠). سقف‌ها را بالا ببرید یا این درخواست‌ها را دستی ارجاع بدهید.</div>` : ""}
+        <div class="tp-scroll" data-keep-scroll style="max-height:380px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>درخواست باز<br><span class="dim">سقف ${M(L.maxReq)}</span></th><th>اقلام باز<br><span class="dim">سقف ${M(L.maxItems)}</span></th><th>زحمت</th><th>ظرفیت</th><th>اشغال فعلی</th><th>پیشنهاد تازه</th><th>اشغال بعد از تأیید</th></tr></thead><tbody>
         ${E.map((e) => {
-          const b = P.before.get(e.id), a2 = P.after.get(e.id), cap = P.cap.get(e.id), add = P.plan.filter((p) => p.e.id === e.id);
+          const b = P.before.get(e.id), a2 = P.after.get(e.id), cap = P.cap.get(e.id), add = P.plan.filter((p) => p.expert.id === e.id);
           return `<tr><td class="name">${esc(e.label || e.name)}</td>
-            <td class="num">${M(b.reqs)}${add.length ? ` → <b>${M(a2.reqs)}</b>` : ""}</td><td class="num">${M(b.items)}${add.length ? ` → <b>${M(a2.items)}</b>` : ""}</td>
+            <td class="num">${M(b.reqs)}${add.length ? ` → ${capCell(a2.reqs, L.maxReq)}` : ""}</td><td class="num">${M(b.items)}${add.length ? ` → ${capCell(a2.items, L.maxItems)}` : ""}</td>
             <td class="num">${b.effort.toFixed(1)}${add.length ? ` → <b>${a2.effort.toFixed(1)}</b>` : ""}</td><td class="num">${cap.toFixed(1)}</td>
             <td>${bar(pctOf(b.effort, cap))}</td>
-            <td style="white-space:normal;max-width:280px">${add.length ? add.slice(0, 6).map((p) => `<span class="chip num" title="${esc(p.r.party)} · ${M(p.items)} قلم">${esc(p.r.id)}</span>`).join(" ") + (add.length > 6 ? ` <span class="dim">و ${M(add.length - 6)} دیگر</span>` : "") : "—"}</td>
+            <td style="white-space:normal;max-width:280px">${add.length ? add.slice(0, 6).map((p) => `<span class="chip num ${p.over ? "warn" : ""}" title="${esc(p.job.project)} · ${M(p.items)} قلم${p.over ? " · بیش از سقف" : ""}">${p.over ? "⚠ " : ""}${esc(p.id)}</span>`).join(" ") + (add.length > 6 ? ` <span class="dim">و ${M(add.length - 6)} دیگر</span>` : "") : "—"}</td>
             <td>${bar(pctOf(a2.effort, cap))}</td></tr>`;
         }).join("")}
         </tbody></table></div></div>`;
@@ -660,34 +596,36 @@
         <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی درخواست‌های بی‌کارشناس (${pend.length})</button>
         <span class="dim" style="font-size:.85rem">کارشناسی که خودتان انتخاب کرده‌اید دست نمی‌خورد و در بارِ فعلی حساب شده است.</span>
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>ارجاع هوشمند</h2><p class="lead">پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس <b>با هم</b> ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های کالایی، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه. پیشنهاد الزام‌آور نیست و مدیر هرکدام را می‌تواند عوض کند.</p>
+      <h2>ارجاع هوشمند</h2><p class="lead">پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس <b>با هم</b> ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های اصناف، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه. پیشنهاد الزام‌آور نیست و مدیر هرکدام را می‌تواند عوض کند.</p>
       <div class="tp-formula"><span class="eq">امتیاز =</span>
-        <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه کالایی</b></span>${opSel("op1", A.op1)}
+        <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه اصناف</b></span>${opSel("op1", A.op1)}
         <span class="term"><input class="tp-input" data-asg="b" value="${A.b}">٪ <b>سابقه در این پروژه</b></span>${opSel("op2", A.op2)}
         <span class="term"><input class="tp-input" data-asg="c" value="${A.c}">٪ <b>جریمهٔ بار کاری</b></span></div>
-      <div class="tp-note"><b>زحمت هر درخواست</b> = ضریب پروژه × (۱ واحد سربار + جمع ضریب گروه کالایی اقلامش) — ضریب‌ها همان جدول‌های تب «مهلت هوشمند»اند.
-        <b>ظرفیت هر کارشناس</b> = ظرفیت تنظیمات (${M(settings().capacity)} درخواست) × زحمت یک درخواست میانگین ÷ ضریب سرعت او.
-        <b>جریمهٔ بار</b> با مجذور درصد اشغال بزرگ می‌شود؛ پس هرچه کارشناسی پرتر باشد، هر درخواست اضافه برایش گران‌تر است و توزیع خودبه‌خود متوازن می‌شود.
-        بعد از چیدمان اولیه (از بزرگ‌ترین درخواست)، جابه‌جایی‌ها و تعویض‌های دوتایی تا جایی ادامه می‌یابد که امتیاز کل دیگر بهتر نشود. امتیاز ۱ تا ۵ ماتریس‌ها را خودتان می‌دهید؛ پیش‌فرض ۳.</div>
+      <div class="tp-fields3" style="margin-top:10px">
+        <div class="tp-field"><b>حداکثر درخواست باز هر کارشناس</b><input class="tp-input" data-asg="maxReq" value="${esc(A.maxReq == null ? PL().DEFAULT_LIMITS.maxReq : A.maxReq)}" inputmode="numeric"></div>
+        <div class="tp-field"><b>حداکثر قلم باز هر کارشناس</b><input class="tp-input" data-asg="maxItems" value="${esc(A.maxItems == null ? PL().DEFAULT_LIMITS.maxItems : A.maxItems)}" inputmode="numeric"></div>
+        <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
+      <div class="tp-note"><b>سقف بار</b> از امتیاز جلوتر است: کارشناسی که به یکی از دو سقف رسیده، هرچند امتیازش ۵ باشد، درخواست تازه نمی‌گیرد. اگر همه پر باشند، درخواست به کم‌بارترین می‌رود و با ⚠ نشان داده می‌شود.
+        <b>زحمت هر درخواست</b> = ضریب پروژه × (۱ واحد سربار + جمع ضریب گروه اصناف اقلامش) — ضریب‌ها همان جدول‌های تب «مهلت هوشمند»اند.
+        <b>ظرفیت هر کارشناس</b> = ظرفیت تنظیمات (${M(settings().capacity)} درخواست) × زحمت یک درخواست میانگین ÷ ضریب سرعت او؛ <b>جریمهٔ بار</b> با مجذور درصد اشغال بزرگ می‌شود، پس توزیع خودبه‌خود متوازن می‌شود.
+        امتیاز ۱ تا ۵ ماتریس‌ها را خودتان می‌دهید؛ پیش‌فرض ۳. هر دو ماتریس از همان اول کامل‌اند و یک بار پر می‌شوند — با درخواست تازه ستون تازه‌ای اضافه نمی‌شود.</div>
       ${preview}
-      <div class="tp-sect"><h3>۱. ماتریس کارشناس / گروه کالایی <span>امتیاز ۱ تا ۵</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:320px"><table class="tp-mx"><thead><tr><th>کارشناس</th>${CATS.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>
-        ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td>${CATS.map((c) => `<td><input class="tp-input" data-g="${e.id}|${esc(c)}" value="${scoreOf(e.id, "category", c)}" inputmode="numeric"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۲. ماتریس کارشناس / پروژه <span>امتیاز ۱ تا ۵ — فقط طرف‌های موجود در میز</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:320px"><table class="tp-mx"><thead><tr><th>کارشناس</th>${parties.map((p) => `<th title="${esc(p)}">${esc(shortP(p))}</th>`).join("")}</tr></thead><tbody>
-        ${E.map((e) => `<tr><td class="name">${esc(e.label || e.name)}</td>${parties.map((p) => `<td><input class="tp-input" data-p="${e.id}|${esc(p)}" value="${scoreOf(e.id, "party", p)}" inputmode="numeric"></td>`).join("")}</tr>`).join("")}</tbody></table></div></div></div>`;
+      <div class="tp-sect"><h3>۱. ماتریس کارشناس / گروه اصناف <span>امتیاز ۱ تا ۵ — ${M(GROUPS().length)} گروه فهرست اصناف</span></h3>
+        ${scoreMatrix(E, "guild", guildKeys(), "g", "فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در تب «سوابق تأمین» بارگذاری کنید.")}</div>
+      <div class="tp-sect"><h3>۲. ماتریس کارشناس / پروژه <span>امتیاز ۱ تا ۵ — ${M(projectKeys().length)} پروژه</span></h3>
+        ${scoreMatrix(E, "project", projKeys(), "p", "پروژه‌ای تعریف نشده است.")}</div></div>`;
   }
 
   /* ---------- مهلت هوشمند ---------- */
   function vDeadline() {
-    const E = S.data.experts.filter((e) => e.active), D = settings().deadline;
+    const E = activeExperts(), D = settings().deadline;
     const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && !(Number(a.days) > 0)).map((a) => ({ r, a })));
-    const parties = [...new Set(S.data.requests.map((r) => r.party))];
     const opSel = (k, v) => `<select class="tp-select op" data-dl-op="${k}">${["×", "÷", "+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
-    const shortP = (p) => p.replace(/^مرکز هزینه\s*/, "").slice(0, 30) + (p.length > 36 ? "…" : "");
-    needWorkload();
-    const plans = WL ? planDeadlines(list) : [];
+    needWorkload(); needAxes();
+    const plans = WL && AX ? planDeadlines(list) : [];
     const x0 = plans[0];
-    const preview = WL_ERR ? `<div class="tp-note warn">بار فعلی کارشناسان خوانده نشد: ${esc(WL_ERR)}</div>`
-      : !WL ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان…</div>`
+    const preview = WL_ERR || AX_ERR ? `<div class="tp-note warn">${esc(WL_ERR || AX_ERR)}</div>`
+      : !WL || !AX ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان و گروه‌های اصناف…</div>`
       : plans.length ? `<div class="tp-sect"><h3>پیش‌نمایش مهلت‌ها <span>${M(plans.length)} ارجاع ارسال‌نشده — با فرض تأیید همه</span></h3>
         <div class="tp-scroll" data-keep-scroll style="max-height:360px"><table class="tp-mx"><thead><tr><th>درخواست</th><th>کارشناس</th><th>اقلام</th><th>فرمول</th><th>√اقلام</th><th>اشغال کارشناس</th><th>مهلت پیشنهادی</th></tr></thead><tbody>
         ${plans.slice(0, 60).map((x) => `<tr><td class="num">${esc(x.r.id)}</td><td class="name">${esc(x.e.label || x.e.name)}</td><td class="num">${M(x.items)}</td>
@@ -695,34 +633,38 @@
         </tbody></table></div></div>` : "";
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-dl ${list.length && WL ? "" : "disabled"}>اعمال روی ارجاع‌های ارسال‌نشدهٔ بی‌مهلت (${list.length})</button>
+        <button class="tp-btn primary" data-apply-dl ${list.length && WL && AX ? "" : "disabled"}>اعمال روی ارجاع‌های ارسال‌نشدهٔ بی‌مهلت (${list.length})</button>
         ${x0 ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: فرمول ${x0.base.toFixed(2)} × √اقلام ${x0.size.toFixed(2)} × اشغال ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></span>` : ""}
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>مهلت هوشمند</h2><p class="lead">مهلت هر ارجاع با فرض تأیید همهٔ ارجاع‌ها حساب می‌شود: فرمول زیر (پایه، سرعت کارشناس، ضریب پروژه، و میانگین ضریب گروه کالایی اقلام) × ریشهٔ دوم تعداد اقلام × ضریب اشغال کارشناس. اشغال، بار همهٔ ارجاع‌های باز اوست بر ظرفیتش؛ تا ظرفیت، ضریبش ۱ است و بالاتر از آن مهلت به همان نسبت بلندتر می‌شود. نتیجه گرد و حداقل ۱ روز است.</p>
+      <h2>مهلت هوشمند</h2><p class="lead">مهلت هر ارجاع با فرض تأیید همهٔ ارجاع‌ها حساب می‌شود: فرمول زیر (پایه، سرعت کارشناس، ضریب پروژه، و میانگین ضریب گروه اصناف اقلام — گروهی که بک‌اند برای هر قلم از فهرست اقلام درمی‌آورد) × ریشهٔ دوم تعداد اقلام × ضریب اشغال کارشناس. اشغال، بار همهٔ ارجاع‌های باز اوست بر ظرفیتش؛ تا ظرفیت، ضریبش ۱ است و بالاتر از آن مهلت به همان نسبت بلندتر می‌شود. نتیجه گرد و حداقل ۱ روز است.</p>
       <div class="tp-formula"><span class="eq">مهلت (روز) =</span>
         <span class="term"><input class="tp-input" data-dl="base" value="${D.base}"> <b>پایه</b></span>${opSel("op1", D.op1)}
         <span class="term"><input class="tp-input" data-dl="we" value="${D.we}"> <b>ضریب کارشناس</b></span>${opSel("op2", D.op2)}
         <span class="term"><input class="tp-input" data-dl="wp" value="${D.wp}"> <b>ضریب پروژه</b></span>${opSel("op3", D.op3)}
-        <span class="term"><input class="tp-input" data-dl="wi" value="${D.wi}"> <b>ضریب گروه کالایی</b></span>
+        <span class="term"><input class="tp-input" data-dl="wi" value="${D.wi}"> <b>ضریب گروه اصناف</b></span>
         <span class="eq">× √تعداد اقلام × ضریب اشغال</span></div>
       ${preview}
       <div class="tp-sect"><h3>۱. سرعت انجام کار کارشناس <span>عدد کمتر یعنی سریع‌تر — ظرفیت هم به همان نسبت بیشتر</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>ضریب</th></tr></thead><tbody>
         ${E.map((x) => `<tr><td class="name">${esc(x.label || x.name)}</td><td><input class="tp-input" data-sp="${x.id}" value="${x.speed}"></td></tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۲. زمان موردنیاز گروه کالایی <span>همین ضریب «سختی» قلم در ارجاع هوشمند است</span></h3><div class="tp-scroll" style="max-height:300px"><table class="tp-mx"><thead><tr><th>گروه کالایی</th><th>ضریب</th></tr></thead><tbody>
-        ${CATS.map((c) => `<tr><td class="name">${c}</td><td><input class="tp-input" data-cw="${esc(c)}" value="${weightOf("category", c)}"></td></tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۳. زمان موردنیاز پروژه <span>همین ضریب «اهمیت» پروژه در ارجاع هوشمند است</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>پروژه</th><th>ضریب</th></tr></thead><tbody>
-        ${parties.map((p) => `<tr><td class="name" title="${esc(p)}">${esc(shortP(p))}</td><td><input class="tp-input" data-pw="${esc(p)}" value="${weightOf("party", p)}"></td></tr>`).join("")}</tbody></table></div></div></div>`;
+      <div class="tp-sect"><h3>۲. اهمیت و زمان هر گروه اصناف <span>همین ضریب «سختی» قلم در ارجاع هوشمند است — ${M(GROUPS().length)} گروه فهرست اصناف</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx"><thead><tr><th class="rt">گروه اصناف</th><th>کد</th><th>طبقه</th><th>ضریب</th></tr></thead><tbody>
+        ${GROUPS().map((g) => `<tr><td class="name rt">${esc(g.name)}</td><td class="num dim">${esc(g.code)}</td><td class="num dim">${M(g.n)}</td><td><input class="tp-input" data-cw="${esc(g.code)}" value="${weightOf("guild", g.code)}"></td></tr>`).join("")
+          || `<tr><td colspan="4" class="dim">فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در تب «سوابق تأمین» بارگذاری کنید.</td></tr>`}</tbody></table></div></div>
+      <div class="tp-sect"><h3>۳. اهمیت و زمان هر پروژه <span>همین ضریب «اهمیت» پروژه در ارجاع هوشمند است — ${M(projectKeys().length)} پروژه</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx"><thead><tr><th class="rt">پروژه</th><th>شهر</th><th>مدیر پروژه</th><th>ضریب</th></tr></thead><tbody>
+        ${projectKeys().map((p) => { const x = PROJECTS().find((y) => y.name === p) || {}; return `<tr><td class="name rt" title="${esc(p)}">${esc(p)}</td><td class="dim">${esc(x.city || "")}</td><td class="dim">${esc(x.manager || "")}</td><td><input class="tp-input" data-pw="${esc(p)}" value="${weightOf("project", p)}"></td></tr>`; }).join("")}</tbody></table></div></div></div>`;
   }
 
   /* ---------- اقلام و کدها (کد واقعی راهکاران — نیازی به کدِ ساختگی نیست) ---------- */
   function vNorm() {
+    needAxes();
     const seen = new Map();
-    S.data.requests.forEach((r) => r.items.forEach((it) => { const k = it.code || it.title; if (!seen.has(k)) seen.set(k, { code: it.code, title: it.title, unit: it.unit, n: 0, cat: catOf(it.title) }); seen.get(k).n++; }));
+    S.data.requests.forEach((r) => r.items.forEach((it) => { const k = it.code || it.title; if (!seen.has(k)) seen.set(k, { code: it.code, title: it.title, unit: it.unit, n: 0, g: it.g || "" }); seen.get(k).n++; }));
     const list = [...seen.values()].sort((a, b) => b.n - a.n);
+    const known = list.filter((x) => x.g && x.g !== PL().MISC_GUILD).length;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>اقلام و کدها</h2>
-      <p class="lead">کد هر قلم همان «کد قلم خریدنی» راهکاران است (یک کد ⇄ یک عنوان). گروه کالایی برای ارجاع/مهلت هوشمند از روی عنوان حدس زده می‌شود و در ماتریس‌ها قابل تنظیم است.</p>
-      <div class="tp-scroll" style="max-height:60vh"><table class="tp-mx"><thead><tr><th>کد قلم</th><th style="width:44%">عنوان</th><th>واحد</th><th>تکرار در میز</th><th>گروه کالایی</th></tr></thead><tbody>
-        ${list.map((x) => `<tr><td class="num" style="color:var(--tp-accent);font-weight:700">${esc(x.code || "—")}</td><td class="name" style="white-space:normal">${esc(x.title)}</td><td>${esc(x.unit)}</td><td class="num">${x.n}</td><td>${esc(x.cat)}</td></tr>`).join("")}
+      <p class="lead">کد هر قلم همان «کد قلم خریدنی» راهکاران است (یک کد ⇄ یک عنوان). گروه اصناف هر قلم در بک‌اند از فهرست اقلام خوانده می‌شود — کد قلم → طبقهٔ اصناف → گروه — و همان گروهی است که در ارجاع و مهلت هوشمند امتیاز و ضریب می‌گیرد.
+        ${M(known)} از ${M(list.length)} قلم در فهرست اصناف پیدا شد؛ بقیه «متفرقه» شمرده می‌شوند.</p>
+      <div class="tp-scroll" style="max-height:60vh"><table class="tp-mx"><thead><tr><th>کد قلم</th><th style="width:42%">عنوان</th><th>واحد</th><th>تکرار در میز</th><th>گروه اصناف</th></tr></thead><tbody>
+        ${list.map((x) => `<tr><td class="num" style="color:var(--tp-accent);font-weight:700">${esc(x.code || "—")}</td><td class="name" style="white-space:normal">${esc(x.title)}</td><td>${esc(x.unit)}</td><td class="num">${x.n}</td><td title="${esc(x.g || "")}">${esc(groupName(x.g))}</td></tr>`).join("")}
       </tbody></table></div></div>`;
   }
 
@@ -745,8 +687,14 @@
      اکسل واحد، و برگهٔ «گزارش روزانه» با فیلتر ستون‌ها) و «گزارش سه ماهه» (تیک برگه‌ها، سال/فصل/ماه
      چندانتخابی، تیکِ کارشناسانِ همان دوره پیش از ساخت، پیش‌نمایش همان برگه‌ها و نمودارهایی که در
      فایل می‌رود). ساخت داده و فایل در worker/reports.js. */
+  /* بازهٔ «وضعیت درخواست‌ها»: از ابتدای ماه جاری تا «تاکنون» — بایگانی بیست هزار درخواست دارد
+     و بی بازه، پاسخ هم سنگین است هم بی‌فایده. مدیر هر دو سر بازه را عوض می‌کند؛ پایانِ خالی
+     یعنی تاکنون. */
+  const monthStart = () => { const [y, m] = TP.todayJ(); return `${y}/${String(m).padStart(2, "0")}/01`; };
   const RP = { part: "status", meta: null, metaLoading: false, status: null, loading: false, sheet: "general", sl: { 2: [], 7: [], 11: [] }, hidden: false, limit: 300,
-    dq: ["", "", "", "", "", ""], dLimit: 300, pop: null, season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false } };
+    dq: ["", "", "", "", "", ""], dLimit: 300, pop: null, range: { from: monthStart(), to: "" }, rangeKey: "",
+    season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false } };
+  const rangeQs = () => `?from=${encodeURIComponent(RP.range.from || "")}&to=${encodeURIComponent(RP.range.to || "")}`;
   const SL = [[2, "وضعیت"], [7, "طرف مقابل"], [11, "کارشناس خرید"]];
   const RP_ST_ORDER = ["بسته شده", "تایید شده", "ثبت شده", "در جریان", "بررسی مجدد", "متوقف شده", "معلق"];
   const RP_MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
@@ -765,8 +713,8 @@
     RP.metaLoading = false; render();
   }
   async function loadRepStatus() {
-    RP.loading = true;
-    try { RP.status = await TP.api("/reports/status"); RP.err = ""; } catch (e) { RP.err = e.message; }
+    RP.loading = true; RP.rangeKey = `${RP.range.from}|${RP.range.to}`;
+    try { RP.status = await TP.api("/reports/status" + rangeQs()); RP.err = ""; } catch (e) { RP.err = e.message; }
     RP.loading = false; render();
   }
   /* دانلود فایل از مسیرهای گزارش — TP.api فقط JSON می‌خواند */
@@ -805,15 +753,27 @@
       ${part === "status" ? vRepStatus() : vRepSeason()}</div>`;
   }
 
+  /* بازهٔ گزارش وضعیت — تاریخ شروع و پایان از تقویم؛ پایانِ خالی یعنی «تاکنون» */
+  function vRepRange() {
+    const R = RP.range, stale = RP.status && RP.rangeKey !== `${R.from}|${R.to}`;
+    return `<div class="rp-range">
+      <span class="lab">از تاریخ</span><input class="tp-input date" data-rfrom value="${esc(R.from)}" placeholder="از ابتدا" readonly style="width:120px;text-align:center">
+      <span class="lab">تا تاریخ</span><input class="tp-input date" data-rto value="${esc(R.to)}" placeholder="تاکنون" readonly style="width:120px;text-align:center">
+      <label class="chip ${R.to ? "" : "on"}" style="cursor:pointer;padding:4px 12px" title="بازه تا امروز ادامه دارد"><input type="checkbox" data-rnow ${R.to ? "" : "checked"}> تاکنون</label>
+      <button class="tp-btn xs" data-rquick="month">ماه جاری</button><button class="tp-btn xs" data-rquick="year">سال جاری</button><button class="tp-btn xs" data-rquick="all">همه</button>
+      <button class="tp-btn sm ${stale ? "primary" : ""}" data-rstatus-reload>${stale ? "نمایش این بازه" : "↻ به‌روزرسانی"}</button>
+      ${stale ? `<span class="chip warn">بازه عوض شده — برای دیدنش دکمه را بزنید</span>` : ""}</div>`;
+  }
   function vRepStatus() {
     const D = RP.status;
-    if (!D) { if (!RP.loading) loadRepStatus(); return `<div class="empty">در حال ساخت گزارش وضعیت درخواست‌ها…</div>`; }
+    if (!D) { if (!RP.loading) loadRepStatus(); return vRepRange() + `<div class="empty">در حال ساخت گزارش وضعیت درخواست‌ها…</div>`; }
     const tabs = [["general", "درخواست کلی"], ["daily", "گزارش روزانه"]].map(([k, l]) => `<button class="rp-sheet ${RP.sheet === k ? "on" : ""}" data-rsheet="${k}">${l}</button>`).join("");
-    return `<div class="rp-tools"><div class="rp-sheets">${tabs}</div><span class="rp-sp"></span>
+    const R = D.range || {};
+    return vRepRange() + `<div class="rp-tools"><div class="rp-sheets">${tabs}</div><span class="rp-sp"></span>
         ${RP.sheet === "general" ? `<label class="chip" style="cursor:pointer;padding:3px 10px"><input type="checkbox" data-rhidden ${RP.hidden ? "checked" : ""}> ستون‌های پنهان فایل را هم نشان بده</label>` : ""}
-        <button class="tp-btn sm" data-rstatus-reload title="ساخت دوباره از آخرین داده‌ها">↻ به‌روزرسانی</button>
         <button class="tp-btn sm primary" data-rstatus-xlsx>دانلود اکسل (هر دو برگه)</button>
-        <span class="dim" style="font-size:.8rem">ساخته‌شده ${TP.fmt(D.generatedAt)}</span></div>
+        <span class="dim" style="font-size:.8rem">${esc(R.from ? `از ${R.from}` : "از ابتدا")} ${esc(R.to ? `تا ${R.to}` : "تاکنون")} · ساخته‌شده ${TP.fmt(D.generatedAt)}</span></div>
+      ${D.capped ? `<div class="tp-note warn">این بازه ${M(D.total)} درخواست دارد و فقط ${M(D.general.length)} تای تازه‌ترش آمد؛ برای دیدن بقیه بازه را کوچک‌تر کنید (فایل اکسل هم همین‌قدر است).</div>` : ""}
       ${RP.sheet === "general" ? vRepGeneral() : vRepDaily()}`;
   }
   function vRepGeneral() {
@@ -1087,7 +1047,8 @@
           keys: v("keys").value.split(/[،,]/).map((x) => x.trim()).filter(Boolean), noSystem: v("noSystem").checked || undefined }; }).filter((p) => p.name);
         const managers = d.querySelector("[data-pmgr]").value.split("\n").map((x) => x.trim()).filter(Boolean);
         const old = meta.projects.find((p) => p.note); rows.forEach((p) => { const o = meta.projects.find((x) => x.name === p.name && x.note); if (o && p.noSystem) p.note = o.note; });
-        try { await TP.api("/settings", { method: "PUT", body: { reportProjects: rows, reportManagers: managers } }); RP.meta = null; RP.season.result = null; render(); }
+        /* پروژه‌ها محورِ ماتریس‌های ارجاع و مهلت هوشمند هم هستند */
+        try { await TP.api("/settings", { method: "PUT", body: { reportProjects: rows, reportManagers: managers } }); RP.meta = null; RP.season.result = null; AX = null; AX_ERR = null; render(); }
         catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
         void old;
       }, "ذخیره");
@@ -1103,8 +1064,17 @@
     Q("[data-rpart]").forEach((b) => b.onclick = () => { RP.part = b.dataset.rpart; RP.pop = null; render(); });
     Q("[data-rsheet]").forEach((b) => b.onclick = () => { RP.sheet = b.dataset.rsheet; render(); });
     const rh = G("[data-rhidden]"); if (rh) rh.onchange = (e) => { RP.hidden = e.target.checked; render(); };
-    const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; render(); };
-    const rx = G("[data-rstatus-xlsx]"); if (rx) rx.onclick = () => repDownload("/reports/status.xlsx", null, "وضعیت درخواست ها.xlsx");
+    const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; RP.limit = 300; RP.dLimit = 300; render(); };
+    const rx = G("[data-rstatus-xlsx]"); if (rx) rx.onclick = () => repDownload("/reports/status.xlsx" + rangeQs(), null, "وضعیت درخواست ها.xlsx");
+    /* بازهٔ گزارش وضعیت */
+    const rfr = G("[data-rfrom]"); if (rfr) rfr.onclick = () => TP.openDatePicker(rfr, (v) => { RP.range.from = String(v || "").split("،")[0].trim(); render(); }, { single: true });
+    const rto = G("[data-rto]"); if (rto) rto.onclick = () => TP.openDatePicker(rto, (v) => { RP.range.to = String(v || "").split("،")[0].trim(); render(); }, { single: true });
+    const rnow = G("[data-rnow]"); if (rnow) rnow.onchange = (e) => { if (e.target.checked) RP.range.to = ""; else { const [y, m, d] = TP.todayJ(); RP.range.to = `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`; } render(); };
+    Q("[data-rquick]").forEach((b) => b.onclick = () => {
+      const [y] = TP.todayJ(), k = b.dataset.rquick;
+      RP.range = { from: k === "all" ? "" : k === "year" ? `${y}/01/01` : monthStart(), to: "" };
+      RP.status = null; RP.limit = 300; RP.dLimit = 300; render();
+    });
     Q("[data-sl]").forEach((b) => b.onclick = () => { const sel = RP.sl[+b.dataset.sl], k = b.dataset.k, i = sel.indexOf(k); if (!sel.length) sel.push(k); else if (i >= 0) sel.splice(i, 1); else sel.push(k); RP.limit = 300; render(); });
     Q("[data-slclear]").forEach((b) => b.onclick = () => { RP.sl[+b.dataset.slclear] = []; render(); });
     const sa = G("[data-slall]"); if (sa) sa.onclick = () => { SL.forEach(([c]) => { RP.sl[c] = []; }); render(); };
@@ -1255,15 +1225,16 @@
     /* ماتریس‌ها — فقط همان خانهٔ تغییرکرده فرستاده می‌شود؛ سرور upsert می‌کند */
     const setScore = (eid, kind, key, v) => { const x = S.scores.scores.find((s) => s.expert_id === eid && s.kind === kind && s.key === key); const score = Math.max(0, Math.min(5, +String(v).replace(/[^0-9]/g, "") || 0)); if (x) x.score = score; else S.scores.scores.push({ expert_id: eid, kind, key, score }); return score; };
     const setW = (kind, key, v) => { const x = S.scores.weights.find((s) => s.kind === kind && s.key === key); const w = +v || 1; if (x) x.w = w; else S.scores.weights.push({ kind, key, w }); return w; };
-    Q("[data-g]").forEach((i) => i.oninput = (e) => { const [eid, c] = e.target.dataset.g.split("|"); const score = setScore(+eid, "category", c, e.target.value);
-      autoSave(`g:${e.target.dataset.g}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "category", key: c, score }] } })); TP.keepFocus(e.target, "g", render); });
-    Q("[data-p]").forEach((i) => i.oninput = (e) => { const [eid, p] = e.target.dataset.p.split("|"); const score = setScore(+eid, "party", p, e.target.value);
-      autoSave(`p:${e.target.dataset.p}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "party", key: p, score }] } })); TP.keepFocus(e.target, "p", render); });
+    /* کلید امتیازها: گروه اصناف (کد گروه) و پروژه (نام پروژهٔ گزارش) — هر دو ثابت‌اند */
+    Q("[data-g]").forEach((i) => i.oninput = (e) => { const [eid, c] = e.target.dataset.g.split("|"); const score = setScore(+eid, "guild", c, e.target.value);
+      autoSave(`g:${e.target.dataset.g}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "guild", key: c, score }] } })); TP.keepFocus(e.target, "g", render); });
+    Q("[data-p]").forEach((i) => i.oninput = (e) => { const [eid, p] = e.target.dataset.p.split("|"); const score = setScore(+eid, "project", p, e.target.value);
+      autoSave(`p:${e.target.dataset.p}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "project", key: p, score }] } })); TP.keepFocus(e.target, "p", render); });
     Q("[data-sp]").forEach((i) => i.onchange = async (e) => { const ex = S.data.experts.find((x) => x.id === +e.target.dataset.sp); ex.speed = +e.target.value || 1; await TP.api(`/experts/${ex.id}`, { method: "PUT", body: { speed: ex.speed } }); savedFlash(); render(); });
-    Q("[data-cw]").forEach((i) => i.oninput = (e) => { const w = setW("category", e.target.dataset.cw, e.target.value);
-      autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "category", key: e.target.dataset.cw, w }] } })); TP.keepFocus(e.target, "cw", render); });
-    Q("[data-pw]").forEach((i) => i.oninput = (e) => { const w = setW("party", e.target.dataset.pw, e.target.value);
-      autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "party", key: e.target.dataset.pw, w }] } })); TP.keepFocus(e.target, "pw", render); });
+    Q("[data-cw]").forEach((i) => i.oninput = (e) => { const w = setW("guild", e.target.dataset.cw, e.target.value);
+      autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "guild", key: e.target.dataset.cw, w }] } })); TP.keepFocus(e.target, "cw", render); });
+    Q("[data-pw]").forEach((i) => i.oninput = (e) => { const w = setW("project", e.target.dataset.pw, e.target.value);
+      autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "project", key: e.target.dataset.pw, w }] } })); TP.keepFocus(e.target, "pw", render); });
     const aa = G("[data-apply-asg]"); if (aa) aa.onclick = applyAssignAll;
     const ad = G("[data-apply-dl]"); if (ad) ad.onclick = applyDeadlineAll;
     Q("[data-dec]").forEach((b) => b.onclick = async () => {
@@ -1306,17 +1277,18 @@
   async function applyAssignAll() {
     const pend = S.data.requests.filter((r) => unassignedOpen(r).length);
     if (!pend.length) return TP.modal("ارجاع هوشمند", "درخواستِ بی‌کارشناسی نیست.", null, "باشد", "");
-    const b = TP.busy("اعمال ارجاع هوشمند…", `${pend.length} درخواست`); let n = 0;
+    const b = TP.busy("اعمال ارجاع هوشمند…", `${pend.length} درخواست`); let n = 0, P = null;
     try {
       await loadWorkload();
-      const P = planAssign(pend);
+      if (!AX) AX = await TP.api("/axes");
+      P = planAssign(pend);
       for (const p of P.plan) {
-        await TP.api("/assign", { body: { request_id: p.r.id, expert_id: p.e.id, item_ids: unassignedOpen(p.r).map((i) => i.id), source: "smart" } });
+        await TP.api("/assign", { body: { request_id: p.id, expert_id: p.expert.id, item_ids: unassignedOpen(p.job.r).map((i) => i.id), source: "smart" } });
         n++; b.set(`${n} از ${P.plan.length}`);
       }
     } catch (e) { b.close(); WL = null; await refresh(); return TP.modal("ارجاع هوشمند نیمه‌کاره ماند", `${n} درخواست ارجاع شد؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد — توزیع با فرض تأیید همه متوازن شده است. هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
+    TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد — توزیع با فرض تأیید همه متوازن شده است و سقف بار هر کارشناس رعایت شده.${P && P.over ? `<br><br><b>${M(P.over)} درخواست</b> از سقف همهٔ کارشناسان گذشت و به کم‌بارترین داده شد؛ در تب «ارجاع هوشمند» با ⚠ دیده می‌شوند.` : ""} هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
   }
   /* فقط ارجاع‌های ارسال‌نشده‌ای که هنوز مهلت ندارند (تصمیم مدیر): مهلتی که خودِ مدیر گذاشته نمی‌پرد
      و در اشغالِ کارشناس (بار همهٔ ارجاع‌های باز) از قبل حساب شده است */
@@ -1326,6 +1298,7 @@
     const b = TP.busy("اعمال مهلت هوشمند…", `${list.length} ارجاع`); let n = 0;
     try {
       await loadWorkload();
+      if (!AX) AX = await TP.api("/axes");
       for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days, source: "smart" } }); n++; b.set(`${n} از ${list.length}`); }
     } catch (e) { b.close(); await refresh(); return TP.modal("مهلت هوشمند نیمه‌کاره ماند", `${n} ارجاع مهلت گرفت؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
     b.close(); await refresh(); S.tab = "desk"; render();

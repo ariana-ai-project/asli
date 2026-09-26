@@ -28,7 +28,7 @@ import { bundleData, readiness, commissionGuard, recordCommission } from "./bund
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { historyStatus, itemHistory, supplierBuys, itemSeries, ratesWithShares } from "./history.js";
-import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allHeads } from "./catalog.js";
+import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allHeads, guildGroups, guildsOfItems } from "./catalog.js";
 import { normalizeItem, confirmNorm, clearNorm, revertEdit } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
@@ -36,7 +36,7 @@ import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
 import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putReportTeam, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS,
-  REQ_HIST_COLS, REQ_HIST_DDL, reqHistValues } from "./reports.js";
+  REQ_HIST_COLS, REQ_HIST_DDL, reqHistValues, reportProjects, projectOf } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
@@ -633,23 +633,51 @@ async function desk(env, url) {
   const res2 = await env.DB.batch(second);
   const byReq = new Map(reqs.map((r) => [r.id, { ...r, items: [], assignments: [] }]));
   res2.forEach((r, k) => (r.results || []).forEach((x) => { const g = byReq.get(x.request_id); if (g) (k % 2 ? g.assignments : g.items).push(x); }));
-  return { requests: [...byReq.values()], ...extra };
+  const out = [...byReq.values()];
+  /* پروژهٔ هر درخواست و گروه اصناف هر قلم از همین‌جا می‌روند: ارجاع و مهلت هوشمند نباید
+     پروژه را از روی نام طرف مقابل و گروه را از روی عنوان حدس بزنند (تصمیم مدیر، مهر ۱۴۰۵) */
+  await withProjectsAndGuilds(env, out, extra.settings);
+  return { requests: out, ...extra };
+}
+
+/** پروژهٔ هر درخواست (projectOf) و گروه اصناف هر قلم (فهرست اقلام) — روی همان شیءها */
+async function withProjectsAndGuilds(env, requests, settings) {
+  const projects = reportProjects(settings), memo = new Map();
+  for (const r of requests) {
+    const k = `${r.party}\u0001${r.center}`;
+    let p = memo.get(k);
+    if (p === undefined) { const x = projectOf(projects, r.party, r.center); memo.set(k, p = x ? x.name : null); }
+    r.project = p;
+  }
+  const items = requests.flatMap((r) => r.items || []);
+  if (!items.length) return;
+  const gs = await guildsOfItems(env, items.map((i) => ({ code: i.code, title: i.title })));
+  items.forEach((i, k) => { i.g = gs[k]; });
 }
 
 /* بار باز کارشناسان برای ارجاع و مهلت هوشمند: همهٔ ارجاع‌هایی که قلم باز یا معلق دارند —
-   ارسال‌شده و ارسال‌نشده، چون فرض پیشنهادها «تأیید همه» است — با طرف مقابل و عنوان اقلام.
-   گروه کالایی را پنل از روی عنوان حدس می‌زند، پس این‌جا فقط دادهٔ خام می‌رود. */
-async function workload(env) {
-  const rows = (await env.DB.prepare(`SELECT a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party, i.title
+   ارسال‌شده و ارسال‌نشده، چون فرض پیشنهادها «تأیید همه» است — با پروژه و گروه اصناف اقلام
+   (هر دو این‌جا شناسایی می‌شوند، نه با حدسِ پنل از روی نام و عنوان). */
+async function workload(env, settings) {
+  const rows = (await env.DB.prepare(`SELECT a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party, r.center, i.code, i.title
     FROM assignments a JOIN requests r ON r.id=a.request_id JOIN items i ON i.assignment_id=a.id
     WHERE i.state IN ('open','hold') ORDER BY a.id LIMIT 20000`).all()).results || [];
   const by = new Map();
   for (const x of rows) {
     let g = by.get(x.aid);
-    if (!g) { g = { aid: x.aid, expert_id: x.expert_id, request_id: x.request_id, dispatched: !!x.dispatched_at, party: x.party, titles: [] }; by.set(x.aid, g); }
-    g.titles.push(x.title);
+    if (!g) { g = { aid: x.aid, expert_id: x.expert_id, request_id: x.request_id, dispatched: !!x.dispatched_at, party: x.party, center: x.center, items: [], titles: [] }; by.set(x.aid, g); }
+    g.items.push({ code: x.code, title: x.title }); g.titles.push(x.title);
   }
-  return { assignments: [...by.values()] };
+  const list = [...by.values()];
+  await withProjectsAndGuilds(env, list, settings || await getSettings(env));
+  for (const g of list) { g.guilds = g.items.map((i) => i.g); delete g.items; delete g.center; }
+  return { assignments: list };
+}
+
+/** گروه‌های اصناف و پروژه‌های گزارش — محورهای ماتریس‌های ارجاع و مهلت هوشمند (یک بار پر می‌شوند) */
+async function axes(env, settings) {
+  const s = settings || await getSettings(env);
+  return { groups: await guildGroups(env), projects: reportProjects(s).map((p) => ({ name: p.name, city: p.city || "", manager: p.manager || "" })) };
 }
 
 /* کارشناس‌های ارشد اول، بعد بقیه — همان ترتیبی که فهرست انتخاب کارشناس در میز باید داشته باشد */
@@ -1400,6 +1428,8 @@ async function route(request, env, ctx) {
     }
     if (path === "/scores" && m === "GET") { await requireAny(request, env); return json(await scoresGet(env)); }
     if (path === "/scores" && m === "PUT") { requireManager(request, env); return json(await scoresPut(env, await readJson(request))); }
+    /* محورهای ماتریس‌های ارجاع و مهلت هوشمند: گروه‌های اصناف دیتابیس و پروژه‌های گزارش */
+    if (path === "/axes" && m === "GET") { requireManager(request, env); return json(await axes(env)); }
 
     /* --- بارگذاری اکسل (مدیر) --- */
     if (path === "/import/begin" && m === "POST") { requireManager(request, env); return json(await importBegin(env, await readJson(request))); }
@@ -1759,8 +1789,10 @@ async function route(request, env, ctx) {
       const settings = await getSettings(env);
       const xlsx = (bytes, name) => new Response(bytes, { headers: { "content-type": XLSX_MIME, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, "cache-control": "private, no-store" } });
       if (path === "/reports/meta" && m === "GET") return json(await reportMeta(env, settings));
-      if (path === "/reports/status" && m === "GET") return json(await statusData(env, settings));
-      if (path === "/reports/status.xlsx" && m === "GET") return xlsx(await bookFile(statusBook(await statusData(env, settings))), `وضعیت درخواست ها ${jStr(now()).replace(/\//g, "-")}.xlsx`);
+      /* بازهٔ گزارش وضعیت: from تاریخ شروع، to تاریخ پایان (خالی = تاکنون) */
+      const range = { from: url.searchParams.get("from"), to: url.searchParams.get("to") };
+      if (path === "/reports/status" && m === "GET") return json(await statusData(env, settings, range));
+      if (path === "/reports/status.xlsx" && m === "GET") return xlsx(await bookFile(statusBook(await statusData(env, settings, range))), `وضعیت درخواست ها ${jStr(now()).replace(/\//g, "-")}.xlsx`);
       /* کارشناسانِ بازهٔ انتخابی، برای تیکِ کارشناسانی که در گزارش بیایند */
       if (path === "/reports/season/experts" && m === "POST") return json(await seasonExperts(env, await readJson(request)));
       if ((path === "/reports/season" || path === "/reports/season.xlsx") && m === "POST") {
