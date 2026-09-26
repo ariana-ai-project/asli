@@ -18,7 +18,7 @@ import { existsSync, readFileSync, readdirSync } from "node:fs";
 
 import { loadTP, sqliteD1 } from "./run.mjs";
 import * as W from "../../../worker/catalog.js";
-import { itemHistory, supplierBuys, itemSeries, resolveScope, excludedWhy } from "../../../worker/history.js";
+import { itemHistory, supplierBuys, itemSeries, resolveScope, excludedWhy, ratesWithShares } from "../../../worker/history.js";
 import { normalizeItem, confirmNorm, revertEdit, scoreHeads, nearestItems, settle, conventionLines, userPrompt } from "../../../worker/normalize.js";
 
 const TP0 = loadTP();
@@ -47,11 +47,19 @@ const ITEM_HEAD = ["کد قلم", "عنوان قلم", "نوع قلم", "واح�
 const item = (code, title, head, ref, cl, cls, attrs) => [code, title, head, ref, cl, cls, "",
   attrs["اندازه"] || "", attrs["جنس"] || "", attrs["نمره"] || "", JSON.stringify(attrs)];
 
-function booksOf({ idxA1402 = 50, extraRow = null, sheet = false } = {}) {
+/* میلگرد با دو نام (یکسان‌سازیِ دوم، تصمیم مدیر): «آرماتور» و «میلگرد» یک کالایند و نمره‌شان قطر است */
+const REBAR_ITEMS = [
+  ["5001", "آرماتور 12 A3", "آرماتور", { "نمره": "12", "اندازه": "A3" }],
+  ["5002", "میلگرد 12", "میلگرد", { "نمره": "12" }],
+  ["5003", "میلگرد 16", "میلگرد", { "نمره": "16" }],
+];
+
+function booksOf({ idxA1402 = 50, extraRow = null, sheet = false, rebar = false } = {}) {
   const layers = sheet ? [...LAYERS, ["ضخامت", "thickness"], ["پوشش", "coating"]] : LAYERS;
   const items = book({
     items: [ITEM_HEAD,
       ...(sheet ? SHEET_ITEMS.map(([code, title, a]) => item(code, title, "ورق", "کیلوگرم", "C09", "300", a)) : []),
+      ...(rebar ? REBAR_ITEMS.map(([code, title, head, a]) => item(code, title, head, "کیلوگرم", "C09", "300", a)) : []),
       item("1001", "پیچ آلن M8 فولادی", "پیچ", "عدد", "C04", "200", { "اندازه": "M8", "جنس": "فولاد" }),
       item("1002", "پیچ آلن M8 فولاد", "پیچ", "عدد", "C04", "200", { "اندازه": "M8", "جنس": "فولاد" }),
       item("1003", "پیچ M10", "پیچ", "عدد", "C04", "200", { "اندازه": "M10" }),
@@ -72,9 +80,11 @@ function booksOf({ idxA1402 = 50, extraRow = null, sheet = false } = {}) {
   });
   const RATE = ["نوع قلم", "واحد ثبت‌شده", "واحد مرجع", "نرخ تبدیل به واحد مرجع", "مبنای نرخ", "اطمینان"];
   const units = book({
-    ref_units: [["نوع قلم", "واحد مرجع"], ["پیچ", "عدد"], ["مهره", "عدد"], ["تیر آهن", "شاخه"]],
+    ref_units: [["نوع قلم", "واحد مرجع"], ["پیچ", "عدد"], ["مهره", "عدد"], ["تیر آهن", "شاخه"],
+      ...(rebar ? [["آرماتور", "کیلوگرم"], ["میلگرد", "کیلوگرم"]] : [])],
     head_rates: [RATE, ["پیچ", "کیلو گرم", "عدد", 50, "برآورد قیمتی", "متوسط"], ["پیچ", "بسته", "عدد", 100, "بستهٔ استاندارد صنفی", "بالا"],
-      ["تیر آهن", "تن", "شاخه", 5, "برآورد قیمتی", "پایین"]],
+      ["تیر آهن", "تن", "شاخه", 5, "برآورد قیمتی", "پایین"],
+      ...(rebar ? [["آرماتور", "تن", "کیلوگرم", 1000, "تبدیل قطعی", "قطعی"], ["میلگرد", "تن", "کیلوگرم", 1000, "تبدیل قطعی", "قطعی"]] : [])],
     cluster_rates: [["کد خوشه", "نام خوشه", ...RATE], ["C04", "پیچ", "پیچ", "کیلو گرم", "عدد", 40, "برآورد قیمتی", "پایین"],
       ["C04", "پیچ", "پیچ", "جین", "عدد", 12, "تبدیل قطعی", "قطعی"]],
     item_rates: [["کد قلم", "عنوان قلم", "نوع قلم", "واحد ثبت‌شده", "واحد مرجع", "نرخ تبدیل به واحد مرجع", "مبنای نرخ", "منشأ"],
@@ -92,6 +102,11 @@ function booksOf({ idxA1402 = 50, extraRow = null, sheet = false } = {}) {
     ["6", "1401/01/15", "بسته شده", "کارشناس الف", "2001", "مهره M8", 5, "عدد", 50000, "سایر تامین کنندگان", null, null, 1, "بهار", "1401"],
   ];
   if (extraRow) rows.push(extraRow);
+  if (rebar) rows.push(
+    ["31", "1403/05/01", "بسته شده", "کارشناس الف", "5001", "آرماتور 12 A3", 1000, "کیلوگرم", 30000000, "آهن‌فروشی ج", null, null, 5, "تابستان", "1403"],
+    ["32", "1403/05/02", "بسته شده", "کارشناس الف", "5002", "میلگرد 12", 500, "کیلوگرم", 15000000, "آهن‌فروشی د", null, null, 5, "تابستان", "1403"],
+    ["33", "1403/05/03", "بسته شده", "کارشناس الف", "5002", "میلگرد 12", 2, "تن", 60000000, "آهن‌فروشی د", null, null, 5, "تابستان", "1403"],
+    ["34", "1403/05/04", "بسته شده", "کارشناس الف", "5003", "میلگرد 16", 300, "کیلوگرم", 9000000, "آهن‌فروشی ه", null, null, 5, "تابستان", "1403"]);
   if (sheet) rows.push(
     ["21", "1403/05/01", "بسته شده", "کارشناس الف", "4001", "ورق 2 میل", 100, "کیلوگرم", 4000000, "آهن‌فروشی الف", null, null, 5, "تابستان", "1403"],
     ["22", "1403/05/02", "بسته شده", "کارشناس الف", "4002", "ورق آهن 3 میل", 50, "کیلوگرم", 2000000, "آهن‌فروشی ب", null, null, 5, "تابستان", "1403"],
@@ -270,7 +285,7 @@ test("قاعدهٔ عام ۱ و ۲ در صافیِ خروجی مدل: «ورق 2
   const bolt = await settle(noCatalog, META, { head: "انکر بولت", layers: [{ name: "قطر", value: "M24", unit: "", implicit: false }, { name: "طول", value: "810", unit: "میلی‌متر", implicit: false }], residual: "", confidence: "high" }, "انکر بولت M24*810");
   assert.deepEqual(plain(bolt.layers), { "قطر": { v: "M24", n: [24], u: "میلی‌متر" }, "طول": { v: "810", n: [810], u: "" } }, "طول بی‌عرف: نامعلوم، نه حدسِ مدل");
   /* «1/2» بی‌واحد با عرفِ اینچیِ همان نوع قلم نیم اینچ است، نه ۱٫۲ */
-  const inchEnv = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ data: JSON.stringify({ ref: "عدد", n: 1, uc: { "قطر": [{ u: "اینچ", n: 9, lo: 0.25, hi: 4 }] }, items: [] }) }] }), first: async () => null }) }) } };
+  const inchEnv = { DB: { prepare: () => ({ bind: () => ({ all: async () => ({ results: [{ head: "مغزی", part: 0, data: JSON.stringify({ ref: "عدد", n: 1, uc: { "قطر": [{ u: "اینچ", n: 9, lo: 0.25, hi: 4 }] }, items: [] }) }] }), first: async () => null }) }) } };
   const nip = await settle(inchEnv, META, { head: "مغزی", layers: [{ name: "قطر", value: "1/2", unit: "", implicit: false }], residual: "", confidence: "high" }, "مغزی 1/2");
   assert.deepEqual(plain(nip.layers["قطر"]), { v: "1/2", n: [0.5], u: "اینچ", i: 1 });
   /* مدل خودش «ورق گالوانیزه» را برگزیده ولی عنوان جنسی نگفته: حدس است، عرف (آهنی) می‌ماند */
@@ -478,7 +493,12 @@ test("نرمال‌سازی: کد در فهرست ← بی‌مدل؛ عنوان
     assert.ok(cat.rates.units.some((u) => u.unit === "کیلو گرم" && u.rate === 50));
 
     const fresh = { id: 9, code: null, title: "پیچ آلن M8 فولادی گالوانیزه", spec: "" };
-    const m = await normalizeItem(env, fresh);
+    /* مدل هزینه دارد: بی تأییدِ کارشناس (model) صدا زده نمی‌شود و پاسخ فقط می‌گوید «مدل لازم است» */
+    const ask = await normalizeItem(env, fresh);
+    assert.equal(ask.source, "none"); assert.equal(ask.needsModel, true);
+    assert.ok(ask.costEst > 0, "هزینهٔ تقریبی برای کادرِ تأیید");
+    assert.equal(calls.length, 0, "بی تأیید، مدل صدا زده نشد");
+    const m = await normalizeItem(env, fresh, { model: true });
     assert.equal(m.source, "model");
     assert.deepEqual(plain(m.layers), { "اندازه": "M8", "جنس": "آهنی" }, "لایهٔ ناشناخته کنار رفت؛ جنس با نام استاندارد");
     assert.equal(calls.length, 1);
@@ -525,6 +545,78 @@ test("ورق در سوابق: «نوع قلم» یعنی فقط ورق آهنی�
   assert.deepEqual(o.suppliers.map((s) => s.name), ["آهن‌فروشی الف"]);
 });
 
+/* ---------------- یکسان‌سازیِ دوم و «قلم انتخابی» (تصمیم مدیر، مهر ۱۴۰۵) ---------------- */
+
+test("آرماتور همان میلگرد است: یک نوع قلم، نمره ← قطر، سوابقِ هر دو نام با هم — بی بازنویسی دیتابیس", { skip: SKIP }, async () => {
+  const { env } = await loaded(build({ rebar: true }));
+  /* دیتابیس همان‌طور که بارگذاری شده می‌ماند: «آرماتور آهنی» و «میلگرد آهنی» دو ردیف‌اند */
+  const stored = env.DB.raw.prepare("SELECT head FROM cat_heads WHERE part=0 AND (head LIKE 'آرماتور%' OR head LIKE 'میلگرد%') ORDER BY head").all().map((r) => r.head);
+  assert.deepEqual(stored, ["آرماتور آهنی", "میلگرد آهنی"]);
+  assert.equal(await W.headOfCode(env, "5001"), "میلگرد آهنی", "کدِ آرماتور به نامِ استاندارد");
+  const heads = await W.allHeads(env);
+  assert.ok(heads.includes("میلگرد آهنی") && !heads.includes("آرماتور آهنی"), "نامِ هم‌معنا در فهرستِ انتخاب نیست");
+  const it = { id: 50, code: "5001", title: "آرماتور 12 A3", norm_json: null };
+  const head = await itemHistory(env, it, { mode: "head" });
+  assert.equal(head.struct.head, "میلگرد آهنی");
+  assert.deepEqual(plain(head.struct.layers["قطر"]), { v: "12", n: [12], u: "میلی‌متر", i: 1 }, "نمره ۱۲ ← قطر ۱۲ میلی‌متر");
+  assert.equal(head.struct.layers["نمره"], undefined);
+  assert.deepEqual(head.suppliers.map((s) => s.name).sort(), ["آهن‌فروشی ج", "آهن‌فروشی د", "آهن‌فروشی ه"].sort(), "سوابقِ هر دو نام");
+  assert.equal(head.totals.qty, 1000 + 500 + 2000 + 300, "تن به کیلوگرم");
+  /* «عین قلم»: قطرِ ۱۲ ولی «اندازهٔ A3»ِ آرماتور لایهٔ اضافه است */
+  const exact = await itemHistory(env, { id: 51, code: "5002", title: "میلگرد 12", norm_json: null }, { mode: "exact" });
+  assert.deepEqual(exact.suppliers.map((s) => s.name), ["آهن‌فروشی د"]);
+});
+
+test("قلم انتخابی: فقط لایه‌های تیک‌خورده برابر (از هر کد)، و فقط واحدهای تیک‌خورده در همهٔ جمع‌ها", { skip: SKIP }, async () => {
+  const { env } = await loaded(build({ rebar: true }));
+  const it = { id: 52, code: "5002", title: "میلگرد 12", norm_json: null };
+  /* بی تیکِ لایه: همان «نوع قلم» */
+  const none = await itemHistory(env, it, { mode: "pick", pick: { layers: [], units: [] } });
+  assert.equal(none.match.codes, 3); assert.equal(none.suppliers.length, 3);
+  /* قطرِ ۱۲: آرماتورِ ۵۰۰۱ (با لایهٔ اضافهٔ A3) و میلگردِ ۵۰۰۲ — دو کدِ متفاوت، همان قطر */
+  const d12 = await itemHistory(env, it, { mode: "pick", pick: { layers: ["قطر"], units: [] } });
+  assert.equal(d12.match.codes, 2);
+  assert.deepEqual(d12.match.picked, ["قطر"]);
+  assert.deepEqual(d12.suppliers.map((s) => s.name).sort(), ["آهن‌فروشی ج", "آهن‌فروشی د"].sort());
+  /* فقط کیلوگرم: خریدِ «تن»ِ آهن‌فروشی د در هیچ جمعی نیست */
+  const kg = await itemHistory(env, it, { mode: "pick", pick: { layers: ["قطر"], units: ["کیلوگرم"] } });
+  const dd = kg.suppliers.find((s) => s.name === "آهن‌فروشی د");
+  assert.equal(dd.qty, 500); assert.equal(dd.n, 1);
+  assert.equal(kg.unitDropped, 1);
+  assert.equal(kg.totals.qty, 1500);
+  const buys = await supplierBuys(env, it, "آهن‌فروشی د", { mode: "pick", pick: { layers: ["قطر"], units: ["کیلوگرم"] } });
+  assert.deepEqual(buys.buys.map((b) => b.unit), ["کیلوگرم"], "ریز خریدها هم");
+  const pts = await itemSeries(env, it, { mode: "pick", pick: { layers: ["قطر"], units: ["کیلوگرم"] } });
+  assert.equal(pts.points.reduce((a, p) => a + p.qty, 0), 1500, "نمودار هم");
+  /* لایه‌ای که این قلم ندارد نادیده است */
+  assert.equal((await itemHistory(env, it, { mode: "pick", pick: { layers: ["ضخامت"], units: [] } })).match.codes, 3);
+});
+
+test("سهمِ هر واحد از کلِ خریدِ نوع قلم (به واحد مرجع) کنار نرخ‌ها — همان جمعیتِ جدول تأمین‌کنندگان", { skip: SKIP }, async () => {
+  const { env } = await loaded(build({ rebar: true }));
+  const p = await normalizeItem(env, { id: 53, code: "5002", title: "میلگرد 12" });
+  const rv = await ratesWithShares(env, p.rates, p.head, p.code);
+  assert.equal(rv.ref, "کیلوگرم");
+  assert.equal(rv.total, 3800);
+  assert.equal(rv.refRow.unit, "کیلوگرم");
+  assert.equal(Math.round(rv.refRow.share * 10) / 10, 47.4, "۱۸۰۰ از ۳۸۰۰ کیلوگرم");
+  const ton = rv.units.find((u) => u.unit === "تن");
+  assert.equal(ton.rate, 1000); assert.equal(ton.rows, 1); assert.equal(Math.round(ton.share * 10) / 10, 52.6);
+  const head = await itemHistory(env, { id: 53, code: "5002", title: "میلگرد 12", norm_json: null }, { mode: "head" });
+  assert.equal(rv.total, head.totals.qty, "همان جمعِ جدول تأمین‌کنندگان");
+});
+
+test("ریز خریدها: قیمت واحد و مبلغ کل، و هر دو به مبلغِ زمستان ۱۴۰۴ با ضریبِ تعدیلِ همان ردیف", { skip: SKIP }, async () => {
+  const { env } = await loaded();
+  const r = await supplierBuys(env, it1001, "شرکت الف", { mode: "exact" });
+  const b = r.buys.find((x) => x.order_date === "1402/02/10");
+  assert.equal(b.unit_price, 10000);
+  assert.equal(b.adj_factor, 2, "شاخص بهار ۱۴۰۲ = ۵۰ ← ضریب ۲");
+  assert.equal(b.unit_price_adj, 20000, "قیمت واحد × ضریب");
+  assert.equal(b.amount_adj, 2000000, "مبلغ کل × ضریب");
+  assert.equal(b.unit_price_adj, b.unit_price * b.adj_factor);
+});
+
 /* ---------------- دیتابیس پیش از مدل، و ذخیرهٔ کارشناس در دیتابیس اصلی (تصمیم مدیر، مهر ۱۴۰۵) ---------------- */
 
 /* مدلِ ساختگی که فقط می‌شمارد چند بار صدا زده شد — این بخش نباید هرگز به آن برسد مگر قلمِ تازه */
@@ -557,14 +649,20 @@ test("نرمال‌سازی: کد، بعد عنوانِ عیناً همان — 
     const f = await normalizeItem(env, { id: 62, code: "1001", title: "هرچه" }, { force: true });
     assert.equal(f.source, "catalog");
     assert.equal(calls.length, 0, "کد یا عنوان در دیتابیس بود → مدل صدا زده نشد");
-    /* فقط قلمی که نه کدش و نه عنوانش در دیتابیس است */
-    const m = await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" });
+    /* فقط قلمی که نه کدش و نه عنوانش در دیتابیس است — و فقط با تأییدِ هزینه */
+    assert.equal((await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" })).needsModel, true);
+    assert.equal(calls.length, 0);
+    const m = await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { model: true });
     assert.equal(m.source, "model"); assert.equal(calls.length, 1);
     /* جستجوی سوابق با تیکِ نرمال‌سازی، بی تأیید: ساختارِ دیتابیس (با عنوان) */
     const h = await itemHistory(env, { id: 60, code: null, title: "پيچ آلن M8 فولادی" }, { norm: true, mode: "exact" });
     assert.equal(h.match.source, "title"); assert.equal(h.match.codes, 2);
     const g = await itemHistory(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { norm: true, mode: "head" });
-    assert.match(g.message, /ذخیره/, "پیشنهادِ مدل تا ذخیره نشود مبنای جستجو نیست");
+    assert.match(g.message, /ذخیره/, "پیشنهادِ مدل تا ذخیره نشود، بی خودِ پیشنهاد مبنای جستجو نیست");
+    /* پنل پیشنهادِ ذخیره‌نشده را همراهِ درخواست می‌فرستد: فقط خوانده می‌شود */
+    const p = await itemHistory(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { norm: true, mode: "head", struct: { head: m.head, layers: m.layers } });
+    assert.equal(p.match.source, "proposal"); assert.equal(p.struct.head, "پیچ");
+    assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM item_edits").get().n, 0, "چیزی در دیتابیس ننشست");
   });
 });
 
@@ -574,20 +672,21 @@ test("ذخیرهٔ کارشناس در دیتابیس اصلی: درخواستِ
     const a = { id: 70, code: "1003", title: "پیچ M10" };
     rowOf(env, 70, a);
     const who = { role: "expert", expert: { id: 5, name: "ابوذر بهمنی", label: "آقای بهمنی" } };
+    /* «نمره ۸٫۸»ِ پیچ کلاسِ استحکام است — یکسان‌سازیِ دوم آن را به «رده» می‌برد */
     const r = await confirmNorm(env, a, { head: "پیچ", layers: { "اندازه": "M10", "نمره": "8.8" }, source: "catalog", code: "1003" }, who);
     assert.equal(r.saved, "created"); assert.equal(r.norm.source, "edit");
     assert.equal(r.edit.by, "آقای بهمنی");
     /* درخواستِ دیگر با همان کد — بی تأیید، بی مدل */
     const b = await normalizeItem(env, { id: 71, code: "1003", title: "پیچ ده" });
     assert.equal(b.source, "edit");
-    assert.deepEqual(layersOf(b), { "اندازه": "M10", "نمره": "8.8", "جنس": { v: "آهنی", i: 1 } });
+    assert.deepEqual(layersOf(b), { "اندازه": "M10", "رده": "8.8", "جنس": { v: "آهنی", i: 1 } });
     assert.equal(b.edit.by, "آقای بهمنی");
     /* همان عنوان بی‌کد هم (عنوان → کد ۱۰۰۳ → ویرایش) */
     assert.equal((await normalizeItem(env, { id: 72, code: null, title: "پیچ M10" })).source, "edit");
     assert.equal(calls.length, 0);
     /* جستجوی «عین قلم» با کدِ ۱۰۰۳ بی تیکِ نرمال‌سازی هم بر لایه‌های تازه است */
     const sc = await resolveScope(env, { id: 73, code: "1003", title: "x" }, { norm: false, mode: "exact" });
-    assert.equal(sc.struct.layers["نمره"], "8.8", "ساختار از دیتابیس اصلی، نه فهرستِ خام");
+    assert.equal(sc.struct.layers["رده"], "8.8", "ساختار از دیتابیس اصلی، نه فهرستِ خام");
     /* دوباره ذخیره، این بار عیناً همان فهرست: ویرایش برداشته می‌شود */
     const back = await confirmNorm(env, a, { head: "پیچ", layers: { "اندازه": "M10" }, source: "edit", code: "1003" }, who);
     assert.equal(back.saved, "reverted");

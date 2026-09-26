@@ -51,6 +51,7 @@
     normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
     hmode: "head",                     // «نوع قلم» (head، پیش‌فرض — تصمیم مدیر) یا «عین قلم» (exact)
     tg: null,              // وضعیت اتصال تلگرام: {connected, botConfigured, bot}
+    pick: {},              // «قلم انتخابی» هر قلم: {layers: [نام لایه‌های تیک‌خورده], units: [واحدهای تیک‌خورده] | null = همه}
     letter: null,          // وضعیت نامهٔ ارجاع باز: {aid, letter, stt} — از /assignments/:id/letter
     /* ضبط صدای نامه: rec = MediaRecorder باز، draft = متنِ در حال ویرایش (که
        بازرندرِ تیک‌های موضوع نباید ببلعدش)، sel = اقلامِ موضوع */
@@ -363,7 +364,7 @@
   } catch (_) { /* حالت خصوصی */ }
   const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدار بدون زبالهٔ اعشار شناور */
   const HSORT = { m: "rankM", qty: "rankQty", n: "rankN" };
-  const HMODE_FA = { exact: "عین قلم", head: "نوع قلم" };
+  const HMODE_FA = { exact: "عین قلم", head: "نوع قلم", pick: "قلم انتخابی" };
   /* چرا یک نام در سهم و رتبه نیامده (worker/history.js:excludedWhy) */
   const EXCL_WHY = {
     bucket: "نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
@@ -394,15 +395,35 @@
   const isQuant = (k) => !!(RL() && RL().QUANT[k]);
   /* واحدهای هم‌بُعدِ یک لایهٔ کمّی (ضخامت: میلی‌متر، سانتی‌متر، اینچ …) */
   const unitsFor = (k) => { const R = RL(); if (!R || !R.QUANT[k]) return []; const d = R.QUANT[k]; return R.UNIT_NAMES.filter((u) => d.includes("*") || d.includes(R.UNITS[u].dim)); };
-  /* هزینهٔ تقریبیِ یک تفکیک با مدل (Haiku) تا وقتی سرور میانگینِ واقعی را نگفته — همان worker/normalize.js:NORM_COST_EST */
+  /* هزینهٔ تقریبیِ یک تفکیک با مدل (Haiku) تا وقتی سرور میانگینِ واقعی را نگفته — همان worker/normalize.js:NORM_COST_EST.
+     روی صفحه نشان داده نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵)؛ فقط در کادرِ تأییدی که پیش از هر فراخوانی مدل باز می‌شود. */
   const NORM_COST_EST = 0.006;
   const costTxt = (c) => `≈ ${Number(c).toLocaleString("en-US", { maximumFractionDigits: 4 })} دلار`;
-  /* پارامترهای جستجو: حالت، و اینکه بر ساختار تأییدشدهٔ نرمال‌سازی باشد یا فقط کد راهکاران */
-  const histQuery = (it) => `item_id=${it.id}&k=${S.mom}&mode=${S.hmode}&norm=${S.normOn ? 1 : 0}`;
-  /* جستجو با تیکِ نرمال‌سازی: ساختارِ ذخیره‌شده، یا ساختاری که خودِ دیتابیس داده (بی تأیید)؛
-     پیشنهادِ مدل تا ذخیره نشود نه */
-  const normReady = (it) => { const n = S.norm[it.id]; return !!(n && n.data && (n.data.confirmed || DB_SRC.has(n.data.source))); };
+  /* «قلم انتخابی» هر قلم: لایه‌های تیک‌خورده، و واحدهای تیک‌خورده (null = همه) */
+  const pickOf = (it) => S.pick[it.id] || (S.pick[it.id] = { layers: [], units: null });
+  /* پارامترهای جستجو. جستجو همیشه بر ساختارِ نرمال‌سازی است (ذخیره‌شده، یا دیتابیس با کد/عنوان)؛ پیشنهادِ
+     ذخیره‌نشدهٔ مدل همراهِ درخواست می‌رود و فقط خوانده می‌شود. تیکِ «نرمال‌سازی اقلام» فقط کادرِ لایه‌ها را
+     نشان می‌دهد (تصمیم مدیر، مهر ۱۴۰۵). */
+  const unsaved = (n) => !!(n && n.data && n.data.head && !n.data.confirmed && !DB_SRC.has(n.data.source) && !n.data.needsModel);
+  const histQuery = (it) => {
+    let q = `item_id=${it.id}&k=${S.mom}&mode=${S.hmode}&norm=1`;
+    const n = S.norm[it.id];
+    if (unsaved(n)) q += `&struct=${encodeURIComponent(JSON.stringify({ head: n.data.head, layers: n.data.layers || {} }))}`;
+    if (S.hmode === "pick") {
+      const p = pickOf(it);
+      for (const l of p.layers) q += `&pl=${encodeURIComponent(l)}`;
+      for (const u of p.units || []) q += `&pu=${encodeURIComponent(u)}`;
+    }
+    return q;
+  };
   const normDirty = (it) => { const n = S.norm[it.id]; return !!(n && n.draft && n.base !== JSON.stringify(n.draft)); };
+  /* مقدارِ کمّی به واحد مرجعِ لایه (catalog-rules.mjs:toRef) — «۶ متر ≈ ۶۰۰۰ میلی‌متر»؛ خالی اگر همان واحد است */
+  const refTxt = (k, t, u) => {
+    const R = RL(); if (!R || !R.toRef || !u) return "";
+    const q = R.quantWith(k, t, u); if (!q || Array.isArray(q)) return "";
+    const r = R.toRef(k, q); if (!r || r.same) return "";
+    return `≈ ${r.n.map((x) => M(Math.round(x * 1000) / 1000)).join("×")} ${r.u}`;
+  };
   const CHART_COLORS = ["#4f8cff", "#ff8c42", "#22c55e", "#e5484d", "#a78bfa", "#f2c230", "#2dd4bf", "#f472b6", "#93c5fd", "#fb923c", "#86efac", "#fca5a5"];
 
   const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]
@@ -439,7 +460,7 @@
   const jParts = (ms) => TP.fmtD(ms).split("/").map(Number);
   const jMonth = (y, m) => TP.jStr2ms(`${y + Math.floor((m - 1) / 12)}/${((m - 1) % 12 + 12) % 12 + 1}/01`);
 
-  const seriesKey = (it) => `${it.id}|${S.hmode}|${S.normOn ? 1 : 0}`;
+  const seriesKey = (it) => `${it.id}|${S.hmode}|${S.hmode === "pick" ? JSON.stringify(pickOf(it)) : ""}`;
   function chartBody(it, d) {
     const se = S.series[seriesKey(it)];
     if (se === "loading") return `<div class="empty">در حال خواندن نقاط نمودار…</div>`;
@@ -531,11 +552,23 @@
   function vNorm(it) {
     const n = S.norm[it.id];
     if (!n || n.loading) return `<div class="normbox"><div class="dim">در حال یافتن ساختار قلم در دیتابیس (با کد، بعد با عنوان)…</div></div>`;
-    if (n.error) return `<div class="normbox"><div class="tp-note warn" style="margin:0 0 8px">${esc(n.error)}</div><button class="tp-btn sm" data-norm-redo>تلاش دوباره</button></div>`;
+    if (n.error) return `<div class="normbox"><div class="tp-note warn" style="margin:0 0 8px">${esc(n.error)}</div><button class="tp-btn sm" data-norm-retry>تلاش دوباره</button></div>`;
+    if (n.data && n.data.needsModel) {
+      return `<div class="normbox"><div class="toolrow" style="margin-bottom:6px"><b>نرمال‌سازی اقلام</b><span class="chip warn">در دیتابیس نیست</span></div>
+        <div style="font-size:.9rem">کد و عنوانِ این قلم در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌هایش باید عنوان به مدل زبانی داده شود — پیش از آن هزینهٔ تقریبی را می‌پرسم.</div>
+        <div class="toolrow" style="margin-top:8px"><button class="tp-btn primary" data-norm-model>تفکیک با مدل…</button></div></div>`;
+    }
     loadHeads();
     const d = n.data, dr = n.draft, rv = d.rates || { ref: null, units: [] };
+    const pickMode = S.hmode === "pick", pk = pickOf(it);
+    /* نام‌های پنهان («نمره») در فهرستِ انتخاب نمی‌آیند، مگر همین لایه همان باشد */
     const names = d.layerNames || [];
-    const opt = (sel) => names.map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+    const opt = (sel) => [...new Set([...names, ...(sel && !names.includes(sel) ? [sel] : [])])].map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+    /* «قلم انتخابی»: تیکِ هر نرخ = خریدهای همان واحد در جستجو می‌آیند (پیش‌فرض همه) */
+    const allUnits = [rv.refRow ? rv.refRow.unit : rv.ref, ...(rv.units || []).map((u) => u.unit)].filter(Boolean);
+    const unitOn = (u) => !pk.units || pk.units.includes(u);
+    const shareCell = (u) => (u.rows ? `<b class="num">${(u.share || 0).toFixed(1)}٪</b>${u.unconverted ? ` <span class="chip warn" title="خریدهایی با این واحد که نرخ ندارند و در جمع نیامده‌اند">${M(u.unconverted)} بی‌نرخ</span>` : ""}
+      <div class="dim num" style="font-size:.75rem">${M(u.rows)} خرید · ${M(RQ(u.qty))} ${esc(u.unit)}</div>` : `<span class="dim">در سوابق نیست</span>`);
     const cands = [...new Set([d.head, ...(d.candidates || [])].filter(Boolean))];
     const fromDb = DB_SRC.has(d.source);
     const where = it.code ? `کد ${it.code}` : "عنوانِ همین قلم";
@@ -543,11 +576,10 @@
       same: "همان فهرست اقلام است؛ چیزی در دیتابیس عوض نشد", reverted: "با فهرست اقلام یکی شد؛ ویرایشِ قبلی از دیتابیس برداشته شد" }[d.saved];
     return `<div class="normbox">
       <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
-        <span class="chip ${d.confirmed || fromDb ? "ok" : "warn"}">${d.confirmed ? "ذخیره‌شده — جستجو بر همین است" : fromDb ? "جستجو بر همین است" : "پیشنهاد مدل — تا «ذخیره» نشود جستجو نمی‌شود"}</span>
+        <span class="chip ${d.confirmed || fromDb ? "ok" : "warn"}">${d.confirmed ? "ذخیره‌شده — جستجو بر همین است" : fromDb ? "جستجو بر همین است" : "پیشنهاد مدل — جستجو بر همین است، ولی در دیتابیس ذخیره نشده"}</span>
         <span class="chip info" title="${fromDb ? "بی مدل: کد یا عنوانِ عیناً همان در دیتابیس بود" : "کد و عنوان در دیتابیس نبود"}">${esc(SRC_FA[d.source] || d.source)}${d.code ? ` · کد ${esc(d.code)}` : ""}</span>
         ${d.source === "title" && d.title ? `<span class="chip" title="قلمِ دیتابیس با همین عنوان">${esc(d.title)}</span>` : ""}
         ${d.edit ? `<span class="chip" title="آخرین ذخیرهٔ این قلم در دیتابیس اصلی">${esc(d.edit.by || "کارشناس")} · ${esc(TP.fmt(d.edit.at))}</span>` : ""}
-        ${d.source === "model" && d.cost != null ? `<span class="chip" title="هزینهٔ همین یک فراخوانی مدل">${Number(d.cost).toLocaleString("en-US", { maximumFractionDigits: 4 })} دلار</span>` : ""}
         ${saved ? `<span class="chip ok">${esc(saved)}</span>` : ""}
         ${d.known === false ? `<span class="chip warn" title="جستجو چیزی پیدا نمی‌کند مگر نوع قلمِ موجود را انتخاب کنید">این نوع قلم در فهرست نیست — سابقه‌ای ندارد</span>` : ""}</div>
       <div class="normgrid">
@@ -555,28 +587,34 @@
           <datalist id="nh-${it.id}" data-heads="${esc(JSON.stringify(cands))}">${headOptions(cands)}</datalist>
           <span class="dim" style="font-size:.8rem;margin-top:3px">قابل تغییر — از فهرست انتخاب کنید یا بنویسید.</span></label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
-          ${dr.layers.map((l, i) => { const qn = isQuant(l.k); return `<div class="normlayer"><select class="tp-input" data-norm-lk="${i}">${opt(l.k)}</select>
+          ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> لایه‌ای را که تیک بزنید، فقط اقلامی از همین نوع قلم می‌آیند که همان لایه را با <b>همان مقدار</b> دارند — از هر کدی (مثلاً «ضخامت ۸ میلی‌متر» ورق‌های ۸ میلِ همهٔ کدها را می‌آورد). بی‌تیک یعنی آن لایه مهم نیست.</div>` : ""}
+          ${dr.layers.map((l, i) => { const qn = isQuant(l.k), rf = qn ? refTxt(l.k, l.t, l.u) : ""; return `<div class="normlayer">
+            ${pickMode ? `<input type="checkbox" data-pick-l="${esc(l.k)}" ${pk.layers.includes(l.k) ? "checked" : ""} title="در «قلم انتخابی» فقط اقلامی با همین مقدارِ این لایه">` : ""}
+            <select class="tp-input" data-norm-lk="${i}">${opt(l.k)}</select>
             <input class="tp-input${qn ? " num" : ""}" data-norm-lv="${i}" value="${esc(l.t)}"${qn ? ` placeholder="فقط عدد" title="فقط عدد: ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶ — واحد را از فهرست کنارش انتخاب کنید"` : ""}>
             ${qn ? `<select class="tp-input nu" data-norm-lu="${i}" title="واحد استاندارد؛ تبدیل و مقایسه بر پایهٔ همین است"><option value="">بی‌واحد</option>${unitsFor(l.k).map((u) => `<option ${u === l.u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : ""}
-            ${l.i ? `<span class="chip info" title="در عنوان گفته نشده؛ از عرفِ پذیرفته‌شدهٔ همین نوع قلم آمده. با ویرایش، صریح می‌شود.">ضمنی</span>` : ""}
+            ${rf ? `<span class="dim num" style="font-size:.8rem" title="به واحد مرجعِ این لایه — مقایسه و جستجو بر همین است">${esc(rf)}</span>` : ""}
+            ${l.i ? `<span class="chip info" title="در عنوان گفته نشده؛ از عرفِ پذیرفته‌شدهٔ همین نوع قلم آمده (یا واحدش از بزرگیِ عدد خوانده شده). با ویرایش، صریح می‌شود.">ضمنی</span>` : ""}
             <button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button></div>`; }).join("")
             || `<div class="dim" style="font-size:.85rem">لایه‌ای ندارد.</div>`}
           <button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button>
-          <div class="dim" style="font-size:.8rem;margin-top:4px">در لایهٔ کمّی (قطر، طول، ضخامت …) فقط عدد بنویسید و واحد را از فهرست انتخاب کنید؛ «۲ میل»، «2mm» و «۰٫۲ سانتی‌متر» یکی‌اند.
+          <div class="dim" style="font-size:.8rem;margin-top:4px">در لایهٔ کمّی (قطر، طول، ضخامت، مساحت، محیط، یال …) فقط عدد بنویسید و واحد را از فهرست انتخاب کنید؛ «۲ میل»، «2mm» و «۰٫۲ سانتی‌متر» یکی‌اند و هر لایه به واحد مرجعش (طول‌ها میلی‌متر، مساحت متر مربع) سنجیده می‌شود.
             «ضمنی» یعنی در عنوان نیامده و از عرفِ همین نوع قلم آمده (مثلاً ورقِ بی‌جنس ← آهنی).</div></div>
       </div>
       ${d.residual ? `<div class="dim" style="font-size:.85rem;margin-top:6px">بخشی از عنوان که به هیچ لایه‌ای نخورد: <b>${esc(d.residual)}</b></div>` : ""}
       ${rv.ref ? `<div class="tp-field" style="margin-top:10px"><b>نرخ تبدیل به واحد مرجع («${esc(rv.ref)}»)</b>
-        ${rv.units.length ? `<table class="tp-mx" style="width:auto"><thead><tr><th>واحد ثبت‌شده در سوابق</th><th>نرخ</th><th>مبنا</th><th>اطمینان</th></tr></thead><tbody>
-          ${rv.units.map((u) => `<tr><td>${esc(u.unit)}</td>
+        ${rv.total ? `<div class="dim" style="font-size:.85rem;margin:2px 0 4px">کلِ خریدِ این نوع قلم، به واحد مرجع: <b class="num">${M(RQ(rv.total))} ${esc(rv.ref)}</b> — ستونِ «سهم» می‌گوید چند درصدش با هر واحد خریده شده.</div>` : ""}
+        ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> فقط خریدهایی می‌آیند که واحدشان تیک خورده؛ واحدی را که بردارید، خریدهایش در هیچ جمع، سهم، رتبه و ریز خریدی نمی‌آیند.</div>` : ""}
+        <table class="tp-mx" style="width:auto"><thead><tr>${pickMode ? "<th>در جستجو</th>" : ""}<th>واحد ثبت‌شده در سوابق</th><th>نرخ</th><th>مبنا</th><th>اطمینان</th><th title="سهمِ خریدهای همین واحد از کلِ مقدارِ خریدِ این نوع قلم، به واحد مرجع">سهم از کل خرید</th></tr></thead><tbody>
+          ${rv.refRow ? `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(rv.refRow.unit)}" ${unitOn(rv.refRow.unit) ? "checked" : ""}></td>` : ""}<td><b>${esc(rv.refRow.unit)}</b></td><td class="num">۱</td><td class="rt">واحد مرجع</td><td><span class="chip ok">قطعی</span></td><td>${shareCell(rv.refRow)}</td></tr>` : ""}
+          ${(rv.units || []).map((u) => `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(u.unit)}" ${unitOn(u.unit) ? "checked" : ""}></td>` : ""}<td>${esc(u.unit)}</td>
             <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(dr.rates[u.unit] != null ? dr.rates[u.unit] : u.rate, false))}" inputmode="decimal" style="width:110px"></td>
-            <td class="rt" style="white-space:normal">${esc(u.basis)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td></tr>`).join("")}
+            <td class="rt" style="white-space:normal">${esc(u.basis)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td><td>${shareCell(u)}</td></tr>`).join("")}
         </tbody></table>
-        <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). نرخی را که عوض کنید، در جستجو بر همهٔ نرخ‌های دیگر مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان نرخ فایل.</div>`
-        : `<div class="dim" style="font-size:.85rem">همهٔ خریدهای این نوع قلم با واحد مرجع ثبت شده‌اند؛ تبدیلی لازم نیست.</div>`}</div>` : ""}
+        <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). نرخی را که عوض کنید، در جستجو بر همهٔ نرخ‌های دیگر مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان نرخ فایل.</div>
+        ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="tp-note warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div>` : ""}
       <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و نرخ‌های تبدیل">ذخیره</button>
-        ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود (هزینه دارد) — فقط برای قلمی که کد و عنوانش در دیتابیس نیست">تفکیک دوباره با مدل</button>
-        <span class="dim normcost" title="هزینهٔ تقریبیِ هر بار تفکیک با مدل (Haiku) — میانگینِ اجراهای اخیر">${costTxt(d.costEst != null ? d.costEst : S.normCost || NORM_COST_EST)}</span>`}
+        ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن هزینهٔ تقریبی را می‌پرسم">تفکیک دوباره با مدل…</button>`}
         ${d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
           : d.confirmed ? `<button class="tp-btn" data-norm-clear title="ذخیرهٔ همین قلم برداشته می‌شود و ساختار دوباره از دیتابیس خوانده می‌شود">برداشتن ذخیره</button>` : ""}</div></div>`;
   }
@@ -584,7 +622,6 @@
   function vHistory(it) {
     const d = S.hist[it.id];
     const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
-    const gated = S.normOn && !normReady(it);
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
       ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
@@ -593,27 +630,32 @@
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
       <button class="tp-btn" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده — در پنجرهٔ بزرگ وسط صفحه">نمودار روند</button>
-      <button class="tp-btn primary" data-run-hist ${gated ? `disabled title="اول ساختاری که مدل پیشنهاد داده را «ذخیره» کنید"` : ""}>${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
+      <button class="tp-btn primary" data-run-hist title="ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان)؛ اگر نبود، پیش از تفکیک با مدل هزینه را می‌پرسم">${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>
       <div class="toolrow">
-        <label class="chkline" title="ساختار قلم (نوع قلم و لایه‌های ویژگیِ استاندارد) با کد، و اگر نبود با عنوانِ عیناً همان، از دیتابیس خوانده می‌شود؛ فقط قلمِ تازه با مدل تفکیک می‌شود"><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
-        <span class="dim normcost" title="قلمی که کد یا عنوانش در دیتابیس هست بی‌هزینه است؛ فقط قلمِ تازه به مدل (Haiku) می‌رود">هر تفکیک با مدل ${costTxt(S.normCost || NORM_COST_EST)}</span>
+        <label class="chkline" title="لایهٔ زیرین را نشان می‌دهد: نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل — برای دیدن و اصلاح. جستجو با تیک یا بی تیک بر همین ساختار است."><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
         <span class="seg" role="radiogroup" aria-label="حالت جستجو">
           <button class="tp-btn sm ${S.hmode === "head" ? "primary" : ""}" data-hmode="head" title="همهٔ اقلام همین نوع — مثلاً هر پیچی که تا حالا خریده‌ایم (پیش‌فرض)">نوع قلم</button>
+          <button class="tp-btn sm ${S.hmode === "pick" ? "primary" : ""}" data-hmode="pick" title="همین نوع قلم، و فقط لایه‌ها و واحدهای خریدی که در کادر نرمال‌سازی تیک می‌زنید">قلم انتخابی</button>
           <button class="tp-btn sm ${S.hmode === "exact" ? "primary" : ""}" data-hmode="exact" title="همان نوع قلم با دقیقاً همان لایه‌های ویژگی">عین قلم</button></span>
-        ${gated ? `<span class="dim" style="font-size:.85rem">ساختاری که مدل پیشنهاد داده را بررسی و «ذخیره» کنید، بعد «بررسی سوابق» را بزنید.</span>` : ""}</div>`;
-    /* کادر نرمال‌سازی: تا سوابق خوانده نشده زیر همین نوار است؛ بعد از «بررسی سوابق» زیر فهرست تأمین‌کنندگان (تصمیم مدیر، مهر ۱۴۰۵) */
-    const norm = S.normOn ? vNorm(it) : "";
+        ${S.hmode === "pick" ? `<span class="dim" style="font-size:.85rem">لایه‌ها و واحدهایی را که می‌خواهید در کادرِ نرمال‌سازی تیک بزنید، بعد «بررسی سوابق».</span>` : ""}</div>`;
+    /* کادر نرمال‌سازی: تا سوابق خوانده نشده زیر همین نوار است؛ بعد از «بررسی سوابق» زیر فهرست تأمین‌کنندگان (تصمیم مدیر، مهر ۱۴۰۵).
+       «قلم انتخابی» بی آن معنا ندارد، پس در آن حالت همیشه باز است. */
+    const norm = S.normOn || S.hmode === "pick" ? vNorm(it) : "";
 
     if (!d) return `<div class="pad">${head}${norm}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
-      ${S.normOn ? "ساختار قلم با کد یا عنوانش از دیتابیس می‌آید (قلمِ تازه با مدل)؛ حالت «نوع قلم» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید." : "حالت «نوع قلم» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید. اگر کد این قلم در فهرست اقلام نیست، «نرمال‌سازی اقلام» را روشن کنید."}
+      حالت «نوع قلم»، «قلم انتخابی» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید؛ ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان).
       رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
     if (d.available === false) return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
     const st = d.struct || {}, mt = d.match || {};
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
+    const picked = new Set(mt.picked || []);
     const structChips = st.head ? `<div class="toolrow">
         <span class="chip ok" title="حالت جستجو">${HMODE_FA[mt.mode] || ""}${mt.codes != null ? ` — ${M(mt.codes)} قلم از ${M(mt.headItems)} قلمِ «${esc(st.head)}»` : ""}</span>
-        ${Object.entries(st.layers || {}).map(([k, v]) => `<span class="chip" title="لایهٔ ویژگی">${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("")}
+        ${mt.source === "proposal" ? `<span class="chip warn" title="جستجو بر پیشنهادِ مدل است که هنوز در دیتابیس ذخیره نشده">پیشنهاد ذخیره‌نشده</span>` : ""}
+        ${Object.entries(st.layers || {}).map(([k, v]) => `<span class="chip ${mt.mode === "pick" && picked.has(k) ? "ok" : ""}" title="${mt.mode === "pick" ? (picked.has(k) ? "در جستجو: فقط همین مقدار" : "در جستجو نیست") : "لایهٔ ویژگی"}">${mt.mode === "pick" && picked.has(k) ? "✓ " : ""}${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("")}
+        ${mt.units ? `<span class="chip info" title="«قلم انتخابی»: فقط خریدهای همین واحدها">واحدها: ${esc(mt.units.join("، "))}</span>` : ""}
+        ${d.unitDropped ? `<span class="chip warn" title="خریدهایی با واحدِ تیک‌نخورده — در هیچ جمع و سهمی نیامده‌اند">${M(d.unitDropped)} خرید با واحدِ کنارگذاشته</span>` : ""}
         <span class="chip info">واحد مرجع: ${esc(st.refUnit || "—")}</span>
         ${(d.rates || []).map((r) => `<span class="chip ${CONF_CLS[r.conf] || ""}" title="${esc(r.basis)} — ${M(r.rows)} خرید${r.varied ? ` — نرخ ویژهٔ هر قلم، از ${fmtRate(r.min)} تا ${fmtRate(r.max)}` : ""}">${esc(r.unit)} × ${fmtRate(r.rate)}${r.varied ? " (متغیر)" : ""}</span>`).join("")}
         ${d.unconverted ? `<span class="chip warn" title="واحدی که نرخ تبدیل ندارد در جمع مقدار نمی‌آید؛ نرخش را در پنل نرمال‌سازی بدهید">${M(d.unconverted)} خرید بی‌نرخ تبدیل</span>` : ""}
@@ -640,11 +682,12 @@
       ${(d.titles || []).length ? `<details class="histitems"><summary>اقلامِ شمرده‌شده (${M(d.titles.length)}${mt.codes > d.titles.length ? "+" : ""})</summary>
         ${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${showLayer(v)}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)} خرید</span></span>`).join("")}</details>` : ""}
       <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
-        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
+        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="کد تأمین‌کننده در فایل سوابق (یا دفترچهٔ تأمین‌کنندگان)">کد</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
           : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
-        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${s.code ? ` <span class="dim num" style="font-size:.8rem" title="کد تأمین‌کننده">${esc(s.code)}</span>` : ""}${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل؛ در مقدار نیامده‌اند">${M(s.unconverted)}</span>` : ""}</td>
+        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل؛ در مقدار نیامده‌اند">${M(s.unconverted)}</span>` : ""}</td>
+        <td class="num">${s.code ? esc(s.code) : `<span class="dim">—</span>`}</td>
         <td>${s.grade ? `<span class="chip grade g${esc(s.grade)}">${esc(s.grade)}</span>` : `<span class="dim">—</span>`}</td>
         <td class="num">${M(s.n)}</td>${rc("n", s.rankN)}
         <td class="num">${M(RQ(s.qty))}</td>${rc("qty", s.rankQty)}
@@ -661,11 +704,43 @@
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
 
+  /**
+   * «بررسی سوابق» هرگز قفل نیست (تصمیم مدیر، مهر ۱۴۰۵): اگر ساختار قلم هنوز خوانده نشده، همین‌جا خودکار
+   * نرمال‌سازی می‌شود — از دیتابیس و بی‌هزینه؛ فقط اگر قلم در دیتابیس نبود، هزینهٔ مدل پرسیده می‌شود.
+   */
+  async function ensureNorm(it) {
+    let n = S.norm[it.id];
+    if (!n || n.error) { await runNormalize(false); n = S.norm[it.id]; }
+    if (!n || n.error) { TP.modal("ساختار قلم خوانده نشد", esc((n && n.error) || "خطای ناشناخته"), null, "باشد", ""); return false; }
+    if (n.data && n.data.needsModel) return askModel(it, false);
+    return true;
+  }
+
+  /**
+   * مدل هزینه دارد، پس هر فراخوانی‌اش با کادرِ تأیید و هزینهٔ تقریبی است (تصمیم مدیر، مهر ۱۴۰۵).
+   * true اگر کارشناس تأیید کرد و ساختاری آمد.
+   */
+  function askModel(it, force) {
+    return new Promise((resolve) => {
+      let done = false;
+      const end = (v) => { if (!done) { done = true; resolve(v); } };
+      const cost = S.normCost || NORM_COST_EST;
+      const d = TP.modal("تفکیک با مدل زبانی",
+        `${force ? "عنوانِ این قلم دوباره به مدل داده می‌شود تا نوع قلم و لایه‌هایش را از نو پیشنهاد کند." : `کد و عنوانِ «${esc(it.title)}» در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌های ویژگی‌اش باید عنوان به مدل زبانی (Haiku) داده شود.`}
+        <br><br>هزینهٔ تقریبی: <b>${costTxt(cost)}</b> <span class="dim" style="font-size:.85rem">(میانگینِ اجراهای اخیر)</span>
+        <br><br>پیشنهادِ مدل تا شما «ذخیره»اش نکنید در دیتابیس نمی‌نشیند؛ جستجو بر همان پیشنهاد انجام می‌شود.`,
+        async () => { await runNormalize(!!force, true); const n = S.norm[it.id]; end(!!(n && n.data && !n.data.needsModel && !n.error)); },
+        "تأیید و تفکیک", "انصراف");
+      const no = d.querySelector("[data-n]"); if (no) no.addEventListener("click", () => end(false));
+      d.addEventListener("click", (e) => { if (e.target === d) end(false); });
+    });
+  }
+
   async function runHist() {
     const it = item(); if (!it) return;
-    if (S.normOn && !normReady(it)) return TP.modal("اول ذخیره", "کد و عنوانِ این قلم در دیتابیس نبود و ساختارش (نوع قلم و لایه‌ها) را مدل پیشنهاد داده است. آن را بررسی و «ذخیره» کنید.", null, "باشد", "");
+    if (!(await ensureNorm(it))) return;
     /* جستجو بر ساختارِ ذخیره‌شده است؛ ویرایشِ ذخیره‌نشده اول ذخیره شود */
-    if (S.normOn && normDirty(it)) {
+    if (normDirty(it)) {
       return TP.modal("تغییرات ذخیره نشده", "نوع قلم، لایه‌ها یا نرخ‌هایی را که عوض کرده‌اید هنوز ذخیره نکرده‌اید و جستجو بر ساختارِ ذخیره‌شده انجام می‌شود.",
         async () => { if (await confirmNormUI()) runHist(); }, "ذخیره و بررسی", "انصراف");
     }
@@ -685,17 +760,19 @@
     const it = item(), s = supOf(key); if (!s) return;
     try {
       const r = await TP.api(`/suppliers/history/buys?${histQuery(it)}&supplier=${encodeURIComponent(s.name)}`);
-      const d = S.hist[it.id] || {}, pl = (d.base && d.base.priceLabel) || "زمستان ۱۴۰۴", ref = r.unit || "";
+      const d = S.hist[it.id] || {}, pl = (d.base && d.base.priceLabel) || "زمستان ۱۴۰۴";
+      const rial = (v) => (v == null ? "—" : M(Math.round(v)));
+      /* هشت ستون (تصمیم مدیر، مهر ۱۴۰۵): دو ستونِ آخر همان قیمت واحد و مبلغ کل‌اند ضرب در ضریبِ
+         تعدیلِ همین ردیف (شاخصِ طبقهٔ اصنافِ قلم در فصلِ خرید، به مبنای زمستان ۱۴۰۴) */
       TP.modal(`سوابق خرید — ${esc(s.name)}`, r.buys.length
         ? `<div class="tp-scroll" style="max-height:56vh"><table class="tp-mx" style="width:100%"><thead><tr>
-            <th>تاریخ</th><th>عنوان در فایل</th><th>مقدار ثبت‌شده</th><th>به واحد مرجع (${esc(ref)})</th><th>قیمت واحد روز (ریال)</th>
-            <th>قیمت هر ${esc(ref)} (${esc(pl)})</th><th>مبلغ (${esc(pl)})</th></tr></thead><tbody>
+            <th>تاریخ</th><th>عنوان قلم</th><th>مقدار خرید</th><th>واحد</th><th>قیمت واحد (ریال)</th><th>مبلغ کل (ریال)</th>
+            <th>قیمت واحد به مبلغ ${esc(pl)}</th><th>مبلغ کل به مبلغ ${esc(pl)}</th></tr></thead><tbody>
           ${r.buys.map((x) => `<tr><td class="num">${esc(x.order_date)}</td><td class="rt" style="white-space:normal">${esc(x.title)}</td>
-            <td class="num">${x.qty == null ? "—" : `${M(x.qty)} ${esc(x.unit || "")}`}</td>
-            <td class="num">${x.qty_ref == null ? `<span class="chip warn" title="این واحد نرخ تبدیل ندارد">بی‌نرخ</span>` : M(RQ(x.qty_ref))}</td>
-            <td class="num">${x.unit_price == null ? "—" : M(Math.round(x.unit_price))}</td>
-            <td class="num">${x.unit_adj == null ? "—" : M(Math.round(x.unit_adj))}</td>
-            <td class="num">${x.amount_adj == null ? "—" : M(Math.round(x.amount_adj))}</td></tr>`).join("")}
+            <td class="num">${x.qty == null ? "—" : M(RQ(x.qty))}</td><td>${esc(x.unit || "—")}</td>
+            <td class="num">${rial(x.unit_price)}</td><td class="num">${rial(x.amount)}</td>
+            <td class="num" title="${x.adj_factor != null ? `ضریب تعدیل این ردیف: ${fmtRate(x.adj_factor)}` : ""}">${rial(x.unit_price_adj)}</td>
+            <td class="num">${rial(x.amount_adj)}</td></tr>`).join("")}
           </tbody></table></div>` : "ردیفی پیدا نشد.", null, "بستن", "");
     } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
   }
@@ -720,12 +797,13 @@
   /* پاسخ سرور → {data، draft، base}؛ base پیش‌نویسِ دست‌نخورده است تا ویرایشِ ذخیره‌نشده پیدا شود */
   const normState = (d) => { const draft = normDraft(d); return { data: d, draft, base: JSON.stringify(draft) }; };
 
-  async function runNormalize(force) {
+  /* `model`: فقط وقتی کارشناس هزینه را دیده و تأیید کرده (askModel) — وگرنه سرور مدل را صدا نمی‌زند */
+  async function runNormalize(force, model) {
     const it = item(); if (!it) return;
     S.norm[it.id] = { loading: true }; render();
     try {
-      const d = await TP.api(`/items/${it.id}/normalize`, { body: { force: !!force } });
-      if (d.costEst != null) S.normCost = d.costEst;   /* میانگینِ واقعی، کنار چک‌باکس هم */
+      const d = await TP.api(`/items/${it.id}/normalize`, { body: { force: !!force, model: !!model } });
+      if (d.costEst != null) S.normCost = d.costEst;   /* میانگینِ واقعی — برای کادرِ تأییدِ مدل */
       S.norm[it.id] = normState(d);
     } catch (e) { S.norm[it.id] = { error: e.message }; }
     if (item() && item().id === it.id) render();
@@ -1669,14 +1747,31 @@
     if (nOn) nOn.onchange = (e) => {
       S.normOn = e.target.checked;
       try { localStorage.setItem(NORM_KEY, S.normOn ? "1" : "0"); } catch (_) { /* حالت خصوصی */ }
-      const it = item(); if (it) delete S.hist[it.id];   /* مبنای جستجو عوض شد؛ نتیجهٔ قبلی دیگر معتبر نیست */
+      /* تیک فقط کادرِ لایهٔ زیرین را نشان می‌دهد؛ مبنای جستجو عوض نمی‌شود، پس نتیجه می‌ماند */
       render();
     };
     Q("[data-hmode]").forEach((b) => b.onclick = () => {
       if (S.hmode === b.dataset.hmode) return;
       S.hmode = b.dataset.hmode;
       const it = item();
-      if (it && S.hist[it.id] && !(S.normOn && (!normReady(it) || normDirty(it)))) runHist(); else render();
+      if (it && S.hist[it.id] && !normDirty(it)) runHist(); else render();
+    });
+    /* «قلم انتخابی»: تیکِ لایه‌ها و واحدها — اگر نتیجه‌ای روی صفحه است همان لحظه از نو جستجو می‌شود،
+       وگرنه با «بررسی سوابق» */
+    Q("[data-pick-l]").forEach((c) => c.onchange = () => {
+      const it = item(); if (!it) return;
+      const p = pickOf(it), k = c.dataset.pickL;
+      p.layers = c.checked ? [...new Set([...p.layers, k])] : p.layers.filter((x) => x !== k);
+      if (S.hist[it.id]) runHist(); else render();
+    });
+    Q("[data-pick-u]").forEach((c) => c.onchange = () => {
+      const it = item(); if (!it) return;
+      const n = S.norm[it.id], rv = (n && n.data && n.data.rates) || {};
+      const all = [rv.refRow ? rv.refRow.unit : rv.ref, ...(rv.units || []).map((u) => u.unit)].filter(Boolean);
+      const p = pickOf(it), cur = new Set(p.units || all);
+      if (c.checked) cur.add(c.dataset.pickU); else cur.delete(c.dataset.pickU);
+      p.units = all.every((u) => cur.has(u)) ? null : all.filter((u) => cur.has(u));
+      if (S.hist[it.id]) runHist(); else render();
     });
     /* ویرایش پیش‌نویس بی‌بازرندر، تا فوکوس و مکان‌نما نپرند */
     const nd = () => { const it = item(); return it && S.norm[it.id] && S.norm[it.id].draft; };
@@ -1708,11 +1803,14 @@
       if (v == null || (orig && orig.src !== "user" && (v === orig.rate || v === Number(fmtRate(orig.rate, false))))) delete n.draft.rates[u]; else n.draft.rates[u] = v;
     });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
-    const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => runNormalize(true);
+    /* هر فراخوانی مدل با کادرِ تأیید و هزینهٔ تقریبی */
+    const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
+    const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);
+    const nrt = G("[data-norm-retry]"); if (nrt) nrt.onclick = () => runNormalize(false);
     const ncl = G("[data-norm-clear]"); if (ncl) ncl.onclick = clearNormUI;
     const nrv = G("[data-norm-revert]"); if (nrv) nrv.onclick = revertEditUI;
-    /* تیک روشن است و این قلم هنوز پیشنهادی ندارد → خودکار تفکیک می‌شود (Task.txt: «به شکل خودکار») */
-    if (S.screen === "detail" && S.tab === "history" && S.normOn && item() && !S.norm[item().id]) runNormalize(false);
+    /* کادر باز است و این قلم هنوز ساختاری ندارد → خودکار از دیتابیس خوانده می‌شود (بی مدل؛ Task.txt: «به شکل خودکار») */
+    if (S.screen === "detail" && S.tab === "history" && (S.normOn || S.hmode === "pick") && item() && !S.norm[item().id]) runNormalize(false);
     const chb = G("[data-chart]"); if (chb) chb.onclick = () => openChart(item());
     Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });

@@ -32,6 +32,8 @@
  */
 import { HttpError } from "./http.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
+import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
+import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -249,7 +251,7 @@ export async function catalogMeta(env) {
 /* کد قلم با رقم فارسی هم همان کد است */
 const codeKey = (code) => ascii(T(code));
 
-/** نوع قلمِ یک کد راهکاران در فهرستِ بارگذاری‌شده (بی ویرایشِ کارشناس)، یا null */
+/** نوع قلمِ یک کد راهکاران در فهرستِ بارگذاری‌شده (بی ویرایشِ کارشناس)، به نامِ استاندارد، یا null */
 export async function headOfCode(env, code) {
   const c = codeKey(code); if (!c) return null;
   fresh();
@@ -259,7 +261,40 @@ export async function headOfCode(env, code) {
     cache.codes.set(s, r ? parse(r.data) : {});
   }
   const h = cache.codes.get(s)[c];
-  return h == null ? null : h;
+  if (h == null) return null;
+  /* نامِ هم‌معنا («آرماتور آهنی») به نام استاندارد؛ اگر جنسِ نامِ استاندارد را خودِ قلم می‌گوید
+     («شلنگ» ← «شیلنگ لاستیکی»)، از ردیفِ همان قلم خوانده می‌شود */
+  if (!aliasNeedsItem(h)) return CANON.canonHead(h);
+  const x = (await storedItems(env, [h])).find((r) => r.item[0] === c);
+  return CANON.canonHead(h, x ? { title: x.item[1], layers: x.item[4] } : null);
+}
+
+/* ------------------------------------------------------------------ */
+/* نام‌های هم‌معنا (catalog-canon.mjs)                                   */
+/* ------------------------------------------------------------------ */
+/* فهرست همان‌طور که بارگذاری شده خوانده می‌شود و یکسان‌سازیِ دوم — نامِ استاندارد، «نمره» به لایهٔ
+   واقعی، مقاطع فلزی — هنگام خواندن روی آن می‌نشیند؛ پس دیتابیس بازنویسی نمی‌شود (سقف نوشتنِ روزانه) و
+   بارگذاریِ دوبارهٔ فایل‌ها هم همین نتیجه را می‌دهد. */
+const baseOf = (h) => RULES.splitHead(h, HEAD_RULES).base;
+function aliasNeedsItem(h) {
+  const sh = RULES.splitHead(h, HEAD_RULES), cb = CANON.canonBase(sh.base);
+  if (keyOf(cb) === keyOf(sh.base) || sh.mat) return false;
+  const r = HEAD_RULES[keyOf(cb)];
+  return !!(r && r.r === "f");
+}
+/* GLOB برای نام‌های هم‌خانواده («آرماتور *»)؛ نامی که نویسهٔ ویژهٔ GLOB دارد فقط عیناً */
+const globSafe = (s) => !/[*?[\]]/.test(s);
+/** ردیف‌های خامِ چند نوع قلمِ ذخیره‌شده، به‌علاوهٔ نام‌های «پایه + جنس»ِ هم‌معناها: [{head، d، item}] */
+async function storedItems(env, names, families = []) {
+  const cond = [], args = [];
+  for (const n of names) { cond.push("head=?"); args.push(n); }
+  for (const b of families) if (globSafe(b)) { cond.push("head=?", "head GLOB ?"); args.push(b, `${b} *`); }
+  if (!cond.length) return [];
+  const rows = (await env.DB.prepare(`SELECT head, part, data FROM cat_heads WHERE ${cond.join(" OR ")} ORDER BY head, part`).bind(...args).all()
+    .catch(() => ({ results: [] }))).results || [];
+  const out = [];
+  for (const r of rows) { const d = parse(r.data); out.push({ head: r.head, d, item: null }); for (const x of d.items || []) out.push({ head: r.head, d: null, item: x }); }
+  return out;
 }
 
 /** کدِ قلمِ فهرست با همین عنوان — عیناً همان عنوان، با همان کلیدِ مقایسه (ی/ک عربی، نیم‌فاصله،
@@ -289,6 +324,7 @@ export async function editIndex(env) {
   try { rs = (await env.DB.prepare("SELECT k, code, title_n, head, at FROM item_edits").bind().all()).results || []; } catch (_) { rs = []; }
   const byCode = new Map(), byTitle = new Map();
   for (const r of rs) {
+    r.head = CANON.canonHead(r.head);   /* ویرایشی که پیش از یکسان‌سازیِ نام‌ها ذخیره شده («آرماتور آهنی») */
     if (r.code) byCode.set(r.code, r);
     const t = byTitle.get(r.title_n);
     if (!t || r.at > t.at) byTitle.set(r.title_n, r);
@@ -302,7 +338,10 @@ export async function editRows(env, keys) {
   for (let i = 0; i < keys.length; i += 90) {
     const part = keys.slice(i, i + 90);
     const rs = (await env.DB.prepare(`SELECT * FROM item_edits WHERE k IN (${part.map(() => "?").join(",")})`).bind(...part).all()).results || [];
-    out.push(...rs.map((r) => ({ ...r, data: parse(r.data) })));
+    out.push(...rs.map((r) => {
+      const data = parse(r.data), head = CANON.canonHead(r.head);
+      return { ...r, head, data: { ...data, layers: CANON.canonLayers(head, data.layers || {}) } };
+    }));
   }
   return out;
 }
@@ -326,18 +365,45 @@ async function headTop(env, h) {
  * فهرستی که پیش از یکسان‌سازی بارگذاری شده این سه را ندارد: src همان نام، بی sub.
  */
 export async function catalogHead(env, head) {
-  const h = nameOf(head); if (!h) return null;
-  const rows = (await env.DB.prepare("SELECT data FROM cat_heads WHERE head=? ORDER BY part").bind(h).all().catch(() => ({ results: [] }))).results || [];
+  const h = CANON.canonHead(nameOf(head)); if (!h) return null;
+  /* خودِ نوع قلم، و نوع قلم‌های ذخیره‌شده با نامِ هم‌معنا («آرماتور آهنی» برای «میلگرد آهنی») */
+  const fams = CANON.aliasBases(baseOf(h));
+  const rows = await storedItems(env, [h], fams);
   if (!rows.length) return null;
-  const out = { head: h, ref: "عدد", n: 0, hr: {}, cr: {}, src: [h], sub: false, uc: {}, items: [] };
+  const heads = new Map();   /* نامِ ذخیره‌شده ← {d (سرِ بخش ۰ و بقیه)، items، total} */
   for (const r of rows) {
-    const d = parse(r.data);
+    let e = heads.get(r.head); if (!e) heads.set(r.head, e = { parts: [], items: [], total: 0 });
+    if (r.d) e.parts.push(r.d);
+    else { e.total++; if (r.head === h || CANON.canonHead(r.head, { title: r.item[1], layers: r.item[4] }) === h) e.items.push(r.item); }
+  }
+  const own = heads.get(h);
+  const out = { head: h, ref: "عدد", n: 0, hr: {}, cr: {}, src: [h], sub: false, uc: {}, items: [] };
+  /* سرِ نوع قلم از خودش؛ اگر فقط با نامِ هم‌معنا ذخیره شده، از همان */
+  const top = own || [...heads.values()].find((e) => e.items.length);
+  if (!top) return null;
+  for (const d of top.parts) {
     for (const k of ["ref", "n", "hr", "cr", "src", "uc"]) if (d[k] !== undefined) out[k] = d[k];
     if (d.sub) out.sub = true;
-    out.items.push(...(d.items || []));
   }
+  const src = new Set(out.src || []);
+  for (const [name, e] of heads) {
+    if (e === top || !e.items.length) continue;
+    const p0 = e.parts.find((d) => d.ref !== undefined) || {};
+    /* هم‌معنایی با واحد مرجعِ دیگر، مقدارِ خریدش را با نرخ‌های این نوع قلم نمی‌شود جمع زد */
+    if ((p0.ref || "عدد") !== out.ref) { console.warn("canon: واحد مرجع ناهمخوان", name, p0.ref, "≠", out.ref); continue; }
+    for (const s of p0.src || [name]) src.add(s);
+    if (p0.sub || e.items.length < e.total) out.sub = true;
+    for (const d of e.parts) for (const [k, v] of Object.entries(d.uc || {})) if (!out.uc[k]) out.uc = { ...out.uc, [k]: v };
+  }
+  /* بخشی از یک نوع قلمِ ذخیره‌شده که به نام دیگری رفت: ردیف‌های خریدش باید با کدها محدود شوند */
+  if (own && own.items.length < own.total) out.sub = true;
+  out.src = [...src];
+  for (const e of heads.values()) for (const x of e.items) out.items.push(canonItem(h, x));
+  out.n = out.items.length;
   return out;
 }
+/* قلم با لایه‌های استاندارد (نمره به لایهٔ واقعی، مقاطع فلزی) — تاپلِ تازه، دادهٔ خوانده‌شده دست نمی‌خورد */
+const canonItem = (h, x) => { const L = CANON.canonLayers(h, x[4] || {}); return L === x[4] ? x : [x[0], x[1], x[2], x[3], L, ...x.slice(5)]; };
 
 /**
  * نوع قلم در دیتابیس اصلی: فهرست + ویرایش‌های کارشناس. قلمی که کارشناس به نوع قلمِ دیگری برده
@@ -388,12 +454,15 @@ export async function allHeads(env) {
   if (cache.heads === undefined) {
     const rs = (await env.DB.prepare("SELECT head FROM cat_heads WHERE part=0").all().catch(() => ({ results: [] }))).results || [];
     const ix = await editIndex(env);
-    cache.heads = [...new Set([...rs.map((r) => r.head), ...[...ix.byCode.values(), ...ix.byTitle.values()].map((e) => e.head)])].sort((a, b) => a.localeCompare(b, "fa"));
+    const stored = new Set(rs.map((r) => r.head));
+    /* نامِ هم‌معنا در فهرستِ انتخاب نمی‌آید — نامِ استانداردش هست */
+    const names = rs.map((r) => { const c = CANON.canonHead(r.head); return c === r.head || stored.has(c) || !aliasNeedsItem(r.head) ? c : null; }).filter(Boolean);
+    cache.heads = [...new Set([...names, ...[...ix.byCode.values(), ...ix.byTitle.values()].map((e) => e.head)])].sort((a, b) => a.localeCompare(b, "fa"));
   }
   return cache.heads;
 }
 
-/** واژه → نوع‌های قلم، فقط برای تکه‌های لازم */
+/** واژه → نوع‌های قلم (به نامِ استاندارد)، فقط برای تکه‌های لازم */
 export async function wordHeads(env, ws) {
   const shards = [...new Set(ws.map((w) => shardOf("word", w)))];
   if (!shards.length) return {};
@@ -401,7 +470,7 @@ export async function wordHeads(env, ws) {
   const all = {};
   for (const r of rows) Object.assign(all, parse(r.data));
   const out = {};
-  for (const w of ws) if (all[w]) out[w] = all[w];
+  for (const w of ws) if (all[w]) out[w] = [...new Set(all[w].map((h) => CANON.canonHead(h)))];
   return out;
 }
 

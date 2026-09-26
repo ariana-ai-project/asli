@@ -4,9 +4,13 @@
  * داده از چهار فایل مرجع می‌آید (worker/catalog.js): ردیف‌های خرید با نوع قلمِ هر کد و
  * قیمت تعدیل‌شده به زمستان ۱۴۰۴، و فهرست اقلام با لایه‌ها و نرخ‌های تبدیل واحد.
  *
- * دو حالت جستجو (Task.txt، شهریور ۱۴۰۵):
- *   «عین قلم»  — همان نوع قلم با دقیقاً همان لایه‌های ویژگی (مثلاً فقط «پیچ آلن M8×30»)
- *   «نوع قلم»  — هر قلمی از همان نوع (هر پیچی که تا حالا خریده‌ایم)
+ * سه حالت جستجو (Task.txt، شهریور ۱۴۰۵؛ «قلم انتخابی» مهر ۱۴۰۵):
+ *   «عین قلم»     — همان نوع قلم با دقیقاً همان لایه‌های ویژگی (مثلاً فقط «پیچ آلن M8×30»)
+ *   «نوع قلم»     — هر قلمی از همان نوع (هر پیچی که تا حالا خریده‌ایم)
+ *   «قلم انتخابی» — همان نوع قلم و فقط لایه‌هایی که کارشناس تیک زده برابر (ورقِ «ضخامت ۸ میلی‌متر»
+ *                   با هر مساحت و هر کدی)، و فقط خریدهایی که واحدشان در نرخ‌های تیک‌خورده است (بی
+ *                   تیکِ «ورق → کیلوگرم»، خریدهای برگی‌ای در هیچ جمع و سهم و ریز خریدی نمی‌آیند).
+ *                   بی تیکِ لایه همان «نوع قلم» است و با تیکِ همهٔ لایه‌ها همان «عین قلم».
  * رتبه‌بندی برای هر حالت جدا حساب می‌شود.
  *
  * ساختار قلم (نوع و لایه‌ها) یا از دیتابیس اصلی می‌آید — فهرست اقلام و ویرایش‌های کارشناس، با
@@ -24,6 +28,8 @@
 import { HttpError } from "./http.js";
 import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor } from "./catalog.js";
 import { normOf, catalogStruct, dbStruct, canonStruct } from "./normalize.js";
+import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
+import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 
 export { activeImport } from "./catalog.js";
 
@@ -97,14 +103,22 @@ const IN_MAX = 90;
  *         اصلی با کد یا عنوانِ عیناً همان — همان که پنل بی مدل نشان داده؛ پیشنهادِ مدل بی تأیید نه،
  *         false = فقط دیتابیس اصلی با کد راهکاران، undefined = ذخیره‌شده اگر هست وگرنه دیتابیس با
  *         کد یا عنوان (بات).
- * خروجی: {hd, struct, mode, codes, override, source} یا {message}.
+ * `struct`: پیشنهادِ ذخیره‌نشدهٔ «نرمال‌سازی اقلام» ({head، layers}) — پنل وقتی کارشناس بی ذخیره
+ *         «بررسی سوابق» را زده؛ فقط خوانده می‌شود و جایی نوشته نمی‌شود.
+ * `pick`: {layers: [نام لایه‌ها]، units: [واحدهای خرید]} برای «قلم انتخابی».
+ * خروجی: {hd, struct, mode, codes, override, source, units, picked} یا {message}.
  */
-export async function resolveScope(env, it, { norm, mode } = {}) {
+export async function resolveScope(env, it, { norm, mode, struct: given, pick } = {}) {
   let n = normOf(it);
   let hd, struct, override = {}, source;
-  if (n && norm !== false) {
-    /* تأییدِ پیش از یکسان‌سازی («ورق» با ضخامتِ «2 میل») به زبان امروزِ فهرست برده می‌شود */
-    if (n.v !== 2) { const meta = await catalogMeta(env); if (meta) n = await canonStruct(env, meta, n, it); }
+  if (given && given.head && norm !== false) {
+    struct = CANON.canonStructure({ head: nameOf(given.head), layers: given.layers && typeof given.layers === "object" ? given.layers : {}, residual: "", code: null },
+      { title: T(it.title), layers: given.layers || {} });
+    hd = await headData(env, struct.head); source = "proposal";
+  } else if (n && norm !== false) {
+    /* تأییدِ پیش از یکسان‌سازی («ورق» با ضخامتِ «2 میل») یا پیش از یکسان‌سازیِ دوم (نمره، مقاطع) به
+       زبان امروزِ فهرست برده می‌شود */
+    const meta = await catalogMeta(env); if (meta) n = await canonStruct(env, meta, n, it);
     hd = await headData(env, n.head);
     struct = n; override = n.rates || {}; source = "norm";
   } else if (norm !== false) {
@@ -127,14 +141,27 @@ export async function resolveScope(env, it, { norm, mode } = {}) {
   }
   if (!hd) return { message: `نوع قلم «${struct.head}» در فهرست اقلام نیست، پس سابقهٔ خریدی هم ندارد.`, struct };
 
-  const m = mode === "head" ? "head" : "exact";
-  let codes = null;
+  const m = mode === "head" ? "head" : mode === "pick" ? "pick" : "exact";
+  let codes = null, picked = [];
   if (m === "exact") {
     codes = hd.items.filter((x) => layersEqual(x[4], struct.layers)).map((x) => x[0]);
     if (struct.code && !codes.includes(struct.code)) codes.push(struct.code);
   }
-  return { hd, struct, mode: m, codes, override, source };
+  if (m === "pick") {
+    /* فقط لایه‌هایی که خودِ این قلم دارد؛ برابری با همان کلیدِ «عین قلم» (واحد به مرجع برده می‌شود) */
+    const L = struct.layers || {};
+    picked = [...new Set(((pick && pick.layers) || []).map(nameOf))].filter((k) => L[k] != null && L[k] !== "");
+    if (picked.length) {
+      const want = picked.map((k) => [k, RULES.layerKey(k, L[k])]);
+      codes = hd.items.filter((x) => want.every(([k, v]) => x[4] && x[4][k] != null && RULES.layerKey(k, x[4][k]) === v)).map((x) => x[0]);
+      if (struct.code && !codes.includes(struct.code)) codes.push(struct.code);
+    }
+  }
+  const units = m === "pick" && pick && Array.isArray(pick.units) && pick.units.length ? new Set(pick.units.map(nameOf)) : null;
+  return { hd, struct, mode: m, codes, override, source, units, picked };
 }
+/* «قلم انتخابی»: واحدِ خریدی که تیک نخورده در هیچ جمع و سهمی نمی‌آید */
+const unitOk = (sc, u) => !sc.units || sc.units.has(nameOf(u));
 
 /**
  * کوئری روی ردیف‌های همین محدوده؛ «عین قلم» با فهرست کدها، تکه‌تکه اگر بلند باشد.
@@ -162,7 +189,8 @@ async function scoped(env, sc, select, tail, args = [], tailArgs = []) {
     return res;
   };
   const allSrc = [...new Set([...src, ...inc.flatMap((x) => x.src)])];
-  let codes = sc.mode === "head" ? (hd.sub ? hd.items.map((x) => x[0]) : null) : sc.codes;
+  /* فهرستِ کد («عین قلم»، «قلم انتخابی» با لایهٔ تیک‌خورده)، وگرنه همهٔ نوع قلم */
+  let codes = sc.codes != null ? sc.codes : hd.sub ? hd.items.map((x) => x[0]) : null;
   if (!codes && src.length + out.length > IN_MAX) codes = hd.items.map((x) => x[0]);
   if (!codes) {
     const rows = await run(`head IN (${q(src)})${out.length ? ` AND item_code NOT IN (${q(out)})` : ""}`, [...src, ...out]);
@@ -217,9 +245,12 @@ export async function itemHistory(env, it, opts = {}) {
   const hd = sc.hd;
   const byCode = new Map(hd.items.map((x) => [x[0], x]));
   const struct = { head: hd.head, layers: sc.struct.layers || {}, residual: sc.struct.residual || "", code: sc.struct.code || null, refUnit: hd.ref };
-  const match = { mode: sc.mode, source: sc.source, codes: sc.mode === "head" ? hd.items.length : sc.codes.length, headItems: hd.items.length };
-  if (sc.mode === "exact" && !sc.codes.length) {
-    return { ...head, ...empty, struct, match, message: "هیچ قلمی در فهرست دقیقاً همین لایه‌ها را ندارد. حالت «نوع قلم» همهٔ اقلام همین نوع را نشان می‌دهد." };
+  const match = { mode: sc.mode, source: sc.source, codes: sc.codes ? sc.codes.length : hd.items.length, headItems: hd.items.length,
+    picked: sc.picked || [], units: sc.units ? [...sc.units] : null };
+  if (sc.codes && !sc.codes.length) {
+    return { ...head, ...empty, struct, match, message: sc.mode === "pick"
+      ? "هیچ قلمی از این نوع، لایه‌های تیک‌خورده را با همین مقدار ندارد. تیکِ یکی از لایه‌ها را بردارید."
+      : "هیچ قلمی در فهرست دقیقاً همین لایه‌ها را ندارد. حالت «نوع قلم» همهٔ اقلام همین نوع را نشان می‌دهد." };
   }
 
   /* ۱) خریدها به تفکیک تأمین‌کننده × کد × واحد — تبدیل واحد به ازای (کد، واحد) است */
@@ -230,9 +261,10 @@ export async function itemHistory(env, it, opts = {}) {
   "GROUP BY supplier_n, item_code, unit", w);
 
   const per = new Map(), excluded = new Map(), units = new Map();
-  let lowConf = 0;
+  let lowConf = 0, unitDropped = 0;
   for (const g of groups) {
     const u = nameOf(g.unit);
+    if (!unitOk(sc, u)) { unitDropped += g.n; continue; }
     const rt = rateFor(hd, byCode.get(g.item_code) || null, u, sc.override);
     if (!units.has(u)) units.set(u, { unit: u, rows: 0, rates: new Map() });
     const us = units.get(u); us.rows += g.n;
@@ -300,14 +332,21 @@ export async function itemHistory(env, it, opts = {}) {
   const unconverted = list.reduce((a, s) => a + s.unconv, 0);
 
   /* ۳) کدام اقلامِ فهرست در این نتیجه‌اند — تا کارشناس ببیند «عین قلم» و «نوع قلم» چه چیزهایی را شمرده */
-  const titles = opts.brief ? [] : (await scoped(env, sc, "SELECT item_code, MAX(title) AS title, COUNT(*) AS n", "GROUP BY item_code ORDER BY n DESC LIMIT 12"))
-    .sort((a, b) => b.n - a.n).slice(0, 12)
-    .map((r) => ({ code: r.item_code, title: (byCode.get(r.item_code) || [])[1] || r.title, n: r.n, layers: (byCode.get(r.item_code) || [])[4] || null }));
+  let titles = [];
+  if (!opts.brief) {
+    const tc = new Map();
+    for (const r of await scoped(env, sc, "SELECT item_code, unit, MAX(title) AS title, COUNT(*) AS n", "GROUP BY item_code, unit ORDER BY n DESC LIMIT 200")) {
+      if (!unitOk(sc, r.unit)) continue;
+      const e = tc.get(r.item_code) || { code: r.item_code, title: r.title, n: 0 }; e.n += r.n; tc.set(r.item_code, e);
+    }
+    titles = [...tc.values()].sort((a, b) => b.n - a.n).slice(0, 12)
+      .map((r) => ({ code: r.code, title: (byCode.get(r.code) || [])[1] || r.title, n: r.n, layers: (byCode.get(r.code) || [])[4] || null }));
+  }
 
   return {
     ...head, struct, match, rates, titles,
     excluded: [...excluded.values()],
-    unconverted, lowConf,
+    unconverted, lowConf, unitDropped,
     item: { unit: hd.ref, units: [...units.keys()].join("، "), mixedUnits: false, refUnit: hd.ref },
     totals: { n: list.reduce((a, s) => a + s.n, 0), qty: sumQty, qtyM: sumM, suppliers: suppliers.length },
     suppliers,
@@ -322,13 +361,13 @@ export async function itemSeries(env, it, opts = {}) {
   const { err } = await readyImport(env);
   if (err) throw new HttpError(err.message, 409);
   const sc = await resolveScope(env, it, opts);
-  if (!sc.hd || (sc.mode === "exact" && !sc.codes.length)) return { points: [], unit: sc.hd ? sc.hd.ref : null };
+  if (!sc.hd || (sc.codes && !sc.codes.length)) return { points: [], unit: sc.hd ? sc.hd.ref : null };
   const byCode = new Map(sc.hd.items.map((x) => [x[0], x]));
   const rows = await scoped(env, sc, `SELECT supplier_n AS key, MAX(supplier) AS name, order_date AS date, item_code, unit,
       SUM(COALESCE(qty,0)) AS qty, COUNT(*) AS n`, "GROUP BY supplier_n, order_date, item_code, unit ORDER BY order_date LIMIT 5000");
   const pts = new Map();
   for (const r of rows) {
-    if (excludedWhy(r.key)) continue;
+    if (excludedWhy(r.key) || !unitOk(sc, r.unit)) continue;
     const rt = rateFor(sc.hd, byCode.get(r.item_code) || null, r.unit, sc.override);
     if (!rt) continue;
     const kk = `${r.key}|${r.date}`;
@@ -346,11 +385,13 @@ export async function supplierBuys(env, it, supplier, opts = {}) {
   const { err } = await readyImport(env);
   if (err) throw new HttpError(err.message, 409);
   const sc = await resolveScope(env, it, opts);
-  if (!sc.hd || (sc.mode === "exact" && !sc.codes.length)) return { buys: [], unit: sc.hd ? sc.hd.ref : null };
+  if (!sc.hd || (sc.codes && !sc.codes.length)) return { buys: [], unit: sc.hd ? sc.hd.ref : null };
   const byCode = new Map(sc.hd.items.map((x) => [x[0], x]));
-  const rows = await scoped(env, sc, "SELECT order_date, title, item_code, qty, unit, amount, amount_adj",
-    "AND supplier_n=? ORDER BY order_date DESC LIMIT 300", [], [sn]);
-  /* هر ردیف با مقدارش به واحد مرجع و قیمت واحدش به زمستان ۱۴۰۴ (به ازای همان واحد مرجع) */
+  const rows = (await scoped(env, sc, "SELECT order_date, title, item_code, qty, unit, amount, amount_adj",
+    "AND supplier_n=? ORDER BY order_date DESC LIMIT 300", [], [sn])).filter((r) => unitOk(sc, r.unit));
+  /* هر ردیف با قیمت روزِ خودش و قیمتِ به مبلغِ زمستان ۱۴۰۴ (تصمیم مدیر، مهر ۱۴۰۵): قیمت واحد و مبلغ کل
+     هر دو در همان ضریب تعدیلِ ردیف ضرب می‌شوند — ضریبی که هنگام بارگذاری از شاخصِ طبقهٔ اصنافِ قلم
+     و فصلِ خرید ساخته شده (amount_adj ÷ amount)، پس قیمت واحدِ تعدیل‌شده به همان واحدِ ثبت‌شده است. */
   const buys = rows.sort((a, b) => (a.order_date < b.order_date ? 1 : -1)).slice(0, 300).map((r) => {
     const rt = rateFor(sc.hd, byCode.get(r.item_code) || null, r.unit, sc.override);
     const qref = rt && r.qty != null ? r.qty * rt.rate : null;
@@ -358,11 +399,61 @@ export async function supplierBuys(env, it, supplier, opts = {}) {
       order_date: r.order_date, title: r.title, item_code: r.item_code, qty: r.qty, unit: r.unit,
       amount: r.amount, amount_adj: r.amount_adj,
       unit_price: r.qty ? r.amount / r.qty : null,
+      unit_price_adj: r.qty && r.amount_adj != null ? r.amount_adj / r.qty : null,
+      adj_factor: r.amount && r.amount_adj != null ? r.amount_adj / r.amount : null,
       rate: rt ? rt.rate : null, qty_ref: qref,
       unit_adj: qref ? r.amount_adj / qref : null,
     };
   });
   return { buys, unit: sc.hd.ref };
+}
+
+/**
+ * سهمِ هر واحدِ خرید از کلِ مقدارِ خریدِ این نوع قلم (به واحد مرجع) — کنار هر نرخ در کادرِ «نرمال‌سازی
+ * اقلام»: از ۱۰۰۰ کیلوگرم، چند درصد واقعاً کیلوگرم خریده شده و چند درصد از «ورق» یا «متر مربع» تبدیل
+ * شده، تا کارشناس بداند کنار گذاشتنِ یک نرخ در «قلم انتخابی» چه سهمی را کنار می‌گذارد. همان
+ * جمعیتِ جدول تأمین‌کنندگان (بی نام‌های تجمیعی و تحویلیِ کارفرما) و همان نرخ‌ها (rateFor).
+ */
+export async function unitShares(env, hd, override = {}) {
+  if (!hd) return null;
+  const sc = { hd, mode: "head", codes: null, override };
+  const byCode = new Map(hd.items.map((x) => [x[0], x]));
+  const rows = await scoped(env, sc, "SELECT supplier_n AS sn, item_code, unit, COUNT(*) AS n, SUM(COALESCE(qty,0)) AS qty", "GROUP BY supplier_n, item_code, unit");
+  const per = new Map(); let total = 0;
+  for (const g of rows) {
+    if (excludedWhy(g.sn)) continue;
+    const u = nameOf(g.unit);
+    const rt = rateFor(hd, byCode.get(g.item_code) || null, u, override);
+    const e = per.get(u) || { unit: u, rows: 0, qty: 0, qtyRef: 0, unconverted: 0 };
+    e.rows += g.n; e.qty += g.qty || 0;
+    if (rt) { const q = (g.qty || 0) * rt.rate; e.qtyRef += q; total += q; } else e.unconverted += g.n;
+    per.set(u, e);
+  }
+  const units = [...per.values()].map((e) => ({ ...e, share: total ? e.qtyRef / total * 100 : 0 })).sort((a, b) => b.qtyRef - a.qtyRef || b.rows - a.rows);
+  return { ref: hd.ref, total, units };
+}
+
+/**
+ * نرخ‌های کادرِ «نرمال‌سازی اقلام» (normalize.js:ratesView) به‌همراهِ سهمِ هر واحد، ردیفِ خودِ واحد مرجع،
+ * و واحدهایی که در سوابق هست ولی نرخِ نوع قلم ندارند (با نرخِ خوشه یا بی‌نرخ).
+ */
+export async function ratesWithShares(env, rv, head, code) {
+  if (!rv || !rv.ref || !head) return rv;
+  const hd = await headData(env, head); if (!hd) return rv;
+  const override = {};
+  for (const u of rv.units || []) if (u.src === "user" && u.rate > 0) override[u.unit] = u.rate;
+  const sh = await unitShares(env, hd, override);
+  const pickS = (s) => (s ? { rows: s.rows, qty: s.qty, qtyRef: s.qtyRef, share: s.share, unconverted: s.unconverted } : { rows: 0, qty: 0, qtyRef: 0, share: 0, unconverted: 0 });
+  const byU = new Map(sh.units.map((s) => [s.unit, s]));
+  const units = (rv.units || []).map((u) => ({ ...u, ...pickS(byU.get(u.unit)) }));
+  const item = code ? hd.items.find((x) => x[0] === code) || null : null;
+  for (const [u, s] of byU) {
+    if (u === rv.ref || units.some((x) => x.unit === u)) continue;
+    const rt = rateFor(hd, item, u, override);
+    units.push({ unit: u, ...(rt || { rate: null, basis: "نرخی نیست", conf: "—", src: "none" }), ...pickS(s) });
+  }
+  units.sort((a, b) => (b.qtyRef || 0) - (a.qtyRef || 0) || (b.rows || 0) - (a.rows || 0) || String(a.unit).localeCompare(String(b.unit), "fa"));
+  return { ...rv, units, refRow: { unit: rv.ref, rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref", ...pickS(byU.get(rv.ref)) }, total: sh.total };
 }
 
 /** وضعیت بارگذاری برای تب «سوابق تأمین» مدیر */

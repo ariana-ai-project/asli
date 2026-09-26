@@ -27,7 +27,7 @@ import { DEFAULTS, getSettings, settingsFromRows } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
-import { historyStatus, itemHistory, supplierBuys, itemSeries } from "./history.js";
+import { historyStatus, itemHistory, supplierBuys, itemSeries, ratesWithShares } from "./history.js";
 import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allHeads } from "./catalog.js";
 import { normalizeItem, confirmNorm, clearNorm, revertEdit } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
@@ -1742,12 +1742,19 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
       const b = await readJson(request);
-      return json(await normalizeItem(env, it, { force: !!b.force }));
+      /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
+      const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
+      /* کنار هر نرخ، سهمِ همان واحد از کلِ خریدِ این نوع قلم */
+      if (p.head && p.rates) p.rates = await ratesWithShares(env, p.rates, p.head, p.code || null);
+      return json(p);
     }
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      return json(m === "PUT" ? await confirmNorm(env, it, await readJson(request), who) : await clearNorm(env, it));
+      if (m === "DELETE") return json(await clearNorm(env, it));
+      const r = await confirmNorm(env, it, await readJson(request), who);
+      if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null);
+      return json(r);
     }
     /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
@@ -1756,12 +1763,20 @@ async function route(request, env, ctx) {
     }
     /* نام همهٔ نوع‌های قلم — انتخابِ نوع قلم در پنل نرمال‌سازی */
     if (path === "/catalog/heads" && m === "GET") { await requireAny(request, env); return json({ heads: await allHeads(env) }); }
-    /* «عین قلم» (mode=exact) یا «نوع قلم» (mode=head)؛ norm=1 یعنی بر ساختار تأییدشدهٔ نرمال‌سازی،
-       norm=0 یعنی فقط با کد راهکاران در فهرست اقلام */
-    const histOpts = () => ({
-      k: url.searchParams.get("k"), mode: url.searchParams.get("mode") === "head" ? "head" : "exact",
-      norm: url.searchParams.get("norm") === "1" ? true : url.searchParams.get("norm") === "0" ? false : undefined,
-    });
+    /* «عین قلم» (mode=exact)، «نوع قلم» (mode=head) یا «قلم انتخابی» (mode=pick، با pl=لایه‌های تیک‌خورده و
+       pu=واحدهای تیک‌خورده، هرکدام تکرارشونده)؛ norm=1 یعنی بر ساختار تأییدشدهٔ نرمال‌سازی، norm=0 یعنی فقط
+       با کد راهکاران در فهرست اقلام؛ struct=پیشنهادِ ذخیره‌نشدهٔ نرمال‌سازی ({head، layers}، JSON) */
+    const histOpts = () => {
+      const md = url.searchParams.get("mode");
+      let struct = null;
+      try { const s = url.searchParams.get("struct"); struct = s ? JSON.parse(s) : null; } catch (_) { throw new HttpError("ساختارِ پیشنهادی خوانا نیست."); }
+      return {
+        k: url.searchParams.get("k"), mode: md === "head" || md === "pick" ? md : "exact",
+        norm: url.searchParams.get("norm") === "1" ? true : url.searchParams.get("norm") === "0" ? false : undefined,
+        struct: struct && typeof struct === "object" && typeof struct.head === "string" ? struct : null,
+        pick: md === "pick" ? { layers: url.searchParams.getAll("pl"), units: url.searchParams.getAll("pu") } : null,
+      };
+    };
     if (path === "/suppliers/history" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));

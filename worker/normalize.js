@@ -36,10 +36,14 @@ import { runCost } from "./discovery.js";
 import { ascii, nameOf, keyOf, words, catalogMeta, headOfCode, headData, catalogHead, itemOf, wordHeads, rateFor, layersEqual,
   codeOfTitle, editIndex, editRows, editKey, resetEditsCache } from "./catalog.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
+import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
 
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
-export const NORM_PROMPT_VERSION = "item-norm/2.0";
+/* ۲٫۱: فهرستِ لایه‌ها بی «نمره» و با مساحت، محیط و یال‌ها (یکسان‌سازیِ دوم) */
+export const NORM_PROMPT_VERSION = "item-norm/2.1";
+/* لایه‌هایی که ذخیره و خوانده می‌شوند: فهرستِ استاندارد به‌علاوهٔ «نمره»ای که معنایش هنوز تصمیم نشده */
+const knownLayers = (meta) => new Set([...RULES.layerList(meta.layers).map((l) => l.fa), ...RULES.HIDDEN_LAYERS]);
 /* نسخهٔ ساختارِ ذخیره‌شده (norm_json و norm_cache): ۲ = لایهٔ کمّی عدد + واحد، جنسِ ضمنی، نوع قلمِ مؤثر */
 const NORM_V = 2;
 const T = (v) => String(v == null ? "" : v).trim();
@@ -192,7 +196,7 @@ export const toolSchema = (layers) => ({
  * خروجی: {head, layers, residual, confidence, hd}.
  */
 export async function settle(env, meta, raw, text, { strict = false } = {}) {
-  const known = new Set(meta.layers.map((l) => l.fa));
+  const known = knownLayers(meta);
   const entries = Array.isArray(raw && raw.layers)
     ? raw.layers.map((x) => [nameOf(x && x.name), { text: T(x && x.value), unit: T(x && x.unit), imp: !!(x && x.implicit) }])
     : Object.entries((raw && raw.layers) || {}).map(([k, v]) => [nameOf(k), Array.isArray(v) || (v && typeof v === "object")
@@ -233,7 +237,9 @@ export async function settle(env, meta, raw, text, { strict = false } = {}) {
      فهرستی که پیش از این قواعد ساخته شده (meta.rules ندارد) نه «ورق آهنی» دارد نه جنسِ ضمنی؛
      تا ورودِ دوباره‌اش، درخواست هم به همان زبان می‌ماند — وگرنه «ورق آهنی» در فهرستِ کهنه پیدا
      نمی‌شد و سوابقِ «ورق» از دست می‌رفت. */
-  const head0 = nameOf(raw && raw.head);
+  /* نامِ هم‌معنا یا غلط («آرماتور»، «پیج») از همین‌جا به نام استاندارد می‌رود تا جنس و عرف هم از
+     قاعدهٔ نامِ استاندارد بیایند */
+  const head0 = raw && raw.head ? CANON.canonHead(nameOf(raw.head)) : "";
   if (!head0) throw new HttpError(strict ? "نوع قلم لازم است." : "مدل نوع قلم را برنگرداند.", strict ? 400 : 502);
   const sh0 = RULES.splitHead(head0, HEAD_RULES);
   const sh = meta.rules ? sh0 : { base: sh0.base, mat: null, rule: null };
@@ -269,8 +275,9 @@ export async function settle(env, meta, raw, text, { strict = false } = {}) {
     if (qs.every(Boolean)) attrs[k] = qs.length > 1 ? qs : qs[0];
     else if (strict && parts.some((p) => p.unit)) throw new HttpError(`«${k}»: «${x.text}» عدد نیست؛ یا عدد بنویسید یا واحد را بردارید تا متن بماند.`);
   }
+  /* یکسان‌سازیِ دوم: نمره به لایهٔ واقعی، ورق ← ضخامت + مساحت، قوطی ← محیط، نبشی ← یال‌ها */
   return {
-    head: eff, layers: attrs, residual: [T(raw && raw.residual), ...extra].filter(Boolean).join(" "),
+    head: eff, layers: CANON.canonLayers(eff, attrs), residual: [T(raw && raw.residual), ...extra].filter(Boolean).join(" "),
     confidence: ["high", "medium", "low"].includes(raw && raw.confidence) ? raw.confidence : "low", hd,
   };
 }
@@ -283,9 +290,9 @@ async function askModel(env, it, meta, cands, samples, conv) {
     headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({
       model, max_tokens: 1024,
-      system: systemPrompt(meta.layers),
+      system: systemPrompt(RULES.layerList(meta.layers)),
       /* خروجی با ابزار، نه متن آزاد — همان قاعدهٔ extract.js: همیشه JSON معتبرِ هم‌شکل */
-      tools: [{ name: "record_split", description: "تفکیک عنوان قلم را ثبت می‌کند.", strict: true, input_schema: toolSchema(meta.layers) }],
+      tools: [{ name: "record_split", description: "تفکیک عنوان قلم را ثبت می‌کند.", strict: true, input_schema: toolSchema(RULES.layerList(meta.layers)) }],
       tool_choice: { type: "tool", name: "record_split" },
       messages: [{ role: "user", content: userPrompt(it, cands, samples, conv) }],
     }),
@@ -310,9 +317,13 @@ const textOf = (it) => `${T(it && it.title)} ${T(it && it.spec)}`.trim();
  * امروز: «ورق» + ضخامت «2 میل» ← «ورق آهنی» + ضخامت ۲ میلی‌متر + جنسِ ضمنیِ آهنی.
  */
 export async function canonStruct(env, meta, s, it) {
-  if (!s || s.v === NORM_V) return s;
-  const r = await settle(env, meta, { head: s.head, layers: s.layers, residual: s.residual, confidence: s.confidence }, textOf(it));
-  return { ...s, head: r.head, layers: r.layers, v: NORM_V };
+  if (!s) return s;
+  if (s.v !== NORM_V) {
+    const r = await settle(env, meta, { head: s.head, layers: s.layers, residual: s.residual, confidence: s.confidence }, textOf(it));
+    return { ...s, head: r.head, layers: r.layers, v: NORM_V };
+  }
+  /* نسخهٔ ۲ پیش از یکسان‌سازیِ دوم: نام و لایه‌ها به زبان امروز (بی مدل، بی دیتابیس) */
+  return CANON.canonStructure(s, { title: T(it && it.title), layers: s.layers || {} });
 }
 
 /* ویرایشِ کارشناس برای نمایش: کلید، نام کارشناس و زمان */
@@ -387,10 +398,15 @@ export async function normalizeItem(env, it, opts = {}) {
   /* نام لایه‌های استاندارد همراه هر پاسخ — پنل برای ویرایش لایه‌ها فهرستشان را لازم دارد؛
      costEst: هزینهٔ تقریبیِ «تفکیک دوباره با مدل»، کنار همان دکمه */
   const [p, costEst] = await Promise.all([proposal(env, it, meta, opts), costEstimate(env)]);
-  return { ...p, layerNames: meta.layers.map((l) => l.fa), costEst };
+  return { ...p, layerNames: RULES.layerList(meta.layers).map((l) => l.fa), costEst };
 }
 
-async function proposal(env, it, meta, { force = false }) {
+/**
+ * `model`: اجازهٔ صدا زدنِ مدل. مدل هزینه دارد، پس هرگز بی تأییدِ صریحِ کارشناس صدا زده نمی‌شود
+ * (تصمیم مدیر، مهر ۱۴۰۵): بی این اجازه، قلمی که نه در دیتابیس است نه در کشِ مدل، پاسخِ
+ * {needsModel: true} می‌گیرد و پنل هزینهٔ تقریبی را می‌گوید و می‌پرسد.
+ */
+async function proposal(env, it, meta, { force = false, model = false }) {
 
   if (!force) {
     /* از قبل تأیید شده: همان، با نرخ‌هایی که کارشناس عوض کرده بود */
@@ -418,6 +434,8 @@ async function proposal(env, it, meta, { force = false }) {
       return { source: "cache", ...r, rates: ratesView(hd, null), known: !!hd, model: hit.model };
     }
   }
+
+  if (!model) return { source: "none", needsModel: true, head: "", layers: {}, residual: "", rates: { ref: null, units: [] }, known: false };
 
   /* نوع‌های محتمل از واژه‌های عنوان (و مشخصهٔ فنی، که اغلب اندازه و جنس است) */
   const text = textOf(it);
@@ -488,7 +506,7 @@ export async function confirmNorm(env, it, body, who = null) {
   const meta = await catalogMeta(env);
   if (!meta) throw new HttpError("فهرست اقلام هنوز بارگذاری نشده است.", 409);
   if (!nameOf(body && body.head)) throw new HttpError("نوع قلم لازم است.");
-  const known = new Set(meta.layers.map((l) => l.fa));
+  const known = knownLayers(meta);
   for (const k of Object.keys((body && body.layers) || {})) if (!known.has(nameOf(k))) throw new HttpError(`«${nameOf(k)}» لایهٔ استاندارد نیست.`);
   const rates = {};
   for (const [u, r] of Object.entries((body && body.rates) || {})) {

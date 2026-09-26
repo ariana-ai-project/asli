@@ -116,6 +116,8 @@
     /* لایهٔ کمّی: عدد و واحدِ جدا — عدد باریک، واحد از فهرستِ واحدهای هم‌بُعد */
     .normlayer input.num { flex: 0 1 150px; min-width: 90px; }
     .normlayer select.nu { width: 130px; }
+    /* تیکِ «قلم انتخابی» جلوی هر لایه — نه جای فیلد متن را بگیرد نه ردیف را بشکند */
+    .normlayer input[type=checkbox] { flex: 0 0 auto; min-width: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--tp-accent); }
     .normcost { font-size: .8rem; }
     .seg { display: inline-flex; gap: 4px; }
     .chkline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
