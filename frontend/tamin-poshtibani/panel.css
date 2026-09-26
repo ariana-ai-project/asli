@@ -354,6 +354,9 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
   border: 1px solid var(--tp-line); border-radius: 10px; padding: 8px 10px; }
 .rp-ex { display: flex; gap: 6px; align-items: baseline; cursor: pointer; padding: 3px 0; flex-wrap: wrap; }
 .rp-ex .dim { font-size: .78rem; }
+/* هشدارِ کارشناسانِ بی‌سرگروه روی جدول گروه‌بندیِ گزارش (manager.js:teamDialog) */
+.rp-loose { margin: 6px 0 0; padding-inline-start: 22px; max-height: 40vh; overflow: auto; }
+.rp-loose .dim { font-size: .82rem; }
 
 /* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
 .tp-theme { min-width: 34px; }

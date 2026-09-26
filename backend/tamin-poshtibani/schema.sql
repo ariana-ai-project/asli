@@ -380,6 +380,9 @@ CREATE TABLE IF NOT EXISTS templates (
 --   managerChat / teamWebhook / webhook  — شناسهٔ کانال مدیر و نشانی وبهوک‌ها
 --   siteCards     — وضعیت کارت‌های صفحهٔ اول: {"mali":"soon", ...} با سه حالت active|soon|off (worker/site.js)
 --   sitePassHash  — SHA-256 رمز مشترک تب «پشتیبانی» صفحهٔ اول؛ خود رمز ذخیره نمی‌شود
+--   reportTeam    — گروه‌بندیِ گزارش سه‌ماهه، جدا از senior/senior_id جدول experts:
+--                   {"seniors":[سرگروه‌ها],"parent":{"<کارشناس>":سرگروه|null}} — null یعنی عمداً بی‌سرگروه
+--                   (worker/reports.js، GET/PUT /reports/team؛ هر تغییر در settings_history)
 CREATE TABLE IF NOT EXISTS settings (
   key        TEXT PRIMARY KEY,
   value      TEXT NOT NULL,               -- JSON
