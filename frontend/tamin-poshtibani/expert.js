@@ -370,7 +370,7 @@
     bucket: "نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
     employer: "مصالحِ تحویلیِ کارفرما است با قیمت اسمی، نه خرید از تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
   };
-  const CONF_CLS = { "قطعی": "ok", "بالا": "ok", "متوسط": "info", "پایین": "warn", "کارشناس": "info" };
+  const CONF_CLS = { "قطعی": "ok", "بالا": "ok", "متوسط": "info", "پایین": "warn", "کارشناس": "info", "فرمول": "ok" };
   /* ساختار قلم از کجا آمده: سه تای اول خودِ دیتابیس‌اند (کد یا عنوانِ عیناً همان) و مدل صدا زده نمی‌شود */
   const SRC_FA = { catalog: "از دیتابیس — همین کد", title: "از دیتابیس — همین عنوان", edit: "از دیتابیس — ویرایش کارشناس",
     cache: "پیشنهاد مدل (همین عنوان قبلاً تفکیک شده)", model: "پیشنهاد مدل", manual: "ویرایش کارشناس" };
@@ -395,6 +395,53 @@
   const isQuant = (k) => !!(RL() && RL().QUANT[k]);
   /* واحدهای هم‌بُعدِ یک لایهٔ کمّی (ضخامت: میلی‌متر، سانتی‌متر، اینچ …) */
   const unitsFor = (k) => { const R = RL(); if (!R || !R.QUANT[k]) return []; const d = R.QUANT[k]; return R.UNIT_NAMES.filter((u) => d.includes("*") || d.includes(R.UNITS[u].dim)); };
+
+  /* ---------- تبدیلِ ایستا/پویا (catalog-units.mjs، از راه TP.units) ----------
+     کادرِ نرخ‌ها برای هر واحد می‌گوید تبدیلش ایستاست — ضریب از خودِ دو واحد، برای همهٔ اقلام یکی (۱ تن =
+     ۱۰۰۰ کیلوگرم) — یا پویا: ضریب به اندازهٔ همین قلم بسته است (۱ ورق = مساحت × ضخامت × چگالی کیلوگرم) و
+     فرمول‌هایش (فرمول ۱، ۲، …) با لایه‌های همین پیش‌نویس حساب می‌شوند؛ لایه‌ای که کارشناس می‌افزاید یا اصلاح
+     می‌کند همان لحظه در فرمول می‌نشیند. بی ماژول، همان فرمول‌هایی که سرور با لایه‌های ذخیره‌شده حساب کرده. */
+  const UX = () => (window.TP && TP.units) || null;
+  const KIND_FA = { static: "ایستا", dynamic: "پویا", ref: "مرجع", unknown: "" };
+  const KIND_TIP = {
+    static: "ایستا: ضریب از خودِ دو واحد می‌آید و برای همهٔ اقلامِ این نوع یکی است (مثل ۱ تن = ۱۰۰۰ کیلوگرم)",
+    dynamic: "پویا: ضریب به اندازهٔ خودِ قلم بسته است (مساحت و ضخامتِ ورق، قطر و طولِ شاخه، شمارِ یک دست) و برای هر قلم با فرمول از لایه‌هایش حساب می‌شود",
+    unknown: "این واحد در جدولِ واحدها نیست؛ نرخِ فایل به کار می‌رود",
+  };
+  /** لایه‌های پیش‌نویس به شکلِ استاندارد، همان که «ذخیره» می‌فرستد و سرور یکسان می‌کند */
+  function draftLayers(dr) {
+    const R = RL(), L = {};
+    for (const l of dr.layers || []) {
+      if (!l.k || !String(l.t || "").trim()) continue;
+      if (isQuant(l.k)) { const q = R && R.quantWith(l.k, l.t, l.u || null, l.i); if (q) L[l.k] = q; }
+      else L[l.k] = l.i ? { v: l.t, i: 1 } : l.t;
+    }
+    return window.TP.canon ? TP.canon.canonLayers(dr.head, L) : L;
+  }
+  /** تبدیلِ یک واحد با لایه‌های پیش‌نویس؛ null اگر ماژول نیست یا نوع قلم در پیش‌نویس عوض شده (واحد مرجعِ تازه بعد از ذخیره) */
+  function liveConv(n, unit) {
+    const U = UX(), rv = (n.data && n.data.rates) || {};
+    if (!U || !rv.ref || String(n.draft.head || "").trim() !== String(n.data.head || "").trim()) return null;
+    try { return U.convert({ head: n.draft.head, layers: draftLayers(n.draft) }, unit, rv.ref); } catch (_) { return null; }
+  }
+  /** نرخی که ردیف نشان می‌دهد: نرخِ دستیِ پیش‌نویس، وگرنه فرمولِ پویا با لایه‌های پیش‌نویس، وگرنه نرخ سرور */
+  function rateShown(n, u, cv) {
+    if (n.draft.rates[u.unit] != null) return n.draft.rates[u.unit];
+    if (u.src !== "user" && cv && cv.type === "dynamic" && cv.rate != null) return cv.rate;
+    return u.rate;
+  }
+  /** خانهٔ «فرمول / مبنا» یک واحد */
+  function fxHtml(n, u, cv) {
+    const c = cv || { type: u.kind, formulas: u.formulas || [], used: u.used == null ? -1 : u.used, basis: u.staticBasis || "" };
+    const user = u.src === "user" || n.draft.rates[u.unit] != null;
+    const userNote = user ? `<div class="dim" style="font-size:.78rem">نرخِ دستیِ کارشناس بر ${c.type === "dynamic" ? "فرمول" : "ضریب"} مقدم است.</div>` : "";
+    if (c.type === "static") return `${esc(c.basis || u.staticBasis || u.basis)}${userNote}`;
+    if (c.type !== "dynamic") return `${esc(u.basis)}${userNote}`;
+    const li = (c.formulas || []).map((f, i) => `<li class="${i === c.used ? "used" : f.value != null ? "ok" : "miss"}"><b>فرمول ${M(i + 1)}:</b> ${esc(f.label)}
+      <div class="fxv">${f.value != null ? `${esc(f.expr)}${i === c.used && !user ? " — به کار رفت ✓" : ""}` : `لایهٔ ${(f.missing || []).map((x) => `«${esc(x)}»`).join(" و ")} را ندارد`}</div></li>`).join("");
+    const none = c.used < 0 ? `<div class="fxw">هیچ فرمولی لایه‌هایش را ندارد؛ ${!user && u.rate != null && u.src !== "formula" ? `نرخِ ثابتِ فایل (${fmtRate(u.rate)}) — یک عدد برای همهٔ اقلامِ این نوع — به کار می‌رود` : !user ? "خریدِ این واحد بی‌نرخ می‌ماند" : "نرخِ دستی به کار می‌رود"}. لایهٔ لازم را در «لایه‌های ویژگی» بالا بیفزایید.</div>` : "";
+    return `${li ? `<ol class="fxl">${li}</ol>` : ""}${none}${userNote}`;
+  }
   /* هزینهٔ تقریبیِ یک تفکیک با مدل (Haiku) تا وقتی سرور میانگینِ واقعی را نگفته — همان worker/normalize.js:NORM_COST_EST.
      روی صفحه نشان داده نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵)؛ فقط در کادرِ تأییدی که پیش از هر فراخوانی مدل باز می‌شود. */
   const NORM_COST_EST = 0.006;
@@ -568,7 +615,8 @@
     const allUnits = [rv.refRow ? rv.refRow.unit : rv.ref, ...(rv.units || []).map((u) => u.unit)].filter(Boolean);
     const unitOn = (u) => !pk.units || pk.units.includes(u);
     const shareCell = (u) => (u.rows ? `<b class="num">${(u.share || 0).toFixed(1)}٪</b>${u.unconverted ? ` <span class="chip warn" title="خریدهایی با این واحد که نرخ ندارند و در جمع نیامده‌اند">${M(u.unconverted)} بی‌نرخ</span>` : ""}
-      <div class="dim num" style="font-size:.75rem">${M(u.rows)} خرید · ${M(RQ(u.qty))} ${esc(u.unit)}</div>` : `<span class="dim">در سوابق نیست</span>`);
+      <div class="dim num" style="font-size:.75rem">${M(u.rows)} خرید · ${M(RQ(u.qty))} ${esc(u.unit)}</div>
+      ${u.formulaRows || u.fixedRows ? `<div class="dim" style="font-size:.72rem" title="در همهٔ اقلامِ این نوع: خریدهایی که ضریبشان با فرمول از لایه‌های همان قلم آمد، و خریدهایی که قلمشان لایهٔ لازم را نداشت و نرخِ ثابتِ فایل گرفتند">${u.formulaRows ? `${M(u.formulaRows)} با فرمول` : ""}${u.formulaRows && u.fixedRows ? " · " : ""}${u.fixedRows ? `<span style="color:#fcd34d">${M(u.fixedRows)} با نرخ ثابت</span>` : ""}</div>` : ""}` : `<span class="dim">در سوابق نیست</span>`);
     const cands = [...new Set([d.head, ...(d.candidates || [])].filter(Boolean))];
     const fromDb = DB_SRC.has(d.source);
     const where = it.code ? `کد ${it.code}` : "عنوانِ همین قلم";
@@ -605,13 +653,16 @@
       ${rv.ref ? `<div class="tp-field" style="margin-top:10px"><b>نرخ تبدیل به واحد مرجع («${esc(rv.ref)}»)</b>
         ${rv.total ? `<div class="dim" style="font-size:.85rem;margin:2px 0 4px">کلِ خریدِ این نوع قلم، به واحد مرجع: <b class="num">${M(RQ(rv.total))} ${esc(rv.ref)}</b> — ستونِ «سهم» می‌گوید چند درصدش با هر واحد خریده شده.</div>` : ""}
         ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> فقط خریدهایی می‌آیند که واحدشان تیک خورده؛ واحدی را که بردارید، خریدهایش در هیچ جمع، سهم، رتبه و ریز خریدی نمی‌آیند.</div>` : ""}
-        <table class="tp-mx" style="width:auto"><thead><tr>${pickMode ? "<th>در جستجو</th>" : ""}<th>واحد ثبت‌شده در سوابق</th><th>نرخ</th><th>مبنا</th><th>اطمینان</th><th title="سهمِ خریدهای همین واحد از کلِ مقدارِ خریدِ این نوع قلم، به واحد مرجع">سهم از کل خرید</th></tr></thead><tbody>
-          ${rv.refRow ? `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(rv.refRow.unit)}" ${unitOn(rv.refRow.unit) ? "checked" : ""}></td>` : ""}<td><b>${esc(rv.refRow.unit)}</b></td><td class="num">۱</td><td class="rt">واحد مرجع</td><td><span class="chip ok">قطعی</span></td><td>${shareCell(rv.refRow)}</td></tr>` : ""}
-          ${(rv.units || []).map((u) => `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(u.unit)}" ${unitOn(u.unit) ? "checked" : ""}></td>` : ""}<td>${esc(u.unit)}</td>
-            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(dr.rates[u.unit] != null ? dr.rates[u.unit] : u.rate, false))}" inputmode="decimal" style="width:110px"></td>
-            <td class="rt" style="white-space:normal">${esc(u.basis)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td><td>${shareCell(u)}</td></tr>`).join("")}
+        <table class="tp-mx normrates" style="width:auto"><thead><tr>${pickMode ? "<th>در جستجو</th>" : ""}<th>واحد ثبت‌شده در سوابق</th>
+          <th title="ایستا: ضریب از خودِ دو واحد، برای همهٔ اقلام یکی — پویا: ضریب به اندازهٔ هر قلم بسته است و با فرمول از لایه‌هایش حساب می‌شود">نوع تبدیل</th>
+          <th title="برای همین قلم؛ در تبدیلِ پویا حاصلِ فرمول با لایه‌های همین قلم">نرخ</th><th>فرمول / مبنا</th><th>اطمینان</th><th title="سهمِ خریدهای همین واحد از کلِ مقدارِ خریدِ این نوع قلم، به واحد مرجع">سهم از کل خرید</th></tr></thead><tbody>
+          ${rv.refRow ? `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(rv.refRow.unit)}" ${unitOn(rv.refRow.unit) ? "checked" : ""}></td>` : ""}<td><b>${esc(rv.refRow.unit)}</b></td><td><span class="chip">مرجع</span></td><td class="num">۱</td><td class="rt">واحد مرجع</td><td><span class="chip ok">قطعی</span></td><td>${shareCell(rv.refRow)}</td></tr>` : ""}
+          ${(rv.units || []).map((u) => { const cv = liveConv(n, u.unit), kind = (cv && cv.type) || u.kind; return `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(u.unit)}" ${unitOn(u.unit) ? "checked" : ""}></td>` : ""}<td>${esc(u.unit)}</td>
+            <td>${KIND_FA[kind] ? `<span class="chip ${kind === "dynamic" ? "info" : "ok"}" title="${esc(KIND_TIP[kind] || "")}">${KIND_FA[kind]}</span>` : `<span class="dim" title="${esc(KIND_TIP.unknown)}">—</span>`}</td>
+            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(rateShown(n, u, cv), false))}" inputmode="decimal" style="width:110px" title="${kind === "dynamic" ? "حاصلِ فرمول برای همین قلم؛ عددی که بنویسید نرخِ دستیِ همین قلم می‌شود و بر فرمول مقدم است" : "نرخی که بنویسید بر نرخ فایل مقدم است"}"></td>
+            <td class="rt fxcell" data-norm-fx="${esc(u.unit)}">${fxHtml(n, u, cv)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td><td>${shareCell(u)}</td></tr>`; }).join("")}
         </tbody></table>
-        <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). نرخی را که عوض کنید، در جستجو بر همهٔ نرخ‌های دیگر مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان نرخ فایل.</div>
+        <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). <b>ایستا</b>: ضریب از خودِ دو واحد است و برای همهٔ اقلام یکی. <b>پویا</b>: ضریب برای هر قلم با فرمول از لایه‌های خودش حساب می‌شود — در جمع و سهمِ تأمین‌کنندگان هم هر قلمِ این نوع با لایه‌های خودش؛ اگر لایهٔ لازم را نداشت، نرخِ ثابتِ فایل با اطمینانِ «پایین». نرخی را که دستی عوض کنید، در جستجو بر فرمول و نرخ فایل مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان فرمول یا نرخ فایل.</div>
         ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="tp-note warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div>` : ""}
       <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و نرخ‌های تبدیل">ذخیره</button>
         ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن هزینهٔ تقریبی را می‌پرسم">تفکیک دوباره با مدل…</button>`}
@@ -657,8 +708,9 @@
         ${mt.units ? `<span class="chip info" title="«قلم انتخابی»: فقط خریدهای همین واحدها">واحدها: ${esc(mt.units.join("، "))}</span>` : ""}
         ${d.unitDropped ? `<span class="chip warn" title="خریدهایی با واحدِ تیک‌نخورده — در هیچ جمع و سهمی نیامده‌اند">${M(d.unitDropped)} خرید با واحدِ کنارگذاشته</span>` : ""}
         <span class="chip info">واحد مرجع: ${esc(st.refUnit || "—")}</span>
-        ${(d.rates || []).map((r) => `<span class="chip ${CONF_CLS[r.conf] || ""}" title="${esc(r.basis)} — ${M(r.rows)} خرید${r.varied ? ` — نرخ ویژهٔ هر قلم، از ${fmtRate(r.min)} تا ${fmtRate(r.max)}` : ""}">${esc(r.unit)} × ${fmtRate(r.rate)}${r.varied ? " (متغیر)" : ""}</span>`).join("")}
+        ${(d.rates || []).map((r) => `<span class="chip ${CONF_CLS[r.conf] || ""}" title="${esc(KIND_FA[r.kind] ? `تبدیل ${KIND_FA[r.kind]} — ` : "")}${esc(r.basis)} — ${M(r.rows)} خرید${r.formulaRows ? ` — ${M(r.formulaRows)} خرید با فرمولِ لایه‌های همان قلم` : ""}${r.varied ? ` — نرخ ویژهٔ هر قلم، از ${fmtRate(r.min)} تا ${fmtRate(r.max)}` : ""}">${esc(r.unit)} × ${r.kind === "dynamic" && r.varied ? `${fmtRate(r.min)}…${fmtRate(r.max)}` : fmtRate(r.rate)}${r.kind === "dynamic" ? " (پویا)" : r.varied ? " (متغیر)" : ""}</span>`).join("")}
         ${d.unconverted ? `<span class="chip warn" title="واحدی که نرخ تبدیل ندارد در جمع مقدار نمی‌آید؛ نرخش را در پنل نرمال‌سازی بدهید">${M(d.unconverted)} خرید بی‌نرخ تبدیل</span>` : ""}
+        ${d.fixedDyn ? `<span class="chip warn" title="تبدیلِ این خریدها پویاست (ضریب به اندازهٔ هر قلم بسته است) ولی قلمشان لایهٔ لازم را نداشت و با یک نرخِ ثابت برای همهٔ اقلام حساب شد — در کادرِ نرمال‌سازی فرمول و لایهٔ کم را ببینید">${M(d.fixedDyn)} خرید پویا با نرخ ثابتِ تقریبی</span>` : ""}
         ${d.lowConf ? `<span class="chip warn" title="نرخ تبدیلِ این خریدها اطمینان «پایین» دارد و می‌تواند جمع را جابه‌جا کند">${M(d.lowConf)} خرید با نرخ کم‌اطمینان</span>` : ""}</div>` : "";
     const exc = d.excluded || [];
     const rows = histRows(d);
@@ -1775,18 +1827,29 @@
     });
     /* ویرایش پیش‌نویس بی‌بازرندر، تا فوکوس و مکان‌نما نپرند */
     const nd = () => { const it = item(); return it && S.norm[it.id] && S.norm[it.id].draft; };
-    const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) d.head = e.target.value; };
+    /* فرمول‌ها و نرخِ ردیف‌های پویا با لایه‌های تازهٔ پیش‌نویس، همان لحظه و بی بازرندر */
+    const paintFx = () => {
+      const it = item(), n = it && S.norm[it.id]; if (!n || !n.data || !n.draft) return;
+      for (const u of (n.data.rates && n.data.rates.units) || []) {
+        const cell = [...Q("[data-norm-fx]")].find((el) => el.dataset.normFx === u.unit); if (!cell) continue;
+        const cv = liveConv(n, u.unit);
+        cell.innerHTML = fxHtml(n, u, cv);
+        const inp = [...Q("[data-norm-rate]")].find((el) => el.dataset.normRate === u.unit);
+        if (inp && document.activeElement !== inp && n.draft.rates[u.unit] == null) inp.value = fmtRate(rateShown(n, u, cv), false);
+      }
+    };
+    const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) { d.head = e.target.value; paintFx(); } };
     /* نام لایه عوض شد: کمّی یا نبودنش فرق کرد، پس فیلد واحد باید بیاید یا برود (بازرندر) */
     Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => {
       const d = nd(); if (!d) return;
       const l = d.layers[+e.target.dataset.normLk], was = isQuant(l.k);
       l.k = e.target.value;
       if (!isQuant(l.k)) l.u = "";
-      if (was !== isQuant(l.k)) render();
+      if (was !== isQuant(l.k)) render(); else paintFx();
     });
     /* دستِ کارشناس که به مقدار بخورد، دیگر «ضمنی» نیست */
-    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLv]; l.t = e.target.value; l.i = false; } });
-    Q("[data-norm-lu]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLu]; l.u = e.target.value; l.i = false; } });
+    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLv]; l.t = e.target.value; l.i = false; paintFx(); } });
+    Q("[data-norm-lu]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLu]; l.u = e.target.value; l.i = false; paintFx(); } });
     Q("[data-norm-ldel]").forEach((x) => x.onclick = () => { const d = nd(); if (d) { d.layers.splice(+x.dataset.normLdel, 1); render(); } });
     const nla = G("[data-norm-ladd]");
     if (nla) nla.onclick = () => {
@@ -1798,9 +1861,14 @@
       const n = S.norm[item().id]; if (!n || !n.draft) return;
       const u = e.target.dataset.normRate, v = numIn(e.target.value);
       const orig = ((n.data.rates && n.data.rates.units) || []).find((r) => r.unit === u);
-      /* فقط نرخی که واقعاً عوض شده «نرخ کارشناس» می‌شود؛ خالی یا برابرِ نرخ فایل (همان‌طور که با دو رقم
-         اعشار نشان داده شده) یعنی همان نرخ فایل، با دقتِ کاملش */
-      if (v == null || (orig && orig.src !== "user" && (v === orig.rate || v === Number(fmtRate(orig.rate, false))))) delete n.draft.rates[u]; else n.draft.rates[u] = v;
+      /* فقط نرخی که واقعاً عوض شده «نرخ کارشناس» می‌شود؛ خالی یا برابرِ نرخ فایل یا حاصلِ فرمول (همان‌طور که با
+         دو رقم اعشار نشان داده شده) یعنی همان نرخ فایل یا فرمول، با دقتِ کاملش */
+      const live = orig && liveConv(n, u), shown = orig ? (live && live.type === "dynamic" && live.rate != null ? live.rate : orig.rate) : null;
+      const same = (r) => r != null && (v === r || v === Number(fmtRate(r, false)));
+      if (v == null || (orig && orig.src !== "user" && (same(orig.rate) || same(shown)))) delete n.draft.rates[u]; else n.draft.rates[u] = v;
+      /* نوشتن یا پاک کردنِ نرخِ دستی: یادداشتِ «نرخِ دستی مقدم است» کنار فرمول */
+      const cell = [...Q("[data-norm-fx]")].find((el) => el.dataset.normFx === u);
+      if (cell && orig) cell.innerHTML = fxHtml(n, orig, live);
     });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
     /* هر فراخوانی مدل با کادرِ تأیید و هزینهٔ تقریبی */

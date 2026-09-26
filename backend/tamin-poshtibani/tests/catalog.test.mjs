@@ -223,7 +223,7 @@ test("نرخ تبدیل: دقیقاً ترتیب اولویت فایل ۴", () =
     cr: { C04: { "کیلو گرم": [40, "برآورد", "پایین"], "جین": [12, "قطعی", "قطعی"], "کارتن": [200, "برآورد", "پایین"] } },
   };
   const it = ["1001", "پیچ", "C04", "200", {}, "", { "بسته": [120, "بستهٔ همین قلم"] }];
-  assert.deepEqual(W.rateFor(hd, it, "عدد"), { rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref" });
+  assert.deepEqual(W.rateFor(hd, it, "عدد"), { rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref", kind: "ref" });
   assert.equal(W.rateFor(hd, it, "بسته").rate, 120, "۲) نرخ ویژهٔ قلم بر نوع قلم مقدم است");
   assert.equal(W.rateFor(hd, it, "جین").src, "cluster", "۳) خوشه با اطمینان قطعی");
   const kg = W.rateFor(hd, it, "کیلو گرم");
@@ -233,6 +233,44 @@ test("نرخ تبدیل: دقیقاً ترتیب اولویت فایل ۴", () =
   assert.equal(W.rateFor(hd, it, "لیتر"), null, "راهی نیست");
   assert.equal(W.rateFor(hd, it, "کیلو گرم", { "کیلو گرم": 60 }).rate, 60, "تغییر کارشناس بر همه مقدم است");
   assert.equal(W.rateFor(hd, it, "عدد", { "عدد": 7 }).rate, 1, "…جز خودِ واحد مرجع");
+});
+
+/* تصمیم مدیر (مهر ۱۴۰۵): تبدیلِ «ایستا» ضریبش از خودِ دو واحد است و برای همهٔ اقلام یکی؛ «پویا» به اندازهٔ همان
+   قلم بسته است و با فرمول از لایه‌هایش حساب می‌شود. نرخِ ثابتِ فایل برای تبدیلِ پویا فقط وقتی می‌ماند که قلم
+   لایهٔ لازم را ندارد — و آن‌وقت «پایین» و `fixed`. */
+test("نرخ تبدیل: ایستا از خودِ دو واحد، پویا با فرمولِ لایه‌های همان قلم", () => {
+  const q = (v, u) => ({ v: String(v), n: [v], u });
+  /* ایستا بر نرخ قیمتیِ فایل مقدم است: «لاستیک» عدد ← حلقه ۰٫۰۸۸ بود (یک لاستیکِ ضربه‌گیر = ۰٫۰۸۸ حلقه!) */
+  const tire = { head: "لاستیک", ref: "حلقه", hr: { "عدد": [0.088, "قیمت (هم‌طبقه، هم‌سال)", "پایین"] }, cr: {} };
+  assert.deepEqual(W.rateFor(tire, null, "عدد"), { rate: 1, basis: "ایستا: ۱ عدد = 1 حلقه", conf: "قطعی", src: "static", kind: "static" });
+  const cem = { head: "سیمان", ref: "تن", hr: { "کیلو گرم": [0.0011, "برآورد", "پایین"] }, cr: {} };
+  assert.equal(W.rateFor(cem, null, "کیلو گرم").rate, 0.001);
+
+  /* پویا: ورقِ ۸ میل با مساحت ۲ متر مربع ۱۲۵٫۶ کیلوگرم است، نه نرخ ثابتِ ۱۱۰ */
+  const sheet = { head: "ورق آهنی", ref: "کیلو گرم", hr: { "ورق": [110, "محاسبهٔ مهندسی", "متوسط"] }, cr: {} };
+  const withArea = ["2001", "ورق 8 میل 1×2", "C08", "100", { "ضخامت": q(8, "میلی‌متر"), "مساحت": q(2, "متر مربع") }, "", null];
+  const r = W.rateFor(sheet, withArea, "ورق");
+  assert.deepEqual([Math.round(r.rate * 10) / 10, r.src, r.kind, r.conf], [125.6, "formula", "dynamic", "فرمول"]);
+  assert.match(r.basis, /^فرمول 2: وزن هر ورق = مساحت/);
+  assert.match(r.expr, /2 × 8 × 7\.85 = 125\.6/);
+  /* همان ورق بی مساحت: نرخ ثابتِ فایل، ولی با علامت و لایهٔ کم */
+  const noArea = ["2002", "ورق 8 میل", "C08", "100", { "ضخامت": q(8, "میلی‌متر") }, "", null];
+  const f = W.rateFor(sheet, noArea, "ورق");
+  assert.deepEqual([f.rate, f.src, f.kind, f.conf, f.fixed], [110, "head", "dynamic", "پایین", true]);
+  assert.ok(f.missing.includes("مساحت") && /مساحت/.test(f.basis), f.basis);
+  /* نرخ ویژهٔ قلمِ فایل (محاسبهٔ مهندسیِ همان قلم) وقتی لایه نیست می‌ماند و «ثابت» نیست */
+  const ir = ["2003", "ورق", "C08", "100", {}, "", { "ورق": [94.2, "محاسبهٔ مهندسی"] }];
+  assert.deepEqual([W.rateFor(sheet, ir, "ورق").rate, W.rateFor(sheet, ir, "ورق").fixed], [94.2, undefined]);
+  /* دستِ کارشناس بر فرمول مقدم است: نرخِ جلسه و نرخِ ذخیره‌شدهٔ همین کد */
+  assert.equal(W.rateFor(sheet, withArea, "ورق", { "ورق": 130 }).rate, 130);
+  assert.equal(W.rateFor(sheet, [...withArea.slice(0, 7), { "ورق": 140 }], "ورق").rate, 140);
+  /* ردیف‌های یک نوع قلم هر کدام با لایه‌های قلمِ خودشان — دو ورق، دو نرخ */
+  const big = ["2004", "ورق 8 میل 1.5×6", "C08", "100", { "ضخامت": q(8, "میلی‌متر"), "مساحت": q(9, "متر مربع") }, "", null];
+  assert.equal(Math.round(W.rateFor(sheet, big, "ورق").rate), 565);
+  /* نمایش: فرمول‌ها و لایه‌های کم برای کادرِ نرمال‌سازی */
+  const v = W.rateView(sheet, noArea, "ورق");
+  assert.deepEqual([v.kind, v.used, v.formulas.length], ["dynamic", -1, 2]);
+  assert.equal(W.rateView(cem, null, "کیلو گرم").staticBasis, "۱ کیلو گرم = 0.001 تن");
 });
 
 test("عین قلم: همان لایه‌ها با همان مقدار، نگارش ضرب مهم نیست", () => {

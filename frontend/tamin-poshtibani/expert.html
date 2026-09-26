@@ -119,6 +119,18 @@
     /* تیکِ «قلم انتخابی» جلوی هر لایه — نه جای فیلد متن را بگیرد نه ردیف را بشکند */
     .normlayer input[type=checkbox] { flex: 0 0 auto; min-width: 0; width: 18px; height: 18px; margin: 0; accent-color: var(--tp-accent); }
     .normcost { font-size: .8rem; }
+    /* نرخ‌های تبدیل: فرمول‌های تبدیلِ پویا (فرمول ۱، ۲، …) — به‌کاررفته پررنگ، بی‌لایه کم‌رنگ */
+    .normrates .fxcell { white-space: normal; min-width: 260px; max-width: 460px; font-size: .84rem; line-height: 1.6; text-align: start; }
+    .fxl { margin: 0; padding-inline-start: 0; list-style: none; }
+    .fxl li { padding: 3px 0; border-bottom: 1px dotted var(--tp-line-2); }
+    .fxl li:last-child { border-bottom: 0; }
+    .fxl li.miss { opacity: .6; }
+    .fxl li.used { color: #86efac; }
+    .fxl .fxv { font-size: .78rem; color: var(--tp-dim, #94a3b8); direction: rtl; }
+    .fxl li.used .fxv { color: #86efac; }
+    .fxw { margin-top: 4px; font-size: .78rem; color: #fcd34d; }
+    :root[data-theme="light"] .fxl li.used, :root[data-theme="light"] .fxl li.used .fxv { color: #15803d; }
+    :root[data-theme="light"] .fxw { color: #b45309; }
     .seg { display: inline-flex; gap: 4px; }
     .chkline { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     .chip.grade { font-weight: 800; min-width: 1.8em; text-align: center; }
@@ -235,10 +247,15 @@
   <script src="config.js"></script>
   <script src="shared.js"></script>
   <script type="module">
-    /* قواعد یکسان‌سازی (عدد و واحد، جنس) — همان دو ماژولی که Worker و ورودگر می‌خوانند */
+    /* قواعد یکسان‌سازی (عدد و واحد، جنس، مقاطع) و تبدیلِ ایستا/پویای واحدها — همان ماژول‌هایی که Worker و ورودگر می‌خوانند */
     import * as rules from "./catalog-rules.mjs";
     import { HEAD_RULES } from "./catalog-head-rules.mjs";
-    (window.TP = window.TP || {}).rules = { ...rules, HEAD_RULES };
+    import * as canon from "./catalog-canon.mjs";
+    import * as units from "./catalog-units.mjs";
+    const TP = (window.TP = window.TP || {});
+    TP.rules = { ...rules, HEAD_RULES };
+    TP.canon = canon;
+    TP.units = units;
   </script>
   <script src="expert.js"></script>
 </body>

@@ -26,7 +26,7 @@
  * نوار ۱..۱۰ کارشناس). در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، B، C) جلوتر است.
  */
 import { HttpError } from "./http.js";
-import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor } from "./catalog.js";
+import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor, rateView } from "./catalog.js";
 import { normOf, catalogStruct, dbStruct, canonStruct } from "./normalize.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
@@ -261,14 +261,19 @@ export async function itemHistory(env, it, opts = {}) {
   "GROUP BY supplier_n, item_code, unit", w);
 
   const per = new Map(), excluded = new Map(), units = new Map();
-  let lowConf = 0, unitDropped = 0;
+  let lowConf = 0, unitDropped = 0, fixedDyn = 0;
   for (const g of groups) {
     const u = nameOf(g.unit);
     if (!unitOk(sc, u)) { unitDropped += g.n; continue; }
     const rt = rateFor(hd, byCode.get(g.item_code) || null, u, sc.override);
     if (!units.has(u)) units.set(u, { unit: u, rows: 0, rates: new Map() });
     const us = units.get(u); us.rows += g.n;
-    if (rt) { const kk = `${rt.rate}|${rt.src}`; if (!us.rates.has(kk)) us.rates.set(kk, { ...rt, rows: 0 }); us.rates.get(kk).rows += g.n; if (rt.conf === "پایین") lowConf += g.n; }
+    if (rt) {
+      const kk = `${rt.rate}|${rt.src}`; if (!us.rates.has(kk)) us.rates.set(kk, { ...rt, rows: 0 }); us.rates.get(kk).rows += g.n;
+      if (rt.conf === "پایین") lowConf += g.n;
+      /* تبدیلِ پویا که لایهٔ لازم نداشت و با یک نرخِ ثابت برای همهٔ اقلام حساب شد */
+      if (rt.fixed) fixedDyn += g.n;
+    }
 
     const why = excludedWhy(g.sn);
     if (why) {
@@ -321,11 +326,13 @@ export async function itemHistory(env, it, opts = {}) {
   rankBy(suppliers, "qtyM", "rankM", gradeKey);
   suppliers.sort((a, b) => a.rankM - b.rankM || b.qtyM - a.qtyM || String(a.name).localeCompare(String(b.name), "fa"));
 
-  /* نرخ‌های به‌کاررفته، به تفکیک واحد — «متغیر» یعنی اقلامِ مختلفِ همین نوع نرخ ویژهٔ خودشان را داشتند */
+  /* نرخ‌های به‌کاررفته، به تفکیک واحد — «متغیر» یعنی اقلامِ مختلفِ همین نوع نرخ ویژهٔ خودشان را داشتند
+     (فرمولِ پویا از لایه‌های هر قلم، یا نرخ ویژهٔ قلمِ فایل) */
   const rates = [...units.values()].filter((x) => x.unit !== hd.ref).map((x) => {
     const rs = [...x.rates.values()].sort((a, b) => b.rows - a.rows);
     const top = rs[0] || null;
     return { unit: x.unit, rows: x.rows, rate: top ? top.rate : null, basis: top ? top.basis : "نرخی نیست", conf: top ? top.conf : "—", src: top ? top.src : "none",
+      kind: top ? top.kind : null, formulaRows: rs.filter((r) => r.src === "formula").reduce((a, r) => a + r.rows, 0), fixedRows: rs.filter((r) => r.fixed).reduce((a, r) => a + r.rows, 0),
       varied: rs.length > 1, min: rs.length ? Math.min(...rs.map((r) => r.rate)) : null, max: rs.length ? Math.max(...rs.map((r) => r.rate)) : null,
       unconverted: x.rows - rs.reduce((a, r) => a + r.rows, 0) };
   }).sort((a, b) => b.rows - a.rows);
@@ -346,7 +353,7 @@ export async function itemHistory(env, it, opts = {}) {
   return {
     ...head, struct, match, rates, titles,
     excluded: [...excluded.values()],
-    unconverted, lowConf, unitDropped,
+    unconverted, lowConf, unitDropped, fixedDyn,
     item: { unit: hd.ref, units: [...units.keys()].join("، "), mixedUnits: false, refUnit: hd.ref },
     totals: { n: list.reduce((a, s) => a + s.n, 0), qty: sumQty, qtyM: sumM, suppliers: suppliers.length },
     suppliers,
@@ -424,9 +431,12 @@ export async function unitShares(env, hd, override = {}) {
     if (excludedWhy(g.sn)) continue;
     const u = nameOf(g.unit);
     const rt = rateFor(hd, byCode.get(g.item_code) || null, u, override);
-    const e = per.get(u) || { unit: u, rows: 0, qty: 0, qtyRef: 0, unconverted: 0 };
+    const e = per.get(u) || { unit: u, rows: 0, qty: 0, qtyRef: 0, unconverted: 0, formulaRows: 0, fixedRows: 0 };
     e.rows += g.n; e.qty += g.qty || 0;
-    if (rt) { const q = (g.qty || 0) * rt.rate; e.qtyRef += q; total += q; } else e.unconverted += g.n;
+    if (rt) {
+      const q = (g.qty || 0) * rt.rate; e.qtyRef += q; total += q;
+      if (rt.src === "formula") e.formulaRows += g.n; else if (rt.fixed) e.fixedRows += g.n;
+    } else e.unconverted += g.n;
     per.set(u, e);
   }
   const units = [...per.values()].map((e) => ({ ...e, share: total ? e.qtyRef / total * 100 : 0 })).sort((a, b) => b.qtyRef - a.qtyRef || b.rows - a.rows);
@@ -435,25 +445,27 @@ export async function unitShares(env, hd, override = {}) {
 
 /**
  * نرخ‌های کادرِ «نرمال‌سازی اقلام» (normalize.js:ratesView) به‌همراهِ سهمِ هر واحد، ردیفِ خودِ واحد مرجع،
- * و واحدهایی که در سوابق هست ولی نرخِ نوع قلم ندارند (با نرخِ خوشه یا بی‌نرخ).
+ * و واحدهایی که در سوابق هست ولی نرخِ نوع قلم ندارند (با تبدیلِ ایستا/پویا، نرخِ خوشه یا بی‌نرخ).
+ * `layers`: لایه‌های ساختارِ همین قلم وقتی کدش در فهرست نیست — فرمول‌های پویا با همان‌ها.
+ * `dynamic`: چند خریدِ این نوع قلم با تبدیلِ پویا حساب شد (با فرمولِ هر قلم یا با نرخِ ثابتِ تقریبی).
  */
-export async function ratesWithShares(env, rv, head, code) {
+export async function ratesWithShares(env, rv, head, code, layers = null) {
   if (!rv || !rv.ref || !head) return rv;
   const hd = await headData(env, head); if (!hd) return rv;
   const override = {};
   for (const u of rv.units || []) if (u.src === "user" && u.rate > 0) override[u.unit] = u.rate;
   const sh = await unitShares(env, hd, override);
-  const pickS = (s) => (s ? { rows: s.rows, qty: s.qty, qtyRef: s.qtyRef, share: s.share, unconverted: s.unconverted } : { rows: 0, qty: 0, qtyRef: 0, share: 0, unconverted: 0 });
+  const pickS = (s) => (s ? { rows: s.rows, qty: s.qty, qtyRef: s.qtyRef, share: s.share, unconverted: s.unconverted, formulaRows: s.formulaRows, fixedRows: s.fixedRows }
+    : { rows: 0, qty: 0, qtyRef: 0, share: 0, unconverted: 0, formulaRows: 0, fixedRows: 0 });
   const byU = new Map(sh.units.map((s) => [s.unit, s]));
   const units = (rv.units || []).map((u) => ({ ...u, ...pickS(byU.get(u.unit)) }));
-  const item = code ? hd.items.find((x) => x[0] === code) || null : null;
+  const item = (code ? hd.items.find((x) => x[0] === code) : null) || (layers ? [code || "", "", "", "", layers, "", null, null] : null);
   for (const [u, s] of byU) {
     if (u === rv.ref || units.some((x) => x.unit === u)) continue;
-    const rt = rateFor(hd, item, u, override);
-    units.push({ unit: u, ...(rt || { rate: null, basis: "نرخی نیست", conf: "—", src: "none" }), ...pickS(s) });
+    units.push({ unit: u, ...rateView(hd, item, u, override), ...pickS(s) });
   }
   units.sort((a, b) => (b.qtyRef || 0) - (a.qtyRef || 0) || (b.rows || 0) - (a.rows || 0) || String(a.unit).localeCompare(String(b.unit), "fa"));
-  return { ...rv, units, refRow: { unit: rv.ref, rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref", ...pickS(byU.get(rv.ref)) }, total: sh.total };
+  return { ...rv, units, refRow: { unit: rv.ref, rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref", kind: "ref", ...pickS(byU.get(rv.ref)) }, total: sh.total };
 }
 
 /** وضعیت بارگذاری برای تب «سوابق تأمین» مدیر */

@@ -1805,8 +1805,11 @@ function histSection(it, h, no, budget, mode = "head") {
   /* مقدارها به واحد مرجعِ نوع قلم برده شده‌اند */
   const conv = (h.rates || []).filter((r) => r.rate != null);
   let s = `${title}\n<i>${histScope(h, mode)}</i>\n${M(rows.length)} تأمین‌کننده · ${M(h.totals.n)} خرید · جمع مقدار ${QN(h.totals.qty)}${esc(unit)}`
-    + (conv.length ? `\n<i>به واحد مرجع (${esc(h.item.unit)}) برده شد: ${conv.map((r) => `${esc(r.unit)}×${M(RQ(r.rate))}`).join("، ")}</i>` : "")
-    + (h.unconverted ? `\n⚠️ <i>${M(h.unconverted)} خرید واحدی داشت که نرخ تبدیل ندارد و در جمع مقدار نیامد.</i>` : "");
+    /* تبدیلِ پویا (ورق، شاخه، دست…) برای هر قلم با فرمولِ لایه‌های خودش است، پس یک عدد ندارد */
+    + (conv.length ? `\n<i>به واحد مرجع (${esc(h.item.unit)}) برده شد: ${conv.map((r) => (r.kind === "dynamic" && r.varied
+      ? `${esc(r.unit)}×${M(RQ(r.min))}…${M(RQ(r.max))} (پویا، به اندازهٔ هر قلم)` : `${esc(r.unit)}×${M(RQ(r.rate))}${r.kind === "dynamic" ? " (پویا)" : ""}`)).join("، ")}</i>` : "")
+    + (h.unconverted ? `\n⚠️ <i>${M(h.unconverted)} خرید واحدی داشت که نرخ تبدیل ندارد و در جمع مقدار نیامد.</i>` : "")
+    + (h.fixedDyn ? `\n⚠️ <i>${M(h.fixedDyn)} خرید تبدیلِ پویا داشت ولی قلمش لایهٔ لازم (مثلاً مساحتِ ورق) را نداشت و با نرخِ ثابتِ تقریبی حساب شد.</i>` : "");
   let shown = 0;
   for (const [i, x] of rows.slice(0, HIST_TOP).entries()) {
     const line = supplierLine(x, i, unit, true);

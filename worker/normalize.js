@@ -33,7 +33,7 @@
 import { HttpError } from "./http.js";
 import { MODEL } from "./extract.js";
 import { runCost } from "./discovery.js";
-import { ascii, nameOf, keyOf, words, catalogMeta, headOfCode, headData, catalogHead, itemOf, wordHeads, rateFor, layersEqual,
+import { ascii, nameOf, keyOf, words, catalogMeta, headOfCode, headData, catalogHead, itemOf, wordHeads, rateView, layersEqual,
   codeOfTitle, editIndex, editRows, editKey, resetEditsCache } from "./catalog.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
@@ -365,16 +365,15 @@ export async function dbStruct(env, it) {
   return null;
 }
 
-/** واحدهای ثبت‌شده در سوابق این نوع قلم و نرخ هرکدام به واحد مرجع — برای نمایش و ویرایش */
-export function ratesView(hd, code, override) {
+/** واحدهای ثبت‌شده در سوابق این نوع قلم و نرخ هرکدام به واحد مرجع — برای نمایش و ویرایش، با نوعِ تبدیل
+    (ایستا/پویا) و فرمول‌های پویا برای همین قلم. `layers`: لایه‌های ساختارِ همین قلم وقتی کدش در فهرست نیست
+    (پیشنهاد مدل، عنوانِ تازه) — فرمول‌ها با همان‌ها حساب می‌شوند */
+export function ratesView(hd, code, override, layers = null) {
   if (!hd) return { ref: null, units: [] };
-  const item = code ? itemOf(hd, code) : null;
+  const item = (code ? itemOf(hd, code) : null) || (layers ? [code || "", "", "", "", layers, "", null, null] : null);
   const units = new Set([...Object.keys(hd.hr || {}), ...Object.keys((item && item[6]) || {}), ...Object.keys((item && item[7]) || {}), ...Object.keys(override || {})]);
   units.delete(hd.ref);
-  return {
-    ref: hd.ref,
-    units: [...units].sort().map((u) => ({ unit: u, ...(rateFor(hd, item, u, override) || { rate: null, basis: "نرخی نیست", conf: "—", src: "none" }) })),
-  };
+  return { ref: hd.ref, units: [...units].sort().map((u) => ({ unit: u, ...rateView(hd, item, u, override) })) };
 }
 
 /* هزینهٔ تقریبیِ یک تفکیک با مدل — میانگینِ ۵۰ اجرای آخرِ همین نسخهٔ پرامپت، هر ده دقیقه یک بار */
@@ -415,7 +414,7 @@ async function proposal(env, it, meta, { force = false, model = false }) {
       const done = await canonStruct(env, meta, done0, it);
       const [hd, db] = await Promise.all([headData(env, done.head), dbStruct(env, it)]);
       /* edit: ویرایشِ دیتابیسِ اصلی که اکنون برای این قلم هست — پنل دکمهٔ برداشتنش را نشان می‌دهد */
-      return { ...done, source: done.source || "manual", confirmed: true, rates: ratesView(hd, done.code, done.rates), known: !!hd, edit: (db && db.edit) || null };
+      return { ...done, source: done.source || "manual", confirmed: true, rates: ratesView(hd, done.code, done.rates, done.layers), known: !!hd, edit: (db && db.edit) || null };
     }
   }
 
@@ -423,7 +422,7 @@ async function proposal(env, it, meta, { force = false, model = false }) {
   const db = await dbStruct(env, it);
   if (db) {
     return { source: db.edit ? "edit" : db.by === "title" ? "title" : "catalog", by: db.by, ...db.struct, edit: db.edit,
-      rates: ratesView(db.hd, db.struct.code, db.rates), known: !!db.hd };
+      rates: ratesView(db.hd, db.struct.code, db.rates, db.struct.layers), known: !!db.hd };
   }
 
   if (!force) {
@@ -431,7 +430,7 @@ async function proposal(env, it, meta, { force = false, model = false }) {
     if (hit) {
       const r = await canonStruct(env, meta, parse(hit.result), it);
       const hd = await headData(env, r.head);
-      return { source: "cache", ...r, rates: ratesView(hd, null), known: !!hd, model: hit.model };
+      return { source: "cache", ...r, rates: ratesView(hd, null, null, r.layers), known: !!hd, model: hit.model };
     }
   }
 
@@ -454,7 +453,7 @@ async function proposal(env, it, meta, { force = false, model = false }) {
       ON CONFLICT(title_n) DO UPDATE SET result=excluded.result, model=excluded.model, cost_usd=excluded.cost_usd, created_at=excluded.created_at`)
     .bind(keyOf(it.title), JSON.stringify(split), ans.model, ans.cost, now()).run();
   return {
-    source: "model", ...split, rates: ratesView(s.hd, null), known: !!s.hd, candidates: cands,
+    source: "model", ...split, rates: ratesView(s.hd, null, null, split.layers), known: !!s.hd, candidates: cands,
     model: ans.model, cost: ans.cost, usage: ans.usage, promptVersion: NORM_PROMPT_VERSION,
   };
 }
@@ -527,7 +526,7 @@ export async function confirmNorm(env, it, body, who = null) {
   await env.DB.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=?").bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
   /* نوع قلم پس از ذخیره — اگر قلم به نوع قلمِ دیگری رفت، حالا جزء آن است */
   const hd = saved === "same" ? s.hd : await headData(env, s.head);
-  return { ok: true, norm, known: !!hd, rates: ratesView(hd, norm.code, rates), saved, edit: (db && db.edit) || null };
+  return { ok: true, norm, known: !!hd, rates: ratesView(hd, norm.code, rates, norm.layers), saved, edit: (db && db.edit) || null };
 }
 
 export async function clearNorm(env, it) {

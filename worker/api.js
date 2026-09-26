@@ -1786,7 +1786,7 @@ async function route(request, env, ctx) {
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
       /* کنار هر نرخ، سهمِ همان واحد از کلِ خریدِ این نوع قلم */
-      if (p.head && p.rates) p.rates = await ratesWithShares(env, p.rates, p.head, p.code || null);
+      if (p.head && p.rates) p.rates = await ratesWithShares(env, p.rates, p.head, p.code || null, p.layers || null);
       return json(p);
     }
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
@@ -1794,7 +1794,7 @@ async function route(request, env, ctx) {
       const it = await ownItem(env, who, int(mm[1]));
       if (m === "DELETE") return json(await clearNorm(env, it));
       const r = await confirmNorm(env, it, await readJson(request), who);
-      if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null);
+      if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
     }
     /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */

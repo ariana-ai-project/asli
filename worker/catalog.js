@@ -34,6 +34,7 @@ import { HttpError } from "./http.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
+import { convert } from "../frontend/tamin-poshtibani/catalog-units.mjs";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -481,23 +482,23 @@ const GOOD = new Set(["قطعی", "بالا", "متوسط"]);
 const DOWN = { "قطعی": "بالا", "بالا": "متوسط", "متوسط": "پایین", "پایین": "پایین" };
 
 /**
- * نرخِ «مقدار ثبت‌شده → واحد مرجع» یک ردیف. ترتیب دقیقاً همان برگهٔ schema فایل ۴:
- *   ۱) واحد = واحد مرجع → ۱
- *   ۲) نرخ ویژهٔ همین کد قلم
- *   ۳) نرخ خوشهٔ همین قلم با اطمینان قطعی/بالا/متوسط
- *   ۴) نرخ نوع قلم (اگر شاهد خوشه بود ولی ضعیف، اطمینان یک پله پایین)
- *   ۵) نرخ خوشه حتی با اطمینان پایین
- * `override`: {واحد: نرخ} که کارشناس در تب سوابق عوض کرده — بر همه مقدم (جز خودِ واحد مرجع).
- * بعد از آن نرخی که کارشناس برای همین کد در دیتابیس اصلی ذخیره کرده (خانهٔ ۸ قلم، headData).
- * null یعنی راهی برای تبدیل نیست؛ آن ردیف در جمع مقدار نمی‌آید و هشدار می‌گیرد.
+ * تبدیلِ ایستا یا پویای یک (قلم، واحد) به واحد مرجعِ نوع قلم (catalog-units.mjs) — یک بار برای هر تاپلِ قلم؛
+ * قلمِ بی‌تاپل (کدِ بیرون از فهرست) بی لایه سنجیده می‌شود. خروجی همان convert: {type، rate، basis، formulas، used، missing}.
  */
-export function rateFor(hd, item, unit, override) {
-  const u = nameOf(unit);
-  if (!u || u === hd.ref) return { rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref" };
-  const o = override && Number(override[u]);
-  if (o > 0) return { rate: o, basis: "تعیین کارشناس", conf: "کارشناس", src: "user" };
-  const er = item && item[7] && Number(item[7][u]);
-  if (er > 0) return { rate: er, basis: "تعیین کارشناس (قلم)", conf: "کارشناس", src: "user" };
+const convMemo = new WeakMap();
+export function conversionFor(hd, item, unit) {
+  const key = item || hd;
+  let m = convMemo.get(key);
+  if (!m) convMemo.set(key, (m = new Map()));
+  const k = `${hd.head}\u0001${hd.ref}\u0001${unit}`;
+  let r = m.get(k);
+  if (!r) { r = convert({ head: hd.head, layers: (item && item[4]) || {} }, unit, hd.ref); m.set(k, r); }
+  return r;
+}
+
+/* نرخ‌های فایل ۴ به ترتیبِ برگهٔ schema همان فایل: نرخ ویژهٔ کد قلم، نرخ خوشه با اطمینان قطعی/بالا/متوسط،
+   نرخ نوع قلم (اگر شاهد خوشه بود ولی ضعیف، اطمینان یک پله پایین)، و نرخ خوشه حتی با اطمینان پایین */
+function fileRate(hd, item, u) {
   const ir = item && item[6] && item[6][u];
   if (ir) return { rate: ir[0], basis: `${ir[1] || "نرخ ویژه"} (قلم)`, conf: "بالا", src: "item" };
   const cl = item && item[2];
@@ -507,6 +508,45 @@ export function rateFor(hd, item, unit, override) {
   if (h) return { rate: h[0], basis: `${h[1]} (نوع قلم)`, conf: c ? DOWN[h[2]] || h[2] : h[2], src: "head" };
   if (c) return { rate: c[0], basis: `${c[1]} (خوشه)`, conf: c[2], src: "cluster" };
   return null;
+}
+
+/**
+ * نرخِ «مقدار ثبت‌شده → واحد مرجع» یک ردیف (تصمیم مدیر، مهر ۱۴۰۵: تبدیل ایستا یا پویا):
+ *   ۱) واحد = واحد مرجع → ۱
+ *   ۲) `override`: {واحد: نرخ} که کارشناس در تب سوابق عوض کرده؛ بعد نرخی که کارشناس برای همین کد در
+ *      دیتابیس اصلی ذخیره کرده (خانهٔ ۸ قلم، headData) — دستِ کارشناس بر همه مقدم است
+ *   ۳) ایستا — ضریب از خودِ دو واحد (۱ تن = ۱۰۰۰ کیلوگرم، ۱ دستگاه = ۱ عدد)، برای همهٔ اقلام یکی
+ *   ۴) پویا — فرمول از لایه‌های همین قلم (۱ ورق = مساحت × ضخامت × چگالی کیلوگرم)
+ *   ۵) نرخ‌های فایل ۴ (fileRate). برای تبدیلِ پویا یعنی لایهٔ لازم نبود: نرخِ ویژهٔ قلم می‌ماند، ولی نرخِ
+ *      خوشه یا نوع قلم — یک عدد برای اقلامِ به اندازه‌های مختلف — «پایین» و `fixed` علامت می‌خورد، با
+ *      لایه‌هایی که کم است (`missing`).
+ * `kind`: «ref»، «static»، «dynamic» یا «unknown» (واحدِ ناشناخته، همان نرخ فایل).
+ * null یعنی راهی برای تبدیل نیست؛ آن ردیف در جمع مقدار نمی‌آید و هشدار می‌گیرد.
+ */
+export function rateFor(hd, item, unit, override) {
+  const u = nameOf(unit);
+  if (!u || u === hd.ref) return { rate: 1, basis: "واحد مرجع", conf: "قطعی", src: "ref", kind: "ref" };
+  const cv = conversionFor(hd, item, u), kind = cv.type;
+  const o = override && Number(override[u]);
+  if (o > 0) return { rate: o, basis: "تعیین کارشناس", conf: "کارشناس", src: "user", kind };
+  const er = item && item[7] && Number(item[7][u]);
+  if (er > 0) return { rate: er, basis: "تعیین کارشناس (قلم)", conf: "کارشناس", src: "user", kind };
+  if (cv.rate > 0) {
+    return kind === "static" ? { rate: cv.rate, basis: `ایستا: ${cv.basis}`, conf: "قطعی", src: "static", kind }
+      : { rate: cv.rate, basis: `فرمول ${cv.used + 1}: ${cv.basis}`, conf: "فرمول", src: "formula", kind, expr: cv.formulas[cv.used].expr };
+  }
+  const f = fileRate(hd, item, u);
+  if (!f) return null;
+  if (kind !== "dynamic" || f.src === "item") return { ...f, kind };
+  return { ...f, conf: "پایین", kind, fixed: true, missing: cv.missing,
+    basis: `${f.basis} — یک نرخ برای همهٔ اقلام؛ ${cv.missing.length ? `لایهٔ ${cv.missing.map((x) => `«${x}»`).join(" یا ")} ندارد` : "فرمولی ندارد"}` };
+}
+
+/** نرخ به‌علاوهٔ فرمول‌ها برای نمایش در کادرِ «نرمال‌سازی اقلام» */
+export function rateView(hd, item, unit, override) {
+  const rt = rateFor(hd, item, unit, override), cv = conversionFor(hd, item, nameOf(unit));
+  return { ...(rt || { rate: null, basis: "نرخی نیست", conf: "—", src: "none", kind: cv.type }),
+    kind: cv.type, formulas: cv.formulas, used: cv.used, missing: cv.missing, ...(cv.type === "static" ? { staticRate: cv.rate, staticBasis: cv.basis } : {}) };
 }
 
 /* ------------------------------------------------------------------ */
