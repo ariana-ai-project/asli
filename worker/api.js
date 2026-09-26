@@ -35,7 +35,8 @@ import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
-import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putReportTeam, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
+import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putReportTeam, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS,
+  REQ_HIST_COLS, REQ_HIST_DDL, reqHistValues } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
@@ -137,6 +138,7 @@ CREATE TABLE IF NOT EXISTS tg_flows (id INTEGER PRIMARY KEY, expert_id INTEGER N
 CREATE INDEX IF NOT EXISTS ix_flows_open ON tg_flows(expert_id) WHERE done_at IS NULL;
 CREATE TABLE IF NOT EXISTS letters (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, expert_id INTEGER NOT NULL, voice_key TEXT, voice_secs REAL, transcript TEXT, letter_json TEXT, docx_key TEXT, state TEXT NOT NULL DEFAULT 'need_voice', meta_json TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_letters_asg ON letters(assignment_id);
+${REQ_HIST_DDL};
 CREATE TABLE IF NOT EXISTS hist_imports (id INTEGER PRIMARY KEY, filename TEXT, imported_at INTEGER NOT NULL, finished_at INTEGER, row_count INTEGER, state TEXT NOT NULL DEFAULT 'loading', stats_json TEXT);
 ${CATALOG_DDL.join(";\n")};
 ${EDITS_DDL};
@@ -370,6 +372,9 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
     /* ثبت‌های هر درخواست هم با خودش می‌روند — شناسهٔ ارجاع بعد از پاک‌کردن میز دوباره استفاده می‌شود */
     ...["assignment_log", "quotes_deleted", "commission_tables", "closures"].map((tb) => env.DB.prepare(`DELETE FROM ${tb} WHERE request_id ${where}`).bind(...args)),
+    /* بایگانیِ گزارش‌ها هم — درخواستِ آزمایشیِ پاک‌شده نباید در گزارش سه‌ماهه بماند. فقط همان‌هایی که روی میز بودند:
+       درخواستِ بستهٔ سال‌های پیش که هیچ‌وقت روی میز نیامده با «پاک کردن همه» نمی‌رود، و درخواستِ واقعی با ورود بعدی برمی‌گردد */
+    env.DB.prepare(`DELETE FROM req_hist WHERE id IN (SELECT id FROM requests WHERE id ${where})`).bind(...args),
     env.DB.prepare(`DELETE FROM requests WHERE id ${where}`).bind(...args),
     /* پاک‌کردن میز خودش یک رویداد است و باید در تاریخچه بماند */
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
@@ -413,6 +418,36 @@ async function importBegin(env, body) {
   const r = await env.DB.prepare("INSERT INTO imports (filename,imported_at,row_count,request_count,stats_json) VALUES (?,?,?,?,?)")
     .bind(T(body.filename) || null, now(), int(body.stats && body.stats.rows), int(body.stats && body.stats.requests), body.stats ? JSON.stringify(body.stats) : null).run();
   return { import_id: r.meta.last_row_id };
+}
+
+/* بایگانیِ درخواست‌ها برای گزارش‌ها (import.js:TP.requestSummaries): یک ردیفِ خلاصه برای هر درخواستِ فایل،
+   باز و بسته. فقط ردیفی نوشته می‌شود که تازه است یا اثرانگشتش عوض شده — بار اول ۲۰ هزار نوشتن، بعد روزانه
+   چند ده؛ خواندنِ اثرانگشت‌ها ارزان است (سقف نوشتن ۱۰۰ هزار در روز، خواندن ۵ میلیون). پنل اول همهٔ
+   اثرانگشت‌ها را می‌گیرد (historyFingerprints) و فقط ردیف‌های عوض‌شده را می‌فرستد؛ سرور باز هم می‌سنجد. */
+async function historyFingerprints(env) {
+  const rows = (await env.DB.prepare("SELECT id, fp FROM req_hist").all()).results || [];
+  return { fp: Object.fromEntries(rows.map((r) => [r.id, r.fp])) };
+}
+async function importHistory(env, body) {
+  const rows = (Array.isArray(body.rows) ? body.rows : []).filter((r) => r && T(r.id) && T(r.date) && T(r.fp));
+  if (rows.length > 1000) throw new HttpError("هر دسته حداکثر ۱۰۰۰ درخواست.");
+  const have = new Map();
+  for (let i = 0; i < rows.length; i += 90) {
+    const part = rows.slice(i, i + 90).map((r) => T(r.id));
+    ((await env.DB.prepare(`SELECT id, fp FROM req_hist WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).all()).results || []).forEach((x) => have.set(x.id, x.fp));
+  }
+  const todo = rows.filter((r) => have.get(T(r.id)) !== T(r.fp));
+  const t = now(), cols = [...REQ_HIST_COLS, "updated_at"];
+  const up = cols.filter((c) => c !== "id").map((c) => `${c}=excluded.${c}`).join(",");
+  /* ۱۹ ستون: ۵ ردیف در هر دستور زیرِ سقفِ ۱۰۰ پارامترِ D1 */
+  const stmts = [];
+  for (let i = 0; i < todo.length; i += 5) {
+    const part = todo.slice(i, i + 5), args = [];
+    for (const r of part) args.push(...reqHistValues({ ...r, id: T(r.id), fp: T(r.fp) }), t);
+    stmts.push(env.DB.prepare(`INSERT INTO req_hist (${cols.join(",")}) VALUES ${part.map(() => `(${cols.map(() => "?").join(",")})`).join(",")} ON CONFLICT(id) DO UPDATE SET ${up}`).bind(...args));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+  return { received: rows.length, written: todo.length, same: rows.length - todo.length };
 }
 
 /* یک دستهٔ درخواست‌های باز: درج/به‌روزرسانی درخواست و اقلام.
@@ -1371,6 +1406,8 @@ async function route(request, env, ctx) {
     if (path === "/import/chunk" && m === "POST") { requireManager(request, env); return json(await importChunk(env, await readJson(request))); }
     if (path === "/import/finish" && m === "POST") { requireManager(request, env); return json(await importFinish(env, await readJson(request))); }
     if (path === "/import/apply" && m === "POST") { requireManager(request, env); return json(await importApply(env, await readJson(request))); }
+    if (path === "/import/history" && m === "GET") { requireManager(request, env); return json(await historyFingerprints(env)); }
+    if (path === "/import/history" && m === "POST") { requireManager(request, env); return json(await importHistory(env, await readJson(request))); }
     if (path === "/imports" && m === "GET") { requireManager(request, env); return json({ imports: (await env.DB.prepare("SELECT * FROM imports ORDER BY id DESC LIMIT 30").all()).results || [] }); }
 
     /* --- میز ارجاع (مدیر) --- */

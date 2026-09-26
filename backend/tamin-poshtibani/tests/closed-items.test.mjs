@@ -91,6 +91,29 @@ test("کارشناسِ فایل از قلمِ بسته خوانده نمی‌ش�
   assert.equal(stats.expertConflictDecision, 0);
 });
 
+/* گزارش سه‌ماهه بسته‌ها را هم می‌شمارد، پس هر درخواستِ فایل — باز و بسته — یک ردیفِ خلاصه در بایگانی دارد (ممیزی مهر ۱۴۰۵) */
+test("خلاصهٔ بایگانی برای گزارش‌ها: هر درخواست، باز و بسته، با شمارش اقلام و کارشناسِ رایج", async () => {
+  const parsed = await parse([
+    row("R1", "شیر فلکه", "ثبت شده", "ابوذر بهمنی"),
+    row("R1", "الکترود", "بسته شده", "ابوذر بهمنی"),
+    row("R1", "سیم جوش", "متوقف شده", "حسین احسانی"),
+    row("R2", "الکترود", "بسته شده"),
+  ]);
+  const TP = loadTP().TP;
+  const H = arr(TP.requestSummaries(parsed));
+  const r1 = H.find((h) => h.id === "R1"), r2 = H.find((h) => h.id === "R2");
+  assert.deepEqual([r1.n, r1.nc, r1.ns, r1.nh, r1.sx, r1.ost, r1.date, r1.party], [3, 1, 1, 0, "ابوذر بهمنی", "ثبت شده", "1405/02/16", "کاجاران"]);
+  assert.deepEqual([r2.n, r2.nc, r2.sx], [1, 1, ""], "درخواستِ کاملاً بسته هم بایگانی می‌شود");
+  assert.match(r1.fp, /^[0-9a-f]+$/);
+  assert.equal(arr(TP.requestSummaries(parsed)).find((h) => h.id === "R1").fp, r1.fp, "اثرانگشتِ پایدار");
+  const later = await parse([
+    row("R1", "شیر فلکه", "بسته شده", "ابوذر بهمنی"),
+    row("R1", "الکترود", "بسته شده", "ابوذر بهمنی"),
+    row("R1", "سیم جوش", "متوقف شده", "حسین احسانی"),
+  ]);
+  assert.notEqual(arr(TP.requestSummaries(later))[0].fp, r1.fp, "بسته شدنِ یک قلم اثرانگشت را عوض می‌کند و ردیف دوباره نوشته می‌شود");
+});
+
 test("وضعیت مختلط همچنان گزارش می‌شود", async () => {
   const { stats } = await parse([
     row("R1", "شیر فلکه", "ثبت شده"),

@@ -76,12 +76,17 @@ export const reportProjects = (s) => (Array.isArray(s && s.reportProjects) && s.
 export const reportManagers = (s) => (Array.isArray(s && s.reportManagers) && s.reportManagers.length ? s.reportManagers : DEFAULT_MANAGERS);
 const managerLabelOf = (p) => p.managerLabel || p.manager || "بدون مدیر پروژه";
 
+/** کلیدواژه‌های نرمال‌شدهٔ هر فهرست پروژه، یک بار (گزارش سه‌ماهه برای صدها طرف‌مقابل صدایش می‌زند) */
+const normKeys = new WeakMap();
 /** پروژهٔ یک درخواست: طولانی‌ترین کلیدواژهٔ پیداشده در «طرف مقابل»، وگرنه در «مرکز درخواست کننده» */
 export function projectOf(projects, party, center) {
-  for (const hay of [nrm(party), nrm(center)]) {
+  let K = normKeys.get(projects);
+  if (!K) { K = projects.map((p) => [p, p.keys.map(nrm).filter(Boolean)]); normKeys.set(projects, K); }
+  for (const raw of [party, center]) {
+    const hay = nrm(raw);
     if (!hay) continue;
     let best = null, bl = 0;
-    for (const p of projects) for (const k of p.keys) { const kk = nrm(k); if (kk && hay.includes(kk) && kk.length > bl) { best = p; bl = kk.length; } }
+    for (const [p, ks] of K) for (const kk of ks) if (kk.length > bl && hay.includes(kk)) { best = p; bl = kk.length; }
     if (best) return best;
   }
   return null;
@@ -101,15 +106,27 @@ export function shortNames(experts) {
 }
 /** «کارشناس خرید» فایل‌ها → کارشناس. یک کلمهٔ مشترک کافی نیست («زاده»، «مریم»، «حسین» نام‌های بیرون از
     فهرست را به کارشناس دیگری می‌چسباند)؛ فقط: نام کامل برابر، یا همهٔ کلمه‌های نام/برچسب کارشناس درون نام،
-    یا نامِ تک‌کلمه‌ای برابر نام خانوادگی (یا پیشوند دست‌کم ۴ حرفی آن). کارشناس فعال مقدم است. */
+    یا همهٔ کلمه‌های نامِ دوکلمه‌ایِ فایل درون نام کامل کارشناس («مریم محمودی» ← مریم محمودی اصل زاده)،
+    یا نامِ تک‌کلمه‌ای برابر نام خانوادگی (یا پیشوند دست‌کم ۴ حرفی آن). کارشناس فعال مقدم است.
+    برای نامِ چندکلمه‌ای، نام یا برچسبِ تک‌کلمه‌ای («آقای کوشاری») فقط وقتی به حساب می‌آید که کارشناس نام کامل‌تری
+    ندارد (مثل «آقای رسولی»): برچسبِ کوتاهِ ارسلان کوشاری «سالار کوشاری» را هم می‌گرفت و ۲۲۰ درخواستِ سالار را
+    به ارسلان می‌داد، و «آقای صادقی»ِ محمد صادقی درخواست‌های «آرش صادقی» را (ممیزی مهر ۱۴۰۵). */
 export function expertMatcher(experts) {
   const E = experts.map((e) => {
-    const nw = words(e.name), lw = words(e.label);
-    return { e, full: nw.join(" "), sets: [nw, lw].filter((s) => s.length), last: [...new Set([...lw, ...(nw.length > 1 ? nw.slice(1) : nw)])].filter((x) => x.length >= 3) };
+    const nw = words(e.name), lw = words(e.label), multi = [nw, lw].filter((s) => s.length > 1);
+    return { e, full: nw.join(" "), multi, sets: multi.length ? multi : [nw, lw].filter((s) => s.length),
+      last: [...new Set([...lw, ...(nw.length > 1 ? nw.slice(1) : nw)])].filter((x) => x.length >= 3) };
   });
   const first = (...lists) => { for (const l of lists) { const h = l.find((t) => t.e.active) || l[0]; if (h) return h.e; } return null; };
-  const memo = new Map();
+  const memo = new Map(), rawMemo = new Map();
+  /* بایگانی هزاران درخواست با چند ده نامِ متفاوت دارد: نامِ خام یک بار نرمال و تطبیق داده می‌شود */
   return (raw) => {
+    const s = raw == null ? "" : String(raw);
+    let found = rawMemo.get(s);
+    if (found === undefined) { found = matchOne(s); rawMemo.set(s, found); }
+    return found;
+  };
+  function matchOne(raw) {
     const w = words(raw), key = w.join(" ");
     if (!key) return null;
     if (memo.has(key)) return memo.get(key);
@@ -117,8 +134,9 @@ export function expertMatcher(experts) {
     if (w.length > 1) {
       const rs = new Set(w);
       const exact = E.filter((t) => t.full === key), sub = E.filter((t) => t.sets.some((s) => s.every((x) => rs.has(x))));
+      const sup = E.filter((t) => t.multi.some((s) => w.every((x) => s.includes(x))));
       const act = (l) => l.filter((t) => t.e.active);
-      found = first(act(exact), act(sub), exact, sub);
+      found = first(act(exact), act(sub), act(sup), exact, sub, sup);
     } else if (w[0].length >= 3) {
       const p = w[0];
       found = first(E.filter((t) => t.last.includes(p)),
@@ -126,7 +144,56 @@ export function expertMatcher(experts) {
     }
     memo.set(key, found);
     return found;
+  }
+}
+
+/** f روی رشته، با کش — مقدارهای متفاوت (نام کارشناس، نوع خرید) چند ده تاست و ردیف‌ها چند هزار */
+const cacheBy = (f) => {
+  const m = new Map();
+  return (v) => {
+    const k = v == null ? "" : String(v);
+    let r = m.get(k);
+    if (r === undefined) { if (m.size > 5000) m.clear(); r = f(k); m.set(k, r); }
+    return r;
   };
+};
+/** خرید را کارفرما کرده (راغون: «کارفرمای راغون (کارشناس خرید)» با نوع خرید «خرید از کارفرما») — کالا از سمت
+    پروژه تأمین شده، نه با خریدِ واحد پشتیبانی؛ ردیف «تامین از پروژه»ِ گزارش سه‌ماهه (فرضِ پیش از تأیید مدیر) */
+const EMPLOYER = /کارفرما/;
+export const isEmployer = cacheBy((raw) => EMPLOYER.test(nrm(raw)));
+const employerBuy = cacheBy((b) => nrm(b) === "خرید از کارفرما");
+export const suppliedByProject = (r) => employerBuy(r.buy_type) || isEmployer(r.sx);
+const fnv32 = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+
+/**
+ * «کارشناس خرید»ِ راهکاران که با هیچ کارشناسِ جدول جور نمی‌شود — بیشترشان همکارانِ پیشینِ واحدند که پیش از
+ * سامانه رفته‌اند (فرزاد شهبازیان، محمدرضا عسکری زاده جزی، داود خسروی گیلانی…). بی این، درخواست‌هایشان در
+ * گزارش «ارجاع نشده» شمرده می‌شد. هر نام یک کارشناسِ غیرفعالِ ساختگی می‌شود با شناسهٔ منفیِ پایدار (از خودِ نام،
+ * پس در پنجرهٔ تیک، جدول گروه‌بندی و ساخت گزارش یکی است) و بی سرگروه تا مدیر در جدول جایش بدهد؛ در جدول
+ * experts نوشته نمی‌شود. `names`: نام‌های «کارشناس خرید» درخواست‌ها و سوابق خرید.
+ */
+export function withPseudoExperts(experts, names) {
+  const keys = new Map();
+  for (const raw of new Set(names.map((v) => (v == null ? "" : String(v))))) {
+    if (!T(raw) || isEmployer(raw)) continue;
+    const key = words(raw).join(" ");
+    if (key && !keys.has(key)) keys.set(key, raw);
+  }
+  const used = new Set(experts.map((e) => e.id)), add = [];
+  /* نام‌های چندکلمه‌ای اول؛ نامِ تک‌کلمه‌ای («شهبازیان») بعد، با کارشناس‌های ساختگی هم تطبیق داده می‌شود تا
+     همان کس دو ردیف نشود */
+  for (const single of [false, true]) {
+    const match = expertMatcher(experts.concat(add));
+    for (const [key, raw] of keys) {
+      if (key.includes(" ") === single || match(raw)) continue;
+      let id = -(fnv32(key) % 1e9) - 1;
+      while (used.has(id)) id--;
+      used.add(id);
+      add.push({ id, name: nrm(raw), label: nrm(raw), senior: 0, senior_id: null, active: 0, pseudo: true });
+    }
+  }
+  /* به ترتیب الفبا، نه ترتیبِ نخستین ردیف — پنجرهٔ تیک و برگهٔ کارشناسان با هر بازهٔ بارگذاری یکسان بمانند */
+  return add.length ? experts.concat(add.sort((a, b) => a.name.localeCompare(b.name, "fa"))) : experts;
 }
 
 /* ------------------------------------------------------------------ */
@@ -185,7 +252,7 @@ async function loadExperts(env) {
 /** درخواست‌ها با شمارش اقلام به تفکیک وضعیت و کارشناسِ اصلی — یک ردیف برای هر درخواست */
 async function loadRequestRows(env, years) {
   const where = years && years.length ? `WHERE substr(r.date,1,4) IN (${years.map(() => "?").join(",")})` : "";
-  const sql = `SELECT r.id, r.date, r.supply_unit, r.center, r.requester, r.party_type, r.party, r.req_type,
+  const sql = `SELECT r.id, r.date, r.supply_unit, r.center, r.requester, r.party_type, r.party, r.req_type, r.buy_type,
       COUNT(i.id) AS n, COALESCE(SUM(i.state='closed'),0) AS nc, COALESCE(SUM(i.state='stop'),0) AS ns, COALESCE(SUM(i.state='hold'),0) AS nh,
       GROUP_CONCAT(DISTINCT CASE WHEN i.state='open' THEN i.src_status END) AS ost, MAX(i.src_status) AS anyst, MAX(i.src_expert) AS sx,
       MAX(CASE WHEN i.note IS NOT NULL AND i.note<>'' THEN i.note END) AS note,
@@ -193,6 +260,51 @@ async function loadRequestRows(env, years) {
         ORDER BY (SELECT COUNT(*) FROM items i2 WHERE i2.assignment_id=a.id) DESC, a.dispatched_at DESC LIMIT 1) AS eid
     FROM requests r LEFT JOIN items i ON i.request_id=r.id ${where} GROUP BY r.id ORDER BY r.date DESC, r.id DESC`;
   return (await env.DB.prepare(sql).bind(...(years || []).map(String)).all()).results || [];
+}
+
+/** بایگانیِ درخواست‌ها برای گزارش‌ها: یک ردیف خلاصه برای هر درخواستِ فایل راهکاران، باز و بسته — همان شمارش‌هایی
+    که loadRequestRows از اقلامِ میز می‌گیرد (frontend import.js:TP.requestSummaries). fp اثرانگشتِ ردیف است تا ورود
+    روزانه فقط ردیفِ تغییرکرده را بنویسد (api.js:importHistory) و scripts/import-req-hist.mjs بار اول یک‌جا پرش کند. */
+export const REQ_HIST_COLS = ["id", "date", "party", "center", "party_type", "requester", "req_type", "supply_unit", "buy_type", "n", "nc", "ns", "nh", "ost", "anyst", "sx", "note", "fp"];
+export const REQ_HIST_DDL = "CREATE TABLE IF NOT EXISTS req_hist (id TEXT PRIMARY KEY, date TEXT NOT NULL, party TEXT, center TEXT, party_type TEXT, requester TEXT, req_type TEXT, supply_unit TEXT, buy_type TEXT, "
+  + "n INTEGER NOT NULL, nc INTEGER NOT NULL, ns INTEGER NOT NULL, nh INTEGER NOT NULL, ost TEXT, anyst TEXT, sx TEXT, note TEXT, fp TEXT NOT NULL, updated_at INTEGER NOT NULL) WITHOUT ROWID";
+/** یک ردیف ورودی → مقدارهای ستون‌ها (بی updated_at) — شمارش‌ها عدد صحیح، متن‌ها تا ۵۰۰ نویسه */
+export const reqHistValues = (r) => REQ_HIST_COLS.map((c) => {
+  const v = r[c];
+  if (["n", "nc", "ns", "nh"].includes(c)) { const x = Math.trunc(Number(v)); return Number.isFinite(x) ? x : 0; }
+  return v == null ? null : String(v).slice(0, 500);
+});
+
+/**
+ * درخواست‌های گزارش سه‌ماهه. میز (requests/items) فقط درخواستِ باز دارد: ورود روزانه درخواستِ بسته را نمی‌فرستد
+ * و قلمِ «بسته شده» را وارد نمی‌کند — پس هر دورهٔ گذشته صفر بود و حتی درخواستِ نیمه‌بسته اقلامِ خریدشده‌اش را
+ * نداشت (ممیزی مهر ۱۴۰۵). بایگانی (req_hist: یک ردیف خلاصه برای هر درخواستِ فایل راهکاران، باز و بسته) شمارش‌های
+ * کامل را دارد. درخواستی که روی میز هم هست: وضعیتِ اقلامِ میز (خاتمه، توقف و تعلیقِ پنل از راهکاران جلوترند) و
+ * اقلامی که فقط در بایگانی‌اند — در فایل بسته بودند و وارد میز نشدند — بسته؛ کارشناسِ ارجاعِ ارسال‌شده از میز.
+ * درخواستِ میز که هنوز در بایگانی نیست همان ردیفِ میز. وضعیت درخواست‌ها (statusData) همچنان فقط از میز است.
+ */
+async function loadSeasonRows(env, P, onlyPeriod = false) {
+  /* فقط ماه‌ها و ستون‌هایی که گزارش می‌خواهد — چند هزار ردیف در سال، و پردازندهٔ Worker رایگان ۱۰ میلی‌ثانیه است.
+     گزارش: از فروردین تا آخرین ماهِ دوره در هر سال (دوره، پیش از دوره، روند ماهانه)؛ پنجرهٔ تیک: فقط خودِ دوره */
+  const where = onlyPeriod ? `substr(date,1,7) IN (${[...P.keys].map(() => "?").join(",")})`
+    : `substr(date,1,4) IN (${P.years.map(() => "?").join(",")}) AND substr(date,6,2) <= ?`;
+  const args = onlyPeriod ? [...P.keys] : [...P.years.map(String), p2(P.lastMonth)];
+  const [live, hist] = await Promise.all([
+    loadRequestRows(env, P.years),
+    env.DB.prepare(`SELECT id, date, center, party, buy_type, n, nc, ns, nh, sx FROM req_hist WHERE ${where}`).bind(...args).all()
+      .then((x) => x.results || []).catch(() => []),   /* پیش از نخستین ensureSchema جدول نیست */
+  ]);
+  if (!hist.length) return live;
+  const desk = new Map(live.map((r) => [r.id, r]));
+  const rows = hist.map((h) => {
+    const l = desk.get(h.id);
+    if (!l) return { ...h, eid: null };
+    desk.delete(h.id);
+    if (!l.n) return { ...h, eid: l.eid };
+    if (l.n > h.n) return { ...l, buy_type: l.buy_type || h.buy_type, sx: h.sx || l.sx };   /* میز از فایلِ بایگانی جلوتر است */
+    return { ...h, nc: h.n - l.n + l.nc, ns: l.ns, nh: l.nh, ost: l.ost, eid: l.eid };
+  });
+  return rows.concat([...desk.values()]);
 }
 
 /** وضعیت مؤثر درخواست — همان منطقِ فیلتر وضعیت میز مدیر، در سطح درخواست */
@@ -292,24 +404,34 @@ export const SEASON_SHEETS = [
 /** همهٔ شمارش‌های گزارش سه‌ماهه — مستقل از قالب اکسل تا آزمون‌پذیر باشد.
     `sel.experts`: شناسهٔ کارشناسانی که مدیر تیکشان را نگه داشته (نبودنش یعنی همه)
     `sel.team`: روابطِ جدول گروه‌بندی برای همین گزارش (نبودنش یعنی ارشدهای تب کارشناسان) */
+/** سقفِ مبلغِ یک ردیفِ سوابق (ریال). بالاتر از آن ناممکن است — کل خرید یک سال واحد حدود ۱٫۶×۱۰^۱۳ ریال است —
+    و در دادهٔ واقعی خطای ورود است: ۱۴۰۲/۱۲/۲۸ «فیلتر آبگیر گازوئیل کاترپیلار» با مقدار ۳۵ میلیون عدد
+    (۱٫۲×۱۰^۱۵ ریال، شصت برابرِ خرید کل سال). چنین ردیفی در مبلغ‌ها شمرده نمی‌شود و در یادداشت برگه می‌آید. */
+export const AMOUNT_CAP = 1e13;
+
 export async function seasonData(env, settings, sel) {
   const P = parsePeriod(sel);
   const [rows, experts, hol] = await Promise.all([
-    loadRequestRows(env, P.years), loadExperts(env),
+    loadSeasonRows(env, P), loadExperts(env),
     env.DB.prepare("SELECT date_j FROM holidays").all().then((x) => new Set((x.results || []).map((h) => h.date_j))).catch(() => new Set()),
   ]);
-  const yq = P.years.map(() => "?").join(",");
+  const yq = P.years.map(() => "?").join(","), ys = P.years.map(String);
   /* سوابق خرید (worker/catalog.js:purchases) — تا بارگذاری نشده، جدول نیست و مبلغ‌ها خالی می‌ماند */
-  const amounts = ((await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, expert, SUM(amount) AS amt FROM purchases WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1,2`)
-    .bind(...P.years.map(String)).all().catch(() => ({ results: [] }))).results) || [];
-  return computeSeason({ P, rows, experts, holidays: hol, amounts, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null,
+  const amounts = ((await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, expert, SUM(CASE WHEN amount < ? THEN amount ELSE 0 END) AS amt, SUM(amount >= ?) AS big
+      FROM purchases WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1,2`)
+    .bind(AMOUNT_CAP, AMOUNT_CAP, ...ys).all().catch(() => ({ results: [] }))).results) || [];
+  const outliers = amounts.some((a) => Number(a.big) > 0)
+    ? ((await env.DB.prepare(`SELECT order_date, expert, title, qty, unit, amount FROM purchases WHERE amount >= ? AND substr(order_date,1,4) IN (${yq}) ORDER BY amount DESC LIMIT 20`)
+      .bind(AMOUNT_CAP, ...ys).all().catch(() => ({ results: [] }))).results || [])
+    : [];
+  return computeSeason({ P, rows, experts, holidays: hol, amounts, outliers, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null,
     team: sel && isObj(sel.team) ? sel.team : null });
 }
 
 /** کارشناس هر درخواستِ دوره: ارجاعِ ارسال‌شده، وگرنه ستون «کارشناس خرید» فایل */
 const expertOfRow = (experts) => {
   const match = expertMatcher(experts), byId = new Map(experts.map((e) => [e.id, e]));
-  return (r) => (r.eid ? byId.get(r.eid) : match(r.sx)) || null;
+  return (r) => (r.eid ? byId.get(r.eid) : isEmployer(r.sx) ? null : match(r.sx)) || null;
 };
 
 /**
@@ -319,6 +441,7 @@ const expertOfRow = (experts) => {
  * پیش‌فرضِ جدول گروه‌بندی است برای کارشناسی که در روابطِ ذخیره‌شده هنوز جا داده نشده.
  */
 export function periodExperts({ P, rows, experts }) {
+  experts = withPseudoExperts(experts, rows.map((r) => r.sx));
   const of = expertOfRow(experts), per = new Map();
   for (const r of rows) {
     if (!P.keys.has(String(r.date).slice(0, 7))) continue;
@@ -327,11 +450,11 @@ export function periodExperts({ P, rows, experts }) {
     x.requests++; x.items += Number(r.n) || 0; per.set(e.id, x);
   }
   return experts.filter((e) => e.active || per.has(e.id)).map((e) => ({ id: e.id, name: T(e.name), label: T(e.label), active: !!e.active, senior: !!e.senior,
-    senior_id: e.senior_id || null, requests: (per.get(e.id) || {}).requests || 0, items: (per.get(e.id) || {}).items || 0 }));
+    senior_id: e.senior_id || null, requests: (per.get(e.id) || {}).requests || 0, items: (per.get(e.id) || {}).items || 0, ...(e.pseudo ? { pseudo: true } : {}) }));
 }
 export async function seasonExperts(env, sel) {
   const P = parsePeriod(sel);
-  const [rows, experts] = await Promise.all([loadRequestRows(env, P.years), loadExperts(env)]);
+  const [rows, experts] = await Promise.all([loadSeasonRows(env, P, true), loadExperts(env)]);
   return { label: P.label, experts: periodExperts({ P, rows, experts }) };
 }
 
@@ -346,19 +469,21 @@ export async function seasonExperts(env, sel) {
    کلیدِ parent با null یعنی «عمداً بی‌سرگروه»؛ کارشناسی که نه در seniors است نه در parent هنوز جا داده نشده
    و پنل پیش‌فرضش را از تب کارشناسان می‌گیرد. کلید در DEFAULTS نیست، پس از GET/PUT /settings نمی‌گذرد. */
 export const TEAM_KEY = "reportTeam";
-/** شناسهٔ کارشناس: فقط عدد صحیح مثبت — عدد، یا رشتهٔ رقمی چون کلیدهای شیء JSON رشته‌اند */
+/** شناسهٔ کارشناس: عدد صحیحِ ناصفر — عدد، یا رشتهٔ رقمی چون کلیدهای شیء JSON رشته‌اند. منفی = نامی که فقط در
+    راهکاران است (withPseudoExperts) و در جدول experts نیست */
 const idOf = (v) => {
-  if (typeof v !== "number" && !(typeof v === "string" && /^\d+$/.test(v.trim()))) return null;
+  if (typeof v !== "number" && !(typeof v === "string" && /^-?\d+$/.test(v.trim()))) return null;
   const n = Number(v);
-  return Number.isSafeInteger(n) && n > 0 ? n : null;
+  return Number.isSafeInteger(n) && n !== 0 ? n : null;
 };
 
 /** نگاشتِ ذخیره‌شده یا بدنهٔ گزارش → شکلِ یکدست، بی خطا: ورودیِ خراب کنار می‌رود، سرگروه زیرِ کسی نمی‌رود و
     عضوی که سرگروهش در seniors نیست بی‌سرگروه (null) می‌شود. `known` (اختیاری، Set شناسه‌ها): مدخلِ کارشناسی
-    که دیگر در جدول نیست کنار می‌رود تا نگاشتی که پنل برمی‌گرداند در ذخیره به خطا نخورد. */
+    که دیگر در جدول نیست کنار می‌رود تا نگاشتی که پنل برمی‌گرداند در ذخیره به خطا نخورد (نامِ فقط‌راهکارانی جدول
+    ندارد و می‌ماند). */
 export function normTeam(raw, known = null) {
   const v = isObj(raw) ? raw : {};
-  const ok = (id) => id !== null && (!known || known.has(id));
+  const ok = (id) => id !== null && (!known || id < 0 || known.has(id));
   const seniors = [...new Set((Array.isArray(v.seniors) ? v.seniors : []).map(idOf).filter(ok))];
   const S = new Set(seniors), parent = {};
   for (const [k, p] of Object.entries(isObj(v.parent) ? v.parent : {})) {
@@ -379,7 +504,7 @@ export function validateTeam(raw, known) {
   const need = (v) => {
     const id = idOf(v);
     if (id === null) bad(`شناسهٔ کارشناس باید عدد صحیح باشد: ${JSON.stringify(v)}`);
-    if (!known.has(id)) bad(`کارشناس ${id} در فهرست کارشناسان نیست.`);
+    if (id > 0 && !known.has(id)) bad(`کارشناس ${id} در فهرست کارشناسان نیست.`);
     return id;
   };
   const seniors = [...new Set(raw.seniors.map(need))], S = new Set(seniors), parent = {};
@@ -432,8 +557,14 @@ export async function putReportTeam(env, body) {
  * درخواست‌ها را می‌شمارد — درخواستِ پروژه با برداشتنِ نامِ کارشناس از گزارش کم نمی‌شود.
  * `team`: روابطِ جدول گروه‌بندی (null = ارشدهای تب کارشناسان). گزارش دقیقاً همان را می‌شمارد که مدیر در
  * جدول دید: ستونِ هر سرگروه = خودش و اعضایش، کارشناسِ بی‌سرگروه در «بدون سرگروه».
+ * نامِ «کارشناس خرید»ی که در جدول کارشناسان نیست (کارشناسِ رفته) کارشناسِ ساختگی می‌شود (withPseudoExperts).
+ * «تامین از پروژه» (suppliedByProject): جدا از خرید شده و اقدامی نشده، در ستونِ گروهِ کارشناسش و ردیفِ خودش در
+ * برگهٔ کارشناسان؛ «کارفرمای راغون» کارشناس نیست و «ارجاع نشده» هم شمرده نمی‌شود.
+ * `outliers`: ردیف‌های سوابق بالای AMOUNT_CAP که در مبلغ‌ها نیامده‌اند — در یادداشت برگهٔ «وضعیت کلی».
  */
-export function computeSeason({ P, rows, experts, holidays, amounts, settings, todayJ, pick = null, team = null }) {
+export function computeSeason({ P, rows, experts, holidays, amounts, outliers = [], settings, todayJ, pick = null, team = null }) {
+  amounts = amounts || [];
+  experts = withPseudoExperts(experts, [...rows.map((r) => r.sx), ...amounts.map((a) => a.expert)]);
   const TM = team ? normTeam(team) : null;
   if (TM) experts = withTeam(experts, TM);
   const projects = reportProjects(settings), match = expertMatcher(experts), byId = new Map(experts.map((e) => [e.id, e]));
@@ -443,24 +574,58 @@ export function computeSeason({ P, rows, experts, holidays, amounts, settings, t
   const seniors = TM ? TM.seniors.map((id) => byId.get(id)).filter(Boolean) : experts.filter((e) => e.senior && e.active);
   const picked = Array.isArray(pick) ? new Set(pick.map(Number)) : null;
   const chosen = (e) => !picked || !e || picked.has(e.id);
+  /* پروژهٔ هر «طرف مقابل/مرکز» یک بار — بایگانی چند هزار درخواست در سال دارد و طرف‌مقابل‌ها چند صد تا؛ نقشهٔ
+     دوسطحی، نه کلیدِ چسبانده که برای هر ردیف رشتهٔ تازه بسازد */
+  const pmemo = new Map();
+  const projOf = (r) => {
+    let m = pmemo.get(r.party);
+    if (!m) pmemo.set(r.party, (m = new Map()));
+    let p = m.get(r.center);
+    if (p === undefined) { p = projectOf(projects, r.party, r.center); m.set(r.center, p); }
+    return p;
+  };
+  const classOf = (r) => { const c = purchaseClass(r); return c !== "stopped" && suppliedByProject(r) ? "project" : c; };
 
-  const inP = rows.filter((r) => P.keys.has(String(r.date).slice(0, 7)));
-  const inPrior = rows.filter((r) => P.prior.has(String(r.date).slice(0, 7)));
-  const enrich = (r) => { const e = r.eid ? byId.get(r.eid) : match(r.sx); return { ...r, cls: purchaseClass(r), expert: e || null, group: groupOf(e), project: projectOf(projects, r.party, r.center) }; };
-  const R = inP.map(enrich);
+  /* یک گذر روی همهٔ ردیف‌ها: دوره، پیش از دوره و روند ماهانهٔ سال آخر (ستون‌های سمت چپ برگهٔ پروژه‌ها) */
+  const trendMonths = []; for (let m = 1; m <= P.lastMonth; m++) trendMonths.push(ymKey(P.lastYear, m));
+  const tIdx = new Map(trendMonths.map((k, i) => [k, i]));
+  const cells = new Map(projects.map((p) => [p, { req: trendMonths.map(() => 0), items: trendMonths.map(() => 0) }]));
+  const R = [], prior = { requests: 0, items: 0 };
+  for (const r of rows) {
+    const k = String(r.date).slice(0, 7), n = Number(r.n) || 0, i = tIdx.get(k);
+    const project = P.keys.has(k) || i !== undefined ? projOf(r) : null;
+    if (P.keys.has(k)) {
+      const e = r.eid ? byId.get(r.eid) : isEmployer(r.sx) ? null : match(r.sx);
+      R.push({ ...r, n, nc: Number(r.nc) || 0, cls: classOf(r), expert: e || null, group: groupOf(e), project });
+    } else if (P.prior.has(k)) { prior.requests++; prior.items += n; }
+    const c = i === undefined ? null : cells.get(project);
+    if (c) { c.req[i]++; c.items[i] += n; }
+  }
+  const trend = projects.map((p) => ({ name: p.name, city: p.city, ...cells.get(p) }));
   /* درخواست‌های کارشناسانِ تیک‌خورده (و ارجاع‌نشده‌ها، که مال هیچ کارشناسی نیستند) */
   const RE = picked ? R.filter((r) => chosen(r.expert)) : R;
+  /* کارشناسانِ گزارش = همان فهرستِ پنجرهٔ تیک (periodExperts): فعال‌ها و هر کس در دوره درخواستی داشته.
+     مبلغِ کسی که آن‌جا نبود کنار نمی‌رود — مدیر فرصتِ برداشتنِ تیکش را نداشت */
+  const inR = new Set(R.map((r) => r.expert));
+  const inReport = experts.filter((e) => e.active || inR.has(e)), offered = new Set(inReport.map((e) => e.id));
+  const chosenAmt = (e) => chosen(e) || !offered.has(e.id);
 
   /* گروه‌ها: سرگروه‌های بالا به همان ترتیب؛ «بدون سرگروه» فقط اگر درخواست یا مبلغی داشته باشد */
   const groups = seniors.filter((s) => !picked || experts.some((e) => groupOf(e) === s.id && picked.has(e.id))).map((s) => ({ id: s.id, name: T(s.name) }));
-  const amountNoGroup = amounts.some((a) => P.keys.has(a.ym) && T(a.expert) && Number(a.amt) && groupOf(match(a.expert)) === 0 && chosen(match(a.expert)));
+  const amountNoGroup = amounts.some((a) => P.keys.has(a.ym) && T(a.expert) && Number(a.amt) && groupOf(match(a.expert)) === 0 && chosenAmt(match(a.expert)));
   if (RE.some((r) => r.expert && r.group === 0) || amountNoGroup || !groups.length) groups.push({ id: 0, name: groups.length ? "بدون سرگروه" : "همه کارشناسان" });
+  /* یک گذر روی ردیف‌های دوره به‌جای یک filter برای هر گروه، پروژه و کارشناس — دورهٔ یک‌ساله چند هزار درخواست است */
+  const bucket = (m, k, r) => { const l = m.get(k); if (l) l.push(r); else m.set(k, [r]); };
+  const allInOne = groups.length === 1 && groups[0].id === 0, byGroup = new Map(), byProj = new Map(), byExp = new Map();
+  for (const r of RE) if (r.expert) bucket(byGroup, allInOne ? 0 : r.group, r);
+  for (const r of R) { bucket(byProj, r.project, r); bucket(byExp, r.expert, r); }
   const gStat = groups.map((g) => {
-    const mine = RE.filter((r) => r.expert && (groups.length === 1 && g.id === 0 ? true : r.group === g.id));
-    return { ...g, open: mine.filter((r) => r.cls === "open").length, bought: mine.filter((r) => r.cls === "bought").length, stopped: mine.filter((r) => r.cls === "stopped").length,
-      total: mine.length, items: mine.reduce((a, r) => a + r.n, 0), amount: null };
+    const mine = byGroup.get(g.id) || [];
+    const n = (cls) => mine.filter((r) => r.cls === cls).length;
+    return { ...g, open: n("open"), bought: n("bought"), project: n("project"), stopped: n("stopped"), total: mine.length, items: mine.reduce((a, r) => a + r.n, 0), amount: null };
   });
-  const unassigned = R.filter((r) => !r.expert).length;
+  const unassigned = R.filter((r) => !r.expert && r.cls !== "project").length;
+  const projectNoExpert = R.filter((r) => !r.expert && r.cls === "project").length;
 
   /* مبلغ فاکتورها از «سوابق»: کل دوره، پیش از دوره، و سهم هر گروه اگر فایل ستون کارشناس داشت */
   const amtIn = (set) => amounts.filter((a) => set.has(a.ym)).reduce((s, a) => s + (Number(a.amt) || 0), 0);
@@ -468,27 +633,24 @@ export function computeSeason({ P, rows, experts, holidays, amounts, settings, t
   if (hasExpertAmounts) {
     for (const a of amounts.filter((x) => P.keys.has(x.ym))) {
       const e = match(a.expert), gid = groupOf(e);
-      if (!chosen(e)) continue;
+      if (!chosenAmt(e)) continue;
       const g = gStat.find((x) => (groups.length === 1 && x.id === 0) || x.id === gid);
       if (g) g.amount = (g.amount || 0) + (Number(a.amt) || 0);
     }
   }
   const totals = {
     period: { requests: R.length, items: R.reduce((a, r) => a + r.n, 0), amount: amtIn(P.keys) },
-    prior: { requests: inPrior.length, items: inPrior.reduce((a, r) => a + r.n, 0), amount: amtIn(P.prior) },
+    prior: { ...prior, amount: amtIn(P.prior) },
   };
+  const ym = (o) => String(o.order_date).slice(0, 7);
+  const bigRows = (outliers || []).filter((o) => P.keys.has(ym(o)) || P.prior.has(ym(o)));
 
   /* پروژه‌ها */
   const projStat = (list) => ({ requests: list.length, bought: list.filter((r) => r.cls === "bought").length, items: list.reduce((a, r) => a + r.n, 0), itemsBought: list.reduce((a, r) => a + r.nc, 0) });
-  const pRows = projects.map((p) => ({ ...p, ...projStat(R.filter((r) => r.project === p)) }));
-  const other = projStat(R.filter((r) => !r.project));
+  const pRows = projects.map((p) => ({ ...p, ...projStat(byProj.get(p) || []) }));
+  const other = projStat(byProj.get(null) || []);
   const unmatched = {};
-  R.filter((r) => !r.project).forEach((r) => { const k = T(r.party) || T(r.center) || "—"; unmatched[k] = (unmatched[k] || 0) + 1; });
-
-  /* روند ماهانهٔ سال آخر (ستون‌های سمت چپ برگهٔ پروژه‌ها) */
-  const trendMonths = []; for (let m = 1; m <= P.lastMonth; m++) trendMonths.push(ymKey(P.lastYear, m));
-  const yearRows = rows.filter((r) => String(r.date).slice(0, 4) === String(P.lastYear)).map((r) => ({ ym: String(r.date).slice(0, 7), n: r.n, project: projectOf(projects, r.party, r.center) }));
-  const trend = projects.map((p) => ({ name: p.name, city: p.city, req: trendMonths.map((k) => yearRows.filter((r) => r.project === p && r.ym === k).length), items: trendMonths.map((k) => yearRows.filter((r) => r.project === p && r.ym === k).reduce((a, r) => a + r.n, 0)) }));
+  (byProj.get(null) || []).forEach((r) => { const k = T(r.party) || T(r.center) || "—"; unmatched[k] = (unmatched[k] || 0) + 1; });
 
   /* مدیران پروژه */
   const order = reportManagers(settings).slice();
@@ -498,21 +660,18 @@ export function computeSeason({ P, rows, experts, holidays, amounts, settings, t
     return { label, noSystem: ps.length > 0 && ps.every((p) => p.noSystem), requests: ps.reduce((a, p) => a + p.requests, 0), items: ps.reduce((a, p) => a + p.items, 0) };
   }).filter((m) => m.noSystem || pRows.some((p) => managerLabelOf(p) === m.label));
 
-  /* کارشناسان: فعال‌ها همیشه، غیرفعال‌ها فقط اگر درخواستی داشتند — و فقط تیک‌خورده‌ها؛ متوقف‌ها در ردیف «متوقف شده» */
-  const inReport = experts.filter((e) => e.active || R.some((r) => r.expert === e));
+  /* کارشناسان: فعال‌ها همیشه، غیرفعال‌ها فقط اگر درخواستی داشتند — و فقط تیک‌خورده‌ها؛ متوقف‌ها و «تامین از پروژه»ها
+     در ردیف خودشان */
   const eRows = inReport.filter((e) => chosen(e)).map((e) => {
-    const mine = R.filter((r) => r.expert === e && r.cls !== "stopped");
+    const mine = (byExp.get(e) || []).filter((r) => r.cls !== "stopped" && r.cls !== "project");
     return { id: e.id, name: T(e.name), requests: mine.length, bought: mine.filter((r) => r.cls === "bought").length, items: mine.reduce((a, r) => a + r.n, 0), itemsBought: mine.reduce((a, r) => a + r.nc, 0) };
   });
-  const stoppedAll = RE.filter((r) => r.cls === "stopped");
-  const unassignedOpen = R.filter((r) => !r.expert && r.cls !== "stopped");
-  const specials = [
-    { name: "متوقف شده", requests: stoppedAll.length, bought: 0, items: stoppedAll.reduce((a, r) => a + r.n, 0), itemsBought: 0 },
-    { name: "تامین از پروژه", requests: 0, bought: 0, items: 0, itemsBought: 0 },
-    { name: "ارجاع نشده", requests: unassignedOpen.length, bought: 0, items: unassignedOpen.reduce((a, r) => a + r.n, 0), itemsBought: 0 },
-  ];
+  const stoppedAll = RE.filter((r) => r.cls === "stopped"), projectAll = RE.filter((r) => r.cls === "project");
+  const unassignedOpen = R.filter((r) => !r.expert && r.cls !== "stopped" && r.cls !== "project");
+  const special = (name, list) => ({ name, requests: list.length, bought: 0, items: list.reduce((a, r) => a + r.n, 0), itemsBought: 0 });
+  const specials = [special("متوقف شده", stoppedAll), special("تامین از پروژه", projectAll), special("ارجاع نشده", unassignedOpen)];
 
-  return { period: P, groups: gStat, unassigned, hasExpertAmounts, totals, projects: pRows, other, unmatched, trendMonths, trend, managers: mRows,
+  return { period: P, groups: gStat, unassigned, projectNoExpert, hasExpertAmounts, totals, outliers: bigRows, projects: pRows, other, unmatched, trendMonths, trend, managers: mRows,
     workDays: Math.max(1, workingDays(P.keys, holidays || new Set(), todayJ)), experts: eRows, specials,
     picked: picked ? { n: eRows.length, of: inReport.length } : null };
 }
@@ -540,7 +699,7 @@ function overviewSheet(D) {
   const L = (i) => colName(3 + i);
   line(4, 1, "اقدامی نشده", null, (g) => ({ v: g.open }));
   line(5, 2, "خرید شده  و ارسال شده", null, (g) => ({ v: g.bought }));
-  line(6, 3, "تامین از پروژه", null, () => ({ v: 0 }));
+  line(6, 3, "تامین از پروژه", null, (g) => ({ v: g.project || 0 }));
   line(7, 4, "درخواست متوقف شده", null, (g) => ({ v: g.stopped }));
   line(8, 5, "درخواست های ارسال جهت تعمیر", null, () => ({ v: 0 }));
   sh.height(9, 18.6).put(9, 1, 6, num).put(9, 2, "درخواست های ارجاع نشده", lab).merge(9, 3, 9, last, D.unassigned, val(null));
@@ -594,6 +753,12 @@ function overviewSheet(D) {
       series: [{ name: "مبلغ فاکتورها", ref: absRef(N, 27, 3, 27, 4), values: [t.prior.amount, t.period.amount], color: "70AD47" }] },
   );
   if (!D.hasExpertAmounts) sh.notes.push("فایل سوابق ستون «کارشناس خرید» ندارد؛ مبلغ فاکتورها فقط به‌صورت جمع کل آمده است، نه به تفکیک گروه.");
+  if (D.projectNoExpert) sh.notes.push(`${D.projectNoExpert} درخواستِ «تامین از پروژه» که خریدش را خودِ کارفرما کرده (کارشناس خرید: کارفرما) در ستون گروه‌ها نیامده است؛ در جمع کل دوره و ردیف «تامین از پروژه»ِ برگهٔ «کارشناس خرید» هست.`);
+  if ((D.outliers || []).length) {
+    const rial = (v) => Math.round(Number(v) || 0).toLocaleString("en-US");
+    sh.notes.push(`${D.outliers.length} ردیفِ سوابق با مبلغ ${rial(AMOUNT_CAP)} ریال یا بیشتر در مبلغ‌ها شمرده نشد — بیش از خرید یک سالِ کل واحد است و به احتمال زیاد مقدار یا فی اشتباه وارد شده؛ در راهکاران اصلاح شود: `
+      + D.outliers.slice(0, 5).map((o) => `${o.order_date} «${T(o.title)}» ${T(o.expert)} — مقدار ${rial(o.qty)} ${T(o.unit)}، ${rial(o.amount)} ریال`).join("؛ "));
+  }
   return sh;
 }
 

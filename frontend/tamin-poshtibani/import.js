@@ -235,6 +235,33 @@
     return { filename: parsed.filename, stats: parsed.stats, open, closedIds };
   };
 
+  /* ---------- بایگانیِ درخواست‌ها برای گزارش‌ها ----------
+     گزارش سه‌ماهه درخواست‌های «خرید شده» و «متوقف» هر دوره را به تفکیک کارشناس و پروژه می‌شمارد، ولی
+     ورود روزانه درخواستِ بسته را به پنل نمی‌فرستد (بالا) — پس هر دورهٔ گذشته صفر بود (ممیزی مهر ۱۴۰۵).
+     برای هر درخواستِ فایل (باز و بسته) یک ردیفِ خلاصه ساخته می‌شود — همان شمارش‌هایی که گزارش از
+     اقلام می‌گیرد — و سرور فقط ردیفی را می‌نویسد که اثرانگشتش عوض شده: بار اول یک ردیف برای هر درخواست
+     (۲۰ هزار در ۷ سال)، بعد از آن روزانه فقط چند ده ردیف. */
+  const fnv32 = (s, h = 0x811c9dc5) => { s = String(s); for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
+  const HIST_FIELDS = ["id", "date", "party", "center", "party_type", "requester", "req_type", "supply_unit", "buy_type", "n", "nc", "ns", "nh", "ost", "anyst", "sx", "note"];
+  TP.REQ_HIST_FIELDS = HIST_FIELDS;
+  TP.requestSummaries = function (parsed) {
+    return parsed.requests.map((req) => {
+      const its = req.items;
+      const cnt = (s) => its.filter((i) => i.state === s).length;
+      const ost = [...new Set(its.filter((i) => i.state === "open").map((i) => i.srcStatus).filter(Boolean))].sort().join(",");
+      /* همان MAX(src_status) که گزارش روی اقلامِ پنل می‌گیرد */
+      const anyst = its.map((i) => i.srcStatus || "").reduce((a, b) => (b > a ? b : a), "");
+      /* کارشناس درخواست: رایج‌ترین نامِ ستون «کارشناس خرید» میان اقلام */
+      const f = new Map(); for (const i of its) { const e = T(i.srcExpert); if (e) f.set(e, (f.get(e) || 0) + 1); }
+      const sx = [...f].sort((a, b) => b[1] - a[1] || (a[0] < b[0] ? 1 : -1)).map(([e]) => e)[0] || "";
+      const row = { id: req.id, date: req.date, party: req.party, center: req.center, party_type: req.partyType, requester: req.requester,
+        req_type: req.reqType, supply_unit: req.supplyUnit, buy_type: req.buyType, n: its.length, nc: cnt("closed"), ns: cnt("stop"), nh: cnt("hold"),
+        ost, anyst, sx, note: (its.find((i) => T(i.note)) || {}).note || "" };
+      row.fp = (fnv32(JSON.stringify(HIST_FIELDS.map((k) => row[k]))) >>> 0).toString(16);
+      return row;
+    });
+  };
+
   /* برش دستهٔ درخواست‌های باز برای ارسال در چند فراخوانی (حدود N قلم در هر دسته) */
   TP.chunkRequests = function (reqs, maxItems = 600) {
     const out = []; let cur = [], n = 0;

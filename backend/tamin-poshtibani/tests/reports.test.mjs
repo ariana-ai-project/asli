@@ -11,8 +11,13 @@ import {
 } from "../../../worker/reports.js";
 import { buildBook, chartXml, formatValue } from "../../../worker/xlsxbook.js";
 import { getSettings } from "../../../worker/settings.js";
-import { ensureSchema } from "../../../worker/api.js";
-import { sqliteD1 } from "./run.mjs";
+import { ensureSchema, route } from "../../../worker/api.js";
+import { REQ_HIST_COLS } from "../../../worker/reports.js";
+import { sqliteD1, loadTP } from "./run.mjs";
+
+test("ستون‌های بایگانی: خلاصه‌سازِ پنل (import.js) و جدولِ req_hist یکی‌اند", () => {
+  assert.deepEqual(Array.from(loadTP().TP.REQ_HIST_FIELDS), REQ_HIST_COLS.filter((c) => c !== "fp"), "اثرانگشت روی همین ستون‌هاست؛ واگرایی یعنی بازنویسیِ همهٔ بایگانی");
+});
 
 test("دوره: فصل، ماه، ترکیب و کل سال — با ستون «پیش از دوره»", () => {
   const w = parsePeriod({ years: [1404], seasons: [4] });
@@ -80,6 +85,21 @@ test("تطبیق نام کامل سوابق: یک کلمهٔ مشترک کافی
   assert.equal(m("سید حمید رسولی طاهر").id, 4);
   assert.equal(m("مهدی شیری آغول بیک").id, 6);
   assert.equal(m("طراوتی").id, 5);
+});
+
+test("تطبیق نام (ممیزی مهر ۱۴۰۵): برچسبِ کوتاهِ کارشناسی که نام کامل دارد نامِ چندکلمه‌ایِ دیگری را نمی‌گیرد", () => {
+  const E = [{ id: 1, name: "سالار کوشاری", label: "آقای سالار کوشاری", active: 0 }, { id: 5, name: "ارسلان کوشاری", label: "آقای کوشاری", active: 1 },
+    { id: 22, name: "محمد صادقی", label: "آقای صادقی", active: 1 }, { id: 7, name: "مریم محمودی اصل زاده", label: "خانم محمودی", active: 1 },
+    { id: 11, name: "امید آقا موسی طهرانی", label: "آقای طهرانی", active: 1 }, { id: 20, name: "آقای رسولی", label: "آقای رسولی", active: 1 }];
+  const m = expertMatcher(E);
+  assert.equal(m("سالار کوشاری").id, 1, "۲۲۰ درخواستِ سالار به ارسلان (برچسب «آقای کوشاری») نمی‌رود");
+  assert.equal(m("ارسلان کوشاری").id, 5);
+  assert.equal(m("آرش صادقی"), null, "نه محمد صادقی با برچسب «آقای صادقی»");
+  assert.equal(m("مریم محمودی").id, 7, "نامِ کوتاهِ فایل درون نام کامل کارشناس");
+  assert.equal(m("امید  آقا موسی طهرانی").id, 11);
+  assert.equal(m("امید طهرانی").id, 11);
+  assert.equal(m("سید حمید رسولی طاهر").id, 20, "کارشناسی که نام کامل‌تری ندارد با نام خانوادگی");
+  assert.equal(m("کوشاری").id, 5, "تک‌کلمه: فعال مقدم");
 });
 
 const EXPERTS = [
@@ -176,6 +196,68 @@ test("جدول گروه‌بندی (تصمیم مدیر، مهر ۱۴۰۵): گز
   assert.equal(plainNames(computeSeason({ ...base, team: null })), plainNames(old));
   /* هیچ سرگروهی در جدول: یک ستون «همه کارشناسان» */
   assert.deepEqual(computeSeason({ ...base, team: { seniors: [], parent: {} } }).groups.map((g) => [g.name, g.total]), [["همه کارشناسان", 3]]);
+});
+
+test("نامِ فقط‌راهکاران (کارشناسِ رفته): کارشناسِ ساختگی با شناسهٔ منفیِ پایدار، نه «ارجاع نشده»", () => {
+  const P = parsePeriod({ years: [1402], seasons: [4] });
+  const rows = [
+    { id: "a", date: "1402/10/03", party: "راغون", n: 3, nc: 3, ns: 0, nh: 0, sx: "فرزاد شهبازیان" },
+    { id: "b", date: "1402/11/03", party: "راغون", n: 1, nc: 0, ns: 0, nh: 0, sx: "فرزاد  شهبازیان" },
+    { id: "c", date: "1402/12/03", party: "راغون", n: 2, nc: 2, ns: 0, nh: 0, sx: "ابوذر بهمنی" },
+    { id: "d", date: "1402/12/04", party: "راغون", n: 1, nc: 0, ns: 0, nh: 0, sx: "" },
+  ];
+  const L = periodExperts({ P, rows, experts: EXPERTS });
+  const fz = L.find((e) => e.name === "فرزاد شهبازیان");
+  assert.ok(fz && fz.id < 0 && fz.pseudo && !fz.active, JSON.stringify(fz));
+  assert.deepEqual([fz.requests, fz.items], [2, 4], "دو نگارشِ یک نام یک کارشناس است");
+  assert.equal(periodExperts({ P, rows: rows.slice().reverse(), experts: EXPERTS }).find((e) => e.pseudo).id, fz.id, "شناسه از خودِ نام");
+  assert.ok(!L.some((e) => e.pseudo && e.name !== "فرزاد شهبازیان"), "نامِ جورشده («ابوذر بهمنی») و خالی ساختگی نمی‌شوند");
+
+  const base = { P, rows, experts: EXPERTS, holidays: new Set(), settings: {}, todayJ: "1403/01/01", amounts: [{ ym: "1402/10", expert: "فرزاد شهبازیان", amt: 900 }] };
+  const D = computeSeason(base);
+  assert.equal(D.unassigned, 1, "فقط درخواستِ بی‌نام ارجاع‌نشده است");
+  assert.deepEqual(D.experts.find((e) => e.name === "فرزاد شهبازیان"), { id: fz.id, name: "فرزاد شهبازیان", requests: 2, bought: 1, items: 4, itemsBought: 3 });
+  assert.deepEqual(D.groups.map((g) => [g.name, g.total, g.amount]), [["ارسلان کوشاری", 1, null], ["حمید رسولی", 0, null], ["بدون سرگروه", 2, 900]]);
+  /* در جدول گروه‌بندی جا می‌گیرد؛ بی‌تیک از گزارش بیرون می‌رود، مبلغش هم */
+  assert.deepEqual(computeSeason({ ...base, team: { seniors: [1, 2], parent: { 3: 1, 4: 2, [fz.id]: 2 } } }).groups.map((g) => [g.name, g.total, g.amount]),
+    [["ارسلان کوشاری", 1, null], ["حمید رسولی", 2, 900]]);
+  const U = computeSeason({ ...base, pick: [1, 2, 3, 4] });
+  assert.deepEqual(U.groups.map((g) => [g.name, g.total]), [["ارسلان کوشاری", 1], ["حمید رسولی", 0]]);
+  assert.ok(!U.experts.some((e) => e.id === fz.id));
+  const known = new Map([[1, "آقای کوشاری"], [2, "آقای رسولی"]]);
+  assert.deepEqual(validateTeam({ seniors: [1], parent: { [fz.id]: 1 } }, known), { seniors: [1], parent: { [fz.id]: 1 } }, "شناسهٔ منفی جدول کارشناسان ندارد و پذیرفته است");
+  assert.deepEqual(normTeam({ seniors: [fz.id], parent: { 3: fz.id } }, new Set([3])), { seniors: [fz.id], parent: { 3: fz.id } });
+});
+
+test("«تامین از پروژه»: خریدِ کارفرما جدا شمرده می‌شود و «ارجاع نشده» نیست", () => {
+  const P = parsePeriod({ years: [1402], seasons: [4] });
+  const rows = [
+    { id: "e1", date: "1402/10/05", party: "راغون", n: 2, nc: 2, ns: 0, nh: 0, sx: "کارفرمای راغون (کارشناس خرید)", buy_type: "خرید از کارفرما" },
+    { id: "e2", date: "1402/10/06", party: "راغون", n: 1, nc: 0, ns: 0, nh: 0, sx: "ابوذر بهمنی", buy_type: "خرید از کارفرما" },
+    { id: "e3", date: "1402/10/07", party: "راغون", n: 4, nc: 0, ns: 4, nh: 0, sx: "", buy_type: "خرید از کارفرما" },
+    { id: "e4", date: "1402/10/08", party: "راغون", n: 1, nc: 1, ns: 0, nh: 0, sx: "ابوذر بهمنی", buy_type: "جزئی" },
+  ];
+  const D = computeSeason({ P, rows, experts: EXPERTS, holidays: new Set(), settings: {}, todayJ: "1403/01/01", amounts: [] });
+  const g1 = D.groups.find((g) => g.name === "ارسلان کوشاری");
+  assert.deepEqual([g1.project, g1.bought, g1.open, g1.total], [1, 1, 0, 2], "درخواستِ کارفرماییِ بهمنی در ستون گروهش، ردیف «تامین از پروژه»");
+  assert.equal(D.unassigned, 1, "درخواستِ متوقفِ بی‌کارشناس ارجاع‌نشده است؛ خریدِ کارفرما نه");
+  assert.equal(D.projectNoExpert, 1);
+  assert.deepEqual(D.specials.map((s) => [s.name, s.requests, s.items]), [["متوقف شده", 1, 4], ["تامین از پروژه", 2, 3], ["ارجاع نشده", 0, 0]]);
+  assert.deepEqual(D.experts.find((e) => e.name === "ابوذر بهمنی"), { id: 3, name: "ابوذر بهمنی", requests: 1, bought: 1, items: 1, itemsBought: 1 });
+  assert.ok(!D.experts.some((e) => /کارفرما/.test(e.name)), "کارفرما کارشناسِ ساختگی نمی‌شود");
+  const ov = bookPreview(seasonBook(D, ["overview"]))[0];
+  assert.ok(ov.notes.some((n) => /1 درخواستِ «تامین از پروژه»/.test(n)), ov.notes.join(" | "));
+});
+
+test("ردیفِ پرتِ سوابق: در مبلغ‌ها نیست و در یادداشت می‌آید", () => {
+  const P = parsePeriod({ years: [1402], seasons: [4] });
+  const out = [{ order_date: "1402/12/28", expert: "مهدی شیری آغول بیک", title: "فیلتر آبگیر گازوئیل کاترپیلار", qty: 35000000, unit: "عدد", amount: 1.225e15 },
+    { order_date: "1402/05/01", expert: "x", title: "y", qty: 1, unit: "عدد", amount: 2e13 }, { order_date: "1401/12/01", expert: "x", title: "z", qty: 1, unit: "عدد", amount: 3e13 }];
+  const D = computeSeason({ P, rows: ROWS, experts: EXPERTS, holidays: new Set(), settings: {}, todayJ: "1403/01/01", amounts: [], outliers: out });
+  assert.deepEqual(D.outliers.map((o) => o.order_date), ["1402/12/28", "1402/05/01"], "دوره و پیش از دوره، نه سالِ دیگر");
+  const note = bookPreview(seasonBook(D, ["overview"]))[0].notes.find((n) => /مبلغ‌ها شمرده نشد/.test(n));
+  assert.match(note, /فیلتر آبگیر گازوئیل کاترپیلار/);
+  assert.match(note, /35,000,000 عدد/);
 });
 
 test("نگاشتِ گروه‌بندی: ذخیره سخت‌گیر است و خواندن بی‌خطا یکدست می‌کند", () => {
@@ -282,4 +364,55 @@ test("گروه‌بندی در دیتابیس: GET/PUT /reports/team جدا از
   assert.deepEqual(old.groups.map((g) => [g.name, g.total]), [["ارسلان کوشاری", 1], ["حمید رسولی", 1], ["بدون سرگروه", 1]], "بی team همان تب کارشناسان");
   assert.deepEqual((await seasonData(env, settings, { ...sel, experts: [2, 3, 4], team: "خراب" })).groups.map((g) => g.name), old.groups.map((g) => g.name),
     "team نامعتبر = بی team");
+});
+
+/* گزارش سه‌ماهه برای هر دورهٔ گذشته صفر بود: میز فقط درخواستِ باز دارد (ممیزی مهر ۱۴۰۵). بایگانیِ req_hist یک ردیف
+   خلاصه برای هر درخواستِ فایل راهکاران دارد، باز و بسته، و ورود روزانه فقط ردیفِ تغییرکرده را می‌نویسد. */
+test("بایگانی درخواست‌ها: گزارش بسته‌ها را هم می‌شمارد، ورود فقط تغییرها را می‌نویسد، حذف از میز از بایگانی هم", { skip: SKIP }, async () => {
+  const menv = { ...env, MANAGER_CODE: "4321" };
+  const call = async (path, method = "GET", body) => (await route(new Request(`https://x/tamin-poshtibani/api${path}`, { method,
+    headers: { "X-Manager-Code": "4321", ...(body ? { "Content-Type": "application/json" } : {}) }, body: body ? JSON.stringify(body) : undefined }), menv, { waitUntil() {} })).json();
+  const settings = await getSettings(env), sel = { years: [1404], seasons: [4] };
+  assert.equal((await seasonData(env, settings, sel)).totals.period.requests, 3, "بی بایگانی فقط سه درخواستِ میز");
+
+  const H = (id, date, o = {}) => ({ id, date, party: "راغون", center: "", n: 1, nc: 1, ns: 0, nh: 0, sx: "", fp: `fp-${id}`, ...o });
+  const rows = [
+    H("A", "1404/10/02", { n: 3, nc: 3, sx: "ابوذر بهمنی" }),   /* روی میز هم هست با یک قلم؛ دو قلمِ دیگر در فایل بسته بودند و وارد میز نشدند */
+    H("H1", "1404/10/15", { n: 2, nc: 2, sx: "فرزاد شهبازیان" }),   /* بسته، کارشناسِ رفته */
+    H("H2", "1404/11/20", { n: 1, nc: 0 }),                          /* باز و ارجاع‌نشده */
+    H("H3", "1404/09/01", { n: 5, nc: 5, sx: "ابوذر بهمنی" }),      /* پیش از دوره */
+    H("H4", "1404/12/10", { n: 2, nc: 0, sx: "کارفرمای راغون (کارشناس خرید)", buy_type: "خرید از کارفرما" }),
+  ];
+  const w1 = await call("/import/history", "POST", { rows });
+  assert.deepEqual([w1.written, w1.same], [5, 0]);
+  assert.deepEqual((await call("/import/history")).fp, Object.fromEntries(rows.map((r) => [r.id, r.fp])), "اثرانگشت‌ها برای مقایسه در پنل");
+  const w2 = await call("/import/history", "POST", { rows: [...rows.slice(0, 4), { ...rows[4], nc: 2, fp: "fp-H4b" }] });
+  assert.deepEqual([w2.written, w2.same], [1, 4], "فقط ردیفِ عوض‌شده نوشته می‌شود");
+
+  const D = await seasonData(env, settings, sel);
+  assert.deepEqual([D.totals.period.requests, D.totals.period.items, D.unassigned, D.projectNoExpert], [6, 10, 1, 1], "A یک بار؛ H1، H2، H4 از بایگانی");
+  assert.deepEqual(D.totals.prior, { requests: 1, items: 5, amount: 0 });
+  assert.deepEqual(D.groups.map((g) => [g.name, g.total, g.bought, g.open]), [["ارسلان کوشاری", 1, 1, 0], ["حمید رسولی", 1, 0, 1], ["بدون سرگروه", 2, 1, 1]]);
+  assert.deepEqual(D.experts.find((e) => e.name === "ابوذر بهمنی"), { id: 3, name: "ابوذر بهمنی", requests: 1, bought: 1, items: 3, itemsBought: 3 },
+    "درخواستِ میز: کارشناسِ ارجاع از میز، اقلامِ فقط‌فایل بسته");
+  assert.deepEqual(D.specials.map((s) => [s.name, s.requests]), [["متوقف شده", 0], ["تامین از پروژه", 1], ["ارجاع نشده", 1]]);
+  const fz = (await seasonExperts(env, sel)).experts.find((e) => e.name === "فرزاد شهبازیان");
+  assert.ok(fz && fz.pseudo && fz.id < 0 && fz.requests === 1, JSON.stringify(fz));
+  assert.ok(D.experts.some((e) => e.id === fz.id));
+
+  /* مبلغ: ردیفِ ناممکن (مقدار به‌جای فی) شمرده نمی‌شود و در یادداشت می‌آید */
+  const pu = DB.raw.prepare("INSERT INTO purchases (head,item_code,h,order_date,qty,unit,amount,expert,title) VALUES ('x',?,?,?,?,?,?,?,?)");
+  pu.run("c1", "1", "1404/10/05", 2, "عدد", 5e9, "ابوذر بهمنی", "پیچ");
+  pu.run("c2", "2", "1404/11/05", 35000000, "عدد", 1.2e15, "ابوذر بهمنی", "فیلتر");
+  const D2 = await seasonData(env, settings, sel);
+  assert.equal(D2.totals.period.amount, 5e9);
+  assert.equal(D2.groups[0].amount, 5e9);
+  assert.deepEqual(D2.outliers.map((o) => o.title), ["فیلتر"]);
+
+  /* حذفِ درخواستِ میز آن را از بایگانی هم می‌برد؛ بقیهٔ بایگانی (بسته‌هایی که هیچ‌وقت روی میز نبودند) می‌ماند */
+  await call("/requests/delete", "POST", { ids: ["A"] });
+  const fp = (await call("/import/history")).fp;
+  assert.deepEqual(Object.keys(fp).sort(), ["H1", "H2", "H3", "H4"]);
+  await call("/requests/delete", "POST", { all: true, confirm: "پاک کن" });
+  assert.deepEqual(Object.keys((await call("/import/history")).fp).sort(), ["H1", "H2", "H3", "H4"], "«پاک کردن همه» بایگانیِ بسته‌ها را نمی‌برد");
 });

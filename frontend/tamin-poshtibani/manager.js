@@ -901,7 +901,7 @@
     if (!L.length) return undefined;
     return new Promise((resolve) => {
       const row = (e) => `<label class="rp-ex"><input type="checkbox" data-rex="${e.id}" checked> <b>${esc(e.name)}</b>
-        <span class="dim">${e.requests ? `${M(e.requests)} درخواست · ${M(e.items)} قلم` : "در این دوره درخواستی نداشته"}${e.active ? "" : " · غیرفعال"}</span></label>`;
+        <span class="dim">${e.requests ? `${M(e.requests)} درخواست · ${M(e.items)} قلم` : "در این دوره درخواستی نداشته"}${e.pseudo ? " · فقط در راهکاران (در جدول کارشناسان نیست)" : e.active ? "" : " · غیرفعال"}</span></label>`;
       const d = TP.modal(`کارشناسانِ گزارش ${esc(r.label)}`, `<p style="margin:0 0 8px">تیکِ هر کارشناسی را که نمی‌خواهید در گزارش بیاید بردارید و «تأیید» را بزنید.
           کارشناسِ بی‌تیک در برگهٔ «کارشناس خرید» و ستون گروه‌ها نمی‌آید؛ آمار پروژه‌ها و جمع کلِ دوره همهٔ درخواست‌ها را می‌شمارد.</p>
         <div class="rp-ex-tools"><button class="tp-btn xs" data-rexall>همه</button><button class="tp-btn xs" data-rexnone>هیچ‌کدام</button><span class="dim" data-rexn></span></div>
@@ -986,7 +986,7 @@
         grid.innerHTML = `<div class="tp-scroll" style="max-height:52vh"><table class="tp-mx ex-mx" style="width:${total}px"><colgroup>
             <col style="width:${W.star}px"><col style="width:${W.name}px">${hs.map(() => `<col style="width:${W.senior}px">`).join("")}</colgroup>
           <thead><tr><th title="سرگروه">★</th><th class="rt">کارشناس</th>${hs.map((s) => `<th class="sen" title="${esc(s.name)}">★ ${esc(nm(s))}</th>`).join("")}</tr></thead><tbody>
-          ${rows.map((e) => { const x = st.get(e.id), tip = [e.name, e.active ? "" : "غیرفعال", was(e.id)].filter(Boolean).join(" · "); return `<tr>
+          ${rows.map((e) => { const x = st.get(e.id), tip = [e.name, e.pseudo ? "فقط در راهکاران" : e.active ? "" : "غیرفعال", was(e.id)].filter(Boolean).join(" · "); return `<tr>
             <td><button class="tp-btn xs ${x.senior ? "primary" : ""}" data-tstar="${e.id}" title="${x.senior ? "برداشتن سرگروهی" : "سرگروه شود"}">★</button></td>
             <td class="rt nm" title="${esc(tip)}">${esc(nm(e))}${anySaved && !own(e.id) ? ` <span class="chip info">تازه</span>` : ""}</td>
             ${hs.map((s) => `<td>${x.senior ? `<span class="dim">—</span>` : `<button class="tri ${x.parent === s.id ? "ok" : "unk"}" data-tteam="${e.id}|${s.id}" title="${x.parent === s.id ? "در گروه " + esc(nm(s)) : "در گروه " + esc(nm(s)) + " قرار بگیرد"}">${x.parent === s.id ? "✓" : ""}</button>`}</td>`).join("")}</tr>`; }).join("")}
@@ -1392,12 +1392,26 @@
         for (const c of chunks) { const r = await TP.api("/import/chunk", { body: { import_id, requests: c } }); newR += r.newRequests || 0; k++; busy.set(`ارسال دستهٔ ${k} از ${chunks.length}…`); }
         busy.set("بررسی تعارض با وضعیت فعلی سامانه…");
         const fin = await TP.api("/import/finish", { body: { import_id, closedIds: payload.closedIds } });
+        /* بایگانیِ همهٔ درخواست‌ها (باز و بسته) برای گزارش سه‌ماهه — فقط ردیفِ تازه یا تغییرکرده فرستاده و نوشته می‌شود.
+           ورودِ میز همین حالا تمام شده؛ خطای این مرحله فقط هشدار است تا تعارض‌ها بی‌نمایش نمانند */
+        let hist = [], hw = 0, histErr = "";
+        try {
+          busy.set("بایگانی درخواست‌ها برای گزارش‌ها…");
+          hist = TP.requestSummaries(parsed);
+          const have = (await TP.api("/import/history")).fp || {}, todo = hist.filter((h) => have[h.id] !== h.fp);
+          for (let i = 0; i < todo.length; i += 800) {
+            busy.set(`بایگانی درخواست‌ها برای گزارش‌ها: ${M(Math.min(i + 800, todo.length))} از ${M(todo.length)} ردیف تازه یا تغییرکرده…`);
+            hw += (await TP.api("/import/history", { body: { rows: todo.slice(i, i + 800) } })).written || 0;
+          }
+        } catch (e) { histErr = e.message || String(e); }
         busy.close();
         S.filter = { experts: [], expertText: "", statuses: null, state: "", window: "3d" }; S.q = { id: "", date: "", party: "", item: "" }; S.page.offset = 0; S.tab = "desk";
         await refresh();
         const unknown = Object.entries(st.unknownStatuses || {});
         const summary = `<b>${M(st.requests)}</b> درخواست · <b>${M(st.itemRows)}</b> سطر قلم · <b>${st.parties}</b> طرف مقابل · بازه ${esc(st.dateMin)} تا ${esc(st.dateMax)}<br>${st.closedItemsSkipped ? `<span class="dim"><b>${M(st.closedItemsSkipped)}</b> قلم «بسته شده» وارد نمی‌شود${st.partlyClosed ? ` (${M(st.partlyClosed)} درخواست فقط بخشی از اقلامش بسته است)` : ""} — <b>${M(st.liveItemRows)}</b> قلم وارد پنل می‌شود.</span><br>` : ""}
           <b>${M(st.openRequests)}</b> درخواست با قلم باز به سامانه فرستاده شد (${M(newR)} تازه) · <b>${M(st.closedRequests)}</b> درخواست کاملاً بسته/متوقف فقط برای همگام‌سازی.<br>
+          ${histErr ? `<span style="color:#fcd34d">بایگانی گزارش‌ها به‌روز نشد (${M(hw)} ردیف نوشته شد): ${esc(histErr)} — با بارگذاری دوبارهٔ همین فایل کامل می‌شود.</span>`
+            : `بایگانی گزارش‌ها: <b>${M(hist.length)}</b> درخواست (باز و بسته) — <b>${M(hw)}</b> ردیف تازه یا تغییرکرده نوشته شد.`}<br>
           <b>${M(st.unassignedOpen)}</b> درخواست باز بدون کارشناس · تعارض کارشناس: ${st.expertConflictAuto} مورد خودکار حل شد، <b>${st.expertConflictDecision}</b> مورد دو نام متفاوت (⚠).<br>
           ${st.statusMixed} درخواست وضعیت مختلط دارند (وضعیت روی قلم نگه داشته می‌شود). بزرگ‌ترین درخواست: ${st.maxItems} قلم.
           ${unknown.length ? `<br><span style="color:#fcd34d">وضعیت ناشناخته در فایل: ${unknown.map(([k, v]) => `«${esc(k)}» ×${v}`).join("، ")} — باز فرض شد.</span>` : ""}
