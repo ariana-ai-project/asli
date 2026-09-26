@@ -275,8 +275,20 @@ export function canonLayers(head, layers) {
   /* ۳) ضخامتِ بی‌واحد میلی‌متر است (پیش‌فرضِ یکتای لایه) — «ورق استیل ۰/۱» */
   const t = out["ضخامت"];
   if (t && typeof t === "object" && !Array.isArray(t) && Array.isArray(t.n) && !t.u) out["ضخامت"] = { ...t, u: "میلی‌متر", i: 1 };
+  /* ۴) واحدِ ضمنیِ غلطِ قطر در اتصالات (ممیزی دوم): چند «سه راهی/رابط سینی کابل ... سانتی» عرفِ کلِ
+     نوع قلم را سانتی‌متر کرده بود و «رابط پلی اتیلن ۵۰» پنجاه سانتی‌متر خوانده می‌شد؛ و در اتصالِ
+     پنوماتیک «۸×۶» قطرِ شیلنگ به میلی‌متر است نه اینچ. فقط واحدِ ضمنی (حدسی) عوض می‌شود، نه گفته‌شده. */
+  const pneu = /پنوماتیک/.test(layerText(out["نوع"]) || "");
+  for (const k of ["قطر", "قطر داخلی", "قطر خارجی"]) {
+    const fix = (x) => (x && typeof x === "object" && Array.isArray(x.n) && x.i
+      && ((FITTINGS.has(bk) && x.u === "سانتی‌متر") || (pneu && x.u === "اینچ" && x.n.every((n) => Number.isInteger(n) && n >= 3)))
+      ? { ...x, u: "میلی‌متر" } : x);
+    if (Array.isArray(out[k])) out[k] = out[k].map(fix); else if (out[k]) out[k] = fix(out[k]);
+  }
   return out;
 }
+const FITTINGS = new Set(["سه راهی", "رابط", "زانو", "زانویی", "تبدیل", "بوشن", "مغزی", "درپوش", "کوپلینگ", "واسطه", "سر شیلنگی",
+  "مهره ماسوره", "چپقی", "تی", "موف", "نری", "مادگی"].map(keyOf));
 
 /** ساختارِ یک قلم ({head، layers، …}) به زبانِ استاندارد — نام و لایه‌ها */
 export function canonStructure(s, item = null) {
