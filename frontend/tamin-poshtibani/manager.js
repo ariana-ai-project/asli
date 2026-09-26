@@ -446,7 +446,7 @@
             : `<span class="ename" data-ecode-edit="${e.id}" title="کد ورود (رمز پنل) — برای تغییر کلیک کنید">${esc(e.code)}</span>`}</td><td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
         <tr><td colspan="3"></td><td class="rt" colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
       </tbody></table></div>
-      <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام.</div></div>`;
+      <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام. گروه‌های «گزارش سه ماهه» جدا ذخیره می‌شوند و این جدول فقط پیش‌فرضِ کارشناسی است که هنوز در آن‌ها جا داده نشده.</div></div>`;
   }
   async function expertPatch(id, body) {
     try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); }
@@ -887,8 +887,9 @@
       : s.busy ? `<div class="empty">در حال ساخت گزارش…</div>` : `<div class="empty"><b>برگه‌ها و بازه را انتخاب کنید و «نمایش گزارش» را بزنید.</b>همان برگه‌ها و نمودارهایی نمایش داده می‌شود که در فایل اکسل می‌رود.</div>`}`;
   }
   /* پیش از ساخت (تصمیم مدیر، مهر ۱۴۰۵): کارشناسانی که در این دوره در گزارش می‌آیند، هر کدام با تیک —
-     پیش‌فرض همه — و گزارش فقط با تیک‌خورده‌ها ساخته می‌شود. خروجی: شناسه‌ها؛ null اگر مدیر انصراف
-     داد؛ undefined اگر کارشناسی در دوره نیست (گزارش همان‌طور ساخته می‌شود). */
+     پیش‌فرض همه — و گزارش فقط با تیک‌خورده‌ها ساخته می‌شود. خروجی: { ids: شناسهٔ تیک‌خورده‌ها، list: همهٔ
+     کارشناسانِ دوره (برای جدول گروه‌بندی)، label: نام دوره }؛ null اگر مدیر انصراف داد؛ undefined اگر
+     کارشناسی در دوره نیست (گزارش همان‌طور ساخته می‌شود). */
   async function pickExperts(body) {
     const b = TP.busy("خواندن کارشناسانِ این دوره…", esc(repPeriodLabel(RP.season)));
     let r;
@@ -913,11 +914,129 @@
       d.querySelector("[data-rexnone]").onclick = () => { boxes.forEach((c) => { c.checked = false; }); count(); };
       d.querySelector("[data-y]").onclick = () => {
         if (!count()) { d.querySelector("[data-rexwarn]").style.display = ""; return; }
-        d.remove(); resolve(boxes.filter((c) => c.checked).map((c) => +c.dataset.rex));
+        d.remove(); resolve({ ids: boxes.filter((c) => c.checked).map((c) => +c.dataset.rex), list: L, label: r.label });
       };
       d.querySelector("[data-n]").onclick = () => { d.remove(); resolve(null); };
       d.onclick = (e) => { if (e.target === d) { d.remove(); resolve(null); } };
     });
+  }
+
+  /* جدول گروه‌بندیِ گزارش (تصمیم مدیر، مهر ۱۴۰۵): بعد از تیکِ کارشناسان، همان جدولِ تب کارشناسان فقط با
+     تیک‌خورده‌ها — ★ کارشناس را سرگروه می‌کند و نامش ستونی می‌شود، تیکِ ستونِ هر سرگروه اعضای گروهش را. گزارش
+     دقیقاً با همین روابط ساخته می‌شود (بدنهٔ team). روابط جدا از تب کارشناسان ذخیره می‌شوند — آن تب مسیر ارجاع،
+     تیم ارشد و اعلان‌ها را می‌راند و نباید با چیدنِ ستون‌های یک گزارش عوض شود — و دفعهٔ بعد، در هر دوره‌ای، جدول
+     از پیش پر است؛ فقط کارشناسِ تازه، که پیش‌فرضش از تب کارشناسان می‌آید، جا لازم دارد.
+     `saved`: نگاشتِ ذخیره‌شده { seniors, parent }. خروجی: { team: روابطِ همین گزارش، merged: نگاشتِ تازه برای
+     ذخیره } یا null با انصراف. */
+  function teamDialog(list, ids, saved, label) {
+    const own = (id) => saved.seniors.includes(id) || Object.prototype.hasOwnProperty.call(saved.parent, id);
+    const anySaved = saved.seniors.length > 0 || Object.keys(saved.parent).length > 0;
+    const tick = new Set(ids), nm = (e) => e.label || e.name;
+    /* پیش‌فرض هر ردیف: رابطهٔ ذخیره‌شده، وگرنه تب کارشناسان */
+    const raw = new Map(list.filter((e) => tick.has(e.id)).map((e) => [e.id, own(e.id)
+      ? { senior: saved.seniors.includes(e.id), parent: saved.parent[e.id] || null }
+      : { senior: !!e.senior, parent: e.senior ? null : e.senior_id || null }]));
+    /* سرگروهِ ردیف فقط وقتی به حساب می‌آید که تیک خورده و در همین جدول سرگروه باشد؛ وگرنه ردیف بی‌سرگروه دیده
+       می‌شود، ولی رابطهٔ پیشینش تا مدیر خودِ آن ردیف را عوض نکند می‌ماند (mergedOf) */
+    const counts = (r) => !!(r.parent && raw.has(r.parent) && raw.get(r.parent).senior);
+    const st = new Map([...raw].map(([id, r]) => [id, { senior: r.senior, parent: !r.senior && counts(r) ? r.parent : null }]));
+    const init = new Map([...st].map(([id, x]) => [id, { ...x }]));
+    const lost = (id) => { const r = raw.get(id), x = st.get(id); return !r.senior && r.parent && !counts(r) && !x.senior && !x.parent ? r.parent : null; };
+    const away = (id) => { const p = lost(id); return !!p && !raw.has(p); };   /* سرگروهِ پیشین اصلاً در این گزارش تیک ندارد */
+    const nameOf = (id) => { const e = list.find((x) => x.id === id) || (S.data.experts || []).find((x) => x.id === id); return e ? nm(e) : ""; };
+    const was = (id) => { const p = lost(id), n = p && nameOf(p); return !p ? "" : n ? `قبلاً زیر ${n}` : "قبلاً زیر سرگروهی که این‌جا نیست"; };
+    /* سرگروه‌ها بالا، مثل تب کارشناسان؛ ترتیبِ ردیف‌ها تا بسته شدن جدول ثابت می‌ماند تا زیرِ دست جابه‌جا نشوند */
+    const rows = list.filter((e) => st.has(e.id)).sort((a, b) => st.get(b.id).senior - st.get(a.id).senior);
+    const heads = () => rows.filter((e) => st.get(e.id).senior);
+    const loose = () => rows.filter((e) => !st.get(e.id).senior && !st.get(e.id).parent);
+    const same = (id) => { const a = init.get(id), x = st.get(id); return a.senior === x.senior && (x.senior || a.parent === x.parent); };
+    /* روابطِ همین گزارش: فقط تیک‌خورده‌ها، عیناً همان که در جدول است؛ ستون‌ها به ترتیب جدول */
+    const teamOf = () => { const parent = {}; rows.forEach((e) => { const x = st.get(e.id); if (!x.senior) parent[e.id] = x.parent || null; }); return { seniors: heads().map((e) => e.id), parent }; };
+    /* نگاشتِ تازه: ردیفِ دست‌نخورده رابطهٔ پیشینش را نگه می‌دارد — مدخلِ ذخیره‌شده، یا برای کارشناسِ تازه‌ای که
+       سرگروهِ تب کارشناسانش اصلاً در این گزارش تیک ندارد هیچ مدخلی (پیش‌فرضش دفعهٔ بعد همان می‌ماند) — تا رابطه
+       فقط چون سرگروه این بار در گزارش نبود از بین نرود. ردیفِ تازه یا عوض‌شده از جدول نوشته می‌شود (بی‌سرگروه =
+       null). کارشناسی که در جدول نبود دست نمی‌خورد، جز عضوِ سرگروهی که ستاره‌اش همین‌جا برداشته شد: مثل تب
+       کارشناسان بی‌سرگروه می‌شود، نه اینکه زیرِ کسی بماند که دیگر سرگروه نیست. */
+    const mergedOf = () => {
+      const m = { seniors: saved.seniors.slice(), parent: Object.assign({}, saved.parent) };
+      rows.forEach((e) => {
+        if (same(e.id) && (own(e.id) || away(e.id))) return;
+        const x = st.get(e.id);
+        m.seniors = m.seniors.filter((id) => id !== e.id); delete m.parent[e.id];
+        if (x.senior) m.seniors.push(e.id); else m.parent[e.id] = x.parent || null;
+      });
+      const heads2 = new Set(m.seniors);
+      Object.keys(m.parent).forEach((k) => { if (heads2.has(+k)) delete m.parent[k]; else if (m.parent[k] != null && !heads2.has(m.parent[k])) m.parent[k] = null; });
+      return m;
+    };
+    return new Promise((resolve) => {
+      const W = EX_W;
+      const d = TP.modal(`گروه‌بندیِ گزارش ${esc(label)}`, `<p style="margin:0 0 6px">مثل جدول تب «کارشناسان»، فقط با کارشناسانِ تیک‌خورده: <b>★</b> کارشناس را سرگروه می‌کند و نامش ستونی می‌شود که زیرِ آن اعضای گروهش را تیک می‌زنید (هر کارشناس فقط در یک گروه). ستونِ هر سرگروه در گزارش یعنی درخواست‌های خودش و اعضایش.</p>
+        <p class="dim" style="margin:0 0 8px;font-size:.82rem">روابط برای گزارش‌های بعدی، در هر دوره‌ای، ذخیره می‌شوند و جدول دفعهٔ بعد از پیش پر است. ${anySaved ? "«تازه» یعنی کارشناسی که هنوز جا داده نشده و پیش‌فرضش از تب کارشناسان آمده." : "پیش‌فرضِ این بار از تب کارشناسان آمده."} تب کارشناسان (ارجاع، تیم ارشد و اعلان‌ها) دست نمی‌خورد.</p>
+        <div class="rp-ex-tools" data-tcount></div><div data-tgrid></div>`, null, "تأیید", "انصراف");
+      const box = d.querySelector(".tp-modal"), grid = d.querySelector("[data-tgrid]");
+      const paint = () => {
+        const hs = heads(), lo = loose(), total = W.star + W.name + hs.length * W.senior;
+        box.style.maxWidth = `${Math.max(760, total + 60)}px`;
+        d.querySelector("[data-tcount]").innerHTML = `<span class="chip ${hs.length ? "info" : "warn"}">${hs.length ? `${M(hs.length)} سرگروه` : "هنوز سرگروهی نیست"}</span>
+          <span class="chip ${lo.length ? "warn" : "ok"}">${lo.length ? `${M(lo.length)} کارشناس بی‌سرگروه` : "همه در گروه‌اند"}</span>`;
+        /* هر کلیک جدول را از نو می‌سازد؛ جای اسکرول می‌ماند تا ردیفِ پایینِ فهرست از زیرِ دست نپرد */
+        const old = grid.firstElementChild, top = old ? old.scrollTop : 0, left = old ? old.scrollLeft : 0;
+        grid.innerHTML = `<div class="tp-scroll" style="max-height:52vh"><table class="tp-mx ex-mx" style="width:${total}px"><colgroup>
+            <col style="width:${W.star}px"><col style="width:${W.name}px">${hs.map(() => `<col style="width:${W.senior}px">`).join("")}</colgroup>
+          <thead><tr><th title="سرگروه">★</th><th class="rt">کارشناس</th>${hs.map((s) => `<th class="sen" title="${esc(s.name)}">★ ${esc(nm(s))}</th>`).join("")}</tr></thead><tbody>
+          ${rows.map((e) => { const x = st.get(e.id), tip = [e.name, e.active ? "" : "غیرفعال", was(e.id)].filter(Boolean).join(" · "); return `<tr>
+            <td><button class="tp-btn xs ${x.senior ? "primary" : ""}" data-tstar="${e.id}" title="${x.senior ? "برداشتن سرگروهی" : "سرگروه شود"}">★</button></td>
+            <td class="rt nm" title="${esc(tip)}">${esc(nm(e))}${anySaved && !own(e.id) ? ` <span class="chip info">تازه</span>` : ""}</td>
+            ${hs.map((s) => `<td>${x.senior ? `<span class="dim">—</span>` : `<button class="tri ${x.parent === s.id ? "ok" : "unk"}" data-tteam="${e.id}|${s.id}" title="${x.parent === s.id ? "در گروه " + esc(nm(s)) : "در گروه " + esc(nm(s)) + " قرار بگیرد"}">${x.parent === s.id ? "✓" : ""}</button>`}</td>`).join("")}</tr>`; }).join("")}
+          </tbody></table></div>`;
+        const sc = grid.firstElementChild; sc.scrollTop = top; sc.scrollLeft = left;
+        grid.querySelectorAll("[data-tstar]").forEach((b) => b.onclick = () => {
+          const id = +b.dataset.tstar, x = st.get(id);
+          x.senior = !x.senior; x.parent = null;
+          /* ستاره برداشته شد: اعضایش بی‌سرگروه می‌شوند، نه اینکه به کسِ دیگری بروند — همان قاعدهٔ تب کارشناسان */
+          if (!x.senior) st.forEach((y) => { if (y.parent === id) y.parent = null; });
+          paint();
+        });
+        grid.querySelectorAll("[data-tteam]").forEach((b) => b.onclick = () => {
+          const [eid, sid] = b.dataset.tteam.split("|").map(Number), x = st.get(eid);
+          x.parent = x.parent === sid ? null : sid;   /* هر کارشناس فقط در یک گروه؛ کلیکِ دوباره یعنی بیرون از گروه */
+          paint();
+        });
+      };
+      const finish = () => { d.remove(); resolve({ team: teamOf(), merged: mergedOf() }); };
+      d.querySelector("[data-y]").onclick = () => {
+        const lo = loose();
+        if (!lo.length) return finish();
+        /* هشدار روی جدول: «بازگشت و اصلاح» فقط هشدار را می‌بندد و جدول با همین تغییرها سرِ جایش می‌ماند */
+        const one = lo.length === 1;
+        TP.modal("کارشناسانِ بی‌سرگروه", `${heads().length
+            ? `${one ? "این کارشناس زیر هیچ سرگروهی نیست" : `این ${M(lo.length)} کارشناس زیر هیچ سرگروهی نیستند`} و در گزارش در ستونِ <b>«بدون سرگروه»</b> شمرده ${one ? "می‌شود" : "می‌شوند"}:`
+            : "هیچ سرگروهی تعیین نشده؛ همهٔ کارشناسان در یک ستونِ <b>«همه کارشناسان»</b> شمرده می‌شوند:"}
+          <ul class="rp-loose">${lo.map((e) => `<li>${esc(nm(e))}${was(e.id) ? ` <span class="dim">— ${esc(was(e.id))}</span>` : ""}</li>`).join("")}</ul>`,
+          finish, "تأیید", "بازگشت و اصلاح");
+      };
+      d.querySelector("[data-n]").onclick = () => { d.remove(); resolve(null); };
+      /* کلیکِ بیرون از کادر چیزی را نمی‌بندد تا تغییرهای جدول با یک کلیکِ اشتباه از دست نرود */
+      d.onclick = null;
+      paint();
+    });
+  }
+  /* جدول گروه‌بندی با نگاشتِ ذخیره‌شده، و ذخیرهٔ نگاشتِ تازه اگر چیزی عوض شد. خروجی: روابطِ همین گزارش؛ null با
+     انصراف. ذخیره نشد؟ گزارش باز با همین روابط ساخته می‌شود (روابطِ گزارش در بدنهٔ خودش است) و مدیر خبردار می‌شود. */
+  async function pickTeam(pk, savedP) {
+    const b = TP.busy("خواندن گروه‌بندیِ ذخیره‌شده…", esc(pk.label));
+    let saved;
+    try { saved = await savedP; } catch (e) { b.close(); TP.modal("گروه‌بندی خوانده نشد", esc(e.message), null, "باشد", ""); return null; }
+    b.close();
+    const r = await teamDialog(pk.list, pk.ids, saved, pk.label);
+    if (!r) return null;
+    if (JSON.stringify(r.merged) !== JSON.stringify(saved)) {
+      const w = TP.busy("ذخیرهٔ گروه‌بندی…", "");
+      try { await TP.api("/reports/team", { method: "PUT", body: r.merged }); w.close(); }
+      catch (e) { w.close(); TP.modal("گروه‌بندی ذخیره نشد", `${esc(e.message)}<br>گزارش با همین روابط ساخته می‌شود، ولی دفعهٔ بعد جدول با روابطِ قبلی باز می‌شود.`, null, "باشد", ""); }
+    }
+    return r.team;
   }
 
   async function genSeason(asFile) {
@@ -926,9 +1045,17 @@
     if (!s.sheets.length) return TP.modal("برگه‌ای انتخاب نشده", "دست‌کم یک برگهٔ گزارش را تیک بزنید.", null, "باشد", "");
     const body = { years: s.years, seasons: s.seasons, months: s.months, sheets: s.sheets };
     if (RP.pop) { RP.pop = null; render(); }
-    const ids = await pickExperts(body);
-    if (ids === null) return;
-    if (ids) body.experts = ids;
+    /* گروه‌بندیِ ذخیره‌شده هم‌زمان با کارشناسانِ دوره خوانده می‌شود تا جدولِ بعدی بی‌معطلی باز شود */
+    const savedP = TP.api("/reports/team").then((x) => x.team);
+    savedP.catch(() => { /* با انصراف یا دورهٔ بی‌کارشناس کسی منتظرش نیست؛ خطایش را pickTeam می‌گوید */ });
+    const pk = await pickExperts(body);
+    if (pk === null) return;
+    if (pk) {
+      body.experts = pk.ids;
+      const team = await pickTeam(pk, savedP);
+      if (!team) return;
+      body.team = team;
+    }
     if (asFile) return repDownload("/reports/season.xlsx", body, "گزارش سه ماهه.xlsx");
     s.busy = true; render();
     try { s.result = await TP.api("/reports/season", { body }); s.idx = 0; RP.err = ""; }

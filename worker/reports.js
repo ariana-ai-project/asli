@@ -15,15 +15,18 @@
  *   «متوقف شده»: همهٔ اقلامش متوقف است. بقیه «اقدامی نشده / در جریان».
  *   کارشناس درخواست: ارجاعِ ارسال‌شده با بیشترین قلم؛ اگر در سامانه ارجاع نشده، ستون «کارشناس خرید»
  *     فایل راهکاران (با نام کارشناسان تطبیق داده می‌شود). هیچ‌کدام = «ارجاع نشده».
- *   گروه (سرگروه): کارشناس ارشد خودش یا ارشدِ کارشناس (تب کارشناسان).
+ *   گروه (سرگروه): روابطِ «جدول گروه‌بندی» که مدیر پیش از ساخت می‌بیند و اصلاح می‌کند (sel.team — از
+ *     نگاشتِ ذخیره‌شدهٔ reportTeam، جدا از تب کارشناسان)؛ بی آن، کارشناس ارشد خودش یا ارشدِ کارشناس (تب کارشناسان).
  */
 import { Book, WSheet, buildBook, sheetHtml, chartSvg, absRef, colName, BOOK_CSS } from "./xlsxbook.js";
 import { jLen, jStr, jStr2ms, tehranParts, HOUR } from "./time.js";
 import { HttpError } from "./http.js";
+import { settingsHistoryStmts } from "./records.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const nrm = (x) => T(x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ");
 const p2 = (n) => String(n).padStart(2, "0");
+const isObj = (v) => !!v && typeof v === "object" && !Array.isArray(v);
 
 export const MONTHS = ["فروردین", "اردیبهشت", "خرداد", "تیر", "مرداد", "شهریور", "مهر", "آبان", "آذر", "دی", "بهمن", "اسفند"];
 export const SEASONS = ["بهار", "تابستان", "پاییز", "زمستان"];
@@ -287,7 +290,8 @@ export const SEASON_SHEETS = [
 ];
 
 /** همهٔ شمارش‌های گزارش سه‌ماهه — مستقل از قالب اکسل تا آزمون‌پذیر باشد.
-    `sel.experts`: شناسهٔ کارشناسانی که مدیر تیکشان را نگه داشته (نبودنش یعنی همه) */
+    `sel.experts`: شناسهٔ کارشناسانی که مدیر تیکشان را نگه داشته (نبودنش یعنی همه)
+    `sel.team`: روابطِ جدول گروه‌بندی برای همین گزارش (نبودنش یعنی ارشدهای تب کارشناسان) */
 export async function seasonData(env, settings, sel) {
   const P = parsePeriod(sel);
   const [rows, experts, hol] = await Promise.all([
@@ -298,7 +302,8 @@ export async function seasonData(env, settings, sel) {
   /* سوابق خرید (worker/catalog.js:purchases) — تا بارگذاری نشده، جدول نیست و مبلغ‌ها خالی می‌ماند */
   const amounts = ((await env.DB.prepare(`SELECT substr(order_date,1,7) AS ym, expert, SUM(amount) AS amt FROM purchases WHERE substr(order_date,1,4) IN (${yq}) GROUP BY 1,2`)
     .bind(...P.years.map(String)).all().catch(() => ({ results: [] }))).results) || [];
-  return computeSeason({ P, rows, experts, holidays: hol, amounts, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null });
+  return computeSeason({ P, rows, experts, holidays: hol, amounts, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null,
+    team: sel && isObj(sel.team) ? sel.team : null });
 }
 
 /** کارشناس هر درخواستِ دوره: ارجاعِ ارسال‌شده، وگرنه ستون «کارشناس خرید» فایل */
@@ -310,7 +315,8 @@ const expertOfRow = (experts) => {
 /**
  * کارشناسانی که در گزارشِ این دوره می‌آیند — همان قاعدهٔ برگهٔ «کارشناس خرید»: فعال‌ها، و هر کس که
  * در دوره درخواستی داشته — با شمارِ درخواست و اقلامشان در دوره. پنجرهٔ تیکِ کارشناسان پیش از ساخت
- * گزارش همین را نشان می‌دهد (تصمیم مدیر، مهر ۱۴۰۵).
+ * گزارش همین را نشان می‌دهد (تصمیم مدیر، مهر ۱۴۰۵). ارشدی و سرپرستِ تب کارشناسان (senior، senior_id)
+ * پیش‌فرضِ جدول گروه‌بندی است برای کارشناسی که در روابطِ ذخیره‌شده هنوز جا داده نشده.
  */
 export function periodExperts({ P, rows, experts }) {
   const of = expertOfRow(experts), per = new Map();
@@ -321,12 +327,101 @@ export function periodExperts({ P, rows, experts }) {
     x.requests++; x.items += Number(r.n) || 0; per.set(e.id, x);
   }
   return experts.filter((e) => e.active || per.has(e.id)).map((e) => ({ id: e.id, name: T(e.name), label: T(e.label), active: !!e.active, senior: !!e.senior,
-    requests: (per.get(e.id) || {}).requests || 0, items: (per.get(e.id) || {}).items || 0 }));
+    senior_id: e.senior_id || null, requests: (per.get(e.id) || {}).requests || 0, items: (per.get(e.id) || {}).items || 0 }));
 }
 export async function seasonExperts(env, sel) {
   const P = parsePeriod(sel);
   const [rows, experts] = await Promise.all([loadRequestRows(env, P.years), loadExperts(env)]);
   return { label: P.label, experts: periodExperts({ P, rows, experts }) };
+}
+
+/* ------------------------------------------------------------------ */
+/* گروه‌بندیِ گزارش سه‌ماهه (تصمیم مدیر، مهر ۱۴۰۵)                        */
+/* ------------------------------------------------------------------ */
+/* روابطِ سرگروه و عضو برای گزارش، جدا از senior/senior_id جدول experts: آن دو ستون مسیر ارجاع، تب «تیم
+   کارشناسی» و اعلان‌های تلگرام را می‌رانند و چیدنِ ستون‌های یک گزارش — به‌ویژه برای دوره‌ای گذشته — نباید
+   دستشان بزند. یک نگاشتِ سراسری (نه برای هر دوره) در settings، چون رابطه‌ای که یک بار تعریف شد برای همهٔ
+   دوره‌ها معتبر است و فقط کارشناسِ تازه جا لازم دارد:
+     { seniors: [شناسهٔ سرگروه‌ها], parent: { "<شناسهٔ کارشناس>": شناسهٔ سرگروه | null } }
+   کلیدِ parent با null یعنی «عمداً بی‌سرگروه»؛ کارشناسی که نه در seniors است نه در parent هنوز جا داده نشده
+   و پنل پیش‌فرضش را از تب کارشناسان می‌گیرد. کلید در DEFAULTS نیست، پس از GET/PUT /settings نمی‌گذرد. */
+export const TEAM_KEY = "reportTeam";
+/** شناسهٔ کارشناس: فقط عدد صحیح مثبت — عدد، یا رشتهٔ رقمی چون کلیدهای شیء JSON رشته‌اند */
+const idOf = (v) => {
+  if (typeof v !== "number" && !(typeof v === "string" && /^\d+$/.test(v.trim()))) return null;
+  const n = Number(v);
+  return Number.isSafeInteger(n) && n > 0 ? n : null;
+};
+
+/** نگاشتِ ذخیره‌شده یا بدنهٔ گزارش → شکلِ یکدست، بی خطا: ورودیِ خراب کنار می‌رود، سرگروه زیرِ کسی نمی‌رود و
+    عضوی که سرگروهش در seniors نیست بی‌سرگروه (null) می‌شود. `known` (اختیاری، Set شناسه‌ها): مدخلِ کارشناسی
+    که دیگر در جدول نیست کنار می‌رود تا نگاشتی که پنل برمی‌گرداند در ذخیره به خطا نخورد. */
+export function normTeam(raw, known = null) {
+  const v = isObj(raw) ? raw : {};
+  const ok = (id) => id !== null && (!known || known.has(id));
+  const seniors = [...new Set((Array.isArray(v.seniors) ? v.seniors : []).map(idOf).filter(ok))];
+  const S = new Set(seniors), parent = {};
+  for (const [k, p] of Object.entries(isObj(v.parent) ? v.parent : {})) {
+    const id = idOf(k);
+    if (!ok(id) || S.has(id)) continue;
+    const pid = idOf(p);
+    parent[id] = pid !== id && S.has(pid) ? pid : null;
+  }
+  return { seniors, parent };
+}
+
+/** نگاشتی که مدیر ذخیره می‌کند — برخلاف normTeam چیزی را بی‌صدا دور نمی‌ریزد و با پیامِ روشن رد می‌کند.
+    `known`: Map شناسه → نام کارشناسانِ موجود (فعال و غیرفعال؛ دورهٔ گذشته کارشناسِ رفته را هم دارد) */
+export function validateTeam(raw, known) {
+  const bad = (msg) => { throw new HttpError(msg); };
+  if (!isObj(raw) || !Array.isArray(raw.seniors) || !isObj(raw.parent)) bad("روابط گروه‌ها باید به شکل { seniors: [...], parent: {...} } باشد.");
+  const nm = (id) => `«${known.get(id) || id}»`;
+  const need = (v) => {
+    const id = idOf(v);
+    if (id === null) bad(`شناسهٔ کارشناس باید عدد صحیح باشد: ${JSON.stringify(v)}`);
+    if (!known.has(id)) bad(`کارشناس ${id} در فهرست کارشناسان نیست.`);
+    return id;
+  };
+  const seniors = [...new Set(raw.seniors.map(need))], S = new Set(seniors), parent = {};
+  for (const [k, p] of Object.entries(raw.parent)) {
+    const id = need(k);
+    if (p == null) { if (!S.has(id)) parent[id] = null; continue; }   /* «بی سرگروه» برای سرگروه همان نبودنِ مدخل است */
+    const pid = need(p);
+    if (pid === id) bad(`${nm(id)} نمی‌تواند سرگروه خودش باشد.`);
+    if (S.has(id)) bad(`${nm(id)} سرگروه است و زیر سرگروهِ دیگری نمی‌رود.`);
+    if (!S.has(pid)) bad(`${nm(pid)} در فهرست سرگروه‌ها نیست؛ ${nm(id)} نمی‌تواند زیر او برود.`);
+    parent[id] = pid;
+  }
+  return { seniors, parent };
+}
+
+/** روابطِ جدول جای senior/senior_id همهٔ کارشناسان را می‌گیرد — فقط برای همین محاسبه؛ ورودی دست نمی‌خورد.
+    `team` باید از normTeam گذشته باشد (سرگروهِ هر عضو در seniors است). */
+export function withTeam(experts, team) {
+  const S = new Set(team.seniors);
+  return experts.map((e) => ({ ...e, senior: S.has(e.id) ? 1 : 0, senior_id: S.has(e.id) || team.parent[e.id] == null ? null : team.parent[e.id] }));
+}
+
+/** نگاشتِ ذخیره‌شده برای جدولِ گروه‌بندیِ پنل (GET /reports/team) */
+export async function reportTeam(env) {
+  const [row, ids] = await Promise.all([
+    env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(TEAM_KEY).first(),
+    env.DB.prepare("SELECT id FROM experts").all(),
+  ]);
+  let v = null;
+  try { v = row ? JSON.parse(row.value) : null; } catch (_) { /* مقدار خراب — انگار چیزی ذخیره نشده */ }
+  return { team: normTeam(v, new Set(((ids && ids.results) || []).map((e) => e.id))) };
+}
+
+/** ذخیرهٔ نگاشت از جدولِ پیش از ساخت (PUT /reports/team) — مثل PUT /settings، با مقدار قبلی در settings_history */
+export async function putReportTeam(env, body) {
+  const rows = (await env.DB.prepare("SELECT id, name, label FROM experts").all()).results || [];
+  const team = validateTeam(body, new Map(rows.map((e) => [e.id, T(e.label) || T(e.name)])));
+  const stmts = await settingsHistoryStmts(env, { [TEAM_KEY]: team }, "manager");
+  stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(TEAM_KEY, JSON.stringify(team), Date.now()));
+  await env.DB.batch(stmts);
+  return { ok: true, team };
 }
 
 /**
@@ -335,11 +430,17 @@ export async function seasonExperts(env, sel) {
  * و درخواست‌ها و مبلغ‌هایش در ستون گروه‌ها و ردیف «متوقف شده» شمرده نمی‌شوند؛ ستونِ گروهی که نه
  * سرگروهش و نه هیچ‌یک از اعضایش تیک دارد نمی‌آید. آمار پروژه‌ها، مدیران پروژه و جمع کلِ دوره همهٔ
  * درخواست‌ها را می‌شمارد — درخواستِ پروژه با برداشتنِ نامِ کارشناس از گزارش کم نمی‌شود.
+ * `team`: روابطِ جدول گروه‌بندی (null = ارشدهای تب کارشناسان). گزارش دقیقاً همان را می‌شمارد که مدیر در
+ * جدول دید: ستونِ هر سرگروه = خودش و اعضایش، کارشناسِ بی‌سرگروه در «بدون سرگروه».
  */
-export function computeSeason({ P, rows, experts, holidays, amounts, settings, todayJ, pick = null }) {
+export function computeSeason({ P, rows, experts, holidays, amounts, settings, todayJ, pick = null, team = null }) {
+  const TM = team ? normTeam(team) : null;
+  if (TM) experts = withTeam(experts, TM);
   const projects = reportProjects(settings), match = expertMatcher(experts), byId = new Map(experts.map((e) => [e.id, e]));
   const groupOf = (e) => (!e ? null : e.senior ? e.id : e.senior_id && byId.get(e.senior_id) && byId.get(e.senior_id).senior ? e.senior_id : 0);
-  const seniors = experts.filter((e) => e.senior && e.active);
+  /* سرگروه‌ها: ارشدهای فعالِ تب کارشناسان به ترتیب همان تب؛ با جدول گروه‌بندی به ترتیب ستون‌های همان جدول و
+     حتی اگر غیرفعال باشد — گزارشِ دورهٔ گذشته کارشناسی را دارد که حالا رفته است */
+  const seniors = TM ? TM.seniors.map((id) => byId.get(id)).filter(Boolean) : experts.filter((e) => e.senior && e.active);
   const picked = Array.isArray(pick) ? new Set(pick.map(Number)) : null;
   const chosen = (e) => !picked || !e || picked.has(e.id);
 
@@ -350,7 +451,7 @@ export function computeSeason({ P, rows, experts, holidays, amounts, settings, t
   /* درخواست‌های کارشناسانِ تیک‌خورده (و ارجاع‌نشده‌ها، که مال هیچ کارشناسی نیستند) */
   const RE = picked ? R.filter((r) => chosen(r.expert)) : R;
 
-  /* گروه‌ها: ارشدهای فعال به ترتیب تب کارشناسان؛ «بدون سرگروه» فقط اگر درخواست یا مبلغی داشته باشد */
+  /* گروه‌ها: سرگروه‌های بالا به همان ترتیب؛ «بدون سرگروه» فقط اگر درخواست یا مبلغی داشته باشد */
   const groups = seniors.filter((s) => !picked || experts.some((e) => groupOf(e) === s.id && picked.has(e.id))).map((s) => ({ id: s.id, name: T(s.name) }));
   const amountNoGroup = amounts.some((a) => P.keys.has(a.ym) && T(a.expert) && Number(a.amt) && groupOf(match(a.expert)) === 0 && chosen(match(a.expert)));
   if (RE.some((r) => r.expert && r.group === 0) || amountNoGroup || !groups.length) groups.push({ id: 0, name: groups.length ? "بدون سرگروه" : "همه کارشناسان" });

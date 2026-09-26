@@ -35,7 +35,7 @@ import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
 import { selfTest } from "./selftest.js";
-import { statusData, statusBook, seasonData, seasonExperts, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
+import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putReportTeam, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
@@ -1715,6 +1715,10 @@ async function route(request, env, ctx) {
        .xlsx با همان ساختار فایل‌های نمونهٔ واحد. سه‌ماهه POST است چون انتخاب سال/فصل/ماه/برگه‌ها در بدنه است. */
     if (path.startsWith("/reports/")) {
       requireManager(request, env);
+      /* گروه‌بندیِ گزارش سه‌ماهه: روابط سرگروه/عضو جدا از تب کارشناسان (reports.js:TEAM_KEY) — جدول پیش از
+         ساخت از این پر می‌شود و با تأیید مدیر نگاشتِ تازه این‌جا ذخیره می‌شود */
+      if (path === "/reports/team" && m === "GET") return json(await reportTeam(env));
+      if (path === "/reports/team" && m === "PUT") return json(await putReportTeam(env, await readJson(request)));
       const settings = await getSettings(env);
       const xlsx = (bytes, name) => new Response(bytes, { headers: { "content-type": XLSX_MIME, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`, "cache-control": "private, no-store" } });
       if (path === "/reports/meta" && m === "GET") return json(await reportMeta(env, settings));
