@@ -455,20 +455,16 @@
 
     /* ----- کد قلم → گروه اصناف (ارجاع و مهلت هوشمند) -----
        گروهِ طبقهٔ اصناف همان قلم از فایل اصناف؛ طبقه‌ای که در آن فایل نیست، دو رقم اولش
-       («۱۶۰۱۴۱» ← «۱۶۰۰۰۰») و قلمِ بی‌طبقه، «متفرقه» (۳۰۰۰۰۰) که خودش گروهی از همان فهرست است */
+       («۱۶۰۱۴۱» ← «۱۶۰۰۰۰») و قلمِ بی‌طبقه، «متفرقه» (۳۰۰۰۰۰) که خودش گروهی از همان فهرست است.
+       یک ردیف برای هر کد (نه تکهٔ JSON): پنل مدیر گروهِ صدها کد را با هم می‌پرسد و خواندنِ
+       تکه‌ها سهم پردازندهٔ Worker را تمام می‌کرد (worker/catalog.js:TABLES.cat_guilds). */
     const GUILD_MISC = "300000";
     const groupByClass = new Map(X.classes.map((c) => [T(c.code), T(c.group_code)]));
     const guildOf = (cls) => {
       const c = ascii(T(cls)).replace(/\D/g, "");
       return groupByClass.get(c) || (c.length >= 2 ? c.slice(0, 2) + "0000" : GUILD_MISC);
     };
-    const guildShards = new Map();
-    for (const it of I.items) {
-      const s = shardOf("code", it.code);
-      if (!guildShards.has(s)) guildShards.set(s, {});
-      guildShards.get(s)[it.code] = guildOf(it.cls);
-    }
-    const guildRows = [...guildShards.keys()].sort().map((s) => [s, JSON.stringify(guildShards.get(s))]);
+    const guildRows = [...I.items].sort((a, b) => (a.code < b.code ? -1 : a.code > b.code ? 1 : 0)).map((it) => [it.code, guildOf(it.cls)]);
 
     /* ----- عنوان قلم → کد (نرمال‌سازیِ قلمِ بی‌کد یا با کدِ تازه، بی مدل) -----
        عنوانِ تکراری (همه با یک ساختار) کوچک‌ترین کد را نگه می‌دارد تا خروجی قطعی بماند */

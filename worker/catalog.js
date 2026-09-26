@@ -73,10 +73,13 @@ export const TABLES = {
     ddl: "CREATE TABLE IF NOT EXISTS cat_titles (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
   cat_words: { per: 1, cols: ["shard", "data"],
     ddl: "CREATE TABLE IF NOT EXISTS cat_words (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
-  /* کد قلم → کد گروه اصناف (طبقهٔ اصناف همان قلم در فهرست، تا سرِ گروهش)، با همان تکه‌بندی کدها:
-     ارجاع و مهلت هوشمند گروه هر قلم را با یک ردیف می‌خوانند، نه با باز کردن کل نوع قلم */
-  cat_guilds: { per: 1, cols: ["shard", "data"],
-    ddl: "CREATE TABLE IF NOT EXISTS cat_guilds (shard TEXT PRIMARY KEY, data TEXT NOT NULL) WITHOUT ROWID" },
+  /* کد قلم → کد گروه اصناف (طبقهٔ اصناف همان قلم در فهرست، تا سرِ گروهش).
+     برخلاف بقیهٔ جدول‌های فهرست تکه‌ای نیست و یک ردیف برای هر کد دارد: ارجاع و مهلت هوشمند
+     گروهِ صدها کدِ میز را با هم می‌خواهند و تکهٔ JSON یعنی نیم‌مگابایت باز کردن در Worker
+     (اندازه‌گیری مهر ۱۴۰۵: ۱۲ میلی‌ثانیه، بیش از کل سهم پردازندهٔ یک فراخوانی). این‌جا
+     SQLite با کلید اصلی فقط همان چند ده ردیف را برمی‌گرداند. */
+  cat_guilds: { per: 40, cols: ["code", "g"],
+    ddl: "CREATE TABLE IF NOT EXISTS cat_guilds (code TEXT PRIMARY KEY, g TEXT NOT NULL) WITHOUT ROWID" },
   price_index: { per: 10, cols: ["code", "name", "source", "series"],
     ddl: "CREATE TABLE IF NOT EXISTS price_index (code TEXT PRIMARY KEY, name TEXT, source TEXT, series TEXT NOT NULL) WITHOUT ROWID" },
   guild_classes: { per: 20, cols: ["code", "name", "group_code", "group_name", "index_code"],
@@ -299,31 +302,24 @@ export async function guildGroups(env) {
   return cache.groups;
 }
 
-/** گروه اصناف چند کد قلم با هم: نگاشتِ کد → کد گروه. تکه‌های خوانده‌شده در isolate می‌مانند. */
+/** گروه اصناف چند کد قلم با هم: نگاشتِ کد → کد گروه. کدهای پرسیده‌شده (و نبودشان) در
+    isolate می‌مانند، پس بازخوانیِ میز دوباره از دیتابیس نمی‌پرسد. */
 export async function guildsOfCodes(env, codes) {
   fresh();
-  const out = new Map(), want = new Map();
+  const out = new Map(), want = [];
   for (const raw of codes || []) {
     const c = codeKey(raw); if (!c || out.has(c)) continue;
-    const s = shardOf("code", c);
-    const have = cache.guilds.get(s);
-    if (have) { if (have[c]) out.set(c, have[c]); continue; }
-    if (!want.has(s)) want.set(s, true);
+    const g = cache.guilds.get(c);
+    if (g !== undefined) { if (g) out.set(c, g); continue; }
+    if (!want.includes(c)) want.push(c);
   }
-  if (want.size) {
-    const shards = [...want.keys()];
-    for (let i = 0; i < shards.length; i += 60) {
-      const part = shards.slice(i, i + 60);
-      const rows = (await env.DB.prepare(`SELECT shard, data FROM cat_guilds WHERE shard IN (${part.map(() => "?").join(",")})`)
-        .bind(...part).all().catch(() => ({ results: [] }))).results || [];
-      const got = new Map(rows.map((r) => [r.shard, parse(r.data)]));
-      for (const s of part) cache.guilds.set(s, got.get(s) || {});
-    }
-    for (const raw of codes || []) {
-      const c = codeKey(raw); if (!c || out.has(c)) continue;
-      const g = (cache.guilds.get(shardOf("code", c)) || {})[c];
-      if (g) out.set(c, g);
-    }
+  /* سقف پارامترهای یک دستور D1 صدتاست */
+  for (let i = 0; i < want.length; i += 90) {
+    const part = want.slice(i, i + 90);
+    const rows = (await env.DB.prepare(`SELECT code, g FROM cat_guilds WHERE code IN (${part.map(() => "?").join(",")})`)
+      .bind(...part).all().catch(() => ({ results: [] }))).results || [];
+    const got = new Map(rows.map((r) => [T(r.code), T(r.g)]));
+    for (const c of part) { const g = got.get(c) || ""; cache.guilds.set(c, g); if (g) out.set(c, g); }
   }
   return out;
 }

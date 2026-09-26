@@ -9,6 +9,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import * as PL from "../../../frontend/tamin-poshtibani/assign-rules.mjs";
 import { guildGroupOf, guildGroups, guildsOfItems, shardOf, resetCatalogCache, GUILD_MISC } from "../../../worker/catalog.js";
+/* shardOf برای تکهٔ عنوان‌ها (cat_titles) لازم است — نگاشتِ گروه‌ها خودش تکه‌ای نیست */
 import { statusData, parseRange } from "../../../worker/reports.js";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { getSettings } from "../../../worker/settings.js";
@@ -139,11 +140,8 @@ if (DB) {
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,senior,created_at) VALUES (1,'ابوذر بهمنی','آقای بهمنی','9101',1,1,0,?)").run(t);
   DB.raw.prepare("INSERT INTO guild_classes (code,name,group_code,group_name) VALUES ('160100','قطعات موتور','160000','قطعات یدکی ماشین آلات'),"
     + "('160141','بدنه','160000','قطعات یدکی ماشین آلات'),('110002','آچار','110000','ابزارآلات'),('300001','سایر','300000','متفرقه')").run();
-  const guilds = {};
-  for (const [code, g] of [["2010100733", "160000"], ["2020500056", "160000"], ["1010100001", "110000"]]) {
-    const s = shardOf("code", code); (guilds[s] = guilds[s] || {})[code] = g;
-  }
-  for (const [s, data] of Object.entries(guilds)) DB.raw.prepare("INSERT INTO cat_guilds (shard,data) VALUES (?,?)").run(s, JSON.stringify(data));
+  const ig = DB.raw.prepare("INSERT OR REPLACE INTO cat_guilds (code,g) VALUES (?,?)");
+  for (const [code, g] of [["2010100733", "160000"], ["2020500056", "160000"], ["1010100001", "110000"]]) ig.run(code, g);
   /* عنوانِ عیناً همان، برای قلمی که کدش در فهرست نیست */
   const tk = "پیچ شش گوش م10";
   DB.raw.prepare("INSERT INTO cat_titles (shard,data) VALUES (?,?)").run(shardOf("title", tk), JSON.stringify({ [tk]: "2010100733" }));
