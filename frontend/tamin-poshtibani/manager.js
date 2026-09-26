@@ -853,17 +853,18 @@
     if (months.length === 12) parts.push("سال");
     else { for (let q = 1; q <= 4; q++) { const sm = [(q - 1) * 3 + 1, (q - 1) * 3 + 2, q * 3]; if (sm.every((m) => rest.includes(m))) { parts.push(`فصل ${RP_SEASONS[q - 1]}`); rest = rest.filter((m) => !sm.includes(m)); } } rest.forEach((m) => parts.push(RP_MONTHS[m - 1])); }
     const j = (a) => (a.length <= 1 ? a.join("") : a.slice(0, -1).join("، ") + " و " + a[a.length - 1]);
-    return `${j(parts)} ${M([...s.years].sort((a, b) => a - b).join(" و "))}`;
+    /* سال عدد نیست که جداکنندهٔ هزارگان بگیرد («۱٬۴۰۴»)، و چند سالِ به‌هم‌چسبیده عدد نمی‌شود (NaN) */
+    return `${j(parts)} ${[...s.years].sort((a, b) => a - b).join(" و ")}`;
   }
   function vRepSeason() {
     const meta = RP.meta, s = RP.season;
     if (!meta) { if (!RP.metaLoading) loadRepMeta(); return `<div class="empty">در حال خواندن سال‌ها و پروژه‌ها…</div>`; }
     const pop = (kind, label, active, body) => `<span class="fwrap"><button class="tp-btn sm ${active ? "primary" : ""}" data-rpop="${kind}">${label} ▾</button>${RP.pop === kind ? `<div class="fpop" data-pop>${body}
       <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-rpclear="${kind}">پاک کردن</button><button class="tp-btn xs primary" data-rpclose>بستن</button></div></div>` : ""}</span>`;
-    const yBody = `<div class="fpop-list">${meta.years.map((y) => `<label><input type="checkbox" data-ry="${y}" ${s.years.includes(y) ? "checked" : ""}> ${M(y)}</label>`).join("") || `<span class="dim">درخواستی در سامانه نیست.</span>`}</div>`;
+    const yBody = `<div class="fpop-list">${meta.years.map((y) => `<label><input type="checkbox" data-ry="${y}" ${s.years.includes(y) ? "checked" : ""}> ${y}</label>`).join("") || `<span class="dim">درخواستی در سامانه نیست.</span>`}</div>`;
     const qBody = `<div class="fpop-list">${RP_SEASONS.map((n, i) => `<label><input type="checkbox" data-rq="${i + 1}" ${s.seasons.includes(i + 1) ? "checked" : ""}> ${n} <span class="dim" style="font-size:.78rem">(${RP_MONTHS.slice(i * 3, i * 3 + 3).join("، ")})</span></label>`).join("")}</div>`;
     const mBody = `<div class="fpop-list rp-months">${RP_MONTHS.map((n, i) => `<label><input type="checkbox" data-rm="${i + 1}" ${s.months.includes(i + 1) ? "checked" : ""}> ${n}</label>`).join("")}</div>`;
-    const yl = s.years.length ? s.years.slice().sort().map((y) => M(y)).join("، ") : "انتخاب کنید";
+    const yl = s.years.length ? s.years.slice().sort().join("، ") : "انتخاب کنید";
     const ql = s.seasons.length ? s.seasons.map((q) => RP_SEASONS[q - 1]).join("، ") : "همه";
     const ml = s.months.length ? (s.months.length > 3 ? `${M(s.months.length)} ماه` : s.months.map((m) => RP_MONTHS[m - 1]).join("، ")) : "همه";
     const R = s.result, sh = R && R.sheets[Math.min(s.idx, R.sheets.length - 1)];
