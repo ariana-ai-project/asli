@@ -1113,7 +1113,7 @@
   /* ---------- اتصال رویدادها ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
-    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#mcode").value.trim(); if (!c) return; TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); S.error = e.message; render(); } }; lg.onclick = go; G("#mcode").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
+    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = TP.digits(G("#mcode").value).trim(); if (!c) return; TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); S.error = e.message; render(); } }; lg.onclick = go; G("#mcode").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
     const ih = G("[data-hist-import]"); if (ih) ih.onclick = pickHistory;
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
@@ -1161,7 +1161,7 @@
       const done = async () => {
         if (busy) return; busy = true;
         const id = +i.dataset.ecode, e = S.data.experts.find((x) => x.id === id);
-        const v = i.value.trim().replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+        const v = TP.digits(i.value).trim();
         S.editCode = null;
         if (!v || v === String(e.code)) return render();
         if (!/^\d{4,8}$/.test(v)) { render(); return TP.modal("کد نامعتبر", "کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.", null, "باشد", ""); }

@@ -335,6 +335,8 @@
      قیمت و مقدار عدد (اعشار مجاز)، اعتبار عدد روز، زمان تحویل تاریخ شمسی یا عدد روز.
      خطا برمی‌گرداند یا null. */
   const dig = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  /* کد ورود با صفحه‌کلید فارسی ارقام فارسی دارد؛ هدر HTTP فقط نویسهٔ لاتین می‌پذیرد و کدها در جدول لاتین‌اند */
+  TP.digits = dig;
   const numTxt = (s) => dig(s).replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
   TP.quoteFieldError = function (f, v) {
     const x = String(v == null ? "" : v).trim(); if (!x) return null;

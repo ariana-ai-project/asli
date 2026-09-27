@@ -696,6 +696,9 @@ const expertRows = (rows) => rows.map((e) => ({ ...e, senior: e.senior ? 1 : 0, 
 /* کد ورود کارشناس                                                       */
 /* ------------------------------------------------------------------ */
 const CODE_RE = /^\d{4,8}$/;
+/* ارقام فارسی و عربی ← لاتین. کد در جدول با رقم لاتین ذخیره می‌شود (setExpertCode، addExpert)؛
+   ورود هم باید همین را بسنجد، وگرنه کسی که کدش را با صفحه‌کلید فارسی می‌زند «کد معتبر نیست» می‌گیرد. */
+const asciiDigits = (v) => T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
 /* کدِ کارشناسِ حذف‌شده (غیرفعال) کنار می‌رود تا همان کد دوباره قابل استفاده باشد؛ غیرفعال که وارد
    نمی‌شود و رقم ندارد، پس با هیچ کد ورودی برابر نمی‌شود. نام و کد در جدول UNIQUE اند. */
 const retiredCode = (id) => `x${id}-${now()}`;
@@ -705,7 +708,7 @@ const retiredCode = (id) => `x${id}-${now()}`;
  * کدِ یک کارشناسِ حذف‌شده آزاد می‌شود. `reveal` (فقط مدیر) نام صاحبِ کد را در خطا می‌گوید.
  */
 async function setExpertCode(env, id, raw, { reveal } = {}) {
-  const code = T(raw).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+  const code = asciiDigits(raw);
   if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
   if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.", 409);
   const holder = await env.DB.prepare("SELECT id,name,active FROM experts WHERE code=?").bind(code).first();
@@ -727,7 +730,7 @@ async function setExpertCode(env, id, raw, { reveal } = {}) {
  */
 async function addExpert(env, b) {
   const name = nrm(b.name), label = T(b.label) || T(b.name);
-  const code = T(b.code).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+  const code = asciiDigits(b.code);
   if (!name || !code) throw new HttpError("نام و کد ورود لازم است.");
   if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
   if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری بدهید.", 409);
@@ -1314,8 +1317,10 @@ async function route(request, env, ctx) {
 
     if (path === "/login" && m === "POST") {
       const b = await readJson(request);
-      if (b.role === "manager") { requireManager({ headers: new Headers({ "X-Manager-Code": T(b.code) }) }, env); return json({ role: "manager" }); }
-      const ex = await env.DB.prepare("SELECT id,name,label,code,senior FROM experts WHERE code=? AND active=1").bind(T(b.code)).first();
+      /* رقم فارسی در Headers خطای داخلی می‌داد (هدر فقط نویسهٔ لاتین می‌پذیرد) و در جدول هم پیدا نمی‌شد */
+      const code = asciiDigits(b.code);
+      if (b.role === "manager") { requireManager({ headers: { get: () => code } }, env); return json({ role: "manager" }); }
+      const ex = await env.DB.prepare("SELECT id,name,label,code,senior FROM experts WHERE code=? AND active=1").bind(code).first();
       if (!ex) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
       return json({ role: "expert", expert: { ...ex, senior: ex.senior ? 1 : 0 } });
     }

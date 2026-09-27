@@ -90,7 +90,7 @@
   /* ---------- ورود و کارتابل ---------- */
   function vLogin() {
     return `<div class="tp-card tp-login"><h2>ورود کارشناس خرید</h2><p>کد کارشناسی خود را وارد کنید.</p>
-      <input id="code" class="tp-input" inputmode="numeric" maxlength="6" autocomplete="off" autofocus>
+      <input id="code" class="tp-input" inputmode="numeric" maxlength="8" autocomplete="off" autofocus>
       <button class="tp-btn primary" data-login style="width:100%;margin-top:14px">ورود</button>
       <div class="err">${esc(S.error)}</div><a class="tp-back" href="index.html">← بازگشت به تدارکات</a></div>`;
   }
@@ -128,7 +128,7 @@
   async function saveCode() {
     const G = (s) => document.querySelector(s), msg = G("#acc-msg");
     const say = (t, bad) => { msg.textContent = t; msg.style.color = bad ? "#fca5a5" : "#6ee7b7"; };
-    const digits = (s) => String(s || "").trim().replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d));
+    const digits = (s) => TP.digits(s).trim();
     const cur = digits(G("#acc-cur").value), nw = digits(G("#acc-new").value), rp = digits(G("#acc-rep").value);
     if (!cur) return say("کد فعلی را بنویسید.", true);
     if (!/^\d{4,8}$/.test(nw)) return say("کد تازه باید ۴ تا ۸ رقم باشد.", true);
@@ -1749,7 +1749,7 @@
   /* ---------- اتصال ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
-    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = G("#code").value.trim(); if (!c) return; try { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } catch (e) { S.error = e.message; render(); } }; lg.onclick = go; G("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
+    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = TP.digits(G("#code").value).trim(); if (!c) return; try { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } catch (e) { S.error = e.message; render(); } }; lg.onclick = go; G("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
     const tg = G("[data-tg]"); if (tg) tg.onclick = tgConnect;
