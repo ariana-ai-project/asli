@@ -670,6 +670,11 @@
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
   const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس" };
+  /* notify رویداد: «ارسال» و «تغییر کارشناس» اگر پیام تلگرام به صف رفته باشد telegram و وگرنه none
+     می‌نویسند. تعلیق/توقف/خاتمه/بازگشتِ مدیر همیشه telegram می‌نویسد ولی پیامی نمی‌فرستد
+     (worker/api.js، setState)؛ پس «با اعلان تلگرام» فقط مال همان دو رویداد است. */
+  const TG_SENT = new Set(["dispatch", "reassign"]);
+  const notifyChip = (kind, n) => TG_SENT.has(kind) && n === "telegram" ? `<span class="chip info">با اعلان تلگرام</span>` : `<span class="chip">بدون اعلان تلگرام</span>`;
   function vLog() {
     const D = S.decisions;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>تصمیم‌های در انتظار تأیید <span class="chip ${D.length ? "warn" : ""}">${D.length}</span></h2>
@@ -678,7 +683,7 @@
       : `<p class="lead">تصمیمی در انتظار نیست.${settings().approvalRequired ? "" : " (تأیید مدیر برای تصمیم کارشناس غیرفعال است.)"}</p>`}
       <div class="tp-sect"><h3>رویدادهای اخیر <span>${S.events.length}</span> <button class="tp-btn xs" data-load-events style="margin-inline-start:8px">بارگیری</button></h3>
       <div class="tp-scroll" style="max-height:50vh"><table class="tp-mx"><thead><tr><th>زمان</th><th>عامل</th><th>رویداد</th><th>درخواست</th><th>جزئیات</th></tr></thead><tbody>
-        ${S.events.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ } return `<tr><td class="num" style="white-space:nowrap">${TP.fmt(e.at)}</td><td>${e.actor === "manager" ? "مدیر" : esc(e.actor)}</td><td>${KIND[e.kind] || esc(e.kind)}</td><td class="num">${esc(e.request_id || "")}</td><td class="dim" style="white-space:normal;text-align:right">${esc(Object.entries(p).filter(([k]) => k !== "notify").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))}${p.notify ? ` <span class="chip mock">اعلان ${p.notify} — در انتظار اتصال</span>` : ""}</td></tr>`; }).join("")}
+        ${S.events.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ } return `<tr><td class="num" style="white-space:nowrap">${TP.fmt(e.at)}</td><td>${e.actor === "manager" ? "مدیر" : esc(e.actor)}</td><td>${KIND[e.kind] || esc(e.kind)}</td><td class="num">${esc(e.request_id || "")}</td><td class="dim" style="white-space:normal;text-align:right">${esc(Object.entries(p).filter(([k]) => k !== "notify").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))}${p.notify ? ` ${notifyChip(e.kind, p.notify)}` : ""}</td></tr>`; }).join("")}
       </tbody></table></div></div></div>`;
   }
 
@@ -1307,7 +1312,7 @@
   function doDispatch() {
     const list = readyAssignments(); const by = {};
     list.forEach((a) => by[a.expert_label || a.expert_name] = (by[a.expert_label || a.expert_name] || 0) + 1);
-    TP.modal(`ارسال ${list.length} ارجاع`, `ساعت‌شمار مهلت شروع می‌شود و برای این کارشناسان اعلان می‌رود:<br><br>${Object.entries(by).map(([e, c]) => `${esc(e)} — ${c} درخواست`).join("<br>")}<br><br><span class="chip mock">اعلان تلگرام — در انتظار اتصال</span>`,
+    TP.modal(`ارسال ${list.length} ارجاع`, `ساعت‌شمار مهلت شروع می‌شود و برای این کارشناسان اعلان می‌رود:<br><br>${Object.entries(by).map(([e, c]) => `${esc(e)} — ${c} درخواست`).join("<br>")}<br><br><span class="chip info">اعلان تلگرام — اگر تلگرام کارشناس وصل باشد</span>`,
       async () => { try { await TP.api("/dispatch", { body: { assignment_ids: list.map((a) => a.id) } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تأیید و ارسال");
   }
   const ACT = {
@@ -1318,7 +1323,7 @@
   };
   function doAct(st, aid) {
     const r = S.data.requests.find((x) => x.assignments.some((a) => a.id === aid)); const a = r && r.assignments.find((x) => x.id === aid); if (!a) return;
-    TP.modal(`${ACT[st][0]} — درخواست ${esc(r.id)}`, `<b>${esc(r.party)}</b> · کارشناس ${esc(a.expert_label || a.expert_name)}<br><br>${ACT[st][1]}<br><br><span class="chip mock">اعلان تلگرام به کارشناس — در انتظار اتصال</span>`,
+    TP.modal(`${ACT[st][0]} — درخواست ${esc(r.id)}`, `<b>${esc(r.party)}</b> · کارشناس ${esc(a.expert_label || a.expert_name)}<br><br>${ACT[st][1]}<br><br><span class="chip warn">اعلان تلگرام به کارشناس نمی‌رود</span>`,
       async () => { try { await TP.api("/items/state", { body: { assignment_id: aid, request_id: r.id, state: st } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, `تأیید ${ACT[st][0]}`);
   }
   function moveDialog(aid) {
