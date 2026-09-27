@@ -201,11 +201,11 @@ function Answer({ t, title, onToast }: { t: ViewTurn; title: string; onToast: (m
           </p>
         )}
         <div className="flex items-center gap-1 mt-1.5">
-          <button onClick={doCopy} className="flex items-center gap-1 text-[11px] text-navy-400 hover:text-navy-700 hover:bg-white px-2 py-1 rounded-lg transition-colors" title="رونوشت متن پاسخ">
+          <button onClick={doCopy} className="lg-btn lg-ghost flex items-center gap-1 text-[11px] text-navy-400 hover:text-navy-700 px-2 py-1 rounded-lg" title="رونوشت متن پاسخ">
             {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
             {copied ? 'رونوشت شد' : 'رونوشت'}
           </button>
-          <button onClick={doWord} disabled={exporting} className="flex items-center gap-1 text-[11px] text-navy-400 hover:text-navy-700 hover:bg-white px-2 py-1 rounded-lg transition-colors disabled:opacity-50" title="دریافت پاسخ به‌صورت فایل Word">
+          <button onClick={doWord} disabled={exporting} className="lg-btn lg-ghost flex items-center gap-1 text-[11px] text-navy-400 hover:text-navy-700 px-2 py-1 rounded-lg disabled:opacity-50" title="دریافت پاسخ به‌صورت فایل Word">
             {exporting ? <Loader size={12} className="animate-spin" /> : <Download size={12} />}
             Word
           </button>
@@ -335,7 +335,7 @@ function MemoryModal({ chatId, onClose, onRefreshed }: { chatId: string; onClose
             خلاصه‌ای که دستیار در هر پیام از گفت‌وگوهای پیشین، اسناد پیوست‌شده و نتیجه‌ها به یاد دارد. پس از هر پاسخ خودکار به‌روز و اگر بلند شد، خودکار فشرده می‌شود.
           </p>
         </div>
-        <button onClick={onClose} className="p-1.5 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0" title="بستن">
+        <button onClick={onClose} className="lg-btn lg-ghost p-1.5 rounded-lg flex-shrink-0" title="بستن">
           <X size={18} className="text-navy-500" />
         </button>
       </div>
@@ -360,12 +360,12 @@ function MemoryModal({ chatId, onClose, onRefreshed }: { chatId: string; onClose
           </div>
           <div className="flex items-center gap-2">
             {lagging && (
-              <button onClick={refresh} disabled={busy} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-amber-50 text-amber-800 border border-amber-200 hover:bg-amber-100 disabled:opacity-50 transition-colors">
+              <button onClick={refresh} disabled={busy} className="lg-btn lg-amber flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl disabled:opacity-50">
                 {busy ? <Loader size={12} className="animate-spin" /> : <RefreshCw size={12} />}
                 به‌روزرسانی حافظه
               </button>
             )}
-            <button onClick={save} disabled={!info.memory} className="flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl bg-navy-700 hover:bg-navy-800 text-white disabled:opacity-40 transition-colors">
+            <button onClick={save} disabled={!info.memory} className="lg-btn lg-primary flex items-center gap-1.5 px-3 py-2 text-xs font-semibold rounded-xl disabled:opacity-40">
               <Download size={12} />
               دریافت فایل حافظه
             </button>
@@ -396,7 +396,7 @@ function WorkspaceModal({ onClose, onSwitched }: { onClose: () => void; onSwitch
           <code dir="ltr" className="flex-1 text-[12px] text-navy-800 tracking-wide break-all select-all">{pretty}</code>
           <button
             onClick={async () => { if (await copyText(code)) { setCopied(true); setTimeout(() => setCopied(false), 1500); } }}
-            className="p-1.5 hover:bg-white rounded-lg transition-colors flex-shrink-0"
+            className="lg-btn lg-ghost p-1.5 rounded-lg flex-shrink-0"
             title="رونوشت کد"
           >
             {copied ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} className="text-navy-500" />}
@@ -416,11 +416,11 @@ function WorkspaceModal({ onClose, onSwitched }: { onClose: () => void; onSwitch
           <button
             onClick={() => { if (setWorkspaceId(other)) onSwitched(); else setErr('کد وارد شده معتبر نیست.'); }}
             disabled={!other.trim()}
-            className="flex-1 py-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-xl text-sm font-semibold transition-colors disabled:opacity-40"
+            className="lg-btn lg-primary flex-1 py-2.5 rounded-xl text-sm font-semibold disabled:opacity-40"
           >
             ورود با این کد
           </button>
-          <button onClick={onClose} className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-navy-700 rounded-xl text-sm font-semibold transition-colors">
+          <button onClick={onClose} className="lg-btn lg-secondary flex-1 py-2.5 rounded-xl text-sm font-semibold">
             بستن
           </button>
         </div>
@@ -436,8 +436,8 @@ function Confirm({ title, text, ok, onOk, onClose }: { title: string; text: stri
         <h3 className="text-lg font-bold text-navy-900 mb-2 text-center">{title}</h3>
         <p className="text-sm text-navy-500 text-center mb-6 leading-relaxed">{text}</p>
         <div className="flex gap-3">
-          <button onClick={onOk} className="flex-1 py-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-xl text-sm font-semibold transition-colors">{ok}</button>
-          <button onClick={onClose} className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-navy-700 rounded-xl text-sm font-semibold transition-colors">انصراف</button>
+          <button onClick={onOk} className="lg-btn lg-primary flex-1 py-2.5 rounded-xl text-sm font-semibold">{ok}</button>
+          <button onClick={onClose} className="lg-btn lg-secondary flex-1 py-2.5 rounded-xl text-sm font-semibold">انصراف</button>
         </div>
       </div>
     </Modal>
@@ -786,12 +786,12 @@ export default function LegalChat() {
           <button
             onClick={newChat}
             disabled={streaming}
-            className="flex-1 flex items-center justify-center gap-2 bg-navy-800 hover:bg-navy-700 text-white font-semibold px-4 py-3 rounded-xl transition-colors disabled:opacity-50"
+            className="lg-btn lg-dark flex-1 flex items-center justify-center gap-2 font-semibold px-4 py-3 rounded-xl disabled:opacity-50"
           >
             <Plus size={18} />
             گفت‌وگوی تازه
           </button>
-          <button onClick={() => setSidebarOpen(false)} className="md:hidden p-2.5 rounded-xl hover:bg-white/10 transition-colors" title="بستن فهرست">
+          <button onClick={() => setSidebarOpen(false)} className="lg-btn lg-dark-ghost md:hidden p-2.5 rounded-xl" title="بستن فهرست">
             <X size={18} className="text-blue-200" />
           </button>
         </div>
@@ -842,10 +842,10 @@ export default function LegalChat() {
                           <span className="truncate flex-1 leading-6">{c.title}</span>
                         </button>
                         <div className={`absolute left-1.5 top-1/2 -translate-y-1/2 flex items-center gap-0.5 transition-opacity ${active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 [@media(hover:none)]:opacity-100'}`}>
-                          <button onClick={() => setEditing({ id: c.id, title: c.title })} className="p-1.5 rounded-md hover:bg-white/10" title="تغییر عنوان">
+                          <button onClick={() => setEditing({ id: c.id, title: c.title })} className="lg-btn lg-dark-ghost p-1.5 rounded-md" title="تغییر عنوان">
                             <Pencil size={12} />
                           </button>
-                          <button onClick={() => setToDelete(c)} disabled={streaming && active} className="p-1.5 rounded-md hover:bg-white/10 hover:text-red-300 disabled:opacity-40" title="حذف گفت‌وگو">
+                          <button onClick={() => setToDelete(c)} disabled={streaming && active} className="lg-btn lg-dark-ghost p-1.5 rounded-md hover:text-red-300 disabled:opacity-40" title="حذف گفت‌وگو">
                             <Trash2 size={12} />
                           </button>
                         </div>
@@ -859,7 +859,7 @@ export default function LegalChat() {
         </div>
 
         <div className="p-3 border-t border-white/10 min-w-[288px] md:min-w-[18rem]">
-          <button onClick={() => setWsOpen(true)} className="w-full flex items-center gap-2 text-blue-300 hover:text-white px-3 py-2 rounded-lg hover:bg-white/10 transition-colors text-sm">
+          <button onClick={() => setWsOpen(true)} className="lg-btn lg-dark-ghost w-full flex items-center gap-2 text-blue-300 hover:text-white px-3 py-2 rounded-lg text-sm">
             <KeyRound size={16} />
             دسترسی از دستگاه دیگر
           </button>
@@ -883,7 +883,7 @@ export default function LegalChat() {
         {/* Header */}
         <div className="border-b border-gray-100 bg-white px-3 md:px-6 py-3 flex items-center justify-between gap-2 shadow-sm flex-shrink-0">
           <div className="flex items-center gap-2 md:gap-3 min-w-0">
-            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 hover:bg-gray-100 rounded-lg transition-colors flex-shrink-0" title="فهرست گفت‌وگوها">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="lg-btn lg-ghost p-2 rounded-lg flex-shrink-0" title="فهرست گفت‌وگوها">
               <Menu size={20} className="text-navy-700" />
             </button>
             <div className="flex items-center gap-2 min-w-0">
@@ -900,7 +900,7 @@ export default function LegalChat() {
             {activeId && (
               <button
                 onClick={() => setMemOpen(true)}
-                className="flex items-center gap-1.5 px-2.5 py-2 rounded-xl hover:bg-navy-50 text-navy-600 transition-colors"
+                className="lg-btn lg-ghost flex items-center gap-1.5 px-2.5 py-2 rounded-xl text-navy-600"
                 title="حافظهٔ این گفت‌وگو"
               >
                 {memState === 'saving' ? <Loader size={17} className="animate-spin" /> : <Brain size={17} className={memState === 'error' ? 'text-amber-500' : ''} />}
@@ -928,7 +928,7 @@ export default function LegalChat() {
               <div className="text-center py-16 dr-fade-in">
                 <AlertTriangle size={28} className="text-amber-500 mx-auto mb-3" />
                 <p className="text-sm text-navy-600 mb-4">{chatError}</p>
-                <button onClick={newChat} className="px-4 py-2 bg-navy-700 hover:bg-navy-800 text-white text-sm font-semibold rounded-xl transition-colors">گفت‌وگوی تازه</button>
+                <button onClick={newChat} className="lg-btn lg-primary px-4 py-2 text-sm font-semibold rounded-xl">گفت‌وگوی تازه</button>
               </div>
             ) : turns.length === 0 ? (
               <div className="flex flex-col items-center justify-center text-center pt-4 md:pt-10 dr-fade-in">
@@ -955,7 +955,7 @@ export default function LegalChat() {
                             if (el) { el.focus(); el.setSelectionRange(s.text.length, s.text.length); autoSize(el); }
                           }, 30);
                         }}
-                        className="flex items-start gap-3 text-right bg-white border border-gray-200 hover:border-navy-300 hover:shadow-md rounded-2xl px-4 py-3 transition-all"
+                        className="lg-btn lg-secondary flex items-start gap-3 text-right rounded-2xl px-4 py-3"
                       >
                         <div className="w-9 h-9 rounded-xl bg-sky-50 flex items-center justify-center flex-shrink-0">
                           <Icon size={17} className="text-sky-700" />
@@ -1010,7 +1010,7 @@ export default function LegalChat() {
         {!atBottom && turns.length > 0 && (
           <button
             onClick={() => { setAtBottom(true); scrollToBottom(); }}
-            className="absolute left-1/2 -translate-x-1/2 bottom-36 md:bottom-40 z-10 w-9 h-9 rounded-full bg-white border border-gray-200 shadow-lg flex items-center justify-center hover:bg-gray-50 transition-colors"
+            className="lg-btn lg-fab absolute left-1/2 -translate-x-1/2 bottom-36 md:bottom-40 z-10 w-9 h-9 rounded-full flex items-center justify-center"
             title="رفتن به آخرین پیام"
           >
             <ChevronDown size={18} className="text-navy-600" />
@@ -1035,7 +1035,7 @@ export default function LegalChat() {
               <button
                 onClick={() => fileRef.current?.click()}
                 disabled={streaming}
-                className="flex-shrink-0 w-10 h-10 flex items-center justify-center hover:bg-gray-100 rounded-xl transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                className="lg-btn lg-ghost flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl disabled:opacity-50"
                 title="پیوست فایل"
               >
                 <Paperclip size={18} className="text-navy-600" />
@@ -1065,7 +1065,7 @@ export default function LegalChat() {
               {streaming ? (
                 <button
                   onClick={() => abortRef.current?.abort()}
-                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-navy-900 hover:bg-navy-800 text-white rounded-xl transition-colors shadow-sm"
+                  className="lg-btn lg-primary lg-deep flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl"
                   title="توقف پاسخ"
                 >
                   <Square size={14} fill="currentColor" />
@@ -1074,7 +1074,7 @@ export default function LegalChat() {
                 <button
                   onClick={() => send()}
                   disabled={!canSend}
-                  className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-navy-700 hover:bg-navy-800 text-white rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+                  className="lg-btn lg-primary flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl disabled:opacity-40"
                   title="ارسال"
                 >
                   <Send size={16} />

@@ -16,6 +16,7 @@ const PRECACHE_URLS = [
   "./manifest.json",
   "./css/styles.css",
   "./js/main.js",
+  "./js/liquid-glass.js",
   "./assets/logo-new.jpg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",

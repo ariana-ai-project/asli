@@ -23,6 +23,22 @@
   --step-2: clamp(1.4rem, 1.2rem + 1vw, 1.9rem);
   --step-3: clamp(1.8rem, 1.4rem + 2vw, 2.6rem);
   --step-4: clamp(2.2rem, 1.4rem + 4vw, 4rem);
+
+  /* ---- شیشهٔ مایعِ کارت‌ها؛ هر مقدار فقط همین‌جا ----
+     روی :root است نه .departments، چون صفحهٔ ورود پشتیبانی (tamin-poshtibani/index.html)
+     هم همین .card را بیرون از .departments به کار می‌برد */
+  --lg-fill: rgba(160, 190, 255, 0.07);      /* سردِ خنثی و کم؛ سرمه‌ای پُرتر کارت را «بشقاب آبی» می‌کرد */
+  --lg-fill-static: rgba(30, 56, 118, 0.34); /* موبایل: بدون بلور، کمی پُرتر */
+  --lg-solid: #142a5e;                       /* مرورگر بدون backdrop-filter / کاهش شفافیت */
+  --lg-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 44%);
+  --lg-blur: 5px;                            /* کم، تا شهاب پشت شیشه خطِ نورانی بماند نه لکه */
+  --lg-sat: 125%;
+  --lg-bright: 1.05;                         /* پشتِ شیشه کمی روشن‌تر از اطراف: «بالا آمدن» سطح */
+  --lg-rim-key: rgba(255, 255, 255, 0.6);    /* نور اصلی لبه از بالا-چپ */
+  --lg-rim-mid: rgba(255, 255, 255, 0.08);
+  --lg-rim-back: rgba(255, 255, 255, 0.28);  /* بازتابِ کم‌نورتر پایین-راست */
+  --lg-shadow: 0 20px 44px -14px rgba(1, 6, 22, 0.6);
+  --lg-radius: 28px;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -633,7 +649,7 @@ body.is-pre-play { overflow: hidden; }
      ۲) سحابی‌ها، ستاره‌ها و شهاب‌ها: چیزی که شیشه از پشتش دیده شود. بلور روی
         گرادیان صاف اصلاً به چشم نمی‌آید.
      ۳) کارت‌ها: شیشهٔ کم‌بلور با پرکنندهٔ سرمه‌ای برند و لبهٔ نورانی؛ در کرومیوم
-        دسکتاپ لبه‌شان پشتِ شیشه را مثل عدسی خم می‌کند (نقشه در main.js).
+        دسکتاپ لبه‌شان پشتِ شیشه را مثل عدسی خم می‌کند (نقشه در js/liquid-glass.js).
 
    کارت‌ها «کاشی‌های لانچر»اند — هر کدام دکمهٔ ورود به یک بخش — و روی پس‌زمینه‌ای
    تزئینی و متحرک شناورند، نه روی محتوای خواندنی؛ برای همین شیشه‌اند. نُه لایهٔ
@@ -641,20 +657,6 @@ body.is-pre-play { overflow: hidden; }
    موبایل همان شیشه بدون بلور (ایستا) است.
    ============================================================ */
 .departments {
-  /* ---- پیچ‌های شیشه؛ هر مقدار فقط همین‌جا ---- */
-  --lg-fill: rgba(160, 190, 255, 0.07);      /* سردِ خنثی و کم؛ سرمه‌ای پُرتر کارت را «بشقاب آبی» می‌کرد */
-  --lg-fill-static: rgba(30, 56, 118, 0.34); /* موبایل: بدون بلور، کمی پُرتر */
-  --lg-solid: #142a5e;                       /* مرورگر بدون backdrop-filter / کاهش شفافیت */
-  --lg-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0) 44%);
-  --lg-blur: 5px;                            /* کم، تا شهاب پشت شیشه خطِ نورانی بماند نه لکه */
-  --lg-sat: 125%;
-  --lg-bright: 1.05;                         /* پشتِ شیشه کمی روشن‌تر از اطراف: «بالا آمدن» سطح */
-  --lg-rim-key: rgba(255, 255, 255, 0.6);    /* نور اصلی لبه از بالا-چپ */
-  --lg-rim-mid: rgba(255, 255, 255, 0.08);
-  --lg-rim-back: rgba(255, 255, 255, 0.28);  /* بازتابِ کم‌نورتر پایین-راست */
-  --lg-shadow: 0 20px 44px -14px rgba(1, 6, 22, 0.6);
-  --lg-radius: 28px;
-
   position: relative;
   padding-block: clamp(64px, 10vw, 128px);
   background:
@@ -811,19 +813,16 @@ body.is-pre-play { overflow: hidden; }
   }
 }
 
-/* عدسیِ لبه، فقط روی کارت‌های فعال (href دارند) — main.js کلاس lg-lens را فقط در کرومیوم
-   دسکتاپ و بعد از ساختن نقشه‌ها می‌گذارد. سافاری و فایرفاکس اگر یک تابعِ فهرست را اجرا
-   نکنند کلِ backdrop-filter را دور می‌ریزند؛ برای همین url() پشت @supports و کلاس است.
+/* عدسیِ لبه، فقط روی کارت‌های فعال (href دارند). js/liquid-glass.js فقط در کرومیوم دسکتاپ
+   نقشه را می‌سازد و --lg-lens را روی هر کارت می‌گذارد؛ بدون آن var() خالی می‌شود و همان بلورِ
+   ساده می‌ماند. سافاری و فایرفاکس اگر یک تابعِ فهرست را اجرا نکنند کلِ backdrop-filter را دور
+   می‌ریزند؛ برای همین url() پشت @supports است و در قانون پایه نیست.
    هزینه روی Intel UHD 630 (کروم، بدون سقف فریم): بدون شیشه ~۱۰۰ فریم، بلورِ هر نُه کارت
    ~۱۰۰، عدسیِ دو کارت فعال ~۸۳ (میانه ۱۲ms)، عدسیِ هر نُه کارت ~۳۷ با پرش — پس فقط فعال‌ها. */
 @media (min-width: 901px) {
   @supports (backdrop-filter: url(#a) blur(1px)) {
-    .cards-grid.lg-lens .card[href] {
-      backdrop-filter: url(#lg-lens-card) blur(var(--lg-blur)) saturate(var(--lg-sat)) brightness(var(--lg-bright));
-    }
-
-    .cards-grid.lg-lens .card-wide[href] {
-      backdrop-filter: url(#lg-lens-wide) blur(var(--lg-blur)) saturate(var(--lg-sat)) brightness(var(--lg-bright));
+    .card[href] {
+      backdrop-filter: var(--lg-lens,) blur(var(--lg-blur)) saturate(var(--lg-sat)) brightness(var(--lg-bright));
     }
   }
 }
@@ -1140,7 +1139,7 @@ body.is-pre-play { overflow: hidden; }
    پیش‌فرضِ بالا خودش باید خوانا باشد، چون این ترجیح‌ها به بیشتر مرورگرها نمی‌رسد. */
 @media (prefers-reduced-transparency: reduce) {
   .card,
-  .cards-grid.lg-lens .card[href] {
+  .card[href] {
     background: var(--lg-sheen), var(--lg-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -1149,7 +1148,7 @@ body.is-pre-play { overflow: hidden; }
 
 @media (prefers-contrast: more) {
   .card,
-  .cards-grid.lg-lens .card[href] {
+  .card[href] {
     background: var(--lg-solid);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
@@ -1161,7 +1160,7 @@ body.is-pre-play { overflow: hidden; }
 
 @media (forced-colors: active) {
   .card,
-  .cards-grid.lg-lens .card[href] {
+  .card[href] {
     background: Canvas;
     border: 1px solid CanvasText;
     -webkit-backdrop-filter: none;

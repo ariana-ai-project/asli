@@ -22,6 +22,26 @@
   --tp-radius: 16px;
   --tp-radius-sm: 10px;
   --tp-font: "Vazirmatn", -apple-system, "Segoe UI", Tahoma, sans-serif;
+
+  /* ---- شیشهٔ مایعِ دکمه‌ها (اسکیل liquid-glass) ----
+     دکمه‌های پنل «شیشهٔ ایستا»اند: پرکنندهٔ نیمه‌شفاف + نور بالای درون + لبهٔ مویی + سایهٔ
+     نرم، بدون backdrop-filter. میز مدیر تا ~۲۰۰۰ دکمه در جدولِ اسکرول‌شونده دارد و بلورِ هر
+     کدام در هر فریمِ اسکرول دوباره حساب می‌شد؛ نوارهای بالا و پایین هم خودشان شیشه‌اند و
+     شیشه روی شیشه نمی‌نشیند. فقط دکمهٔ اصلی (و حالت انتخاب‌شده) رنگ برند می‌گیرد، آن هم
+     شیشهٔ رنگی با همان نور و لبه، نه رنگ تخت. */
+  --gl-fill: rgba(120, 165, 255, 0.08);
+  --gl-fill-hover: rgba(120, 165, 255, 0.17);
+  --gl-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.015) 60%);
+  --gl-edge: rgba(180, 208, 255, 0.22);
+  --gl-edge-hover: rgba(180, 208, 255, 0.4);
+  --gl-rim: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 -1px 0 rgba(255, 255, 255, 0.03);
+  --gl-lift: 0 2px 8px -3px rgba(0, 4, 16, 0.65);
+  /* دکمهٔ اصلی: متن سفید روی این آبی در روشن‌ترین نقطه ۴٫۹:۱ (آبی تخت قبلی #4f8cff فقط ۳٫۲ بود) */
+  --gl-tint: linear-gradient(135deg, rgba(40, 100, 220, 0.9), rgba(60, 122, 240, 0.86));
+  --gl-tint-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 55%);
+  --gl-tint-edge: rgba(150, 190, 255, 0.55);
+  --gl-tint-rim: inset 0 1px 0 rgba(255, 255, 255, 0.4), inset 0 -1px 0 rgba(10, 30, 90, 0.25);
+  --gl-tint-glow: 0 6px 18px -7px rgba(47, 111, 228, 0.75);
 }
 
 * { box-sizing: border-box; }
@@ -61,28 +81,42 @@ a { color: inherit; text-decoration: none; }
 /* ---------- تب‌ها ---------- */
 .tp-tabs { display: flex; gap: 6px; flex-wrap: wrap; padding: 10px 18px 0; }
 .tp-tab {
-  border: 1px solid var(--tp-line); background: rgba(120, 165, 255, 0.05); border-radius: 999px;
+  border: 1px solid var(--gl-edge); background: var(--gl-sheen), rgba(120, 165, 255, 0.05); border-radius: 999px;
   padding: 6px 16px; font-weight: 600; font-size: .9rem; color: var(--tp-muted);
+  box-shadow: var(--gl-rim);
+  transition: background-color .2s ease, color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
-.tp-tab:hover { background: rgba(120, 165, 255, 0.12); color: var(--tp-fg); }
-.tp-tab.on { background: linear-gradient(135deg, #2f6fe4, #4f8cff); border-color: #4f8cff; color: #fff; }
+.tp-tab:hover { background: var(--gl-sheen), var(--gl-fill-hover); color: var(--tp-fg); }
+.tp-tab:active { transform: scale(.97); }
+.tp-tab.on {
+  background: var(--gl-tint-sheen), var(--gl-tint); border-color: var(--gl-tint-edge); color: #fff;
+  box-shadow: var(--gl-tint-rim), var(--gl-tint-glow);
+}
 .tp-tab .cnt { background: rgba(255,255,255,.18); border-radius: 9px; padding: 0 7px; font-size: .75rem; margin-inline-start: 6px; }
 
-/* ---------- دکمه‌ها ---------- */
+/* ---------- دکمه‌ها — شیشهٔ ایستا (توکن‌ها بالای فایل) ---------- */
 .tp-btn {
-  border: 1px solid var(--tp-line-2); background: rgba(120, 165, 255, 0.08); color: var(--tp-fg);
+  border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); color: var(--tp-fg);
   border-radius: var(--tp-radius-sm); padding: 7px 14px; font-weight: 600; font-size: .9rem; white-space: nowrap;
+  box-shadow: var(--gl-rim), var(--gl-lift);
+  transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease, transform .15s ease;
 }
-.tp-btn:hover { background: rgba(120, 165, 255, 0.16); }
-.tp-btn.primary { background: linear-gradient(135deg, #2f6fe4, #4f8cff); border-color: #4f8cff; color: #fff; font-weight: 700; }
+.tp-btn:hover { background: var(--gl-sheen), var(--gl-fill-hover); border-color: var(--gl-edge-hover); }
+.tp-btn:active:not([disabled]) { transform: scale(.97); }
+.tp-btn.primary {
+  background: var(--gl-tint-sheen), var(--gl-tint); border-color: var(--gl-tint-edge); color: #fff; font-weight: 700;
+  box-shadow: var(--gl-tint-rim), var(--gl-tint-glow);
+}
 .tp-btn.primary:hover { filter: brightness(1.08); }
 .tp-btn.warn { border-color: rgba(242,194,48,.5); }
-.tp-btn.warn:hover { background: rgba(242,194,48,.15); }
+.tp-btn.warn:hover { background: var(--gl-sheen), rgba(242,194,48,.15); }
 .tp-btn.danger { border-color: rgba(229,72,77,.5); }
-.tp-btn.danger:hover { background: rgba(229,72,77,.15); }
+.tp-btn.danger:hover { background: var(--gl-sheen), rgba(229,72,77,.15); }
 .tp-btn.sm { padding: 3px 10px; font-size: .8rem; }
-.tp-btn.xs { padding: 1px 8px; font-size: .75rem; border-radius: 7px; }
-.tp-btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; }
+/* ریزترین دکمه‌ها در جدول‌های پرتراکم‌اند: فقط نور و لبه، بدون سایهٔ بیرونی تا جدول آرام بماند */
+.tp-btn.xs { padding: 1px 8px; font-size: .75rem; border-radius: 7px; box-shadow: var(--gl-rim); }
+.tp-btn.primary.xs { box-shadow: var(--gl-tint-rim); }
+.tp-btn[disabled] { opacity: .45; cursor: not-allowed; filter: none; box-shadow: var(--gl-rim); }
 
 /* ---------- فیلدها ---------- */
 .tp-input, .tp-select, .tp-textarea {
@@ -261,8 +295,8 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 /* تب کارشناسان: نام قابل کلیک، تیک تیم */
 .ename { cursor: pointer; text-decoration: underline dotted; text-underline-offset: 3px; }
 .ename:hover { color: var(--tp-accent); }
-.tp-mx .tri { width: 30px; height: 24px; border: 1px solid var(--tp-line-2); border-radius: 4px; background: transparent; display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer; color: inherit; }
-.tp-mx .tri.ok { background: rgba(34,197,94,.16); border-color: var(--tp-ok); color: #4ade80; }
+.tp-mx .tri { width: 30px; height: 24px; border: 1px solid var(--tp-line-2); border-radius: 6px; background: var(--gl-sheen); box-shadow: var(--gl-rim); display: inline-flex; align-items: center; justify-content: center; font-weight: 700; cursor: pointer; color: inherit; }
+.tp-mx .tri.ok { background: var(--gl-sheen), rgba(34,197,94,.16); border-color: var(--tp-ok); color: #4ade80; }
 .tp-mx .tri.unk { border-style: dashed; }
 :root[data-theme="light"] .tp-mx .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }
 /* جدول کارشناسان: عرض ستون‌ها از colgroup (manager.js:EX_W) — چهار ستون راست ثابت‌اند */
@@ -298,9 +332,11 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
    ============================================================ */
 .rp-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 12px; }
 .rp-head h2 { margin: 0; }
-.rp-seg { display: inline-flex; border: 1px solid var(--tp-line-2); border-radius: 12px; overflow: hidden; }
-.rp-seg button { border: 0; background: transparent; color: var(--tp-muted); padding: 8px 20px; font-weight: 700; font-size: .95rem; }
-.rp-seg button.on { background: linear-gradient(135deg, #2f6fe4, #4f8cff); color: #fff; }
+/* کنترل بخش‌بخش: یک کپسول شیشه‌ای و بخشِ انتخاب‌شده شیشهٔ رنگی درونش (گردی درون = ۱۲ − ۳) */
+.rp-seg { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--gl-edge); border-radius: 12px; background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim), var(--gl-lift); }
+.rp-seg button { border: 0; border-radius: 9px; background: transparent; color: var(--tp-muted); padding: 5px 18px; font-weight: 700; font-size: .95rem; transition: background-color .2s ease, color .2s ease; }
+.rp-seg button:hover { color: var(--tp-fg); background: var(--gl-fill-hover); }
+.rp-seg button.on { background: var(--gl-tint-sheen), var(--gl-tint); color: #fff; box-shadow: var(--gl-tint-rim), var(--gl-tint-glow); }
 .rp-tools { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
 .rp-sp { flex: 1; }
 .rp-sheets { display: inline-flex; gap: 2px; border-bottom: 2px solid #217346; }
@@ -312,7 +348,8 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-range { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; padding: 10px 12px;
   border: 1px solid var(--tp-line); border-radius: 12px; background: var(--tp-surface-2); }
 .rp-range .lab { color: var(--tp-muted); font-size: .85rem; }
-.rp-range .chip.on { border-color: var(--tp-accent); background: rgba(79,140,255,.12); }
+.rp-range .chip { background: var(--gl-sheen); box-shadow: var(--gl-rim); }
+.rp-range .chip.on { border-color: var(--tp-accent); background: var(--gl-sheen), rgba(79,140,255,.14); }
 .rp-grid { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 14px; align-items: start; }
 @media (max-width: 1100px) { .rp-grid { grid-template-columns: 1fr; } }
 .rp-paper { background: #fff; color: #000; border: 1px solid #c8c8c8; border-radius: 6px; }
@@ -332,6 +369,17 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-daily thead tr.flt input { width: 100%; font-size: .78rem; padding: 2px 5px; background: #fff; color: #000; border-color: #bbb; }
 .rp-none { padding: 24px !important; color: #555; background: #fff !important; }
 .rp-more { padding: 8px; display: flex; gap: 10px; align-items: center; color: #333; font-size: .85rem; background: #fff; }
+/* دکمه‌های روی «کاغذ» سفید، در حالت شب هم شیشهٔ روشن‌اند — قبلاً متن سفید روی سفید بود */
+.rp-more {
+  --tp-fg: #0f1b33;
+  --gl-fill: rgba(47, 111, 228, 0.07);
+  --gl-fill-hover: rgba(47, 111, 228, 0.14);
+  --gl-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.2) 60%);
+  --gl-edge: rgba(30, 60, 120, 0.22);
+  --gl-edge-hover: rgba(47, 111, 228, 0.45);
+  --gl-rim: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(30, 60, 120, 0.06);
+  --gl-lift: 0 2px 8px -3px rgba(20, 40, 80, 0.28);
+}
 .rp-slicers { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; max-width: 760px; }
 .slicer { width: 170px; background: #fff; color: #000; border: 2px solid #ed7d31; border-radius: 4px; box-shadow: 0 2px 6px rgba(0,0,0,.18); }
 .slicer.wide { width: 330px; }
@@ -348,8 +396,8 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .rp-field > b { display: block; font-size: .82rem; color: var(--tp-muted); margin-bottom: 5px; }
 .rp-ticks { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .rp-ticks .lab { color: var(--tp-muted); font-size: .85rem; }
-.rp-tick { cursor: pointer; padding: 4px 12px; font-size: .88rem; display: inline-flex; gap: 6px; align-items: center; }
-.rp-tick.on { border-color: var(--tp-accent); color: var(--tp-fg); background: rgba(79,140,255,.12); }
+.rp-tick { cursor: pointer; padding: 4px 12px; font-size: .88rem; display: inline-flex; gap: 6px; align-items: center; background: var(--gl-sheen); box-shadow: var(--gl-rim); }
+.rp-tick.on { border-color: var(--tp-accent); color: var(--tp-fg); background: var(--gl-sheen), rgba(79,140,255,.14); }
 .rp-period { margin-inline-start: 10px; font-size: .92rem; }
 .rp-months { display: grid !important; grid-template-columns: repeat(3, 1fr); }
 .rp-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -375,6 +423,12 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 /* دکمهٔ حالت شب/روز در نوار بالا (shared.js:TP.themeBtn) */
 .tp-theme { min-width: 34px; }
 
+/* تقویم شمسی (shared.js:SHARED_CSS، که پیش از این فایل می‌آید و اینجا بازنویسی می‌شود):
+   دکمه‌های ماه و پایین همان شیشهٔ ایستا، روزِ انتخاب‌شده شیشهٔ رنگی */
+.jdp-head button, .jdp-foot button { border-color: var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim); }
+.jdp-head button:hover, .jdp-foot button:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+.jdp-grid button.sel { background: var(--gl-tint-sheen), var(--gl-tint); box-shadow: var(--gl-tint-rim); }
+
 /* ============================================================
    حالت روز — html[data-theme="light"]
    همان پوسته با سطح روشن. رنگ‌های معنایی (سبز/زرد/قرمز مراحل) می‌مانند و فقط
@@ -397,6 +451,19 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
   --tp-late: #d9731a;
   --tp-over: #d63a3f;
   color-scheme: light;
+
+  /* شیشهٔ روشن: پرکنندهٔ سفید نیمه‌شفاف با سایهٔ نرم — روی زمینهٔ روشن، شیشه با لبه و سایه
+     دیده می‌شود نه با تیرگی. دکمهٔ اصلی پُررنگ‌تر تا متن سفید روی زمینهٔ سفید ۵:۱ بماند. */
+  --gl-fill: rgba(255, 255, 255, 0.62);
+  --gl-fill-hover: rgba(255, 255, 255, 0.95);
+  --gl-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.75), rgba(255, 255, 255, 0.2) 60%);
+  --gl-edge: rgba(30, 60, 120, 0.18);
+  --gl-edge-hover: rgba(47, 111, 228, 0.42);
+  --gl-rim: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(30, 60, 120, 0.06);
+  --gl-lift: 0 2px 8px -3px rgba(20, 40, 80, 0.28);
+  --gl-tint: linear-gradient(135deg, rgba(37, 96, 214, 0.95), rgba(52, 116, 236, 0.93));
+  --gl-tint-edge: rgba(37, 96, 214, 0.75);
+  --gl-tint-glow: 0 6px 16px -6px rgba(37, 96, 214, 0.55);
 }
 :root[data-theme="light"] body.tp-body {
   background:
@@ -407,12 +474,11 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 :root[data-theme="light"] .tp-top,
 :root[data-theme="light"] .tp-foot { background: rgba(255, 255, 255, 0.92); }
 :root[data-theme="light"] .tp-top .brand img { border-color: rgba(30, 60, 120, 0.25); }
-:root[data-theme="light"] .tp-tab { background: rgba(47, 111, 228, 0.05); }
-:root[data-theme="light"] .tp-tab:hover { background: rgba(47, 111, 228, 0.12); }
+/* دکمه‌ها و تب‌ها در حالت روز فقط با توکن‌های --gl-* بالا عوض می‌شوند */
+:root[data-theme="light"] .tp-tab:not(.on) { background: var(--gl-sheen), rgba(255, 255, 255, 0.45); }
+:root[data-theme="light"] .tp-tab:not(.on):hover { background: var(--gl-sheen), var(--gl-fill-hover); }
 :root[data-theme="light"] .tp-tab .cnt { background: rgba(255, 255, 255, 0.3); }
-:root[data-theme="light"] .tp-btn { background: rgba(47, 111, 228, 0.07); }
-:root[data-theme="light"] .tp-btn:hover { background: rgba(47, 111, 228, 0.14); }
-:root[data-theme="light"] .tp-btn.primary { background: linear-gradient(135deg, #2f6fe4, #4f8cff); color: #fff; }
+:root[data-theme="light"] .tp-tab:not(.on) .cnt { background: rgba(47, 111, 228, 0.12); }
 :root[data-theme="light"] .tp-input, :root[data-theme="light"] .tp-select, :root[data-theme="light"] .tp-textarea,
 :root[data-theme="light"] .tp-input:focus, :root[data-theme="light"] .tp-select:focus, :root[data-theme="light"] .tp-textarea:focus { background: #fff; }
 :root[data-theme="light"] .tp-input.on { background: rgba(47, 111, 228, 0.08); }
@@ -463,3 +529,14 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 :root[data-theme="light"] [style*="#fca5a5"] { color: #b91c1c !important; }
 :root[data-theme="light"] [style*="#fcd34d"] { color: #7a5a05 !important; }
 :root[data-theme="light"] [style*="#6ee7b7"], :root[data-theme="light"] [style*="rgb(110, 231, 183)"] { color: #15803d !important; }
+
+/* دسترس‌پذیری دکمه‌های شیشه‌ای: کنتراست بیشتر و رنگ اجباری → سطح پُر با لبهٔ پررنگ.
+   دکمه باید بدون جلوهٔ شیشه هم دکمه دیده شود. */
+@media (prefers-contrast: more) {
+  .tp-btn, .tp-tab, .rp-seg button, .jdp-head button, .jdp-foot button { background: var(--tp-surface-2); box-shadow: none; border-color: var(--tp-fg); }
+  .tp-btn.primary, .tp-tab.on, .rp-seg button.on, .jdp-grid button.sel { background: #1f56c2; color: #fff; }
+}
+@media (forced-colors: active) {
+  .tp-btn, .tp-tab, .rp-seg button, .tri, .jdp-head button, .jdp-foot button { background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; box-shadow: none; }
+  .tp-btn.primary, .tp-tab.on, .rp-seg button.on, .jdp-grid button.sel { background: Highlight; color: HighlightText; }
+}

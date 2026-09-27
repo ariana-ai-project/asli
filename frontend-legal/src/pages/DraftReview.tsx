@@ -364,10 +364,8 @@ export default function DraftReview() {
             <button
               onClick={handleSubmit}
               disabled={!canSubmit}
-              className={`mt-3 w-full flex items-center justify-center gap-2 text-white font-semibold px-4 py-3 rounded-xl transition-all shadow-sm ${
-                canSubmit
-                  ? 'bg-gradient-to-l from-sky-600 to-navy-700 hover:shadow-lg hover:shadow-navy-900/20 active:scale-[0.99]'
-                  : 'bg-navy-700 opacity-40 cursor-not-allowed'
+              className={`lg-btn lg-primary mt-3 w-full flex items-center justify-center gap-2 font-semibold px-4 py-3 rounded-xl ${
+                canSubmit ? '' : 'opacity-40'
               }`}
             >
               {loading ? (
@@ -443,7 +441,7 @@ export default function DraftReview() {
                       <a
                         href={r.docxUrl}
                         download={`${r.docxFilename}.docx`}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-navy-700 hover:bg-navy-800 active:scale-95 text-white text-xs font-semibold rounded-xl transition-all flex-shrink-0 shadow-sm"
+                        className="lg-btn lg-primary flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl flex-shrink-0"
                       >
                         <Download size={13} />
                         دانلود
@@ -488,13 +486,13 @@ export default function DraftReview() {
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowExitConfirm(false); refs.clear(true); draft.clear(true); navigate('/'); }}
-                className="flex-1 py-2.5 bg-navy-700 hover:bg-navy-800 active:scale-95 text-white rounded-xl text-sm font-semibold transition-all"
+                className="lg-btn lg-primary flex-1 py-2.5 rounded-xl text-sm font-semibold"
               >
                 بله، خروج
               </button>
               <button
                 onClick={() => setShowExitConfirm(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 active:scale-95 text-navy-700 rounded-xl text-sm font-semibold transition-all"
+                className="lg-btn lg-secondary flex-1 py-2.5 rounded-xl text-sm font-semibold"
               >
                 ماندن
               </button>

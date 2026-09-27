@@ -249,13 +249,24 @@ function MotifStyles() {
       .corner-frame .cf-br  { bottom: -1px; right: -1px; border-bottom: 2px solid; border-right: 2px solid; }
       .corner-frame .cf-bl  { bottom: -1px; left: -1px;  border-bottom: 2px solid; border-left: 2px solid; }
 
+      /* دکمهٔ اصلی صفحه: شیشهٔ رنگی (اسکیل liquid-glass) — همان گرادیان برند، کمی شفاف، با نور
+         بالای درون و لبهٔ مویی؛ سرِ روشنش تیره‌تر شد تا متن سفید بالای ۴٫۵:۱ بماند */
       .nq-btn {
-        background: linear-gradient(95deg, #0d3a6b 0%, #0f5fa8 55%, #14a4d9 100%);
-        box-shadow: 0 10px 30px -8px rgba(20, 164, 217, 0.55);
+        background:
+          linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0) 55%),
+          linear-gradient(95deg, rgba(13,58,107,0.92) 0%, rgba(15,95,168,0.9) 55%, rgba(18,130,190,0.88) 100%);
+        box-shadow:
+          inset 0 1px 0 rgba(255,255,255,0.38),
+          inset 0 0 0 1px rgba(150,220,255,0.28),
+          inset 0 -1px 0 rgba(0,20,50,0.35),
+          0 10px 30px -8px rgba(20, 164, 217, 0.55);
         transition: transform 0.35s cubic-bezier(0.2,0.8,0.2,1), box-shadow 0.35s ease, filter 0.35s ease;
       }
-      .nq-btn:hover { transform: translateY(-3px); filter: brightness(1.08); box-shadow: 0 16px 38px -8px rgba(20, 164, 217, 0.7); }
+      .nq-btn:hover { transform: translateY(-3px); filter: brightness(1.08); box-shadow: inset 0 1px 0 rgba(255,255,255,0.45), inset 0 0 0 1px rgba(150,220,255,0.36), inset 0 -1px 0 rgba(0,20,50,0.35), 0 16px 38px -8px rgba(20, 164, 217, 0.7); }
       .nq-btn:active { transform: translateY(-1px) scale(0.98); }
+      .nq-btn:focus-visible { outline: 2px solid #5ed3ff; outline-offset: 3px; }
+      /* دکمهٔ دومِ قهرمان که خودش glass-panel است: نور لبهٔ بالا مثل بقیهٔ دکمه‌های شیشه‌ای */
+      a.glass-panel { box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), inset 0 0 0 1px rgba(148,214,255,0.06); }
 
       .chip {
         border: 1px solid rgba(94, 211, 255, 0.28);
@@ -720,7 +731,7 @@ export default function Home() {
             </div>
 
             <button
-              className="md:hidden p-2 rounded-xl text-white hover:bg-white/10 transition-all"
+              className="lg-btn lg-dark-ghost md:hidden p-2 rounded-xl text-white"
               onClick={() => setMenuOpen(!menuOpen)}
               aria-label="منو"
             >
@@ -738,7 +749,7 @@ export default function Home() {
                 key={item.label}
                 href={item.href}
                 onClick={() => setMenuOpen(false)}
-                className="flex items-center gap-2 text-white hover:text-sky-300 hover:bg-white/10 px-4 py-3 rounded-xl text-sm font-medium transition-all"
+                className="lg-btn lg-dark-ghost flex items-center gap-2 text-white hover:text-sky-300 px-4 py-3 rounded-xl text-sm font-medium"
               >
                 <ChevronLeft size={14} className="text-sky-400" />
                 {item.label}

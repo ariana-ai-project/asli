@@ -238,7 +238,7 @@ export default function ContractAnalysis() {
           <button
             onClick={startNewConversation}
             disabled={loading}
-            className="w-full flex items-center justify-center gap-2 bg-navy-800 hover:bg-navy-700 text-white font-semibold px-4 py-3 rounded-xl transition-colors disabled:opacity-50"
+            className="lg-btn lg-dark w-full flex items-center justify-center gap-2 font-semibold px-4 py-3 rounded-xl disabled:opacity-50"
           >
             <Plus size={18} />
             مکالمه جدید
@@ -253,7 +253,7 @@ export default function ContractAnalysis() {
               conversations.map((conv) => (
                 <button
                   key={conv.id}
-                  className="w-full text-right px-3 py-2 text-sm text-blue-200/70 hover:text-white hover:bg-white/10 rounded-lg transition-colors"
+                  className="lg-btn lg-dark-ghost w-full text-right px-3 py-2 text-sm text-blue-200/70 hover:text-white rounded-lg"
                 >
                   <div className="flex items-start gap-2">
                     <MessageCircle size={14} className="flex-shrink-0 mt-0.5" />
@@ -269,7 +269,7 @@ export default function ContractAnalysis() {
         </div>
 
         <div className="p-4 border-t border-white/10">
-          <button className="w-full flex items-center gap-2 text-blue-300 hover:text-white px-3 py-2 rounded-lg hover:bg-white/10 transition-colors text-sm">
+          <button className="lg-btn lg-dark-ghost w-full flex items-center gap-2 text-blue-300 hover:text-white px-3 py-2 rounded-lg text-sm">
             <Settings size={16} />
             تنظیمات
           </button>
@@ -283,7 +283,7 @@ export default function ContractAnalysis() {
           <div className="flex items-center gap-3">
             <button
               onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              className="lg-btn lg-ghost p-2 rounded-lg"
             >
               <Menu size={20} className="text-navy-700" />
             </button>
@@ -376,7 +376,7 @@ export default function ContractAnalysis() {
                       <a
                         href={msg.docxUrl}
                         download={`${msg.docxFilename}.docx`}
-                        className="flex items-center gap-1.5 px-4 py-2 bg-navy-700 hover:bg-navy-800 text-white text-xs font-semibold rounded-xl transition-colors flex-shrink-0 shadow-sm"
+                        className="lg-btn lg-primary flex items-center gap-1.5 px-4 py-2 text-xs font-semibold rounded-xl flex-shrink-0"
                       >
                         <Download size={13} />
                         دانلود
@@ -445,7 +445,7 @@ export default function ContractAnalysis() {
                     <button
                       key={prompt.label}
                       onClick={() => handlePresetSelect(prompt)}
-                      className="flex items-center gap-1.5 px-3 py-2 bg-white border border-gray-200 hover:border-navy-400 hover:bg-navy-50 text-navy-700 text-xs font-medium rounded-xl transition-all shadow-sm"
+                      className="lg-btn lg-secondary flex items-center gap-1.5 px-3 py-2 text-xs font-medium rounded-xl"
                     >
                       <Icon size={13} className="text-navy-500" />
                       {prompt.label}
@@ -480,7 +480,7 @@ export default function ContractAnalysis() {
             <button
               onClick={() => fileInputRef.current?.click()}
               disabled={loading}
-              className="flex-shrink-0 w-10 h-10 flex items-center justify-center hover:bg-gray-100 rounded-xl transition-colors border border-gray-200 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="lg-btn lg-secondary flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl disabled:opacity-50"
               title="آپلود فایل"
             >
               <Paperclip size={18} className="text-navy-600" />
@@ -516,7 +516,7 @@ export default function ContractAnalysis() {
             <button
               onClick={handleSendMessage}
               disabled={!canSend || !question.trim()}
-              className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-navy-700 hover:bg-navy-800 text-white rounded-xl transition-colors disabled:opacity-40 disabled:cursor-not-allowed shadow-sm"
+              className="lg-btn lg-primary flex-shrink-0 w-10 h-10 flex items-center justify-center rounded-xl disabled:opacity-40"
               title="ارسال"
             >
               {loading ? (
@@ -545,13 +545,13 @@ export default function ContractAnalysis() {
             <div className="flex gap-3">
               <button
                 onClick={() => { setShowExitConfirm(false); navigate('/'); }}
-                className="flex-1 py-2.5 bg-navy-700 hover:bg-navy-800 text-white rounded-xl text-sm font-semibold transition-colors"
+                className="lg-btn lg-primary flex-1 py-2.5 rounded-xl text-sm font-semibold"
               >
                 بله، خروج
               </button>
               <button
                 onClick={() => setShowExitConfirm(false)}
-                className="flex-1 py-2.5 bg-gray-100 hover:bg-gray-200 text-navy-700 rounded-xl text-sm font-semibold transition-colors"
+                className="lg-btn lg-secondary flex-1 py-2.5 rounded-xl text-sm font-semibold"
               >
                 ماندن
               </button>
