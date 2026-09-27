@@ -261,6 +261,110 @@
     });
   }
 
+  /* نور فشار: از نقطهٔ لمس یا کلیک پخش می‌شود — برای موس و لمس هر دو */
+  cards.forEach((card) => {
+    card.addEventListener("pointerdown", (e) => {
+      const rect = card.getBoundingClientRect();
+      card.style.setProperty("--mx", `${(((e.clientX - rect.left) / rect.width) * 100).toFixed(1)}%`);
+      card.style.setProperty("--my", `${(((e.clientY - rect.top) / rect.height) * 100).toFixed(1)}%`);
+    }, { passive: true });
+  });
+
+  /* ============================================================
+     شیشهٔ مایع — عدسیِ لبهٔ کارت‌های فعال (فقط کرومیوم دسکتاپ؛ هزینه در styles.css)
+     فیلترِ داخل backdrop-filter شکل کارت را نمی‌شناسد و فقط تصویرِ پشت را می‌گیرد؛
+     نویزِ یکنواخت وسط کارت را هم به اندازهٔ لبه می‌لرزاند و شبیه موج گرما می‌شود نه
+     شیشه. پس نقشهٔ جابه‌جایی را از خودِ طرح کارت (مستطیل گوشه‌گرد) می‌سازیم: در نواری
+     کنار لبه پشتِ شیشه مثل لبهٔ عدسی بزرگ‌نمایی می‌شود و وسط صاف می‌ماند.
+     سافاری و فایرفاکس SVG را در backdrop-filter اجرا نمی‌کنند و همان شیشهٔ کم‌بلورِ
+     بدون خمش را می‌بینند — که طرح پایه است، نه حالت خراب.
+     ============================================================ */
+  const LENS_BAND = 0.16;  // پهنای نوار عدسی نسبت به ضلع کوتاه کارت
+  const LENS_POWER = 1.7;  // تمرکز خمش روی خودِ لبه (۱ = پروفیل دایره‌ای)
+  const LENS_SCALE = 1.5;  // شدت خمش نسبت به پهنای نوار؛ بیشینهٔ جابه‌جایی نصفِ این است
+
+  function lensMap(w, h, r) {
+    const band = Math.max(10, Math.round(Math.min(w, h) * LENS_BAND));
+    const c = document.createElement("canvas");
+    c.width = w;
+    c.height = h;
+    const g = c.getContext("2d");
+    const img = g.createImageData(w, h);
+    const px = img.data;
+    const a = w / 2, b = h / 2;
+    r = Math.min(r, a, b);
+    for (let y = 0; y < h; y++) {
+      for (let x = 0; x < w; x++) {
+        const dx = x + 0.5 - a, dy = y + 0.5 - b;
+        const u = Math.abs(dx), v = Math.abs(dy);
+        const qx = u - (a - r), qy = v - (b - r);
+        let d, nx, ny; // d: فاصله تا لبه از داخل؛ (nx, ny): بردار یکهٔ رو به داخل
+        if (qx > 0 && qy > 0) {
+          const len = Math.hypot(qx, qy) || 1;
+          d = r - len;
+          nx = (-Math.sign(dx) * qx) / len;
+          ny = (-Math.sign(dy) * qy) / len;
+        } else if (a - u < b - v) {
+          d = a - u; nx = -Math.sign(dx); ny = 0;
+        } else {
+          d = b - v; nx = 0; ny = -Math.sign(dy);
+        }
+        const m = d > 0 && d < band ? Math.pow(1 - d / band, LENS_POWER) : 0;
+        const i = (y * w + x) * 4;
+        px[i] = Math.round(128 + 127 * m * nx);
+        px[i + 1] = Math.round(128 + 127 * m * ny);
+        px[i + 2] = 128;
+        px[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    return { url: c.toDataURL("image/png"), scale: Math.round(band * LENS_SCALE) };
+  }
+
+  const isChromium = !!(navigator.userAgentData && navigator.userAgentData.brands.some((b) => b.brand === "Chromium"));
+  const lensOK = isChromium && !isMobile &&
+    window.CSS && CSS.supports("backdrop-filter", "url(#a) blur(1px)") &&
+    !window.matchMedia("(prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active)").matches;
+
+  if (lensOK) {
+    const grid = document.querySelector(".cards-grid");
+    const regular = grid.querySelector(".card:not(.card-wide)");
+    const wide = grid.querySelector(".card-wide");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("aria-hidden", "true");
+    svg.setAttribute("focusable", "false");
+    svg.style.cssText = "position:absolute;width:0;height:0;overflow:hidden;pointer-events:none";
+    const filterMarkup = (id) =>
+      `<filter id="${id}" x="0" y="0" width="1" height="1" color-interpolation-filters="sRGB">` +
+      `<feImage preserveAspectRatio="none" result="map"/>` +
+      `<feDisplacementMap in="SourceGraphic" in2="map" scale="0" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+    svg.innerHTML = filterMarkup("lg-lens-card") + filterMarkup("lg-lens-wide");
+    document.body.appendChild(svg);
+
+    const built = {};
+    const buildLens = (id, el) => {
+      if (!el) return;
+      const w = el.offsetWidth, h = el.offsetHeight; // اندازهٔ چیدمان، بدون چرخش هاور
+      if (!w || !h || built[id] === `${w}x${h}`) return;
+      built[id] = `${w}x${h}`;
+      const map = lensMap(w, h, parseFloat(getComputedStyle(el).borderTopLeftRadius) || 0);
+      const f = document.getElementById(id);
+      f.querySelector("feImage").setAttribute("href", map.url);
+      f.querySelector("feDisplacementMap").setAttribute("scale", String(map.scale));
+    };
+    const refreshLens = () => {
+      buildLens("lg-lens-card", regular);
+      buildLens("lg-lens-wide", wide);
+      grid.classList.add("lg-lens");
+    };
+    refreshLens();
+    let lensFrame = 0;
+    new ResizeObserver(() => {
+      cancelAnimationFrame(lensFrame);
+      lensFrame = requestAnimationFrame(refreshLens);
+    }).observe(grid);
+  }
+
   /* ============================================================
      ستاره‌های دنباله‌دار — بک‌گراند بخش کارت‌ها
      ============================================================ */
@@ -297,8 +401,8 @@
   /* ستارهٔ دنباله‌دار با جهت و اندازهٔ تصادفی */
   function spawnMeteor() {
     const side = Math.floor(Math.random() * 4); // 0=بالا 1=راست 2=چپ 3=بالا-گوشه
-    const speed = 4 + Math.random() * 7;
-    const size = Math.random() < 0.25 ? 2.4 : 1 + Math.random() * 1.2; // گاهی بزرگ
+    const speed = 4 + Math.random() * 6;
+    const size = Math.random() < 0.3 ? 2.6 + Math.random() * 0.8 : 1.2 + Math.random() * 1.2; // گاهی بزرگ
     let x, y, angle;
 
     if (side === 0) { x = Math.random() * canvas._w; y = -20; angle = Math.PI / 2 + (Math.random() - 0.5) * 0.9; }
@@ -313,7 +417,7 @@
       size,
       life: 0,
       maxLife: 60 + Math.random() * 70,
-      trail: 60 + size * 40,
+      trail: 90 + size * 55,
       hue: Math.random() < 0.3 ? 28 : 215, // گاهی نارنجی، بیشتر آبی
     });
   }
@@ -341,10 +445,10 @@
     // ستاره‌های چشمک‌زن
     for (const s of stars) {
       s.tw += s.twSpeed;
-      const a = 0.25 + Math.abs(Math.sin(s.tw)) * 0.6;
+      const a = 0.3 + Math.abs(Math.sin(s.tw)) * 0.65;
       ctx.beginPath();
       ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(210, 226, 255, ${a})`;
+      ctx.fillStyle = `rgba(220, 232, 255, ${a})`;
       ctx.fill();
     }
 
@@ -352,10 +456,12 @@
     if (--nextMeteorIn <= 0 && meteors.length < MAX_METEORS) {
       const burst = isMobile ? 1 : 1 + Math.floor(Math.random() * 3); // ۱ تا ۳ شهاب هم‌زمان
       for (let i = 0; i < burst; i++) spawnMeteor();
-      nextMeteorIn = (isMobile ? 14 : 10) + Math.random() * 30;
+      nextMeteorIn = (isMobile ? 12 : 8) + Math.random() * 26;
     }
 
-    // شهاب‌ها
+    /* شهاب‌ها با ترکیب «lighter» نور را روی سحابی جمع می‌کنند نه اینکه رویش رنگ بکشند؛
+       همین است که از پشت شیشهٔ کارت‌ها هم مثل رگهٔ نور دیده می‌شوند */
+    ctx.globalCompositeOperation = "lighter";
     meteors = meteors.filter((m) => {
       m.x += m.vx;
       m.y += m.vy;
@@ -369,27 +475,39 @@
       const ty = m.y - (m.vy / Math.hypot(m.vx, m.vy)) * m.trail;
 
       const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
-      grad.addColorStop(0, `hsla(${m.hue}, 90%, 80%, ${0.9 * fade})`);
-      grad.addColorStop(1, `hsla(${m.hue}, 90%, 70%, 0)`);
+      grad.addColorStop(0, `hsla(${m.hue}, 95%, 84%, ${fade})`);
+      grad.addColorStop(0.35, `hsla(${m.hue}, 90%, 72%, ${0.45 * fade})`);
+      grad.addColorStop(1, `hsla(${m.hue}, 90%, 62%, 0)`);
 
       ctx.strokeStyle = grad;
-      ctx.lineWidth = m.size;
       ctx.lineCap = "round";
       ctx.beginPath();
       ctx.moveTo(m.x, m.y);
       ctx.lineTo(tx, ty);
+      // هالهٔ پهن و کم‌رنگ دنباله، بعد هستهٔ روشن روی همان مسیر
+      ctx.globalAlpha = 0.22;
+      ctx.lineWidth = m.size * 4;
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      ctx.lineWidth = m.size;
       ctx.stroke();
 
-      // سر درخشان
+      // سر درخشان با هاله
+      const headR = m.size * 6;
+      const glow = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, headR);
+      glow.addColorStop(0, `hsla(${m.hue}, 100%, 96%, ${0.95 * fade})`);
+      glow.addColorStop(0.22, `hsla(${m.hue}, 100%, 80%, ${0.4 * fade})`);
+      glow.addColorStop(1, `hsla(${m.hue}, 100%, 70%, 0)`);
       ctx.beginPath();
-      ctx.arc(m.x, m.y, m.size * 1.1, 0, Math.PI * 2);
-      ctx.fillStyle = `hsla(${m.hue}, 100%, 92%, ${fade})`;
+      ctx.arc(m.x, m.y, headR, 0, Math.PI * 2);
+      ctx.fillStyle = glow;
       ctx.fill();
 
       return m.life < m.maxLife &&
         m.x > -200 && m.x < canvas._w + 200 &&
         m.y > -200 && m.y < canvas._h + 200;
     });
+    ctx.globalCompositeOperation = "source-over";
 
     rafId = requestAnimationFrame(drawFrame);
   }
