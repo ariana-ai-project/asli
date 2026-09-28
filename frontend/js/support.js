@@ -178,7 +178,7 @@
 
   /* ---------- سیم‌کشی ---------- */
   document.addEventListener("click", (e) => {
-    const nav = e.target.closest('.nav-links a[href="#footer"], .footer-support a[data-support]');
+    const nav = e.target.closest('.nav-links a[href="#footer"], [data-support]');
     if (nav) { e.preventDefault(); open(); return; }
     if (!box) return;
     const b = e.target.closest("button");

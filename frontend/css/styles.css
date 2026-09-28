@@ -1285,3 +1285,120 @@ body.is-pre-play { overflow: hidden; }
   }
   .card { opacity: 1; transform: none; }
 }
+
+/* ============================================================
+   داستان اسکرولی — فقط دسکتاپ و تبلت (≥ ۹۰۱px)؛ موبایل دست‌نخورده (js/main.js)
+   قهرمان و بخش کارت‌ها هر دو روی صفحه ثابت (fixed) هستند و فقط «مسیر اسکرول»
+   (.scroll-runway) طول دارد؛ اسکرول کاربر از روی آن، فریم لوگوموشن و موشن‌ها را جلو و
+   عقب می‌برد. نوار بالا، پابرگ و ادامهٔ صفحه حذف شده‌اند: صفحه از کرهٔ زمینِ آخر
+   لوگوموشن پایین‌تر نمی‌رود. مقدارهای حرکت (opacity / translate / transform) را
+   جاوااسکریپت در هر فریم می‌نویسد؛ این‌جا فقط انیمیشن‌های زمان‌محورِ قدیمی خاموش و
+   حالت‌های پایه تعریف می‌شوند.
+   ============================================================ */
+.hero-frames, .scroll-runway, .site-admin { display: none; }
+
+@media (min-width: 901px) {
+  .site-header, .site-footer, .interaction-shield, .hero-video, .departments .nebula { display: none; }
+  /* قفلِ پیش از پخش مال سازوکار قدیمی است؛ این‌جا صفحه از همان اول باید اسکرول بخورد */
+  body.is-pre-play { overflow: hidden auto; }
+  .scroll-runway { display: block; height: var(--runway, 650vh); }
+
+  .hero { position: fixed; inset: 0; height: 100vh; height: 100dvh; z-index: 1; }
+  .hero-frames { display: block; position: absolute; inset: 0; width: 100%; height: 100%; }
+
+  /* اورلی همیشه «دیده‌شدنی» است؛ هر عضوش جدا با اسکرول می‌آید و می‌رود */
+  .hero-overlay { opacity: 1; visibility: visible; transition: none; background: none; }
+  /* سایه‌روشنِ خوانایی فقط همراه با عنوان و تصاویر می‌آید (--rv از جاوااسکریپت)، نه روی خودِ ویدیو */
+  .hero-overlay::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: var(--rv, 0);
+    pointer-events: none;
+    background:
+      radial-gradient(ellipse at 50% 120%, rgba(3, 8, 20, 0.55), transparent 60%),
+      linear-gradient(to bottom, rgba(3, 8, 20, 0.5), transparent 30%, transparent 68%, rgba(3, 8, 20, 0.8));
+  }
+  .hero-title { opacity: 0; transform: none; will-change: transform, opacity; }
+  .hero-overlay.visible .hero-title { animation: title-sheen 7s ease-in-out infinite; }
+  .hero-overlay.visible .hero-lines .line { animation: none; }
+  .hero-overlay .hero-lines .line-flow { animation: flow-move 1.9s linear infinite; opacity: 1; }
+  .hero-overlay .hero-lines .particle { animation: none; opacity: 1; }
+  .hero-overlay.visible .geo-dots .geo-dot { animation: dot-pulse 2.2s ease-in-out infinite; opacity: 1; }
+  .hero-lines .line-flows, .hero-lines .line-particles, .hero-lines .geo-dots { opacity: 0; }
+  .hero-overlay.visible .proj { animation: none; }
+  .proj { opacity: 0; transform: none; transition: none; will-change: transform, opacity; }
+  .hero-overlay.visible .scroll-hint { animation: none; }
+  .scroll-hint { opacity: 0; transition: opacity 0.25s ease, background 0.25s ease; }
+
+  /* بخش کارت‌ها: لایهٔ ثابت روی کرهٔ زمین؛ خودش کلیک نمی‌گیرد، کارت‌ها می‌گیرند */
+  .departments {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    padding: 0;
+    background: none;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+  }
+  /* پردهٔ کارت‌ها: زمین کمی تیره می‌شود تا شیشه و متن سفید روی بخش نارنجیِ روشن خوانا بمانند
+     (اصل اسکیل: زیر شیشهٔ «شفاف» روی رسانهٔ روشن، لایهٔ تیره‌کننده لازم است) */
+  .departments::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    background:
+      radial-gradient(ellipse 70% 60% at 50% 50%, rgba(3, 8, 20, 0.55), rgba(3, 8, 20, 0.35) 70%, rgba(3, 8, 20, 0.2));
+    opacity: var(--hd, 0);
+    pointer-events: none;
+  }
+  /* شهاب‌ها فقط در پردهٔ کارت‌ها (--hd) — بدون ستاره‌های ثابت، چون کرهٔ زمین خودش آسمان دارد */
+  .departments .starfield { opacity: var(--hd, 0); }
+  .departments .container { width: 100%; }
+  .section-head {
+    margin-bottom: clamp(14px, 3vh, 44px);
+    opacity: var(--hd, 0);
+    translate: 0 calc(24px * (1 - var(--hd, 0)));
+  }
+  .cards-grid { gap: clamp(12px, 2.2vh, 20px); }
+  .card {
+    pointer-events: auto;
+    opacity: 0;
+    transform: none;
+    visibility: hidden;
+    min-height: clamp(150px, 21vh, 188px);
+    will-change: translate, opacity;
+  }
+  .card.on-stage { visibility: visible; }
+  /* شناوریِ آرام فقط وقتی کارت سر جایش نشسته؛ انیمیشنِ translate روی مقدار درون‌خطی برنده است */
+  .card.settled { animation: card-float 6.5s ease-in-out infinite; }
+  .card-wide { min-height: clamp(84px, 12vh, 108px); }
+
+  /* دکمهٔ گوشه برای پنجرهٔ وضعیت بخش‌ها (جای پیوند «پشتیبانی» نوار بالا که حذف شد) */
+  .site-admin {
+    display: inline-flex;
+    position: fixed;
+    z-index: 3;
+    bottom: 18px;
+    inset-inline-start: 22px;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 14px;
+    border-radius: 999px;
+    font: inherit;
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--color-fg);
+    background: rgba(6, 14, 34, 0.55);
+    cursor: pointer;
+    opacity: var(--hd, 0);
+    pointer-events: none;
+    transition: background 0.25s ease;
+  }
+  .site-admin.ready { pointer-events: auto; }
+  .site-admin:hover { background: rgba(46, 78, 140, 0.55); }
+  .site-admin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+}

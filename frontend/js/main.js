@@ -1,9 +1,13 @@
 /* ============================================================
-   سامانه هوشمند آریانا — منطق صفحه خانه (نسخهٔ بازطراحی‌شده)
-   ۱) دسکتاپ: ویدیو در فریم صفر متوقف است؛ اولین اسکرول → پخش + قفل تعامل
-      پایان ویدیو → نمایش اورلی (عنوان، خطوط، تصاویر) + آزادسازی قفل
-   ۲) موبایل: ویدیو به‌محض لود صفحه به‌صورت خودکار پخش می‌شود (بدون قفل)
-   ۳) ثبت سرویس‌ورکر برای PWA
+   سامانه هوشمند آریانا — منطق صفحهٔ اول
+   دسکتاپ و تبلت (≥ ۹۰۱px): «داستان اسکرولی» به سبک صفحه‌های اپل — صفحه خودش پایین
+   نمی‌رود؛ اسکرول کاربر (چرخ موس، لمس‌پد، کلید، نوار اسکرول) این‌ها را جلو و عقب می‌برد:
+     ۱) ۱۴۹ فریم لوگوموشن روی بوم (assets/frames)، فریم‌به‌فریم با اسکرول
+     ۲) روی آخرین فریم (کرهٔ زمین): خطوط کشیده می‌شوند و تصاویر پروژه‌ها می‌آیند
+     ۳) با ادامهٔ اسکرول هر تصویر به سمت نزدیک‌ترین لبهٔ صفحه بیرون می‌رود و خطوط محو می‌شوند
+     ۴) کارت‌های شیشه‌ای بخش‌ها هر کدام از گوشه/لبهٔ خودش می‌آید و وسط صفحه می‌نشیند
+   پس‌زمینه در همهٔ این پرده‌ها همان کرهٔ زمین می‌ماند؛ برگشتِ اسکرول همه را عقب می‌برد.
+   موبایل (≤ ۹۰۰px): سازوکار قبلی، دست‌نخورده — ویدیو خودکار پخش می‌شود و صفحه عادی است.
    ============================================================ */
 
 (function () {
@@ -14,193 +18,20 @@
   const body = document.body;
   const navToggle = document.querySelector(".nav-toggle");
   const navLinks = document.querySelector(".nav-links");
+  const cards = Array.from(document.querySelectorAll(".card"));
 
-  let started = false;
-  let finished = false;
-
-  /* در موبایل: پخش خودکار به‌محض ورود؛ در دسکتاپ: رفتار تعاملی قبلی */
   const isMobile = window.matchMedia("(max-width: 900px)").matches;
-
-  /* ---------- حالت اولیه: فریم صفر ---------- */
-  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
-  window.scrollTo(0, 0);
-  video.pause();
-  video.currentTime = 0;
-
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 
-  /* ---------- قفل کامل تعامل ---------- */
-  const blockEvent = (e) => {
-    if (!finished) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
+  /* صفحه همیشه از ابتدای داستان شروع می‌شود */
+  if ("scrollRestoration" in history) history.scrollRestoration = "manual";
+  window.scrollTo(0, 0);
 
-  const lockEvents = ["wheel", "touchmove", "keydown", "click", "mousedown", "contextmenu"];
-
-  function lockInteraction() {
-    body.classList.remove("is-pre-play");
-    body.classList.add("is-locked");
-    lockEvents.forEach((ev) =>
-      window.addEventListener(ev, blockEvent, { passive: false, capture: true })
-    );
-  }
-
-  function unlockInteraction() {
-    finished = true;
-    body.classList.remove("is-locked", "is-pre-play");
-    lockEvents.forEach((ev) =>
-      window.removeEventListener(ev, blockEvent, { capture: true })
-    );
-  }
-
-  /* ---------- پایان لوگوموشن ---------- */
-  function onVideoEnd() {
-    if (finished) return;
-    overlay.classList.add("visible");
-    overlay.setAttribute("aria-hidden", "false");
-    unlockInteraction();
-  }
-
-  /* ---------- شروع پخش با اولین تعامل ---------- */
-  function startMotion() {
-    if (started) return;
-    started = true;
-
-    startEvents.forEach((ev) => window.removeEventListener(ev, startMotion));
-
-    if (reduceMotion) {
-      // برای کاربران حساس به حرکت: بدون پخش، مستقیم به حالت نهایی
-      video.pause();
-      onVideoEnd();
-      return;
-    }
-
-    if (isMobile) {
-      // موبایل: بدون قفل اسکرول — ویدیو بالای صفحه پخش می‌شود و کاربر آزاد است
-      body.classList.remove("is-pre-play");
-    } else {
-      lockInteraction();
-    }
-    tryPlay();
-  }
-
-  function tryPlay() {
-    const p = video.play();
-    if (p !== undefined) {
-      p.catch(() => {
-        // اگر Blob هنوز در حال لود است، پس از اتمامش دوباره پخش می‌شود
-        if (blobState === "failed" || blobState === "done") onVideoEnd();
-        else if (blobState === "none") handleVideoError();
-      });
-    }
-  }
-
-  /* مدیریت کلیک روی منو: اگر ویدیو در حال پخش است یا هنوز شروع نشده، اول آن را به پایان برسانیم */
-  document.querySelectorAll('.nav-links a').forEach(link => {
-    link.addEventListener('click', (e) => {
-      if (!finished) {
-        e.preventDefault();
-        startMotion(); // شروع پخش ویدیو
-        // صبر برای اتمام ویدیو و سپس اسکرول به هدف
-        const targetId = link.getAttribute('href');
-        const checkFinished = setInterval(() => {
-          if (finished) {
-            clearInterval(checkFinished);
-            document.querySelector(targetId).scrollIntoView({ behavior: 'smooth' });
-          }
-        }, 500);
-      }
-    });
-  });
-
-  const startEvents = ["wheel", "touchmove", "scroll"];
-  /* passive: شنوندهٔ غیرpassive روی touchmove مرورگر را وادار می‌کند پیش از
-     هر اسکرول منتظر اجرای هندلر بماند — منبع مستقیم کندی اسکرول در موبایل.
-     این هندلر هیچ‌وقت preventDefault نمی‌کند، پس passive درست است. */
-  startEvents.forEach((ev) =>
-    window.addEventListener(ev, startMotion, { passive: true })
-  );
-
-  video.addEventListener("ended", onVideoEnd);
-
-  /* ---------- موبایل: پخش خودکار به‌محض لود صفحه ---------- */
-  if (isMobile) {
-    // ویژگی autoplay برای سازگاری با iOS Safari به‌صورت پویا اضافه می‌شود
-    try { video.setAttribute("autoplay", ""); } catch (e) { /* بی‌اهمیت */ }
-    video.muted = true;
-
-    const mobilePlay = () => {
-      if (!started) startMotion();
-      else if (!finished) tryPlay();
-    };
-    video.addEventListener("canplay", mobilePlay, { once: true });
-    // اجرای فوری + تلاش مجدد پس از لود کامل (حالت کم‌مصرف iOS)
-    mobilePlay();
-    window.addEventListener("load", mobilePlay, { once: true });
-    // پشتیبان: اگر پخش خودکار توسط مرورگر مسدود شد، اولین لمس دوباره تلاش می‌کند
-    const touchRetry = () => {
-      if (!finished) mobilePlay();
-      window.removeEventListener("touchstart", touchRetry);
-      window.removeEventListener("pointerdown", touchRetry);
-    };
-    window.addEventListener("touchstart", touchRetry, { passive: true });
-    window.addEventListener("pointerdown", touchRetry, { passive: true });
-
-    // تضمین اجرای ویدیو حداکثر ۱ ثانیه پس از لود صفحه، صرف‌نظر از تأخیر رویدادهای canplay/load
-    setTimeout(() => {
-      if (!started) startMotion();
-      else if (!finished) tryPlay();
-    }, 1000);
-  }
-
-  /* اگر لود مستقیم شکست خورد (مثلاً پروتکل file://) → تلاش با Blob
-     اولویت با نسخهٔ باکیفیت webm است تا کیفیت ویدیو افت نکند؛
-     فقط در صورت شکست دوبارهٔ webm، به mp4 (کیفیت پایین‌تر) به‌عنوان آخرین گزینه سوییچ می‌کنیم. */
-  let blobState = "none"; // none | loading | done | failed
-  async function handleVideoError() {
-    if (blobState === "loading") return;
-    if (blobState === "done" || blobState === "failed") { onVideoEnd(); return; }
-    blobState = "loading";
-    try {
-      const res = await fetch("assets/logo-motion.webm");
-      if (!res.ok) throw new Error("webm fetch failed");
-      const blob = await res.blob();
-      video.src = URL.createObjectURL(blob);
-      video.load();
-      blobState = "done";
-      if (started && !finished) video.play().catch(() => onVideoEnd());
-    } catch (_) {
-      // آخرین تلاش: نسخهٔ mp4 (کیفیت پایین‌تر، فقط برای سازگاری حداکثری)
-      try {
-        const res2 = await fetch("assets/logo-motion.mp4");
-        const blob2 = await res2.blob();
-        video.src = URL.createObjectURL(blob2);
-        video.load();
-        blobState = "done";
-        if (started && !finished) video.play().catch(() => onVideoEnd());
-      } catch (__) {
-        blobState = "failed";
-        onVideoEnd();
-      }
-    }
-  }
-  video.addEventListener("error", handleVideoError, true);
-  const sourceEl = video.querySelector("source");
-  if (sourceEl) sourceEl.addEventListener("error", handleVideoError);
-
-  // بررسی نهایی: اگر منبع پشتیبانی نشد (networkState=3) → Blob
-  function checkSource() {
-    if (video.readyState === 0 && video.networkState === 3) handleVideoError();
-  }
-  if (document.readyState === "complete") setTimeout(checkSource, 300);
-  else window.addEventListener("load", () => setTimeout(checkSource, 300));
-
-  // محافظ: اگر متادیتا لود نشد یا ویدیو گیر کرد، حداکثر ۲۰ ثانیه قفل بماند
-  setTimeout(() => {
-    if (started && !finished) onVideoEnd();
-  }, 20000);
+  const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
+  const easeOut = (t) => 1 - Math.pow(1 - t, 3);
+  const easeInOut = (t) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
+  /* پیشرفتِ محلی یک عضو در پنجرهٔ [start, start+width] از پیشرفت کل */
+  const win = (p, start, width) => clamp01((p - start) / width);
 
   /* ---------- منوی موبایل ---------- */
   navToggle.addEventListener("click", () => {
@@ -209,31 +40,10 @@
   });
 
   /* ============================================================
-     کارت‌های بخش‌ها — ورود پلکانی + چرخش سه‌بعدی + درخشش نشانگر
-     ============================================================ */
-  const cards = Array.from(document.querySelectorAll(".card"));
-
-  // تأخیر پلکانی ورود هر کارت
-  cards.forEach((card, i) => {
-    card.style.setProperty("--enter-d", `${(i % 5) * 0.09}s`);
-  });
-
-  const cardObserver = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting) {
-          entry.target.classList.add("in");
-          cardObserver.unobserve(entry.target);
-        }
-      });
-    },
-    { threshold: 0.15 }
-  );
-  cards.forEach((card) => cardObserver.observe(card));
-
-  /* چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر
+     چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر (مشترک)
      فقط با ماوس اجرا می‌شود؛ در لمس، pointermove هنگام اسکرول هم شلیک می‌کند
-     و کارت‌ها را به‌صورت عرضی می‌لرزاند */
+     و کارت‌ها را به‌صورت عرضی می‌لرزاند
+     ============================================================ */
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
 
   if (!reduceMotion && finePointer) {
@@ -262,32 +72,35 @@
   }
 
   /* ============================================================
-     ستاره‌های دنباله‌دار — بک‌گراند بخش کارت‌ها
+     ستاره‌های دنباله‌دار — بومِ بخش کارت‌ها (مشترک)
+     موبایل: ستاره‌های چشمک‌زن + شهاب، وقتی بخش دیده می‌شود.
+     دسکتاپ: فقط شهاب‌ها و فقط در پردهٔ کارت‌ها — پشتِ شیشهٔ کارت‌ها رد می‌شوند؛
+     ستارهٔ ثابت نمی‌کشیم چون پس‌زمینه خودِ کرهٔ زمین است.
      ============================================================ */
-  const canvas = document.getElementById("starfield");
-  const ctx = canvas.getContext("2d");
+  const skyCanvas = document.getElementById("starfield");
+  const sky = skyCanvas.getContext("2d");
   let stars = [];
   let meteors = [];
-  let rafId = null;
+  let skyRaf = null;
 
-  function resizeCanvas() {
-    const rect = canvas.parentElement.getBoundingClientRect();
+  function resizeSky() {
+    const rect = skyCanvas.parentElement.getBoundingClientRect();
     /* روی موبایل با dpr=3 بوم نُه برابر پیکسل دارد و هر فریم باید همان‌قدر
        پاک و دوباره رسم شود؛ ۱٫۵ برای خطوط نازک شهاب‌ها به‌اندازهٔ کافی صاف است */
     const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
-    canvas.width = rect.width * dpr;
-    canvas.height = rect.height * dpr;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    canvas._w = rect.width;
-    canvas._h = rect.height;
+    skyCanvas.width = rect.width * dpr;
+    skyCanvas.height = rect.height * dpr;
+    sky.setTransform(dpr, 0, 0, dpr, 0, 0);
+    skyCanvas._w = rect.width;
+    skyCanvas._h = rect.height;
     initStars();
   }
 
   function initStars() {
-    const count = Math.floor((canvas._w * canvas._h) / (isMobile ? 15000 : 9000));
+    const count = isMobile ? Math.floor((skyCanvas._w * skyCanvas._h) / 15000) : 0;
     stars = Array.from({ length: count }, () => ({
-      x: Math.random() * canvas._w,
-      y: Math.random() * canvas._h,
+      x: Math.random() * skyCanvas._w,
+      y: Math.random() * skyCanvas._h,
       r: Math.random() * 1.3 + 0.2,
       tw: Math.random() * Math.PI * 2,
       twSpeed: 0.008 + Math.random() * 0.02,
@@ -301,10 +114,10 @@
     const size = Math.random() < 0.3 ? 2.6 + Math.random() * 0.8 : 1.2 + Math.random() * 1.2; // گاهی بزرگ
     let x, y, angle;
 
-    if (side === 0) { x = Math.random() * canvas._w; y = -20; angle = Math.PI / 2 + (Math.random() - 0.5) * 0.9; }
-    else if (side === 1) { x = canvas._w + 20; y = Math.random() * canvas._h * 0.6; angle = Math.PI - (Math.random() * 0.5 + 0.2); }
-    else if (side === 2) { x = -20; y = Math.random() * canvas._h * 0.6; angle = Math.random() * 0.5 + 0.2; }
-    else { x = Math.random() * canvas._w; y = -20; angle = Math.PI / 2 + (Math.random() - 0.5) * 1.2; }
+    if (side === 0) { x = Math.random() * skyCanvas._w; y = -20; angle = Math.PI / 2 + (Math.random() - 0.5) * 0.9; }
+    else if (side === 1) { x = skyCanvas._w + 20; y = Math.random() * skyCanvas._h * 0.6; angle = Math.PI - (Math.random() * 0.5 + 0.2); }
+    else if (side === 2) { x = -20; y = Math.random() * skyCanvas._h * 0.6; angle = Math.random() * 0.5 + 0.2; }
+    else { x = Math.random() * skyCanvas._w; y = -20; angle = Math.PI / 2 + (Math.random() - 0.5) * 1.2; }
 
     meteors.push({
       x, y,
@@ -324,28 +137,28 @@
   /* سقف نرخ فریم روی موبایل: ۳۰ فریم بر ثانیه، یعنی نصفِ کار برای چشمی که
      تفاوتش را روی این انیمیشن آرام تشخیص نمی‌دهد */
   const MIN_FRAME_MS = isMobile ? 1000 / 30 : 0;
-  let lastFrameAt = 0;
+  let lastSkyAt = 0;
 
-  function drawFrame(now) {
+  function drawSky(now) {
     if (MIN_FRAME_MS) {
       const t = now || performance.now();
-      if (t - lastFrameAt < MIN_FRAME_MS) {
-        rafId = requestAnimationFrame(drawFrame);
+      if (t - lastSkyAt < MIN_FRAME_MS) {
+        skyRaf = requestAnimationFrame(drawSky);
         return;
       }
-      lastFrameAt = t;
+      lastSkyAt = t;
     }
 
-    ctx.clearRect(0, 0, canvas._w, canvas._h);
+    sky.clearRect(0, 0, skyCanvas._w, skyCanvas._h);
 
     // ستاره‌های چشمک‌زن
     for (const s of stars) {
       s.tw += s.twSpeed;
       const a = 0.3 + Math.abs(Math.sin(s.tw)) * 0.65;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(220, 232, 255, ${a})`;
-      ctx.fill();
+      sky.beginPath();
+      sky.arc(s.x, s.y, s.r, 0, Math.PI * 2);
+      sky.fillStyle = `rgba(220, 232, 255, ${a})`;
+      sky.fill();
     }
 
     // زمان‌بندی پرتراکم شهاب‌ها — دسته‌ای و مکرر برای جلوهٔ کهکشانی پرجنب‌وجوش‌تر
@@ -355,9 +168,9 @@
       nextMeteorIn = (isMobile ? 12 : 8) + Math.random() * 26;
     }
 
-    /* شهاب‌ها با ترکیب «lighter» نور را روی سحابی جمع می‌کنند نه اینکه رویش رنگ بکشند؛
+    /* شهاب‌ها با ترکیب «lighter» نور را روی پس‌زمینه جمع می‌کنند نه اینکه رویش رنگ بکشند؛
        همین است که از پشت شیشهٔ کارت‌ها هم مثل رگهٔ نور دیده می‌شوند */
-    ctx.globalCompositeOperation = "lighter";
+    sky.globalCompositeOperation = "lighter";
     meteors = meteors.filter((m) => {
       m.x += m.vx;
       m.y += m.vy;
@@ -370,77 +183,555 @@
       const tx = m.x - (m.vx / Math.hypot(m.vx, m.vy)) * m.trail;
       const ty = m.y - (m.vy / Math.hypot(m.vx, m.vy)) * m.trail;
 
-      const grad = ctx.createLinearGradient(m.x, m.y, tx, ty);
+      const grad = sky.createLinearGradient(m.x, m.y, tx, ty);
       grad.addColorStop(0, `hsla(${m.hue}, 95%, 84%, ${fade})`);
       grad.addColorStop(0.35, `hsla(${m.hue}, 90%, 72%, ${0.45 * fade})`);
       grad.addColorStop(1, `hsla(${m.hue}, 90%, 62%, 0)`);
 
-      ctx.strokeStyle = grad;
-      ctx.lineCap = "round";
-      ctx.beginPath();
-      ctx.moveTo(m.x, m.y);
-      ctx.lineTo(tx, ty);
+      sky.strokeStyle = grad;
+      sky.lineCap = "round";
+      sky.beginPath();
+      sky.moveTo(m.x, m.y);
+      sky.lineTo(tx, ty);
       // هالهٔ پهن و کم‌رنگ دنباله، بعد هستهٔ روشن روی همان مسیر
-      ctx.globalAlpha = 0.22;
-      ctx.lineWidth = m.size * 4;
-      ctx.stroke();
-      ctx.globalAlpha = 1;
-      ctx.lineWidth = m.size;
-      ctx.stroke();
+      sky.globalAlpha = 0.22;
+      sky.lineWidth = m.size * 4;
+      sky.stroke();
+      sky.globalAlpha = 1;
+      sky.lineWidth = m.size;
+      sky.stroke();
 
       // سر درخشان با هاله
       const headR = m.size * 6;
-      const glow = ctx.createRadialGradient(m.x, m.y, 0, m.x, m.y, headR);
+      const glow = sky.createRadialGradient(m.x, m.y, 0, m.x, m.y, headR);
       glow.addColorStop(0, `hsla(${m.hue}, 100%, 96%, ${0.95 * fade})`);
       glow.addColorStop(0.22, `hsla(${m.hue}, 100%, 80%, ${0.4 * fade})`);
       glow.addColorStop(1, `hsla(${m.hue}, 100%, 70%, 0)`);
-      ctx.beginPath();
-      ctx.arc(m.x, m.y, headR, 0, Math.PI * 2);
-      ctx.fillStyle = glow;
-      ctx.fill();
+      sky.beginPath();
+      sky.arc(m.x, m.y, headR, 0, Math.PI * 2);
+      sky.fillStyle = glow;
+      sky.fill();
 
       return m.life < m.maxLife &&
-        m.x > -200 && m.x < canvas._w + 200 &&
-        m.y > -200 && m.y < canvas._h + 200;
+        m.x > -200 && m.x < skyCanvas._w + 200 &&
+        m.y > -200 && m.y < skyCanvas._h + 200;
     });
-    ctx.globalCompositeOperation = "source-over";
+    sky.globalCompositeOperation = "source-over";
 
-    rafId = requestAnimationFrame(drawFrame);
+    skyRaf = requestAnimationFrame(drawSky);
   }
 
-  /* فقط وقتی بخش کارت‌ها دیده می‌شود انیمیشن اجرا شود */
-  const deptSection = document.getElementById("departments");
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        if (entry.isIntersecting && !reduceMotion) {
-          if (!rafId) drawFrame();
-        } else if (rafId) {
-          cancelAnimationFrame(rafId);
-          rafId = null;
-        }
-      });
-    },
-    { threshold: 0.05 }
-  );
+  function startSky() { if (!skyRaf && !reduceMotion) skyRaf = requestAnimationFrame(drawSky); }
+  function stopSky() { if (skyRaf) { cancelAnimationFrame(skyRaf); skyRaf = null; } }
 
-  resizeCanvas();
-  observer.observe(deptSection);
+  resizeSky();
 
   /* در موبایل، پنهان/ظاهرشدن نوار آدرس هنگام اسکرول پشت‌سرهم resize می‌فرستد؛
      هر بار بوم از نو ساخته و ستاره‌ها بازتولید می‌شوند. تغییرِ فقط‌ارتفاع را
      نادیده می‌گیریم و بقیه را با تأخیر کوتاه جمع می‌بندیم. */
-  let lastCanvasWidth = window.innerWidth;
-  let resizeTimer = null;
+  let lastSkyWidth = window.innerWidth;
+  let skyResizeTimer = null;
 
   window.addEventListener("resize", () => {
-    if (isMobile && Math.abs(window.innerWidth - lastCanvasWidth) < 2) return;
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      resizeCanvas();
-      lastCanvasWidth = window.innerWidth;
+    if (isMobile && Math.abs(window.innerWidth - lastSkyWidth) < 2) return;
+    clearTimeout(skyResizeTimer);
+    skyResizeTimer = setTimeout(() => {
+      resizeSky();
+      lastSkyWidth = window.innerWidth;
     }, 200);
   }, { passive: true });
+
+  if (isMobile) mobileMotion();
+  else scrollStory();
+
+  /* ============================================================
+     موبایل — سازوکار قبلی: ویدیو به‌محض لود پخش می‌شود (بدون قفل)، پایانش اورلی را
+     نشان می‌دهد، کارت‌ها با رسیدن به دید وارد می‌شوند، شهاب‌ها وقتی بخش دیده می‌شود.
+     ============================================================ */
+  function mobileMotion() {
+    let started = false;
+    let finished = false;
+
+    /* ---------- حالت اولیه: فریم صفر ---------- */
+    video.preload = "auto";
+    video.pause();
+    video.currentTime = 0;
+
+    /* ---------- قفل کامل تعامل ---------- */
+    const blockEvent = (e) => {
+      if (!finished) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+    };
+
+    const lockEvents = ["wheel", "touchmove", "keydown", "click", "mousedown", "contextmenu"];
+
+    function unlockInteraction() {
+      finished = true;
+      body.classList.remove("is-locked", "is-pre-play");
+      lockEvents.forEach((ev) =>
+        window.removeEventListener(ev, blockEvent, { capture: true })
+      );
+    }
+
+    /* ---------- پایان لوگوموشن ---------- */
+    function onVideoEnd() {
+      if (finished) return;
+      overlay.classList.add("visible");
+      overlay.setAttribute("aria-hidden", "false");
+      unlockInteraction();
+    }
+
+    /* ---------- شروع پخش با اولین تعامل ---------- */
+    function startMotion() {
+      if (started) return;
+      started = true;
+
+      startEvents.forEach((ev) => window.removeEventListener(ev, startMotion));
+
+      if (reduceMotion) {
+        // برای کاربران حساس به حرکت: بدون پخش، مستقیم به حالت نهایی
+        video.pause();
+        onVideoEnd();
+        return;
+      }
+
+      // موبایل: بدون قفل اسکرول — ویدیو بالای صفحه پخش می‌شود و کاربر آزاد است
+      body.classList.remove("is-pre-play");
+      tryPlay();
+    }
+
+    function tryPlay() {
+      const p = video.play();
+      if (p !== undefined) {
+        p.catch(() => {
+          // اگر Blob هنوز در حال لود است، پس از اتمامش دوباره پخش می‌شود
+          if (blobState === "failed" || blobState === "done") onVideoEnd();
+          else if (blobState === "none") handleVideoError();
+        });
+      }
+    }
+
+    /* مدیریت کلیک روی منو: اگر ویدیو در حال پخش است یا هنوز شروع نشده، اول آن را به پایان برسانیم */
+    document.querySelectorAll(".nav-links a").forEach((link) => {
+      link.addEventListener("click", (e) => {
+        if (!finished) {
+          e.preventDefault();
+          startMotion(); // شروع پخش ویدیو
+          // صبر برای اتمام ویدیو و سپس اسکرول به هدف
+          const targetId = link.getAttribute("href");
+          const checkFinished = setInterval(() => {
+            if (finished) {
+              clearInterval(checkFinished);
+              document.querySelector(targetId).scrollIntoView({ behavior: "smooth" });
+            }
+          }, 500);
+        }
+      });
+    });
+
+    const startEvents = ["wheel", "touchmove", "scroll"];
+    /* passive: شنوندهٔ غیرpassive روی touchmove مرورگر را وادار می‌کند پیش از
+       هر اسکرول منتظر اجرای هندلر بماند — منبع مستقیم کندی اسکرول در موبایل.
+       این هندلر هیچ‌وقت preventDefault نمی‌کند، پس passive درست است. */
+    startEvents.forEach((ev) =>
+      window.addEventListener(ev, startMotion, { passive: true })
+    );
+
+    video.addEventListener("ended", onVideoEnd);
+
+    /* ---------- پخش خودکار به‌محض لود صفحه ---------- */
+    // ویژگی autoplay برای سازگاری با iOS Safari به‌صورت پویا اضافه می‌شود
+    try { video.setAttribute("autoplay", ""); } catch (e) { /* بی‌اهمیت */ }
+    video.muted = true;
+
+    const mobilePlay = () => {
+      if (!started) startMotion();
+      else if (!finished) tryPlay();
+    };
+    video.addEventListener("canplay", mobilePlay, { once: true });
+    // اجرای فوری + تلاش مجدد پس از لود کامل (حالت کم‌مصرف iOS)
+    mobilePlay();
+    window.addEventListener("load", mobilePlay, { once: true });
+    // پشتیبان: اگر پخش خودکار توسط مرورگر مسدود شد، اولین لمس دوباره تلاش می‌کند
+    const touchRetry = () => {
+      if (!finished) mobilePlay();
+      window.removeEventListener("touchstart", touchRetry);
+      window.removeEventListener("pointerdown", touchRetry);
+    };
+    window.addEventListener("touchstart", touchRetry, { passive: true });
+    window.addEventListener("pointerdown", touchRetry, { passive: true });
+
+    // تضمین اجرای ویدیو حداکثر ۱ ثانیه پس از لود صفحه، صرف‌نظر از تأخیر رویدادهای canplay/load
+    setTimeout(() => {
+      if (!started) startMotion();
+      else if (!finished) tryPlay();
+    }, 1000);
+
+    /* اگر لود مستقیم شکست خورد (مثلاً پروتکل file://) → تلاش با Blob
+       اولویت با نسخهٔ باکیفیت webm است تا کیفیت ویدیو افت نکند؛
+       فقط در صورت شکست دوبارهٔ webm، به mp4 (کیفیت پایین‌تر) به‌عنوان آخرین گزینه سوییچ می‌کنیم. */
+    let blobState = "none"; // none | loading | done | failed
+    async function handleVideoError() {
+      if (blobState === "loading") return;
+      if (blobState === "done" || blobState === "failed") { onVideoEnd(); return; }
+      blobState = "loading";
+      try {
+        const res = await fetch("assets/logo-motion.webm");
+        if (!res.ok) throw new Error("webm fetch failed");
+        const blob = await res.blob();
+        video.src = URL.createObjectURL(blob);
+        video.load();
+        blobState = "done";
+        if (started && !finished) video.play().catch(() => onVideoEnd());
+      } catch (_) {
+        // آخرین تلاش: نسخهٔ mp4 (کیفیت پایین‌تر، فقط برای سازگاری حداکثری)
+        try {
+          const res2 = await fetch("assets/logo-motion.mp4");
+          const blob2 = await res2.blob();
+          video.src = URL.createObjectURL(blob2);
+          video.load();
+          blobState = "done";
+          if (started && !finished) video.play().catch(() => onVideoEnd());
+        } catch (__) {
+          blobState = "failed";
+          onVideoEnd();
+        }
+      }
+    }
+    video.addEventListener("error", handleVideoError, true);
+    const sourceEl = video.querySelector("source");
+    if (sourceEl) sourceEl.addEventListener("error", handleVideoError);
+
+    // بررسی نهایی: اگر منبع پشتیبانی نشد (networkState=3) → Blob
+    function checkSource() {
+      if (video.readyState === 0 && video.networkState === 3) handleVideoError();
+    }
+    if (document.readyState === "complete") setTimeout(checkSource, 300);
+    else window.addEventListener("load", () => setTimeout(checkSource, 300));
+
+    // محافظ: اگر متادیتا لود نشد یا ویدیو گیر کرد، حداکثر ۲۰ ثانیه قفل بماند
+    setTimeout(() => {
+      if (started && !finished) onVideoEnd();
+    }, 20000);
+
+    /* ---------- کارت‌ها: ورود پلکانی با رسیدن به دید ---------- */
+    cards.forEach((card, i) => {
+      card.style.setProperty("--enter-d", `${(i % 5) * 0.09}s`);
+    });
+
+    const cardObserver = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("in");
+            cardObserver.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.15 }
+    );
+    cards.forEach((card) => cardObserver.observe(card));
+
+    /* فقط وقتی بخش کارت‌ها دیده می‌شود انیمیشن آسمان اجرا شود */
+    const deptSection = document.getElementById("departments");
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) startSky();
+          else stopSky();
+        });
+      },
+      { threshold: 0.05 }
+    );
+    observer.observe(deptSection);
+  }
+
+  /* ============================================================
+     دسکتاپ و تبلت — داستان اسکرولی
+     مسیر اسکرول (px) بر حسب ارتفاع پنجره تقسیم می‌شود:
+       video → reveal → hold → exit → cards → tail
+     پیشرفتِ هر پرده از جای اسکرول درمی‌آید و روی عنصرها نوشته می‌شود؛ هیچ چیز
+     زمان‌محور نیست، پس عقب‌رفتن اسکرول همه‌چیز را دقیقاً برمی‌گرداند.
+     ============================================================ */
+  function scrollStory() {
+    body.classList.remove("is-pre-play");
+    overlay.classList.add("visible");
+    overlay.setAttribute("aria-hidden", "false");
+
+    const frameCanvas = document.getElementById("frameCanvas");
+    const fctx = frameCanvas.getContext("2d");
+    const title = overlay.querySelector(".hero-title");
+    const heroLines = overlay.querySelector(".hero-lines");
+    const lines = Array.from(overlay.querySelectorAll(".line-paths .line"));
+    const flows = overlay.querySelector(".line-flows");
+    const particles = overlay.querySelector(".line-particles");
+    const dots = overlay.querySelector(".geo-dots");
+    const figs = Array.from(overlay.querySelectorAll(".proj"));
+    const hint = overlay.querySelector(".scroll-hint");
+    const admin = document.querySelector(".site-admin");
+    const root = document.documentElement;
+
+    /* ---------- فریم‌های لوگوموشن ----------
+       ۱۴۹ فریم WebP، ۱۶۰۰×۹۰۰، هر کدام ~۶۵KB (۹٫۴MB کل). ترتیب بارگذاری درشت‌به‌ریز است:
+       اول فریم ۰ و آخر، بعد هر ۸تا، هر ۴تا، هر ۲تا، بعد بقیه — پس از همان ثانیه‌های اول
+       اسکرول جواب می‌دهد و با رسیدن هر فریم، ریزتر می‌شود. روی اتصال کند یا «صرفه‌جویی داده»
+       فقط نیمی از فریم‌ها (هر ۲تا) بارگذاری می‌شود. */
+    const FRAMES = 149;
+    const frameUrl = (i) => `assets/frames/logo-${String(i).padStart(3, "0")}.webp`;
+    const imgs = new Array(FRAMES).fill(null);
+    const order = [];
+    {
+      const seen = new Set();
+      const push = (i) => { if (!seen.has(i)) { seen.add(i); order.push(i); } };
+      push(0); push(FRAMES - 1);
+      for (const step of [8, 4, 2, 1]) for (let i = 0; i < FRAMES; i += step) push(i);
+    }
+    /* روی 3g هم همهٔ فریم‌ها می‌آیند (فریم‌های فرد آخرِ صف‌اند و هر وقت رسیدند به کار می‌روند)؛
+       فقط با «صرفه‌جویی داده» یا 2g نیمی از فریم‌ها بارگذاری نمی‌شود */
+    const conn = navigator.connection;
+    const slowNet = !!(conn && (conn.saveData || /2g$/.test(conn.effectiveType || "")));
+    let cursor = 0, inflight = 0;
+
+    function pump() {
+      while (inflight < 6 && cursor < order.length) {
+        const i = order[cursor++];
+        if (slowNet && i % 2 === 1) continue;
+        const im = new Image();
+        im.decoding = "async";
+        inflight++;
+        im.onload = () => { imgs[i] = im; inflight--; if (nearestLoaded(wantFrame) !== drawnFrame) schedule(); pump(); };
+        im.onerror = () => { inflight--; pump(); };
+        im.src = frameUrl(i);
+      }
+    }
+
+    function nearestLoaded(i) {
+      if (imgs[i]) return i;
+      for (let d = 1; d < FRAMES; d++) {
+        if (i - d >= 0 && imgs[i - d]) return i - d;
+        if (i + d < FRAMES && imgs[i + d]) return i + d;
+      }
+      return -1;
+    }
+
+    let cw = 0, ch = 0, wantFrame = 0, drawnFrame = -1;
+
+    function sizeCanvas() {
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      cw = window.innerWidth;
+      ch = window.innerHeight;
+      frameCanvas.width = Math.round(cw * dpr);
+      frameCanvas.height = Math.round(ch * dpr);
+      fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      drawnFrame = -1;
+    }
+
+    /* مثل object-fit: cover ویدیوی قبلی، تا نقاط جغرافیایی خطوط (کالیبره روی همان قاب) سر جایشان بمانند */
+    function paintFrame(i) {
+      const im = imgs[i];
+      if (!im) return;
+      const s = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
+      const w = im.naturalWidth * s, h = im.naturalHeight * s;
+      fctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
+      drawnFrame = i;
+      // فریم‌های همسایه را از قبل رمزگشایی کن تا اسکرول بعدی بی‌مکث باشد
+      for (let d = 1; d <= 4; d++) {
+        for (const j of [i + d, i - d]) {
+          const m = imgs[j];
+          if (m && m.decode) m.decode().catch(() => {});
+        }
+      }
+    }
+
+    /* ---------- مسیر اسکرول ---------- */
+    let seg = null;
+
+    function layout() {
+      const H = window.innerHeight;
+      seg = { video: 2.8 * H, reveal: 0.55 * H, hold: 0.2 * H, exit: 0.75 * H, cards: 1.05 * H, tail: 0.15 * H };
+      seg.total = seg.video + seg.reveal + seg.hold + seg.exit + seg.cards + seg.tail;
+      /* ارتفاع مسیر = کل داستان + یک پنجره، تا در تهِ اسکرول دقیقاً به پایان داستان برسیم */
+      root.style.setProperty("--runway", reduceMotion ? "100vh" : `${Math.round(seg.total + H)}px`);
+    }
+
+    /* ---------- هندسه: هر تصویر و هر کارت به کدام سمت بیرون می‌رود / از کدام سمت می‌آید ----------
+       جهت = از مرکز صفحه به مرکز عنصر؛ فاصله = آن‌قدر که عنصر کاملاً از قاب بیرون برود */
+    let cardGeo = [], figGeo = [];
+
+    function measure() {
+      const vw = window.innerWidth, vh = window.innerHeight, cx = vw / 2, cy = vh / 2;
+      const vec = (r) => {
+        let dx = r.left + r.width / 2 - cx, dy = r.top + r.height / 2 - cy;
+        let len = Math.hypot(dx, dy);
+        if (len < 1) { dx = 0; dy = 1; len = 1; }
+        dx /= len; dy /= len;
+        const tx = dx > 1e-6 ? (vw - r.left) / dx : dx < -1e-6 ? r.right / -dx : Infinity;
+        const ty = dy > 1e-6 ? (vh - r.top) / dy : dy < -1e-6 ? r.bottom / -dy : Infinity;
+        const t = Math.min(tx, ty) + 80;
+        return { x: dx * t, y: dy * t, dist: len };
+      };
+      cards.forEach((c) => { c.style.translate = "0px 0px"; c.classList.remove("settled"); });
+      cardGeo = cards.map((c) => vec(c.getBoundingClientRect()));
+
+      figs.forEach((f) => { f.style.transform = "none"; });
+      const fg = figs.map((f) => vec(f.getBoundingClientRect()));
+      /* ورود: همان ترتیب قدیمیِ --d (نزدیک‌ترها زودتر)؛ خروج: دورترها از مرکز زودتر می‌روند */
+      figs.forEach((f, i) => {
+        const d = parseFloat(getComputedStyle(f).getPropertyValue("--d")) || 0;
+        fg[i].inRank = clamp01((d - 0.15) / 0.35);
+      });
+      fg.map((g, i) => i).sort((a, b) => fg[b].dist - fg[a].dist)
+        .forEach((idx, rank) => { fg[idx].outRank = rank / Math.max(1, figs.length - 1); });
+      figGeo = fg;
+    }
+
+    /* ---------- رسم یک وضعیت از داستان (pos: پیکسلِ اسکرول در مسیر) ---------- */
+    const cardState = cards.map(() => ({ on: false, settled: false }));
+
+    function render(pos) {
+      const H = window.innerHeight;
+
+      // ۱) لوگوموشن: فریم از روی جای اسکرول
+      const pv = clamp01(pos / seg.video);
+      wantFrame = Math.round(pv * (FRAMES - 1));
+      const nf = nearestLoaded(wantFrame);
+      if (nf >= 0 && nf !== drawnFrame) paintFrame(nf);
+
+      // پیشرفتِ پرده‌های بعدی
+      const rv = clamp01((pos - seg.video) / seg.reveal);
+      const ex = clamp01((pos - seg.video - seg.reveal - seg.hold) / seg.exit);
+      const cd = clamp01((pos - seg.video - seg.reveal - seg.hold - seg.exit) / seg.cards);
+
+      overlay.style.setProperty("--rv", rv.toFixed(3));
+
+      // ۲) عنوان: با پرده می‌آید، در خروج به بالا می‌رود
+      const tv = easeOut(rv), tx = easeInOut(ex);
+      title.style.opacity = (tv * (1 - tx)).toFixed(3);
+      title.style.transform = `translateY(${(24 * (1 - tv) - 0.45 * H * tx).toFixed(1)}px)`;
+
+      // خطوط: کشیده‌شدن پلکانی؛ جریان نور، ذره‌ها و نقطه‌ها بعد از خط؛ همه در خروج محو
+      heroLines.style.opacity = (1 - ex).toFixed(3);
+      lines.forEach((ln, i) => {
+        const l = easeInOut(win(rv, (i / (lines.length - 1)) * 0.4, 0.6));
+        ln.style.strokeDashoffset = `${(520 * (1 - l)).toFixed(1)}px`;
+      });
+      const late = easeOut(win(rv, 0.55, 0.45));
+      flows.style.opacity = (0.95 * late).toFixed(3);
+      particles.style.opacity = late.toFixed(3);
+      dots.style.opacity = late.toFixed(3);
+
+      // ۳) تصاویر پروژه‌ها: ورود (بزرگ‌شدن از ۰٫۸۵) و خروج به سمت لبهٔ خودشان
+      figs.forEach((f, i) => {
+        const g = figGeo[i];
+        if (!g) return;
+        const r = easeOut(win(rv, g.inRank * 0.45, 0.55));
+        const e = easeInOut(win(ex, g.outRank * 0.4, 0.6));
+        const s = 0.85 + 0.15 * r + 0.12 * e;
+        f.style.transform = `translate(${(g.x * e).toFixed(1)}px, ${(g.y * e).toFixed(1)}px) scale(${s.toFixed(3)})`;
+        f.style.opacity = (r * (1 - clamp01((e - 0.7) / 0.3))).toFixed(3);
+      });
+
+      // اشارهٔ اسکرول فقط در ابتدای داستان
+      const hv = 1 - clamp01(pos / (0.2 * H));
+      hint.style.opacity = hv.toFixed(3);
+      hint.style.pointerEvents = hv > 0.1 ? "auto" : "none";
+
+      // ۴) کارت‌ها: سرتیتر، شهاب‌ها و دکمهٔ گوشه با --hd؛ هر کارت از سمت خودش
+      const hd = easeOut(clamp01(cd / 0.35));
+      root.style.setProperty("--hd", hd.toFixed(3));
+      admin.classList.toggle("ready", hd > 0.5);
+      if (hd > 0.02) startSky(); else stopSky();
+
+      cards.forEach((c, i) => {
+        const g = cardGeo[i];
+        if (!g) return;
+        const k = easeOut(win(cd, (i / (cards.length - 1)) * 0.5, 0.5));
+        const st = cardState[i];
+        const on = k > 0, settled = k >= 1;
+        if (on !== st.on) { c.classList.toggle("on-stage", on); st.on = on; }
+        if (settled !== st.settled) { c.classList.toggle("settled", settled); st.settled = settled; }
+        c.style.translate = settled ? "0px 0px" : `${(g.x * (1 - k)).toFixed(1)}px ${(g.y * (1 - k)).toFixed(1)}px`;
+        c.style.opacity = k.toFixed(3);
+      });
+    }
+
+    /* ---------- اسکرول → داستان، با نرمی کوتاه ----------
+       هر پلهٔ چرخ موس چند فریم جلو می‌رود؛ نرم‌کردنِ ۲۲٪ در هر فریم، پله را به حرکتی
+       پیوسته تبدیل می‌کند و در کمتر از نیم‌ثانیه به جای واقعی اسکرول می‌رسد. */
+    let target = 0, current = 0, raf = 0;
+
+    function tick() {
+      const d = target - current;
+      if (Math.abs(d) < 0.4) {
+        current = target;
+        render(current);
+        raf = 0;
+        return;
+      }
+      current += d * 0.22;
+      render(current);
+      raf = requestAnimationFrame(tick);
+    }
+
+    function schedule() { if (!raf) raf = requestAnimationFrame(tick); }
+
+    function onScroll() {
+      target = reduceMotion ? seg.total : Math.min(Math.max(window.scrollY, 0), seg.total);
+      schedule();
+    }
+
+    /* کلیک روی اشارهٔ اسکرول: پخش خودکار کل داستان در ~۹ ثانیه؛ هر حرکت کاربر آن را قطع می‌کند */
+    let autoRaf = 0;
+    const stopEvents = ["wheel", "touchstart", "keydown", "mousedown"];
+    function stopAuto() {
+      if (autoRaf) cancelAnimationFrame(autoRaf);
+      autoRaf = 0;
+      stopEvents.forEach((ev) => window.removeEventListener(ev, stopAuto));
+    }
+    hint.addEventListener("click", (e) => {
+      e.preventDefault();
+      stopAuto();
+      const from = window.scrollY, to = seg.total, dur = 9000, t0 = performance.now();
+      stopEvents.forEach((ev) => window.addEventListener(ev, stopAuto, { passive: true }));
+      const step = (now) => {
+        const t = clamp01((now - t0) / dur);
+        window.scrollTo({ top: from + (to - from) * easeInOut(t), behavior: "instant" });
+        if (t < 1) autoRaf = requestAnimationFrame(step);
+        else stopAuto();
+      };
+      autoRaf = requestAnimationFrame(step);
+    });
+
+    /* ---------- راه‌اندازی ---------- */
+    layout();
+    sizeCanvas();
+    measure();
+    if (reduceMotion) current = target = seg.total;
+    render(current);
+    pump();
+
+    window.addEventListener("scroll", onScroll, { passive: true });
+    onScroll();
+
+    /* فونت که برسد، جای نهایی کارت‌ها و تصاویر کمی جابه‌جا می‌شود */
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(() => { measure(); render(current); });
+    }
+
+    let storyResize = null;
+    window.addEventListener("resize", () => {
+      clearTimeout(storyResize);
+      storyResize = setTimeout(() => {
+        layout();
+        sizeCanvas();
+        measure();
+        onScroll();
+        render(current);
+      }, 150);
+    }, { passive: true });
+  }
 
   /* ============================================================
      ثبت سرویس‌ورکر PWA — فقط روی http/https (نه file://)
