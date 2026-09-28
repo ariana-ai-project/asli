@@ -6,22 +6,27 @@
 /* این نسخه را با هر تغییرِ قابل‌توجه در css/js/index.html افزایش دهید —
    مرورگر فقط وقتی sw.js را کلمه‌به‌کلمه تغییر کرده ببیند مرحلهٔ نصب و
    پیش‌کشِ دوباره را اجرا می‌کند؛ بدون این، کاربرانی که قبلاً سایت را
-   باز کرده‌اند تا مدت‌ها نسخهٔ کش‌شدهٔ قدیمی را می‌بینند */
-const CACHE_NAME = "ariana-pwa-v7";
+   باز کرده‌اند تا مدت‌ها نسخهٔ کش‌شدهٔ قدیمی را می‌بینند.
+   هم‌زمان «?v=» نشانی‌های css/js را در index.html و tamin-poshtibani/index.html هم بالا ببرید:
+   ناوبری شبکه‌اول است ولی دارایی‌ها کش‌اول، و بدون نشانی تازه، بازدیدکنندهٔ قبلی اولین بار
+   HTML تازه را با main.js کهنهٔ کش‌شده می‌گرفت (صفحهٔ سیاه تا رفرش بعدی). */
+const CACHE_NAME = "ariana-pwa-v8";
 
-/* پوستهٔ اولیهٔ برنامه — بدون ویدیوها (ویدیوها در اولین درخواست کش می‌شوند) */
+/* پوستهٔ اولیهٔ برنامه — از فریم‌های لوگوموشن فقط اولی (بقیه در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
   "./",
   "./index.html",
   "./manifest.json",
-  "./css/styles.css",
-  "./js/main.js",
-  "./js/liquid-glass.js",
+  "./css/styles.css?v=8",
+  "./js/main.js?v=8",
+  "./js/liquid-glass.js?v=8",
+  "./js/support.js?v=8",
   "./assets/logo-new.jpg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
   "./assets/frames/1600/logo-000.webp",
+  "./assets/frames/720/logo-000.webp",
   "./assets/1.jpg",
   "./assets/2.jpg",
   "./assets/3.jpg",

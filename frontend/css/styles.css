@@ -495,108 +495,6 @@ body.is-pre-play { overflow: hidden; }
 .p7 { left: 38%;  top: 70%; }   /* مقاوم‌سازی پل‌های بافق-بندرعباس */
 
 /* ============================================================
-   چیدمان موبایل — ویدیو در بالای صفحه (غیرتمام‌صفحه)
-   و محتوا (عنوان + تصاویر پروژه‌ها) در جریان عادی صفحه زیر آن
-   ============================================================ */
-@media (max-width: 900px) {
-  .hero {
-    height: auto;
-    min-height: 0;
-    padding-top: 58px; /* جای ناوبری ثابت (کوچک‌شده در موبایل) */
-  }
-
-  /* ویدیو: بلوک عادی در بالای صفحه با نسبت ۱۶:۹ — نه تمام‌صفحه */
-  .hero-video {
-    position: relative;
-    inset: auto;
-    width: 100%;
-    height: auto;
-    aspect-ratio: 16 / 9;
-    object-fit: cover;
-    background: var(--color-bg);
-    box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
-  }
-
-  /* اورلی: در جریان عادی سند، زیر ویدیو (بدون تصاویر پروژه در موبایل).
-     بدون padding و بدون فرزندِ درجریان، ارتفاعش صفر می‌شود تا «بخش‌های سامانه»
-     بلافاصله بعد از ویدیو بیاید — عنوان با position:absolute روی ویدیو می‌ماند. */
-  .hero-overlay {
-    position: static;
-    background: none;
-    display: grid;
-    grid-template-columns: 1fr;
-    gap: 0;
-    align-content: start;
-    padding: 0;
-  }
-
-  /* تصاویر پروژه‌ها در موبایل نمایش داده نمی‌شوند */
-  .proj { display: none; }
-
-  /* عنوان: وسط ویدیو. ویدیو با نسبت ۱۶:۹ از زیر ناوبری شروع می‌شود،
-     پس مرکز عمودی‌اش می‌شود ۵۸px + نصفِ ۵۶٫۲۵vw */
-  .hero-title {
-    position: absolute;
-    top: calc(58px + 28.125vw);
-    bottom: auto;
-    inset-inline: 0;
-    z-index: 5;
-    font-size: clamp(1.7rem, 8vw, 2.8rem);
-    margin: 0;
-    padding: 10px 16px;
-    animation: none;
-    opacity: 1;
-    transform: translateY(-50%);
-    text-shadow: 0 2px 22px rgba(0, 0, 0, 0.95), 0 0 46px rgba(3, 8, 20, 1);
-    /* رنگ سفید خالص — قانون پایه گرادیانِ متن (background-clip: text +
-       color: transparent) را برای دسکتاپ تعریف کرده که اینجا خنثی می‌شود */
-    background: none;
-    -webkit-background-clip: initial;
-    background-clip: initial;
-    color: #ffffff;
-  }
-
-  /* نوار تیرهٔ متقارن پشت عنوان — لوگوی شرکت هم وسط ویدیو است و بدون این
-     نوار، متن و لوگو روی هم می‌افتند و هر دو ناخوانا می‌شوند */
-  .hero-title::before {
-    content: "";
-    position: absolute;
-    inset: -28px 0;
-    z-index: -1;
-    background: linear-gradient(
-      180deg,
-      rgba(3, 8, 20, 0),
-      rgba(3, 8, 20, 0.72) 34%,
-      rgba(3, 8, 20, 0.72) 66%,
-      rgba(3, 8, 20, 0)
-    );
-  }
-
-  .hero-lines, .geo-dots, .line-particles { display: none; }
-
-  /* نوار شیشه‌ای ناوبری: کوچک‌تر در موبایل */
-  .site-header { padding: 6px 10px; }
-
-  .nav-pill { padding: 5px 10px; gap: 8px; }
-
-  .logo-badge { width: 32px; height: 32px; }
-
-  .logo-badge img { border-width: 1.5px; }
-
-  /* دکمهٔ منو: ۳۲px با خط‌های ۱٫۳ پیکسلی روی گوشی به یک تار محو تبدیل می‌شد
-     و هدف لمسی هم کوچک بود */
-  .nav-toggle { width: 38px; height: 38px; padding: 10px; gap: 4px; }
-
-  .nav-toggle span { height: 2px; }
-
-  /* کارت‌ها: ۴تا کنار هم */
-  .cards-grid {
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-  }
-}
-
-/* ============================================================
    بخش‌های سامانه — آسمان سحابی (روشن‌تر از قهرمان) + کارت‌های «شیشهٔ مایع»
 
    لایه‌ها از پشت به جلو:
@@ -1243,7 +1141,7 @@ body.is-pre-play { overflow: hidden; }
 }
 
 /* ============================================================
-   داستان اسکرولی — فقط دسکتاپ و تبلت (≥ ۹۰۱px)؛ موبایل دست‌نخورده (js/main.js)
+   داستان اسکرولی — همهٔ دستگاه‌ها (js/main.js)؛ لایهٔ «فشرده» برای گوشی پایین‌تر
    قهرمان و بخش کارت‌ها هر دو روی صفحه ثابت (fixed) هستند و فقط «مسیر اسکرول»
    (.scroll-runway) طول دارد؛ اسکرول کاربر از روی آن، فریم لوگوموشن و موشن‌ها را جلو و
    عقب می‌برد. نوار بالا، پابرگ و ادامهٔ صفحه حذف شده‌اند: صفحه از کرهٔ زمینِ آخر
@@ -1253,7 +1151,7 @@ body.is-pre-play { overflow: hidden; }
    ============================================================ */
 .hero-frames, .scroll-runway, .site-admin { display: none; }
 
-@media (min-width: 901px) {
+@media all {
   .site-header, .site-footer, .interaction-shield, .hero-video, .departments .nebula { display: none; }
   /* قفلِ پیش از پخش مال سازوکار قدیمی است؛ این‌جا صفحه از همان اول باید اسکرول بخورد */
   body.is-pre-play { overflow: hidden auto; }
@@ -1357,4 +1255,146 @@ body.is-pre-play { overflow: hidden; }
   .site-admin.ready { pointer-events: auto; }
   .site-admin:hover { background: rgba(46, 78, 140, 0.55); }
   .site-admin:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 2px; }
+}
+
+/* ============================================================
+   داستان اسکرولی در گوشی و تبلتِ عمودی (≤ ۹۰۰px) — «فشرده»
+   فریم‌های عمودی ۹:۱۶ (js/main.js)، بدون شهاب و بدون تصاویر و خطوط پروژه‌ها.
+   کارت‌ها: کاشی‌های مربعی شیشه‌ای با نام زیرشان، به الگوی صفحهٔ مرجعِ صاحب محصول؛
+   الگو چهارستونه است ولی ۹ کارت در چهار ستون یکی را تنها می‌گذارد — شبکهٔ ۳×۳ قرینهٔ
+   کامل است و با تعداد کارت‌ها جور.
+   ============================================================ */
+@media (max-width: 900px) {
+  /* قهرمان به قدِ بلندترین پنجره (نوار آدرس جمع‌شده) تا با جمع و باز شدن نوار آدرس
+     نوار خالی زیر تصویر نیفتد؛ پردهٔ کارت‌ها به قدِ کوتاه‌ترین، تا همیشه کامل دیده شود */
+  .hero { height: 100vh; height: 100lvh; }
+  .departments { bottom: auto; height: 100vh; height: 100svh; }
+  .departments .starfield, .hero-lines, .proj { display: none; }
+
+  .hero-title {
+    top: max(56px, 13svh);
+    padding-inline: 16px;
+    font-size: clamp(1.9rem, 8.6vw, 2.7rem);
+    line-height: 1.4;
+  }
+
+  .departments .container { padding-inline: 18px; }
+  .section-head { margin-bottom: clamp(16px, 3.4svh, 30px); }
+  .section-head .eyebrow { margin-bottom: 10px; padding: 6px 16px; font-size: 0.8rem; }
+  .section-head h2 { font-size: clamp(1.55rem, 7vw, 2rem); margin-bottom: 0; }
+
+  .departments .cards-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: clamp(14px, 2.4svh, 22px) clamp(12px, 4vw, 20px);
+    width: min(100%, 420px);
+    margin-inline: auto;
+    perspective: none;
+  }
+
+  /* کارت خودش قاب بی‌رنگ است: کاشی شیشه‌ای (card-icon) بالا، نام زیرش */
+  .departments .card,
+  .departments .card-wide {
+    grid-column: auto;
+    flex-direction: column;
+    justify-content: flex-start;
+    align-items: stretch;
+    gap: 8px;
+    min-height: 0;
+    padding: 0;
+    border-radius: 0;
+    background: none;
+    box-shadow: none;
+    overflow: visible;
+    isolation: auto;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .departments .card::before,
+  .departments .card::after,
+  .departments .card .led { display: none; }
+  /* شناوری دائمیِ نه کارت روی گوشی خرج بی‌فایده است */
+  .departments .card.settled { animation: none; }
+
+  /* کاشی شیشه‌ای: شیشهٔ ایستا در حرکت؛ وقتی کارت سر جایش نشست بلورِ ملایم هم می‌گیرد
+     (۰٫۴۵ ثانیه، فقط یک بار) — در حرکت بلورِ نُه کاشی در هر فریم گران بود */
+  .departments .card .card-icon,
+  .departments .card-wide .card-icon {
+    width: 100%;
+    height: auto;
+    aspect-ratio: 1;
+    border-radius: 24px;
+    color: #e8f0ff;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03) 55%),
+      rgba(22, 40, 86, 0.46);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.36),
+      inset 0 0 0 1px rgba(255, 255, 255, 0.14),
+      inset 0 -1px 0 rgba(255, 255, 255, 0.05),
+      0 14px 28px -16px rgba(0, 4, 16, 0.85);
+    -webkit-backdrop-filter: blur(0px) saturate(100%);
+    backdrop-filter: blur(0px) saturate(100%);
+    transition: -webkit-backdrop-filter 0.45s ease, backdrop-filter 0.45s ease, scale 0.15s ease;
+  }
+  .departments .card.settled .card-icon {
+    -webkit-backdrop-filter: blur(10px) saturate(140%);
+    backdrop-filter: blur(10px) saturate(140%);
+  }
+  .departments .card .card-icon svg,
+  .departments .card-wide .card-icon svg { width: 40%; height: 40%; }
+  .departments .card[href]:active { scale: 1; }
+  .departments .card[href]:active .card-icon { scale: 0.95; }
+  /* هاورِ لمسی بعد از تپ می‌چسبد — کاشی نباید کج بماند */
+  .departments .card[href]:hover .card-icon,
+  .departments .card[href]:focus-visible .card-icon { transform: none; }
+  /* کارتِ غیرفعال: شیشه همان، فقط آیکون و نام کم‌رنگ‌تر */
+  .departments .card[data-status="off"] .card-icon,
+  .departments .card[data-status="soon"] .card-icon { opacity: 1; }
+  .departments .card[data-status="off"] .card-icon svg,
+  .departments .card[data-status="soon"] .card-icon svg { opacity: 0.62; }
+
+  .departments .card h3,
+  .departments .card-wide h3 {
+    font-size: clamp(0.82rem, 3.5vw, 0.98rem);
+    font-weight: 700;
+    line-height: 1.45;
+    text-align: center;
+    text-shadow: 0 1px 10px rgba(1, 6, 22, 0.85);
+  }
+
+  /* وضعیت: نشانِ کوچک روی گوشهٔ کاشی، مثل نشان‌های صفحهٔ مرجع؛ رنگ پُر با متن سفید
+     (سبز ۵٫۱:۱، کهربایی ۵٫۰:۱، قرمز ۶٫۴:۱) */
+  .departments .card .card-status {
+    position: absolute;
+    top: -6px;
+    inset-inline-end: -6px;
+    z-index: 2;
+    padding: 0 8px;
+    border: 0;
+    font-size: 0.62rem;
+    line-height: 1.75;
+    color: #ffffff;
+    background: #b91c1c;
+    box-shadow: 0 3px 10px -2px rgba(0, 0, 0, 0.55);
+  }
+  .departments .card .card-status::before { display: none; }
+  .departments .card[data-status="active"] .card-status { background: #15803d; }
+  .departments .card[data-status="soon"] .card-status { background: #b45309; }
+
+  .site-admin {
+    bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    inset-inline-start: 14px;
+    padding: 7px 12px;
+    font-size: 0.78rem;
+  }
+}
+
+/* گوشیِ افقی (کوتاه): کاشی‌ها کوچک‌تر تا سرتیتر و سه ردیف در ارتفاع کم جا شوند */
+@media (max-width: 900px) and (orientation: landscape) {
+  .hero-title { top: 10svh; font-size: clamp(1.5rem, 4.6vw, 2.2rem); }
+  .section-head { margin-bottom: 8px; }
+  .section-head .eyebrow { display: none; }
+  .departments .cards-grid { width: min(100%, 64svh); gap: 8px 14px; }
+  .departments .card { gap: 4px; }
+  .departments .card .card-icon { border-radius: 16px; }
 }

@@ -1,27 +1,27 @@
 /* ============================================================
-   سامانه هوشمند آریانا — منطق صفحهٔ اول
-   دسکتاپ و تبلت (≥ ۹۰۱px): «داستان اسکرولی» به سبک صفحه‌های اپل — صفحه خودش پایین
-   نمی‌رود؛ اسکرول کاربر (چرخ موس، لمس‌پد، کلید، نوار اسکرول) این‌ها را جلو و عقب می‌برد:
+   سامانه هوشمند آریانا — منطق صفحهٔ اول: «داستان اسکرولی» به سبک صفحه‌های اپل
+   صفحه خودش پایین نمی‌رود؛ اسکرول کاربر (چرخ موس، لمس‌پد، کشیدن انگشت، کلید، نوار
+   اسکرول) این‌ها را جلو و عقب می‌برد:
      ۱) ۱۴۹ فریم لوگوموشن روی بوم (assets/frames)، فریم‌به‌فریم با اسکرول
-     ۲) روی آخرین فریم (کرهٔ زمین): خطوط کشیده می‌شوند و تصاویر پروژه‌ها می‌آیند
-     ۳) با ادامهٔ اسکرول هر تصویر به سمت نزدیک‌ترین لبهٔ صفحه بیرون می‌رود و خطوط محو می‌شوند
+     ۲) روی آخرین فریم (کرهٔ زمین): عنوان؛ در دسکتاپ خطوط و تصاویر پروژه‌ها هم می‌آیند
+     ۳) با ادامهٔ اسکرول عنوان بالا می‌رود؛ در دسکتاپ هر تصویر به سمت نزدیک‌ترین لبهٔ
+        صفحه بیرون می‌رود و خطوط محو می‌شوند
      ۴) کارت‌های شیشه‌ای بخش‌ها هر کدام از گوشه/لبهٔ خودش می‌آید و وسط صفحه می‌نشیند
    پس‌زمینه در همهٔ این پرده‌ها همان کرهٔ زمین می‌ماند؛ برگشتِ اسکرول همه را عقب می‌برد.
-   موبایل (≤ ۹۰۰px): سازوکار قبلی، دست‌نخورده — ویدیو خودکار پخش می‌شود و صفحه عادی است.
+   موبایل (≤ ۹۰۰px، «فشرده»): همان داستان با فریم‌های عمودی ۹:۱۶، بدون شهاب، بدون تصاویر
+   و خطوط پروژه‌ها، و کارت‌ها به شکل کاشی‌های مربعی شیشه‌ای در شبکهٔ ۳×۳.
    ============================================================ */
 
 (function () {
   "use strict";
 
-  const video = document.getElementById("logoMotion");
   const overlay = document.getElementById("heroOverlay");
   const body = document.body;
-  const navToggle = document.querySelector(".nav-toggle");
-  const navLinks = document.querySelector(".nav-links");
   const cards = Array.from(document.querySelectorAll(".card"));
 
-  const isMobile = window.matchMedia("(max-width: 900px)").matches;
+  const mqCompact = window.matchMedia("(max-width: 900px)");
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const coarse = window.matchMedia("(pointer: coarse)").matches;
 
   /* صفحه همیشه از ابتدای داستان شروع می‌شود */
   if ("scrollRestoration" in history) history.scrollRestoration = "manual";
@@ -33,14 +33,8 @@
   /* پیشرفتِ محلی یک عضو در پنجرهٔ [start, start+width] از پیشرفت کل */
   const win = (p, start, width) => clamp01((p - start) / width);
 
-  /* ---------- منوی موبایل ---------- */
-  navToggle.addEventListener("click", () => {
-    const open = navLinks.classList.toggle("open");
-    navToggle.setAttribute("aria-expanded", String(open));
-  });
-
   /* ============================================================
-     چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر (مشترک)
+     چرخش سه‌بعدی ظریف + هالهٔ نور دنبال‌کنندهٔ نشانگر
      فقط با ماوس اجرا می‌شود؛ در لمس، pointermove هنگام اسکرول هم شلیک می‌کند
      و کارت‌ها را به‌صورت عرضی می‌لرزاند
      ============================================================ */
@@ -51,7 +45,7 @@
 
     cards.forEach((card) => {
       card.addEventListener("pointermove", (e) => {
-        if (e.pointerType !== "mouse") return;
+        if (e.pointerType !== "mouse" || mqCompact.matches) return;
 
         const rect = card.getBoundingClientRect();
         const px = (e.clientX - rect.left) / rect.width;   // 0..1
@@ -72,39 +66,22 @@
   }
 
   /* ============================================================
-     ستاره‌های دنباله‌دار — بومِ بخش کارت‌ها (مشترک)
-     موبایل: ستاره‌های چشمک‌زن + شهاب، وقتی بخش دیده می‌شود.
-     دسکتاپ: فقط شهاب‌ها و فقط در پردهٔ کارت‌ها — پشتِ شیشهٔ کارت‌ها رد می‌شوند؛
-     ستارهٔ ثابت نمی‌کشیم چون پس‌زمینه خودِ کرهٔ زمین است.
+     شهاب‌ها — فقط دسکتاپ و فقط در پردهٔ کارت‌ها، پشتِ شیشهٔ کارت‌ها؛ ستارهٔ ثابت
+     نمی‌کشیم چون پس‌زمینه خودِ کرهٔ زمین است. موبایل شهاب ندارد.
      ============================================================ */
   const skyCanvas = document.getElementById("starfield");
   const sky = skyCanvas.getContext("2d");
-  let stars = [];
   let meteors = [];
   let skyRaf = null;
 
   function resizeSky() {
     const rect = skyCanvas.parentElement.getBoundingClientRect();
-    /* روی موبایل با dpr=3 بوم نُه برابر پیکسل دارد و هر فریم باید همان‌قدر
-       پاک و دوباره رسم شود؛ ۱٫۵ برای خطوط نازک شهاب‌ها به‌اندازهٔ کافی صاف است */
-    const dpr = Math.min(window.devicePixelRatio || 1, isMobile ? 1.5 : 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
     skyCanvas.width = rect.width * dpr;
     skyCanvas.height = rect.height * dpr;
     sky.setTransform(dpr, 0, 0, dpr, 0, 0);
     skyCanvas._w = rect.width;
     skyCanvas._h = rect.height;
-    initStars();
-  }
-
-  function initStars() {
-    const count = isMobile ? Math.floor((skyCanvas._w * skyCanvas._h) / 15000) : 0;
-    stars = Array.from({ length: count }, () => ({
-      x: Math.random() * skyCanvas._w,
-      y: Math.random() * skyCanvas._h,
-      r: Math.random() * 1.3 + 0.2,
-      tw: Math.random() * Math.PI * 2,
-      twSpeed: 0.008 + Math.random() * 0.02,
-    }));
   }
 
   /* ستارهٔ دنباله‌دار با جهت و اندازهٔ تصادفی */
@@ -132,40 +109,16 @@
   }
 
   let nextMeteorIn = 12;
-  /* هر شهاب در هر فریم یک گرادیان خطی می‌سازد؛ روی موبایل تعدادشان محدود می‌شود */
-  const MAX_METEORS = isMobile ? 14 : 45;
-  /* سقف نرخ فریم روی موبایل: ۳۰ فریم بر ثانیه، یعنی نصفِ کار برای چشمی که
-     تفاوتش را روی این انیمیشن آرام تشخیص نمی‌دهد */
-  const MIN_FRAME_MS = isMobile ? 1000 / 30 : 0;
-  let lastSkyAt = 0;
+  const MAX_METEORS = 45;
 
-  function drawSky(now) {
-    if (MIN_FRAME_MS) {
-      const t = now || performance.now();
-      if (t - lastSkyAt < MIN_FRAME_MS) {
-        skyRaf = requestAnimationFrame(drawSky);
-        return;
-      }
-      lastSkyAt = t;
-    }
-
+  function drawSky() {
     sky.clearRect(0, 0, skyCanvas._w, skyCanvas._h);
-
-    // ستاره‌های چشمک‌زن
-    for (const s of stars) {
-      s.tw += s.twSpeed;
-      const a = 0.3 + Math.abs(Math.sin(s.tw)) * 0.65;
-      sky.beginPath();
-      sky.arc(s.x, s.y, s.r, 0, Math.PI * 2);
-      sky.fillStyle = `rgba(220, 232, 255, ${a})`;
-      sky.fill();
-    }
 
     // زمان‌بندی پرتراکم شهاب‌ها — دسته‌ای و مکرر برای جلوهٔ کهکشانی پرجنب‌وجوش‌تر
     if (--nextMeteorIn <= 0 && meteors.length < MAX_METEORS) {
-      const burst = isMobile ? 1 : 1 + Math.floor(Math.random() * 3); // ۱ تا ۳ شهاب هم‌زمان
+      const burst = 1 + Math.floor(Math.random() * 3); // ۱ تا ۳ شهاب هم‌زمان
       for (let i = 0; i < burst; i++) spawnMeteor();
-      nextMeteorIn = (isMobile ? 12 : 8) + Math.random() * 26;
+      nextMeteorIn = 8 + Math.random() * 26;
     }
 
     /* شهاب‌ها با ترکیب «lighter» نور را روی پس‌زمینه جمع می‌کنند نه اینکه رویش رنگ بکشند؛
@@ -222,234 +175,15 @@
   }
 
   function startSky() { if (!skyRaf && !reduceMotion) skyRaf = requestAnimationFrame(drawSky); }
-  function stopSky() { if (skyRaf) { cancelAnimationFrame(skyRaf); skyRaf = null; } }
-
-  resizeSky();
-
-  /* در موبایل، پنهان/ظاهرشدن نوار آدرس هنگام اسکرول پشت‌سرهم resize می‌فرستد؛
-     هر بار بوم از نو ساخته و ستاره‌ها بازتولید می‌شوند. تغییرِ فقط‌ارتفاع را
-     نادیده می‌گیریم و بقیه را با تأخیر کوتاه جمع می‌بندیم. */
-  let lastSkyWidth = window.innerWidth;
-  let skyResizeTimer = null;
-
-  window.addEventListener("resize", () => {
-    if (isMobile && Math.abs(window.innerWidth - lastSkyWidth) < 2) return;
-    clearTimeout(skyResizeTimer);
-    skyResizeTimer = setTimeout(() => {
-      resizeSky();
-      lastSkyWidth = window.innerWidth;
-    }, 200);
-  }, { passive: true });
-
-  if (isMobile) mobileMotion();
-  else scrollStory();
-
-  /* ============================================================
-     موبایل — سازوکار قبلی: ویدیو به‌محض لود پخش می‌شود (بدون قفل)، پایانش اورلی را
-     نشان می‌دهد، کارت‌ها با رسیدن به دید وارد می‌شوند، شهاب‌ها وقتی بخش دیده می‌شود.
-     ============================================================ */
-  function mobileMotion() {
-    let started = false;
-    let finished = false;
-
-    /* ---------- حالت اولیه: فریم صفر ---------- */
-    video.preload = "auto";
-    video.pause();
-    video.currentTime = 0;
-
-    /* ---------- قفل کامل تعامل ---------- */
-    const blockEvent = (e) => {
-      if (!finished) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-    };
-
-    const lockEvents = ["wheel", "touchmove", "keydown", "click", "mousedown", "contextmenu"];
-
-    function unlockInteraction() {
-      finished = true;
-      body.classList.remove("is-locked", "is-pre-play");
-      lockEvents.forEach((ev) =>
-        window.removeEventListener(ev, blockEvent, { capture: true })
-      );
-    }
-
-    /* ---------- پایان لوگوموشن ---------- */
-    function onVideoEnd() {
-      if (finished) return;
-      overlay.classList.add("visible");
-      overlay.setAttribute("aria-hidden", "false");
-      unlockInteraction();
-    }
-
-    /* ---------- شروع پخش با اولین تعامل ---------- */
-    function startMotion() {
-      if (started) return;
-      started = true;
-
-      startEvents.forEach((ev) => window.removeEventListener(ev, startMotion));
-
-      if (reduceMotion) {
-        // برای کاربران حساس به حرکت: بدون پخش، مستقیم به حالت نهایی
-        video.pause();
-        onVideoEnd();
-        return;
-      }
-
-      // موبایل: بدون قفل اسکرول — ویدیو بالای صفحه پخش می‌شود و کاربر آزاد است
-      body.classList.remove("is-pre-play");
-      tryPlay();
-    }
-
-    function tryPlay() {
-      const p = video.play();
-      if (p !== undefined) {
-        p.catch(() => {
-          // اگر Blob هنوز در حال لود است، پس از اتمامش دوباره پخش می‌شود
-          if (blobState === "failed" || blobState === "done") onVideoEnd();
-          else if (blobState === "none") handleVideoError();
-        });
-      }
-    }
-
-    /* مدیریت کلیک روی منو: اگر ویدیو در حال پخش است یا هنوز شروع نشده، اول آن را به پایان برسانیم */
-    document.querySelectorAll(".nav-links a").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        if (!finished) {
-          e.preventDefault();
-          startMotion(); // شروع پخش ویدیو
-          // صبر برای اتمام ویدیو و سپس اسکرول به هدف
-          const targetId = link.getAttribute("href");
-          const checkFinished = setInterval(() => {
-            if (finished) {
-              clearInterval(checkFinished);
-              document.querySelector(targetId).scrollIntoView({ behavior: "smooth" });
-            }
-          }, 500);
-        }
-      });
-    });
-
-    const startEvents = ["wheel", "touchmove", "scroll"];
-    /* passive: شنوندهٔ غیرpassive روی touchmove مرورگر را وادار می‌کند پیش از
-       هر اسکرول منتظر اجرای هندلر بماند — منبع مستقیم کندی اسکرول در موبایل.
-       این هندلر هیچ‌وقت preventDefault نمی‌کند، پس passive درست است. */
-    startEvents.forEach((ev) =>
-      window.addEventListener(ev, startMotion, { passive: true })
-    );
-
-    video.addEventListener("ended", onVideoEnd);
-
-    /* ---------- پخش خودکار به‌محض لود صفحه ---------- */
-    // ویژگی autoplay برای سازگاری با iOS Safari به‌صورت پویا اضافه می‌شود
-    try { video.setAttribute("autoplay", ""); } catch (e) { /* بی‌اهمیت */ }
-    video.muted = true;
-
-    const mobilePlay = () => {
-      if (!started) startMotion();
-      else if (!finished) tryPlay();
-    };
-    video.addEventListener("canplay", mobilePlay, { once: true });
-    // اجرای فوری + تلاش مجدد پس از لود کامل (حالت کم‌مصرف iOS)
-    mobilePlay();
-    window.addEventListener("load", mobilePlay, { once: true });
-    // پشتیبان: اگر پخش خودکار توسط مرورگر مسدود شد، اولین لمس دوباره تلاش می‌کند
-    const touchRetry = () => {
-      if (!finished) mobilePlay();
-      window.removeEventListener("touchstart", touchRetry);
-      window.removeEventListener("pointerdown", touchRetry);
-    };
-    window.addEventListener("touchstart", touchRetry, { passive: true });
-    window.addEventListener("pointerdown", touchRetry, { passive: true });
-
-    // تضمین اجرای ویدیو حداکثر ۱ ثانیه پس از لود صفحه، صرف‌نظر از تأخیر رویدادهای canplay/load
-    setTimeout(() => {
-      if (!started) startMotion();
-      else if (!finished) tryPlay();
-    }, 1000);
-
-    /* اگر لود مستقیم شکست خورد (مثلاً پروتکل file://) → تلاش با Blob
-       اولویت با نسخهٔ باکیفیت webm است تا کیفیت ویدیو افت نکند؛
-       فقط در صورت شکست دوبارهٔ webm، به mp4 (کیفیت پایین‌تر) به‌عنوان آخرین گزینه سوییچ می‌کنیم. */
-    let blobState = "none"; // none | loading | done | failed
-    async function handleVideoError() {
-      if (blobState === "loading") return;
-      if (blobState === "done" || blobState === "failed") { onVideoEnd(); return; }
-      blobState = "loading";
-      try {
-        const res = await fetch("assets/logo-motion.webm");
-        if (!res.ok) throw new Error("webm fetch failed");
-        const blob = await res.blob();
-        video.src = URL.createObjectURL(blob);
-        video.load();
-        blobState = "done";
-        if (started && !finished) video.play().catch(() => onVideoEnd());
-      } catch (_) {
-        // آخرین تلاش: نسخهٔ mp4 (کیفیت پایین‌تر، فقط برای سازگاری حداکثری)
-        try {
-          const res2 = await fetch("assets/logo-motion.mp4");
-          const blob2 = await res2.blob();
-          video.src = URL.createObjectURL(blob2);
-          video.load();
-          blobState = "done";
-          if (started && !finished) video.play().catch(() => onVideoEnd());
-        } catch (__) {
-          blobState = "failed";
-          onVideoEnd();
-        }
-      }
-    }
-    video.addEventListener("error", handleVideoError, true);
-    const sourceEl = video.querySelector("source");
-    if (sourceEl) sourceEl.addEventListener("error", handleVideoError);
-
-    // بررسی نهایی: اگر منبع پشتیبانی نشد (networkState=3) → Blob
-    function checkSource() {
-      if (video.readyState === 0 && video.networkState === 3) handleVideoError();
-    }
-    if (document.readyState === "complete") setTimeout(checkSource, 300);
-    else window.addEventListener("load", () => setTimeout(checkSource, 300));
-
-    // محافظ: اگر متادیتا لود نشد یا ویدیو گیر کرد، حداکثر ۲۰ ثانیه قفل بماند
-    setTimeout(() => {
-      if (started && !finished) onVideoEnd();
-    }, 20000);
-
-    /* ---------- کارت‌ها: ورود پلکانی با رسیدن به دید ---------- */
-    cards.forEach((card, i) => {
-      card.style.setProperty("--enter-d", `${(i % 5) * 0.09}s`);
-    });
-
-    const cardObserver = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("in");
-            cardObserver.unobserve(entry.target);
-          }
-        });
-      },
-      { threshold: 0.15 }
-    );
-    cards.forEach((card) => cardObserver.observe(card));
-
-    /* فقط وقتی بخش کارت‌ها دیده می‌شود انیمیشن آسمان اجرا شود */
-    const deptSection = document.getElementById("departments");
-    const observer = new IntersectionObserver(
-      (entries) => {
-        entries.forEach((entry) => {
-          if (entry.isIntersecting) startSky();
-          else stopSky();
-        });
-      },
-      { threshold: 0.05 }
-    );
-    observer.observe(deptSection);
+  function stopSky() {
+    if (skyRaf) { cancelAnimationFrame(skyRaf); skyRaf = null; }
+    if (meteors.length) { meteors = []; sky.clearRect(0, 0, skyCanvas._w, skyCanvas._h); }
   }
 
+  scrollStory();
+
   /* ============================================================
-     دسکتاپ و تبلت — داستان اسکرولی
+     داستان اسکرولی
      مسیر اسکرول (px) بر حسب ارتفاع پنجره تقسیم می‌شود:
        video → reveal → hold → exit → cards → tail
      پیشرفتِ هر پرده از جای اسکرول درمی‌آید و روی عنصرها نوشته می‌شود؛ هیچ چیز
@@ -460,6 +194,7 @@
     overlay.classList.add("visible");
     overlay.setAttribute("aria-hidden", "false");
 
+    const hero = document.getElementById("hero");
     const frameCanvas = document.getElementById("frameCanvas");
     const fctx = frameCanvas.getContext("2d");
     const title = overlay.querySelector(".hero-title");
@@ -472,26 +207,35 @@
     const admin = document.querySelector(".site-admin");
     const root = document.documentElement;
 
+    let compact = mqCompact.matches;
+
     /* ---------- فریم‌های لوگوموشن ----------
-       ۱۴۹ فریم WebP از نسخهٔ 4K لوگوموشن (یک بار نمونه‌برداری، یک بار فشرده‌سازی)، دو مجموعه:
-         1600×900  (~۸۹KB هر فریم، ۱۲٫۹MB) برای همه؛ ترتیب بارگذاری درشت‌به‌ریز است (فریم ۰ و
-                   آخر، بعد هر ۸تا، هر ۴تا، هر ۲تا، بعد بقیه) تا از همان ثانیه‌های اول اسکرول
-                   جواب بدهد.
-         2560×1440 (~۱۴۹KB هر فریم، ۲۱٫۷MB) فقط برای صفحه‌های بزرگ یا پرتراکم (Retina/4K)، و
-                   فقط بعد از رسیدن کل مجموعهٔ اول — ارتقای تدریجی: هر فریمِ تیزتر که رسید جای
-                   قبلی می‌نشیند، پس سرعت اولین تعامل با مجموعهٔ دوم عوض نمی‌شود.
-       با «صرفه‌جویی داده» یا 2g نیمی از فریم‌ها (هر ۲تا) و مجموعهٔ دوم اصلاً بارگذاری نمی‌شود.
+       ۱۴۹ فریم WebP، هر کدام یک بار از ویدیوی باکیفیت نمونه‌برداری و یک بار فشرده شده:
+         افقی (land) از نسخهٔ 4K ۱۶:۹ — دسکتاپ، تبلت و گوشیِ افقی
+           1600/  (~۸۹KB، ۱۲٫۹MB) برای همه
+           2560/  (~۱۴۹KB، ۲۱٫۷MB) صفحهٔ پرتراکم یا پهن‌تر از ۱۹۲۰، روی اتصال سریع
+         عمودی (port) از نسخهٔ 4K ۹:۱۶ — گوشی و تبلتِ عمودی
+           720/   برای همه
+           1080/  صفحهٔ با تراکم ۲ به بالا، اتصال سریع، حافظهٔ دستگاه ۴GB به بالا (یا نامعلوم)
+       ترتیب بارگذاری درشت‌به‌ریز است (فریم ۰ و آخر، بعد هر ۸تا، هر ۴تا، هر ۲تا، بعد بقیه)
+       تا از همان ثانیه‌های اول اسکرول جواب بدهد. مجموعهٔ تیزتر فقط بعد از رسیدن کل مجموعهٔ
+       پایه بارگذاری می‌شود و هر فریمش که رسید جای نسخهٔ پایه می‌نشیند (و نسخهٔ پایه رها
+       می‌شود تا حافظه دو برابر نشود). «صرفه‌جویی داده» یا 2g: نیمی از فریم‌ها، بدون مجموعهٔ تیز.
        بین دو فریم همسایه ترکیب نرم (crossfade) کشیده می‌شود تا اسکرول آهسته پله‌پله نباشد. */
     const FRAMES = 149;
-    const SETS = [{ dir: "1600", imgs: new Array(FRAMES).fill(null) }];
-    const wantHi = (window.devicePixelRatio || 1) > 1.25 || window.innerWidth > 1920;
+    const dpr = window.devicePixelRatio || 1;
     const conn = navigator.connection;
-    /* روی 3g هم مجموعهٔ اول کامل می‌آید (فریم‌های فرد آخرِ صف‌اند)؛ «صرفه‌جویی داده» یا 2g نیمش می‌کند.
-       مجموعهٔ ۲۵۶۰ (~۲۰MB) فقط روی اتصالی که مرورگر 4g می‌داند یا نمی‌شناسد */
     const slowNet = !!(conn && (conn.saveData || /2g$/.test(conn.effectiveType || "")));
     const fastNet = !conn || !conn.effectiveType || conn.effectiveType === "4g";
-    if (wantHi && !slowNet && fastNet) SETS.push({ dir: "2560", imgs: new Array(FRAMES).fill(null) });
-    const frameUrl = (set, i) => `assets/frames/${set.dir}/logo-${String(i).padStart(3, "0")}.webp`;
+    const memOK = !navigator.deviceMemory || navigator.deviceMemory >= 4;
+    const makeGroup = (dirs) => ({ dirs, imgs: dirs.map(() => new Array(FRAMES).fill(null)), setIdx: 0, cursor: 0 });
+    const GROUPS = {
+      land: makeGroup(["1600"].concat((dpr > 1.25 || window.innerWidth > 1920) && !slowNet && fastNet ? ["2560"] : [])),
+      port: makeGroup(["720"].concat(dpr >= 2 && !slowNet && fastNet && memOK ? ["1080"] : [])),
+    };
+    const pickGroup = () => GROUPS[compact && window.innerHeight > window.innerWidth ? "port" : "land"];
+    let group = pickGroup();
+
     const order = [];
     {
       const seen = new Set();
@@ -499,29 +243,51 @@
       push(0); push(FRAMES - 1);
       for (const step of [8, 4, 2, 1]) for (let i = 0; i < FRAMES; i += step) push(i);
     }
-    let setIdx = 0, cursor = 0, inflight = 0;
+    let inflight = 0;
 
     function pump() {
+      const g = group;
       while (inflight < 6) {
-        if (cursor >= order.length) {
-          if (setIdx + 1 < SETS.length) { setIdx++; cursor = 0; continue; }
+        if (g.cursor >= order.length) {
+          if (g.setIdx + 1 < g.dirs.length) { g.setIdx++; g.cursor = 0; continue; }
           return;
         }
-        const set = SETS[setIdx];
-        const i = order[cursor++];
+        const k = g.setIdx;
+        const i = order[g.cursor++];
         if (slowNet && i % 2 === 1) continue;
+        if (g.imgs[k][i]) continue;
         const im = new Image();
         im.decoding = "async";
         inflight++;
-        im.onload = () => { set.imgs[i] = im; inflight--; schedule(); pump(); };
+        im.onload = () => {
+          inflight--;
+          if (g.imgs[k]) {
+            g.imgs[k][i] = im;
+            for (let j = 0; j < k; j++) g.imgs[j][i] = null; // نسخهٔ پایهٔ همین فریم دیگر لازم نیست
+          }
+          if (g === group) schedule();
+          pump();
+        };
         im.onerror = () => { inflight--; pump(); };
-        im.src = frameUrl(set, i);
+        im.src = `assets/frames/${g.dirs[k]}/logo-${String(i).padStart(3, "0")}.webp`;
       }
+    }
+
+    /* چرخش گوشی/تبلت: مجموعهٔ جهت دیگر؛ تصویرهای جهت قبلی رها می‌شوند (از کش HTTP برمی‌گردند) */
+    function switchGroup() {
+      const g = pickGroup();
+      if (g === group) return;
+      group.imgs.forEach((a) => a.fill(null));
+      group.setIdx = 0; group.cursor = 0;
+      group = g;
+      drawnKey = "";
+      pump();
     }
 
     /* تیزترین نسخهٔ موجودِ یک فریم */
     function best(i) {
-      for (let k = SETS.length - 1; k >= 0; k--) if (SETS[k].imgs[i]) return SETS[k].imgs[i];
+      const s = group.imgs;
+      for (let k = s.length - 1; k >= 0; k--) if (s[k][i]) return s[k][i];
       return null;
     }
 
@@ -534,24 +300,30 @@
       return -1;
     }
 
-    let cw = 0, ch = 0, wantFrame = 0, drawnKey = "";
+    let cw = 0, ch = 0, drawnKey = "";
 
+    /* اندازهٔ بوم از خودِ قاب قهرمان (در گوشی ۱۰۰lvh، یعنی قدِ پنجره با نوار آدرسِ جمع‌شده)،
+       تا با جمع و باز شدن نوار آدرس بوم عوض نشود و نوار خالی نیفتد */
     function sizeCanvas() {
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      cw = window.innerWidth;
-      ch = window.innerHeight;
-      frameCanvas.width = Math.round(cw * dpr);
-      frameCanvas.height = Math.round(ch * dpr);
-      fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const r = Math.min(dpr, 2);
+      cw = hero.clientWidth || window.innerWidth;
+      ch = hero.clientHeight || window.innerHeight;
+      frameCanvas.width = Math.round(cw * r);
+      frameCanvas.height = Math.round(ch * r);
+      fctx.setTransform(r, 0, 0, r, 0, 0);
       drawnKey = "";
     }
 
-    /* مثل object-fit: cover ویدیوی قبلی، تا نقاط جغرافیایی خطوط (کالیبره روی همان قاب) سر جایشان بمانند */
+    /* مثل object-fit: cover، تا نقاط جغرافیایی خطوط (کالیبره روی همان قاب) سر جایشان بمانند.
+       فریم‌های عمودی ۹:۱۶ روی گوشیِ باریک‌تر (مثلاً ۳۹۰×۸۴۴) از دو طرف بریده می‌شوند؛ نشانِ «K»
+       در ابتدای ویدیو نزدیک لبهٔ چپ است، پس برش عمودی ۱۵٪ از چپ است نه نصف‌نصف (روی ۳۷۵×۸۱۲
+       لبهٔ «K» حدود ۱۰px از کنار صفحه فاصله می‌گیرد) */
     function drawCover(im, alpha) {
       const s = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
       const w = im.naturalWidth * s, h = im.naturalHeight * s;
+      const ax = group === GROUPS.port ? 0.15 : 0.5;
       fctx.globalAlpha = alpha;
-      fctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
+      fctx.drawImage(im, (cw - w) * ax, (ch - h) / 2, w, h);
       fctx.globalAlpha = 1;
     }
 
@@ -586,7 +358,10 @@
 
     function layout() {
       const H = window.innerHeight;
-      seg = { video: 2.8 * H, reveal: 0.55 * H, hold: 0.2 * H, exit: 0.75 * H, cards: 1.05 * H, tail: 0.15 * H };
+      /* گوشی پردهٔ تصاویر پروژه‌ها ندارد، پس ظهور و خروج کوتاه‌ترند */
+      seg = compact
+        ? { video: 2.4 * H, reveal: 0.35 * H, hold: 0.1 * H, exit: 0.45 * H, cards: 1.0 * H, tail: 0.15 * H }
+        : { video: 2.8 * H, reveal: 0.55 * H, hold: 0.2 * H, exit: 0.75 * H, cards: 1.05 * H, tail: 0.15 * H };
       seg.total = seg.video + seg.reveal + seg.hold + seg.exit + seg.cards + seg.tail;
       /* ارتفاع مسیر = کل داستان + یک پنجره، تا در تهِ اسکرول دقیقاً به پایان داستان برسیم */
       root.style.setProperty("--runway", reduceMotion ? "100vh" : `${Math.round(seg.total + H)}px`);
@@ -605,12 +380,14 @@
         dx /= len; dy /= len;
         const tx = dx > 1e-6 ? (vw - r.left) / dx : dx < -1e-6 ? r.right / -dx : Infinity;
         const ty = dy > 1e-6 ? (vh - r.top) / dy : dy < -1e-6 ? r.bottom / -dy : Infinity;
-        const t = Math.min(tx, ty) + 80;
+        const t = Math.min(tx, ty) + (compact ? 40 : 80);
         return { x: dx * t, y: dy * t, dist: len };
       };
       cards.forEach((c) => { c.style.translate = "0px 0px"; c.classList.remove("settled"); });
+      cardState.forEach((s) => { s.settled = false; });
       cardGeo = cards.map((c) => vec(c.getBoundingClientRect()));
 
+      if (compact) { figGeo = []; return; }
       figs.forEach((f) => { f.style.transform = "none"; });
       const fg = figs.map((f) => vec(f.getBoundingClientRect()));
       /* ورود: همان ترتیب قدیمیِ --d (نزدیک‌ترها زودتر)؛ خروج: دورترها از مرکز زودتر می‌روند */
@@ -634,7 +411,6 @@
       const f = pv * (FRAMES - 1);
       let fi = Math.floor(f), frac = f - fi;
       if (frac > 0.96 && fi + 1 < FRAMES) { fi++; frac = 0; }
-      wantFrame = fi;
       paintFrames(fi, frac);
 
       // پیشرفتِ پرده‌های بعدی
@@ -647,35 +423,37 @@
       // ۲) عنوان: با پرده می‌آید، در خروج به بالا می‌رود
       const tv = easeOut(rv), tx = easeInOut(ex);
       title.style.opacity = (tv * (1 - tx)).toFixed(3);
-      title.style.transform = `translateY(${(24 * (1 - tv) - 0.45 * H * tx).toFixed(1)}px)`;
+      title.style.transform = `translateY(${(24 * (1 - tv) - (compact ? 0.3 : 0.45) * H * tx).toFixed(1)}px)`;
 
-      // خطوط: کشیده‌شدن پلکانی؛ جریان نور، ذره‌ها و نقطه‌ها بعد از خط؛ همه در خروج محو
-      heroLines.style.opacity = (1 - ex).toFixed(3);
-      lines.forEach((ln, i) => {
-        const l = easeInOut(win(rv, (i / (lines.length - 1)) * 0.4, 0.6));
-        ln.style.strokeDashoffset = `${(520 * (1 - l)).toFixed(1)}px`;
-      });
-      const late = easeOut(win(rv, 0.55, 0.45));
-      flows.style.opacity = (0.95 * late).toFixed(3);
-      particles.style.opacity = late.toFixed(3);
-      dots.style.opacity = late.toFixed(3);
+      if (!compact) {
+        // خطوط: کشیده‌شدن پلکانی؛ جریان نور، ذره‌ها و نقطه‌ها بعد از خط؛ همه در خروج محو
+        heroLines.style.opacity = (1 - ex).toFixed(3);
+        lines.forEach((ln, i) => {
+          const l = easeInOut(win(rv, (i / (lines.length - 1)) * 0.4, 0.6));
+          ln.style.strokeDashoffset = `${(520 * (1 - l)).toFixed(1)}px`;
+        });
+        const late = easeOut(win(rv, 0.55, 0.45));
+        flows.style.opacity = (0.95 * late).toFixed(3);
+        particles.style.opacity = late.toFixed(3);
+        dots.style.opacity = late.toFixed(3);
 
-      // ۳) تصاویر پروژه‌ها: ورود (بزرگ‌شدن از ۰٫۸۵) و خروج به سمت لبهٔ خودشان
-      figs.forEach((f, i) => {
-        const g = figGeo[i];
-        if (!g) return;
-        const r = easeOut(win(rv, g.inRank * 0.45, 0.55));
-        const e = easeInOut(win(ex, g.outRank * 0.4, 0.6));
-        const s = 0.85 + 0.15 * r + 0.12 * e;
-        f.style.transform = `translate(${(g.x * e).toFixed(1)}px, ${(g.y * e).toFixed(1)}px) scale(${s.toFixed(3)})`;
-        f.style.opacity = (r * (1 - clamp01((e - 0.7) / 0.3))).toFixed(3);
-      });
+        // ۳) تصاویر پروژه‌ها: ورود (بزرگ‌شدن از ۰٫۸۵) و خروج به سمت لبهٔ خودشان
+        figs.forEach((fig, i) => {
+          const g = figGeo[i];
+          if (!g) return;
+          const r = easeOut(win(rv, g.inRank * 0.45, 0.55));
+          const e = easeInOut(win(ex, g.outRank * 0.4, 0.6));
+          const s = 0.85 + 0.15 * r + 0.12 * e;
+          fig.style.transform = `translate(${(g.x * e).toFixed(1)}px, ${(g.y * e).toFixed(1)}px) scale(${s.toFixed(3)})`;
+          fig.style.opacity = (r * (1 - clamp01((e - 0.7) / 0.3))).toFixed(3);
+        });
+      }
 
-      // ۴) کارت‌ها: سرتیتر، شهاب‌ها و دکمهٔ گوشه با --hd؛ هر کارت از سمت خودش
+      // ۴) کارت‌ها: سرتیتر، لایهٔ تیره، شهاب‌ها (فقط دسکتاپ) و دکمهٔ گوشه با --hd؛ هر کارت از سمت خودش
       const hd = easeOut(clamp01(cd / 0.35));
       root.style.setProperty("--hd", hd.toFixed(3));
       admin.classList.toggle("ready", hd > 0.5);
-      if (hd > 0.02) startSky(); else stopSky();
+      if (!compact && hd > 0.02) startSky(); else stopSky();
 
       cards.forEach((c, i) => {
         const g = cardGeo[i];
@@ -692,8 +470,10 @@
 
     /* ---------- اسکرول → داستان، با نرمی کوتاه ----------
        هر پلهٔ چرخ موس چند فریم جلو می‌رود؛ نرم‌کردنِ ۲۲٪ در هر فریم، پله را به حرکتی
-       پیوسته تبدیل می‌کند و در کمتر از نیم‌ثانیه به جای واقعی اسکرول می‌رسد. */
+       پیوسته تبدیل می‌کند و در کمتر از نیم‌ثانیه به جای واقعی اسکرول می‌رسد. در لمس، خودِ
+       اسکرولِ مرورگر نرم است؛ نرمیِ کمتر (۳۵٪) تا انگشت و تصویر از هم جدا نیفتند. */
     let target = 0, current = 0, raf = 0;
+    const ease = coarse ? 0.35 : 0.22;
 
     function tick() {
       const d = target - current;
@@ -703,7 +483,7 @@
         raf = 0;
         return;
       }
-      current += d * 0.22;
+      current += d * ease;
       render(current);
       raf = requestAnimationFrame(tick);
     }
@@ -718,6 +498,7 @@
     /* ---------- راه‌اندازی ---------- */
     layout();
     sizeCanvas();
+    resizeSky();
     measure();
     if (reduceMotion) current = target = seg.total;
     render(current);
@@ -731,12 +512,21 @@
       document.fonts.ready.then(() => { measure(); render(current); });
     }
 
-    let storyResize = null;
+    /* تغییر اندازه: در گوشی، جمع و باز شدن نوار آدرس فقط ارتفاع را کمی عوض می‌کند؛ آن را
+       نادیده می‌گیریم تا مسیر اسکرول زیر انگشت جابه‌جا نشود. چرخش گوشی (عرض عوض می‌شود)
+       همه‌چیز را از نو می‌چیند و مجموعهٔ فریمِ همان جهت را می‌آورد. */
+    let lastW = window.innerWidth, lastH = window.innerHeight, storyResize = null;
     window.addEventListener("resize", () => {
       clearTimeout(storyResize);
       storyResize = setTimeout(() => {
+        const w = window.innerWidth, h = window.innerHeight;
+        if (coarse && w === lastW && Math.abs(h - lastH) < 160) return;
+        lastW = w; lastH = h;
+        compact = mqCompact.matches;
+        switchGroup();
         layout();
         sizeCanvas();
+        resizeSky();
         measure();
         onScroll();
         render(current);

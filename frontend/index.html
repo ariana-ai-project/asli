@@ -11,8 +11,10 @@
   <meta property="og:image" content="assets/logo-new.jpg" />
   <link rel="icon" type="image/jpeg" href="assets/logo-new.jpg" />
   <link rel="manifest" href="manifest.json" />
-  <!-- دسکتاپ: اولین فریم لوگوموشن پیش از هر چیز بیاید تا صفحه با تصویر باز شود -->
-  <link rel="preload" as="image" href="assets/frames/1600/logo-000.webp" fetchpriority="high" media="(min-width: 901px)" />
+  <!-- اولین فریم لوگوموشن پیش از هر چیز بیاید تا صفحه با تصویر باز شود؛ گوشی و تبلتِ عمودی
+       فریم‌های ۹:۱۶ می‌گیرند (همان شرطِ pickGroup در js/main.js) -->
+  <link rel="preload" as="image" href="assets/frames/1600/logo-000.webp" fetchpriority="high" media="(min-width: 901px), (orientation: landscape)" />
+  <link rel="preload" as="image" href="assets/frames/720/logo-000.webp" fetchpriority="high" media="(max-width: 900px) and (orientation: portrait)" />
   <link rel="apple-touch-icon" href="assets/icon-192.png" />
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -21,44 +23,16 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet" />
-  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/styles.css?v=8" />
 </head>
 <body class="is-pre-play">
-
-  <!-- ناوبری شیشه‌ای -->
-  <header class="site-header">
-    <nav class="glass nav-pill" aria-label="ناوبری اصلی">
-      <a class="brand" href="#" aria-label="صفحه اصلی — شرکت تونل سد آریانا">
-        <span class="logo-badge">
-          <span class="logo-badge-ring" aria-hidden="true"></span>
-          <img src="assets/logo-new.jpg" alt="لوگوی شرکت تونل سد آریانا" class="brand-logo" />
-        </span>
-      </a>
-      <ul class="nav-links">
-        <li><a href="#services">خدمات</a></li>
-        <li><a href="#departments">پنل مدیریت</a></li>
-        <li><a href="#tools">ابزارها</a></li>
-        <li><a href="#footer">پشتیبانی</a></li>
-      </ul>
-      <button class="nav-toggle glass" aria-label="باز کردن منو" aria-expanded="false">
-        <span></span><span></span><span></span>
-      </button>
-    </nav>
-  </header>
 
   <main id="main">
 
     <!-- ===== قهرمان: لوگوموشن ===== -->
     <section class="hero" id="hero">
-      <!-- دسکتاپ و تبلت: ۱۴۹ فریم لوگوموشن روی بوم، وابسته به اسکرول کاربر (js/main.js).
-           موبایل: همان ویدیو، خودکار. -->
+      <!-- ۱۴۹ فریم لوگوموشن روی بوم، وابسته به اسکرول کاربر (js/main.js) — در همهٔ دستگاه‌ها -->
       <canvas id="frameCanvas" class="hero-frames" aria-hidden="true"></canvas>
-      <video id="logoMotion" class="hero-video" muted playsinline preload="none">
-        <source src="assets/logo-motion.webm" type="video/webm" />
-      </video>
-
-      <!-- لایهٔ قفل تعامل هنگام پخش -->
-      <div class="interaction-shield" id="shield" aria-hidden="true"></div>
 
       <!-- اورلی پایانی: عنوان + خطوط + تصاویر پروژه‌ها -->
       <div class="hero-overlay" id="heroOverlay" aria-hidden="true">
@@ -266,52 +240,20 @@
       </div>
     </section>
 
-    <!-- دسکتاپ: مسیر اسکرول — صفحه خودش پایین نمی‌رود؛ فقط طول این عنصر است که اسکرول می‌خورد
-         و js/main.js از روی آن، فریم ویدیو و موشن‌ها را جلو و عقب می‌برد (ارتفاع از --runway) -->
+    <!-- مسیر اسکرول — صفحه خودش پایین نمی‌رود؛ فقط طول این عنصر است که اسکرول می‌خورد و
+         js/main.js از روی آن، فریم ویدیو و موشن‌ها را جلو و عقب می‌برد (ارتفاع از --runway) -->
     <div class="scroll-runway" aria-hidden="true"></div>
 
   </main>
 
-  <!-- دسکتاپ: نوار بالا حذف شده؛ پنجرهٔ وضعیت بخش‌ها (js/support.js) از این دکمهٔ گوشه باز می‌شود -->
+  <!-- نوار بالا و پابرگ حذف شده‌اند؛ پنجرهٔ وضعیت بخش‌ها (js/support.js) از این دکمهٔ گوشه باز می‌شود -->
   <button class="site-admin glass" type="button" data-support aria-label="مدیریت وضعیت بخش‌ها">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
     <span>پشتیبانی</span>
   </button>
 
-  <!-- ===== پابرگ ===== -->
-  <footer class="site-footer" id="footer">
-    <div class="container footer-grid">
-      <div class="footer-brand">
-        <span class="logo-badge logo-badge-lg">
-          <span class="logo-badge-ring" aria-hidden="true"></span>
-          <img src="assets/logo-new.jpg" alt="لوگوی شرکت تونل سد آریانا" class="footer-logo" />
-        </span>
-        <h4>شرکت تونل سد آریانا</h4>
-      </div>
-      <nav class="footer-nav" aria-label="پیوندهای پابرگ">
-        <h5>دسترسی سریع</h5>
-        <ul>
-          <li><a href="#services">خدمات</a></li>
-          <li><a href="#departments">پنل مدیریت</a></li>
-          <li><a href="#tools">ابزارها</a></li>
-        </ul>
-      </nav>
-      <div class="footer-support">
-        <h5>پشتیبانی</h5>
-        <ul>
-          <li><a href="#">مرکز راهنمایی</a></li>
-          <li><a href="#">تماس با ما</a></li>
-          <li><a href="#">سوالات متداول</a></li>
-        </ul>
-      </div>
-    </div>
-    <div class="footer-bar">
-      <p>© ۱۴۰۵ شرکت تونل سد آریانا — تمامی حقوق محفوظ است. | Tunnel Sadd Ariana co.</p>
-    </div>
-  </footer>
-
-  <script src="js/liquid-glass.js"></script>
-  <script src="js/main.js"></script>
-  <script src="js/support.js"></script>
+  <script src="js/liquid-glass.js?v=8"></script>
+  <script src="js/main.js?v=8"></script>
+  <script src="js/support.js?v=8"></script>
 </body>
 </html>
