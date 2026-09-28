@@ -1317,8 +1317,10 @@ body.is-pre-play { overflow: hidden; }
     opacity: var(--hd, 0);
     translate: 0 calc(24px * (1 - var(--hd, 0)));
   }
-  .cards-grid { gap: clamp(12px, 2.2vh, 20px); }
-  .card {
+  /* فقط کارت‌های داستان (داخل .departments) — همین .card را صفحهٔ ورود پشتیبانی هم به کار
+     می‌برد و نباید پنهان شود */
+  .departments .cards-grid { gap: clamp(12px, 2.2vh, 20px); }
+  .departments .card {
     pointer-events: auto;
     opacity: 0;
     transform: none;
@@ -1326,10 +1328,10 @@ body.is-pre-play { overflow: hidden; }
     min-height: clamp(150px, 21vh, 188px);
     will-change: translate, opacity;
   }
-  .card.on-stage { visibility: visible; }
+  .departments .card.on-stage { visibility: visible; }
   /* شناوریِ آرام فقط وقتی کارت سر جایش نشسته؛ انیمیشنِ translate روی مقدار درون‌خطی برنده است */
-  .card.settled { animation: card-float 6.5s ease-in-out infinite; }
-  .card-wide { min-height: clamp(84px, 12vh, 108px); }
+  .departments .card.settled { animation: card-float 6.5s ease-in-out infinite; }
+  .departments .card-wide { min-height: clamp(84px, 12vh, 108px); }
 
   /* دکمهٔ گوشه برای پنجرهٔ وضعیت بخش‌ها (جای پیوند «پشتیبانی» نوار بالا که حذف شد) */
   .site-admin {
