@@ -574,9 +574,6 @@ body.is-pre-play { overflow: hidden; }
 
   .hero-lines, .geo-dots, .line-particles { display: none; }
 
-  /* اشارهٔ اسکرول در موبایل پنهان می‌شود — قانونش پایین‌تر از تعریف پایه آمده
-     تا در آبشار برنده شود (نگاه کنید به بلوکِ بعد از .scroll-hint) */
-
   /* نوار شیشه‌ای ناوبری: کوچک‌تر در موبایل */
   .site-header { padding: 6px 10px; }
 
@@ -597,47 +594,6 @@ body.is-pre-play { overflow: hidden; }
     grid-template-columns: repeat(4, 1fr);
     gap: 10px;
   }
-}
-
-/* ---------- اشارهٔ اسکرول ---------- */
-.scroll-hint {
-  position: absolute;
-  bottom: 28px;
-  inset-inline: 0;
-  margin-inline: auto;
-  width: fit-content;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 22px;
-  border-radius: 999px;
-  background: var(--glass-bg);
-  -webkit-backdrop-filter: blur(14px);
-  backdrop-filter: blur(14px);
-  border: 1px solid var(--color-border);
-  font-size: 0.9rem;
-  font-weight: 500;
-  opacity: 0;
-  transition: background 0.25s ease;
-}
-
-.hero-overlay.visible .scroll-hint {
-  animation: rise-in 0.8s 2.2s ease forwards;
-}
-
-.scroll-hint:hover { background: rgba(158, 197, 255, 0.16); }
-
-.scroll-hint svg { animation: bounce-y 1.6s ease-in-out infinite; }
-
-@keyframes bounce-y {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(4px); }
-}
-
-/* در موبایل ویدیو تمام‌صفحه نیست و «بخش‌های سامانه» بلافاصله زیرش می‌آید،
-   پس اشارهٔ اسکرول کاری برای انجام‌دادن ندارد */
-@media (max-width: 900px) {
-  .scroll-hint { display: none; }
 }
 
 /* ============================================================
@@ -1328,8 +1284,6 @@ body.is-pre-play { overflow: hidden; }
   .hero-lines .line-flows, .hero-lines .line-particles, .hero-lines .geo-dots { opacity: 0; }
   .hero-overlay.visible .proj { animation: none; }
   .proj { opacity: 0; transform: none; transition: none; will-change: transform, opacity; }
-  .hero-overlay.visible .scroll-hint { animation: none; }
-  .scroll-hint { opacity: 0; transition: opacity 0.25s ease, background 0.25s ease; }
 
   /* بخش کارت‌ها: لایهٔ ثابت روی کرهٔ زمین؛ خودش کلیک نمی‌گیرد، کارت‌ها می‌گیرند */
   .departments {

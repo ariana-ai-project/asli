@@ -469,7 +469,6 @@
     const particles = overlay.querySelector(".line-particles");
     const dots = overlay.querySelector(".geo-dots");
     const figs = Array.from(overlay.querySelectorAll(".proj"));
-    const hint = overlay.querySelector(".scroll-hint");
     const admin = document.querySelector(".site-admin");
     const root = document.documentElement;
 
@@ -633,11 +632,6 @@
         f.style.opacity = (r * (1 - clamp01((e - 0.7) / 0.3))).toFixed(3);
       });
 
-      // اشارهٔ اسکرول فقط در ابتدای داستان
-      const hv = 1 - clamp01(pos / (0.2 * H));
-      hint.style.opacity = hv.toFixed(3);
-      hint.style.pointerEvents = hv > 0.1 ? "auto" : "none";
-
       // ۴) کارت‌ها: سرتیتر، شهاب‌ها و دکمهٔ گوشه با --hd؛ هر کارت از سمت خودش
       const hd = easeOut(clamp01(cd / 0.35));
       root.style.setProperty("--hd", hd.toFixed(3));
@@ -681,28 +675,6 @@
       target = reduceMotion ? seg.total : Math.min(Math.max(window.scrollY, 0), seg.total);
       schedule();
     }
-
-    /* کلیک روی اشارهٔ اسکرول: پخش خودکار کل داستان در ~۹ ثانیه؛ هر حرکت کاربر آن را قطع می‌کند */
-    let autoRaf = 0;
-    const stopEvents = ["wheel", "touchstart", "keydown", "mousedown"];
-    function stopAuto() {
-      if (autoRaf) cancelAnimationFrame(autoRaf);
-      autoRaf = 0;
-      stopEvents.forEach((ev) => window.removeEventListener(ev, stopAuto));
-    }
-    hint.addEventListener("click", (e) => {
-      e.preventDefault();
-      stopAuto();
-      const from = window.scrollY, to = seg.total, dur = 9000, t0 = performance.now();
-      stopEvents.forEach((ev) => window.addEventListener(ev, stopAuto, { passive: true }));
-      const step = (now) => {
-        const t = clamp01((now - t0) / dur);
-        window.scrollTo({ top: from + (to - from) * easeInOut(t), behavior: "instant" });
-        if (t < 1) autoRaf = requestAnimationFrame(step);
-        else stopAuto();
-      };
-      autoRaf = requestAnimationFrame(step);
-    });
 
     /* ---------- راه‌اندازی ---------- */
     layout();
