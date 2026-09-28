@@ -57,22 +57,25 @@
     s.id = "sp-css";
     s.textContent = `
 .sp-bg{position:fixed;inset:0;background:rgba(3,8,20,.72);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}
-.sp-box{width:min(560px,100%);max-height:86vh;overflow:auto;background:#0b1424;border:1px solid rgba(120,160,255,.28);border-radius:18px;padding:20px;color:#e8eefc;box-shadow:0 24px 70px rgba(0,0,0,.55)}
+.sp-box{width:min(560px,100%);max-height:86vh;overflow:auto;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%),#0b1424;border:1px solid rgba(120,160,255,.28);border-radius:18px;padding:20px;color:#e8eefc;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 24px 70px rgba(0,0,0,.55)}
 .sp-box h3{margin:0 0 4px;font-size:1.15rem}
 .sp-box p.sp-hint{margin:0 0 16px;color:#93a4c4;font-size:.85rem;line-height:1.9}
 .sp-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid rgba(120,160,255,.14)}
 .sp-row:first-of-type{border-top:0}
 .sp-name{flex:1;font-size:.95rem}
 .sp-name small{display:block;color:#7c8aa8;font-size:.72rem}
-.sp-opt{background:rgba(120,160,255,.10);border:1px solid rgba(120,160,255,.24);color:#c8d6f5;border-radius:9px;padding:5px 10px;font:inherit;font-size:.78rem;cursor:pointer}
-.sp-opt:hover{background:rgba(120,160,255,.2)}
-.sp-opt[aria-pressed="true"]{background:#1e388c;border-color:#4f8cff;color:#fff}
-.sp-opt[data-state="active"][aria-pressed="true"]{background:#15803d;border-color:#22c55e}
-.sp-opt[data-state="soon"][aria-pressed="true"]{background:#a16207;border-color:#f59e0b}
-.sp-opt[data-state="off"][aria-pressed="true"]{background:#991b1b;border-color:#ef4444}
+.sp-opt{background:linear-gradient(180deg,rgba(255,255,255,.1),rgba(255,255,255,.015) 60%),rgba(120,160,255,.08);border:1px solid rgba(180,208,255,.22);color:#c8d6f5;border-radius:9px;padding:5px 10px;font:inherit;font-size:.78rem;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.16);transition:background-color .2s ease,scale .15s ease}
+.sp-opt:hover{background-color:rgba(120,160,255,.18)}
+.sp-opt:active,.sp-btn:active{scale:.97}
+.sp-opt[aria-pressed="true"]{color:#fff;box-shadow:inset 0 1px 0 rgba(255,255,255,.34),0 4px 12px -5px rgba(0,0,0,.6)}
+.sp-opt[data-state="active"][aria-pressed="true"]{background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,0) 55%),rgba(21,128,61,.9);border-color:rgba(74,222,128,.6)}
+.sp-opt[data-state="soon"][aria-pressed="true"]{background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,0) 55%),rgba(161,98,7,.92);border-color:rgba(251,191,36,.6)}
+.sp-opt[data-state="off"][aria-pressed="true"]{background:linear-gradient(180deg,rgba(255,255,255,.18),rgba(255,255,255,0) 55%),rgba(153,27,27,.9);border-color:rgba(248,113,113,.6)}
 .sp-box input{background:rgba(255,255,255,.06);border:1px solid rgba(120,160,255,.28);color:#e8eefc;border-radius:10px;padding:9px 12px;font:inherit;width:140px;text-align:center;letter-spacing:.2em}
-.sp-btn{background:#1e388c;border:1px solid #4f8cff;color:#fff;border-radius:10px;padding:9px 16px;font:inherit;cursor:pointer}
-.sp-btn.ghost{background:transparent;border-color:rgba(120,160,255,.3);color:#c8d6f5}
+.sp-btn{background:linear-gradient(180deg,rgba(255,255,255,.2),rgba(255,255,255,0) 55%),linear-gradient(135deg,rgba(40,100,220,.9),rgba(60,122,240,.86));border:1px solid rgba(150,190,255,.55);color:#fff;border-radius:10px;padding:9px 16px;font:inherit;font-weight:600;cursor:pointer;box-shadow:inset 0 1px 0 rgba(255,255,255,.4),0 6px 18px -7px rgba(47,111,228,.75);transition:filter .2s ease,scale .15s ease}
+.sp-btn:hover{filter:brightness(1.08)}
+.sp-btn.ghost{background:linear-gradient(180deg,rgba(255,255,255,.09),rgba(255,255,255,.015) 60%),rgba(120,165,255,.08);border-color:rgba(180,208,255,.22);color:#c8d6f5;box-shadow:inset 0 1px 0 rgba(255,255,255,.16)}
+.sp-btn:focus-visible,.sp-opt:focus-visible{outline:2px solid #4f8cff;outline-offset:2px}
 .sp-foot{display:flex;gap:10px;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid rgba(120,160,255,.14);flex-wrap:wrap}
 .sp-msg{min-height:20px;margin-top:10px;font-size:.82rem;color:#7ee0a8}
 .sp-msg.bad{color:#ffa8a8}`;

@@ -461,8 +461,10 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
   --gl-edge-hover: rgba(47, 111, 228, 0.42);
   --gl-rim: inset 0 1px 0 rgba(255, 255, 255, 0.95), inset 0 -1px 0 rgba(30, 60, 120, 0.06);
   --gl-lift: 0 2px 8px -3px rgba(20, 40, 80, 0.28);
-  --gl-tint: linear-gradient(135deg, rgba(37, 96, 214, 0.95), rgba(52, 116, 236, 0.93));
-  --gl-tint-edge: rgba(37, 96, 214, 0.75);
+  /* اندازه‌گیری روی عکسِ بی‌متن: آبیِ #3474ec متن سفید را ۴٫۲:۱ می‌داد؛ این آبی بالای ۵:۱ است */
+  --gl-tint: linear-gradient(135deg, rgba(28, 76, 186, 0.96), rgba(38, 92, 206, 0.95));
+  --gl-tint-sheen: linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0) 50%);
+  --gl-tint-edge: rgba(28, 76, 186, 0.8);
   --gl-tint-glow: 0 6px 16px -6px rgba(37, 96, 214, 0.55);
 }
 :root[data-theme="light"] body.tp-body {

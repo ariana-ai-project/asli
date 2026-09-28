@@ -21,22 +21,47 @@
     .tp-hero .eyebrow { display: inline-block; margin-bottom: 14px; }
     .tp-hero h1 { font-size: var(--step-4); font-weight: 900; margin-bottom: 10px; }
     .tp-hero p { color: var(--color-muted); max-width: 620px; margin-inline: auto; }
+    /* سحابی‌ها در قاب خودشان می‌مانند؛ قبلاً از لبهٔ راست بیرون می‌زدند و صفحه روی گوشی
+       ~۳۰px به پهلو اسکرول می‌خورد */
+    /* flow-root: حاشیهٔ پایینِ قاب از body بیرون نزند؛ min-height: پس‌زمینه تا تهِ پنجره یکپارچه
+       بماند — وگرنه سحابی زیر قاب بریده می‌شد و گرادیانِ body از نو تکرار می‌شد (دو خط افقی) */
+    body { position: relative; display: flow-root; min-height: 100vh; min-height: 100dvh; }
+    .tp-sky { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: -1; }
+
+    /* پس‌زمینهٔ کارت‌ها: «مه ساحلی» (Coastal Fog) از نمونهٔ اسکیل liquid-glass (MIT) — فقط
+       گرادیان CSS، بی‌تصویر. شیشه بی‌چیزی پشتش دیده نمی‌شود؛ افقِ روشنِ مه از پشت کارت‌ها رد
+       می‌شود و در کرومیوم دسکتاپ لبهٔ عدسیِ کارت‌ها آن را خم می‌کند. */
     .tp-grid {
+      position: relative; isolation: isolate;
       display: grid; grid-template-columns: 1fr 1fr; gap: 28px;
-      max-width: 980px; margin: 48px auto 80px; padding-inline: clamp(16px, 5vw, 64px);
+      width: min(1040px, calc(100% - 2 * clamp(16px, 5vw, 64px)));
+      margin: 48px auto 80px; padding: clamp(24px, 5vw, 56px);
+      border-radius: 32px; overflow: hidden;
+      background:
+        radial-gradient(90% 70% at 72% 18%, rgba(255, 233, 204, 0.55), transparent 60%),
+        radial-gradient(60% 40% at 20% 70%, rgba(120, 150, 150, 0.35), transparent 70%),
+        linear-gradient(180deg, #2e4150 0%, #5f7a86 38%, #aebcb9 58%, #6d8388 60%, #3b5260 72%, #1f2e37 100%);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), inset 0 0 0 1px rgba(255, 255, 255, 0.06), 0 30px 80px -30px rgba(0, 0, 0, 0.85);
+      /* روی مهِ روشن، شیشه تیره‌تر و پُرتر است تا متن سفید خوانا بماند (اسکیل: روی پس‌زمینهٔ روشن،
+         پرکننده بالا می‌رود) — عدد با عکسِ بی‌متن سنجیده شد */
+      --lg-fill: rgba(12, 24, 44, 0.46);
+      --lg-fill-static: rgba(12, 24, 44, 0.58);
+      --lg-solid: #1c2c44;
     }
-    @media (max-width: 720px) { .tp-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) { .tp-grid { grid-template-columns: 1fr; border-radius: 26px; } }
     /* main.js (که این صفحه بارگذاری نمی‌کند) معمولاً opacity کارت‌ها را با IntersectionObserver به ۱ می‌رساند؛ اینجا مستقیم فعال است */
     .tp-panel-card { min-height: 240px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 14px; padding: 40px 24px; opacity: 1 !important; transform: none !important; }
     .tp-panel-card .card-icon { width: 64px; height: 64px; border-radius: 18px; }
     .tp-panel-card .card-icon svg { width: 32px; height: 32px; }
     .tp-panel-card h3 { font-size: var(--step-2); }
-    .tp-panel-card .tp-desc { color: var(--color-muted); font-size: 0.95rem; }
+    .tp-panel-card .tp-desc { color: rgba(228, 238, 255, 0.9); font-size: 0.95rem; }
   </style>
 </head>
 <body>
-  <div class="nebula nebula-a" aria-hidden="true"></div>
-  <div class="nebula nebula-b" aria-hidden="true"></div>
+  <div class="tp-sky" aria-hidden="true">
+    <div class="nebula nebula-a"></div>
+    <div class="nebula nebula-b"></div>
+  </div>
 
   <div class="container tp-header">
     <a class="tp-back" href="../index.html#services">
