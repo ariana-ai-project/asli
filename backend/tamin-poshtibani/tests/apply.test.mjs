@@ -114,6 +114,16 @@ test("خطی که همهٔ اجباری‌هایش را دارد، ثبت‌شد
   assert.deepEqual(res.missing, []);
 });
 
+test("اجباری‌ای که قالبش درست نیست هم ثبت موقت نمی‌شود (همان قاعدهٔ پنل)", async () => {
+  /* متنِ خامِ مدل: «تحویل فوری از انبار» زمان تحویل نیست و «چک ۴۵ روزه» گزینهٔ تسویه نیست */
+  const DB = fakeDb({ items: ITEMS, quotes: [] });
+  const res = await applyExtraction({ DB }, proforma({ delivery_date: "تحویل فوری از انبار", pay_class: null, pay_terms: "چک ۴۵ روزه" }), {});
+  assert.deepEqual(inserts(DB).map((r) => r.saved), [0, 0]);
+  assert.equal(res.saved, 0);
+  assert.deepEqual(res.missing.sort(), ["dtime", "pay"]);
+  assert.equal(inserts(DB)[0].dtime, "تحویل فوری از انبار", "خوانده‌ها می‌نشینند تا کارشناس ببیند و درستش کند");
+});
+
 test("اگر اجباری‌ای خوانده نشده، خط ساخته می‌شود ولی ثبت‌شده نیست و می‌گوید چه کم است", async () => {
   const DB = fakeDb({ items: ITEMS, quotes: [] });
   const res = await applyExtraction({ DB }, proforma({ delivery_date: null, pay_class: null, pay_terms: null }), {});

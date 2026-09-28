@@ -442,6 +442,35 @@ test("نوبت ناتمام کنار گذاشته می‌شود؛ خطای مد�
   assert.equal(L.modelError(400, { error: { message: "prompt is too long: 1200000 tokens > 1000000 maximum" } }).extra.code, "context");
 });
 
+test("بیش از سقفِ متن یا فایل خطای روشن می‌دهد؛ تلاش دوبارهٔ نخستین پیامِ ناموفق همان گفت‌وگو را ادامه می‌دهد", async () => {
+  await freshEnv();
+  /* پیش از این، بیش از سقف بی‌صدا بریده می‌شد و مدل فقط بخشی را می‌دید */
+  const long = await asJson(await call(req("POST", "/chats/new/send", { json: { text: "ا".repeat(100001) } })));
+  assert.equal(long.status, 413);
+  const many = await asJson(await call(req("POST", "/chats/new/send", { json: { text: "x", files: Array.from({ length: 21 }, (_, i) => `f${i}`) } })));
+  assert.equal(many.status, 400);
+  assert.match(many.data.error, /۲۰/);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM legal_chats").first()).n, 0, "گفت‌وگویی ساخته نشد");
+
+  /* نخستین پیامِ گفت‌وگوی تازه با فایل، و خطای مدل پیش از آنکه شناسهٔ گفت‌وگو به مرورگر برسد */
+  const f = (await upload("قرارداد.pdf", "application/pdf", new Uint8Array([37, 80, 68, 70]), "chat")).data;
+  /* خطایی که تکرار نمی‌شود (۵۲۹ را خودِ Worker یک بار دیگر امتحان می‌کند) */
+  M.fail = { status: 400, body: { type: "error", error: { type: "invalid_request_error", message: "Your credit balance is too low to access the Anthropic API." } } };
+  const e = await asJson(await call(req("POST", "/chats/new/send", { json: { text: "این قرارداد را بخوان", files: [f.id] } })));
+  assert.equal(e.status, 503);
+  assert.ok(e.data.chat);
+  /* مرورگر شناسه را ندارد و دوباره «new» می‌فرستد: همان گفت‌وگو، نه ۴۰۹ «فایل مال گفت‌وگوی دیگری است» */
+  const again = await turn("new", "این قرارداد را بخوان", [f.id], { memory: false });
+  assert.equal(again.id, e.data.chat);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM legal_chats").first()).n, 1, "گفت‌وگوی تکراری ساخته نشد");
+  const g = (await asJson(await call(req("GET", `/chats/${again.id}`)))).data;
+  assert.deepEqual(g.turns.map((t) => t.state), ["failed", "done"]);
+
+  /* گفت‌وگویی که نوبتِ کامل دارد همچنان مالِ خودش است: فایلش در «new» دیگر ۴۰۹ است */
+  const other = await asJson(await call(req("POST", "/chats/new/send", { json: { text: "باز همان فایل", files: [f.id] } })));
+  assert.equal(other.status, 409);
+});
+
 test("تاشدگی: نوبت‌های قدیمی بیرون، فایل‌ها سنجاق، هرگز جلوتر از حافظه", () => {
   const f = (id, tok) => ({ id, file_id: `file_${id}`, name: `${id}.pdf`, mime: "application/pdf", tok });
   const turns = [

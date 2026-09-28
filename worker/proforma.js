@@ -6,7 +6,7 @@
  */
 import { HttpError } from "./http.js";
 import { extractProforma, toRial } from "./extract.js";
-import { VAT_RATE, netOf, ENUMS, missingRequired, INVOICE_AI } from "./quote-rules.js";
+import { VAT_RATE, netOf, ENUMS, missingRequired, validateQuote, INVOICE_AI } from "./quote-rules.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -159,8 +159,10 @@ export async function applyExtraction(env, p, body) {
           ship: terms.ship || old.ship, invoice: old.invoice_src === "manual" && old.invoice ? old.invoice : aiInvoice, pay: terms.pay || old.pay,
           place: terms.place || old.place, place_other: terms.place_other || old.place_other, vat: terms.vat || old.vat }
       : { spec: line.spec || null, unit: line.unit || it.unit, qty: line.qty == null ? it.qty : line.qty, price, ...terms };
-    /* ثبت موقت فقط وقتی همهٔ اجباری‌ها هستند؛ وگرنه خط می‌ماند تا کارشناس در بات یا پنل پرش کند */
-    const miss = missingRequired(merged);
+    /* ثبت موقت فقط وقتی همهٔ اجباری‌ها هستند و قالبشان درست است (همان قاعدهٔ «ثبت موقت» پنل: مثلاً
+       «تحویل فوری از انبار» زمان تحویل نیست و «چک ۴۵ روزه» گزینهٔ تسویه نیست)؛ وگرنه خط می‌ماند تا
+       کارشناس در بات یا پنل درستش کند */
+    const miss = [...missingRequired(merged), ...validateQuote(merged).map((b) => b.field)];
     const saved = miss.length ? 0 : 1;
     if (saved) savedN++; else miss.forEach((f) => missingAll.add(f));
 

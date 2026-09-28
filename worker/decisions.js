@@ -69,12 +69,13 @@ export async function expertDecision(env, ex, aid, body) {
 
   const s = await getSettings(env);
   if (s.approvalRequired) {
+    const t = now();
     const r = await env.DB.prepare("INSERT INTO decisions (assignment_id,expert_id,action,payload_json,requested_at) VALUES (?,?,?,?,?)")
-      .bind(aid, ex.id, action, JSON.stringify(payload), now()).run();
+      .bind(aid, ex.id, action, JSON.stringify(payload), t).run();
     const id = r.meta.last_row_id;
     const stmts = [ev(env, `expert:${ex.id}`, "decision_requested", own.request_id, { decision_id: id, action, items: itemIds })];
     const mgr = await settingValue(env, "managerChat");
-    if (mgr) stmts.push(await decisionRequestStmt(env, mgr, id, aid, action, itemIds));
+    if (mgr) stmts.push(await decisionRequestStmt(env, mgr, id, aid, action, itemIds, t));
     await env.DB.batch(stmts);
     return { ok: true, pending: true, decision_id: id, items: (itemIds || []).length };
   }
@@ -82,8 +83,8 @@ export async function expertDecision(env, ex, aid, body) {
   return { ok: true, pending: false, ...res };
 }
 
-/** پیام «در انتظار تأیید» برای مدیر، با دو دکمه */
-async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemIds) {
+/** پیام «در انتظار تأیید» برای مدیر، با دو دکمه. `at` لحظهٔ ثبتِ تصمیم است و در کلید یکتایی صف می‌آید */
+async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemIds, at) {
   const c = await context(env, aid);
   const its = (await env.DB.prepare("SELECT id, title, qty, unit, state FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
   const chosen = new Set(itemIds || []);
@@ -96,7 +97,9 @@ async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemId
       ? `کارشناس می‌خواهد <b>${M(chosen.size)} قلم از ${M(c.item_count)}</b> را با تأیید کمیسیون خاتمه دهد:\n${list}`
       : `کارشناس می‌خواهد این درخواست را <b>${ACTION_FA[action]}</b> کند.`)
     + `\n\n<i>چون «تصمیم کارشناس منوط به تأیید من» فعال است، تا شما تأیید نکنید اعمال نمی‌شود.</i>`;
-  return queueStmt(env, `dec:${decisionId}:ask`, mgrChat, text, [
+  /* کلید یکتایی زمان را هم دارد: شناسهٔ تصمیم بعد از حذف درخواست‌ها دوباره استفاده می‌شود و ردیفِ
+     قدیمیِ «dec:5:ask» پیامِ تصمیمِ تازه را بی‌صدا می‌خورد (ON CONFLICT DO NOTHING) — همان باگِ dispatch */
+  return queueStmt(env, `dec:${decisionId}:${at}:ask`, mgrChat, text, [
     [{ text: "✅ تأیید", callback_data: `mdec:${decisionId}:ok` }, { text: "❌ رد", callback_data: `mdec:${decisionId}:no` }],
   ]);
 }
@@ -187,5 +190,5 @@ async function tellExpert(env, d, ok, reason, res) {
     : `❌ <b>مدیر ${act} را رد کرد</b>\n\nدرخواست <b>${esc(c.request_id)}</b>`
       + (reason ? `\n\n<b>علت:</b>\n${esc(reason)}` : "\n\n<i>دلیلی نوشته نشد.</i>")
       + `\n\nدرخواست همچنان در کارتابل شماست.`;
-  await env.DB.batch([queueStmt(env, `dec:${d.id}:${ok ? "ok" : "no"}`, c.telegram_chat, text)]);
+  await env.DB.batch([queueStmt(env, `dec:${d.id}:${d.requested_at}:${ok ? "ok" : "no"}`, c.telegram_chat, text)]);
 }

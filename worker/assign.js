@@ -59,6 +59,25 @@ export const seenKb = (aid, team) => [[
 ]];
 
 /* ------------------------------------------------------------------ */
+/* پیام تعلیق / توقف / خاتمه / بازگشتِ مدیر                             */
+/* ------------------------------------------------------------------ */
+const STATE_MSG = {
+  hold: ["⏸", "تعلیق", "را مدیر موقتاً تعلیق کرد و تا «بازگشت به جریان» در کارتابل شما نیست."],
+  stop: ["⛔", "توقف", "را مدیر متوقف کرد؛ کنسل شد و از کارتابل شما بیرون رفت."],
+  closed: ["🔒", "خاتمه", "را مدیر خاتمه داد و از کارتابل شما بیرون رفت."],
+  open: ["▶️", "بازگشت به جریان", "را مدیر دوباره به جریان انداخت و باز در کارتابل شماست."],
+};
+
+/** پیام کارشناس وقتی مدیر از پنل وضعیت اقلامِ ارجاعش را عوض می‌کند؛ `n` شمار اقلامی است که واقعاً عوض شد */
+export function stateText(st, a, n) {
+  const [icon, title, body] = STATE_MSG[st];
+  return `${icon} <b>${title}</b>\n\n`
+    + `درخواست <b>${esc(a.request_id)}</b>\n`
+    + `${esc(a.party || "")}\n\n`
+    + `${M(n)} قلم از این درخواست ${body}`;
+}
+
+/* ------------------------------------------------------------------ */
 /* تعطیلات                                                              */
 /* ------------------------------------------------------------------ */
 /* در هر isolate کش می‌شود؛ خیلی کم تغییر می‌کند و Cron در پلن رایگان فقط ۵۰ subrequest دارد */
@@ -185,6 +204,7 @@ export async function reassign(env, body, actor = "manager") {
   const t = now();
   const days = int(body.days, a.days);
   let b = await env.DB.prepare("SELECT * FROM assignments WHERE request_id=? AND expert_id=?").bind(a.request_id, eid).first();
+  const existed = !!b;
   if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, days, a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days }; }
   const items = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all()).results || [];
   /* ساعت‌شمار کارشناس جدید از نو شروع می‌شود، پس زمان‌بندی هشدارها هم از نو ساخته می‌شود —
@@ -198,6 +218,9 @@ export async function reassign(env, body, actor = "manager") {
     deadlineAt = alertSchedule(t, newDays, thr, isHoliday).deadlineAt;
   }
   const stmts = [
+    /* کارشناس تازه روی همین درخواست ارجاعِ دیگری داشت (مثلاً ارسال‌نشده): کارِ ارسال‌شده‌ای که به آن
+       می‌رود ارسال‌شده می‌ماند و ساعت‌شمارش از نو — وگرنه در کارتابلش دیده نمی‌شد ولی هشدار و پیامش می‌رفت */
+    ...(existed && a.dispatched_at ? [env.DB.prepare("UPDATE assignments SET dispatched_at=?, days=? WHERE id=?").bind(t, newDays, b.id)] : []),
     env.DB.prepare("UPDATE items SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE quotes SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE proformas SET assignment_id=? WHERE assignment_id=? AND supplier_name NOT IN (SELECT supplier_name FROM proformas WHERE assignment_id=?)").bind(b.id, aid, b.id),

@@ -18,6 +18,8 @@
   const ORDER = ["active", "soon", "off"];
   const esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   const cards = () => [...document.querySelectorAll(".cards-grid .card[data-dept]")];
+  /* رمز در هدر X-Site-Code می‌رود و هدر HTTP رقم فارسی نمی‌پذیرد؛ سرور هم همین شکل را هش می‌کند */
+  const ascii = (v) => String(v == null ? "" : v).trim().replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
   const code = {
     get: () => { try { return sessionStorage.getItem(SKEY) || ""; } catch (_) { return ""; } },
     set: (v) => { try { sessionStorage.setItem(SKEY, v); } catch (_) { /* حالت ناشناس */ } },
@@ -137,8 +139,8 @@
 
   async function unlock(c) {
     try {
-      const r = await api("/site/login", { body: { code: c } });
-      code.set(c);
+      const r = await api("/site/login", { body: { code: ascii(c) } });
+      code.set(ascii(c));
       state = { cards: r.cards || {}, hasPass: !!r.hasPass };
       paint(state.cards);
       draw(adminView());
@@ -160,7 +162,9 @@
 
   async function savePass(p) {
     try {
-      const r = await api("/site", { method: "PUT", auth: true, body: { pass: p } });
+      const r = await api("/site", { method: "PUT", auth: true, body: { pass: ascii(p) } });
+      /* رمزِ همین تب هم رمز تازه می‌شود؛ وگرنه کلیک بعدی با رمز قدیمی ۴۰۱ می‌گرفت و تب قفل می‌شد */
+      code.set(ascii(p));
       state.hasPass = !!r.hasPass;
       draw(adminView());
       msg("رمز تب ذخیره شد ✓");

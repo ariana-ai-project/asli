@@ -313,7 +313,7 @@
               ${its.some((i) => i.state === "hold") ? `<button class="tp-btn xs" data-act="open|${a.id}">بازگشت</button>` : ""}</td>
             <td><button class="tp-btn xs" data-open="${a.id}">مشاهده</button> <button class="tp-btn xs" data-move="${a.id}" ${a.dispatched_at ? "" : "disabled"}>تغییر</button></td>`;
         } else if (u.un) {
-          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
+          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}" data-un="${u.un.map((i) => i.id).join(",")}"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
             <td><input class="tp-input num unset" style="width:64px;text-align:center" disabled placeholder="—"></td><td class="num">${u.un.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, null, S.now)}"></div></td>
             ${TP.STAGES.map(() => `<td class="console"><div class="box b-idle"></div></td>`).join("")}
@@ -669,12 +669,19 @@
   }
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
-  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس" };
-  /* notify رویداد: «ارسال» و «تغییر کارشناس» اگر پیام تلگرام به صف رفته باشد telegram و وگرنه none
-     می‌نویسند. تعلیق/توقف/خاتمه/بازگشتِ مدیر همیشه telegram می‌نویسد ولی پیامی نمی‌فرستد
-     (worker/api.js، setState)؛ پس «با اعلان تلگرام» فقط مال همان دو رویداد است. */
-  const TG_SENT = new Set(["dispatch", "reassign"]);
-  const notifyChip = (kind, n) => TG_SENT.has(kind) && n === "telegram" ? `<span class="chip info">با اعلان تلگرام</span>` : `<span class="chip">بدون اعلان تلگرام</span>`;
+  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس",
+    decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
+    manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
+    commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک" };
+  /* عامل رویداد: manager، system یا expert:<id> — کارشناس با نامش، نه شناسه */
+  const actorName = (a) => { if (a === "manager") return "مدیر"; if (a === "system") return "سامانه";
+    const m = /^expert:(\d+)$/.exec(a || ""), e = m && S.data.experts.find((x) => x.id === +m[1]);
+    return e ? esc(e.label || e.name) : esc(a); };
+  /* notify رویداد همان است که واقعاً به صف تلگرام رفت (telegram) یا نرفت (none). تعلیق/توقف/خاتمه/
+     بازگشتِ مدیر پیش از مهر ۱۴۰۵ بی‌آنکه پیامی برود telegram می‌نوشت؛ رویدادهای تازه‌اش notified
+     (شمار کارشناسانِ خبرشده) هم دارند و فقط همان‌ها معتبرند (worker/api.js، setState). */
+  const STATE_KINDS = new Set(["hold", "stop", "closed", "open"]);
+  const notifyChip = (kind, p) => p.notify === "telegram" && (!STATE_KINDS.has(kind) || p.notified > 0) ? `<span class="chip info">با اعلان تلگرام</span>` : `<span class="chip">بدون اعلان تلگرام</span>`;
   function vLog() {
     const D = S.decisions;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>تصمیم‌های در انتظار تأیید <span class="chip ${D.length ? "warn" : ""}">${D.length}</span></h2>
@@ -683,7 +690,7 @@
       : `<p class="lead">تصمیمی در انتظار نیست.${settings().approvalRequired ? "" : " (تأیید مدیر برای تصمیم کارشناس غیرفعال است.)"}</p>`}
       <div class="tp-sect"><h3>رویدادهای اخیر <span>${S.events.length}</span> <button class="tp-btn xs" data-load-events style="margin-inline-start:8px">بارگیری</button></h3>
       <div class="tp-scroll" style="max-height:50vh"><table class="tp-mx"><thead><tr><th>زمان</th><th>عامل</th><th>رویداد</th><th>درخواست</th><th>جزئیات</th></tr></thead><tbody>
-        ${S.events.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ } return `<tr><td class="num" style="white-space:nowrap">${TP.fmt(e.at)}</td><td>${e.actor === "manager" ? "مدیر" : esc(e.actor)}</td><td>${KIND[e.kind] || esc(e.kind)}</td><td class="num">${esc(e.request_id || "")}</td><td class="dim" style="white-space:normal;text-align:right">${esc(Object.entries(p).filter(([k]) => k !== "notify").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))}${p.notify ? ` ${notifyChip(e.kind, p.notify)}` : ""}</td></tr>`; }).join("")}
+        ${S.events.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ } return `<tr><td class="num" style="white-space:nowrap">${TP.fmt(e.at)}</td><td>${actorName(e.actor)}</td><td>${KIND[e.kind] || esc(e.kind)}</td><td class="num">${esc(e.request_id || "")}</td><td class="dim" style="white-space:normal;text-align:right">${esc(Object.entries(p).filter(([k]) => k !== "notify" && k !== "notified").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))}${p.notify ? ` ${notifyChip(e.kind, p)}` : ""}</td></tr>`; }).join("")}
       </tbody></table></div></div></div>`;
   }
 
@@ -714,12 +721,15 @@
       const s = RP.season;
       if (!s.years) { s.years = [RP.meta.today.year]; s.seasons = [Math.floor((RP.meta.today.month - 1) / 3) + 1]; }
       if (!s.sheets) s.sheets = RP.meta.sheets.map((x) => x.key);
-    } catch (e) { RP.err = e.message; }
+      RP.metaFailed = false;
+    } catch (e) { RP.err = e.message; RP.metaFailed = true; }
     RP.metaLoading = false; render();
   }
+  /* خطا پرچمِ «ناموفق» می‌گذارد تا render خودکار دوباره نفرستد — وگرنه هر خطا (۴۰۱، ۵xx، قطعی) یک حلقهٔ
+     بی‌پایان درخواست می‌شد که هر بار بازهٔ گزارش را از D1 می‌خواند. دوباره فقط با دکمه. */
   async function loadRepStatus() {
     RP.loading = true; RP.rangeKey = `${RP.range.from}|${RP.range.to}`;
-    try { RP.status = await TP.api("/reports/status" + rangeQs()); RP.err = ""; } catch (e) { RP.err = e.message; }
+    try { RP.status = await TP.api("/reports/status" + rangeQs()); RP.err = ""; RP.statusFailed = false; } catch (e) { RP.err = e.message; RP.statusFailed = true; }
     RP.loading = false; render();
   }
   /* دانلود فایل از مسیرهای گزارش — TP.api فقط JSON می‌خواند */
@@ -771,7 +781,10 @@
   }
   function vRepStatus() {
     const D = RP.status;
-    if (!D) { if (!RP.loading) loadRepStatus(); return vRepRange() + `<div class="empty">در حال ساخت گزارش وضعیت درخواست‌ها…</div>`; }
+    if (!D) {
+      if (!RP.loading && !RP.statusFailed) loadRepStatus();
+      return vRepRange() + `<div class="empty">${RP.statusFailed ? "گزارش ساخته نشد؛ برای تلاش دوباره «↻ به‌روزرسانی» را بزنید." : "در حال ساخت گزارش وضعیت درخواست‌ها…"}</div>`;
+    }
     const tabs = [["general", "درخواست کلی"], ["daily", "گزارش روزانه"]].map(([k, l]) => `<button class="rp-sheet ${RP.sheet === k ? "on" : ""}" data-rsheet="${k}">${l}</button>`).join("");
     const R = D.range || {};
     return vRepRange() + `<div class="rp-tools"><div class="rp-sheets">${tabs}</div><span class="rp-sp"></span>
@@ -823,7 +836,11 @@
   }
   function vRepSeason() {
     const meta = RP.meta, s = RP.season;
-    if (!meta) { if (!RP.metaLoading) loadRepMeta(); return `<div class="empty">در حال خواندن سال‌ها و پروژه‌ها…</div>`; }
+    if (!meta) {
+      if (!RP.metaLoading && !RP.metaFailed) loadRepMeta();
+      return RP.metaFailed ? `<div class="empty">سال‌ها و پروژه‌ها خوانده نشد. <button class="tp-btn sm" data-rmeta-retry>تلاش دوباره</button></div>`
+        : `<div class="empty">در حال خواندن سال‌ها و پروژه‌ها…</div>`;
+    }
     const pop = (kind, label, active, body) => `<span class="fwrap"><button class="tp-btn sm ${active ? "primary" : ""}" data-rpop="${kind}">${label} ▾</button>${RP.pop === kind ? `<div class="fpop" data-pop>${body}
       <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-rpclear="${kind}">پاک کردن</button><button class="tp-btn xs primary" data-rpclose>بستن</button></div></div>` : ""}</span>`;
     const yBody = `<div class="fpop-list">${meta.years.map((y) => `<label><input type="checkbox" data-ry="${y}" ${s.years.includes(y) ? "checked" : ""}> ${y}</label>`).join("") || `<span class="dim">درخواستی در سامانه نیست.</span>`}</div>`;
@@ -1053,7 +1070,7 @@
         const managers = d.querySelector("[data-pmgr]").value.split("\n").map((x) => x.trim()).filter(Boolean);
         const old = meta.projects.find((p) => p.note); rows.forEach((p) => { const o = meta.projects.find((x) => x.name === p.name && x.note); if (o && p.noSystem) p.note = o.note; });
         /* پروژه‌ها محورِ ماتریس‌های ارجاع و مهلت هوشمند هم هستند */
-        try { await TP.api("/settings", { method: "PUT", body: { reportProjects: rows, reportManagers: managers } }); RP.meta = null; RP.season.result = null; AX = null; AX_ERR = null; render(); }
+        try { await TP.api("/settings", { method: "PUT", body: { reportProjects: rows, reportManagers: managers } }); RP.meta = null; RP.metaFailed = false; RP.season.result = null; AX = null; AX_ERR = null; render(); }
         catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
         void old;
       }, "ذخیره");
@@ -1069,7 +1086,8 @@
     Q("[data-rpart]").forEach((b) => b.onclick = () => { RP.part = b.dataset.rpart; RP.pop = null; render(); });
     Q("[data-rsheet]").forEach((b) => b.onclick = () => { RP.sheet = b.dataset.rsheet; render(); });
     const rh = G("[data-rhidden]"); if (rh) rh.onchange = (e) => { RP.hidden = e.target.checked; render(); };
-    const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; RP.limit = 300; RP.dLimit = 300; render(); };
+    const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; RP.statusFailed = false; RP.limit = 300; RP.dLimit = 300; render(); };
+    const mr = G("[data-rmeta-retry]"); if (mr) mr.onclick = () => { RP.metaFailed = false; RP.err = ""; render(); };
     const rx = G("[data-rstatus-xlsx]"); if (rx) rx.onclick = () => repDownload("/reports/status.xlsx" + rangeQs(), null, "وضعیت درخواست ها.xlsx");
     /* بازهٔ گزارش وضعیت */
     const rfr = G("[data-rfrom]"); if (rfr) rfr.onclick = () => TP.openDatePicker(rfr, (v) => { RP.range.from = String(v || "").split("،")[0].trim(); render(); }, { single: true });
@@ -1078,7 +1096,7 @@
     Q("[data-rquick]").forEach((b) => b.onclick = () => {
       const [y] = TP.todayJ(), k = b.dataset.rquick;
       RP.range = { from: k === "all" ? "" : k === "year" ? `${y}/01/01` : monthStart(), to: "" };
-      RP.status = null; RP.limit = 300; RP.dLimit = 300; render();
+      RP.status = null; RP.statusFailed = false; RP.limit = 300; RP.dLimit = 300; render();
     });
     Q("[data-sl]").forEach((b) => b.onclick = () => { const sel = RP.sl[+b.dataset.sl], k = b.dataset.k, i = sel.indexOf(k); if (!sel.length) sel.push(k); else if (i >= 0) sel.splice(i, 1); else sel.push(k); RP.limit = 300; render(); });
     Q("[data-slclear]").forEach((b) => b.onclick = () => { RP.sl[+b.dataset.slclear] = []; render(); });
@@ -1200,7 +1218,9 @@
       try {
         if (aid && eid) await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid } });
         else if (aid) await TP.api("/unassign", { body: { assignment_id: aid } });
-        else await TP.api("/assign", { body: { request_id: rid, expert_id: eid } });
+        /* ردیفِ «بدون کارشناس»: فقط همین اقلام — بی item_ids، سرور همهٔ اقلامِ ارسال‌نشده را می‌برد و ارجاعِ
+           ارسال‌نشدهٔ کارشناس دیگرِ همین درخواست را هم خالی و حذف می‌کرد */
+        else await TP.api("/assign", { body: { request_id: rid, expert_id: eid, item_ids: (e.target.dataset.un || "").split(",").map(Number).filter(Boolean) } });
         await refresh();
       } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
     });
@@ -1316,14 +1336,19 @@
       async () => { try { await TP.api("/dispatch", { body: { assignment_ids: list.map((a) => a.id) } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تأیید و ارسال");
   }
   const ACT = {
-    hold: ["تعلیق", "<b>تعلیق موقت است.</b> پایش و اعلان متوقف می‌شود و درخواست از کارتابل خارج می‌شود، ولی هر زمان با «بازگشت» دوباره در جریان می‌افتد."],
+    hold: ["تعلیق", "<b>تعلیق موقت است.</b> پایش و یادآوری مهلت متوقف می‌شود و درخواست از کارتابل خارج می‌شود، ولی هر زمان با «بازگشت» دوباره در جریان می‌افتد."],
     stop: ["توقف", "<b>توقف نهایی است.</b> اقلام کنسل می‌شوند و از کارتابل خارج می‌شوند. برای ادامه باید در راهکاران دوباره فعال شوند."],
     closed: ["خاتمه", "اقلام خاتمه‌یافته تلقی می‌شوند و از کارتابل خارج می‌شوند."],
     open: ["بازگشت به جریان", "اقلام از تعلیق خارج و دوباره وارد کارتابل کارشناس می‌شوند. پایش از سر گرفته می‌شود."],
   };
   function doAct(st, aid) {
     const r = S.data.requests.find((x) => x.assignments.some((a) => a.id === aid)); const a = r && r.assignments.find((x) => x.id === aid); if (!a) return;
-    TP.modal(`${ACT[st][0]} — درخواست ${esc(r.id)}`, `<b>${esc(r.party)}</b> · کارشناس ${esc(a.expert_label || a.expert_name)}<br><br>${ACT[st][1]}<br><br><span class="chip warn">اعلان تلگرام به کارشناس نمی‌رود</span>`,
+    /* پیام تلگرام فقط وقتی می‌رود که ارجاع ارسال شده، قلمی واقعاً وضعیت عوض کند و تلگرام کارشناس وصل باشد (worker/api.js، setState) */
+    const ex = S.data.experts.find((e) => e.id === a.expert_id), change = itemsOf(r, a).some((i) => i.state !== "closed" && i.state !== st);
+    const tg = !a.dispatched_at ? `<span class="chip">ارسال‌نشده؛ اعلانی به کارشناس نمی‌رود</span>`
+      : !change ? `<span class="chip">وضعیت اقلام همین است؛ اعلانی نمی‌رود</span>`
+      : ex && ex.telegram_chat ? `<span class="chip info">اعلان تلگرام به کارشناس می‌رود</span>` : `<span class="chip warn">تلگرام کارشناس وصل نیست؛ اعلانی نمی‌رود</span>`;
+    TP.modal(`${ACT[st][0]} — درخواست ${esc(r.id)}`, `<b>${esc(r.party)}</b> · کارشناس ${esc(a.expert_label || a.expert_name)}<br><br>${ACT[st][1]}<br><br>${tg}`,
       async () => { try { await TP.api("/items/state", { body: { assignment_id: aid, request_id: r.id, state: st } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, `تأیید ${ACT[st][0]}`);
   }
   function moveDialog(aid) {
@@ -1332,7 +1357,7 @@
     const d = TP.modal(`تغییر کارشناس — درخواست ${esc(r.id)}`, `کارشناس فعلی: <b>${esc(a.expert_label || a.expert_name)}</b><br><br>
       <select class="tp-select" id="mv-exp" style="width:100%"><option value="">— کارشناس جدید —</option>${E.map((e) => `<option value="${e.id}">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</option>`).join("")}</select>
       <div class="tp-field" style="margin-top:10px"><b>مهلت جدید (روز کاری)</b><input class="tp-input" id="mv-days" value="${a.days || ""}" inputmode="numeric" style="width:110px;text-align:center"></div>
-      <p class="dim" style="margin-top:10px;font-size:.85rem">اقلام، استعلام‌ها و پیش‌فاکتورها منتقل می‌شوند، ساعت‌شمار از نو شروع می‌شود و به هر دو کارشناس اعلان می‌رود.</p>`,
+      <p class="dim" style="margin-top:10px;font-size:.85rem">اقلام، استعلام‌ها و پیش‌فاکتورها منتقل می‌شوند، ساعت‌شمار از نو شروع می‌شود و پیام «ارجاع جدید» در تلگرامِ کارشناس جدید می‌آید (اگر تلگرامش وصل باشد). کارشناس فعلی پیامی نمی‌گیرد.</p>`,
       /* مودال پیش از اجرای onYes از DOM جدا می‌شود؛ مقدارها را از خودِ عنصر مودال می‌خوانیم، نه document */
       async () => { const eid = +d.querySelector("#mv-exp").value, days = +d.querySelector("#mv-days").value; if (!eid) return; try { await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid, days } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تغییر ارجاع");
     d.querySelector("#mv-exp").focus();

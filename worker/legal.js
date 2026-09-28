@@ -620,18 +620,32 @@ async function memoryOf(env, ws, id) {
 
 async function send(request, env, ws, id) {
   const b = await readJson(request);
-  const text = String(b.text == null ? "" : b.text).slice(0, MAX_Q);
-  const ids = Array.isArray(b.files) ? b.files.slice(0, MAX_FILES_TURN) : [];
+  const text = String(b.text == null ? "" : b.text);
+  const ids = Array.isArray(b.files) ? b.files : [];
+  /* بیش از سقف را بی‌صدا نمی‌بُریم: مدل فقط بخشی از فایل‌ها یا متن را می‌دید و کاربر خبر نداشت */
+  if (text.length > MAX_Q) throw new HttpError(`پیام خیلی بلند است (بیش از ${MAX_Q.toLocaleString("fa-IR")} نویسه)؛ متن بلند را به‌صورت فایل پیوست کنید.`, 413);
+  if (ids.length > MAX_FILES_TURN) throw new HttpError(`در هر پیام حداکثر ${MAX_FILES_TURN.toLocaleString("fa-IR")} فایل می‌شود فرستاد؛ بقیه را در پیام بعدی بفرستید.`, 400);
   if (!T(text) && !ids.length) throw new HttpError("پیام خالی است.", 400);
 
   let chat;
   const t = now();
+  const files = await filesOf(env, ws, ids, "chat");
+  /* تلاش دوباره برای نخستین پیامِ گفت‌وگوی تازه: اگر بارِ قبل پیش از رسیدنِ شناسهٔ گفت‌وگو به مرورگر شکست
+     خورد (قطع شبکه، توقف)، فایل‌ها به همان گفت‌وگو بسته شده‌اند و «new» دوباره ۴۰۹ می‌گرفت. گفت‌وگویی که
+     هنوز هیچ نوبتِ کاملی ندارد، همان ادامه می‌یابد. */
+  if (id === "new") {
+    const bound = [...new Set(files.map((f) => f.chat_id).filter(Boolean))];
+    if (bound.length === 1 && files.every((f) => f.chat_id === bound[0])) {
+      const prev = await env.DB.prepare("SELECT c.id FROM legal_chats c WHERE c.id=? AND c.ws=? AND NOT EXISTS (SELECT 1 FROM legal_turns x WHERE x.chat_id=c.id AND x.state='done')")
+        .bind(bound[0], ws).first();
+      if (prev) id = prev.id;
+    }
+  }
   if (id === "new") {
     chat = { id: rid(20), ws, title: "", title_auto: 1, memory: "", memory_seq: 0, fold_seq: 0, pins_json: null, last_seq: 0, ctx_tokens: 0, created_at: t };
   } else {
     chat = await chatOf(env, ws, id);
   }
-  const files = await filesOf(env, ws, ids, "chat");
   if (files.some((f) => f.chat_id && f.chat_id !== chat.id)) throw new HttpError("این فایل مال گفت‌وگوی دیگری است؛ دوباره بارگذاری‌اش کنید.", 409);
   const call = await meter(env, request, ws, "chat", chat.id);
 

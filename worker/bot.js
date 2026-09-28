@@ -543,16 +543,18 @@ async function onFlowText(env, api, chat, ex, f, text) {
 }
 
 /**
- * «۲٬۵۰۰٬۰۰۰»، «2,500,000»، «2500000 ریال» → 2500000
- * ارقام فارسی و عربی، جداکننده‌های رایج و کلمهٔ «ریال» پذیرفته می‌شوند؛
+ * «۲٬۵۰۰٬۰۰۰»، «2,500,000»، «2500000 ریال»، «۲۵۰٬۰۰۰ تومان» → 2500000 · «۲٫۵» → 2.5
+ * ارقام فارسی و عربی، جداکننده‌های رایج، ممیز فارسی «٫» و کلمهٔ «ریال» پذیرفته می‌شوند؛ «تومان»
+ * ده برابر می‌شود، چون قیمت به ریال ذخیره می‌شود (همان toRial خواندنِ پیش‌فاکتور).
  * چیزی که عدد نیست، null برمی‌گردد تا کاربر دوباره بنویسد نه اینکه صفر ثبت شود.
  */
 export function parsePrice(s) {
   const digits = "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩";
   let x = String(s == null ? "" : s).replace(/[۰-۹٠-٩]/g, (d) => String(digits.indexOf(d) % 10));
-  x = x.replace(/[,٬،_\s]/g, "").replace(/ریال|تومان|rial|IRR/gi, "").trim();
+  const toman = /تومان|toman/i.test(x);
+  x = x.replace(/[,٬،_\s]/g, "").replace(/ریال|تومان|rial|toman|IRR/gi, "").replace(/٫/g, ".").trim();
   if (!/^\d+(\.\d+)?$/.test(x)) return null;
-  const n = Number(x);
+  const n = toman ? Math.round(Number(x) * 10 * 1e6) / 1e6 : Number(x);   /* ۱٫۱ تومان → ۱۱ نه ۱۱٫۰۰۰۰۰۰۰۰۰۰۰۰۰۲ */
   return isFinite(n) && n > 0 ? n : null;
 }
 
@@ -1063,9 +1065,11 @@ async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
   const allSaved = savedN === lines.length;
   const lowN = lines.filter((q) => q.low_conf).length;
 
-  /* اجباری‌ها هر کدام یک ردیف؛ اختیاری‌ها دوتا-دوتا تا کارت بلند نشود */
-  const kb = kbReq.map((b) => [b]);
-  for (let i = 0; i < kbOpt.length; i += 2) kb.push(kbOpt.slice(i, i + 2));
+  /* اجباری‌ها هر کدام یک ردیف؛ اختیاری‌ها دوتا-دوتا تا کارت بلند نشود. سقف دارد: تلگرام صفحه‌کلیدِ
+     بیش از حدود صد دکمه را رد می‌کند؛ با پر شدنِ اولی‌ها، بعدی‌ها جایشان را می‌گیرند */
+  const kb = kbReq.slice(0, 40).map((b) => [b]);
+  const opt = kbOpt.slice(0, 20);
+  for (let i = 0; i < opt.length; i += 2) kb.push(opt.slice(i, i + 2));
   /* تصمیم مدیر: حتی وقتی نام تأمین‌کننده دستی وارد شده، بقیهٔ فیلدها می‌تواند از پیش‌فاکتور بیاید */
   kb.push([{ text: "📎 دریافت پیش‌فاکتور (بقیه از فایل خوانده شود)", callback_data: `qw:${q0.id}:0` }]);
   kb.push([{ text: "✏️ اصلاح یک فیلد پرشده", callback_data: `qe:${q0.id}:0` }]);
@@ -1079,11 +1083,13 @@ async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
       ? `⛔ برای ثبت موقت، فیلدهای ❌ باید پر شوند. روی هر کدام بزنید و مقدارش را بدهید.`
       : `همهٔ اجباری‌ها هستند؛ «ثبت موقت» را بزنید.${missOpt.length ? " اختیاری‌های خالی مانع نیستند." : ""}`;
 
+  /* فهرست‌های بلند (تأمین‌کنندهٔ ده‌ها قلمی) کوتاه می‌شوند تا پیام از سقف ۴۰۹۶ نویسهٔ تلگرام رد نشود؛ دکمه‌ها همه هستند */
+  const few = (a2, n) => (a2.length > n ? `${a2.slice(0, n).join("، ")} و ${M(a2.length - n)} مورد دیگر` : a2.join("، "));
   const text = `${head ? head + "\n\n" : ""}📋 <b>استعلام «${esc(supplier)}»</b> — درخواست <b>${esc(a ? a.request_id : "")}</b>\n`
     + `${M(lines.length)} قلم · ثبت‌شده ${M(savedN)} از ${M(lines.length)}${lowN ? ` · ${M(lowN)} قیمتِ کم‌اطمینان ⚠️` : ""}\n\n`
     + (read.length ? `✅ <b>پر شده:</b> ${read.join(" · ")}\n` : "")
-    + (missReq.length ? `❌ <b>اجباری و خالی:</b> ${esc(missReq.join("، "))}\n` : "")
-    + (missOpt.length ? `⚪ <b>اختیاری و خالی:</b> ${esc(missOpt.join("، "))}\n` : "")
+    + (missReq.length ? `❌ <b>اجباری و خالی:</b> ${esc(few(missReq, 25))}\n` : "")
+    + (missOpt.length ? `⚪ <b>اختیاری و خالی:</b> ${esc(few(missOpt, 15))}\n` : "")
     + `\n${state}`;
 
   if (messageId) {
@@ -1180,13 +1186,20 @@ async function editMenu(env, api, chat, q, messageId) {
 /** ثبت موقتِ همهٔ خط‌های تأمین‌کننده — فقط اگر اجباری‌ها پرند (همان قاعدهٔ پنل) */
 async function saveSupplier(env, api, chat, ex, q, messageId) {
   const lines = await supplierLines(env, q.assignment_id, q.supplier_name);
-  const problems = [];
+  /* شرایطِ فاکتور (زمان تحویل، تسویه، …) مالِ همهٔ خط‌های تأمین‌کننده است: یک بار گفته می‌شود نه برای هر قلم.
+     پیام تلگرام ۴۰۹۶ نویسه جا دارد؛ بیست‌وچند خط با یک ایراد مشترک از آن رد می‌شد و هیچ پاسخی نمی‌رفت. */
+  const problems = [], seen = new Set();
+  const add = (s) => { if (!seen.has(s)) { seen.add(s); problems.push(s); } };
   for (const l of lines) {
     const miss = missingRequired(l);
-    if (miss.length) problems.push(`• ${esc(short(l.item_title, 24))}: ${esc(miss.map(fieldLabel).join("، "))}`);
-    for (const b of validateQuote(l)) problems.push(`• ${esc(short(l.item_title, 24))}: ${esc(b.message)}`);
+    const sup = miss.filter((f) => PER_SUPPLIER.includes(f)), own = miss.filter((f) => !PER_SUPPLIER.includes(f));
+    if (sup.length) add(`• ${esc(sup.map(fieldLabel).join("، "))}`);
+    if (own.length) add(`• ${esc(short(l.item_title, 24))}: ${esc(own.map(fieldLabel).join("، "))}`);
+    for (const b of validateQuote(l)) add(PER_SUPPLIER.includes(b.field) ? `• ${esc(b.message)}` : `• ${esc(short(l.item_title, 24))}: ${esc(b.message)}`);
   }
-  if (problems.length) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `⛔ <b>ثبت موقت نشد</b> — این‌ها خالی‌اند:\n${problems.join("\n")}`);
+  const MAX_P = 12;
+  const shown = problems.length > MAX_P ? [...problems.slice(0, MAX_P), `<i>و ${M(problems.length - MAX_P)} مورد دیگر</i>`] : problems;
+  if (problems.length) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, messageId, `⛔ <b>ثبت موقت نشد</b> — این‌ها خالی یا نادرست‌اند:\n${shown.join("\n")}`);
   const t = now();
   await env.DB.batch([
     env.DB.prepare("UPDATE quotes SET saved=1, updated_at=? WHERE assignment_id=? AND supplier_name=?").bind(t, q.assignment_id, q.supplier_name),
@@ -1327,7 +1340,7 @@ async function closeCard(env, api, chat, ex, aid, messageId, head) {
 }
 
 /** خلاصهٔ خوانا از خروجی مدل، تا کارشناس پیش از ثبت ببیند چه چیزی قرار است بنشیند */
-function extractSummary(r, itemTitles) {
+export function extractSummary(r, itemTitles) {
   if (!r.extractable) {
     return `⚠️ <b>نتوانستم مطمئن بخوانم</b>\n\nدلیل: <b>${esc(REFUSAL_FA[r.reason] || r.reason || "نامشخص")}</b>\n\n`
       + `${r.notes ? esc(r.notes) + "\n\n" : ""}قیمت‌ها را روی کارت استعلام دستی وارد کنید.`;
@@ -1337,7 +1350,10 @@ function extractSummary(r, itemTitles) {
   const cur = r.currency || "نامشخص";
   const body = matched.map((l) => {
     const title = esc(itemTitles.get(l.matched_item_id) || l.title);
-    return `• ${title}\n   ${money(l.unit_price)} ${esc(cur)}${l.confidence === "high" ? " ✓" : " ⚠️"}`;
+    /* همان قیمتی که «ثبت در جدول» می‌نشاند: سطرِ فقط-مبلغ‌کل، قیمت واحد را از جمع ÷ مقدار می‌گیرد */
+    const up = lineUnitPrice(l);
+    const price = up == null ? "بی‌قیمت" : `${money(up)} ${esc(cur)}${l.unit_price == null ? " <i>(از جمع ÷ مقدار)</i>" : ""}`;
+    return `• ${title}\n   ${price}${l.confidence === "high" ? " ✓" : " ⚠️"}`;
   }).join("\n");
 
   const rotated = r.orientation && r.orientation !== "upright";
@@ -1427,7 +1443,7 @@ async function onExtract(env, api, chat, ex, pid, step, val, messageId) {
       const head = `✅ ${M(res.applied)} قلم از پیش‌فاکتور در جدول نشست.`
         + (res.created ? `\n${M(res.created)} خط استعلام تازه به نام <b>${esc(res.supplier)}</b> ساخته شد.` : "")
         + (res.skipped ? `\n${M(res.skipped)} سطر تطبیق نخورد و ثبت نشد.` : "")
-        + (res.unsaved ? `\n${M(res.unsaved)} خط هنوز ثبت موقت نشده — چیزی کم دارد.` : "");
+        + (res.unsaved ? `\n${M(res.unsaved)} خط هنوز ثبت موقت نشده — فیلدی کم است یا قالبش درست نیست.` : "");
       return quoteCard(env, api, chat, p.assignment_id, res.supplier, null, head);
     } catch (e) { await api.sendMessage(chat, `ثبت نشد: ${esc(e.message)}`); }
     return { ok: true };
@@ -1552,7 +1568,10 @@ async function onVoice(env, msg, ex) {
   }
   await env.DB.prepare("UPDATE letters SET voice_key=?, voice_secs=?, transcript=?, state='transcribed', updated_at=? WHERE id=?")
     .bind(key, v.duration || null, text, now(), pending.id).run();
-  await api.sendMessage(chat, `📄 <b>این را شنیدم:</b>\n\n<i>${esc(text)}</i>\n\nدرست است؟`, letterConfirmKb(pending));
+  /* متن کامل ذخیره شد؛ نمایشش کوتاه می‌شود — پیام تلگرام ۴۰۹۶ نویسه جا دارد و صحبتِ حدود پنج‌دقیقه‌ای
+     از آن رد می‌شد: پیام نمی‌رفت و نامه در «transcribed» گیر می‌کرد (صوتِ بعدی دیگر پذیرفته نمی‌شد) */
+  const shown = text.length > 3000 ? `${text.slice(0, 3000)}…\n\n(${M(text.length - 3000)} نویسهٔ دیگر هم ذخیره شد)` : text;
+  await api.sendMessage(chat, `📄 <b>این را شنیدم:</b>\n\n<i>${esc(shown)}</i>\n\nدرست است؟`, letterConfirmKb(pending));
   return { ok: true };
 }
 
@@ -1628,8 +1647,10 @@ async function makeLetter(env, api, chat, ex, letterId, subjectTitles) {
   /* وسط تحویل، نامه همراهِ بقیهٔ اسناد می‌رود؛ بیرون از آن، همین حالا */
   if (!dw) {
     const file = await store.get(docxKey);
+    /* زیرنویس فایل در تلگرام ۱۰۲۴ نویسه جا دارد و موضوع همهٔ عنوان‌های انتخابی را دارد؛ بلندترش فایل را
+       بی‌صدا نمی‌فرستاد (catch)، پس موضوع کوتاه می‌شود — خودِ نامه موضوع کامل را دارد */
     await api.sendDocument(chat, `نامه-${d.request.id}.docx`, new Blob([await new Response(file.body).arrayBuffer()], { type: DOCX_MIME }),
-      `📝 <b>${esc(letter.subject)}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`).catch(() => {});
+      `📝 <b>${esc(short(letter.subject, 700))}</b>\n\nاگر متنش را می‌پسندید همین را پیوست کنید؛ وگرنه در Word اصلاحش کنید.`).catch(() => {});
   }
   if (out.letter.uncertain && out.letter.uncertain.length) {
     await api.sendMessage(chat, `⚠️ این‌ها در صحبتتان روشن نبود و در نامه نیامد:\n${out.letter.uncertain.map((u) => "• " + esc(u)).join("\n")}`).catch(() => {});
@@ -2414,7 +2435,8 @@ async function templateView(env, api, chat, ex, id, ctx, mid, head) {
   if (!t2) return templateList(env, api, chat, ex, ctx, mid, "این قالب دیگر نیست.");
   const kb = [
     [{ text: "✏️ ویرایش عنوان", callback_data: `tp:et:${id}${ctx || ""}` }, { text: "✏️ ویرایش متن", callback_data: `tp:eb:${id}${ctx || ""}` }],
-    [{ text: "🗑 حذف این قالب", callback_data: `tp:dl:${id}${ctx || ""}` }],
+    /* قالبِ مشترک را فقط مدیر حذف می‌کند (همان قاعدهٔ پنل) */
+    ...(t2.expert_id == null ? [] : [[{ text: "🗑 حذف این قالب", callback_data: `tp:dl:${id}${ctx || ""}` }]]),
     ...await tplNav(env, ex, ctx, `tp:ls:0${ctx || ""}`),
   ];
   return show(api, chat, mid, `${head ? head + "\n\n" : ""}📄 <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n\n<code>${esc(t2.body)}</code>\n\n`
@@ -2467,13 +2489,14 @@ async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
   if (!t2) { await ack("این قالب دیگر نیست.", true); return { ok: true }; }
   if (step === "et") { await ack(); return templateAsk(env, api, chat, ex, "edit_title", { id, ctx }, `✏️ عنوان تازهٔ قالب «${esc(t2.title)}» را بنویسید:`); }
   if (step === "eb") { await ack(); return templateAsk(env, api, chat, ex, "edit_body", { id, ctx }, `${bodyPrompt(t2.title)}\n\nمتن فعلی:\n<code>${esc(t2.body)}</code>`); }
+  if ((step === "dl" || step === "dk") && t2.expert_id == null) { await ack("قالب مشترک را فقط مدیر حذف می‌کند.", true); return { ok: true }; }
   if (step === "dl") {
     await ack();
     return show(api, chat, mid, `🗑 قالب «<b>${esc(t2.title)}</b>» حذف شود؟`,
       [[{ text: "🗑 بله، حذف شود", callback_data: `tp:dk:${id}${ctx}` }], ...await tplNav(env, ex, ctx, `tp:v:${id}${ctx}`)]);
   }
   if (step === "dk") {
-    await env.DB.prepare("DELETE FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(id, ex.id).run();
+    await env.DB.prepare("DELETE FROM templates WHERE id=? AND expert_id=?").bind(id, ex.id).run();
     await ack("حذف شد");
     return templateList(env, api, chat, ex, ctx, mid, `🗑 قالب «${esc(t2.title)}» حذف شد.`);
   }
@@ -2725,6 +2748,12 @@ async function onCallback(env, cq) {
       return { ok: true };
     }
     if (verdict === "no") {
+      /* کانالِ مدیر پاسخ نمی‌گیرد (پست کانال به بات نمی‌رسد)، پس دلیل آن‌جا خوانده نمی‌شود و تصمیم
+         منتظر می‌ماند؛ رد با دلیل از پنل مدیر */
+      if (cq.message && cq.message.chat && cq.message.chat.type === "channel") {
+        await ack("در کانال نمی‌توانم دلیلِ رد را بخوانم. از پنل مدیر، تب «تصمیم‌ها و رویدادها»، رد کنید تا دلیل هم برای کارشناس برود.", true);
+        return { ok: true };
+      }
       /* دلیل لازم است؛ پیام بعدیِ مدیر (در پاسخ به همین پیام) دلیل است */
       await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('mgrReject',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
         .bind(JSON.stringify({ decision_id: did, at: now() }), now()).run();
@@ -3013,7 +3042,8 @@ async function onCallback(env, cq) {
     /* sg:<search>:open:<item> · sg:<search>:p:<i>:<item> · sg:<search>:t:<i>:<template>:<item> */
     const [, sidRaw, step, aRaw, bRaw, cRaw] = T(cq.data).split(":");
     const sr = await searchById(env, parseInt(sidRaw, 10));
-    const sit = await searchItemFor(env, ex, sr, parseInt(step === "open" ? aRaw : step === "p" ? bRaw : cRaw, 10) || 0);
+    /* شناسهٔ قلم: open و ch چهارمین بخش، p پنجمین، t ششمین (همان جایی که دکمه‌ها می‌سازند) */
+    const sit = await searchItemFor(env, ex, sr, parseInt(step === "open" || step === "ch" ? aRaw : step === "p" ? bRaw : cRaw, 10) || 0);
     if (!sit) { await ack("این جستجو پیدا نشد.", true); return { ok: true }; }
     const sup = (sr.result && sr.result.suppliers) || [];
     if (step === "open") {

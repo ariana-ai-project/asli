@@ -1215,7 +1215,7 @@
         await reload();
         TP.modal("ثبت شد", `${M(res.applied || 0)} خط پر شد${res.created ? ` (${M(res.created)} خط تازه ساخته شد)` : ""}.`
           + (res.saved ? `<br>${M(res.saved)} خط «ثبت موقت» شد.` : "")
-          + (res.unsaved ? `<br><span class="chip warn">${M(res.unsaved)} خط هنوز فیلد اجباری خالی دارد</span>${(res.missing || []).length ? `: ${esc(res.missing.map((f) => LBL[f] || f).join("، "))}` : ""}` : "")
+          + (res.unsaved ? `<br><span class="chip warn">${M(res.unsaved)} خط هنوز فیلدِ اجباریِ خالی یا نادرست دارد</span>${(res.missing || []).length ? `: ${esc(res.missing.map((f) => LBL[f] || f).join("، "))}` : ""}` : "")
           + (res.vatStripped ? `<br>ارزش افزوده از قیمت‌ها کم شد.` : "")
           + `<br><br>عددها را با خود سند بسنجید؛ این‌ها پیش‌نویس‌اند.`, null, "باشد", "");
       } catch (e) { busy.close(); TP.modal("ثبت نشد", esc(e.message), null, "باشد", ""); }
@@ -1247,7 +1247,7 @@
           <td><select class="tp-select" data-qf="${q.id}|deal" title="اختیاری — تصمیم داخلی؛ از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
           <td style="min-width:170px"><div class="stack"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
             ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}">` : ""}</div></td>
-          <td class="num">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
+          <td class="num" data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
           <td>${pfCell(q)}</td>
           <td>${exCell(q)}</td>
           <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
@@ -1935,7 +1935,7 @@
         if (bad) { el.classList.add("bad"); TP.modal("قالب فیلد درست نیست", esc(bad), null, "باشد", ""); return; }
         try { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: f === "item_id" ? +el.value : el.value } }); await reload(); }
         catch (e) { el.classList.add("bad"); TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); } };
-      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { if (!el.dataset.opt) el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); const cell = el.closest("tr").children[3 + QF.length + 4]; if (cell) cell.textContent = v ? M(v) : "—"; } }; }
+      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { if (!el.dataset.opt) el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); /* خانهٔ «قیمت کل» با نشانش، نه با شمارهٔ ستون — با افزوده شدنِ ستون ارزش افزوده، اندیس روی «محل تحویل» افتاده بود و آن را پاک می‌کرد */ const cell = document.querySelector(`[data-qtot="${id}"]`); if (cell) cell.textContent = v ? M(v) : "—"; } }; }
     });
     Q("[data-fin]").forEach((c) => c.onchange = async (e) => { await TP.api(`/quotes/${e.target.dataset.fin}`, { method: "PUT", body: { final: e.target.checked ? 1 : 0 } }); await reload(); });
     Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); } catch (e) {

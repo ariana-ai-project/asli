@@ -40,7 +40,7 @@ import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putRepor
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
 import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
-import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, TEAM_SIZE_SQL } from "./assign.js";
+import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
 
@@ -339,6 +339,9 @@ async function migrateColumns(env) {
  * فایل شکست بخورد، دیتابیس تمیز است و فقط چند فایل یتیم می‌ماند — که از
  * حالتِ عکسش (ردیفی که به فایلِ نبوده اشاره می‌کند) خیلی بهتر است.
  */
+/* پیشوندِ کلیدهای صف که بعدش شناسهٔ ارجاع می‌آید: dispatch/stage/over (bot.js)، over-mgr/over-team (هشدار پایان مهلت)،
+   mgr/team (پایش رنگ‌ها، manager.js)، closed/closed-team (خاتمه)، partial (خاتمهٔ جزئی)، state (تعلیق/توقف/…) */
+const OUTBOX_PREFIXES = ["dispatch", "stage", "over", "over-mgr", "over-team", "mgr", "team", "closed", "closed-team", "partial", "state"];
 async function deleteRequests(env, ids) {
   const where = ids ? `IN (${ids.map(() => "?").join(",")})` : "IS NOT NULL";
   const args = ids || [];
@@ -358,15 +361,23 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM quotes WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM proformas WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM letters WHERE assignment_id IN (${inAsg})`).bind(...args),
+    /* پیامِ در صفِ تصمیم‌ها (dec:<تصمیم>:…) پیش از خودِ تصمیم‌ها، چون کلیدش شناسهٔ تصمیم است نه ارجاع */
+    env.DB.prepare(`DELETE FROM outbox WHERE status='pending' AND EXISTS (SELECT 1 FROM decisions d WHERE d.assignment_id IN (${inAsg})
+      AND outbox.idem LIKE 'dec:' || d.id || ':%')`).bind(...args),
     env.DB.prepare(`DELETE FROM decisions WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM alerts WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM tg_uploads WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM tg_flows WHERE assignment_id IN (${inAsg})`).bind(...args),
-    /* اعلان‌های در صف برای ارجاع‌های حذف‌شده نباید بعداً فرستاده شوند؛ فرستاده‌شده‌ها تاریخچه‌اند و می‌مانند */
+    /* اعلان‌های در صف برای ارجاع‌های حذف‌شده نباید بعداً فرستاده شوند؛ فرستاده‌شده‌ها تاریخچه‌اند و می‌مانند.
+       همهٔ کلیدهایی که با شناسهٔ ارجاع شروع می‌شوند: <پیشوند>:<ارجاع>:… (و شکلِ قدیمیِ بی‌دنباله‌شان).
+       با OR، نه جدولی از UNION ALL: D1 «SELECTِ مرکب» با این‌همه جزء را نمی‌پذیرد. */
     env.DB.prepare(`DELETE FROM outbox WHERE status='pending' AND EXISTS (SELECT 1 FROM assignments a WHERE a.request_id ${where}
-      AND (outbox.idem LIKE 'dispatch:' || a.id || ':%' OR outbox.idem LIKE 'stage:' || a.id || ':%'
-        OR outbox.idem LIKE 'over:' || a.id || ':%' OR outbox.idem LIKE 'over-mgr:' || a.id || ':%'
-        OR outbox.idem = 'dispatch:' || a.id OR outbox.idem = 'over:' || a.id OR outbox.idem = 'over-mgr:' || a.id))`).bind(...args),
+      AND (${OUTBOX_PREFIXES.map((p) => `outbox.idem LIKE '${p}:' || a.id || ':%'`).join(" OR ")}
+        OR outbox.idem IN ('dispatch:' || a.id, 'over:' || a.id, 'over-mgr:' || a.id)))`).bind(...args),
+    /* جستجوهای هوشمندِ اقلامِ حذف‌شده می‌مانند (با کد و عنوان قلم دوباره پیدا می‌شوند) ولی از شناسهٔ قلم جدا
+       می‌شوند: شناسهٔ قلم دوباره استفاده می‌شود و جستجوی قدیمی روی قلمِ تازهٔ بی‌ربط «همین قلم» دیده می‌شد */
+    env.DB.prepare(`UPDATE smart_searches SET item_id=0 WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
+    env.DB.prepare(`DELETE FROM smart_jobs WHERE state='queued' AND item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
@@ -958,20 +969,33 @@ async function unassign(env, body) {
   return { ok: true };
 }
 
-/* تعلیق / توقف / خاتمه / بازگشت — مدیر */
+/* تعلیق / توقف / خاتمه / بازگشت — مدیر.
+   کارشناسِ هر ارجاعِ ارسال‌شده‌ای که قلمی از آن واقعاً وضعیت عوض می‌کند، اگر تلگرامش وصل
+   است خبر می‌گیرد (صف پیام؛ روتر بعد از پاسخ flush می‌کند). ارجاعِ ارسال‌نشده پیامی ندارد،
+   چون کارشناس هنوز از آن خبر ندارد. notify رویداد همان است که واقعاً به صف رفت و notified
+   شمار کارشناسانِ خبرشده — رویدادهای پیش از مهر ۱۴۰۵ بی‌آنکه پیامی برود telegram می‌نوشتند. */
 async function setState(env, body, actor) {
   const st = body.state; if (!["open", "hold", "stop", "closed"].includes(st)) throw new HttpError("state نامعتبر است.");
-  const t = now(); let res;
+  const t = now(); let cond, args;
   if (Array.isArray(body.item_ids) && body.item_ids.length) {
     const ids = body.item_ids.map((x) => int(x)).filter(Boolean);
-    res = await env.DB.prepare(`UPDATE items SET state=?, state_at=? WHERE id IN (${ids.map(() => "?").join(",")})`).bind(st, t, ...ids).run();
+    cond = (p) => `${p}id IN (${ids.map(() => "?").join(",")})`; args = ids;
   } else if (body.assignment_id) {
-    res = await env.DB.prepare("UPDATE items SET state=?, state_at=? WHERE assignment_id=? AND state<>'closed'").bind(st, t, int(body.assignment_id)).run();
+    cond = (p) => `${p}assignment_id=? AND ${p}state<>'closed'`; args = [int(body.assignment_id)];
   } else if (body.request_id) {
-    res = await env.DB.prepare("UPDATE items SET state=?, state_at=? WHERE request_id=? AND state<>'closed'").bind(st, t, T(body.request_id)).run();
+    cond = (p) => `${p}request_id=? AND ${p}state<>'closed'`; args = [T(body.request_id)];
   } else throw new HttpError("request_id یا assignment_id یا item_ids لازم است.");
-  await env.DB.batch([ev(env, actor, st, T(body.request_id) || null, null, { assignment_id: body.assignment_id || null, item_ids: body.item_ids || null, notify: "telegram" })]);
-  return { ok: true, changed: res.meta.changes };
+  /* پیش از UPDATE: ارجاع‌های ارسال‌شده‌ای که قلمشان واقعاً وضعیت عوض می‌کند (بعدش همه یکی‌اند) */
+  const hit = (await env.DB.prepare(`SELECT a.id AS aid, a.request_id, r.party, e.telegram_chat, COUNT(*) AS n
+      FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
+     WHERE ${cond("i.")} AND i.state<>? AND a.dispatched_at IS NOT NULL GROUP BY a.id`).bind(...args, st).all()).results || [];
+  const tell = hit.filter((a) => a.telegram_chat);
+  const out = await env.DB.batch([
+    env.DB.prepare(`UPDATE items SET state=?, state_at=? WHERE ${cond("")}`).bind(st, t, ...args),
+    ...tell.map((a) => queueStmt(env, `state:${a.aid}:${st}:${t}`, a.telegram_chat, stateText(st, a, a.n))),
+    ev(env, actor, st, T(body.request_id) || null, null, { assignment_id: body.assignment_id || null, item_ids: body.item_ids || null, notify: tell.length ? "telegram" : "none", notified: tell.length }),
+  ]);
+  return { ok: true, changed: out[0].meta.changes, notified: tell.length };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1337,7 +1361,8 @@ async function route(request, env, ctx) {
     /* --- تنظیمات و کارشناسان --- */
     if (path === "/settings" && m === "GET") { await requireAny(request, env); return json(await getSettings(env)); }
     if (path === "/settings" && m === "PUT") { requireManager(request, env); return json(await putSettings(env, await readJson(request))); }
-    if (path === "/experts" && m === "GET") { await requireAny(request, env); return json({ experts: await listExperts(env) }); }
+    /* فقط مدیر: کد ورودِ همهٔ کارشناسان در این فهرست است و کد همان رمز است (پنل کارشناس این مسیر را نمی‌خواند) */
+    if (path === "/experts" && m === "GET") { requireManager(request, env); return json({ experts: await listExperts(env) }); }
     /* افزودن کارشناس — کارکنان عوض می‌شوند و نباید برای هر نفر تازه استقرار لازم باشد */
     if (path === "/experts" && m === "POST") {
       requireManager(request, env);
@@ -1453,7 +1478,7 @@ async function route(request, env, ctx) {
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
-    if (path === "/items/state" && m === "POST") { requireManager(request, env); return json(await setState(env, await readJson(request), "manager")); }
+    if (path === "/items/state" && m === "POST") { requireManager(request, env); const r = await setState(env, await readJson(request), "manager"); flush(env, ctx, r.notified); return json(r); }
     if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
     if ((mm = /^\/decisions\/(\d+)\/(approve|reject)$/.exec(path)) && m === "POST") {
       requireManager(request, env); const b = await readJson(request).catch(() => ({}));
@@ -1596,7 +1621,8 @@ async function route(request, env, ctx) {
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
       const b = await readJson(request);
       const L = await letterOf(env, aid, int(b.letter_id));
-      if (!L.transcript || L.state !== "transcribed") throw new HttpError("این نامه قبلاً نوشته یا لغو شده است.", 409);
+      /* failed: نگارشِ قبلی شکست خورده (کلید مدل، سقف نرخ) ولی متن سالم است — تلاش دوباره همین است */
+      if (!L.transcript || !["transcribed", "failed"].includes(L.state)) throw new HttpError("این نامه قبلاً نوشته یا لغو شده است.", 409);
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("نگارش نامه");
       const subjectTitles = (Array.isArray(b.subject_titles) ? b.subject_titles : []).map(T).filter(Boolean);
       const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
@@ -1713,7 +1739,8 @@ async function route(request, env, ctx) {
         `INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at)
          VALUES (?,?,?,?,?,?,'panel',?)
          ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key,
-           mime=excluded.mime, size_bytes=excluded.size_bytes, source='panel', uploaded_at=excluded.uploaded_at, item_ids=NULL`,
+           mime=excluded.mime, size_bytes=excluded.size_bytes, source='panel', uploaded_at=excluded.uploaded_at, item_ids=NULL,
+           extracted_json=NULL, extract_state=NULL, extract_at=NULL`,
       ).bind(aid, supplier, filename, key, request.headers.get("content-type") || null, size || null, t).run();
       return json({ ok: true, stored: true, backend: store.backend });
     }
