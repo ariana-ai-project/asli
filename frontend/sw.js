@@ -7,7 +7,7 @@
    مرورگر فقط وقتی sw.js را کلمه‌به‌کلمه تغییر کرده ببیند مرحلهٔ نصب و
    پیش‌کشِ دوباره را اجرا می‌کند؛ بدون این، کاربرانی که قبلاً سایت را
    باز کرده‌اند تا مدت‌ها نسخهٔ کش‌شدهٔ قدیمی را می‌بینند */
-const CACHE_NAME = "ariana-pwa-v6";
+const CACHE_NAME = "ariana-pwa-v7";
 
 /* پوستهٔ اولیهٔ برنامه — بدون ویدیوها (ویدیوها در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -21,7 +21,7 @@ const PRECACHE_URLS = [
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
-  "./assets/frames/logo-000.webp",
+  "./assets/frames/1600/logo-000.webp",
   "./assets/1.jpg",
   "./assets/2.jpg",
   "./assets/3.jpg",

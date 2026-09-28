@@ -473,13 +473,25 @@
     const root = document.documentElement;
 
     /* ---------- فریم‌های لوگوموشن ----------
-       ۱۴۹ فریم WebP، ۱۶۰۰×۹۰۰، هر کدام ~۶۵KB (۹٫۴MB کل). ترتیب بارگذاری درشت‌به‌ریز است:
-       اول فریم ۰ و آخر، بعد هر ۸تا، هر ۴تا، هر ۲تا، بعد بقیه — پس از همان ثانیه‌های اول
-       اسکرول جواب می‌دهد و با رسیدن هر فریم، ریزتر می‌شود. روی اتصال کند یا «صرفه‌جویی داده»
-       فقط نیمی از فریم‌ها (هر ۲تا) بارگذاری می‌شود. */
+       ۱۴۹ فریم WebP از نسخهٔ 4K لوگوموشن (یک بار نمونه‌برداری، یک بار فشرده‌سازی)، دو مجموعه:
+         1600×900  (~۸۹KB هر فریم، ۱۲٫۹MB) برای همه؛ ترتیب بارگذاری درشت‌به‌ریز است (فریم ۰ و
+                   آخر، بعد هر ۸تا، هر ۴تا، هر ۲تا، بعد بقیه) تا از همان ثانیه‌های اول اسکرول
+                   جواب بدهد.
+         2560×1440 (~۱۴۹KB هر فریم، ۲۱٫۷MB) فقط برای صفحه‌های بزرگ یا پرتراکم (Retina/4K)، و
+                   فقط بعد از رسیدن کل مجموعهٔ اول — ارتقای تدریجی: هر فریمِ تیزتر که رسید جای
+                   قبلی می‌نشیند، پس سرعت اولین تعامل با مجموعهٔ دوم عوض نمی‌شود.
+       با «صرفه‌جویی داده» یا 2g نیمی از فریم‌ها (هر ۲تا) و مجموعهٔ دوم اصلاً بارگذاری نمی‌شود.
+       بین دو فریم همسایه ترکیب نرم (crossfade) کشیده می‌شود تا اسکرول آهسته پله‌پله نباشد. */
     const FRAMES = 149;
-    const frameUrl = (i) => `assets/frames/logo-${String(i).padStart(3, "0")}.webp`;
-    const imgs = new Array(FRAMES).fill(null);
+    const SETS = [{ dir: "1600", imgs: new Array(FRAMES).fill(null) }];
+    const wantHi = (window.devicePixelRatio || 1) > 1.25 || window.innerWidth > 1920;
+    const conn = navigator.connection;
+    /* روی 3g هم مجموعهٔ اول کامل می‌آید (فریم‌های فرد آخرِ صف‌اند)؛ «صرفه‌جویی داده» یا 2g نیمش می‌کند.
+       مجموعهٔ ۲۵۶۰ (~۲۰MB) فقط روی اتصالی که مرورگر 4g می‌داند یا نمی‌شناسد */
+    const slowNet = !!(conn && (conn.saveData || /2g$/.test(conn.effectiveType || "")));
+    const fastNet = !conn || !conn.effectiveType || conn.effectiveType === "4g";
+    if (wantHi && !slowNet && fastNet) SETS.push({ dir: "2560", imgs: new Array(FRAMES).fill(null) });
+    const frameUrl = (set, i) => `assets/frames/${set.dir}/logo-${String(i).padStart(3, "0")}.webp`;
     const order = [];
     {
       const seen = new Set();
@@ -487,35 +499,42 @@
       push(0); push(FRAMES - 1);
       for (const step of [8, 4, 2, 1]) for (let i = 0; i < FRAMES; i += step) push(i);
     }
-    /* روی 3g هم همهٔ فریم‌ها می‌آیند (فریم‌های فرد آخرِ صف‌اند و هر وقت رسیدند به کار می‌روند)؛
-       فقط با «صرفه‌جویی داده» یا 2g نیمی از فریم‌ها بارگذاری نمی‌شود */
-    const conn = navigator.connection;
-    const slowNet = !!(conn && (conn.saveData || /2g$/.test(conn.effectiveType || "")));
-    let cursor = 0, inflight = 0;
+    let setIdx = 0, cursor = 0, inflight = 0;
 
     function pump() {
-      while (inflight < 6 && cursor < order.length) {
+      while (inflight < 6) {
+        if (cursor >= order.length) {
+          if (setIdx + 1 < SETS.length) { setIdx++; cursor = 0; continue; }
+          return;
+        }
+        const set = SETS[setIdx];
         const i = order[cursor++];
         if (slowNet && i % 2 === 1) continue;
         const im = new Image();
         im.decoding = "async";
         inflight++;
-        im.onload = () => { imgs[i] = im; inflight--; if (nearestLoaded(wantFrame) !== drawnFrame) schedule(); pump(); };
+        im.onload = () => { set.imgs[i] = im; inflight--; schedule(); pump(); };
         im.onerror = () => { inflight--; pump(); };
-        im.src = frameUrl(i);
+        im.src = frameUrl(set, i);
       }
     }
 
+    /* تیزترین نسخهٔ موجودِ یک فریم */
+    function best(i) {
+      for (let k = SETS.length - 1; k >= 0; k--) if (SETS[k].imgs[i]) return SETS[k].imgs[i];
+      return null;
+    }
+
     function nearestLoaded(i) {
-      if (imgs[i]) return i;
+      if (best(i)) return i;
       for (let d = 1; d < FRAMES; d++) {
-        if (i - d >= 0 && imgs[i - d]) return i - d;
-        if (i + d < FRAMES && imgs[i + d]) return i + d;
+        if (i - d >= 0 && best(i - d)) return i - d;
+        if (i + d < FRAMES && best(i + d)) return i + d;
       }
       return -1;
     }
 
-    let cw = 0, ch = 0, wantFrame = 0, drawnFrame = -1;
+    let cw = 0, ch = 0, wantFrame = 0, drawnKey = "";
 
     function sizeCanvas() {
       const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -524,21 +543,39 @@
       frameCanvas.width = Math.round(cw * dpr);
       frameCanvas.height = Math.round(ch * dpr);
       fctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      drawnFrame = -1;
+      drawnKey = "";
     }
 
     /* مثل object-fit: cover ویدیوی قبلی، تا نقاط جغرافیایی خطوط (کالیبره روی همان قاب) سر جایشان بمانند */
-    function paintFrame(i) {
-      const im = imgs[i];
-      if (!im) return;
+    function drawCover(im, alpha) {
       const s = Math.max(cw / im.naturalWidth, ch / im.naturalHeight);
       const w = im.naturalWidth * s, h = im.naturalHeight * s;
+      fctx.globalAlpha = alpha;
       fctx.drawImage(im, (cw - w) / 2, (ch - h) / 2, w, h);
-      drawnFrame = i;
+      fctx.globalAlpha = 1;
+    }
+
+    /* فریم i و، اگر هر دو موجود باشند، فریم بعدی با شفافیت frac رویش — ترکیب نرم بین دو فریم.
+       ترکیب یعنی دو بار کشیدن؛ اگر روی این دستگاه کشیدن کند باشد (میانگین متحرک بالای ۱۸ms)،
+       ترکیب خاموش می‌شود و فقط نزدیک‌ترین فریم کشیده می‌شود تا اسکرول لَخت نشود. */
+    let paintAvg = 0, blendOK = true;
+    function paintFrames(i, frac) {
+      const a = nearestLoaded(i);
+      if (a < 0) return;
+      const b = blendOK && a === i && frac > 0.04 && i + 1 < FRAMES && best(i + 1) ? i + 1 : -1;
+      const ia = best(a), ib = b >= 0 ? best(b) : null;
+      const key = `${a}:${ia.naturalWidth}:${b}:${ib ? ib.naturalWidth : 0}:${ib ? frac.toFixed(2) : ""}`;
+      if (key === drawnKey) return;
+      const t0 = performance.now();
+      drawCover(ia, 1);
+      if (ib) drawCover(ib, frac);
+      drawnKey = key;
+      paintAvg = paintAvg * 0.8 + (performance.now() - t0) * 0.2;
+      if (paintAvg > 18) blendOK = false;
       // فریم‌های همسایه را از قبل رمزگشایی کن تا اسکرول بعدی بی‌مکث باشد
       for (let d = 1; d <= 4; d++) {
         for (const j of [i + d, i - d]) {
-          const m = imgs[j];
+          const m = best(j);
           if (m && m.decode) m.decode().catch(() => {});
         }
       }
@@ -592,11 +629,13 @@
     function render(pos) {
       const H = window.innerHeight;
 
-      // ۱) لوگوموشن: فریم از روی جای اسکرول
+      // ۱) لوگوموشن: فریم (و کسرِ بین دو فریم) از روی جای اسکرول
       const pv = clamp01(pos / seg.video);
-      wantFrame = Math.round(pv * (FRAMES - 1));
-      const nf = nearestLoaded(wantFrame);
-      if (nf >= 0 && nf !== drawnFrame) paintFrame(nf);
+      const f = pv * (FRAMES - 1);
+      let fi = Math.floor(f), frac = f - fi;
+      if (frac > 0.96 && fi + 1 < FRAMES) { fi++; frac = 0; }
+      wantFrame = fi;
+      paintFrames(fi, frac);
 
       // پیشرفتِ پرده‌های بعدی
       const rv = clamp01((pos - seg.video) / seg.reveal);
