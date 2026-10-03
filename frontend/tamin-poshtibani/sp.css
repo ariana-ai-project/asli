@@ -1,0 +1,139 @@
+/* ============================================================
+   پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (دموی مهر ۱۴۰۵)
+   روی همان توکن‌های رنگ panel.css (حالت شب و روز)؛ این‌ها فقط اجزای همین دو صفحه‌اند.
+   هر دو صفحه در مرورگر و داخل تلگرام (مینی‌اپ) باز می‌شوند — پس از ۳۶۰ پیکسل پهنا به بالا.
+   ============================================================ */
+.sp-wrap { max-width: 1180px; margin: 0 auto; padding: 14px 16px 90px; }
+.sp-center { max-width: 440px; margin: 8vh auto 0; padding: 0 16px; }
+.sp-box { background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 18px; }
+.sp-box h2 { margin: 0 0 6px; font-size: 1.1rem; }
+.sp-box .lead { color: var(--tp-muted); font-size: .9rem; margin: 0 0 14px; }
+.sp-pass { font-size: 1.5rem; letter-spacing: .5em; text-align: center; width: 100%; direction: ltr; }
+.sp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sp-row.end { justify-content: flex-end; }
+.sp-grow { flex: 1; min-width: 0; }
+.sp-muted { color: var(--tp-muted); font-size: .85rem; }
+.sp-err { color: var(--tp-over); font-size: .88rem; margin-top: 8px; white-space: pre-line; }
+.sp-ok { color: var(--tp-ok); font-size: .88rem; margin-top: 8px; }
+.sp-badge { display: inline-flex; align-items: center; min-width: 20px; justify-content: center; font-size: .72rem; font-weight: 700; border-radius: 999px; padding: 0 7px; line-height: 1.7; background: var(--tp-over); color: #fff; }
+.sp-badge.wait { background: var(--tp-warn); color: #1d1600; }
+.sp-badge.soft { background: rgba(120,165,255,.18); color: var(--tp-fg); }
+.sp-tag { font-size: .72rem; border: 1px dashed var(--tp-line-2); border-radius: 6px; padding: 0 6px; color: var(--tp-muted); }
+
+/* وضعیت خط و بسته */
+.sp-st { font-size: .75rem; border-radius: 999px; padding: 1px 9px; border: 1px solid var(--tp-line-2); white-space: nowrap; }
+.sp-st.new, .sp-st.draft { color: var(--tp-muted); }
+.sp-st.ready { border-color: var(--tp-accent); color: var(--tp-accent); }
+.sp-st.submitted, .sp-st.pending, .sp-st.approved { border-color: var(--tp-warn); color: var(--tp-warn); }
+.sp-st.proforma { border-color: var(--tp-accent-2); color: var(--tp-accent-2); }
+.sp-st.returned { border-color: var(--tp-late); color: var(--tp-late); }
+.sp-st.rejected { border-color: var(--tp-over); color: var(--tp-over); }
+.sp-st.final { border-color: var(--tp-ok); color: var(--tp-ok); background: rgba(34,197,94,.1); }
+
+/* تب‌ها */
+.sp-tabs { display: flex; gap: 6px; border-bottom: 1px solid var(--tp-line); margin: 10px 0 14px; overflow-x: auto; }
+.sp-tab { background: none; border: none; border-bottom: 3px solid transparent; padding: 9px 14px; color: var(--tp-muted); font-weight: 600; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.sp-tab.on { border-bottom-color: var(--tp-accent); color: var(--tp-fg); }
+.sp-pills { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.sp-pill { border: 1px solid var(--tp-line-2); background: var(--tp-surface); border-radius: 12px; padding: 7px 12px; text-align: right; white-space: nowrap; display: inline-flex; gap: 8px; align-items: center; }
+.sp-pill.on { border-color: var(--tp-accent); box-shadow: inset 0 0 0 1px var(--tp-accent); }
+
+/* کارت قلم */
+.sp-card { background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 14px; margin-bottom: 14px; }
+.sp-card > header { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
+.sp-card h3 { margin: 0; font-size: 1rem; line-height: 1.6; }
+.sp-sec { margin-top: 10px; }
+.sp-sec > b { display: block; font-size: .8rem; color: var(--tp-muted); font-weight: 600; margin-bottom: 5px; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-chip { display: inline-flex; gap: 6px; align-items: center; border: 1px solid var(--tp-line-2); border-radius: 9px; padding: 3px 9px; font-size: .85rem; background: rgba(120,165,255,.06); }
+.sp-chip.lock { background: rgba(120,165,255,.1); }
+.sp-chip.add { border-style: dashed; border-color: var(--tp-accent); }
+.sp-chip i { font-style: normal; color: var(--tp-muted); }
+.sp-chip button { border: none; background: none; color: var(--tp-over); padding: 0 2px; font-size: .9rem; }
+.sp-grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+.sp-grid4 label, .sp-field { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--tp-muted); }
+.sp-grid4 .tp-input { width: 100%; }
+.sp-total { font-weight: 800; color: var(--tp-fg); font-size: .95rem; padding: 6px 0; }
+.sp-addlayer { display: grid; grid-template-columns: 1fr 1.4fr auto; gap: 6px; margin-top: 6px; }
+.sp-files { display: flex; flex-direction: column; gap: 6px; }
+.sp-file { display: flex; gap: 8px; align-items: center; font-size: .85rem; border: 1px solid var(--tp-line); border-radius: 9px; padding: 5px 9px; }
+.sp-file .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tp-muted); }
+.sp-upl { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.sp-upl .full { grid-column: 1 / -1; }
+.sp-actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; margin-top: 12px; }
+.sp-lockedmsg { font-size: .85rem; color: var(--tp-muted); background: rgba(120,165,255,.06); border-radius: 9px; padding: 7px 10px; margin-top: 10px; }
+
+/* جدول آمادهٔ ارسال و بسته‌ها */
+.sp-table { width: 100%; border-collapse: collapse; font-size: .88rem; }
+.sp-table th, .sp-table td { border-bottom: 1px solid var(--tp-line); padding: 7px 8px; text-align: center; }
+.sp-table th { color: var(--tp-muted); font-weight: 600; font-size: .8rem; }
+.sp-table td.t { text-align: right; }
+.sp-table tfoot td { font-weight: 800; }
+.sp-scroll { overflow-x: auto; }
+.sp-bundle { border: 1px solid var(--tp-line); border-radius: 12px; padding: 12px; margin-top: 12px; background: var(--tp-surface); }
+.sp-bundle > header { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+.sp-comment { border-inline-start: 3px solid var(--tp-late); padding: 4px 10px; margin: 6px 0; font-size: .88rem; white-space: pre-line; }
+.sp-ai { margin-top: 8px; font-size: .85rem; border: 1px solid var(--tp-line); border-radius: 10px; padding: 8px 10px; }
+.sp-ai.ok { border-color: rgba(34,197,94,.5); }
+.sp-ai.bad { border-color: rgba(242,194,48,.6); }
+.sp-ai ul { margin: 4px 0 0; padding-inline-start: 18px; }
+.sp-check { display: flex; gap: 8px; align-items: flex-start; font-size: .85rem; margin-top: 8px; }
+
+/* گفت‌وگو */
+.sp-chat { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--tp-line); border-radius: var(--tp-radius); background: var(--tp-surface); min-height: 260px; max-height: 62vh; overflow-y: auto; }
+.sp-msg { max-width: 82%; border-radius: 14px; padding: 7px 11px; font-size: .92rem; white-space: pre-wrap; word-break: break-word; align-self: flex-start; background: rgba(120,165,255,.1); border: 1px solid var(--tp-line); }
+.sp-msg.me { align-self: flex-end; background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.45); }
+.sp-msg .who { display: block; font-size: .72rem; color: var(--tp-muted); margin-bottom: 2px; }
+.sp-msg time { display: block; font-size: .7rem; color: var(--tp-dim); margin-top: 3px; text-align: left; }
+.sp-msg.ev { align-self: center; max-width: 94%; background: transparent; border: 1px dashed var(--tp-line-2); color: var(--tp-muted); font-size: .84rem; text-align: center; }
+.sp-msg.note { border-color: rgba(242,194,48,.55); }
+.sp-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
+.sp-composer textarea { flex: 1; min-height: 46px; max-height: 160px; resize: vertical; }
+.sp-empty { color: var(--tp-muted); text-align: center; padding: 30px 10px; font-size: .9rem; }
+
+/* صفحهٔ مکاتبات: درخواست‌ها | تأمین‌کنندگان | گفت‌وگو */
+.sp-cols { display: grid; grid-template-columns: 250px 250px minmax(0, 1fr); gap: 14px; align-items: start; }
+.sp-col { background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); overflow: hidden; }
+.sp-col > h4 { margin: 0; padding: 10px 12px; font-size: .9rem; border-bottom: 1px solid var(--tp-line); display: flex; align-items: center; gap: 8px; }
+.sp-col .scroll { max-height: 72vh; overflow-y: auto; }
+.sp-item { display: block; width: 100%; text-align: right; background: none; border: none; border-bottom: 1px solid var(--tp-line); padding: 9px 12px; }
+.sp-item:hover { background: rgba(120,165,255,.08); }
+.sp-item.on { background: rgba(79,140,255,.16); box-shadow: inset -3px 0 0 var(--tp-accent); }
+.sp-item .t { display: flex; gap: 6px; align-items: center; font-weight: 700; font-size: .9rem; }
+.sp-item .t span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-item .m { color: var(--tp-muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-main { min-width: 0; }
+.sp-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 10px 14px; }
+.sp-head h3 { margin: 0; font-size: 1rem; }
+.sp-back { display: none; }
+.sp-sms { white-space: pre-wrap; direction: rtl; background: rgba(120,165,255,.08); border: 1px solid var(--tp-line); border-radius: 10px; padding: 10px; font-size: .88rem; overflow-wrap: anywhere; }
+.sp-modal-list { max-height: 40vh; overflow-y: auto; border: 1px solid var(--tp-line); border-radius: 10px; padding: 6px 10px; }
+.sp-modal-list label { display: flex; gap: 8px; align-items: center; padding: 4px 0; font-size: .9rem; }
+
+/* پنجره‌ها — صفحهٔ تأمین‌کننده shared.js را بار نمی‌کند، پس سبکش این‌جا هم هست */
+.tp-modal-bg { position: fixed; inset: 0; background: rgba(3,8,20,.62); display: flex; align-items: center; justify-content: center; z-index: 900; padding: 16px; backdrop-filter: blur(4px); }
+.tp-modal { background: #0b1730; color: #eef4ff; border: 1px solid rgba(158,197,255,.22); border-radius: 16px; max-width: 600px; width: 100%; padding: 20px 22px; max-height: 86vh; overflow: auto; box-shadow: 0 24px 70px rgba(0,0,0,.55); }
+.tp-modal h3 { margin: 0 0 10px; font-size: 1.05rem; }
+.tp-modal .tp-body { color: #b7c6e6; line-height: 1.9; }
+.tp-modal .tp-acts { display: flex; gap: 8px; margin-top: 16px; flex-wrap: wrap; }
+.tp-btn[disabled] { opacity: .45; cursor: not-allowed; }
+:root[data-theme="light"] .tp-modal-bg { background: rgba(15,27,51,.35); }
+:root[data-theme="light"] .tp-modal { background: #fff; color: #0f1b33; border-color: rgba(30,60,120,.18); box-shadow: 0 24px 60px rgba(20,40,80,.2); }
+:root[data-theme="light"] .tp-modal .tp-body { color: #3b4a66; }
+
+@media (max-width: 960px) {
+  .sp-cols { grid-template-columns: 1fr; }
+  .sp-cols[data-view="req"] .sp-col.sups, .sp-cols[data-view="req"] .sp-main { display: none; }
+  .sp-cols[data-view="sup"] .sp-col.reqs, .sp-cols[data-view="sup"] .sp-main { display: none; }
+  .sp-cols[data-view="chat"] .sp-col.reqs, .sp-cols[data-view="chat"] .sp-col.sups { display: none; }
+  .sp-back { display: inline-flex; }
+}
+@media (max-width: 640px) {
+  .sp-wrap { padding: 10px 10px 80px; }
+  .sp-grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-upl { grid-template-columns: 1fr; }
+  .sp-addlayer { grid-template-columns: 1fr 1fr; }
+  .sp-addlayer button { grid-column: 1 / -1; }
+  .sp-msg { max-width: 92%; }
+  .tp-top { padding: 8px 10px; gap: 8px; }
+}

@@ -47,6 +47,8 @@ import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
+import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink } from "./sp-core.js";
+import { pushMsgs as spPush } from "./sp-push.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -469,6 +471,8 @@ async function onMessage(env, msg) {
   }
   if (text === "/kartabl") return kartabl(env, api, chat, ex);
   if (text === "/ghaleb") return templateList(env, api, chat, ex, null, "");
+  /* دموی پنل تأمین‌کننده: «📨 ارسال» کنار «کپی پیام» فقط برای کارشناسی که خودش روشنش کرده */
+  if (text === "/azmayesh") return toggleSpDemo(env, api, chat, ex);
   /* میان‌بُرها به همان مسیرهای منو می‌رسند؛ فقط «کدام درخواست؟» را اول می‌پرسند */
   if (SHORTCUTS[text]) return kartabl(env, api, chat, ex, { target: SHORTCUTS[text] });
 
@@ -539,6 +543,8 @@ async function onFlowText(env, api, chat, ex, f, text) {
 
   /* قالب پیام: عنوان یا متنِ قالبِ تازه، یا ویرایشِ یکی از قبلی‌ها */
   if (f.kind === "tpl") return onTemplateText(env, api, chat, ex, f, d, text);
+  /* «📨 ارسال» به تأمین‌کننده: شمارهٔ تازه یا برچسبِ شماره */
+  if (f.kind === "spsend") return onSpSendText(env, api, chat, ex, f, d, text);
   return { ok: true };
 }
 
@@ -1705,8 +1711,9 @@ async function histStart(env, api, chat, ex, aid, mid) {
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
   if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
-  /* pick: اقلامی که سوابقشان خواسته شده — عوض کردنِ حالت همان‌ها را دوباره می‌سنجد */
-  const d = { sel: [], single: its.length === 1, pick: its.length === 1 ? [its[0].id] : [] };
+  /* pick: اقلامی که سوابقشان خواسته شده — عوض کردنِ حالت همان‌ها را دوباره می‌سنجد.
+     sp: دموی پنل تأمین‌کننده برای این کارشناس روشن است — کارتِ قلم «📨 ارسال به تأمین‌کننده» دارد */
+  const d = { sel: [], single: its.length === 1, pick: its.length === 1 ? [its[0].id] : [], sp: await spDemoOn(env, ex.id) };
   const f = await newFlow(env, ex, chat, "hsel", "pick", aid, d);
   if (d.single) return histModeCard(api, chat, f, d, its, asg, mid);
   return histSelCard(api, chat, f, d, its, asg, mid);
@@ -1877,6 +1884,8 @@ function histItemRender(api, chat, f, d, it, h, mode, page, mid) {
     }
     kb.push([{ text: "➕ انتخاب جهت استعلام", callback_data: `hq:${f.id}:${it.id}:${m}` }]);
   }
+  /* دموی پنل تأمین‌کننده: استعلام از همین‌جا برای تأمین‌کننده (یا تأمین‌کنندهٔ فرضی) فرستاده می‌شود */
+  if (d.sp) kb.push([{ text: "📨 ارسال به تأمین‌کننده", callback_data: `hz:${f.id}:${it.id}:${m}` }]);
   kb.push([{ text: `${MODE_ICON[o]} ${MODE_FA[o]}`, callback_data: `${base}:${mCode(o)}:0` }]);
   kb.push([KARTABL_BTN, { text: "↩️ بازگشت", callback_data: d.single ? `hx:${f.id}:mode:0` : `hb:p${f.id}` }]);
   return show(api, chat, mid, s, kb);
@@ -2505,6 +2514,227 @@ async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
 }
 
 /* ------------------------------------------------------------------ */
+/* «📨 ارسال» به تأمین‌کننده — دموی پنل تأمین‌کننده (مهر ۱۴۰۵)            */
+/*                                                                      */
+/* از کارتِ قلمِ «بررسی سوابق» (تصمیم مدیر: آزمایش از سوابق، نه جستجوی     */
+/* هوشمند): تأمین‌کننده — همان سوابقِ قلم، یا «تأمین‌کنندهٔ فرضی» ← قالب    */
+/* پیام ← شماره (برچسب‌خورده‌های قبلی، یا شمارهٔ تازه با برچسب) ← تأیید ←  */
+/* گفت‌وگو و خطِ مشخصات با لایه‌های قفل ساخته می‌شود (worker/sp-core.js)   */
+/* و متنِ پیامک — فعلاً خاموش — با لینک پنل، لینک بات و رمز همین‌جا       */
+/* نشان داده می‌شود. فقط برای کارشناسی که /azmayesh زده (settings.spDemo). */
+/* ------------------------------------------------------------------ */
+const SP_LABELS = ["همراه", "دفتر", "فروش", "مدیر فروش"];
+
+async function spDemoOn(env, exId) {
+  const v = await settingValue(env, "spDemo");
+  return v === true || v === "all" || (Array.isArray(v) && v.includes(exId));
+}
+
+async function toggleSpDemo(env, api, chat, ex) {
+  const v = await settingValue(env, "spDemo");
+  if (v === true || v === "all") { await api.sendMessage(chat, "دموی «ارسال به تأمین‌کننده» برای همهٔ کارشناسان روشن است.").catch(() => {}); return { ok: true }; }
+  const list = Array.isArray(v) ? v.filter((x) => Number.isInteger(x)) : [];
+  const on = !list.includes(ex.id);
+  await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('spDemo',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(JSON.stringify(on ? [...list, ex.id] : list.filter((x) => x !== ex.id)), now()).run();
+  await api.sendMessage(chat, on
+    ? "🧪 <b>دموی پنل تأمین‌کننده برای شما روشن شد.</b>\n\n"
+      + "کارتابل ← درخواست ← «📚 بررسی سوابق» ← کارتِ قلم: حالا دکمهٔ «📨 ارسال به تأمین‌کننده» هم هست. "
+      + "تأمین‌کننده را از همان سوابق انتخاب کنید — یا «🧪 تأمین‌کنندهٔ فرضی» — بعد قالب پیام و شماره، و تأیید. "
+      + "پیامک فعلاً خاموش است؛ متنش با لینک پنل، لینک بات و رمز همین‌جا می‌آید.\n\n"
+      + "در پنل کارشناس هم دکمهٔ «💬 مکاتبات» پیدا می‌شود (درخواست‌ها، تأمین‌کنندگان و گفت‌وگو).\n\n"
+      + "برای خاموش کردن، دوباره /azmayesh بفرستید."
+    : "دموی پنل تأمین‌کننده برای شما خاموش شد.").catch(() => {});
+  return { ok: true };
+}
+
+/** گامِ پرسیدنی: پاسخ متنیِ بعدیِ کارشناس به همین گفت‌وگو می‌رسد (INPUT_STEPS) */
+async function spAsk(env, ex, f, d, step) {
+  await closeInputs(env, ex.id);
+  await env.DB.prepare("UPDATE tg_flows SET data_json=?, step=?, asked_at=?, done_at=NULL WHERE id=?").bind(JSON.stringify(d), step, now(), f.id).run();
+}
+
+/** hz:<hsel>:<item>:<h|e> — از کارتِ قلمِ سوابق: تأمین‌کنندگانِ همان حالت، و تأمین‌کنندهٔ فرضی */
+async function spHistStart(env, api, chat, ex, hf, itemId, m) {
+  const it = (await itemsOf(env, hf.assignment_id)).find((i) => i.id === itemId);
+  if (!it) { await api.sendMessage(chat, "این قلم دیگر باز نیست.").catch(() => {}); return { ok: true }; }
+  const h = await itemHistory(env, it, { k: HIST_K, brief: true, mode: mOf(m) }).catch(() => null);
+  const sups = ((h && h.suppliers) || []).slice(0, HIST_MAX_SEL).map((s) => ({ name: s.name, code: s.code || "" }));
+  const f = await newFlow(env, ex, chat, "spsend", "pick_supplier", hf.assignment_id,
+    { src: "hist", hf: hf.id, m, item: it.id, it: it.title, sups, opts: [], sel: null, demo: false });
+  return spSupPick(api, chat, f, flowData(f), null);
+}
+
+function spSupPick(api, chat, f, d, mid) {
+  const kb = (d.sups || []).map((s, i) => [{ text: `🏢 ${short(s.name, 34)}`, callback_data: `spf:${f.id}:s:${i}` }]);
+  kb.push([{ text: "🧪 تأمین‌کنندهٔ فرضی (دمو)", callback_data: `spf:${f.id}:sd:0` }]);
+  kb.push([{ text: "↩️ بازگشت به کارت قلم", callback_data: `hv:${d.hf}:${d.item}:${d.m === "e" ? "e" : "h"}:0` }]);
+  return show(api, chat, mid, `📨 <b>ارسال استعلام</b> — «${esc(short(d.it || "", 50))}»\n\nبه کدام تأمین‌کننده؟`
+    + ((d.sups || []).length ? " همان تأمین‌کنندگانِ سوابقِ این قلم، به ترتیب امتیاز." : "\n<i>در سوابق، تأمین‌کنندهٔ نام‌داری برای این قلم نیست.</i>")
+    + "\n\n<i>🧪 «تأمین‌کنندهٔ فرضی» برای دیدنِ سمت تأمین‌کننده در دموست؛ پیامکِ شبیه‌سازی‌شده‌اش همین‌جا می‌آید.</i>", kb);
+}
+
+async function spTplPick(env, api, chat, ex, f, d, mid) {
+  const tpls = (await ensureTemplates(env, ex.id, env.COMPANY)).slice(0, 12);
+  const desc = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b> — <i>${esc(short(t2.body.replace(/\s+/g, " "), 60))}</i>`).join("\n");
+  const kb = tpls.map((t2) => [{ text: short(t2.title, 34), callback_data: `spf:${f.id}:tp:${t2.id}` }]);
+  kb.push([{ text: "↩️ تغییر تأمین‌کننده", callback_data: `spf:${f.id}:sp:0` }]);
+  return show(api, chat, mid, `✉️ پیام برای <b>${esc(short(d.demo ? DEMO.name : d.name, 40))}</b>\nکدام قالب؟\n\n${desc}\n\n<i>قالب تازه یا ویرایش قالب‌ها: /ghaleb</i>`, kb);
+}
+
+/** شماره‌های یک تأمین‌کننده: آن‌هایی که قبلاً برچسب خورده‌اند، بعد شماره‌های همان نام در نتیجه‌های جستجوی هوشمند */
+async function spPhoneOpts(env, name) {
+  const opts = (await phonesOfName(env, name)).map((p) => ({ id: p.id, phone: p.phone, label: p.label }));
+  const more = (await env.DB.prepare("SELECT DISTINCT phone FROM supplier_phones WHERE supplier_name=? LIMIT 6").bind(name).all()).results || [];
+  for (const r of more) { const n = normPhone(r.phone); if (n && n !== DEMO.phone && !opts.some((o) => o.phone === n)) opts.push({ phone: n, label: null }); }
+  return opts.slice(0, 12);
+}
+
+function spSendPick(api, chat, f, d, mid) {
+  const kb = (d.opts || []).map((o, k) => [{ text: `📞 ${o.phone}${o.label ? ` (${o.label})` : " — بی‌برچسب"}`, callback_data: `spf:${f.id}:p:${k}` }]);
+  kb.push([{ text: "➕ شمارهٔ دیگر", callback_data: `spf:${f.id}:new:0` }]);
+  kb.push([{ text: "↩️ تغییر قالب", callback_data: `spf:${f.id}:tpl:0` }]);
+  return show(api, chat, mid, `📨 <b>ارسال «${esc(d.title || "")}» به ${esc(short(d.name, 40))}</b>\n\nبه کدام شماره؟ هر شماره یک برچسب دارد (همراه، دفتر، فروش…) تا بعداً معلوم باشد پیام به کجا رفته.`
+    + ((d.opts || []).length ? "" : "\n<i>شماره‌ای از این تأمین‌کننده ثبت نشده است؛ «شمارهٔ دیگر» را بزنید و شماره و برچسبش را بنویسید.</i>"), kb);
+}
+
+function spSendLabel(api, chat, f, d, mid) {
+  const o = d.opts[d.sel];
+  const kb = [SP_LABELS.slice(0, 2).map((x, j) => ({ text: x, callback_data: `spf:${f.id}:l:${j}` })),
+    SP_LABELS.slice(2).map((x, j) => ({ text: x, callback_data: `spf:${f.id}:l:${j + 2}` })),
+    [{ text: "✏️ برچسب دیگر…", callback_data: `spf:${f.id}:lo:0` }], [{ text: "↩️ بازگشت", callback_data: `spf:${f.id}:back:0` }]];
+  return show(api, chat, mid, `🏷 برچسب شمارهٔ <b>${esc(o.phone)}</b> چیست؟`, kb);
+}
+
+async function spSendConfirm(env, api, chat, ex, f, d, mid) {
+  const it = await smartItemOf(env, ex.id, d.item);
+  const tpl = await ownTemplate(env, ex.id, d.tpl);
+  if (!it || !tpl) { await api.sendMessage(chat, "این قلم یا قالب دیگر در دسترس نیست.").catch(() => {}); return { ok: true }; }
+  const name = d.demo ? DEMO.name : d.name;
+  const o = d.demo ? { phone: DEMO.phone, label: DEMO.label } : d.opts[d.sel];
+  const text = fillTemplate(tpl.body, { supplier: name, item: it, expertName: ex.name });
+  return show(api, chat, mid, `📨 <b>ارسال به ${esc(name)}</b>\n📞 ${esc(o.phone)} (${esc(o.label || "—")})\n📦 ${esc(it.title)} — ${M(it.qty)} ${esc(it.unit || "")}\n`
+    + "🔒 لایه‌های ویژگی همین قلم قفل‌شده برایش می‌رود؛ مقدار، واحد و قیمت واحد را خودش پر می‌کند.\n\n"
+    + `متن پیام:\n<blockquote>${esc(text)}</blockquote>`,
+  [[{ text: "✅ ارسال", callback_data: `spf:${f.id}:go:0` }],
+    d.demo ? [{ text: "↩️ تغییر قالب", callback_data: `spf:${f.id}:tpl:0` }] : [{ text: "↩️ تغییر شماره", callback_data: `spf:${f.id}:back:0` }],
+    [{ text: "↩️ تغییر تأمین‌کننده", callback_data: `spf:${f.id}:sp:0` }]]);
+}
+
+async function spSendGo(env, api, chat, ex, f, d, mid) {
+  const it = await smartItemOf(env, ex.id, d.item);
+  const tpl = await ownTemplate(env, ex.id, d.tpl);
+  if (!it || !tpl) { await api.sendMessage(chat, "این قلم یا قالب دیگر در دسترس نیست.").catch(() => {}); return { ok: true }; }
+  const o = d.demo ? null : d.opts[d.sel];
+  let r;
+  try {
+    r = await spSend(env, ex, {
+      assignment_id: it.aid, item_ids: [it.id], demo: !!d.demo, supplier_name: d.name,
+      text: fillTemplate(tpl.body, { supplier: d.demo ? DEMO.name : d.name, item: it, expertName: ex.name }),
+      ...(o && o.id ? { phone_id: o.id } : { phone: o && o.phone }), label: o && o.label,
+    });
+  } catch (e) { await api.sendMessage(chat, `⚠️ ${esc(e.message)}`).catch(() => {}); return { ok: true }; }
+  await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+  await spPush(env, { id: r.thread_id }, r.msgs).catch((e) => console.error("sp push", e && e.message));
+  const link = r.links.bot ? await expertLink(env, ex.id).catch(() => null) : null;
+  const kb = [[{ text: "🌐 پنل تأمین‌کننده (لینک پیامک)", url: r.links.panel }]];
+  if (r.links.bot) kb.push([{ text: "🤖 بات تأمین‌کننده (لینک پیامک)", url: r.links.bot }]);
+  if (link && link.url) kb.push([{ text: "💬 گفت‌وگو در بات مکاتبات", url: link.url }]);
+  kb.push([{ text: "🌐 صفحهٔ مکاتبات", url: corrLink(env) }]);
+  if (d.src === "hist" && d.hf) kb.push([{ text: "📚 بازگشت به کارت قلم", callback_data: `hv:${d.hf}:${d.item}:${d.m === "e" ? "e" : "h"}:0` }]);
+  kb.push(navRow(it.aid));
+  return show(api, chat, mid, `✅ <b>فرستاده شد</b> — گفت‌وگو با «${esc(r.supplier.name)}» برای درخواست ${esc(r.request_id)}`
+    + `${r.added ? ` (${M(r.added)} قلم تازه)` : " (این قلم قبلاً رفته بود؛ یادآوری با رمز تازه رفت)"}.\n\n`
+    + `📱 <b>پیامک شبیه‌سازی‌شده</b> به ${esc(r.sms.to)} (${esc(r.sms.label || "—")})\n`
+    + "<i>پیامک فعلاً خاموش است؛ همین متن به‌جای آن این‌جاست. لینک‌ها واقعی‌اند — برای دیدن سمت تأمین‌کننده بازشان کنید. رمزِ هر پیامک تا هفت روز (یا تا «خروج») معتبر است.</i>\n"
+    + `<blockquote>${esc(r.sms.text)}</blockquote>\n\nپاسخ تأمین‌کننده در «بات مکاتبات» و «صفحهٔ مکاتبات» می‌آید.`, kb);
+}
+
+async function spSendAction(env, api, chat, ex, parts, mid, ack) {
+  const f = await ownFlow(env, ex, parseInt(parts[1], 10), "spsend");
+  if (!f || f.done_at) { await ack("این ارسال دیگر فعال نیست؛ از کارتِ قلم در «بررسی سوابق» دوباره «ارسال» را بزنید.", true); return { ok: true }; }
+  const d = flowData(f), step = parts[2], v = parseInt(parts[3], 10) || 0;
+  /* تأمین‌کننده: s از سوابق · sd فرضی · sp برگشت به فهرست تأمین‌کنندگان */
+  if (step === "s" || step === "sd") {
+    const s = step === "s" ? (d.sups || [])[v] : null;
+    if (step === "s" && !s) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+    d.demo = step === "sd"; d.name = s ? s.name : DEMO.name; d.code = s ? s.code : ""; d.opts = []; d.sel = null;
+    await saveFlow(env, f.id, d, "pick_tpl");
+    await ack();
+    return spTplPick(env, api, chat, ex, f, d, mid);
+  }
+  if (step === "sp") { await saveFlow(env, f.id, d, "pick_supplier"); await ack(); return spSupPick(api, chat, f, d, mid); }
+  /* قالب: tp انتخاب · tpl برگشت به فهرست قالب‌ها */
+  if (step === "tp") {
+    const tpl = await ownTemplate(env, ex.id, v);
+    if (!tpl) { await ack("این قالب دیگر نیست.", true); return { ok: true }; }
+    d.tpl = tpl.id; d.title = tpl.title;
+    if (!d.demo) d.opts = await spPhoneOpts(env, d.name);
+    await saveFlow(env, f.id, d, d.demo ? "confirm" : "pick_phone");
+    await ack();
+    return d.demo ? spSendConfirm(env, api, chat, ex, f, d, mid) : spSendPick(api, chat, f, d, mid);
+  }
+  if (step === "tpl") { await saveFlow(env, f.id, d, "pick_tpl"); await ack(); return spTplPick(env, api, chat, ex, f, d, mid); }
+  /* شماره: p انتخاب · l برچسب · lo برچسب دلخواه · new شمارهٔ تازه · back برگشت به شماره‌ها */
+  if (step === "p") {
+    const o = (d.opts || [])[v];
+    if (!o) { await ack("گزینهٔ نامعتبر.", true); return { ok: true }; }
+    d.sel = v;
+    await saveFlow(env, f.id, d, o.label ? "confirm" : "pick_label");
+    await ack();
+    return o.label ? spSendConfirm(env, api, chat, ex, f, d, mid) : spSendLabel(api, chat, f, d, mid);
+  }
+  if (step === "l") {
+    if (d.sel == null || !d.opts[d.sel] || !SP_LABELS[v]) { await ack(); return { ok: true }; }
+    d.opts[d.sel].label = SP_LABELS[v];
+    await saveFlow(env, f.id, d, "confirm");
+    await ack();
+    return spSendConfirm(env, api, chat, ex, f, d, mid);
+  }
+  if (step === "lo") {
+    await spAsk(env, ex, f, d, "need_label");
+    await ack();
+    await api.sendMessage(chat, "🏷 برچسب این شماره را بنویسید (مثلاً «همراه آقای رضایی»):", [[{ text: "✖️ بی‌خیال", callback_data: `spf:${f.id}:back:0` }]]).catch(() => {});
+    return { ok: true };
+  }
+  if (step === "new") {
+    await spAsk(env, ex, f, d, "need_phone");
+    await ack();
+    await api.sendMessage(chat, "➕ شماره و برچسبش را بنویسید، مثل:\n<code>09121234567 فروش</code>", [[{ text: "✖️ بی‌خیال", callback_data: `spf:${f.id}:back:0` }]]).catch(() => {});
+    return { ok: true };
+  }
+  if (step === "back") {
+    if (d.demo) { await saveFlow(env, f.id, d, "pick_tpl"); await ack(); return spTplPick(env, api, chat, ex, f, d, mid); }
+    await saveFlow(env, f.id, d, "pick_phone");
+    await ack();
+    return spSendPick(api, chat, f, d, mid);
+  }
+  if (step === "go") { await ack("در حال ارسال…"); return spSendGo(env, api, chat, ex, f, d, mid); }
+  await ack();
+  return { ok: true };
+}
+
+async function onSpSendText(env, api, chat, ex, f, d, text) {
+  if (f.step === "need_phone") {
+    const m = /^([+\d۰-۹٠-٩][\d۰-۹٠-٩\s\-()]{6,18}?)\s*([^\d۰-۹٠-٩\s].*)?$/.exec(text.trim());
+    const phone = m ? normPhone(m[1]) : null;
+    if (!phone || phone === DEMO.phone) { await api.sendMessage(chat, "شماره معتبر نیست. این‌طور بنویسید: <code>09121234567 فروش</code>").catch(() => {}); return { ok: true }; }
+    const label = T(m[2]).slice(0, 30);
+    d.opts = [...(d.opts || []).filter((o) => o.phone !== phone), { phone, label: label || null }];
+    d.sel = d.opts.length - 1; d.demo = false;
+    await saveFlow(env, f.id, d, label ? "confirm" : "pick_label");
+    return label ? spSendConfirm(env, api, chat, ex, f, d, null) : spSendLabel(api, chat, f, d, null);
+  }
+  if (f.step === "need_label") {
+    if (d.sel == null || !d.opts[d.sel]) return { ok: true };
+    d.opts[d.sel].label = text.trim().slice(0, 30);
+    await saveFlow(env, f.id, d, "confirm");
+    return spSendConfirm(env, api, chat, ex, f, d, null);
+  }
+  return { ok: true };
+}
+
+/* ------------------------------------------------------------------ */
 /* تحویل — انتخاب اسناد، ساختنِ آنچه نیست، پیوست‌ها، و فرستادن همه با هم  */
 /*                                                                      */
 /* درخواست خرید و جدول کمیسیون همان لحظه ساخته می‌شوند؛ نامه اگر نیست     */
@@ -2664,7 +2894,8 @@ const MODE_TTL = 24 * 3600000;
 
 const INPUT_STEPS = `((kind='field' AND step='need_value') OR (kind='notes' AND step='need_notes')
   OR (kind='manual' AND step='need_supplier') OR (kind='smart' AND step IN ('need_brand','need_specs','need_notes2'))
-  OR (kind='tpl' AND step IN ('need_title','need_body','edit_title','edit_body')))`;
+  OR (kind='tpl' AND step IN ('need_title','need_body','edit_title','edit_body'))
+  OR (kind='spsend' AND step IN ('need_phone','need_label')))`;
 
 /** آخرین پرسشِ متنیِ باز همین کارشناس */
 async function inputFlow(env, expertId) {
@@ -2922,6 +3153,16 @@ async function onCallback(env, cq) {
     return histSupplierCard(env, api, chat, ex, f, flowData(f), num(2), "v", mid, mOf(parts[3]));
   }
 
+  /* «📨 ارسال به تأمین‌کننده» از کارتِ قلم (دموی پنل تأمین‌کننده): hz:<flow>:<item>:<h|e> */
+  if (action === "hz") {
+    const f = await ownFlow(env, ex, num(1), "hsel");
+    if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
+    if (!(await ownOpenAssignment(env, ex.id, f.assignment_id))) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
+    if (!(await spDemoOn(env, ex.id))) { await ack("دموی پنل تأمین‌کننده برای شما خاموش است؛ /azmayesh را بفرستید.", true); return { ok: true }; }
+    await ack();
+    return spHistStart(env, api, chat, ex, f, num(2), parts[3] === "e" ? "e" : "h");
+  }
+
   /* انتخاب قلم بعد از پیامِ سوابق: hp:<flow>:<item> (دکمهٔ پیام‌های قدیمی ← کارتِ قلم) · hp:<flow>:ls (فهرست) */
   if (action === "hp") {
     const f = await ownFlow(env, ex, num(1), "hsel");
@@ -3084,6 +3325,11 @@ async function onCallback(env, cq) {
     }
     await ack(); return { ok: true };
   }
+
+  /* «📨 ارسال» به تأمین‌کننده (دموی پنل تأمین‌کننده): شروع از کارتِ قلمِ سوابق (hz)؛ spf:<flow>:<step>:<v> گام‌ها.
+     spx دکمهٔ قدیمیِ زیر قالبِ جستجوی هوشمند بود — ارسال حالا فقط از «بررسی سوابق» است. */
+  if (action === "spx") { await ack("ارسال به تأمین‌کننده حالا از «📚 بررسی سوابق» ← کارتِ قلم است.", true); return { ok: true }; }
+  if (action === "spf") return spSendAction(env, api, chat, ex, parts, mid, ack);
 
   /* قالب‌های پیام: tp:<step>:<id>[:sid:i] — ls فهرست · v نمایش · new · et/eb ویرایش عنوان/متن · dl/dk حذف */
   if (action === "tp") return onTemplateAction(env, api, chat, ex, parts, mid, ack);

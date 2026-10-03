@@ -12,14 +12,18 @@
 #   MANAGER_CODE       کد ورود مدیر
 #   TG_BOT_TOKEN       توکن بات کارشناسان (@ArianaSupplyBot)
 #   TG_TEAM_BOT_TOKEN  توکن بات کارشناسان ارشد (@Supply_SeniorBot) — اعلان پایش تیم و منوی /tim
+#   TG_SP_BOT_TOKEN    توکن بات مکاتبات تأمین‌کنندگان (دموی پنل تأمین‌کننده — worker/sp-bot.js)؛
+#                      نام کاربری‌اش را خودِ Worker از getMe می‌خواند و در settings نگه می‌دارد
 #   TG_WEBHOOK_SECRET  رازی که تلگرام در هدر X-Telegram-Bot-Api-Secret-Token برمی‌گرداند
-#                      (یک راز برای هر دو بات؛ وبهوکشان جداست)
+#                      (یک راز برای هر سه بات؛ وبهوکشان جداست)
 # ============================================================
 name = "asli"
 main = "worker.js"
 compatibility_date = "2026-09-03"
 
 [vars]
+# نشانی عمومی سایت — لینکِ پیامکِ تأمین‌کننده، مینی‌اپ‌ها و وبهوکِ بات مکاتبات با همین ساخته می‌شوند
+SITE_ORIGIN = "https://arianaai.website"
 # نام کاربری بات؛ راز نیست و برای ساختن لینک t.me لازم است
 TG_BOT_USERNAME = "ArianaSupplyBot"
 # بات تیمیِ کارشناسان ارشد (اعلان‌های پایش تیم). توکنش راز است: wrangler secret put TG_TEAM_BOT_TOKEN

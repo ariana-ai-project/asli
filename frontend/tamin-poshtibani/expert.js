@@ -1228,25 +1228,30 @@
     }
   }
 
+  /* خانهٔ فقط‌خواندنیِ خط استعلام (تصمیم مدیر، مهر ۱۴۰۵): مقدارها فقط از پنل تأمین‌کننده یا «استخراج»
+     پیش‌فاکتور می‌آیند و ورود/ویرایش دستی بسته است. خانهٔ اجباریِ خالی با نشان قرمز. */
+  function roCell(v, need, opts) {
+    const o = opts || {};
+    const empty = v == null || v === "";
+    const txt = empty ? "—" : o.money ? M(Number(v)) : esc(v);
+    return `<td class="ro${o.num ? " num" : ""}${need && empty ? " miss" : ""}"${o.w ? ` style="min-width:${o.w}px"` : ""}${need && empty ? ' title="اجباری — از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آید"' : ""}>${txt}</td>`;
+  }
   function vQuotes() {
     const r = S.d.request, its = items(), Q = S.d.quotes;
+    const itemTitle = (id) => { const x = its.find((i) => i.id === id); return x ? x.title : ""; };
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور (خط دستی: غیررسمی؛ خوانده‌شده از پیش‌فاکتور: رسمی، مگر سند خلافش را بگوید). بقیه اختیاری‌اند و خالی بودنشان مانع ثبت نیست. هر ویرایش، «ثبت موقت» را برمی‌دارد.</span></div>
+        <span class="dim" style="font-size:.85rem">مقدارهای هر خط فقط از پنل تأمین‌کننده (تأیید نهایی) یا «استخراج» پیش‌فاکتور می‌آیند؛ ورود و ویرایش دستی بسته است. اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور، ارزش افزوده — خانهٔ قرمز یعنی هنوز خالی است.</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
-        ${Q.map((q) => `<tr class="${q.saved ? "" : ""}">
+        ${Q.map((q) => `<tr>
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""}></td>
-          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}</td>
-          <td><select class="tp-select" data-qf="${q.id}|item_id">${its.map((x) => `<option value="${x.id}" ${q.item_id === x.id ? "selected" : ""}>${esc(x.title)}</option>`).join("")}</select></td>
-          ${QF.map(([k, , w, ty, opt]) => `<td><input class="tp-input ${!opt && (q[k] == null || q[k] === "") ? "bad" : ""} ${ty === "date" ? "date" : ""} ${ty === "num" ? "num" : ""}" data-qf="${q.id}|${k}" ${opt ? 'data-opt="1"' : ""} value="${esc(q[k] == null ? "" : q[k])}" style="width:${w}px" ${ty === "date" ? "readonly" : ""} ${ty === "num" ? 'inputmode="decimal"' : ""}></td>`).join("")}
-          <td><select class="tp-select ${q.invoice ? "" : "bad"}" data-qf="${q.id}|invoice"><option value="">—</option>${INVT.map((v) => `<option ${q.invoice === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td><select class="tp-select ${q.pay ? "" : "bad"}" data-qf="${q.id}|pay"><option value="">—</option>${PAYS.map((v) => `<option ${q.pay === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td><select class="tp-select ${q.vat ? "" : "bad"}" data-qf="${q.id}|vat" title="اجباری — قیمتِ ردیف باید بدون ارزش افزوده باشد؛ ارزش افزوده ته جدول جدا حساب می‌شود"><option value="">—</option>${VATS.map((v) => `<option ${q.vat === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td><select class="tp-select" data-qf="${q.id}|deal" title="اختیاری — تصمیم داخلی؛ از پیش‌فاکتور استخراج نمی‌شود"><option value="">—</option>${DEALS.map((v) => `<option ${q.deal === v ? "selected" : ""}>${v}</option>`).join("")}</select></td>
-          <td style="min-width:170px"><div class="stack"><select class="tp-select" data-qf="${q.id}|place" title="اختیاری"><option value="">—</option>${PLACES.map((v) => `<option ${q.place === v ? "selected" : ""}>${v}</option>`).join("")}</select>
-            ${q.place === "سایر" ? `<input class="tp-input ${q.place_other ? "" : "bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}">` : ""}</div></td>
+          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : ""}</td>
+          <td class="ro item">${esc(itemTitle(q.item_id))}</td>
+          ${QF.map(([k, , w, ty, opt]) => roCell(q[k], !opt, { w, num: ty === "num", money: k === "price" || k === "qty" })).join("")}
+          ${roCell(q.invoice, true)}${roCell(q.pay, true)}${roCell(q.vat, true)}${roCell(q.deal, false)}
+          ${roCell(q.place === "سایر" && q.place_other ? `سایر: ${q.place_other}` : q.place, false)}
           <td class="num" data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
           <td>${pfCell(q)}</td>
           <td>${exCell(q)}</td>
@@ -1255,7 +1260,7 @@
         </tbody></table></div>
         ${vFormHead(r)}${vGuard()}`
         : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید؛ در تب‌های «بررسی سوابق» و «جستجوی هوشمند» هم دکمهٔ «افزودن» کنار هر تأمین‌کننده او را به همین‌جا می‌آورد.</div>`}
-      <div class="tp-note">«زمان تحویل»، «اعتبار پیش‌فاکتور» و «شرایط تسویه»، مثل قیمت، با دکمهٔ «استخراج» از پیش‌فاکتورِ بارگذاری‌شده خوانده می‌شوند و با تأیید شما در جدول می‌نشینند. «محل معامله» (کارگاه یا دفتر مرکزی) فقط دستی است. تاریخ از تقویم انتخاب می‌شود.</div></div>`;
+      <div class="tp-note">قیمت، مقدار، «زمان تحویل»، «اعتبار پیش‌فاکتور»، «شرایط تسویه» و بقیهٔ فیلدها یا از پنل تأمین‌کننده (با تأیید نهایی شما در «💬 مکاتبات») می‌آیند، یا با دکمهٔ «استخراج» از پیش‌فاکتورِ بارگذاری‌شده خوانده می‌شوند و با تأیید شما در جدول می‌نشینند. اگر عددی درست خوانده نشده، «دوباره بخوان» را بزنید یا پیش‌فاکتورِ درست را بارگذاری کنید.</div></div>`;
   }
   function vFormHead(r) {
     return `<div class="endbar" style="margin:16px 0 0;align-items:flex-end">
@@ -1721,6 +1726,11 @@
   }
   const reload = () => openDetail(A().id, true);
 
+  /* دموی پنل تأمین‌کننده: دکمهٔ «مکاتبات» فقط برای کارشناسی که /azmayesh را در بات زده (settings.spDemo) */
+  function spDemoOn() {
+    const v = S.settings && S.settings.spDemo;
+    return v === true || v === "all" || (Array.isArray(v) && !!S.expert && v.includes(S.expert.id));
+  }
   /* دکمه‌های تلگرام نوار بالا. کارشناس ارشد دو تلگرام دارد (تصمیم مدیر): «تلگرام کارشناسی» — همان
      بات کارشناسان برای ارجاع‌های خودش (با «ارجاع به تیم» کنار «مشاهده») — و «تلگرام تیمی» برای
      اعلان‌های پایش کارشناسان زیر نظرش. */
@@ -1737,7 +1747,7 @@
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}${spDemoOn() ? `<a class="tp-btn sm" href="correspond.html" title="مکاتبات با تأمین‌کنندگان (دموی پنل تأمین‌کننده)">💬 مکاتبات</a>` : ""}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
@@ -1926,17 +1936,7 @@
         }, "افزودن");
       const all = d.querySelector("#supall"); if (all) all.onchange = () => d.querySelectorAll("[data-supi]").forEach((c) => { c.checked = all.checked; });
     };
-    Q("[data-qf]").forEach((el) => {
-      const [id, f] = el.dataset.qf.split("|"); const q = S.d.quotes.find((x) => x.id === +id); if (!q) return;
-      if (el.classList.contains("date")) { el.onclick = () => TP.openDatePicker(el, async (v) => { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: v } }); await reload(); }, { single: true }); return; }
-      /* قالب فیلد (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد روز، اعتبار عدد — اشتباه، خطا می‌دهد و ذخیره نمی‌شود */
-      const commit = async () => { if (String(q[f] == null ? "" : q[f]) === el.value) return;
-        const bad = TP.quoteFieldError(f, el.value);
-        if (bad) { el.classList.add("bad"); TP.modal("قالب فیلد درست نیست", esc(bad), null, "باشد", ""); return; }
-        try { await TP.api(`/quotes/${id}`, { method: "PUT", body: { [f]: f === "item_id" ? +el.value : el.value } }); await reload(); }
-        catch (e) { el.classList.add("bad"); TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); } };
-      if (el.tagName === "SELECT") el.onchange = commit; else { el.onchange = commit; el.oninput = () => { if (!el.dataset.opt) el.classList.toggle("bad", !el.value); const tot = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`); if (tot && pr) { const v = (Number(tot.value) || 0) * (Number(String(pr.value).replace(/,/g, "")) || 0); /* خانهٔ «قیمت کل» با نشانش، نه با شمارهٔ ستون — با افزوده شدنِ ستون ارزش افزوده، اندیس روی «محل تحویل» افتاده بود و آن را پاک می‌کرد */ const cell = document.querySelector(`[data-qtot="${id}"]`); if (cell) cell.textContent = v ? M(v) : "—"; } }; }
-    });
+    /* خانه‌های خط استعلام فقط‌خواندنی‌اند (تصمیم مدیر، مهر ۱۴۰۵) — ویرایشگرِ فیلدها دیگر نیست */
     Q("[data-fin]").forEach((c) => c.onchange = async (e) => { await TP.api(`/quotes/${e.target.dataset.fin}`, { method: "PUT", body: { final: e.target.checked ? 1 : 0 } }); await reload(); });
     Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); } catch (e) {
       const miss = (e.data && e.data.missing) || [];

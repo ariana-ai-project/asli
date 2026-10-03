@@ -34,12 +34,14 @@ export class TgError extends Error {
 
 /**
  * `which`: خالی = بات اصلی (کارشناسان و کانال مدیر، TG_BOT_TOKEN)؛ «team» = بات تیمیِ کارشناسان
- * ارشد (Supply Senior، TG_TEAM_BOT_TOKEN) که فقط اعلان‌های پایش تیم را می‌فرستد.
+ * ارشد (Supply Senior، TG_TEAM_BOT_TOKEN) که فقط اعلان‌های پایش تیم را می‌فرستد؛ «sp» = بات مکاتبات
+ * تأمین‌کنندگان (TG_SP_BOT_TOKEN) — گفت‌وگوی کارشناس و تأمین‌کننده (worker/sp-bot.js).
  */
+const TOKEN_VAR = { team: "TG_TEAM_BOT_TOKEN", sp: "TG_SP_BOT_TOKEN" };
 export function telegram(env, which) {
-  const team = which === "team";
-  const token = team ? env.TG_TEAM_BOT_TOKEN : env.TG_BOT_TOKEN;
-  if (!token) throw new TgError("init", 503, `${team ? "TG_TEAM_BOT_TOKEN" : "TG_BOT_TOKEN"} روی این پروژه ست نشده است.`);
+  const name = TOKEN_VAR[which] || "TG_BOT_TOKEN";
+  const token = env[name];
+  if (!token) throw new TgError("init", 503, `${name} روی این پروژه ست نشده است.`);
   /* فقط توسعهٔ محلی: مسیر «فایل رسید» بدون یک تلگرامِ بدلی اصلاً تست‌پذیر نبود.
      در تولید ست نمی‌شود و همان آدرس واقعی می‌ماند. */
   const api = env.TG_API_BASE || API;

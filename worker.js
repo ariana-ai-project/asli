@@ -11,7 +11,12 @@
  */
 import { route as apiRoute, ensureSchema } from "./worker/api.js";
 import { scheduled as botTick } from "./worker/bot.js";
+import { ensureSpWebhook } from "./worker/sp-bot.js";
 import { legalRoute, legalCleanup, PREFIX as LEGAL_PREFIX } from "./worker/legal.js";
+
+/* وبهوکِ بات مکاتبات تأمین‌کنندگان یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
+   ثبت نشده یا دامنه عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار کار دستی لازم نیست. */
+let spHooked = false;
 
 export default {
   async fetch(request, env, ctx) {
@@ -35,5 +40,12 @@ export default {
       (r) => console.log("bot tick", JSON.stringify(r)),
       (e) => console.error("bot tick failed", e && e.message),
     ));
+    if (!spHooked && env.TG_SP_BOT_TOKEN && env.TG_WEBHOOK_SECRET) {
+      spHooked = true;
+      ctx.waitUntil(ensureSchema(env).then(() => ensureSpWebhook(env)).then(
+        (r) => r && !r.cached && console.log("sp webhook", JSON.stringify(r)),
+        (e) => { spHooked = false; console.error("sp webhook failed", e && e.message); },
+      ));
+    }
   },
 };

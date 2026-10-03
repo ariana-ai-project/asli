@@ -43,6 +43,9 @@ import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebho
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
+import { SP_DDL } from "./sp-core.js";
+import { spRoute } from "./sp-api.js";
+import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -166,6 +169,7 @@ CREATE TABLE IF NOT EXISTS commission_tables (id INTEGER PRIMARY KEY, assignment
 CREATE INDEX IF NOT EXISTS ix_ctab_asg ON commission_tables(assignment_id);
 CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, expert_id INTEGER, action TEXT NOT NULL, item_ids_json TEXT, closed INTEGER, fully_closed INTEGER, actor TEXT, decision_id INTEGER, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
+${SP_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -1098,19 +1102,26 @@ async function quoteCreate(env, ex, body) {
   /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو) یا دستی */
   const origin = ["history", "smart", "manual"].includes(body.origin) ? body.origin : "manual";
   const originRef = origin === "smart" ? int(body.search_id) : null;
+  /* فقط نام و کد تأمین‌کننده؛ مشخصات، مقدار و قیمت دستی پذیرفته نمی‌شود (MANUAL_LOCKED) — واحد و مقدار
+     همان خواستهٔ قلم است تا پیش‌فاکتور یا پنل تأمین‌کننده جایش را بگیرد */
   const stmts = fresh.map((item) => {
     const it = its.get(item);
-    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,source,origin,origin_ref,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'panel',?,?,?,?)`)
-      .bind(aid, item, supplier, T(body.supplier_code) || null, T(body.spec) || null, T(body.unit) || it.unit || null,
-        num(body.qty) ?? it.qty ?? null, num(body.price), INVOICE_DEFAULT, origin, originRef, t, t);
+    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,source,origin,origin_ref,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,NULL,?,'panel',?,?,?,?)`)
+      .bind(aid, item, supplier, T(body.supplier_code) || null, it.unit || null, it.qty ?? null, INVOICE_DEFAULT, origin, originRef, t, t);
   });
   const res = await env.DB.batch(stmts);
   const ids = res.map((r) => r.meta.last_row_id);
   return { ok: true, id: ids[0], ids, skipped: wanted.length - fresh.length };
 }
+/* تصمیم مدیر (مهر ۱۴۰۵): خانه‌های خط استعلام در پنل کارشناس دستی پر یا ویرایش نمی‌شوند — مقدارها از پنل
+   تأمین‌کننده (تأیید نهایی، worker/sp-core.js) یا خواندن پیش‌فاکتور (/proformas/:id/apply) می‌آیند. از پنل فقط
+   تیک «تأیید نهایی» و «ثبت موقت» می‌رسد. بات کارشناسان مسیر جدای خودش را دارد و این قاعده آن را نمی‌گیرد. */
+const MANUAL_LOCKED = QUOTE_FIELDS.filter((f) => f !== "final");
 async function quoteUpdate(env, ex, id, body) {
   const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
   if (!q) throw new HttpError("استعلام پیدا نشد.", 404);
+  const locked = MANUAL_LOCKED.filter((f) => f in (body || {}));
+  if (locked.length) throw new HttpError("ورود و ویرایش دستیِ خط استعلام بسته است؛ مقدارها از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آیند.", 403, { locked });
   /* قالبِ فیلدها (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد، اعتبار عدد — وگرنه خطا */
   const bad = validateQuote(body);
   if (bad.length) throw new HttpError(bad.map((x) => x.message).join(" "), 422, { invalid: bad.map((x) => x.field) });
@@ -1234,7 +1245,7 @@ async function route(request, env, ctx) {
   if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   const m = request.method.toUpperCase();
 
-  if (m === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": url.origin, "access-control-allow-headers": "content-type,x-manager-code,x-expert-code,x-role", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
+  if (m === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": url.origin, "access-control-allow-headers": "content-type,x-manager-code,x-expert-code,x-role,x-sp-session,x-tg-init", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
 
   try {
     await ensureSchema(env);
@@ -1273,6 +1284,26 @@ async function route(request, env, ctx) {
       return json({ ok: true });
     }
 
+    /* وبهوکِ بات مکاتبات تأمین‌کنندگان (پنل تأمین‌کننده، worker/sp-bot.js). همان راز؛ شناسهٔ آپدیت در
+       بازهٔ جدای خودش در tg_seen (منفی و دور از بازهٔ بات تیمی). */
+    if (path === "/tg/sp-webhook" && m === "POST") {
+      if (!env.TG_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TG_WEBHOOK_SECRET) {
+        return new Response("forbidden", { status: 403 });
+      }
+      const u = await request.json().catch(() => null);
+      if (!u || !u.update_id) return json({ ok: true });
+      const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(-(Math.abs(u.update_id) + 1e12), now()).run();
+      if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
+      await handleSpUpdate(env, u);
+      return json({ ok: true });
+    }
+
+    /* پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (worker/sp-api.js) */
+    if (path.startsWith("/sp/")) {
+      const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json });
+      if (r) return r;
+    }
+
     /* کارشناس لینک اتصال می‌گیرد (TG-03) */
     if (path === "/tg/link" && m === "POST") {
       const ex = await requireExpert(request, env);
@@ -1302,7 +1333,9 @@ async function route(request, env, ctx) {
       await api.setWebhook(`${url.origin}${PREFIX}/tg/webhook`, env.TG_WEBHOOK_SECRET);
       /* بات تیمی کارشناسان ارشد هم اگر توکنش ست شده */
       const team = env.TG_TEAM_BOT_TOKEN ? await ensureTeamWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
-      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team });
+      /* بات مکاتبات تأمین‌کنندگان هم اگر توکنش ست شده */
+      const sp = env.TG_SP_BOT_TOKEN ? await ensureSpWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
+      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team, sp });
     }
     if (path === "/tg/setup" && m === "GET") {
       requireManager(request, env);

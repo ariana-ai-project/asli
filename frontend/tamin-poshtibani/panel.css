@@ -542,3 +542,8 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
   .tp-btn, .tp-tab, .rp-seg button, .tri, .jdp-head button, .jdp-foot button { background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; box-shadow: none; }
   .tp-btn.primary, .tp-tab.on, .rp-seg button.on, .jdp-grid button.sel { background: Highlight; color: HighlightText; }
 }
+
+/* تب استعلامات (مهر ۱۴۰۵): خانه‌های خط استعلام فقط‌خواندنی‌اند — مقدار از پنل تأمین‌کننده یا استخراج پیش‌فاکتور؛
+   خانهٔ اجباریِ خالی قرمز است. */
+.tp-table.q td.ro { color: var(--tp-fg); }
+.tp-table.q td.miss { color: var(--tp-over); font-weight: 700; background: rgba(229, 72, 77, 0.08); }
