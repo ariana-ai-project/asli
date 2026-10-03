@@ -19,7 +19,8 @@ import { HttpError } from "./http.js";
 import { telegram } from "./telegram.js";
 import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
-import { INVOICE_AI, canSave, normalizeDtime, validDtime } from "./quote-rules.js";
+import { canSave } from "./quote-rules.js";
+import { AI_VERSION, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -42,8 +43,8 @@ CREATE TABLE IF NOT EXISTS sp_phones (id INTEGER PRIMARY KEY, supplier_id INTEGE
 CREATE INDEX IF NOT EXISTS ix_spph_sup ON sp_phones(supplier_id);
 CREATE TABLE IF NOT EXISTS sp_threads (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, supplier_id INTEGER NOT NULL, phone_id INTEGER, created_by INTEGER, e_seen INTEGER NOT NULL DEFAULT 0, s_seen INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL, created_at INTEGER NOT NULL, UNIQUE(assignment_id, supplier_id));
 CREATE INDEX IF NOT EXISTS ix_spth_sup ON sp_threads(supplier_id);
-CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(thread_id, item_id));
-CREATE TABLE IF NOT EXISTS sp_bundles (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, line_ids TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', comment TEXT, pf_key TEXT, pf_name TEXT, pf_mime TEXT, pf_size INTEGER, pf_at INTEGER, ai_json TEXT, ai_at INTEGER, manual_ok INTEGER, created_at INTEGER NOT NULL, decided_at INTEGER);
+CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, no INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(thread_id, item_id));
+CREATE TABLE IF NOT EXISTS sp_bundles (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, line_ids TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', comment TEXT, pf_key TEXT, pf_name TEXT, pf_mime TEXT, pf_size INTEGER, pf_at INTEGER, ai_json TEXT, ai_at INTEGER, manual_ok INTEGER, accept_json TEXT, created_at INTEGER NOT NULL, decided_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_spb_thread ON sp_bundles(thread_id);
 CREATE TABLE IF NOT EXISTS sp_msgs (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, who TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', body TEXT NOT NULL, meta_json TEXT, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_spm_thread ON sp_msgs(thread_id, id);
@@ -51,11 +52,23 @@ CREATE TABLE IF NOT EXISTS sp_files (id INTEGER PRIMARY KEY, thread_id INTEGER N
 CREATE INDEX IF NOT EXISTS ix_spf_line ON sp_files(line_id);
 CREATE TABLE IF NOT EXISTS sp_sessions (h TEXT PRIMARY KEY, phone_id INTEGER NOT NULL, via TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, revoked_at INTEGER) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sp_tg (chat TEXT PRIMARY KEY, role TEXT NOT NULL, expert_id INTEGER, phone_id INTEGER, focus INTEGER, flow_json TEXT, ids_json TEXT, updated_at INTEGER NOT NULL) WITHOUT ROWID;
-CREATE TABLE IF NOT EXISTS sp_links (token TEXT PRIMARY KEY, expert_id INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER) WITHOUT ROWID;
+CREATE TABLE IF NOT EXISTS sp_links (token TEXT PRIMARY KEY, expert_id INTEGER NOT NULL, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, used_at INTEGER, payload TEXT) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS sp_sms (id INTEGER PRIMARY KEY, phone_id INTEGER NOT NULL, thread_id INTEGER, expert_id INTEGER, kind TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sp_passes (id INTEGER PRIMARY KEY, phone_id INTEGER NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_sppass_phone ON sp_passes(phone_id, created_at);
 `;
+
+/* ستون‌هایی که بعد از اولین استقرارِ دمو اضافه شدند (CREATE IF NOT EXISTS روی جدولِ موجود اثری ندارد؛ api.js
+   آن‌ها را در COLUMN_MIGRATIONS می‌گذارد): کدِ افزایشیِ قلم در پنل هر تأمین‌کننده، پذیرش‌های جدول تطابق،
+   و پیامک‌های شبیه‌سازی‌شده‌ای که منتظرند کارشناس بات مکاتبات را وصل کند. */
+export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept_json", "TEXT"], ["sp_links", "payload", "TEXT"]];
+
+/** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
+export async function spBackfill(env) {
+  await env.DB.prepare(`UPDATE sp_lines SET no=(SELECT COUNT(*) FROM sp_lines l2 JOIN sp_threads t2 ON t2.id=l2.thread_id
+      WHERE t2.supplier_id=(SELECT t.supplier_id FROM sp_threads t WHERE t.id=sp_lines.thread_id) AND l2.id<=sp_lines.id)
+    WHERE no IS NULL`).run();
+}
 
 /* ------------------------------------------------------------------ */
 /* ثابت‌ها                                                              */
@@ -144,6 +157,10 @@ export const fmtMoney = (n) => (n == null || !Number.isFinite(Number(n)) ? "—"
 const faN = (s) => String(s).replace(/\d/g, (d) => FA[+d]).replace(/,/g, "٬").replace(/\./g, "٫");
 const qtyTxt = (n) => (n == null ? "—" : faN(String(Math.round(Number(n) * 1000) / 1000)));
 const moneyTxt = (n) => faN(fmtMoney(n));
+/** «کد ۷ — » پیش از نام قلم: کدِ افزایشیِ پنلِ همان تأمین‌کننده */
+const codeTxt = (no) => (no ? `کد ${faN(no)} — ` : "");
+/** فهرست اقلامِ یک رخداد، هر قلم با کد و نامش — تا هر پیامِ گفت‌وگو بگوید دقیقاً کدام قلم */
+const itemsTxt = (lines) => lines.map((l) => `• ${codeTxt(l.no)}${l.title}`).join("\n");
 
 /* ------------------------------------------------------------------ */
 /* هویت تأمین‌کننده: لینک + رمز پیامک → نشست                              */
@@ -236,13 +253,15 @@ export async function resendPassword(env, k) {
     JOIN experts e ON e.id=a.expert_id WHERE t.supplier_id=? ORDER BY t.last_at DESC LIMIT 1`).bind(p.supplier_id).first();
   const sup = await env.DB.prepare("SELECT name, demo FROM sp_suppliers WHERE id=?").bind(p.supplier_id).first();
   const { pass, stmts } = await newPassword(env, p.id);
-  const text = smsBody(env, { intro: `رمز تازهٔ ورود به پنل تأمین‌کنندگان شرکت ${COMPANY(env)}`, k: p.k, bot: await spBotUser(env), pass });
+  const bot = await spBotUser(env);
+  const text = smsBody(env, { intro: `رمز تازهٔ ورود به پنل تأمین‌کنندگان شرکت ${COMPANY(env)}`, k: p.k, bot, pass });
   await env.DB.batch([
     ...stmts,
     env.DB.prepare("UPDATE sp_phones SET resend_at=? WHERE id=?").bind(t, p.id),
     env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'pass',?,?)").bind(p.id, th ? th.id : null, th ? th.expert_id : null, maskPass(text, pass), t),
   ]);
-  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", text, expertChat: th ? th.telegram_chat : null };
+  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", text, expertChat: th ? th.telegram_chat : null,
+    expertId: th ? th.expert_id : null, threadId: th ? th.id : null, panel: panelLink(env, p.k), bot: botLink(bot, "s" + p.k) };
 }
 
 /* ------------------------------------------------------------------ */
@@ -344,18 +363,22 @@ export async function spSend(env, ex, b) {
       .bind(aid, asg.request_id, sup.id, ph.id, ex.id, t, t).run();
     th = { id: r.meta.last_row_id };
   }
-  const have = new Set(((await env.DB.prepare("SELECT item_id FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).map((x) => x.item_id));
-  const fresh = its.filter((i) => !have.has(i.id));
+  const old = new Map(((await env.DB.prepare("SELECT item_id, no FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).map((x) => [x.item_id, x.no]));
+  const fresh = its.filter((i) => !old.has(i.id));
   const locked = await Promise.all(fresh.map((i) => lockedLayers(env, i)));
+  /* کدِ قلم در پنل همین تأمین‌کننده: شمارش افزایشی، جدا از کد راهکاران (که مال خود شرکت است) */
+  const top = await env.DB.prepare("SELECT COALESCE(MAX(l.no),0) AS n FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE t.supplier_id=?").bind(sup.id).first();
+  const nos = new Map([...old].map(([id, no]) => [id, no]));
+  fresh.forEach((i, n) => nos.set(i.id, (top ? top.n : 0) + n + 1));
 
   const stmts = fresh.map((i, n) => env.DB.prepare(
-    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,state,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'new',?,?)",
-  ).bind(th.id, i.id, nrm(i.title), locked[n].head, JSON.stringify(locked[n].layers), i.qty, T(i.unit) || null, i.qty, T(i.unit) || null, t, t));
+    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'new',?,?,?)",
+  ).bind(th.id, i.id, nrm(i.title), locked[n].head, JSON.stringify(locked[n].layers), i.qty, T(i.unit) || null, i.qty, T(i.unit) || null, nos.get(i.id), t, t));
   const { pass, stmts: passStmts } = await newPassword(env, ph.id);
   stmts.push(...passStmts, env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
 
   const text = T(b.text).slice(0, 3000);
-  const titles = (fresh.length ? fresh : its).map((i) => `• ${nrm(i.title)} — ${qtyTxt(i.qty)} ${T(i.unit)}`).join("\n");
+  const titles = (fresh.length ? fresh : its).map((i) => `• ${codeTxt(nos.get(i.id))}${nrm(i.title)} — ${qtyTxt(i.qty)} ${T(i.unit)}`).join("\n");
   const evBody = fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم فرستاده شد:\n${titles}` : `🔁 یادآوری استعلام:\n${titles}`;
   const msgs = [];
   if (text) msgs.push(["e", "text", text, null]);
@@ -414,16 +437,20 @@ export function threadOut(th, side) {
 export function lineOut(l) {
   const qty = l.qty == null ? null : Number(l.qty), price = l.price == null ? null : Number(l.price);
   return {
-    id: l.id, item_id: l.item_id, title: l.title, head: l.head, layers: parse(l.layers_json, []), extra: parse(l.extra_json, []),
+    id: l.id, no: l.no || null, item_id: l.item_id, title: l.title, head: l.head, layers: parse(l.layers_json, []), extra: parse(l.extra_json, []),
     req_qty: l.req_qty, req_unit: l.req_unit, qty, unit: l.unit, price, total: qty != null && price != null ? qty * price : null,
     note: l.note, state: l.state, state_fa: LINE_FA[l.state] || l.state, bundle_id: l.bundle_id, quote_id: l.quote_id, missing: lineMissing(l),
   };
 }
+/** بسته برای نمایش؛ کارشناس جدول تطابق، پذیرش‌هایش و این‌که تأیید نهایی ممکن است یا چه مانعی مانده را هم می‌بیند */
 export function bundleOut(b, side) {
+  const ai = side === "e" ? parse(b.ai_json, null) : null;
+  const accept = side === "e" ? parse(b.accept_json, {}) : null;
+  const match = ai && ai.v === AI_VERSION ? resolve(ai, accept) : null;
   return {
     id: b.id, line_ids: parse(b.line_ids, []), state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment,
     pf: b.pf_key ? { name: b.pf_name, mime: b.pf_mime, size: b.pf_size, at: b.pf_at } : null,
-    ...(side === "e" ? { ai: parse(b.ai_json, null), manual_ok: !!b.manual_ok } : {}),
+    ...(side === "e" ? { ai: ai && ai.v === AI_VERSION ? ai : null, accept, ready: !!(match && match.ready), problems: match ? match.problems : [] } : {}),
     created_at: b.created_at, decided_at: b.decided_at,
   };
 }
@@ -588,13 +615,13 @@ export async function submitLines(env, sup, thId, lineIds) {
     .filter((l) => !want || want.has(l.id));
   if (!lines.length) throw new HttpError("هیچ قلمِ «آمادهٔ ارسال»ی انتخاب نشده است.", 422);
   const bad = lines.filter((l) => lineMissing(l).length);
-  if (bad.length) throw new HttpError(`این اقلام کامل نیستند: ${bad.map((l) => `«${l.title}»`).join("، ")}`, 422);
+  if (bad.length) throw new HttpError(`این اقلام کامل نیستند: ${bad.map((l) => `${codeTxt(l.no)}«${l.title}»`).join("، ")}`, 422);
   const t = now();
   const r = await env.DB.prepare("INSERT INTO sp_bundles (thread_id,line_ids,state,created_at) VALUES (?,?,'pending',?)").bind(th.id, JSON.stringify(lines.map((l) => l.id)), t).run();
   const bid = r.meta.last_row_id;
   const sum = lines.reduce((s, l) => s + Number(l.qty) * Number(l.price), 0);
   const body = `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد:\n`
-    + lines.map((l) => `• ${l.title} — ${qtyTxt(l.qty)} ${l.unit} × ${moneyTxt(l.price)} = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال`).join("\n")
+    + lines.map((l) => `• ${codeTxt(l.no)}${l.title} — ${qtyTxt(l.qty)} ${l.unit} × ${moneyTxt(l.price)} = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال`).join("\n")
     + `\nجمع: ${moneyTxt(sum)} ریال`;
   const meta = { ev: "submit", bundle: bid };
   const res = await env.DB.batch([
@@ -619,7 +646,7 @@ export async function addFile(env, sup, target, f) {
   const { line: l, label } = target;
   const t = now();
   const note = T(f.note).slice(0, 300) || null;
-  const body = `📎 پیوست «${label}» برای «${l.title}»${note ? ` — ${note}` : ""}`;
+  const body = `📎 پیوست «${label}» برای ${codeTxt(l.no)}${l.title}${note ? ` — ${note}` : ""}`;
   const meta = { ev: "file", line: l.id };
   const res = await env.DB.batch([
     env.DB.prepare("INSERT INTO sp_files (thread_id,line_id,label,note,filename,mime,size,skey,at) VALUES (?,?,?,?,?,?,?,?,?)")
@@ -651,20 +678,22 @@ async function bundleFor(env, who, bundleId) {
   const th = await threadFor(env, b.thread_id, who);
   return { b, th };
 }
+const bundleLines = async (env, bid) => (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
+
 export async function proformaTarget(env, sup, bundleId) {
   const { b, th } = await bundleFor(env, { supplier: sup }, bundleId);
   if (!["approved", "proforma"].includes(b.state)) throw new HttpError("برای این بسته پیش‌فاکتور خواسته نشده است.", 409);
   return { b, th };
 }
-/** پیش‌فاکتور رسید (یا عوض شد): بررسیِ قبلی باطل می‌شود — سند تازه، بررسی تازه */
+/** پیش‌فاکتور رسید (یا عوض شد): بررسی و پذیرش‌های قبلی باطل می‌شوند — سند تازه، بررسی تازه */
 export async function setProforma(env, target, f) {
   const { b, th } = target;
   const t = now();
-  const n = parse(b.line_ids, []).length;
-  const body = `📄 پیش‌فاکتور «${T(f.filename) || "پیش‌فاکتور"}» برای ${faN(n)} قلم ${b.state === "proforma" ? "عوض شد" : "رسید"}.`;
+  const lines = await bundleLines(env, b.id);
+  const body = `📄 پیش‌فاکتور «${T(f.filename) || "پیش‌فاکتور"}» ${b.state === "proforma" ? "عوض شد" : "رسید"} برای:\n${itemsTxt(lines)}`;
   const meta = { ev: "pf", bundle: b.id };
   const res = await env.DB.batch([
-    env.DB.prepare("UPDATE sp_bundles SET state='proforma', pf_key=?, pf_name=?, pf_mime=?, pf_size=?, pf_at=?, ai_json=NULL, ai_at=NULL, manual_ok=NULL WHERE id=?")
+    env.DB.prepare("UPDATE sp_bundles SET state='proforma', pf_key=?, pf_name=?, pf_mime=?, pf_size=?, pf_at=?, ai_json=NULL, ai_at=NULL, manual_ok=NULL, accept_json=NULL WHERE id=?")
       .bind(f.skey, T(f.filename).slice(0, 120) || "proforma", f.mime || null, f.size || null, t, b.id),
     env.DB.prepare("UPDATE sp_lines SET state='proforma', updated_at=? WHERE bundle_id=? AND state IN ('approved','proforma')").bind(t, b.id),
     msgStmt(env, th.id, "s", "event", body, meta, t),
@@ -682,94 +711,91 @@ export async function proformaOfBundle(env, who, bundleId) {
 /* ------------------------------------------------------------------ */
 /* تصمیم کارشناس                                                         */
 /* ------------------------------------------------------------------ */
-const specText = (l) => [l.head ? `نوع قلم: ${l.head}` : null, ...parse(l.layers_json, []).map((x) => `${x.k}: ${x.v}`), ...parse(l.extra_json, []).map((x) => `${x.k}: ${x.v}`)]
-  .filter(Boolean).join("، ").slice(0, 500);
-
-/** آیا «تأیید نهایی» ممکن است؟ خروجی: فهرست مانع‌ها (خالی = ممکن) */
-export function finalProblems(b, lines, manualOk) {
-  const out = [];
-  for (const l of lines) { const miss = lineMissing(l); if (miss.length) out.push(`«${l.title}»: ${miss.join("، ")} پر نشده است`); }
-  if (!b.pf_key) out.push("پیش‌فاکتور هنوز نرسیده است");
-  const ai = parse(b.ai_json, null);
-  if (!(ai && ai.ok) && !manualOk && !b.manual_ok) out.push("صراحتِ لایه‌ها و فیلدهای اجباری در پیش‌فاکتور تأیید نشده — «بررسی هوشمند» را بزنید یا خودتان پیش‌فاکتور را بررسی و تیکش را بزنید");
-  return out;
-}
+const aiOf = (b) => { const ai = parse(b.ai_json, null); return ai && ai.v === AI_VERSION ? ai : null; };
 
 /**
  * تصمیم روی یک بسته: approve (تأیید مشخصات و درخواست پیش‌فاکتور) · return (برگشت با توضیح؛ قابل ویرایش
- * می‌شود) · reject (رد) · final (تأیید نهایی ← خط استعلام موقت در تب استعلامات).
+ * می‌شود) · reject (رد) · final (تأیید نهایی ← اقلام با مقدارهای پیش‌فاکتور به تب استعلامات).
+ * تأیید نهایی فقط وقتی که جدول تطابقِ بررسی هوشمند همه‌جا ✅ است یا مغایرت‌ها پذیرفته شده‌اند (sp-ai.js:resolve).
  */
-export async function decide(env, ex, bundleId, action, { comment, manual_ok } = {}) {
+export async function decide(env, ex, bundleId, action, { comment } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
-  const lines = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(b.id).all()).results || []);
+  const lines = await bundleLines(env, b.id);
   const note = T(comment).slice(0, 1000);
   const t = now();
   const stmts = [];
-  let body, ev = action, quoteIds = [];
+  let body, quoteIds = [];
   const open = ["pending", "approved", "proforma"];
+  const list = itemsTxt(lines);
   if (action === "approve") {
     if (b.state !== "pending") throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
     stmts.push(env.DB.prepare("UPDATE sp_bundles SET state='approved', comment=?, decided_at=? WHERE id=?").bind(note || null, t, b.id),
       env.DB.prepare("UPDATE sp_lines SET state='approved', updated_at=? WHERE bundle_id=? AND state='submitted'").bind(t, b.id));
-    body = `✅ مشخصات ${faN(lines.length)} قلم تأیید شد. لطفاً پیش‌فاکتورِ همین اقلام را بارگذاری کنید.${note ? `\n${note}` : ""}`;
+    body = `✅ مشخصات تأیید شد؛ لطفاً پیش‌فاکتورِ این اقلام را بارگذاری کنید:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else if (action === "return") {
     if (!open.includes(b.state)) throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
     if (!note) throw new HttpError("برای برگشت، توضیح بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.");
     stmts.push(env.DB.prepare("UPDATE sp_bundles SET state='returned', comment=?, decided_at=? WHERE id=?").bind(note, t, b.id),
       env.DB.prepare("UPDATE sp_lines SET state='returned', updated_at=? WHERE bundle_id=?").bind(t, b.id));
-    body = `↩️ ${faN(lines.length)} قلم برای اصلاح برگشت خورد:\n${note}`;
+    body = `↩️ برای اصلاح برگشت خورد:\n${list}\n💬 ${note}`;
   } else if (action === "reject") {
     if (!open.includes(b.state)) throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
     stmts.push(env.DB.prepare("UPDATE sp_bundles SET state='rejected', comment=?, decided_at=? WHERE id=?").bind(note || null, t, b.id),
       env.DB.prepare("UPDATE sp_lines SET state='rejected', updated_at=? WHERE bundle_id=?").bind(t, b.id));
-    body = `❌ ${faN(lines.length)} قلم رد شد.${note ? `\n${note}` : ""}`;
+    body = `❌ رد شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else if (action === "final") {
     if (b.state !== "proforma") throw new HttpError(b.state === "approved" ? "پیش‌فاکتور هنوز نرسیده است." : `این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
-    const problems = finalProblems(b, lines, !!manual_ok);
-    if (problems.length) throw new HttpError(`تأیید نهایی هنوز ممکن نیست:\n• ${problems.join("\n• ")}`, 422, { problems });
-    const q = th.demo ? { ids: [], stmts: [] } : await quoteStmts(env, th, b, lines, t);
-    quoteIds = q.ids;
-    stmts.push(...q.stmts,
-      env.DB.prepare("UPDATE sp_bundles SET state='final', manual_ok=?, decided_at=? WHERE id=?").bind(manual_ok ? 1 : b.manual_ok || null, t, b.id));
-    lines.forEach((l, n) => stmts.push(env.DB.prepare("UPDATE sp_lines SET state='final', quote_id=?, updated_at=? WHERE id=?").bind(q.ids[n] || null, t, l.id)));
-    body = `🏁 تأیید نهایی شد (${faN(lines.length)} قلم).${note ? `\n${note}` : ""}`
-      + (th.demo ? "\n(تأمین‌کنندهٔ فرضی است؛ در حالت واقعی همین‌جا خط استعلام موقت در تب استعلامات درخواست ساخته می‌شد.)" : "");
+    const res = resolve(aiOf(b), parse(b.accept_json, {}));
+    if (!res.ready) throw new HttpError(`تأیید نهایی هنوز ممکن نیست:\n• ${res.problems.join("\n• ")}`, 422, { problems: res.problems });
+    stmts.push(...await quoteStmts(env, th, b, lines, res, t),
+      env.DB.prepare("UPDATE sp_bundles SET state='final', decided_at=? WHERE id=?").bind(t, b.id),
+      env.DB.prepare("UPDATE sp_lines SET state='final', updated_at=? WHERE bundle_id=?").bind(t, b.id));
+    body = `🏁 تأیید نهایی شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else throw new HttpError("تصمیم نامعتبر.");
-  const meta = { ev, bundle: b.id };
+  const meta = { ev: action, bundle: b.id };
   stmts.push(msgStmt(env, th.id, "e", "event", body, meta, t), touchStmt(env, th.id, t));
-  const res = await env.DB.batch(stmts);
-  const mid = res[res.length - 2].meta.last_row_id;
-  /* خط استعلامِ تازه — شناسه‌اش بعد از اجرای دسته معلوم است */
-  if (action === "final" && !th.demo) {
-    const ids = ((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=? AND origin='supplier' AND origin_ref=?").bind(th.assignment_id, th.supplier_name, b.id).all()).results || []);
+  const out = await env.DB.batch(stmts);
+  const mid = out[out.length - 2].meta.last_row_id;
+  /* خط‌های استعلام — شناسه‌شان بعد از اجرای دسته معلوم است */
+  if (action === "final") {
+    const ids = ((await env.DB.prepare(`SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=? AND item_id IN (${lines.map(() => "?").join(",")})`)
+      .bind(th.assignment_id, th.supplier_name, ...lines.map((l) => l.item_id)).all()).results || []);
     const byItem = new Map(ids.map((r) => [r.item_id, r.id]));
     const link = lines.filter((l) => byItem.has(l.item_id)).map((l) => env.DB.prepare("UPDATE sp_lines SET quote_id=? WHERE id=?").bind(byItem.get(l.item_id), l.id));
     if (link.length) await env.DB.batch(link);
-    quoteIds = [...byItem.values()];
+    quoteIds = lines.map((l) => byItem.get(l.item_id)).filter(Boolean);
   }
   return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, demo: !!th.demo,
     msgs: [msgObj(mid, th.id, "e", "event", body, meta, t)], thread: th };
 }
 
 /**
- * خط‌های استعلامِ موقت در تب استعلامات (تأمین‌کنندهٔ واقعی؛ فرضیِ دمو چیزی در داده‌های واقعی نمی‌سازد).
- * مقدار، واحد و قیمت از خودِ خط؛ شرایط فاکتور از بررسی هوشمند اگر انجام شده. اگر همهٔ فیلدهای اجباری
- * پر بود «ثبت موقت» است (saved=1)، وگرنه کارشناس در تب استعلامات کاملش می‌کند. پیش‌فاکتور هم برای همین
- * تأمین‌کننده ثبت می‌شود تا تب استعلامات و جدول کمیسیون همان سند را ببینند.
+ * اقلامِ تأییدنهایی‌شده در تب استعلامات — همهٔ مقدارها از پیش‌فاکتور: ردیف‌های ✅ و مغایرت‌هایی که کارشناس
+ * پذیرفته (resolve). خطی که برای همین تأمین‌کننده و قلم از قبل هست (مثلاً از «انتخاب جهت استعلام») همان
+ * به‌روز می‌شود. خط «ثبت موقت» است اگر همهٔ اجباری‌ها پر باشد، و تیک «تأیید نهایی» می‌خورد تا به جدول
+ * کمیسیون برسد. پیش‌فاکتور هم برای همین تأمین‌کننده ثبت می‌شود تا تب استعلامات و کمیسیون همان سند را ببینند.
  */
-async function quoteStmts(env, th, b, lines, t) {
-  const ai = parse(b.ai_json, null) || {};
-  const h = ai.header || {};
-  const have = new Set(((await env.DB.prepare("SELECT item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || []).map((r) => r.item_id));
+async function quoteStmts(env, th, b, lines, res, t) {
+  const have = new Map(((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
+    .map((r) => [r.item_id, r.id]));
+  const byLine = new Map(res.lines.map((x) => [x.line_id, x.values]));
+  const tm = res.terms;
   const stmts = [];
-  const dt = h.delivery && validDtime(h.delivery) ? normalizeDtime(h.delivery) : null;
   for (const l of lines) {
-    if (have.has(l.item_id)) continue;
-    const q = { unit: l.unit, qty: l.qty, price: l.price, dtime: dt, pay: h.pay || null, invoice: h.invoice === "غیر رسمی" ? "غیر رسمی" : INVOICE_AI, vat: h.vat || null };
-    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,saved,source,origin,origin_ref,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'supplier','supplier',?,?,?)`)
-      .bind(th.assignment_id, l.item_id, th.supplier_name, specText(l), q.unit, q.qty, q.price, q.dtime, h.valid_days != null ? String(h.valid_days) : null, h.ship || null,
-        q.invoice, q.pay, q.vat, h.place || null, canSave(q) ? 1 : 0, b.id, t, t));
+    const v = byLine.get(l.id) || {};
+    const spec = [l.head ? `نوع قلم: ${l.head}` : null, ...(v.spec || []).map((x) => `${x.k}: ${x.v}`)].filter(Boolean).join("، ").slice(0, 500) || null;
+    const q = { unit: v.unit || null, qty: v.qty ?? null, price: v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
+    const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
+      tm.place || null, tm.place_other || null, canSave(q) ? 1 : 0];
+    if (have.has(l.item_id)) {
+      stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, place=?, place_other=?, saved=?,
+          final=1, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, updated_at=? WHERE id=?`)
+        .bind(...vals, t, b.id, t, have.get(l.item_id)));
+    } else {
+      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,0,'supplier','supplier',?,?,?)`)
+        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, t, b.id, t, t));
+    }
   }
   if (b.pf_key) {
     stmts.push(env.DB.prepare(`INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at,item_ids)
@@ -778,26 +804,60 @@ async function quoteStmts(env, th, b, lines, t) {
         size_bytes=excluded.size_bytes, source='supplier', uploaded_at=excluded.uploaded_at, item_ids=excluded.item_ids`)
       .bind(th.assignment_id, th.supplier_name, b.pf_name, b.pf_key, b.pf_mime, b.pf_size, t, JSON.stringify(lines.map((l) => l.item_id))));
   }
-  return { ids: [], stmts };
+  return stmts;
+}
+
+/** همهٔ ردیف‌های جدول تطابق با کلیدِ پذیرششان */
+function matchRows(ai) {
+  const out = [];
+  for (const ln of (ai && ai.lines) || []) for (const row of ln.rows || []) out.push({ key: lineKey(ln.line_id, row), row, line: ln });
+  for (const row of (ai && ai.header) || []) out.push({ key: headKey(row), row, line: null });
+  return out;
+}
+
+/**
+ * پذیرشِ مغایرت‌ها در جدول تطابق: کارشناس قبول می‌کند که پیش‌فاکتور ملاک باشد. فقط ردیفی که سند مقداری برایش
+ * دارد (❌، یا ⚠️ای که مدل مطمئن نبود) پذیرفتنی است؛ چیزی که در سند نیست هرگز. `all`: همهٔ پذیرفتنی‌ها.
+ */
+export async function acceptRows(env, ex, bundleId, { keys, on = true, all = false } = {}) {
+  const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
+  if (b.state !== "proforma") throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
+  const ai = aiOf(b);
+  if (!ai) throw new HttpError("اول «بررسی هوشمند» را بزنید تا جدول تطابق ساخته شود.", 409);
+  const acc = parse(b.accept_json, {});
+  const rows = matchRows(ai);
+  if (all) { for (const x of rows) if (acceptable(x.row)) acc[x.key] = true; }
+  else {
+    for (const k of Array.isArray(keys) ? keys : [keys]) {
+      const x = rows.find((y) => y.key === k);
+      if (!x) throw new HttpError("این ردیف در جدول تطابق نیست.", 404);
+      if (!acceptable(x.row)) throw new HttpError(x.row.status === "ok" ? "این ردیف همین حالا هم با پیش‌فاکتور یکی است." : "این مورد در پیش‌فاکتور نیامده؛ چیزی برای پذیرفتن نیست — بسته را برای اصلاح برگردانید.", 422);
+      if (on) acc[k] = true; else delete acc[k];
+    }
+  }
+  await env.DB.batch([env.DB.prepare("UPDATE sp_bundles SET accept_json=? WHERE id=?").bind(JSON.stringify(acc), b.id), touchStmt(env, th.id, now())]);
+  const r = resolve(ai, acc);
+  return { ok: true, accept: acc, ready: r.ready, problems: r.problems, thread: th };
 }
 
 /** نتیجهٔ «بررسی هوشمند» روی بسته ذخیره می‌شود (sp-ai.js مدل را صدا می‌زند) */
 export async function aiTarget(env, ex, bundleId) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
   if (b.state !== "proforma" || !b.pf_key) throw new HttpError("بررسی هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);
-  const lines = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(b.id).all()).results || []);
-  return { b, th, lines };
+  return { b, th, lines: await bundleLines(env, b.id) };
 }
 export async function saveAi(env, target, ai) {
   const { b, th } = target;
   const t = now();
-  const ok = !!ai.ok;
-  const body = ok ? "🤖 بررسی هوشمند: همهٔ لایه‌ها و فیلدهای اجباری در پیش‌فاکتور صریح آمده‌اند."
-    : `🤖 بررسی هوشمند: ${ai.readable === false ? "پیش‌فاکتور خوانا نبود" : "بعضی لایه‌ها یا فیلدها در پیش‌فاکتور صریح نیامده‌اند"} — جزئیات در کارت بسته.`;
-  const meta = { ev: "ai", bundle: b.id, ok };
-  /* «note»: یادداشتِ درونیِ کارشناس — تأمین‌کننده نمی‌بیند */
+  const rows = matchRows(ai).filter((x) => x.row.gate);
+  const bad = rows.filter((x) => x.row.status === "bad").length, warn = rows.filter((x) => x.row.status === "warn").length;
+  const body = ai.readable === false ? `🤖 بررسی هوشمند: پیش‌فاکتور خوانا نبود${ai.reason ? ` (${ai.reason})` : ""}.`
+    : ai.ok ? "🤖 بررسی هوشمند: همهٔ لایه‌ها و فیلدهای اجباری با پیش‌فاکتور می‌خوانند ✅"
+      : `🤖 بررسی هوشمند: ${faN(bad)} مغایرت ❌ و ${faN(warn)} موردِ نیامده یا نامطمئن ⚠️ — جدول تطابق را ببینید.`;
+  const meta = { ev: "ai", bundle: b.id, ok: !!ai.ok };
+  /* «note»: یادداشتِ درونیِ کارشناس — تأمین‌کننده نمی‌بیند. خواندنِ تازه، پذیرش‌های قبلی را پاک می‌کند */
   const res = await env.DB.batch([
-    env.DB.prepare("UPDATE sp_bundles SET ai_json=?, ai_at=? WHERE id=?").bind(JSON.stringify(ai), t, b.id),
+    env.DB.prepare("UPDATE sp_bundles SET ai_json=?, ai_at=?, accept_json=NULL WHERE id=?").bind(JSON.stringify(ai), t, b.id),
     msgStmt(env, th.id, "e", "note", body, meta, t),
     touchStmt(env, th.id, t),
   ]);
@@ -807,12 +867,18 @@ export async function saveAi(env, target, ai) {
 /* ------------------------------------------------------------------ */
 /* لینک اتصال کارشناس به بات مکاتبات                                    */
 /* ------------------------------------------------------------------ */
-export async function expertLink(env, exId) {
-  const token = "e" + randHex(12);
+/**
+ * لینک یک‌بارمصرفِ اتصال به بات مکاتبات. `pending`: پیامک‌های شبیه‌سازی‌شده‌ای که هنوز جایی برای نشان دادن
+ * نداشتند (کارشناس بات مکاتبات را وصل نکرده) — با همین لینک نگه داشته و بعد از اتصال نشان داده و پاک می‌شوند.
+ */
+export async function expertLink(env, exId, pending) {
   const t = now();
+  const prev = await env.DB.prepare("SELECT payload FROM sp_links WHERE expert_id=? AND used_at IS NULL AND expires_at>? ORDER BY created_at DESC LIMIT 1").bind(exId, t).first();
+  const queue = [...parse(prev && prev.payload, []), ...(pending ? [pending] : [])].slice(-5);
+  const token = "e" + randHex(12);
   await env.DB.batch([
     env.DB.prepare("DELETE FROM sp_links WHERE expert_id=? OR expires_at<?").bind(exId, t),
-    env.DB.prepare("INSERT INTO sp_links (token,expert_id,created_at,expires_at) VALUES (?,?,?,?)").bind(token, exId, t, t + 24 * 3600000),
+    env.DB.prepare("INSERT INTO sp_links (token,expert_id,created_at,expires_at,payload) VALUES (?,?,?,?,?)").bind(token, exId, t, t + 24 * 3600000, queue.length ? JSON.stringify(queue) : null),
   ]);
   const bot = await spBotUser(env);
   return { token, url: botLink(bot, token), bot };

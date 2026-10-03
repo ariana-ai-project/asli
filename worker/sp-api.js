@@ -3,7 +3,7 @@
  *
  * سه راه احراز هویت، یک وضعیت:
  *   X-SP-Session  نشستِ تأمین‌کننده بعد از ورود با لینک و رمز پیامک (پنل وب)
- *   X-TG-Init     initData مینی‌اپ تلگرام، امضاشده با توکن بات مکاتبات؛ نقش از گفت‌وگوی وصل‌شده (sp_tg)
+ *   X-TG-Init     initData مینی‌اپ تلگرام — بات مکاتبات (نقشِ گفت‌وگوی وصل‌شده، sp_tg) یا بات کارشناسان (کارشناسِ همان گفت‌وگو)
  *   X-Expert-Code کد کارشناس (صفحهٔ مکاتبات در مرورگر) — همان کد پنل کارشناس
  *
  * فایل‌ها خام و جریانی به انبار می‌روند (مثل /proformas/upload) تا CPU صرف کدگذاری نشود.
@@ -15,34 +15,13 @@ import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { ensureSpWebhook, deliverSimSms } from "./sp-bot.js";
 import { runAiCheck, AI_COST_HINT } from "./sp-ai.js";
+import { verifyInitData, tgIdentity } from "./tg-auth.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
-const hex = (buf) => [...new Uint8Array(buf)].map((b) => b.toString(16).padStart(2, "0")).join("");
 
-/**
- * اعتبار initData مینی‌اپ: HMAC-SHA256 با کلیدِ HMAC_SHA256("WebAppData", توکن بات) روی همهٔ فیلدها
- * (مرتب، key=value، با \n) جز hash. نسخه‌های تازهٔ تلگرام فیلد signature هم دارند؛ اگر با آن نشد، بی آن
- * هم سنجیده می‌شود — هر دو با همان توکن امضا شده‌اند. کهنه‌تر از یک روز پذیرفته نمی‌شود.
- */
-export async function verifyInitData(token, initData, maxAgeSec = 24 * 3600) {
-  if (!token || !initData) return null;
-  const p = new URLSearchParams(initData);
-  const hash = p.get("hash");
-  if (!hash) return null;
-  const enc = new TextEncoder();
-  const k1 = await crypto.subtle.importKey("raw", enc.encode("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const secret = await crypto.subtle.sign("HMAC", k1, enc.encode(token));
-  const k2 = await crypto.subtle.importKey("raw", secret, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const ok = async (skip) => {
-    const s = [...p.entries()].filter(([k]) => !skip.includes(k)).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)).map(([k, v]) => `${k}=${v}`).join("\n");
-    return hex(await crypto.subtle.sign("HMAC", k2, enc.encode(s))) === hash;
-  };
-  if (!(await ok(["hash"])) && !(await ok(["hash", "signature"]))) return null;
-  const auth = int(p.get("auth_date"));
-  if (!auth || Date.now() / 1000 - auth > maxAgeSec) return null;
-  try { const u = JSON.parse(p.get("user") || "null"); return u && u.id ? u : null; } catch (_) { return null; }
-}
+/* اعتبارِ initData در worker/tg-auth.js است (پنل کارشناس هم همان را می‌خواهد)؛ این‌جا برای آزمون‌ها دوباره صادر می‌شود */
+export { verifyInitData };
 
 async function whoAmI(request, env, deps) {
   const sess = T(request.headers.get("X-SP-Session"));
@@ -53,11 +32,18 @@ async function whoAmI(request, env, deps) {
   }
   const init = request.headers.get("X-TG-Init");
   if (init) {
-    const u = await verifyInitData(env.TG_SP_BOT_TOKEN, init);
-    if (!u) throw new HttpError("اعتبار مینی‌اپ تلگرام تأیید نشد؛ صفحه را از داخل بات دوباره باز کنید.", 401);
-    const row = await P.tgRow(env, u.id);
-    if (row && row.role === "s") { const s = await C.phoneIdentity(env, row.phone_id); if (s) return { supplier: s, side: "s", tg: row }; }
-    if (row && row.role === "e") {
+    const id = await tgIdentity(env, init);
+    if (!id) throw new HttpError("اعتبار مینی‌اپ تلگرام تأیید نشد؛ صفحه را از داخل بات دوباره باز کنید.", 401);
+    /* مینی‌اپِ بات کارشناسان: همان کارشناسی که گفت‌وگویش به حسابش گره خورده */
+    if (id.bot === "main") {
+      const ex = await env.DB.prepare("SELECT id, name, label, active FROM experts WHERE telegram_chat=? AND active=1").bind(String(id.user.id)).first();
+      if (ex) return { expert: ex, side: "e" };
+      throw new HttpError("این حساب تلگرام به هیچ کارشناسی وصل نیست؛ از پنل کارشناس «اتصال به تلگرام» را بزنید.", 401);
+    }
+    /* مینی‌اپِ بات مکاتبات: نقشِ فعلیِ همان گفت‌وگو (یک گفت‌وگو می‌تواند هر دو هویت را داشته باشد) */
+    const row = await P.tgRow(env, id.user.id);
+    if (row && row.role === "s" && row.phone_id) { const s = await C.phoneIdentity(env, row.phone_id); if (s) return { supplier: s, side: "s", tg: row }; }
+    if (row && row.role === "e" && row.expert_id) {
       const ex = await env.DB.prepare("SELECT id, name, label, active FROM experts WHERE id=?").bind(row.expert_id).first();
       if (ex && ex.active) return { expert: ex, side: "e", tg: row };
     }
@@ -121,9 +107,9 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   if (path === "/sp/resend" && m === "POST") {
     const b = await readJson(request);
     const r = await C.resendPassword(env, b.k);
-    if (r.expertChat && env.TG_BOT_TOKEN) await later(ctx, () => deliverSimSms(env, r));
-    return json({ ok: true, to: r.masked, demo: true, note: r.expertChat
-      ? "پیامک فعلاً خاموش است؛ در این دمو متنِ پیامک (با رمز تازه) در گفت‌وگوی کارشناس در بات کارشناسان آمد."
+    const where = r.expertId ? await deliverSimSms(env, r).catch(() => "") : "";
+    return json({ ok: true, to: r.masked, demo: true, note: where
+      ? `پیامک فعلاً خاموش است؛ در این دمو متنِ پیامک (با رمز تازه) در ${where} آمد.`
       : "پیامک فعلاً خاموش است و هنوز کارشناسی برای این شماره استعلامی نفرستاده؛ رمز تازه ساخته شد ولی جایی نمایش داده نشد." });
   }
 
@@ -163,7 +149,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     }
     if (path === "/sp/logout" && m === "POST") {
       await C.logout(env, sup.phone_id, who.session);
-      if (who.tg) await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(who.tg.chat).run();
+      /* خروج از مینی‌اپ: فقط هویتِ تأمین‌کننده برداشته می‌شود؛ اگر همین گفت‌وگو کارشناس هم هست، با همان می‌ماند */
+      if (who.tg) {
+        if (who.tg.expert_id) await env.DB.prepare("UPDATE sp_tg SET phone_id=NULL, role='e', focus=NULL, flow_json=NULL WHERE chat=?").bind(who.tg.chat).run();
+        else await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(who.tg.chat).run();
+      }
       return json({ ok: true });
     }
     if ((mm = /^\/sp\/line\/(\d+)$/.exec(path)) && m === "PUT") return json(await C.lineSave(env, sup, mm[1], await readJson(request)));
@@ -214,9 +204,15 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   }
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/decide$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
-    const r = await C.decide(env, ex, mm[1], T(b.action), { comment: b.comment, manual_ok: b.manual_ok === true });
+    const r = await C.decide(env, ex, mm[1], T(b.action), { comment: b.comment });
     await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
     return json({ ok: true, state: r.state, quote_ids: r.quote_ids, demo: r.demo });
+  }
+  /* جدول تطابق: پذیرفتنِ مغایرت (پیش‌فاکتور ملاک) — keys یا all */
+  if ((mm = /^\/sp\/x\/bundle\/(\d+)\/accept$/.exec(path)) && m === "POST") {
+    const b = await readJson(request);
+    const r = await C.acceptRows(env, ex, mm[1], { keys: b.keys || b.key, on: b.on !== false, all: b.all === true });
+    return json({ ok: true, accept: r.accept, ready: r.ready, problems: r.problems });
   }
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/ai$/.exec(path)) && m === "POST") {
     const b = await readJson(request);

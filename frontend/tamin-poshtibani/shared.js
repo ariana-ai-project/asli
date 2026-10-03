@@ -315,15 +315,38 @@
     clear() { try { sessionStorage.removeItem("tp.manager"); } catch (_) { /* بی‌اهمیت */ } },
   };
 
+  /* ---------- مینی‌اپ تلگرام (مهر ۱۴۰۵) ----------
+     پنل کارشناس داخل بات کارشناسان (یا بات مکاتبات): تلگرام initData امضاشده را در hash نشانی می‌گذارد
+     (#tgWebAppData=…). همان در sessionStorage همین تب می‌ماند — با رفتن به صفحهٔ دیگر hash می‌رود — و هر
+     فراخوانی در هدر X-TG-Init می‌فرستدش؛ سرور با توکن همان بات می‌سنجد و کارشناسِ همان حساب تلگرام را
+     می‌شناسد (worker/tg-auth.js). کد ورود لازم نیست؛ اگر کسی با کد وارد شود، کد مقدم است. */
+  TP.tg = (() => {
+    let d = "";
+    try { d = new URLSearchParams(location.hash.slice(1)).get("tgWebAppData") || ""; } catch (_) { /* بی‌اهمیت */ }
+    try { if (d) sessionStorage.setItem("tp.tg", d); else d = sessionStorage.getItem("tp.tg") || ""; } catch (_) { /* حالت خصوصی */ }
+    return d;
+  })();
+  if (TP.tg) {
+    const s = document.createElement("script"); s.src = "https://telegram.org/js/telegram-web-app.js"; s.async = true;
+    s.onload = () => { try { window.Telegram.WebApp.ready(); window.Telegram.WebApp.expand(); } catch (_) { /* بی‌اهمیت */ } };
+    document.head.appendChild(s);
+  }
+  /** هدرهای ورود — برای fetchهای خام (بارگذاری و دانلود فایل) هم */
+  TP.authHeaders = function () {
+    const h = {};
+    const ex = TP.session.get();
+    if (ex && ex.code) h["X-Expert-Code"] = ex.code; else if (TP.tg) h["X-TG-Init"] = TP.tg;
+    const mg = TP.manager.get(); if (mg) h["X-Manager-Code"] = mg;
+    return h;
+  };
+
   /* ---------- فراخوانی API ----------
      api("/requests?window=3d") · api("/dispatch", {method:"POST", body:{...}})
      کد کارشناس (اگر وارد شده) و نقش مدیر با هدر می‌رود. خطای سرور → Error با پیام سرور. */
   TP.api = async function (path, opt = {}) {
     const base = CFG.apiBase || "/tamin-poshtibani/api";
-    const headers = { "Accept": "application/json", ...(opt.headers || {}) };
+    const headers = { "Accept": "application/json", ...TP.authHeaders(), ...(opt.headers || {}) };
     if (opt.body !== undefined) headers["Content-Type"] = "application/json";
-    const ex = TP.session.get(); if (ex && ex.code) headers["X-Expert-Code"] = ex.code;
-    const mg = TP.manager.get(); if (mg) headers["X-Manager-Code"] = mg;
     const res = await fetch(base + path, { method: opt.method || (opt.body !== undefined ? "POST" : "GET"), headers, body: opt.body !== undefined ? JSON.stringify(opt.body) : undefined });
     let data = null; const txt = await res.text();
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }

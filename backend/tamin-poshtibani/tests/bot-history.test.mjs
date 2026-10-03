@@ -98,26 +98,64 @@ globalThis.fetch = async (url, init) => {
   return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: method === "sendMessage" ? ++nextMsg : body.message_id || 1 } }) };
 };
 let cbn = 0;
+/* منوی ثابتِ پایین (worker/tg-nav.js) پیامِ جداست با کیبورد پاسخ؛ از «آخرین صفحه» کنار گذاشته می‌شود */
+const isMenu = (c) => !!(c.body.reply_markup && c.body.reply_markup.keyboard);
+function collect(from) {
+  const mine = sent.slice(from);
+  const msgs = mine.filter((c) => (c.method === "sendMessage" || c.method === "editMessageText") && !isMenu(c));
+  const last = msgs[msgs.length - 1] || null;
+  const ackCall = mine.find((c) => c.method === "answerCallbackQuery");
+  return { all: msgs, mine, last, text: last ? last.body.text : "", kb: last && last.body.reply_markup ? last.body.reply_markup.inline_keyboard || [] : [], ack: ackCall ? ackCall.body : null };
+}
 /** یک فشردنِ دکمه؛ خروجی: آخرین پیامِ فرستاده/ویرایش‌شده و پاسخِ دکمه */
 async function press(data, { chat = CHAT, mid = 500 } = {}) {
   const from = sent.length;
   await handleUpdate(env, { callback_query: { id: `cb${++cbn}`, data, message: { message_id: mid, chat: { id: chat } } } });
-  const mine = sent.slice(from);
-  const msgs = mine.filter((c) => c.method === "sendMessage" || c.method === "editMessageText");
-  const last = msgs[msgs.length - 1] || null;
-  const ackCall = mine.find((c) => c.method === "answerCallbackQuery");
-  return { all: msgs, last, text: last ? last.body.text : "", kb: last && last.body.reply_markup ? last.body.reply_markup.inline_keyboard : [], ack: ackCall ? ackCall.body : null };
+  return collect(from);
 }
+/** نوشتن در گفت‌وگو — دکمه‌های منوی ثابتِ پایین متن می‌فرستند */
+async function type(text, { chat = CHAT } = {}) {
+  const from = sent.length;
+  await handleUpdate(env, { message: { message_id: 4000 + ++cbn, chat: { id: chat, type: "private" }, text } });
+  return collect(from);
+}
+const pressBack = () => type("↩️ بازگشت");
+/** «بازگشتِ» صفحهٔ فعلی — از زیر پیام به منوی ثابت رفته و برای همان گفت‌وگو نگه داشته می‌شود */
+const navBack = (chat = CHAT) => { const r = DB.raw.prepare("SELECT back FROM tg_nav WHERE chat=?").get(String(chat)); return r ? r.back : null; };
 const buttons = (kb) => kb.flat().map((b) => [b.text, b.callback_data]);
 const cbOf = (kb, text) => { const b = kb.flat().find((x) => x.text.includes(text)); return b ? b.callback_data : null; };
 const supplierLines = (text) => text.split("\n").filter((l) => /^[۰-۹]+\. /.test(l)).map((l) => l.replace(/<[^>]+>/g, ""));
+
+test("منوی ثابت پایین: «بازگشت»، «کارتابل»، «درخواست» و مینی‌اپ — یک بار؛ از دکمه‌های زیر پیام برداشته می‌شوند", { skip: SKIP }, async () => {
+  const first = await press("hs:a:1");
+  const menu = first.mine.filter((c) => c.method === "sendMessage" && isMenu(c));
+  assert.equal(menu.length, 1, "اولین بار منو فرستاده می‌شود");
+  const rows = menu[0].body.reply_markup.keyboard;
+  assert.deepEqual(rows[0].map((b) => b.text), ["↩️ بازگشت", "📋 کارتابل", "📄 درخواست"]);
+  assert.equal(rows[1][0].web_app.url, "https://arianaai.website/tamin-poshtibani/expert.html?tg=1", "مینی‌اپِ پنل کارشناس");
+  assert.equal(menu[0].body.reply_markup.is_persistent, true);
+  const btn = first.mine.find((c) => c.method === "setChatMenuButton");
+  assert.equal(btn.body.menu_button.type, "web_app", "دکمهٔ مینی‌اپ کنار کادر پیام");
+  const flat = JSON.stringify(first.kb);
+  assert.ok(!/"kt:n"|📄 درخواست|↩️ بازگشت/.test(flat), "کارتابل، درخواست و بازگشت دیگر زیر پیام نیستند");
+  assert.match(navBack(), /^hx:\d+:back:0$/, "بازگشتِ همین صفحه برای منوی پایین نگه داشته شد");
+  const again = await press("hs:a:1");
+  assert.ok(!again.mine.some(isMenu), "منو یک بار، نه با هر پیام");
+
+  const back = await pressBack();
+  assert.match(back.text, /درخواست R-1/, "«↩️ بازگشت» همان دکمهٔ بازگشتِ صفحه را می‌زند");
+  const k = await type("📋 کارتابل");
+  assert.match(k.text, /کارتابل/);
+  const req = await type("📄 درخواست");
+  assert.match(req.text, /درخواست R-1/, "«📄 درخواست»: منوی آخرین درخواستی که رویش بودیم");
+});
 
 test("یک قلم: اول انتخاب حالت، بعد «نوع قلم»: ۵ تأمین‌کنندهٔ اول با رتبه و رده، و «همه» صفحه‌به‌صفحه", { skip: SKIP }, async () => {
   const start = await press("hs:a:1");
   assert.match(start.text, /کدام را ببینم؟/);
   const hH = cbOf(start.kb, "نوع قلم"), hE = cbOf(start.kb, "عین قلم");
   assert.match(hH, /^hm:\d+:h$/); assert.match(hE, /^hm:\d+:e$/);
-  assert.match(cbOf(start.kb, "بازگشت"), /^hx:\d+:back:0$/);
+  assert.match(navBack(), /^hx:\d+:back:0$/);
 
   const head = await press(hH);
   assert.match(head.text, /🔹 <b>نوع قلم<\/b> — پیچ/);
@@ -130,7 +168,7 @@ test("یک قلم: اول انتخاب حالت، بعد «نوع قلم»: ۵ �
   assert.match(all1, /^hv:\d+:11:h:1$/);
   assert.match(cbOf(head.kb, "عین قلم"), /^hv:\d+:11:e:0$/, "با یک دکمه به «عین قلم»");
   assert.match(cbOf(head.kb, "انتخاب جهت استعلام"), /^hq:\d+:11:h$/);
-  assert.match(cbOf(head.kb, "بازگشت"), /^hx:\d+:mode:0$/, "یک قلم: بازگشت به انتخابِ حالت");
+  assert.match(navBack(), /^hx:\d+:mode:0$/, "یک قلم: بازگشت به انتخابِ حالت");
   const done = DB.raw.prepare("SELECT hist_done_at FROM items WHERE id=11").get();
   assert.ok(done.hist_done_at, "خواندنِ سوابق همان انجامِ مرحله است");
 
@@ -163,12 +201,12 @@ test("«عین قلم» از همان کارت؛ در امتیاز برابر ر
   const pick = await press(cbOf(exact.kb, "انتخاب جهت استعلام"));
   assert.match(pick.text, /تأمین‌کنندگانِ «پیچ آلن M8 فولادی»<\/b> — 🎯 عین قلم/);
   assert.deepEqual(pick.kb.slice(0, 3).map((r) => r[0].text.replace(/^☐ /, "")), ["شرکت الف", "شرکت ب", "شرکت ج"], "تأمین‌کنندگانِ همان حالت");
-  const back = await press(cbOf(pick.kb, "بازگشت"));
+  const back = await pressBack();
   assert.match(back.text, /🎯 <b>عین قلم<\/b>/, "بازگشت به همان کارتِ قلم");
 
-  const mode = await press(cbOf(back.kb, "بازگشت"));
+  const mode = await pressBack();
   assert.match(mode.text, /کدام را ببینم؟/);
-  const menu = await press(cbOf(mode.kb, "بازگشت"));
+  const menu = await pressBack();
   assert.match(menu.text, /درخواست R-1/, "و یک قدم دیگر: منوی درخواست");
 });
 
@@ -188,19 +226,19 @@ test("چند قلم: انتخاب اقلام ← حالت ← پیامِ خلا�
   const kb = picker.body.reply_markup.inline_keyboard;
   assert.deepEqual(buttons(kb).slice(0, 2).map(([t, c]) => [t.replace(/ · .*/, ""), c.replace(/^hv:\d+:/, "")]), [["پیچ آلن M8 فولادی", "21:e:0"], ["مهره M8", "22:e:0"]]);
   assert.match(cbOf(kb, "همین اقلام با «نوع قلم»"), /^hm:\d+:h$/);
-  assert.match(cbOf(kb, "بازگشت"), /^hx:\d+:mode:0$/);
+  assert.match(navBack(), /^hx:\d+:mode:0$/);
 
   const card = await press(cbOf(kb, "مهره M8"));
   assert.match(card.text, /سوابق «مهره M8»/);
-  assert.match(cbOf(card.kb, "بازگشت"), /^hb:p\d+$/, "چند قلم: بازگشت به انتخاب قلم");
-  const again = await press(cbOf(card.kb, "بازگشت"));
+  assert.match(navBack(), /^hb:p\d+$/, "چند قلم: بازگشت به انتخاب قلم");
+  const again = await pressBack();
   assert.match(again.text, /کارتِ کدام قلم را باز کنم؟/);
 
   const head = await press(cbOf(again.kb, "همین اقلام با «نوع قلم»"));
   assert.ok(head.all.some((c) => /🔹 <b>نوع قلم<\/b>/.test(c.body.text)), "همین دو قلم این بار با «نوع قلم»");
   assert.match(cbOf(head.kb, "پیچ آلن M8 فولادی"), /:21:h:0$/);
-  const backMode = await press(cbOf(head.kb, "بازگشت"));
-  const backSel = await press(cbOf(backMode.kb, "بازگشت"));
+  await pressBack();
+  const backSel = await pressBack();
   assert.match(backSel.text, /سوابق کدام اقلام را ببینم؟/, "تا انتخاب اقلام");
 });
 
@@ -208,7 +246,7 @@ test("مالکیت: کارتِ سوابقِ یک کارشناس از گفت‌و
   const start = await press("hs:a:1");
   const hv = cbOf((await press(cbOf(start.kb, "نوع قلم"))).kb, "عین قلم");
   const r = await press(hv, { chat: OTHER });
-  assert.equal(r.last, null, "هیچ پیامی برای کارشناس دیگر");
+  assert.equal(r.last, null, "هیچ پیامی برای کارشناس دیگر (جز منوی ثابتِ خودش)");
   assert.ok(r.ack && r.ack.show_alert, "فقط هشدارِ دکمه");
 });
 test("دموی پنل تأمین‌کننده: «📨 ارسال» از کارتِ قلمِ سوابق به تأمین‌کنندهٔ همان سوابق، با قالب و شمارهٔ تازه", { skip: SKIP }, async () => {

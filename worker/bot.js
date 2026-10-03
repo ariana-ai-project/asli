@@ -48,7 +48,8 @@ import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTempl
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
 import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink } from "./sp-core.js";
-import { pushMsgs as spPush } from "./sp-push.js";
+import { pushMsgs as spPush, deliverSms as spDeliverSms } from "./sp-push.js";
+import { NAV, navApi, navLoad, navSave, ensureMenu } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -399,12 +400,19 @@ export async function handleTeamUpdate(env, u) {
  * پاسخ ۲۰۰ ندهیم، همان آپدیت را بارها دوباره می‌فرستد.
  */
 export async function handleUpdate(env, u, ctx) {
+  /* گفت‌وگوی خصوصی: منوی ثابت پایین و برداشتنِ دکمه‌های راهبری از پیام‌ها (worker/tg-nav.js) */
+  const m = u.message || (u.callback_query && u.callback_query.message);
+  const priv = m && m.chat && m.chat.type !== "group" && m.chat.type !== "supergroup" && m.chat.type !== "channel";
+  const st = priv ? await navLoad(env, m.chat.id) : null;
   try {
-    if (u.message) return await onMessage(env, u.message);
-    if (u.callback_query) return await onCallback(env, u.callback_query, ctx);
+    const api = st ? navApi(telegram(env), st) : null;
+    if (u.message) return await onMessage(env, u.message, api);
+    if (u.callback_query) return await onCallback(env, u.callback_query, api);
     if (u.my_chat_member) return await onChatMember(env, u.my_chat_member);
   } catch (e) {
     console.error("bot update failed", e && e.message);
+  } finally {
+    if (st) await navSave(env, st).catch((e) => console.error("nav save", e && e.message));
   }
   return { ok: true };
 }
@@ -413,7 +421,7 @@ async function expertOfChat(env, chatId) {
   return env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.telegram_chat,e.senior, ${TEAM_SIZE_SQL} AS team_n FROM experts e WHERE e.telegram_chat=?`).bind(String(chatId)).first();
 }
 
-async function onMessage(env, msg) {
+async function onMessage(env, msg, apiIn) {
   const chat = msg.chat && msg.chat.id;
   /* کانال/گروه جای گفت‌وگو نیست — با یک استثنا: مدیر که «رد» را زده، دلیلش را
      همان‌جا می‌نویسد. (در گروه با حالت خصوصیِ بات، فقط پاسخ‌های مستقیم به پیامِ
@@ -444,14 +452,14 @@ async function onMessage(env, msg) {
     return { ok: true };
   }
   if (!chat) return { ok: true };
-  const api = telegram(env);
+  const api = apiIn || telegram(env);
   const text = T(msg.text);
 
   if (text.startsWith("/start")) {
     const token = T(text.slice(6));
     if (!token || token === "kartabl") {
       const ex = await expertOfChat(env, chat);
-      if (ex) return kartabl(env, api, chat, ex, { head: `سلام ${esc(ex.label || ex.name)}. حساب شما به سامانه وصل است.` });
+      if (ex) { await ensureMenu(env, api, api.nav, true); return kartabl(env, api, chat, ex, { head: `سلام ${esc(ex.label || ex.name)}. حساب شما به سامانه وصل است.` }); }
       await api.sendMessage(chat, "برای اتصال، از پنل کارشناس دکمهٔ «اتصال به تلگرام» را بزنید و روی لینکی که می‌دهد کلیک کنید.\n\nاین بات فقط با کارشناسان ثبت‌شدهٔ واحد تأمین و پشتیبانی کار می‌کند.");
       return { ok: true };
     }
@@ -460,9 +468,20 @@ async function onMessage(env, msg) {
 
   const ex = await expertOfChat(env, chat);
   if (!ex) { await api.sendMessage(chat, "این گفت‌وگو به هیچ کارشناسی وصل نیست. از پنل کارشناس «اتصال به تلگرام» را بزنید."); return { ok: true }; }
+  await ensureMenu(env, api, api.nav);
 
-  if (msg.voice || msg.audio) return onVoice(env, msg, ex);
-  if (msg.document || msg.photo || msg.video) return onFile(env, msg, ex);
+  /* منوی ثابت پایین: کارتابل، درخواستِ جاری و بازگشت به صفحهٔ قبل (worker/tg-nav.js). هر پرسشِ متنیِ باز کنار
+     گذاشته می‌شود — دکمهٔ منو یعنی کارشناس از آن پرسش بیرون آمده است. */
+  if (text === NAV.kartabl || text === NAV.req || text === NAV.back) {
+    await closeInputs(env, ex.id);
+    const st = api.nav || {};
+    if (text === NAV.back && st.back) return onCallback(env, { id: "", data: st.back, message: { chat: { id: chat } } }, api);
+    if (text !== NAV.kartabl && st.aid && await ownOpenAssignment(env, ex.id, st.aid)) return requestMenu(env, api, chat, ex, st.aid);
+    return kartabl(env, api, chat, ex, text === NAV.req ? { head: "هنوز درخواستی باز نکرده‌اید؛ از کارتابل یکی را انتخاب کنید:" } : {});
+  }
+
+  if (msg.voice || msg.audio) return onVoice(env, msg, ex, api);
+  if (msg.document || msg.photo || msg.video) return onFile(env, msg, ex, api);
 
   if (text === "/stop") {
     await env.DB.prepare("UPDATE experts SET telegram_chat=NULL WHERE id=?").bind(ex.id).run();
@@ -582,6 +601,7 @@ async function bindToken(env, api, chat, token) {
   ]);
   await api.sendMessage(chat,
     `✅ وصل شد.\n\n${esc(ex.label || ex.name)} گرامی، از این پس ارجاع‌های تازه و یادآوری مهلت‌ها همین‌جا به شما اطلاع داده می‌شود.\n\n/kartabl — ارجاع‌های باز\n/stop — قطع اتصال`);
+  await ensureMenu(env, api, api.nav, true);
   return kartabl(env, api, chat, ex);
 }
 
@@ -738,8 +758,8 @@ function fileOf(msg) {
   return null;
 }
 
-async function onFile(env, msg, ex) {
-  const api = telegram(env);
+async function onFile(env, msg, ex, apiIn) {
+  const api = apiIn || telegram(env);
   const chat = msg.chat.id;
   const file = fileOf(msg);
   if (!file) return { ok: true };
@@ -1537,8 +1557,8 @@ async function onLetterText(env, api, chat, ex, L, text) {
 }
 
 /** پیام صوتی رسید: ذخیره، رونویسی، و نشان دادن متن برای تأیید */
-async function onVoice(env, msg, ex) {
-  const api = telegram(env);
+async function onVoice(env, msg, ex, apiIn) {
+  const api = apiIn || telegram(env);
   const chat = msg.chat.id;
   const pending = await env.DB.prepare(
     "SELECT * FROM letters WHERE expert_id=? AND state='need_voice' AND updated_at>? ORDER BY id DESC LIMIT 1",
@@ -2342,7 +2362,10 @@ export async function runSmartJobs(env) {
     const params = JSON.parse(job.params_json || "{}");
     const out = await smartSearch(env, it, ex, { ...params, deliveryHint: it.party }, "telegram");
     await env.DB.prepare("UPDATE smart_jobs SET state='done', search_id=?, finished_at=? WHERE id=?").bind(out.search_id, now(), job.id).run();
-    await smartResultsMessage(env, api, job.chat_id, ex, it, params, out);
+    /* منوی ثابتِ همان گفت‌وگو: دکمه‌های راهبری از پیامِ نتیجه هم برداشته می‌شوند (worker/tg-nav.js) */
+    const nav = await navLoad(env, job.chat_id);
+    await smartResultsMessage(env, navApi(api, nav), job.chat_id, ex, it, params, out);
+    await navSave(env, nav).catch((e) => console.error("nav save", e && e.message));
     return { jobs: 1, stale: stale.length };
   } catch (e) {
     const msg = String((e && e.message) || e).slice(0, 300);
@@ -2636,18 +2659,23 @@ async function spSendGo(env, api, chat, ex, f, d, mid) {
   } catch (e) { await api.sendMessage(chat, `⚠️ ${esc(e.message)}`).catch(() => {}); return { ok: true }; }
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
   await spPush(env, { id: r.thread_id }, r.msgs).catch((e) => console.error("sp push", e && e.message));
-  const link = r.links.bot ? await expertLink(env, ex.id).catch(() => null) : null;
-  const kb = [[{ text: "🌐 پنل تأمین‌کننده (لینک پیامک)", url: r.links.panel }]];
-  if (r.links.bot) kb.push([{ text: "🤖 بات تأمین‌کننده (لینک پیامک)", url: r.links.bot }]);
-  if (link && link.url) kb.push([{ text: "💬 گفت‌وگو در بات مکاتبات", url: link.url }]);
+  /* مکاتبات فقط در بات مکاتبات (تصمیم مدیر، مهر ۱۴۰۵): پیامکِ شبیه‌سازی‌شده همان‌جا می‌رود؛ اگر کارشناس هنوز
+     وصلش نکرده، با لینکِ اتصال نگه داشته و بعد از اتصال نشان داده می‌شود. این‌جا فقط خبرِ ارسال. */
+  const sms = { thread_id: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label, text: r.sms.text, panel: r.links.panel, bot: r.links.bot };
+  const got = await spDeliverSms(env, ex.id, sms).catch(() => 0);
+  const link = !got && r.links.bot ? await expertLink(env, ex.id, sms).catch(() => null) : null;
+  const plainBot = got && r.links.bot ? r.links.bot.replace(/\?start=.*$/, "") : null;
+  const kb = [];
+  if (plainBot || (link && link.url)) kb.push([{ text: got ? "💬 رفتن به بات مکاتبات" : "💬 وصل کردن بات مکاتبات", url: plainBot || link.url }]);
   kb.push([{ text: "🌐 صفحهٔ مکاتبات", url: corrLink(env) }]);
   if (d.src === "hist" && d.hf) kb.push([{ text: "📚 بازگشت به کارت قلم", callback_data: `hv:${d.hf}:${d.item}:${d.m === "e" ? "e" : "h"}:0` }]);
   kb.push(navRow(it.aid));
-  return show(api, chat, mid, `✅ <b>فرستاده شد</b> — گفت‌وگو با «${esc(r.supplier.name)}» برای درخواست ${esc(r.request_id)}`
-    + `${r.added ? ` (${M(r.added)} قلم تازه)` : " (این قلم قبلاً رفته بود؛ یادآوری با رمز تازه رفت)"}.\n\n`
-    + `📱 <b>پیامک شبیه‌سازی‌شده</b> به ${esc(r.sms.to)} (${esc(r.sms.label || "—")})\n`
-    + "<i>پیامک فعلاً خاموش است؛ همین متن به‌جای آن این‌جاست. لینک‌ها واقعی‌اند — برای دیدن سمت تأمین‌کننده بازشان کنید. رمزِ هر پیامک تا هفت روز (یا تا «خروج») معتبر است.</i>\n"
-    + `<blockquote>${esc(r.sms.text)}</blockquote>\n\nپاسخ تأمین‌کننده در «بات مکاتبات» و «صفحهٔ مکاتبات» می‌آید.`, kb);
+  const where = got ? "همین الان در «بات مکاتبات» برایتان آمد" : r.links.bot ? "بعد از وصل کردنِ «بات مکاتبات» (دکمهٔ زیر) آن‌جا می‌آید" : "در «صفحهٔ مکاتبات» دیده می‌شود";
+  return show(api, chat, mid, `✅ <b>فرستاده شد</b> — استعلام «${esc(short(it.title, 50))}» برای «${esc(r.supplier.name)}» (درخواست ${esc(r.request_id)})`
+    + `${r.added ? "" : " — این قلم قبلاً رفته بود؛ یادآوری با رمز تازه رفت"}.\n\n`
+    + `📱 پیامکِ شبیه‌سازی‌شده (لینک پنل، لینک بات و رمز) ${where}. گفت‌وگو و پاسخ‌های تأمین‌کننده هم همان‌جاست، نه در این بات.`
+    /* بات مکاتبات روی این محیط نیست: پیامک جای دیگری برای دیده شدن ندارد */
+    + (r.links.bot ? "" : `\n<blockquote>${esc(r.sms.text)}</blockquote>`), kb);
 }
 
 async function spSendAction(env, api, chat, ex, parts, mid, ack) {
@@ -2938,8 +2966,8 @@ async function itemsOf(env, aid) {
 /** «۱۲٬۳۴۵٬۶۷۸» — جداکنندهٔ هزارگان فارسی */
 const money = (n) => M(Number(n || 0).toLocaleString("en-US")).replace(/,/g, "٬");
 
-async function onCallback(env, cq) {
-  const api = telegram(env);
+async function onCallback(env, cq, apiIn) {
+  const api = apiIn || telegram(env);
   /* تأیید فشردن دکمه فقط ساعت‌شنی تلگرام را برمی‌دارد. اگر شکست بخورد نباید
      تغییر وضعیتی که کاربر خواسته را لغو کند، پس خطایش بلعیده می‌شود. */
   const ack = (text, alert) => api.answerCallback(cq.id, text, alert).catch(() => {});
@@ -2998,6 +3026,7 @@ async function onCallback(env, cq) {
 
   const ex = chat ? await expertOfChat(env, chat) : null;
   if (!ex) { await ack("این گفت‌وگو به کارشناسی وصل نیست.", true); return { ok: true }; }
+  await ensureMenu(env, api, api.nav);
   /* همهٔ دکمه‌ها action:a:b:c اند */
   const parts = T(cq.data).split(":");
   const num = (i) => parseInt(parts[i], 10);

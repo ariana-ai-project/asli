@@ -1,13 +1,15 @@
 /**
  * بات مکاتبات تأمین‌کنندگان (TG_SP_BOT_TOKEN) — «بات خالص و منو» در کنار مینی‌اپ، برای مقایسه.
+ * همهٔ مکاتباتِ کارشناس با تأمین‌کننده این‌جاست (تصمیم مدیر، مهر ۱۴۰۵) — بات کارشناسان از آن چیزی نشان نمی‌دهد.
  *
- * دو نقش، هر گفت‌وگوی تلگرام یکی:
+ * دو نقش؛ یک گفت‌وگو می‌تواند هر دو هویت را داشته باشد (برای آزمودنِ هر دو سو با یک حساب) و با «🔁» عوضشان کند:
  *   کارشناس   — با لینک یک‌بارمصرف (/start e…) از «ارسال» در بات کارشناسان یا صفحهٔ مکاتبات وصل می‌شود.
  *               منوی ثابت: «لیست درخواست‌ها» ← تأمین‌کنندگانِ آن درخواست، و «لیست تأمین‌کنندگان» ← درخواست‌ها.
  *               انتخاب یک گفت‌وگو صفحه را پاک می‌کند و تاریخچهٔ کامل همان را می‌نویسد؛ هر متنی بعد از آن
  *               برای همان تأمین‌کننده می‌رود. پیامِ تأمین‌کنندهٔ دیگر هشدار و دکمهٔ «رفتن به این گفت‌وگو» دارد.
+ *               جدول تطابقِ خوانش هوشمند، پذیرش مغایرت‌ها و تأیید نهایی هم همین‌جاست.
  *   تأمین‌کننده — با لینک پیامک (/start s…) و رمزِ همان پیامک. منو: استعلام‌ها، گفت‌وگو، پنل (مینی‌اپ)، خروج.
- *               پر کردن مقدار، واحد، قیمت واحد، لایهٔ تازه و پیوست، «آمادهٔ ارسال»، ارسال مشخصات و پیش‌فاکتور.
+ *               پر کردن گام‌به‌گامِ مقدار و قیمت واحد، لایهٔ تازه و پیوست؛ «آمادهٔ ارسال» ← «ویرایش» یا «ارسال».
  *
  * وضعیت یکی است: همان توابع sp-core.js که پنل وب صدا می‌زند؛ هر تغییری این‌جا در پنل هم دیده می‌شود.
  * همیشه بی‌استثنا برمی‌گردد تا تلگرام آپدیت را دوباره نفرستد.
@@ -16,10 +18,11 @@ import { telegram, esc, TgError } from "./telegram.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
-import { runAiCheck, AI_COST_HINT } from "./sp-ai.js";
+import { runAiCheck, AI_COST_HINT, AI_VERSION } from "./sp-ai.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
+const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
 const { fa, short } = P;
 
 /* ------------------------------------------------------------------ */
@@ -87,39 +90,59 @@ async function onMessage(env, msg) {
   if (!row) { await plain(env, chat, WELCOME); return { ok: true }; }
   P.track(row, msg.message_id);
   try {
+    /* منتظرِ رمزِ تأمین‌کننده ولی هویتِ کارشناسی هم دارد: /start، انصراف یا دکمهٔ منوی کارشناس یعنی برگشت به
+       نقش کارشناس — وگرنه هر متنی رمزِ اشتباه حساب می‌شد و گفت‌وگو در «منتظر رمز» گیر می‌کرد */
+    const eMenu = Object.values(P.MENU.e).includes(text);
+    if (row.role === "p" && row.expert_id && (st || eMenu || /^\/cancel$|^انصراف$/.test(text))) {
+      row.role = "e"; P.setFlow(row, null);
+      if (!eMenu) return await home(env, row, "باشد، ورودِ تأمین‌کننده کنار گذاشته شد.");
+    }
     if (st) {
       if (row.role === "e" || row.role === "s") return await home(env, row, "سلام 👋");
       await P.send(env, row, WELCOME);
       return { ok: true };
     }
     if (/^\/cancel$|^انصراف$/.test(text)) { P.setFlow(row, null); await P.send(env, row, "باشد، کنار گذاشته شد."); return { ok: true }; }
+    /* «🔁» — گفت‌وگویی که هر دو هویت را دارد، نقشش را عوض می‌کند */
+    if ((text === P.MENU.e.swap || text === P.MENU.s.swap) && P.hasBoth(row)) return await switchRole(env, row, text === P.MENU.e.swap ? "s" : "e");
     if (row.role === "p") return await pendingPass(env, row, text);
     if (row.role === "e") return await expertMessage(env, row, msg, text);
     if (row.role === "s") return await supplierMessage(env, row, msg, text);
     return { ok: true };
   } finally {
-    if (row) await P.save(env, row).catch((e) => console.error("sp save", e && e.message));
+    await P.save(env, row).catch((e) => console.error("sp save", e && e.message));
   }
 }
 
 /* ------------------------------------------------------------------ */
-/* اتصال                                                                 */
+/* اتصال و نقش                                                           */
 /* ------------------------------------------------------------------ */
+/** نقش را می‌گذارد و هویتِ دیگرِ همین گفت‌وگو (اگر هست) را نگه می‌دارد */
 async function upsertRow(env, chat, role, fields) {
   await env.DB.prepare(`INSERT INTO sp_tg (chat,role,expert_id,phone_id,focus,flow_json,ids_json,updated_at) VALUES (?,?,?,?,NULL,?,COALESCE((SELECT ids_json FROM sp_tg WHERE chat=?),'[]'),?)
-    ON CONFLICT(chat) DO UPDATE SET role=excluded.role, expert_id=excluded.expert_id, phone_id=excluded.phone_id, focus=NULL, flow_json=excluded.flow_json, updated_at=excluded.updated_at`)
+    ON CONFLICT(chat) DO UPDATE SET role=excluded.role, expert_id=COALESCE(excluded.expert_id, sp_tg.expert_id), phone_id=COALESCE(excluded.phone_id, sp_tg.phone_id),
+      focus=NULL, flow_json=excluded.flow_json, updated_at=excluded.updated_at`)
     .bind(String(chat), role, fields.expert_id || null, fields.phone_id || null, fields.flow ? JSON.stringify(fields.flow) : null, String(chat), now()).run();
   return P.tgRow(env, chat);
+}
+
+async function switchRole(env, row, role) {
+  row.role = role; P.setFocus(row, null); P.setFlow(row, null);
+  await P.setMenuButton(env, row.chat, role);
+  return home(env, row, role === "e" ? "🔁 حالا در نقشِ <b>کارشناس</b> هستید." : "🔁 حالا در نقشِ <b>تأمین‌کننده</b> هستید.");
 }
 
 async function startSupplier(env, chat, row, k, startMid) {
   const ph = await env.DB.prepare("SELECT p.id, s.name FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id WHERE p.k=?").bind(k).first();
   if (!ph) { await plain(env, chat, "این لینک معتبر نیست. لینک را از آخرین پیامک باز کنید."); return { ok: true }; }
-  if (row && row.role === "s" && row.phone_id === ph.id) {
+  if (row && row.phone_id === ph.id && row.role !== "p") {
     P.track(row, startMid);
-    try { return await home(env, row, "شما از قبل وارد شده‌اید."); } finally { await P.save(env, row); }
+    try {
+      if (row.role !== "s") return await switchRole(env, row, "s");
+      return await home(env, row, "شما از قبل وارد شده‌اید.");
+    } finally { await P.save(env, row); }
   }
-  const was = row && row.role === "e" ? "\n<i>(این گفت‌وگو تا حالا به‌عنوان کارشناس وصل بود؛ با ورودِ تأمین‌کننده جایش را می‌گیرد.)</i>" : "";
+  const was = row && row.expert_id ? "\n<i>(این گفت‌وگو نقش کارشناس هم دارد؛ بعد از ورود با «🔁» بین دو نقش جابه‌جا شوید.)</i>" : "";
   const r = await upsertRow(env, chat, "p", { flow: { step: "pass", k } });
   P.track(r, startMid);
   await P.send(env, r, `🔐 ورود <b>${esc(ph.name)}</b>\n\nرمز ۶ رقمیِ پیامک را بفرستید.${was}`,
@@ -136,7 +159,7 @@ async function pendingPass(env, row, text) {
     await env.DB.prepare("UPDATE sp_tg SET role='s', phone_id=?, flow_json=NULL, focus=NULL, updated_at=? WHERE chat=?").bind(sup.phone_id, now(), row.chat).run();
     Object.assign(row, { role: "s", phone_id: sup.phone_id, flow_json: null, focus: null });
     await P.setMenuButton(env, row.chat, "s");
-    await P.send(env, row, `✅ خوش آمدید، <b>${esc(sup.name)}</b>.\nاز منوی پایین «📋 استعلام‌ها» را بزنید؛ یا همه‌چیز را در «🧩 پنل (مینی‌اپ)» ببینید.`, P.menuKb(env, "s"));
+    await P.send(env, row, `✅ خوش آمدید، <b>${esc(sup.name)}</b>.\nاز منوی پایین «📋 استعلام‌ها» را بزنید؛ یا همه‌چیز را در «🧩 پنل (مینی‌اپ)» ببینید.`, P.menuKb(env, "s", P.hasBoth(row)));
     return listSupplierThreads(env, row, sup);
   } catch (e) {
     await P.send(env, row, `⚠️ ${esc(e.message)}`, [[{ text: "📱 ارسال رمز به پیامک", callback_data: `rs:${f.k}` }]]);
@@ -150,14 +173,16 @@ async function startExpert(env, chat, row, token, startMid) {
   if (!lk || lk.used_at || lk.expires_at < t) { await plain(env, chat, "این لینک معتبر نیست یا منقضی شده است؛ از بات کارشناسان یا صفحهٔ مکاتبات لینک تازه بگیرید."); return { ok: true }; }
   const ex = await env.DB.prepare("SELECT id, name, label, active FROM experts WHERE id=?").bind(lk.expert_id).first();
   if (!ex || !ex.active) { await plain(env, chat, "این کارشناس فعال نیست."); return { ok: true }; }
-  await env.DB.prepare("UPDATE sp_links SET used_at=? WHERE token=?").bind(t, token).run();
+  await env.DB.prepare("UPDATE sp_links SET used_at=?, payload=NULL WHERE token=?").bind(t, token).run();
   const r = await upsertRow(env, chat, "e", { expert_id: ex.id });
   P.track(r, startMid);
   await P.setMenuButton(env, chat, "e");
   await P.send(env, r, `✅ ${esc(ex.label || ex.name)}، این گفت‌وگو «بات مکاتبات» شما شد.\n\n`
     + "از منوی پایین «📋 لیست درخواست‌ها» یا «🏷 لیست تأمین‌کنندگان» را بزنید و یک گفت‌وگو را باز کنید؛ "
     + "از آن پس هر چه بنویسید برای همان تأمین‌کننده می‌رود. همه‌چیز در «🧩 مکاتبات (مینی‌اپ)» هم هست."
-    + (row && row.role === "s" ? "\n<i>(این گفت‌وگو تا حالا به‌عنوان تأمین‌کننده وصل بود.)</i>" : ""), P.menuKb(env, "e"));
+    + (P.hasBoth(r) ? "\n<i>(این گفت‌وگو نقش تأمین‌کننده هم دارد؛ با «🔁» بین دو نقش جابه‌جا شوید.)</i>" : ""), P.menuKb(env, "e", P.hasBoth(r)));
+  /* پیامک‌های شبیه‌سازی‌شده‌ای که تا حالا جایی برای نشان دادن نداشتند */
+  for (const sms of parse(lk.payload, [])) await P.deliverSms(env, ex.id, sms, [r]);
   await P.save(env, r);
   return { ok: true };
 }
@@ -166,21 +191,34 @@ async function home(env, row, head) {
   if (row.role === "e") {
     const ex = await expertOf(env, row);
     if (!ex) return { ok: true };
-    await P.send(env, row, `${head}\nاز منوی پایین یکی از فهرست‌ها را بزنید.`, P.menuKb(env, "e"));
+    await P.send(env, row, `${head}\nاز منوی پایین یکی از فهرست‌ها را بزنید.`, P.menuKb(env, "e", P.hasBoth(row)));
     return listRequests(env, row, ex);
   }
-  const sup = await C.phoneIdentity(env, row.phone_id);
+  const sup = await supplierOf(env, row);
   if (!sup) return { ok: true };
-  await P.send(env, row, `${head}\n${esc(sup.name)}`, P.menuKb(env, "s"));
+  await P.send(env, row, `${head}\n${esc(sup.name)}`, P.menuKb(env, "s", P.hasBoth(row)));
   return listSupplierThreads(env, row, sup);
 }
 
-async function expertOf(env, row) {
-  const ex = await env.DB.prepare("SELECT id, name, label, active FROM experts WHERE id=?").bind(row.expert_id).first();
-  if (ex && ex.active) return ex;
-  await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
+/** هویتی که دیگر معتبر نیست برداشته می‌شود؛ اگر هویتِ دیگری مانده، گفت‌وگو با همان می‌ماند */
+async function dropIdentity(env, row, which, msg) {
+  const other = which === "e" ? row.phone_id : row.expert_id;
+  if (other) {
+    await env.DB.prepare(`UPDATE sp_tg SET ${which === "e" ? "expert_id" : "phone_id"}=NULL, role=?, focus=NULL, flow_json=NULL WHERE chat=?`).bind(which === "e" ? "s" : "e", row.chat).run();
+  } else await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
   row._dirty = false;
-  await plain(env, row.chat, "این حساب کارشناسی دیگر فعال نیست؛ اتصال برداشته شد.");
+  await plain(env, row.chat, msg);
+}
+async function expertOf(env, row) {
+  const ex = row.expert_id ? await env.DB.prepare("SELECT id, name, label, active FROM experts WHERE id=?").bind(row.expert_id).first() : null;
+  if (ex && ex.active) return ex;
+  await dropIdentity(env, row, "e", "این حساب کارشناسی دیگر فعال نیست؛ اتصالش برداشته شد.");
+  return null;
+}
+async function supplierOf(env, row) {
+  const sup = row.phone_id ? await C.phoneIdentity(env, row.phone_id) : null;
+  if (sup) return sup;
+  await dropIdentity(env, row, "s", "این شماره دیگر در سامانه نیست؛ اتصالش برداشته شد.");
   return null;
 }
 
@@ -190,7 +228,7 @@ async function expertOf(env, row) {
 async function listRequests(env, row, ex, mid) {
   const d = await C.expertThreads(env, ex);
   const withT = d.requests.filter((g) => g.threads.length);
-  if (!withT.length) { await P.show(env, row, mid, "هنوز با هیچ تأمین‌کننده‌ای گفت‌وگو ندارید.\nاز بات کارشناسان، زیر نتیجهٔ جستجو و قالب پیام، «📨 ارسال» را بزنید.", []); return { ok: true }; }
+  if (!withT.length) { await P.show(env, row, mid, "هنوز با هیچ تأمین‌کننده‌ای گفت‌وگو ندارید.\nدر بات کارشناسان: «📚 بررسی سوابق» ← کارتِ قلم ← «📨 ارسال به تأمین‌کننده».", []); return { ok: true }; }
   const kb = withT.slice(0, 30).map((g) => [{ text: `${g.unread ? `🔴${fa(g.unread)} ` : ""}${g.waiting ? "⏳ " : ""}${g.request_id} — ${short(g.party, 18)} (${fa(g.threads.length)})`, callback_data: `xr:${g.assignment_id}` }]);
   await P.show(env, row, mid, `📋 <b>درخواست‌هایی که گفت‌وگو دارند</b>${d.unread ? ` — ${fa(d.unread)} پیام نخوانده` : ""}\n<i>🔴 نخوانده · ⏳ بستهٔ منتظر تصمیم</i>`, kb);
   return { ok: true };
@@ -255,25 +293,29 @@ async function expertMessage(env, row, msg, text) {
   return { ok: true };
 }
 
+async function bundleCardSend(env, row, ex, bid, mid, head) {
+  const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
+  if (!b) return { ok: true };
+  const th = await C.threadFor(env, b.thread_id, { expert: ex });
+  const L = (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
+  const c = P.bundleCard(th, b, L);
+  await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
+  return { ok: true };
+}
+
 async function decideAndShow(env, row, ex, bid, action, opts, mid) {
   try {
     const r = await C.decide(env, ex, bid, action, opts);
     await P.pushMsgs(env, r.thread, r.msgs);
-    const th = await C.threadRow(env, r.thread.id);
-    const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
-    const L = (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
-    const c = P.bundleCard(th, b, L);
-    const extra = action === "final" ? (r.demo ? "\n\n<i>تأمین‌کنندهٔ فرضی است؛ خط استعلامی در داده‌های واقعی ساخته نشد.</i>"
-      : `\n\n✅ ${fa(r.quote_ids.length)} خط استعلامِ موقت در تب استعلامات ساخته شد؛ آن‌جا کاملش کنید.`) : "";
-    await P.show(env, row, mid, `${r.msgs[0] ? `<i>${esc(r.msgs[0].body)}</i>\n\n` : ""}${c.text}${extra}`, c.kb);
+    const extra = action === "final" ? `\n\n✅ ${fa(r.quote_ids.length)} قلم با مقدارهای پیش‌فاکتور به تب استعلامات رفت (ثبت موقت و تیک «تأیید نهایی»).` : "";
+    return bundleCardSend(env, row, ex, bid, mid, `<i>${esc(r.msgs[0] ? r.msgs[0].body : "")}</i>${extra}`);
   } catch (e) {
-    const p = e.extra && e.extra.problems;
-    const onlyManual = action === "final" && p && p.length === 1 && /صراحتِ لایه‌ها/.test(p[0]);
-    await P.send(env, row, `⚠️ ${esc(e.message)}`, onlyManual
-      ? [[{ text: "🏁 تأیید نهایی — پیش‌فاکتور را خودم بررسی کردم", callback_data: `xd:${bid}:fm` }], [{ text: "🤖 بررسی هوشمند", callback_data: `xd:${bid}:ai` }]]
-      : null);
+    const kb = action === "final"
+      ? [[{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${bid}:rt` }], [{ text: "📦 کارت بسته و جدول تطابق", callback_data: `xd:${bid}:card` }]]
+      : null;
+    await P.send(env, row, `⚠️ ${esc(e.message)}${action === "final" ? "\n\n<i>اگر چیزی در پیش‌فاکتور نیامده، بسته را با توضیح برگردانید تا تأمین‌کننده پیش‌فاکتور کامل بفرستد. مغایرت‌ها را می‌شود پذیرفت (پیش‌فاکتور ملاک).</i>" : ""}`, kb);
+    return { ok: true };
   }
-  return { ok: true };
 }
 
 async function bundleAction(env, row, ex, bid, act, mid, ack) {
@@ -286,7 +328,11 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
     return { ok: true };
   }
   if (act === "fn") { await ack(); return decideAndShow(env, row, ex, bid, "final", {}, null); }
-  if (act === "fm") { await ack(); return decideAndShow(env, row, ex, bid, "final", { manual_ok: true }, null); }
+  if (act === "aa") {
+    try { await C.acceptRows(env, ex, bid, { all: true }); await ack("همهٔ مغایرت‌ها پذیرفته شد"); }
+    catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+    return bundleCardSend(env, row, ex, bid, mid);
+  }
   if (act === "pf") {
     const b = await C.proformaOfBundle(env, { expert: ex }, bid);
     const store = storage(env);
@@ -297,7 +343,8 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
   }
   if (act === "ai") {
     await ack();
-    await P.send(env, row, `🤖 <b>بررسی هوشمند پیش‌فاکتور</b>\nمدل Claude Haiku 4.5 پیش‌فاکتور را می‌خواند و می‌سنجد که همهٔ لایه‌های قفل‌شده، مقدار و قیمت هر قلم صریح در آن آمده باشند؛ شرایط فاکتور را هم برای خط استعلام برمی‌دارد.\n\nهزینهٔ تقریبی: <b>${AI_COST_HINT}</b> برای هر بار. انجام شود؟`, P.aiConfirmKb(bid));
+    await P.send(env, row, "🤖 <b>خوانش هوشمند پیش‌فاکتور</b>\nمدل Claude Haiku 4.5 پیش‌فاکتور را می‌خواند: مقدار، واحد، قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) را برمی‌دارد و هر لایهٔ ویژگی و فیلد اجباری را با بستهٔ تأمین‌کننده می‌سنجد (✅/⚠️/❌).\n\n"
+      + `هزینهٔ تقریبی: <b>${AI_COST_HINT}</b> برای هر بار. انجام شود؟`, P.aiConfirmKb(bid));
     return { ok: true };
   }
   if (act === "ai2") {
@@ -308,38 +355,30 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
       if (!store || !store.signedUrl) throw new Error("انبار فایل وصل نیست.");
       const ai = await runAiCheck(env, { fileUrl: await store.signedUrl(tg.b.pf_key, 900), mime: tg.b.pf_mime, lines: tg.lines });
       await C.saveAi(env, tg, ai);
-      const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
-      const c = P.bundleCard(await C.threadRow(env, tg.th.id), b, tg.lines);
-      await P.show(env, row, mid, `${c.text}\n\n<i>هزینهٔ همین اجرا: ${fa(ai.cost_usd)} دلار</i>`, c.kb);
-    } catch (e) { await P.send(env, row, `⚠️ بررسی هوشمند نشد: ${esc(e.message)}`); }
+      return bundleCardSend(env, row, ex, bid, mid, `<i>هزینهٔ همین خوانش: ${fa(ai.cost_usd)} دلار</i>`);
+    } catch (e) { await P.send(env, row, `⚠️ خوانش هوشمند نشد: ${esc(e.message)}`); }
     return { ok: true };
   }
-  if (act === "card") {
-    await ack();
-    const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
-    if (!b) return { ok: true };
-    const th = await C.threadFor(env, b.thread_id, { expert: ex });
-    const L = (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
-    const c = P.bundleCard(th, b, L);
-    await P.show(env, row, mid, c.text, c.kb);
-    return { ok: true };
-  }
+  if (act === "card") { await ack(); return bundleCardSend(env, row, ex, bid, mid); }
   await ack();
   return { ok: true };
+}
+
+/** xa:<bundle>:<i> — پذیرش (یا پس گرفتنِ پذیرشِ) یک ردیفِ جدول تطابق */
+async function toggleAccept(env, row, ex, bid, i, mid, ack) {
+  const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
+  const ai = b ? parse(b.ai_json, null) : null;
+  const x = ai && ai.v === AI_VERSION ? P.acceptList(ai)[i] : null;
+  if (!x) { await ack("این ردیف دیگر در جدول نیست.", true); return { ok: true }; }
+  const on = !parse(b.accept_json, {})[x.key];
+  try { await C.acceptRows(env, ex, bid, { keys: [x.key], on }); await ack(on ? "پذیرفته شد — پیش‌فاکتور ملاک" : "پذیرش برداشته شد"); }
+  catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+  return bundleCardSend(env, row, ex, bid, mid);
 }
 
 /* ------------------------------------------------------------------ */
 /* تأمین‌کننده                                                            */
 /* ------------------------------------------------------------------ */
-async function supplierOf(env, row) {
-  const sup = await C.phoneIdentity(env, row.phone_id);
-  if (sup) return sup;
-  await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
-  row._dirty = false;
-  await plain(env, row.chat, "این شماره دیگر در سامانه نیست؛ اتصال برداشته شد.");
-  return null;
-}
-
 async function listSupplierThreads(env, row, sup, mid) {
   const list = await C.supplierThreads(env, sup);
   if (!list.length) { await P.show(env, row, mid, "فعلاً استعلامی برای شما نیست. وقتی کارشناس استعلامی بفرستد، همین‌جا خبرتان می‌کنیم.", []); return { ok: true }; }
@@ -374,6 +413,30 @@ async function storeTgFile(env, aid, file) {
   return key;
 }
 
+const VAL_PROMPT = {
+  q: "🔢 مقدار را بنویسید (فقط عدد):", u: "📏 واحد را بنویسید (مثلاً عدد، کیلوگرم، متر):", p: "💰 قیمت واحد را به <b>ریال و بدون ارزش افزوده</b> بنویسید:",
+  n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):", l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»",
+};
+/** پرسیدنِ یک مقدار؛ برای «مقدار» دکمهٔ «همان مقدارِ درخواست» هم هست */
+async function askValue(env, row, l, f, head) {
+  P.setFlow(row, { step: "val", line: l.id, f });
+  const kb = [];
+  if (f === "q" && l.req_qty != null) kb.push([{ text: `✔️ همان مقدار درخواست (${P.qty(l.req_qty)} ${l.req_unit || ""})`, callback_data: `sv:${l.id}:qd` }]);
+  kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
+  await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${VAL_PROMPT[f]}`, kb);
+  return { ok: true };
+}
+/** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده، همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
+async function afterSave(env, row, sup, lineId, head) {
+  const l = await env.DB.prepare("SELECT * FROM sp_lines WHERE id=?").bind(lineId).first();
+  const miss = C.lineMissing(l || {});
+  if (l && C.LINE_EDITABLE.includes(l.state) && l.state !== "ready") {
+    if (miss.includes("مقدار")) return askValue(env, row, l, "q", head);
+    if (miss.includes("قیمت واحد")) return askValue(env, row, l, "p", head);
+  }
+  return lineCardSend(env, row, sup, lineId, null, `${head}${miss.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
+}
+
 async function supplierMessage(env, row, msg, text) {
   const sup = await supplierOf(env, row);
   if (!sup) return { ok: true };
@@ -386,11 +449,15 @@ async function supplierMessage(env, row, msg, text) {
   }
   if (text === P.MENU.s.out) {
     await C.logout(env, sup.phone_id, null);
-    await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
+    const keepExpert = !!row.expert_id;
+    if (keepExpert) await env.DB.prepare("UPDATE sp_tg SET phone_id=NULL, role='e', focus=NULL, flow_json=NULL WHERE chat=?").bind(row.chat).run();
+    else await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
     row._dirty = false;
-    await P.spApi(env).call("sendMessage", { chat_id: row.chat, text: "🚪 خارج شدید. برای ورود دوباره، «ارسال رمز به پیامک» را بزنید و لینک پیامک را باز کنید.", reply_markup: { remove_keyboard: true } }).catch(() => {});
+    await P.spApi(env).call("sendMessage", { chat_id: row.chat, text: "🚪 از نقش تأمین‌کننده خارج شدید. برای ورود دوباره، «ارسال رمز به پیامک» را بزنید و لینک پیامک را باز کنید.",
+      reply_markup: keepExpert ? P.menuKb(env, "e", false) : { remove_keyboard: true } }).catch(() => {});
     await plain(env, row.chat, "ورود دوباره:", [[{ text: "📱 ارسال رمز به پیامک", callback_data: `rs:${sup.k}` }]]);
-    await P.spApi(env).call("setChatMenuButton", { chat_id: row.chat, menu_button: { type: "default" } }).catch(() => {});
+    if (!keepExpert) await P.spApi(env).call("setChatMenuButton", { chat_id: row.chat, menu_button: { type: "default" } }).catch(() => {});
+    else await P.setMenuButton(env, row.chat, "e");
     return { ok: true };
   }
   const f = P.flowOf(row);
@@ -436,7 +503,7 @@ async function supplierMessage(env, row, msg, text) {
         await C.lineSave(env, sup, f.line, { extra: [...extra, { k: m[1], v: m[2] }] });
       } else if (body) await C.lineSave(env, sup, f.line, body);
       P.setFlow(row, null);
-      return lineCardSend(env, row, sup, f.line, null, "✅ ذخیره شد.");
+      return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
   if (file) { await P.send(env, row, "برای فرستادن فایل، از کارت قلم «📎 پیوست» را بزنید؛ برای پیش‌فاکتور دکمهٔ «📄 ارسال پیش‌فاکتور» را."); return { ok: true }; }
@@ -452,8 +519,11 @@ async function supplierMessage(env, row, msg, text) {
 async function lineCardSend(env, row, sup, lineId, mid, head) {
   const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   if (!l || l.supplier_id !== sup.supplier_id) { await P.send(env, row, "این قلم پیدا نشد."); return { ok: true }; }
-  const files = (await env.DB.prepare("SELECT label FROM sp_files WHERE line_id=? ORDER BY id").bind(l.id).all()).results || [];
-  const c = P.lineCard(l, files);
+  const [files, rest] = await Promise.all([
+    env.DB.prepare("SELECT label FROM sp_files WHERE line_id=? ORDER BY id").bind(l.id).all(),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM sp_lines WHERE thread_id=? AND id!=? AND state IN ('new','draft','returned')").bind(l.thread_id, l.id).first(),
+  ]);
+  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0);
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }
@@ -473,11 +543,6 @@ async function itemsCardSend(env, row, sup, thId, mid, head) {
 /* ------------------------------------------------------------------ */
 /* دکمه‌ها                                                               */
 /* ------------------------------------------------------------------ */
-const VAL_PROMPT = {
-  q: "🔢 مقدار را بنویسید (فقط عدد):", u: "📏 واحد را بنویسید (مثلاً عدد، کیلوگرم، متر):", p: "💰 قیمت واحد را به <b>ریال</b> بنویسید:",
-  n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):", l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»",
-};
-
 async function onCallback(env, cq) {
   const api = P.spApi(env);
   const ack = (text, alert) => api.answerCallback(cq.id, text, alert).catch(() => {});
@@ -492,12 +557,12 @@ async function onCallback(env, cq) {
   if (a === "rs") {
     try {
       const r = await C.resendPassword(env, parts[1]);
-      if (r.expertChat && env.TG_BOT_TOKEN) await deliverSimSms(env, r);
+      const where = await deliverSimSms(env, r);
       await ack("فرستاده شد");
-      await plain(env, chat, `📱 رمز تازه به ${esc(r.masked)} پیامک شد.${r.expertChat ? "\n<i>(دمو: پیامک خاموش است؛ متنش در گفت‌وگوی کارشناس در بات کارشناسان آمد.)</i>" : ""}\nرمز را همین‌جا بفرستید.`);
-      /* بعد از «خروج» ردیفی نمانده: همین گفت‌وگو منتظر رمز می‌شود. گفت‌وگوی وصل‌شده دست نمی‌خورد. */
+      await plain(env, chat, `📱 رمز تازه به ${esc(r.masked)} پیامک شد.${where ? `\n<i>(دمو: پیامک خاموش است؛ متنش در ${where} آمد.)</i>` : ""}\nرمز را همین‌جا بفرستید.`);
+      /* بعد از «خروج» ردیفی نمانده (یا فقط هویتِ کارشناس مانده): همین گفت‌وگو منتظر رمز می‌شود */
       const row0 = await P.tgRow(env, chat);
-      if (!row0) await upsertRow(env, chat, "p", { flow: { step: "pass", k: parts[1] } });
+      if (!row0 || (row0.role === "e" && !row0.phone_id)) await upsertRow(env, chat, "p", { flow: { step: "pass", k: parts[1] } });
     } catch (e) { await ack(String(e.message).slice(0, 180), true); }
     return { ok: true };
   }
@@ -506,12 +571,18 @@ async function onCallback(env, cq) {
   if (!row || (row.role !== "e" && row.role !== "s")) { await ack("اول وارد شوید.", true); return { ok: true }; }
   try {
     if (a === "xc") { P.setFlow(row, null); await ack("انصراف"); return { ok: true }; }
+    /* go:<thread>[:e|s] — اگر نقشِ خواسته‌شده نقشِ فعلی نیست و این گفت‌وگو آن هویت را دارد، اول عوض می‌شود */
+    if (a === "go" && (parts[2] === "e" || parts[2] === "s") && parts[2] !== row.role) {
+      if ((parts[2] === "e" && !row.expert_id) || (parts[2] === "s" && !row.phone_id)) { await ack("این گفت‌وگو آن نقش را ندارد.", true); return { ok: true }; }
+      row.role = parts[2]; P.setFlow(row, null); row._dirty = true;
+      await P.setMenuButton(env, row.chat, row.role);
+    }
     if (row.role === "e") {
       const ex = await expertOf(env, row);
       if (!ex) { await ack(); return { ok: true }; }
-      if (a === "xl") { await ack(); return parts[1] === "s" ? listSuppliers(env, row, ex, mid) : listRequests(env, row, ex, mid); }
-      if (a === "xr") { await ack(); return listSuppliersOfRequest(env, row, ex, n(1), mid); }
-      if (a === "xs") { await ack(); return listRequestsOfSupplier(env, row, ex, n(1), mid); }
+      if (a === "xl") { await ack(); return await (parts[1] === "s" ? listSuppliers(env, row, ex, mid) : listRequests(env, row, ex, mid)); }
+      if (a === "xr") { await ack(); return await listSuppliersOfRequest(env, row, ex, n(1), mid); }
+      if (a === "xs") { await ack(); return await listRequestsOfSupplier(env, row, ex, n(1), mid); }
       if (a === "xt" || a === "go") {
         const th = await C.threadFor(env, n(1), { expert: ex }).catch(() => null);
         if (!th) { await ack("این گفت‌وگو در دسترس شما نیست.", true); return { ok: true }; }
@@ -520,6 +591,7 @@ async function onCallback(env, cq) {
         return { ok: true };
       }
       if (a === "xd") return await bundleAction(env, row, ex, n(1), parts[2], mid, ack);
+      if (a === "xa") return await toggleAccept(env, row, ex, n(1), n(2), mid, ack);
       await ack();
       return { ok: true };
     }
@@ -533,15 +605,21 @@ async function onCallback(env, cq) {
       await P.showThread(env, row, th);
       return { ok: true };
     }
-    if (a === "ic") { await ack(); return itemsCardSend(env, row, sup, n(1), mid); }
-    if (a === "si") { await ack(); return lineCardSend(env, row, sup, n(1), mid); }
+    if (a === "ic") { await ack(); return await itemsCardSend(env, row, sup, n(1), mid); }
+    if (a === "si") { P.setFlow(row, null); await ack(); return await lineCardSend(env, row, sup, n(1), mid); }
     if (a === "sv") {
       const f = parts[2];
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
+      if (f === "qd") {
+        try { await C.lineSave(env, sup, l.id, { qty: l.req_qty, unit: l.req_unit }); await ack("همان مقدار درخواست"); }
+        catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+        P.setFlow(row, null);
+        return await afterSave(env, row, sup, l.id, "✅ مقدار ثبت شد.");
+      }
       if (!VAL_PROMPT[f]) { await ack(); return { ok: true }; }
       await ack();
-      P.setFlow(row, { step: "val", line: n(1), f });
-      await P.send(env, row, VAL_PROMPT[f], [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
-      return { ok: true };
+      return await askValue(env, row, l, f);
     }
     if (a === "sl") {
       const l = await env.DB.prepare("SELECT extra_json FROM sp_lines WHERE id=?").bind(n(1)).first();
@@ -549,13 +627,13 @@ async function onCallback(env, cq) {
       extra.splice(n(2), 1);
       await C.lineSave(env, sup, n(1), { extra });
       await ack("حذف شد");
-      return lineCardSend(env, row, sup, n(1), mid);
+      return await lineCardSend(env, row, sup, n(1), mid);
     }
     if (a === "sa") {
       if (parts[2] === undefined) {
         await ack();
         const kb = C.FILE_LABELS.map((x, i) => [{ text: x, callback_data: `sa:${n(1)}:${i}` }]);
-        kb.push([{ text: "✏️ برچسب دیگر…", callback_data: `sa:${n(1)}:o` }], [{ text: "↩️ بازگشت", callback_data: `si:${n(1)}` }]);
+        kb.push([{ text: "✏️ برچسب دیگر…", callback_data: `sa:${n(1)}:o` }], [{ text: "↩️ کارت قلم", callback_data: `si:${n(1)}` }]);
         await P.show(env, row, mid, "📎 برچسب این پیوست چیست؟", kb);
         return { ok: true };
       }
@@ -568,23 +646,29 @@ async function onCallback(env, cq) {
       return { ok: true };
     }
     if (a === "sr") {
-      try { await C.lineReady(env, sup, n(1), parts[2] === "1"); await ack(parts[2] === "1" ? "آمادهٔ ارسال شد" : "به پیش‌نویس برگشت"); }
-      catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
-      return lineCardSend(env, row, sup, n(1), mid);
+      const on = parts[2] === "1";
+      try { await C.lineReady(env, sup, n(1), on); await ack(on ? "آمادهٔ ارسال شد" : "برای ویرایش باز شد"); }
+      catch (e) {
+        await ack(String(e.message).slice(0, 180), true);
+        /* چیزی مانده: همان را می‌پرسیم تا تأمین‌کننده سرگردان نماند */
+        if (on) return await afterSave(env, row, sup, n(1), "⚠️ هنوز کامل نیست.");
+        return { ok: true };
+      }
+      return await lineCardSend(env, row, sup, n(1), mid, on ? null : "✏️ حالا می‌توانید ویرایش کنید؛ بعد دوباره «✅ آمادهٔ ارسال».");
     }
     if (a === "ss") {
       try {
         const r = await C.submitLines(env, sup, n(1));
         await ack("فرستاده شد");
         await P.pushMsgs(env, r.thread, r.msgs);
-        return itemsCardSend(env, row, sup, n(1), mid, `✅ مشخصات برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}).`);
+        return await itemsCardSend(env, row, sup, n(1), mid, `✅ برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
       } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
     }
     if (a === "sp") {
       try { await C.proformaTarget(env, sup, n(1)); } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
       await ack();
       P.setFlow(row, { step: "pf", bundle: n(1) });
-      await P.send(env, row, `📄 فایل پیش‌فاکتورِ بستهٔ ${fa(n(1))} را بفرستید (PDF یا عکس). لایه‌ها، مقدار و قیمت هر قلم باید صریح در آن آمده باشد.`, [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+      await P.send(env, row, `📄 فایل پیش‌فاکتورِ بستهٔ ${fa(n(1))} را بفرستید (PDF یا عکس). لایه‌ها، مقدار، قیمت واحد و شرایط فاکتور (تحویل، تسویه، ارزش افزوده) باید صریح در آن آمده باشد.`, [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
       return { ok: true };
     }
     await ack();
@@ -598,9 +682,21 @@ async function onCallback(env, cq) {
   }
 }
 
-/** پیامک شبیه‌سازی‌شده (رمز تازه) در گفت‌وگوی کارشناسِ آخرین استعلامِ همین تأمین‌کننده، در بات کارشناسان */
+/**
+ * پیامک شبیه‌سازی‌شده (رمز تازه) برای کارشناسِ آخرین استعلامِ همین تأمین‌کننده: در بات مکاتباتِ او. اگر هنوز
+ * وصلش نکرده، بات کارشناسان فقط خبر می‌دهد (بی متنِ پیامک) و لینکِ اتصال می‌دهد؛ پیامک با همان لینک نگه داشته
+ * و بعد از اتصال نشان داده می‌شود. خروجی: جایی که پیامک آمد (برای متنِ دمو) یا خالی.
+ */
 export async function deliverSimSms(env, r) {
-  await telegram(env).sendMessage(r.expertChat,
-    `📱 <b>پیامک شبیه‌سازی‌شده</b> — به ${esc(r.to)}${r.label ? ` (${esc(r.label)})` : ""}، ${esc(r.supplier)}\n<i>پیامک فعلاً خاموش است؛ در حالت واقعی این متن فقط به گوشی تأمین‌کننده می‌رود.</i>\n\n<blockquote>${esc(r.text)}</blockquote>`)
-    .catch((e) => console.error("sim sms", e && e.message));
+  if (!r || !r.expertId) return "";
+  const sms = { thread_id: r.threadId, supplier: r.supplier, to: r.to, label: r.label, text: r.text, panel: r.panel, bot: r.bot };
+  if (await P.deliverSms(env, r.expertId, sms)) return "گفت‌وگوی کارشناس در بات مکاتبات";
+  if (r.expertChat && env.TG_BOT_TOKEN) {
+    const link = await C.expertLink(env, r.expertId, sms).catch(() => null);
+    await telegram(env).sendMessage(r.expertChat,
+      `📱 «${esc(r.supplier)}» رمز تازه خواست. پیامکِ شبیه‌سازی‌شده‌اش در <b>بات مکاتبات</b> است؛ یک بار وصلش کنید تا آن‌جا ببینید.`,
+      link && link.url ? [[{ text: "💬 بات مکاتبات", url: link.url }]] : null).catch((e) => console.error("sim sms pointer", e && e.message));
+    return "بات مکاتبات (بعد از اتصالِ کارشناس)";
+  }
+  return "";
 }

@@ -1150,11 +1150,10 @@
 
   /* بدنهٔ خام می‌رود، پس TP.api (که JSON می‌فرستد) به کار نمی‌آید */
   async function uploadProforma(supplier, file) {
-    const ex = TP.session.get();
     const qs = `?assignment_id=${A().id}&supplier_name=${encodeURIComponent(supplier)}&filename=${encodeURIComponent(file.name)}`;
     const res = await fetch((CFG.apiBase || "/tamin-poshtibani/api") + "/proformas/upload" + qs, {
       method: "POST",
-      headers: { "Content-Type": file.type || "application/octet-stream", ...(ex && ex.code ? { "X-Expert-Code": ex.code } : {}) },
+      headers: { "Content-Type": file.type || "application/octet-stream", ...TP.authHeaders() },
       body: file,
     });
     let data = null; const txt = await res.text();
@@ -1334,8 +1333,7 @@
     const r = S.d.request, aid = A().id;
     const b = TP.busy("ساختن فایل…", kind === "request" ? "برگهٔ درخواست خرید (Word)" : "جدول کمیسیون (اکسل)");
     try {
-      const ex = TP.session.get();
-      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/sheet/${kind}`, { headers: ex && ex.code ? { "X-Expert-Code": ex.code } : {} });
+      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/sheet/${kind}`, { headers: TP.authHeaders() });
       if (!res.ok) { let msg = `خطای سرور ${res.status}`; try { msg = (await res.json()).error || msg; } catch (_) { /* متن خام */ } throw new Error(msg); }
       const blob = await res.blob();
       const link = document.createElement("a");
@@ -1466,11 +1464,10 @@
 
   /* بدنهٔ خام می‌رود (TP.api فقط JSON می‌فرستد) — همان قاعدهٔ بارگذاری پیش‌فاکتور */
   async function uploadVoice(letterId, blob, secs) {
-    const ex = TP.session.get();
     const qs = `?letter_id=${letterId}${secs ? `&secs=${secs}` : ""}`;
     const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${A().id}/letter/voice${qs}`, {
       method: "POST",
-      headers: { "Content-Type": blobType(blob), ...(ex && ex.code ? { "X-Expert-Code": ex.code } : {}) },
+      headers: { "Content-Type": blobType(blob), ...TP.authHeaders() },
       body: blob,
     });
     let data = null; const txt = await res.text();
@@ -1540,8 +1537,7 @@
     const aid = A().id, rid = S.d.request.id;
     const b = TP.busy("آماده‌سازی فایل…", "نامهٔ Word روی سربرگ شرکت");
     try {
-      const ex = TP.session.get();
-      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/letter/file`, { headers: ex && ex.code ? { "X-Expert-Code": ex.code } : {} });
+      const res = await fetch(`${CFG.apiBase || "/tamin-poshtibani/api"}/assignments/${aid}/letter/file`, { headers: TP.authHeaders() });
       if (!res.ok) { let msg = `خطای سرور ${res.status}`; try { msg = (await res.json()).error || msg; } catch (_) { /* متن خام */ } throw new Error(msg); }
       const blob = await res.blob();
       const link = document.createElement("a");
@@ -2015,7 +2011,8 @@
   }
 
   /* ---------- شروع ---------- */
-  if (S.expert) { S.screen = "list"; loadTray(); } else render();
+  /* مینی‌اپ تلگرام: کارشناس با initData همان بات شناخته می‌شود و کد ورود لازم نیست (shared.js: TP.tg) */
+  if (S.expert || TP.tg) { S.screen = "list"; loadTray(); } else render();
   window.addEventListener("tp-theme", render);
   /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه با دکمهٔ ↻ یا با کار
      خود کارشناس تازه می‌شود، تا وسط پر کردن استعلام چیزی جابه‌جا نشود. */

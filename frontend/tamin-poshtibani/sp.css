@@ -91,18 +91,35 @@
 .sp-composer textarea { flex: 1; min-height: 46px; max-height: 160px; resize: vertical; }
 .sp-empty { color: var(--tp-muted); text-align: center; padding: 30px 10px; font-size: .9rem; }
 
-/* صفحهٔ مکاتبات: درخواست‌ها | تأمین‌کنندگان | گفت‌وگو */
-.sp-cols { display: grid; grid-template-columns: 250px 250px minmax(0, 1fr); gap: 14px; align-items: start; }
-.sp-col { background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); overflow: hidden; }
-.sp-col > h4 { margin: 0; padding: 10px 12px; font-size: .9rem; border-bottom: 1px solid var(--tp-line); display: flex; align-items: center; gap: 8px; }
-.sp-col .scroll { max-height: 72vh; overflow-y: auto; }
+/* صفحهٔ مکاتبات: دو ستونِ درخواست‌ها و تأمین‌کنندگان چسبیده به هم و به لبهٔ راست؛ بقیهٔ پهنا گفت‌وگو.
+   ارتفاع = خودِ پنجره (نوار بالا + بقیه)؛ هر ستون و گفت‌وگو جداگانه اسکرول می‌خورند. */
+#app.sp-app { display: flex; flex-direction: column; height: 100vh; height: 100dvh; }
+.sp-full { flex: 1; min-height: 0; }
+.sp-cols { display: grid; grid-template-columns: 260px 260px minmax(0, 1fr); height: 100%; }
+.sp-col { display: flex; flex-direction: column; min-height: 0; background: var(--tp-surface); border-inline-end: 1px solid var(--tp-line); }
+.sp-col > h4 { margin: 0; padding: 10px 12px; font-size: .9rem; border-bottom: 1px solid var(--tp-line); display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.sp-col .scroll { flex: 1; min-height: 0; overflow-y: auto; }
+.sp-colfoot { padding: 10px 12px; border-top: 1px solid var(--tp-line); flex-shrink: 0; }
+.sp-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 16px 16px; }
+.sp-chatpane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sp-chatpane .sp-chat { flex: 1; min-height: 160px; max-height: none; }
+.sp-h3 { margin: 18px 0 6px; font-size: 1rem; }
+.sp-h3:first-child { margin-top: 2px; }
+.sp-code { display: inline-block; font-size: .72rem; font-weight: 700; border: 1px solid var(--tp-accent); color: var(--tp-accent); border-radius: 6px; padding: 0 6px; margin-inline-end: 2px; vertical-align: middle; white-space: nowrap; line-height: 1.6; }
+
+/* جدول تطابق پیش‌فاکتور با بسته */
+.sp-match { margin-top: 10px; border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; background: rgba(120,165,255,.04); }
+.sp-match h5 { margin: 12px 0 4px; font-size: .9rem; }
+.sp-mt td { vertical-align: top; }
+.sp-mt td.sp-mst { font-size: 1.05rem; }
+.sp-mt tr.info td { opacity: .78; }
+.sp-acc { display: inline-flex; gap: 5px; align-items: center; font-size: .78rem; white-space: nowrap; cursor: pointer; }
 .sp-item { display: block; width: 100%; text-align: right; background: none; border: none; border-bottom: 1px solid var(--tp-line); padding: 9px 12px; }
 .sp-item:hover { background: rgba(120,165,255,.08); }
 .sp-item.on { background: rgba(79,140,255,.16); box-shadow: inset -3px 0 0 var(--tp-accent); }
 .sp-item .t { display: flex; gap: 6px; align-items: center; font-weight: 700; font-size: .9rem; }
 .sp-item .t span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-item .m { color: var(--tp-muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sp-main { min-width: 0; }
 .sp-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 10px 14px; }
 .sp-head h3 { margin: 0; font-size: 1rem; }
 .sp-back { display: none; }
@@ -123,6 +140,8 @@
 
 @media (max-width: 960px) {
   .sp-cols { grid-template-columns: 1fr; }
+  .sp-col { border-inline-end: none; }
+  .sp-main { padding: 10px; }
   .sp-cols[data-view="req"] .sp-col.sups, .sp-cols[data-view="req"] .sp-main { display: none; }
   .sp-cols[data-view="sup"] .sp-col.reqs, .sp-cols[data-view="sup"] .sp-main { display: none; }
   .sp-cols[data-view="chat"] .sp-col.reqs, .sp-cols[data-view="chat"] .sp-col.sups { display: none; }

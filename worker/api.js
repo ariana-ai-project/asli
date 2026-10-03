@@ -43,9 +43,11 @@ import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebho
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
-import { SP_DDL } from "./sp-core.js";
+import { SP_DDL, SP_COLUMNS, spBackfill } from "./sp-core.js";
 import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
+import { expertOfInit } from "./tg-auth.js";
+import { NAV_DDL } from "./tg-nav.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -77,8 +79,14 @@ function requireManager(request, env) {
 }
 async function requireExpert(request, env) {
   const code = T(request.headers.get("X-Expert-Code"));
-  if (!code) throw new HttpError("وارد نشده‌اید.", 401);
-  const ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,team_via,alert_stages,alert_thresholds FROM experts WHERE code=?").bind(code).first();
+  let ex = null;
+  if (code) ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,team_via,alert_stages,alert_thresholds FROM experts WHERE code=?").bind(code).first();
+  else if (request.headers.get("X-TG-Init")) {
+    /* مینی‌اپ تلگرام (مهر ۱۴۰۵): پنل کارشناس داخل بات کارشناسان یا بات مکاتبات — initData امضاشدهٔ همان بات
+       به‌جای کد ورود؛ کارشناس همانی است که گفت‌وگویش به حسابش گره خورده (worker/tg-auth.js) */
+    ex = await expertOfInit(env, request.headers.get("X-TG-Init"));
+    if (!ex) throw new HttpError("این حساب تلگرام به هیچ کارشناسی وصل نیست؛ از پنل کارشناس «اتصال به تلگرام» را بزنید.", 401);
+  } else throw new HttpError("وارد نشده‌اید.", 401);
   if (!ex || !ex.active) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
   ex.senior = ex.senior ? 1 : 0;
   ex.alert_stages = stageTicks(ex.alert_stages);
@@ -170,6 +178,7 @@ CREATE INDEX IF NOT EXISTS ix_ctab_asg ON commission_tables(assignment_id);
 CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, expert_id INTEGER, action TEXT NOT NULL, item_ids_json TEXT, closed INTEGER, fully_closed INTEGER, actor TEXT, decision_id INTEGER, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
 ${SP_DDL.trim()}
+${NAV_DDL}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -248,6 +257,8 @@ const COLUMN_MIGRATIONS = [
      و نرخ‌های تبدیلی که عوض کرده (worker/normalize.js). «بررسی سوابق» بر همین جستجو می‌کند. */
   ["items", "norm_json", "TEXT"],
   ["items", "norm_at", "INTEGER"],
+  /* (مهر ۱۴۰۵) پنل تأمین‌کننده: کد افزایشیِ قلم، پذیرش‌های جدول تطابق، پیامکِ منتظرِ اتصالِ بات مکاتبات (sp-core.js) */
+  ...SP_COLUMNS,
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -299,6 +310,8 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  /* قلم‌های پنل تأمین‌کننده که پیش از ستونِ «no» ساخته شدند، به ترتیب کد می‌گیرند */
+  await spBackfill(env).catch((e) => console.error("spBackfill", e && e.message));
   /* جستجوهای پیش از ستون‌های کلید قلم؛ اگر نشد، فقط جستجوهای قبلی دیرتر پیدا می‌شوند */
   await backfillSearchKeys(env).catch((e) => console.error("backfillSearchKeys", e && e.message));
   const c = await env.DB.prepare("SELECT COUNT(*) AS n FROM experts").first();

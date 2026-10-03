@@ -3,9 +3,11 @@
 
    کل مسیر روی SQLite واقعی (همان طرحِ ensureSchema)، تلگرامِ بدلی، انبارِ بدلی و مدلِ بدلی:
    «ارسال» کارشناس ← پیامکِ شبیه‌سازی‌شده با لینک و رمز ← ورود تأمین‌کننده ← لایه‌های قفل و لایهٔ تازه ←
-   آمادهٔ ارسال و ارسال چند قلم با هم ← تأیید و درخواست پیش‌فاکتور ← پیش‌فاکتور ← بررسی هوشمند ←
-   تأیید نهایی (و خط استعلام موقت برای تأمین‌کنندهٔ واقعی)؛ بات مکاتبات در هر دو نقش، مینی‌اپ (initData)،
-   «ارسال» از بات کارشناسان، رمز تازه، خروج و قفل بعد از پنج رمز اشتباه.
+   آمادهٔ ارسال و ارسال چند قلم با هم ← تأیید و درخواست پیش‌فاکتور ← پیش‌فاکتور ← خوانش هوشمند و جدول
+   تطابق (✅/⚠️/❌) ← پذیرش مغایرت‌ها (پیش‌فاکتور ملاک) ← تأیید نهایی ← خط استعلام با مقدارهای پیش‌فاکتور؛
+   کدِ افزایشیِ قلم در پنل هر تأمین‌کننده و در همهٔ پیام‌ها؛ بات مکاتبات در هر دو نقش (و هر دو در یک
+   گفت‌وگو)، پیامکِ شبیه‌سازی‌شده فقط در بات مکاتبات، مینی‌اپ (initData هر دو بات)، «ارسال» از بات
+   کارشناسان، رمز تازه، خروج و قفل بعد از پنج رمز اشتباه.
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -15,7 +17,7 @@ import { ensureSchema, route } from "../../../worker/api.js";
 import { handleUpdate } from "../../../worker/bot.js";
 import { handleSpUpdate } from "../../../worker/sp-bot.js";
 import { verifyInitData } from "../../../worker/sp-api.js";
-import { normPhone, toNum } from "../../../worker/sp-core.js";
+import { normPhone, toNum, DEMO } from "../../../worker/sp-core.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -23,13 +25,14 @@ const env = {
   DB, TG_BOT_TOKEN: "tok", TG_SP_BOT_TOKEN: "sptok", TG_WEBHOOK_SECRET: "sec", TG_API_BASE: "https://tg.test/bot", TG_FILE_API_BASE: "https://tgfile.test/bot",
   SUPABASE_URL: "https://sb.test", SUPABASE_SERVICE_KEY: "svc", ANTHROPIC_API_KEY: "k", ANTHROPIC_API_BASE: "https://ai.test", SITE_ORIGIN: "https://site.test",
 };
-const EXPERT_CHAT = 555;
+const EXPERT_CHAT = 555, EXPERT2_CHAT = 556;
 
 if (DB) {
   await ensureSchema(env);
   const t = Date.now();
   DB.raw.exec("DELETE FROM experts");
-  DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'کارشناس یک','آقای یک','9001',1,1,?,?), (2,'کارشناس دو','آقای دو','9002',1,1,NULL,?)").run(String(EXPERT_CHAT), t, t);
+  DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'کارشناس یک','آقای یک','9001',1,1,?,?), (2,'کارشناس دو','آقای دو','9002',1,1,?,?)")
+    .run(String(EXPERT_CHAT), t, String(EXPERT2_CHAT), t);
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-1','1405/07/01','پروژهٔ یک'), ('R-2','1405/07/02','پروژهٔ دو')").run();
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,dispatched_at,created_at) VALUES (1,'R-1',1,?,?), (2,'R-2',2,?,?)").run(t, t, t, t);
   const ins = DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,code,title,spec,qty,unit,state,assignment_id,norm_json) VALUES (?,?,?,?,?,?,?,?,?,'open',?,?)");
@@ -78,8 +81,15 @@ async function call(path, { method, body, headers, raw } = {}) {
 const EX = { "X-Expert-Code": "9001" };
 const since = (n) => calls.slice(n);
 const sent = (from, bot, chat) => since(from).filter((c) => c.bot === bot && c.method === "sendMessage" && (chat == null || String(c.body.chat_id) === String(chat)));
+/** هر پیامی که به گفت‌وگو رسید — تازه یا ویرایشِ همان کارت */
+const shown = (from, bot, chat) => since(from).filter((c) => c.bot === bot && (c.method === "sendMessage" || c.method === "editMessageText") && String(c.body.chat_id) === String(chat));
+const btns = (m) => (m && m.body.reply_markup && m.body.reply_markup.inline_keyboard ? m.body.reply_markup.inline_keyboard.flat() : []);
 const passOf = (sms) => /رمز ورود: (\d{6})/.exec(sms)[1];
 const keyOf = (sms) => /#k=([0-9a-f]{12})/.exec(sms)[1];
+const v = (value, sure = true) => ({ value, sure });
+/** پاسخِ بدلیِ مدل (ابزار record_check) */
+const aiOut = (input) => ({ model: "claude-haiku-4-5", usage: { input_tokens: 4000, output_tokens: 600 }, content: [{ type: "tool_use", name: "record_check", input }] });
+const terms = (over = {}) => ({ delivery: v("۱۰ روز کاری"), pay: { value: "نقدی", text: "نقد", sure: true }, invoice: v(null), vat: v("دارد"), valid_days: v(7), ...over });
 const S = {};
 
 test("ابزارها: شماره و عدد", () => {
@@ -93,7 +103,7 @@ test("ابزارها: شماره و عدد", () => {
   assert.equal(toNum(""), null);
 });
 
-test("ارسال به تأمین‌کنندهٔ فرضی: گفت‌وگو، خط با لایه‌های قفل، و متن پیامک با لینک و رمز", { skip: SKIP }, async () => {
+test("ارسال به تأمین‌کنندهٔ فرضی: گفت‌وگو، خط با لایه‌های قفل و کدِ قلم، و متن پیامک با لینک و رمز", { skip: SKIP }, async () => {
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11, 12], demo: true, text: "سلام، استعلام داریم." } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.added, 2);
@@ -112,9 +122,13 @@ test("ارسال به تأمین‌کنندهٔ فرضی: گفت‌وگو، خط
   assert.deepEqual(JSON.parse(lines[0].layers_json), [{ k: "اندازه", v: "M8" }, { k: "جنس", v: "فولاد" }], "لایهٔ ضمنی هم بی علامت «ضمنی»");
   assert.deepEqual(JSON.parse(lines[1].layers_json), [{ k: "مشخصات فنی", v: "گرید 8.8" }], "قلم بی‌ساختار: مشخصات همان سطر");
   assert.equal(lines[0].qty, 100); assert.equal(lines[0].unit, "عدد");
+  assert.deepEqual(lines.map((l) => l.no), [1, 2], "کدِ افزایشیِ قلم در پنل همین تأمین‌کننده");
+  const ev = r.data.msgs.find((m) => m.kind === "event");
+  assert.match(ev.body, /• کد ۱ — پیچ آلن M8 فولادی — ۱۰۰ عدد\n• کد ۲ — مهره M8 — ۵۰ عدد/, "پیامِ استعلام: نام و کدِ هر قلم");
 
   const again = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], demo: true } });
   assert.equal(again.data.added, 0, "قلمِ رفته دوباره ساخته نمی‌شود — یادآوری");
+  assert.match(again.data.msgs.find((m) => m.kind === "event").body, /یادآوری استعلام:\n• کد ۱ — پیچ آلن M8 فولادی/, "یادآوری هم با همان کد");
   assert.notEqual(passOf(again.data.sms.text), S.demoPass, "هر ارسال رمز تازه");
   S.demoPass1 = S.demoPass;
   S.demoPass = passOf(again.data.sms.text);
@@ -144,6 +158,7 @@ test("مشخصات: لایهٔ قفل تغییر نمی‌کند، لایهٔ ت
   const th = (await call(`/sp/thread/${S.th}`, { headers: H })).data;
   const [l1, l2] = th.lines;
   S.l1 = l1.id; S.l2 = l2.id;
+  assert.deepEqual([l1.no, l2.no], [1, 2], "کد در خروجیِ پنل");
   assert.equal(th.thread.phone, "0900•••0000", "شماره برای تأمین‌کننده پوشیده");
   const locked = await call(`/sp/line/${l1.id}`, { method: "PUT", headers: H, body: { extra: [{ k: "جنس", v: "استیل" }] } });
   assert.equal(locked.status, 422);
@@ -163,7 +178,7 @@ test("مشخصات: لایهٔ قفل تغییر نمی‌کند، لایهٔ ت
   assert.equal(noLabel.status, 400, "پیوست بی برچسب نه");
 });
 
-test("ارسال چند قلم با هم ← تصمیم کارشناس ← پیش‌فاکتور ← بررسی هوشمند ← تأیید نهایی (فرضی: بی خط استعلام)", { skip: SKIP }, async () => {
+test("ارسال چند قلم ← تأیید ← پیش‌فاکتور ← خوانش هوشمند و جدول تطابق ← پذیرش مغایرت ← تأیید نهایی ← تب استعلامات (فرضی هم)", { skip: SKIP }, async () => {
   const H = { "X-SP-Session": S.sess };
   const sub = await call(`/sp/thread/${S.th}/submit`, { headers: H, body: { line_ids: [S.l1, S.l2] } });
   assert.equal(sub.status, 200, JSON.stringify(sub.data));
@@ -175,47 +190,95 @@ test("ارسال چند قلم با هم ← تصمیم کارشناس ← پی�
   const g = desk.requests.find((x) => x.request_id === "R-1");
   assert.equal(g.threads[0].waiting, 1);
   assert.ok(g.threads[0].unread >= 1, "رخدادِ ارسالِ تأمین‌کننده نخوانده است");
+  const evs = () => (DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND kind='event' ORDER BY id").all(S.th)).map((m) => m.body);
+  assert.match(evs().pop(), /مشخصات ۲ قلم برای بررسی فرستاده شد:\n• کد ۱ — پیچ آلن M8 فولادی — ۱۰۰ عدد × ۱۲٬۵۰۰ = ۱٬۲۵۰٬۰۰۰ ریال\n• کد ۲ — مهره M8/);
 
   assert.equal((await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "return" } })).status, 400, "برگشت بی توضیح نه");
   const ap = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "approve" } });
   assert.equal(ap.data.state, "approved");
+  assert.match(evs().pop(), /✅ مشخصات تأیید شد؛ لطفاً پیش‌فاکتورِ این اقلام را بارگذاری کنید:\n• کد ۱ — پیچ آلن M8 فولادی\n• کد ۲ — مهره M8/);
   const early = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "final" } });
   assert.equal(early.status, 409, "بی پیش‌فاکتور تأیید نهایی نیست");
 
   const pf = await call(`/sp/bundle/${S.b}/proforma?filename=pf.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" });
   assert.equal(pf.status, 200, JSON.stringify(pf.data));
+  assert.match(evs().pop(), /📄 پیش‌فاکتور «pf\.pdf» رسید برای:\n• کد ۱ — پیچ آلن M8 فولادی\n• کد ۲ — مهره M8/);
   const guard = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "final" } });
   assert.equal(guard.status, 422);
-  assert.match(guard.data.error, /صراحتِ لایه‌ها/);
+  assert.match(guard.data.error, /بررسی هوشمند پیش‌فاکتور هنوز انجام نشده است/, "تأیید نهایی فقط با جدول تطابق");
+  assert.equal((await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { all: true } })).status, 409, "بی جدول، چیزی برای پذیرفتن نیست");
 
   const noConfirm = await call(`/sp/x/bundle/${S.b}/ai`, { headers: EX, body: {} });
   assert.equal(noConfirm.status, 428, "مدل فقط با تأیید صریح کارشناس");
-  aiReply = { model: "claude-haiku-4-5", usage: { input_tokens: 4000, output_tokens: 600 }, content: [{ type: "tool_use", name: "record_check", input: {
-    readable: true, currency: "تومان", delivery: "۱۰ روز کاری", pay_class: "نقدی", vat_status: "دارد",
-    lines: [
-      { line_id: S.l1, found: true, qty: 100, unit: "عدد", unit_price: 1250, layers: [{ name: "اندازه", status: "explicit" }, { name: "جنس", status: "explicit" }] },
-      { line_id: S.l2, found: true, qty: 50, unit: "عدد", unit_price: 300, layers: [{ name: "مشخصات فنی", status: "explicit" }] },
-    ] } }] };
+  /* خوانش ۱: تومان؛ قلم اول همه ✅ (لایهٔ افزوده هم)، قلم دوم قیمت ۳۲۰ تومان = ۳٬۲۰۰ ریال ≠ ۳٬۰۰۰ ❌؛ ارزش افزوده نیامده ⚠️ */
+  const lines1 = [
+    { line_id: S.l1, found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(1250),
+      layers: [{ name: "اندازه", status: "explicit", seen: "M8", sure: true }, { name: "جنس", status: "explicit", seen: "فولادی", sure: true }, { name: "برند", status: "explicit", seen: "فولاد البرز", sure: true }] },
+    { line_id: S.l2, found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(320), layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }] },
+  ];
+  aiReply = aiOut({ readable: true, currency: "تومان", vat_included: false, ...terms({ vat: v(null, false) }), lines: lines1 });
   const ai = await call(`/sp/x/bundle/${S.b}/ai`, { headers: EX, body: { confirm: true } });
   assert.equal(ai.status, 200, JSON.stringify(ai.data));
-  assert.equal(ai.data.ai.ok, true);
-  assert.equal(ai.data.ai.lines[0].unit_price, 12500, "تومان ← ریال");
-  assert.equal(ai.data.ai.lines[0].price_match, true);
+  assert.equal(ai.data.ai.ok, false);
   assert.equal(ai.data.ai.cost_usd, 0.007);
+  const rowOf = (a, lineId, key) => (lineId ? a.lines.find((l) => l.line_id === lineId).rows : a.header).find((r) => r.key === key);
+  assert.deepEqual(["L:اندازه", "L:جنس", "X:برند", "qty", "unit", "price"].map((k) => rowOf(ai.data.ai, S.l1, k).status), ["ok", "ok", "ok", "ok", "ok", "ok"]);
+  assert.equal(rowOf(ai.data.ai, S.l1, "price").got, 12500, "تومان ← ریال");
+  assert.deepEqual([rowOf(ai.data.ai, S.l2, "price").status, rowOf(ai.data.ai, S.l2, "price").got], ["bad", 3200]);
+  assert.equal(rowOf(ai.data.ai, null, "vat").status, "warn");
+  assert.equal(rowOf(ai.data.ai, null, "invoice").got, "رسمی", "نوع فاکتور: رسمی مگر سند خلافش را بگوید");
+  const req = calls.filter((c) => c.bot === "ai").pop().body;
+  assert.match(JSON.stringify(req.messages), /کد 1\)[^"]*پیچ آلن M8 فولادی/, "بستهٔ تأمین‌کننده با کد قلم به مدل می‌رود");
+
+  const xb = async () => (await call(`/sp/thread/${S.th}`, { headers: EX })).data.bundles.find((b) => b.id === S.b);
+  let b = await xb();
+  assert.equal(b.ready, false);
+  assert.ok(b.problems.some((p) => /«مهره M8» \(کد ۲\): «قیمت واحد \(ریال، بی ارزش افزوده\)» با پیش‌فاکتور فرق دارد/.test(p)), b.problems.join(" | "));
+  assert.ok(b.problems.some((p) => /«ارزش افزوده» در پیش‌فاکتور نیامده/.test(p)));
+  const vat = await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: ["h|vat"] } });
+  assert.equal(vat.status, 422, "آنچه در پیش‌فاکتور نیامده پذیرفتنی نیست — عدد و مشخصه بی پیش‌فاکتور وارد نمی‌شود");
+  assert.match(vat.data.error, /در پیش‌فاکتور نیامده/);
+  const acc = await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: [`${S.l2}|price`] } });
+  assert.equal(acc.status, 200, JSON.stringify(acc.data));
+  assert.equal(acc.data.ready, false, "ارزش افزوده هنوز مانع است");
+  const stillNo = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "final" } });
+  assert.equal(stillNo.status, 422);
+  assert.match(stillNo.data.error, /ارزش افزوده/);
+
+  /* خوانش ۲ (سند کامل‌تر): پذیرش‌های قبلی پاک می‌شوند — سند تازه، بررسی تازه */
+  aiReply = aiOut({ readable: true, currency: "تومان", vat_included: false, ...terms(), lines: lines1 });
+  assert.equal((await call(`/sp/x/bundle/${S.b}/ai`, { headers: EX, body: { confirm: true } })).status, 200);
+  b = await xb();
+  assert.deepEqual(b.accept, {}, "خوانش تازه، پذیرش‌ها از نو");
+  assert.equal(b.problems.length, 1);
+  const all = await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { all: true } });
+  assert.equal(all.data.ready, true, JSON.stringify(all.data));
+
   const fin = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "final" } });
   assert.equal(fin.status, 200, JSON.stringify(fin.data));
-  assert.equal(fin.data.demo, true);
-  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM quotes").get().n, 0, "تأمین‌کنندهٔ فرضی در داده‌های واقعی چیزی نمی‌سازد");
+  assert.equal(fin.data.quote_ids.length, 2, "تأمین‌کنندهٔ فرضی هم به تب استعلامات می‌رود");
+  const q = (item) => DB.raw.prepare("SELECT * FROM quotes WHERE assignment_id=1 AND item_id=? AND supplier_name=?").get(item, DEMO.name);
+  const q11 = q(11), q12 = q(12);
+  assert.deepEqual([q11.price, q11.qty, q11.unit, q11.dtime, q11.pay, q11.invoice, q11.vat, q11.valid_days], [12500, 100, "عدد", "10 روز کاری", "نقدی", "رسمی", "دارد", "7"]);
+  assert.equal(q11.spec, "نوع قلم: پیچ، اندازه: M8، جنس: فولاد، برند: فولاد البرز", "لایه‌های ✅ و لایهٔ افزوده‌ای که سند تأییدش کرد");
+  assert.deepEqual([q11.saved, q11.final, q11.origin, q11.source], [1, 1, "supplier", "supplier"], "ثبت موقت (همهٔ اجباری‌ها پر) و تیک تأیید نهایی");
+  assert.equal(q12.price, 3200, "مغایرتِ پذیرفته: قیمتِ پیش‌فاکتور، نه قیمتِ اعلامی");
+  assert.equal(q12.spec, "مشخصات فنی: گرید 8.8");
+  assert.equal(DB.raw.prepare("SELECT source FROM proformas WHERE assignment_id=1 AND supplier_name=?").get(DEMO.name).source, "supplier", "پیش‌فاکتور در تب استعلامات");
+  assert.match(evs().pop(), /🏁 تأیید نهایی شد:\n• کد ۱ — پیچ آلن M8 فولادی\n• کد ۲ — مهره M8/);
 
   const sup = (await call(`/sp/thread/${S.th}`, { headers: H })).data;
   assert.ok(sup.msgs.every((m) => m.kind !== "note"), "یادداشتِ بررسی هوشمند را تأمین‌کننده نمی‌بیند");
-  assert.ok(sup.bundles.every((b) => !("ai" in b)), "نتیجهٔ مدل در خروجیِ تأمین‌کننده نیست");
+  assert.ok(sup.bundles.every((x) => !("ai" in x) && !("accept" in x)), "جدول تطابق در خروجیِ تأمین‌کننده نیست");
   assert.deepEqual(sup.lines.map((l) => l.state), ["final", "final"]);
 });
 
-test("تأمین‌کنندهٔ واقعی: شمارهٔ برچسب‌دار، تأیید نهایی دستی ← خط استعلام موقت و پیش‌فاکتور در تب استعلامات", { skip: SKIP }, async () => {
+test("تأمین‌کنندهٔ واقعی: کد از ۱ در پنل خودش؛ خطِ استعلامِ موجود با مقدارهای پیش‌فاکتور به‌روز می‌شود (ارزش افزوده از قیمت کم)", { skip: SKIP }, async () => {
   const noLabel = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت نمونه", phone: "09121234567" } });
   assert.equal(noLabel.status, 400, "شمارهٔ تازه بی برچسب نه");
+  /* «انتخاب جهت استعلام» از پیش: خطی بی قیمت برای همین تأمین‌کننده و قلم */
+  const pre = await call("/quotes", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت نمونه", origin: "history" } });
+  assert.equal(pre.status, 200, JSON.stringify(pre.data));
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت نمونه", phone: "۰۹۱۲۱۲۳۴۵۶۷", label: "فروش", text: "سلام" } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.phone.label, "فروش");
@@ -225,26 +288,34 @@ test("تأمین‌کنندهٔ واقعی: شمارهٔ برچسب‌دار، �
   const H = { "X-SP-Session": s };
   const th = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data;
   const id = th.lines[0].id;
+  assert.equal(th.lines[0].no, 1, "شمارشِ کد مالِ هر تأمین‌کننده است");
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { qty: 100, price: 11000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
   await call(`/sp/x/bundle/${b}/decide`, { headers: EX, body: { action: "approve" } });
   await call(`/sp/bundle/${b}/proforma?filename=pf2.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" });
-  const fin = await call(`/sp/x/bundle/${b}/decide`, { headers: EX, body: { action: "final", manual_ok: true } });
+  const manual = await call(`/sp/x/bundle/${b}/decide`, { headers: EX, body: { action: "final", manual_ok: true } });
+  assert.equal(manual.status, 422, "تیکِ «خودم بررسی کردم» دیگر راهِ تأیید نهایی نیست");
+  /* سند ریالی با ارزش افزودهٔ داخل قیمت: ۱۲٬۱۰۰ ← ۱۱٬۰۰۰ بی ارزش افزوده = همان اعلامی ✅ */
+  aiReply = aiOut({ readable: true, currency: "ریال", vat_included: true, vat_rate: 10, ...terms({ delivery: v("۱۴۰۵/۰۸/۱۵"), pay: { value: "۵۰٪ پیش‌پرداخت", sure: true }, invoice: v("رسمی") }),
+    lines: [{ line_id: id, found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(12100),
+      layers: [{ name: "اندازه", status: "explicit", seen: "M8", sure: true }, { name: "جنس", status: "explicit", seen: "فولاد", sure: true }] }] });
+  const ai = await call(`/sp/x/bundle/${b}/ai`, { headers: EX, body: { confirm: true } });
+  assert.equal(ai.data.ai.ok, true, JSON.stringify(ai.data.ai.lines));
+  const fin = await call(`/sp/x/bundle/${b}/decide`, { headers: EX, body: { action: "final" } });
   assert.equal(fin.status, 200, JSON.stringify(fin.data));
-  assert.equal(fin.data.quote_ids.length, 1);
-  const q = DB.raw.prepare("SELECT * FROM quotes WHERE id=?").get(fin.data.quote_ids[0]);
-  assert.equal(q.supplier_name, "شرکت نمونه");
-  assert.equal(q.price, 11000); assert.equal(q.qty, 100); assert.equal(q.origin, "supplier");
+  assert.deepEqual(fin.data.quote_ids, [pre.data.id], "همان خطِ «انتخاب جهت استعلام»، نه خط تازه");
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=1 AND item_id=11 AND supplier_name='شرکت نمونه'").get().n, 1);
+  const q = DB.raw.prepare("SELECT * FROM quotes WHERE id=?").get(pre.data.id);
+  assert.deepEqual([q.price, q.qty, q.dtime, q.pay, q.invoice, q.vat, q.saved, q.final, q.origin], [11000, 100, "1405/08/15", "۵۰٪ پیش‌پرداخت", "رسمی", "دارد", 1, 1, "supplier"]);
   assert.match(q.spec, /نوع قلم: پیچ، اندازه: M8، جنس: فولاد/);
-  assert.equal(q.saved, 0, "بی بررسی هوشمند شرایط فاکتور خالی است؛ کارشناس در تب استعلامات کاملش می‌کند");
   const p = DB.raw.prepare("SELECT * FROM proformas WHERE assignment_id=1 AND supplier_name='شرکت نمونه'").get();
   assert.equal(p.source, "supplier");
   assert.equal(DB.raw.prepare("SELECT quote_id FROM sp_lines WHERE id=?").get(id).quote_id, q.id);
   S.realK = keyOf(r.data.sms.text); S.realSess = s; S.realTh = r.data.thread_id;
 });
 
-test("بات مکاتبات: اتصال کارشناس و تأمین‌کننده، پیام دوطرفه، هشدار و «رفتن به این گفت‌وگو» با پاک‌کردن صفحه", { skip: SKIP }, async () => {
+test("بات مکاتبات: اتصال کارشناس و تأمین‌کننده، پیامکِ شبیه‌سازی‌شده همان‌جا، پیام دوطرفه، هشدار و «رفتن به این گفت‌وگو»", { skip: SKIP }, async () => {
   const link = (await call("/sp/x/tglink", { headers: EX, body: {} })).data;
   assert.match(link.url, /^https:\/\/t\.me\/AriaSupplierBot\?start=e[0-9a-f]{24}$/, "نام بات از getMe");
   const token = link.url.split("start=")[1];
@@ -259,11 +330,15 @@ test("بات مکاتبات: اتصال کارشناس و تأمین‌کنند�
   await handleSpUpdate(env, { update_id: 2, message: { message_id: 11, chat: { id: EC, type: "private" }, text: `/start ${token}` } });
   assert.match(sent(n, "sp", EC).pop().body.text, /معتبر نیست/, "لینک یک‌بارمصرف");
 
-  /* تأمین‌کنندهٔ واقعی با لینک پیامک و رمزِ همان پیامک */
+  /* «ارسال رمز به پیامک»: پیامکِ شبیه‌سازی‌شده در بات مکاتباتِ کارشناس — نه در بات کارشناسان */
+  n = calls.length;
   const resend = await call("/sp/resend", { body: { k: S.realK } });
   assert.equal(resend.status, 200);
-  const simSms = sent(0, "main", EXPERT_CHAT).filter((c) => /پیامک شبیه‌سازی‌شده/.test(c.body.text)).pop();
-  assert.ok(simSms, "دمو: رمز تازه در گفت‌وگوی کارشناس در بات کارشناسان");
+  assert.match(resend.data.note, /بات مکاتبات/);
+  const simSms = sent(n, "sp", EC).find((c) => /پیامک شبیه‌سازی‌شده/.test(c.body.text));
+  assert.ok(simSms, "دمو: رمز تازه در گفت‌وگوی کارشناس در بات مکاتبات");
+  assert.ok(btns(simSms).some((b) => b.callback_data === `go:${S.realTh}:e`), "و دکمهٔ رفتن به همان گفت‌وگو");
+  assert.equal(sent(n, "main").length, 0, "بات کارشناسان از مکاتبات چیزی نمی‌گیرد");
   const pass = /رمز ورود: (\d{6})/.exec(simSms.body.text)[1];
   await handleSpUpdate(env, { update_id: 3, message: { message_id: 20, chat: { id: SC, type: "private" }, text: `/start s${S.realK}` } });
   assert.equal(DB.raw.prepare("SELECT role FROM sp_tg WHERE chat=?").get(String(SC)).role, "p");
@@ -272,22 +347,23 @@ test("بات مکاتبات: اتصال کارشناس و تأمین‌کنند�
   const row = DB.raw.prepare("SELECT * FROM sp_tg WHERE chat=?").get(String(SC));
   assert.equal(row.role, "s");
   assert.equal(row.focus, S.realTh, "تنها استعلام همان لحظه باز می‌شود");
-  assert.ok(sent(n, "sp", SC).some((c) => /اقلام استعلام R-1/.test(c.body.text)), "کارت اقلام");
+  assert.ok(sent(n, "sp", SC).some((c) => /اقلام استعلام R-1/.test(c.body.text) && /کد ۱ · پیچ آلن M8 فولادی/.test(c.body.text)), "کارت اقلام با کد");
 
   /* پیام تأمین‌کننده ← کارشناس (گفت‌وگوی دیگری باز ندارد: هشدار با دکمهٔ رفتن) */
   n = calls.length;
   await handleSpUpdate(env, { update_id: 5, message: { message_id: 22, chat: { id: SC, type: "private" }, text: "قیمت با حمل است؟" } });
   const alert = sent(n, "sp", EC)[0];
   assert.match(alert.body.text, /🔔 <b>شرکت نمونه<\/b>/);
-  assert.equal(alert.body.reply_markup.inline_keyboard[0][0].callback_data, `go:${S.realTh}`);
+  assert.equal(alert.body.reply_markup.inline_keyboard[0][0].callback_data, `go:${S.realTh}:e`);
+  assert.equal(sent(n, "main").length, 0, "پیامِ تأمین‌کننده در بات کارشناسان نمی‌آید");
 
   n = calls.length;
-  await handleSpUpdate(env, { update_id: 6, callback_query: { id: "c1", data: `go:${S.realTh}`, message: { message_id: alert ? 1 : 0, chat: { id: EC } } } });
+  await handleSpUpdate(env, { update_id: 6, callback_query: { id: "c1", data: `go:${S.realTh}:e`, message: { message_id: 1, chat: { id: EC } } } });
   const del = since(n).find((c) => c.bot === "sp" && c.method === "deleteMessages");
   assert.ok(del && del.body.message_ids.includes(10), "پیام‌های قبلیِ صفحه پاک می‌شوند");
-  const shown = sent(n, "sp", EC).map((c) => c.body.text).join("\n");
-  assert.match(shown, /💬 <b>شرکت نمونه<\/b>/);
-  assert.match(shown, /قیمت با حمل است؟/, "تاریخچهٔ کامل");
+  const text = sent(n, "sp", EC).map((c) => c.body.text).join("\n");
+  assert.match(text, /💬 <b>شرکت نمونه<\/b>/);
+  assert.match(text, /قیمت با حمل است؟/, "تاریخچهٔ کامل");
   assert.equal(DB.raw.prepare("SELECT focus FROM sp_tg WHERE chat=?").get(String(EC)).focus, S.realTh);
 
   /* پاسخ کارشناس ← تأمین‌کننده (همین گفت‌وگو جلوی چشم اوست: خودِ پیام) */
@@ -298,74 +374,124 @@ test("بات مکاتبات: اتصال کارشناس و تأمین‌کنند�
   assert.equal(web.msgs.filter((m) => m.kind === "text").pop().body, "بله، تا انبار.", "وب و بات یک وضعیت");
 });
 
-test("بات خالص، سراسر: تأمین‌کننده قلم را در بات پر می‌کند و پیوست و پیش‌فاکتور می‌فرستد؛ کارشناس با دکمه‌ها تصمیم می‌گیرد", { skip: SKIP }, async () => {
+test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آمادهٔ ارسال» ← فقط «ویرایش» و «ارسال»؛ جدول تطابق و پذیرش در بات کارشناس", { skip: SKIP }, async () => {
   const EC = 900, SC = 901;
   const sp = async (u) => { await handleSpUpdate(env, { update_id: 100 + calls.length, ...u }); };
   const cb = (chat, data) => sp({ callback_query: { id: `q${calls.length}`, data, message: { message_id: 1, chat: { id: chat } } } });
   const txt = (chat, text, extra) => sp({ message: { message_id: 500 + calls.length, chat: { id: chat, type: "private" }, text, ...(extra || {}) } });
-  const lastTo = (n, chat) => sent(n, "sp", chat).pop();
-  const btns = (m) => (m && m.body.reply_markup && m.body.reply_markup.inline_keyboard ? m.body.reply_markup.inline_keyboard.flat() : []);
+  const lastTo = (n, chat) => shown(n, "sp", chat).pop();
 
-  /* قلم دوم به همان تأمین‌کننده: همان گفت‌وگو (درخواست × تأمین‌کننده)، خطِ تازه */
+  /* قلم دوم به همان تأمین‌کننده: همان گفت‌وگو (درخواست × تأمین‌کننده)، خطِ تازه با کدِ بعدی */
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت نمونه", phone: "09121234567" } });
   assert.equal(r.data.thread_id, S.realTh);
-  const line = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=? AND item_id=12").get(S.realTh).id;
+  const line = DB.raw.prepare("SELECT id, no FROM sp_lines WHERE thread_id=? AND item_id=12").get(S.realTh);
+  assert.equal(line.no, 2);
 
   let n = calls.length;
-  await cb(SC, `si:${line}`);
-  const card = since(n).filter((c) => c.bot === "sp" && (c.method === "editMessageText" || c.method === "sendMessage")).pop();
-  assert.match(card.body.text, /مهره M8[\s\S]*🔒[\s\S]*مشخصات فنی: گرید 8\.8/);
-  for (const [f, v] of [["q", "۵۰"], ["p", "3,200"], ["l", "برند: نمونه‌سازان"]]) { await cb(SC, `sv:${line}:${f}`); await txt(SC, v); }
-  let L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line);
-  assert.equal(L.qty, 50); assert.equal(L.price, 3200);
+  await cb(SC, `si:${line.id}`);
+  assert.match(lastTo(n, SC).body.text, /کد ۲ · مهره M8[\s\S]*🔒[\s\S]*مشخصات فنی: گرید 8\.8[\s\S]*قیمت واحد \(ریال، بدون ارزش افزوده\)/);
+  /* «🔢 مقدار» ← دکمهٔ «همان مقدار درخواست» ← بات خودش قیمت را می‌پرسد */
+  n = calls.length;
+  await cb(SC, `sv:${line.id}:q`);
+  const ask = lastTo(n, SC);
+  assert.ok(btns(ask).some((b) => b.callback_data === `sv:${line.id}:qd` && /همان مقدار درخواست \(۵۰ عدد\)/.test(b.text)));
+  n = calls.length;
+  await cb(SC, `sv:${line.id}:qd`);
+  assert.match(lastTo(n, SC).body.text, /مقدار ثبت شد[\s\S]*ریال و بدون ارزش افزوده/, "گام بعد خودکار: قیمت واحد");
+  n = calls.length;
+  await txt(SC, "3,200");
+  assert.match(lastTo(n, SC).body.text, /همه‌چیز پر است/);
+  await cb(SC, `sv:${line.id}:l`); await txt(SC, "برند: نمونه‌سازان");
+  let L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line.id);
+  assert.equal(L.qty, 50); assert.equal(L.price, 3200); assert.equal(L.unit, "عدد");
   assert.deepEqual(JSON.parse(L.extra_json), [{ k: "برند", v: "نمونه‌سازان" }]);
-  await cb(SC, `sv:${line}:l`);
+  await cb(SC, `sv:${line.id}:l`);
   n = calls.length;
   await txt(SC, "مشخصات فنی: گرید 10");
   assert.match(lastTo(n, SC).body.text, /قفل‌شدهٔ کارشناس/, "لایهٔ قفل از بات هم تغییر نمی‌کند");
   await cb(SC, "xc:0");
 
   /* پیوست با برچسب از فهرست، و کپشن = توضیح */
-  await cb(SC, `sa:${line}`);
-  await cb(SC, `sa:${line}:0`);
+  await cb(SC, `sa:${line.id}`);
+  await cb(SC, `sa:${line.id}:0`);
   await sp({ message: { message_id: 900, chat: { id: SC, type: "private" }, document: { file_id: "F1", file_size: 10, file_name: "cert.pdf", mime_type: "application/pdf" }, caption: "گواهی ۱۴۰۵" } });
-  const f = DB.raw.prepare("SELECT * FROM sp_files WHERE line_id=?").get(line);
+  const f = DB.raw.prepare("SELECT * FROM sp_files WHERE line_id=?").get(line.id);
   assert.deepEqual([f.label, f.note, f.filename], ["گواهی کیفیت", "گواهی ۱۴۰۵", "cert.pdf"]);
   assert.ok(calls.some((c) => c.bot === "store" && c.method === "POST"), "فایل تلگرام جریانی به انبار رفت");
 
-  await cb(SC, `sr:${line}:1`);
+  /* «آمادهٔ ارسال» ← دو راه: «✏️ ویرایش» و «📤 ارسال» */
+  n = calls.length;
+  await cb(SC, `sr:${line.id}:1`);
+  const ready = lastTo(n, SC);
+  assert.match(ready.body.text, /این قلم آمادهٔ ارسال است/);
+  assert.deepEqual(ready.body.reply_markup.inline_keyboard[0].map((b) => [b.text, b.callback_data]), [["✏️ ویرایش", `sr:${line.id}:0`], ["📤 ارسال", `ss:${S.realTh}`]]);
+  assert.ok(!btns(ready).some((b) => /^sv:/.test(b.callback_data)), "قلمِ آماده دیگر دکمهٔ ویرایشِ تک‌فیلد ندارد");
+  n = calls.length;
+  await cb(SC, `sr:${line.id}:0`);
+  assert.ok(btns(lastTo(n, SC)).some((b) => b.callback_data === `sv:${line.id}:p`), "«✏️ ویرایش»: دوباره پیش‌نویس");
+  await cb(SC, `sr:${line.id}:1`);
   n = calls.length;
   await cb(SC, `ss:${S.realTh}`);
-  const bid = DB.raw.prepare("SELECT bundle_id FROM sp_lines WHERE id=?").get(line).bundle_id;
+  const bid = DB.raw.prepare("SELECT bundle_id FROM sp_lines WHERE id=?").get(line.id).bundle_id;
   assert.ok(bid);
   const toExpert = sent(n, "sp", EC);
+  assert.ok(toExpert.some((m) => /مشخصات ۱ قلم برای بررسی فرستاده شد:\n• کد ۲ — مهره M8/.test(m.body.text)), "پیامِ ارسال با نام و کدِ قلم");
   assert.ok(toExpert.some((m) => btns(m).some((b) => b.callback_data === `xd:${bid}:ok`)), "کارشناسِ همان گفت‌وگو کارت بسته را با دکمه‌های تصمیم می‌گیرد");
 
   n = calls.length;
   await cb(EC, `xd:${bid}:ok`);
-  assert.ok(sent(n, "sp", SC).some((m) => btns(m).some((b) => b.callback_data === `sp:${bid}`)), "تأمین‌کننده دکمهٔ «ارسال پیش‌فاکتور» می‌گیرد");
+  const toSup = sent(n, "sp", SC);
+  assert.ok(toSup.some((m) => /مشخصات تأیید شد[\s\S]*کد ۲ — مهره M8/.test(m.body.text) && btns(m).some((b) => b.callback_data === `sp:${bid}`)), "تأمین‌کننده: نام و کد، و دکمهٔ «ارسال پیش‌فاکتور»");
   await cb(SC, `sp:${bid}`);
   n = calls.length;
   await sp({ message: { message_id: 901, chat: { id: SC, type: "private" }, document: { file_id: "F2", file_size: 10, file_name: "pf.pdf", mime_type: "application/pdf" } } });
   assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(bid).state, "proforma");
-  assert.ok(sent(n, "sp", EC).some((m) => btns(m).some((b) => b.callback_data === `xd:${bid}:fn`)));
+  assert.ok(sent(n, "sp", EC).some((m) => /پیش‌فاکتور «pf\.pdf» رسید برای:\n• کد ۲ — مهره M8/.test(m.body.text)));
+  assert.ok(sent(n, "sp", EC).some((m) => btns(m).some((b) => b.callback_data === `xd:${bid}:ai`)));
 
   n = calls.length;
   await cb(EC, `xd:${bid}:fn`);
   const warn = lastTo(n, EC);
   assert.match(warn.body.text, /تأیید نهایی هنوز ممکن نیست/);
-  assert.ok(btns(warn).some((b) => b.callback_data === `xd:${bid}:fm`), "فقط تیکِ بررسیِ دستی مانده: دکمه‌اش پیشنهاد می‌شود");
+  assert.ok(btns(warn).some((b) => b.callback_data === `xd:${bid}:rt`) && btns(warn).some((b) => b.callback_data === `xd:${bid}:card`), "راه‌ها: برگرداندن یا کارت و جدول");
+  n = calls.length;
   await cb(EC, `xd:${bid}:ai`);
-  assert.match(lastTo(calls.length - 1, EC).body.text, /هزینهٔ تقریبی/, "پیش از مدل، هزینه پرسیده می‌شود");
-  await cb(EC, `xd:${bid}:fm`);
+  const cost = lastTo(n, EC);
+  assert.match(cost.body.text, /هزینهٔ تقریبی/, "پیش از مدل، هزینه پرسیده می‌شود");
+  assert.ok(btns(cost).some((b) => b.callback_data === `xd:${bid}:ai2`));
+  /* سند: قیمت ۳٬۳۰۰ ≠ ۳٬۲۰۰ ❌؛ برند «سازه‌گستر» ≠ «نمونه‌سازان» (ردیف اطلاعاتی) */
+  aiReply = aiOut({ readable: true, currency: "ریال", vat_included: false, ...terms(),
+    lines: [{ line_id: line.id, found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(3300),
+      layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }, { name: "برند", status: "different", seen: "سازه‌گستر", sure: true }] }] });
+  n = calls.length;
+  await cb(EC, `xd:${bid}:ai2`);
+  const card = lastTo(n, EC);
+  assert.match(card.body.text, /جدول تطابق با پیش‌فاکتور/);
+  assert.match(card.body.text, /✅ مشخصات فنی: گرید 8\.8/);
+  assert.match(card.body.text, /❌ قیمت واحد \(ریال، بی ارزش افزوده\): ۳٬۲۰۰ ← سند: ۳٬۳۰۰/);
+  assert.match(card.body.text, /❌ برند: نمونه‌سازان ← سند: سازه‌گستر <i>\(اطلاعاتی\)<\/i>/);
+  assert.match(card.body.text, /✅ نوع فاکتور: رسمی <i>\(پیش‌فرضِ شرکت\)<\/i>/);
+  const priceBtn = btns(card).find((b) => /^xa:/.test(b.callback_data) && /قیمت واحد/.test(b.text));
+  assert.ok(priceBtn, "دکمهٔ پذیرشِ همان ردیف");
+  assert.ok(btns(card).some((b) => b.callback_data === `xd:${bid}:aa`), "و «پذیرش همه»");
+  n = calls.length;
+  await cb(EC, priceBtn.callback_data);
+  const accepted = lastTo(n, EC);
+  assert.match(accepted.body.text, /✔️ قیمت واحد[^\n]*پذیرفته — پیش‌فاکتور ملاک/);
+  assert.match(accepted.body.text, /همه‌چیز برای تأیید نهایی آماده است/);
+  n = calls.length;
+  await cb(EC, `xd:${bid}:fn`);
   assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(bid).state, "final");
-  L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line);
-  assert.ok(L.quote_id, "خط استعلام موقت");
+  L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line.id);
+  const q = DB.raw.prepare("SELECT * FROM quotes WHERE id=?").get(L.quote_id);
+  assert.equal(q.price, 3300, "قیمتِ پیش‌فاکتور");
+  assert.equal(q.spec, "مشخصات فنی: گرید 8.8", "لایهٔ افزوده‌ای که سند چیز دیگری گفت و پذیرفته نشد، وارد نمی‌شود");
+  assert.ok(sent(n, "sp", SC).some((m) => /🏁 تأیید نهایی شد:\n• کد ۲ — مهره M8/.test(m.body.text)), "تأمین‌کننده: نام و کدِ قلمِ تأییدشده");
 
   /* فهرست درخواست‌های کارشناس در بات */
   n = calls.length;
   await cb(EC, "xl:r");
-  const list = since(n).filter((c) => c.bot === "sp" && (c.method === "editMessageText" || c.method === "sendMessage")).pop();
+  const list = lastTo(n, EC);
   assert.match(list.body.text, /درخواست‌هایی که گفت‌وگو دارند/);
   assert.ok(btns(list).some((b) => b.callback_data === "xr:1"));
 });
@@ -382,7 +508,7 @@ test("مذاکره: برگشت با توضیح ← اصلاح و ارسال دو
   assert.equal(ret.data.state, "returned");
   const th = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data;
   assert.equal(th.lines[0].state, "returned");
-  assert.match(th.msgs.pop().body, /قیمت با حمل تا کارگاه باشد/);
+  assert.match(th.msgs.pop().body, /برای اصلاح برگشت خورد:\n• کد ۱ — پیچ آلن M8 فولادی\n💬 قیمت با حمل تا کارگاه باشد/);
   assert.equal((await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { price: 105000 } })).status, 200, "برگشت‌خورده دوباره قابل ویرایش");
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b2 = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
@@ -392,20 +518,23 @@ test("مذاکره: برگشت با توضیح ← اصلاح و ارسال دو
   const b = DB.raw.prepare("SELECT state, comment FROM sp_bundles WHERE id=?").get(b2);
   assert.deepEqual({ ...b }, { state: "rejected", comment: "قیمت از بازار بالاتر است." });
   assert.equal(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(EC)).flow_json, null, "پرسشِ دلیل بسته شد");
+  assert.match(DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(r.data.thread_id).body, /❌ رد شد:\n• کد ۱ — پیچ آلن M8 فولادی\n💬 قیمت از بازار بالاتر است\./);
 });
 
-test("مینی‌اپ: initData امضاشده با توکن بات؛ دستکاری‌شده یا کهنه پذیرفته نیست", { skip: SKIP }, async () => {
-  const enc = (s) => new TextEncoder().encode(s);
-  const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
-  async function initData(token, user, at = Math.floor(Date.now() / 1000)) {
-    const p = new URLSearchParams({ auth_date: String(at), query_id: "q", user: JSON.stringify(user), signature: "sig" });
-    const dcs = [...p.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, v]) => `${k}=${v}`).join("\n");
-    const k1 = await crypto.subtle.importKey("raw", enc("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    const sec = await crypto.subtle.sign("HMAC", k1, enc(token));
-    const k2 = await crypto.subtle.importKey("raw", sec, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-    p.set("hash", hex(await crypto.subtle.sign("HMAC", k2, enc(dcs))));
-    return p.toString();
-  }
+/* initData امضاشده، همان‌طور که تلگرام می‌سازد */
+const enc = (s) => new TextEncoder().encode(s);
+const hex = (b) => [...new Uint8Array(b)].map((x) => x.toString(16).padStart(2, "0")).join("");
+async function initData(token, user, at = Math.floor(Date.now() / 1000)) {
+  const p = new URLSearchParams({ auth_date: String(at), query_id: "q", user: JSON.stringify(user), signature: "sig" });
+  const dcs = [...p.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([k, x]) => `${k}=${x}`).join("\n");
+  const k1 = await crypto.subtle.importKey("raw", enc("WebAppData"), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  const sec = await crypto.subtle.sign("HMAC", k1, enc(token));
+  const k2 = await crypto.subtle.importKey("raw", sec, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
+  p.set("hash", hex(await crypto.subtle.sign("HMAC", k2, enc(dcs))));
+  return p.toString();
+}
+
+test("مینی‌اپ: initData امضاشده با توکن همان بات؛ دستکاری‌شده یا کهنه پذیرفته نیست؛ پنل کارشناس داخل بات کارشناسان بی کد ورود", { skip: SKIP }, async () => {
   const good = await initData("sptok", { id: 901, first_name: "x" });
   assert.equal((await verifyInitData("sptok", good)).id, 901);
   assert.equal(await verifyInitData("other", good), null, "توکن دیگر");
@@ -419,17 +548,29 @@ test("مینی‌اپ: initData امضاشده با توکن بات؛ دستکا
   assert.equal(ex.status, 200, "کارشناسِ وصل‌شده به بات مکاتبات");
   const stranger = await call("/sp/me", { headers: { "X-TG-Init": await initData("sptok", { id: 999 }) } });
   assert.equal(stranger.status, 401);
+
+  /* مینی‌اپِ بات کارشناسان: کارشناسی که گفت‌وگویش به حسابش گره خورده — پنل کارشناس و صفحهٔ مکاتبات */
+  const main = await initData("tok", { id: EXPERT_CHAT });
+  const pm = await call("/me", { headers: { "X-TG-Init": main } });
+  assert.equal(pm.status, 200, JSON.stringify(pm.data));
+  assert.equal(pm.data.expert.id, 1);
+  assert.equal(pm.data.expert.code, undefined, "کد ورود به مینی‌اپ برنمی‌گردد");
+  assert.equal((await call("/tray?full=1", { headers: { "X-TG-Init": main } })).status, 200, "کارتابل پنل کارشناس");
+  assert.equal((await call("/sp/x/threads", { headers: { "X-TG-Init": main } })).status, 200, "صفحهٔ مکاتبات از همان مینی‌اپ");
+  assert.equal((await call("/me", { headers: { "X-TG-Init": await initData("tok", { id: 4242 }) } })).status, 401, "حسابِ وصل‌نشده");
+  assert.equal((await call("/me", { headers: { "X-TG-Init": await initData("sptok", { id: EXPERT_CHAT }) } })).status, 401, "امضای بات دیگر برای همان شناسه");
 });
 
-test("«📨 ارسال» از «بررسی سوابق» (نه جستجوی هوشمند): فقط با /azmayesh؛ تأمین‌کنندهٔ فرضی ← قالب ← پیامکِ شبیه‌سازی‌شده", { skip: SKIP }, async () => {
+test("«📨 ارسال» از «بررسی سوابق»: فقط با /azmayesh؛ پیامکِ شبیه‌سازی‌شده در بات مکاتبات، نه در بات کارشناسان", { skip: SKIP }, async () => {
+  const isMenu = (c) => !!(c.body.reply_markup && c.body.reply_markup.keyboard);
   const press = async (data, mid = 700) => {
     const n = calls.length;
     await handleUpdate(env, { callback_query: { id: `m${n}`, data, message: { message_id: mid, chat: { id: EXPERT_CHAT } } } });
     const mine = since(n).filter((c) => c.bot === "main");
-    const msgs = mine.filter((c) => c.method === "sendMessage" || c.method === "editMessageText");
+    const msgs = mine.filter((c) => (c.method === "sendMessage" || c.method === "editMessageText") && !isMenu(c));
     const last = msgs[msgs.length - 1];
     const ackCall = mine.find((c) => c.method === "answerCallbackQuery");
-    return { text: last ? last.body.text : "", kb: last && last.body.reply_markup ? last.body.reply_markup.inline_keyboard : [], ack: ackCall ? ackCall.body : null };
+    return { n, text: last ? last.body.text : "", kb: last && last.body.reply_markup ? last.body.reply_markup.inline_keyboard : [], ack: ackCall ? ackCall.body : null };
   };
   const btn = (kb, t) => { const b = kb.flat().find((x) => x.text.includes(t)); return b && (b.callback_data || b.url || b.copy_text); };
   const flowOf = (kb) => /hx:(\d+):t:/.exec(JSON.stringify(kb))[1];
@@ -460,16 +601,78 @@ test("«📨 ارسال» از «بررسی سوابق» (نه جستجوی هو
   const conf = await press(btn(tpl.kb, "رسمی"));
   assert.match(conf.text, /ارسال به تأمین‌کنندهٔ فرضی آریانا \(دمو\)[\s\S]*09000000000 \(دمو\)[\s\S]*سلام تأمین‌کنندهٔ فرضی آریانا \(دمو\)؛ برای پیچ آلن M8 فولادی به مقدار 100 عدد/);
   const done = await press(btn(conf.kb, "ارسال"));
-  assert.match(done.text, /فرستاده شد/);
-  assert.match(done.text, /پیامک شبیه‌سازی‌شده/);
-  assert.match(done.text, /رمز ورود: \d{6}/);
-  assert.match(btn(done.kb, "پنل تأمین‌کننده"), /^https:\/\/site\.test\/tamin-poshtibani\/supplier\.html#k=/);
-  assert.match(btn(done.kb, "بات تأمین‌کننده"), /^https:\/\/t\.me\/AriaSupplierBot\?start=s/);
-  assert.match(btn(done.kb, "بات مکاتبات"), /^https:\/\/t\.me\/AriaSupplierBot\?start=e/);
+  assert.match(done.text, /فرستاده شد<\/b> — استعلام «پیچ آلن M8 فولادی»/);
+  assert.match(done.text, /همین الان در «بات مکاتبات» برایتان آمد/);
+  assert.doesNotMatch(done.text, /رمز ورود/, "متنِ پیامک (با رمز) در بات کارشناسان نمی‌آید");
+  assert.equal(btn(done.kb, "بات مکاتبات"), "https://t.me/AriaSupplierBot");
+  assert.equal(btn(done.kb, "صفحهٔ مکاتبات"), "https://site.test/tamin-poshtibani/correspond.html");
   assert.equal(btn(done.kb, "بازگشت به کارت قلم"), `hv:${fid}:11:h:0`);
-  const latest = /رمز ورود: (\d{6})/.exec(done.text)[1];
+  const sms = sent(done.n, "sp", 900).find((c) => /پیامک شبیه‌سازی‌شده/.test(c.body.text));
+  assert.ok(sms, "پیامکِ شبیه‌سازی‌شده در بات مکاتباتِ همین کارشناس");
+  assert.match(btns(sms).find((b) => /پنل تأمین‌کننده/.test(b.text)).url, /^https:\/\/site\.test\/tamin-poshtibani\/supplier\.html#k=/);
+  assert.match(btns(sms).find((b) => /بات تأمین‌کننده/.test(b.text)).url, /^https:\/\/t\.me\/AriaSupplierBot\?start=s/);
+  const latest = /رمز ورود: (\d{6})/.exec(sms.body.text)[1];
   assert.equal((await call("/sp/login", { body: { k: S.demoK, password: latest } })).status, 200, "رمزِ همین پیامک");
   assert.equal((await call("/sp/login", { body: { k: S.demoK, password: S.demoPass } })).status, 200, "و رمزِ پیامک‌های قبلی هم هنوز");
+  S.demoLatest = latest;
+});
+
+test("کارشناسی که بات مکاتبات را وصل نکرده: پیامک با لینکِ اتصال نگه داشته و بعد از اتصال همان‌جا نشان داده می‌شود", { skip: SKIP }, async () => {
+  const EX2 = { "X-Expert-Code": "9002" };
+  const r = await call("/sp/x/send", { headers: EX2, body: { assignment_id: 2, item_ids: [21], supplier_name: "شرکت چهارم", phone: "09120000004", label: "دفتر" } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  let n = calls.length;
+  const rs = await call("/sp/resend", { body: { k: keyOf(r.data.sms.text) } });
+  assert.match(rs.data.note, /بعد از اتصالِ کارشناس/);
+  const pointer = sent(n, "main", EXPERT2_CHAT)[0];
+  assert.ok(pointer, "بات کارشناسان فقط خبر می‌دهد");
+  assert.doesNotMatch(pointer.body.text, /رمز ورود/, "بی متنِ پیامک");
+  const url = btns(pointer).find((b) => /بات مکاتبات/.test(b.text)).url;
+  const token = url.split("start=")[1];
+  assert.ok(DB.raw.prepare("SELECT payload FROM sp_links WHERE token=?").get(token).payload, "پیامک منتظرِ اتصال");
+  n = calls.length;
+  await handleSpUpdate(env, { update_id: 7001, message: { message_id: 70, chat: { id: 902, type: "private" }, text: `/start ${token}` } });
+  const got = sent(n, "sp", 902).find((c) => /پیامک شبیه‌سازی‌شده/.test(c.body.text));
+  assert.ok(got && /رمز ورود: \d{6}/.test(got.body.text), "بعد از اتصال، پیامک همان‌جا");
+  assert.equal(DB.raw.prepare("SELECT payload FROM sp_links WHERE token=?").get(token).payload, null, "و از جدول پاک شد");
+});
+
+test("یک گفت‌وگو، دو نقش: کارشناس همان حساب را تأمین‌کنندهٔ فرضی هم می‌کند؛ هشدارِ نقشِ دیگر، «🔁»، و خروجی که نقش کارشناس را نگه می‌دارد", { skip: SKIP }, async () => {
+  const EC = 900;
+  const txt = (text) => handleSpUpdate(env, { update_id: 8000 + calls.length, message: { message_id: 800 + calls.length, chat: { id: EC, type: "private" }, text } });
+  const tg = () => DB.raw.prepare("SELECT role, expert_id, phone_id, focus FROM sp_tg WHERE chat=?").get(String(EC));
+  const demoPhone = DB.raw.prepare("SELECT id FROM sp_phones WHERE k=?").get(S.demoK).id;
+
+  await txt(`/start s${S.demoK}`);
+  assert.deepEqual({ ...tg(), focus: undefined }, { role: "p", expert_id: 1, phone_id: null, focus: undefined }, "منتظر رمز؛ هویتِ کارشناس می‌ماند");
+  let n = calls.length;
+  await txt("📋 لیست درخواست‌ها");
+  assert.equal(tg().role, "e", "دکمهٔ منوی کارشناس وسطِ ورود: برگشت به نقش کارشناس، نه «رمز اشتباه»");
+  assert.ok(sent(n, "sp", EC).some((c) => /درخواست‌هایی که گفت‌وگو دارند/.test(c.body.text)));
+
+  await txt(`/start s${S.demoK}`);
+  n = calls.length;
+  await txt(S.demoLatest);
+  assert.deepEqual({ ...tg(), focus: undefined }, { role: "s", expert_id: 1, phone_id: demoPhone, focus: undefined });
+  const menu = sent(n, "sp", EC).find((c) => c.body.reply_markup && c.body.reply_markup.keyboard);
+  assert.ok(menu.body.reply_markup.keyboard.flat().some((b) => b.text === "🔁 نقش کارشناس"), "دکمهٔ عوض کردن نقش");
+
+  /* پیامِ تأمین‌کنندهٔ فرضی (همین گفت‌وگو) ← هشدار برای نقشِ کارشناسِ همین گفت‌وگو */
+  n = calls.length;
+  await txt("سلام از طرف تأمین‌کننده");
+  const alert = sent(n, "sp", EC).find((c) => /🔔/.test(c.body.text));
+  assert.match(alert.body.text, /\(نقش کارشناس\)/);
+  assert.equal(btns(alert)[0].callback_data, `go:${S.th}:e`);
+  await handleSpUpdate(env, { update_id: 8500, callback_query: { id: "sw", data: `go:${S.th}:e`, message: { message_id: 1, chat: { id: EC } } } });
+  assert.deepEqual([tg().role, tg().focus], ["e", S.th], "«رفتن به این گفت‌وگو» نقش را هم عوض کرد");
+  await txt("🔁 نقش تأمین‌کننده");
+  assert.equal(tg().role, "s");
+
+  n = calls.length;
+  await txt("🚪 خروج");
+  assert.deepEqual({ ...tg(), focus: undefined }, { role: "e", expert_id: 1, phone_id: null, focus: undefined }, "خروجِ تأمین‌کننده؛ کارشناس می‌ماند");
+  assert.ok(sent(n, "sp", EC).some((c) => c.body.reply_markup && c.body.reply_markup.keyboard && c.body.reply_markup.keyboard[0][0].text === "📋 لیست درخواست‌ها"), "منوی کارشناس برمی‌گردد");
+  assert.equal((await call("/sp/login", { body: { k: S.demoK, password: S.demoLatest } })).status, 401, "رمزهای پیامک باطل شد");
 });
 
 test("تب استعلامات پنل کارشناس: ورود و ویرایش دستیِ خط استعلام بسته است؛ تیک «تأیید نهایی» و «ثبت موقت» می‌ماند", { skip: SKIP }, async () => {
@@ -481,13 +684,14 @@ test("تب استعلامات پنل کارشناس: ورود و ویرایش د
   assert.equal(many.status, 403);
   assert.deepEqual(many.data.locked.sort(), ["dtime", "item_id", "pay"]);
   assert.equal((await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { final: 1 } })).status, 200, "تیک تأیید نهایی");
-  const save = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { save: true } });
-  assert.equal(save.status, 422, "ثبت موقت هنوز هست؛ فقط با فیلدهای اجباریِ پر");
-  assert.ok((save.data.missing || []).includes("dtime"));
+  assert.equal((await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { save: true } })).status, 200, "خطِ آمده از پنل تأمین‌کننده کامل است: ثبت موقت");
   const created = await call("/quotes", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "تأمین‌کنندهٔ دستی", price: 999, qty: 7, spec: "دستی", unit: "تن" } });
   assert.equal(created.status, 200);
   const row = DB.raw.prepare("SELECT price, qty, unit, spec FROM quotes WHERE id=?").get(created.data.id);
   assert.deepEqual({ ...row }, { price: null, qty: 50, unit: "عدد", spec: null }, "خط تازه فقط نام دارد؛ واحد و مقدار همان خواستهٔ قلم");
+  const save = await call(`/quotes/${created.data.id}`, { method: "PUT", headers: EX, body: { save: true } });
+  assert.equal(save.status, 422, "ثبت موقت فقط با فیلدهای اجباریِ پر");
+  assert.ok((save.data.missing || []).includes("price"));
 });
 
 test("خروج: رمز باطل؛ ورود دوباره فقط با رمز تازه؛ پنج رمز اشتباه ← قفل", { skip: SKIP }, async () => {

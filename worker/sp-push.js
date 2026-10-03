@@ -1,19 +1,20 @@
 /**
  * بات مکاتبات تأمین‌کنندگان — لایهٔ تلگرامِ مشترک: ارسال و ثبتِ پیام‌ها برای پاک‌کردنِ بعدی، منوی ثابت،
  * کارت‌ها، و پخشِ پیام‌های تازهٔ هر گفت‌وگو به طرف دیگر (هر جا که کار انجام شده باشد: پنل وب، مینی‌اپ،
- * بات مکاتبات یا «ارسال» در بات کارشناسان).
+ * بات مکاتبات یا «ارسال» در بات کارشناسان). همهٔ مکاتباتِ کارشناس این‌جاست؛ بات کارشناسان از گفت‌وگو با
+ * تأمین‌کننده چیزی نشان نمی‌دهد (تصمیم مدیر، مهر ۱۴۰۵).
+ *
+ * یک گفت‌وگوی تلگرام می‌تواند هر دو هویت را داشته باشد (کارشناس و تأمین‌کننده — برای آزمودن هر دو سو با یک
+ * حساب)؛ نقشِ فعلی با «🔁» عوض می‌شود و پیامِ نقشِ دیگر به‌شکل هشدار با دکمهٔ رفتن می‌رسد.
  *
  * پاک‌کردن گفت‌وگو: تلگرام فقط پیام‌های زیر ۴۸ ساعت را پاک می‌کند (deleteMessages، ۱۰۰ تا در هر
  * فراخوانی). پس شناسهٔ هر پیامی که بات می‌فرستد و هر پیامی که کاربر می‌نویسد در sp_tg.ids_json می‌ماند؛
- * با عوض شدنِ گفت‌وگو، تازه‌ها پاک و تاریخچهٔ گفت‌وگوی تازه یکجا نوشته می‌شود. پیام‌های کهنه‌تر از
- * ۴۸ ساعت می‌مانند — محدودیت خودِ تلگرام است.
+ * با عوض شدنِ گفت‌وگو، تازه‌ها پاک و تاریخچهٔ گفت‌وگوی تازه یکجا نوشته می‌شود.
  */
 import { telegram, esc, TgError } from "./telegram.js";
 import { tehranParts } from "./time.js";
-import {
-  siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, corrLink, lineMissing,
-} from "./sp-core.js";
-import { AI_COST_HINT } from "./sp-ai.js";
+import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, lineMissing } from "./sp-core.js";
+import { AI_COST_HINT, AI_VERSION, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -34,6 +35,8 @@ export function when(ms) {
   return fa(p.jy === q.jy && p.jm === q.jm && p.jd === q.jd ? hm : `${p2(p.jm)}/${p2(p.jd)} ${hm}`);
 }
 export const short = (s, n = 28) => { const x = T(s); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
+/** «کد ۷ · عنوان» — کدِ افزایشیِ قلم در پنلِ همان تأمین‌کننده */
+export const lineTag = (l, n = 60) => `${l.no ? `کد ${fa(l.no)} · ` : ""}${short(l.title, n)}`;
 
 export const spReady = (env) => !!env.TG_SP_BOT_TOKEN;
 export const spApi = (env) => telegram(env, "sp");
@@ -47,6 +50,8 @@ export function track(row, mid) { if (mid) { idsOf(row).push([mid, now()]); row.
 export const flowOf = (row) => parse(row.flow_json, null);
 export function setFlow(row, flow) { row.flow_json = flow ? JSON.stringify(flow) : null; row._dirty = true; }
 export function setFocus(row, id) { row.focus = id || null; row._dirty = true; }
+/** این گفت‌وگو هم کارشناس است هم تأمین‌کننده */
+export const hasBoth = (row) => !!(row && row.expert_id && row.phone_id);
 
 export async function send(env, row, text, kb, extra) {
   const r = await spApi(env).call("sendMessage", {
@@ -63,8 +68,8 @@ export async function show(env, row, mid, text, kb) {
 }
 export async function save(env, row) {
   if (!row || !row._dirty) return;
-  await env.DB.prepare("UPDATE sp_tg SET focus=?, flow_json=?, ids_json=?, updated_at=? WHERE chat=?")
-    .bind(row.focus == null ? null : row.focus, row.flow_json == null ? null : row.flow_json, JSON.stringify(idsOf(row).slice(-KEEP_IDS)), now(), row.chat).run();
+  await env.DB.prepare("UPDATE sp_tg SET role=?, focus=?, flow_json=?, ids_json=?, updated_at=? WHERE chat=?")
+    .bind(row.role, row.focus == null ? null : row.focus, row.flow_json == null ? null : row.flow_json, JSON.stringify(idsOf(row).slice(-KEEP_IDS)), now(), row.chat).run();
   row._dirty = false;
 }
 export async function clearChat(env, row) {
@@ -78,15 +83,16 @@ export async function clearChat(env, row) {
 /* منوی ثابتِ پایین و دکمهٔ مینی‌اپ                                      */
 /* ------------------------------------------------------------------ */
 export const MENU = {
-  e: { reqs: "📋 لیست درخواست‌ها", sups: "🏷 لیست تأمین‌کنندگان", app: "🧩 مکاتبات (مینی‌اپ)" },
-  s: { list: "📋 استعلام‌ها", chat: "💬 گفت‌وگو", app: "🧩 پنل (مینی‌اپ)", out: "🚪 خروج" },
+  e: { reqs: "📋 لیست درخواست‌ها", sups: "🏷 لیست تأمین‌کنندگان", app: "🧩 مکاتبات (مینی‌اپ)", swap: "🔁 نقش تأمین‌کننده" },
+  s: { list: "📋 استعلام‌ها", chat: "💬 گفت‌وگو", app: "🧩 پنل (مینی‌اپ)", out: "🚪 خروج", swap: "🔁 نقش کارشناس" },
 };
 export const appUrl = (env, role) => `${siteOrigin(env)}${role === "e" ? CORR_PATH : PANEL_PATH}?tg=1`;
-export function menuKb(env, role) {
+export function menuKb(env, role, both) {
   const m = MENU[role];
   const keyboard = role === "e"
     ? [[{ text: m.reqs }, { text: m.sups }], [{ text: m.app, web_app: { url: appUrl(env, "e") } }]]
     : [[{ text: m.list }, { text: m.chat }], [{ text: m.app, web_app: { url: appUrl(env, "s") } }, { text: m.out }]];
+  if (both) keyboard.push([{ text: m.swap }]);
   return { keyboard, is_persistent: true, resize_keyboard: true };
 }
 export async function setMenuButton(env, chat, role) {
@@ -119,78 +125,125 @@ export function headerText(env, th, side) {
 }
 
 const lineSum = (l) => `${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} = ${money(l.qty != null && l.price != null ? l.qty * l.price : null)} ریال`;
+const ICON = { ok: "✅", warn: "⚠️", bad: "❌" };
+const cell = (v, row) => (v == null || v === "" ? "—" : row && row.key === "price" ? money(v) : typeof v === "number" ? qty(v) : esc(v));
 
-/** کارت یک بسته برای کارشناس، با دکمه‌های تصمیمِ همان وضعیت */
+/** ردیف‌های پذیرفتنیِ جدول تطابق به ترتیبِ ثابت — دکمه‌های پذیرش با شمارهٔ همین فهرست */
+export function acceptList(ai) {
+  const out = [];
+  for (const ln of (ai && ai.lines) || []) for (const row of ln.rows || []) if (acceptable(row)) out.push({ key: lineKey(ln.line_id, row), row, line: ln });
+  for (const row of (ai && ai.header) || []) if (acceptable(row)) out.push({ key: headKey(row), row, line: null });
+  return out;
+}
+
+/** جدول تطابق به متن: هر لایه و هر فیلد اجباری با ✅/⚠️/❌، مقدارِ بسته و مقدارِ سند، و پذیرفته‌شده‌ها */
+function matchText(ai, accept) {
+  const acc = accept || {};
+  const rowTxt = (row, k) => {
+    const accepted = acc[k] && acceptable(row);
+    const want = row.want != null && row.want !== "" ? cell(row.want, row) : null;
+    const got = cell(row.got, row);
+    const tail = row.kind === "terms"
+      ? `: ${got}${row.def ? " <i>(پیش‌فرضِ شرکت)</i>" : ""}`
+      : row.status === "ok" ? `: ${want || got}` : `: ${want || "—"} ← سند: ${got}`;
+    return `  ${accepted ? "✔️" : ICON[row.status]} ${esc(row.label)}${tail}${accepted ? " <i>(پذیرفته — پیش‌فاکتور ملاک)</i>" : ""}${row.gate ? "" : " <i>(اطلاعاتی)</i>"}`;
+  };
+  let s = "\n\n🤖 <b>جدول تطابق با پیش‌فاکتور</b> — ✅ همان · ⚠️ نیامده یا نامطمئن · ❌ فرق دارد";
+  for (const ln of ai.lines || []) {
+    s += `\n▪️ <b>${esc(lineTag(ln, 40))}</b>${ln.found ? "" : " — <i>در سند پیدا نشد</i>"}`;
+    for (const row of ln.rows || []) s += `\n${rowTxt(row, lineKey(ln.line_id, row))}`;
+  }
+  s += "\n▪️ <b>شرایط فاکتور</b>";
+  for (const row of ai.header || []) s += `\n${rowTxt(row, headKey(row))}`;
+  return s;
+}
+
+/** کارت یک بسته برای کارشناس، با جدول تطابق و دکمه‌های تصمیمِ همان وضعیت */
 export function bundleCard(th, b, lines) {
-  const ai = parse(b.ai_json, null);
+  const ai0 = parse(b.ai_json, null);
+  const ai = ai0 && ai0.v === AI_VERSION ? ai0 : null;
+  const acc = parse(b.accept_json, {});
   let text = `📦 <b>بستهٔ ${fa(b.id)}</b> — ${esc(BUNDLE_FA[b.state] || b.state)}\n`
-    + lines.map((l, i) => `${fa(i + 1)}. <b>${esc(l.title)}</b>\n   ${lineSum(l)}`
+    + lines.map((l) => `• <b>${esc(lineTag(l))}</b>\n   ${lineSum(l)}`
       + (parse(l.extra_json, []).length ? `\n   ➕ ${parse(l.extra_json, []).map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ")}` : "")).join("\n")
     + `\n<b>جمع: ${money(lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0))} ریال</b>`;
   if (b.comment && ["returned", "rejected"].includes(b.state)) text += `\n💬 ${esc(b.comment)}`;
   if (b.pf_key) text += `\n📄 پیش‌فاکتور: ${esc(b.pf_name || "")}`;
-  if (ai) {
-    text += `\n🤖 بررسی هوشمند: ${ai.ok ? "✅ همه صریح" : "⚠️ کامل نیست"}`;
-    for (const x of ai.lines || []) {
-      const bad = (x.layers || []).filter((y) => y.status !== "explicit");
-      const warn = [!x.found ? "در سند پیدا نشد" : null, ...bad.map((y) => `${y.k}: ${y.status === "different" ? `متفاوت (${y.seen || "؟"})` : "نیامده"}`),
-        x.qty_match === false ? `مقدار سند ${qty(x.qty)}` : null, x.price_match === false ? `قیمت سند ${money(x.unit_price)}` : null].filter(Boolean);
-      if (warn.length) text += `\n   • ${esc(short(x.title, 30))}: ${esc(warn.join("؛ "))}`;
-    }
-  }
   const kb = [];
   if (b.state === "pending") {
     kb.push([{ text: "✅ تأیید و درخواست پیش‌فاکتور", callback_data: `xd:${b.id}:ok` }]);
-    kb.push([{ text: "↩️ بازگشت با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
+    kb.push([{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
   } else if (b.state === "approved") {
     text += "\n<i>منتظر پیش‌فاکتورِ تأمین‌کننده.</i>";
-    kb.push([{ text: "↩️ بازگشت با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
+    kb.push([{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
   } else if (b.state === "proforma") {
-    kb.push([{ text: "📄 دیدن پیش‌فاکتور", callback_data: `xd:${b.id}:pf` }, { text: "🤖 بررسی هوشمند", callback_data: `xd:${b.id}:ai` }]);
+    kb.push([{ text: "📄 دیدن پیش‌فاکتور", callback_data: `xd:${b.id}:pf` }, { text: ai ? "🤖 خوانش دوباره" : "🤖 خوانش هوشمند", callback_data: `xd:${b.id}:ai` }]);
+    if (ai) {
+      text += matchText(ai, acc);
+      const r = resolve(ai, acc);
+      text += r.ready ? "\n\n✅ <b>همه‌چیز برای تأیید نهایی آماده است.</b>"
+        : `\n\n⛔ <b>مانده:</b>\n${r.problems.slice(0, 4).map((p) => `• ${esc(p)}`).join("\n")}${r.problems.length > 4 ? `\n• … و ${fa(r.problems.length - 4)} مورد دیگر` : ""}`;
+      const list = acceptList(ai);
+      const open = list.filter((x) => !acc[x.key]);
+      if (open.length > 1) kb.push([{ text: `✔️ پذیرش همهٔ مغایرت‌ها (${fa(open.length)}) — پیش‌فاکتور ملاک`, callback_data: `xd:${b.id}:aa` }]);
+      list.slice(0, 8).forEach((x, i) => {
+        if (i % 2 === 0) kb.push([]);
+        kb[kb.length - 1].push({ text: `${acc[x.key] ? "✔️" : "◻️"} ${short(x.row.label, 14)}${x.line && x.line.no ? ` (کد ${fa(x.line.no)})` : ""}`, callback_data: `xa:${b.id}:${i}` });
+      });
+    } else text += "\n\n<i>برای جدول تطابق و پر شدنِ فیلدها از پیش‌فاکتور، «🤖 خوانش هوشمند» را بزنید.</i>";
     kb.push([{ text: "🏁 تأیید نهایی", callback_data: `xd:${b.id}:fn` }]);
-    kb.push([{ text: "↩️ بازگشت با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
+    kb.push([{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${b.id}:rt` }, { text: "❌ رد", callback_data: `xd:${b.id}:rj` }]);
   }
-  return { text, kb };
+  return { text: text.length > 4000 ? text.slice(0, 3990) + "…" : text, kb };
 }
-export const aiConfirmKb = (bid) => [[{ text: `🤖 بله، بررسی کن (${AI_COST_HINT})`, callback_data: `xd:${bid}:ai2` }], [{ text: "✖️ نه", callback_data: `xd:${bid}:card` }]];
+export const aiConfirmKb = (bid) => [[{ text: `🤖 بله، بخوان (${AI_COST_HINT})`, callback_data: `xd:${bid}:ai2` }], [{ text: "✖️ نه", callback_data: `xd:${bid}:card` }]];
 
 /** کارت اقلام برای تأمین‌کننده */
 export function itemsCard(env, th, lines, bundles) {
   const ready = lines.filter((l) => l.state === "ready");
   let text = `📦 <b>اقلام استعلام ${esc(th.request_id)}</b>\n`
-    + lines.map((l, i) => `${fa(i + 1)}. <b>${esc(l.title)}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}`).join("\n");
+    + lines.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}`).join("\n");
   const waitPf = bundles.filter((b) => b.state === "approved");
   if (waitPf.length) text += `\n\n📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.`;
-  text += "\n\n<i>روی هر قلم بزنید تا مقدار، واحد، قیمت واحد، لایهٔ تازه و پیوست را ثبت کنید.</i>";
-  const kb = lines.slice(0, 30).map((l, i) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${fa(i + 1)}. ${short(l.title, 30)}`, callback_data: `si:${l.id}` }]);
-  if (ready.length) kb.push([{ text: `📤 ارسال مشخصات (${fa(ready.length)} قلمِ آماده)`, callback_data: `ss:${th.id}` }]);
+  text += "\n\n<i>روی هر قلم بزنید تا مقدار و قیمت واحد را ثبت کنید؛ بعد «آمادهٔ ارسال».</i>";
+  const kb = lines.slice(0, 30).map((l) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${lineTag(l, 30)}`, callback_data: `si:${l.id}` }]);
+  if (ready.length) kb.push([{ text: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, callback_data: `ss:${th.id}` }]);
   for (const b of waitPf) kb.push([{ text: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, callback_data: `sp:${b.id}` }]);
   kb.push([{ text: "🧩 باز کردن در پنل", web_app: { url: appUrl(env, "s") } }]);
   return { text, kb };
 }
 
-/** کارت یک قلم برای تأمین‌کننده */
-export function lineCard(l, files) {
+/**
+ * کارت یک قلم برای تأمین‌کننده. «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش» (برگشت به پیش‌نویس)
+ * یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر قلم دیگری مانده).
+ */
+export function lineCard(l, files, others) {
   const locked = parse(l.layers_json, []), extra = parse(l.extra_json, []);
-  const editable = ["new", "draft", "returned", "ready"].includes(l.state);
-  let text = `✏️ <b>${esc(l.title)}</b>\nوضعیت: <i>${esc(LINE_FA[l.state] || l.state)}</i>\n`;
+  const editable = ["new", "draft", "returned"].includes(l.state);
+  let text = `✏️ <b>${esc(lineTag(l, 80))}</b>\nوضعیت: <i>${esc(LINE_FA[l.state] || l.state)}</i>\n`;
   if (l.head) text += `نوع قلم: ${esc(l.head)}\n`;
   text += `\n🔒 <b>مشخصات کارشناس</b> (قفل؛ برای مذاکره در گفت‌وگو بنویسید):\n${locked.length ? locked.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("\n") : "—"}\n`;
   text += `\n➕ <b>لایه‌های افزودهٔ شما:</b>\n${extra.length ? extra.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("\n") : "—"}\n`;
   text += `\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b> (درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})`
-    + `\nقیمت واحد: <b>${money(l.price)}</b> ریال\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال`;
+    + `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال`;
   if (l.note) text += `\nتوضیح: ${esc(l.note)}`;
   text += `\n📎 پیوست‌ها: ${files.length ? files.map((f) => esc(f.label)).join("، ") : "—"}`;
-  const miss = lineMissing(l);
-  if (editable && miss.length) text += `\n\n<i>برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   const kb = [];
+  if (l.state === "ready") {
+    text += "\n\n✅ <b>این قلم آمادهٔ ارسال است.</b> برای تغییر «✏️ ویرایش»، برای فرستادن برای کارشناس «📤 ارسال».";
+    kb.push([{ text: "✏️ ویرایش", callback_data: `sr:${l.id}:0` }, { text: "📤 ارسال", callback_data: `ss:${l.thread_id}` }]);
+    if (others) kb.push([{ text: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, callback_data: `ic:${l.thread_id}` }]);
+    return { text, kb };
+  }
+  const miss = lineMissing(l);
+  if (editable && miss.length) text += `\n\n<i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   if (editable) {
-    kb.push([{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }, { text: "📏 واحد", callback_data: `sv:${l.id}:u` }, { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }]);
+    kb.push([{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }, { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }, { text: "📏 واحد", callback_data: `sv:${l.id}:u` }]);
     kb.push([{ text: "➕ لایهٔ تازه", callback_data: `sv:${l.id}:l` }, { text: "📝 توضیح", callback_data: `sv:${l.id}:n` }, { text: "📎 پیوست", callback_data: `sa:${l.id}` }]);
     extra.slice(0, 8).forEach((x, i) => { if (i % 2 === 0) kb.push([]); kb[kb.length - 1].push({ text: `🗑 ${short(x.k, 14)}`, callback_data: `sl:${l.id}:${i}` }); });
-    kb.push([l.state === "ready" ? { text: "↩️ برگشت به پیش‌نویس", callback_data: `sr:${l.id}:0` } : { text: "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
+    kb.push([{ text: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
   }
-  kb.push([{ text: "↩️ فهرست اقلام", callback_data: `ic:${l.thread_id}` }]);
+  kb.push([{ text: "📦 فهرست اقلام", callback_data: `ic:${l.thread_id}` }]);
   return { text, kb };
 }
 
@@ -201,7 +254,7 @@ export async function showThread(env, row, th) {
   const side = row.role;
   await clearChat(env, row);
   setFocus(row, th.id); setFlow(row, null);
-  await send(env, row, headerText(env, th, side), menuKb(env, side));
+  await send(env, row, headerText(env, th, side), menuKb(env, side, hasBoth(row)));
   const msgs = (await env.DB.prepare(`SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id DESC LIMIT 40) ORDER BY id`).bind(th.id).all()).results || [];
   const chunks = [];
   let cur = "";
@@ -251,26 +304,27 @@ async function actionKb(env, th, m, side) {
   return null;
 }
 
+/** گفت‌وگوهای تلگرامیِ یک طرف — بر اساس هویت، نه نقشِ فعلی (هر دو هویت در یک گفت‌وگو ممکن است) */
+const rowsFor = async (env, th, side) => ((side === "e"
+  ? await env.DB.prepare("SELECT * FROM sp_tg WHERE expert_id=?").bind(th.expert_id).all()
+  : await env.DB.prepare("SELECT * FROM sp_tg WHERE phone_id IN (SELECT id FROM sp_phones WHERE supplier_id=?)").bind(th.supplier_id).all()).results || []);
+
 /**
- * پیام‌های تازهٔ یک گفت‌وگو به گفت‌وگوهای تلگرامیِ طرف دیگر: اگر همان گفت‌وگو جلوی چشم اوست، خودِ پیام
- * (و برای رخدادها کارت و دکمه‌هایش)، وگرنه هشدار با دکمهٔ «رفتن به این گفت‌وگو». کارشناسی که هنوز به بات
- * مکاتبات وصل نیست، خبرِ پیامِ تأمین‌کننده را در بات کارشناسان می‌گیرد. شکستِ تلگرام کار اصلی را نمی‌خواباند.
+ * پیام‌های تازهٔ یک گفت‌وگو به گفت‌وگوهای تلگرامیِ طرف دیگر: اگر همان گفت‌وگو و همان نقش جلوی چشم اوست،
+ * خودِ پیام (و برای رخدادها کارت و دکمه‌هایش)، وگرنه هشدار با دکمهٔ «رفتن به این گفت‌وگو». شکستِ تلگرام
+ * کار اصلی را نمی‌خواباند. بات کارشناسان هیچ‌کدام را نمی‌گیرد — مکاتبات فقط در بات مکاتبات است.
  */
 export async function pushMsgs(env, thIn, msgs) {
-  if (!msgs || !msgs.length) return { sent: 0 };
+  if (!msgs || !msgs.length || !spReady(env)) return { sent: 0 };
   const th = thIn && thIn.supplier_name !== undefined && thIn.expert_id !== undefined ? thIn : await threadRow(env, thIn.id || thIn.thread_id || thIn);
   if (!th) return { sent: 0 };
   let sent = 0;
   for (const side of ["e", "s"]) {
     const mine = msgs.filter((m) => m.who !== side && m.kind !== "note");
     if (!mine.length) continue;
-    const rows = spReady(env) ? ((side === "e"
-      ? await env.DB.prepare("SELECT * FROM sp_tg WHERE role='e' AND expert_id=?").bind(th.expert_id).all()
-      : await env.DB.prepare("SELECT * FROM sp_tg WHERE role='s' AND phone_id IN (SELECT id FROM sp_phones WHERE supplier_id=?)").bind(th.supplier_id).all()).results || []) : [];
-    if (side === "e" && !rows.length) { sent += await mainBotNotice(env, th, mine); continue; }
-    for (const row of rows) {
+    for (const row of await rowsFor(env, th, side)) {
       try {
-        if (row.focus === th.id) {
+        if (row.role === side && row.focus === th.id) {
           for (const m of mine) {
             const a = await actionKb(env, th, m, side);
             if (a && a.text) { await send(env, row, msgLine(th, m, side)); await send(env, row, a.text, a.kb); }
@@ -281,8 +335,9 @@ export async function pushMsgs(env, thIn, msgs) {
         } else {
           const last = mine[mine.length - 1];
           const who = last.who === "s" ? th.supplier_name : `کارشناس — ${th.expert_label || th.expert_name}`;
-          await send(env, row, `🔔 <b>${esc(who)}</b> — ${side === "e" ? "درخواست" : "استعلام"} ${esc(th.request_id)}${mine.length > 1 ? ` (${fa(mine.length)} پیام)` : ""}\n${esc(short(last.body.replace(/\s+/g, " "), 160))}`,
-            [[{ text: "🔀 رفتن به این گفت‌وگو", callback_data: `go:${th.id}` }]]);
+          const role = row.role !== side ? (side === "e" ? " <i>(نقش کارشناس)</i>" : " <i>(نقش تأمین‌کننده)</i>") : "";
+          await send(env, row, `🔔 <b>${esc(who)}</b> — ${side === "e" ? "درخواست" : "استعلام"} ${esc(th.request_id)}${mine.length > 1 ? ` (${fa(mine.length)} پیام)` : ""}${role}\n${esc(short(last.body.replace(/\s+/g, " "), 200))}`,
+            [[{ text: "🔀 رفتن به این گفت‌وگو", callback_data: `go:${th.id}:${side}` }]]);
           sent++;
         }
         await save(env, row);
@@ -295,13 +350,26 @@ export async function pushMsgs(env, thIn, msgs) {
   return { sent };
 }
 
-/** کارشناسِ وصل‌نشده به بات مکاتبات: خبر کوتاه در بات کارشناسان (همان باتِ جریان کار) */
-async function mainBotNotice(env, th, mine) {
-  if (!th.expert_chat || !env.TG_BOT_TOKEN) return 0;
-  const last = mine[mine.length - 1];
-  await telegram(env).sendMessage(th.expert_chat,
-    `💬 <b>${esc(th.supplier_name)}</b> — درخواست ${esc(th.request_id)}${mine.length > 1 ? ` (${fa(mine.length)} پیام)` : ""}\n${esc(short(last.body.replace(/\s+/g, " "), 200))}\n\n`
-    + "<i>گفت‌وگو و تصمیم در صفحهٔ مکاتبات یا بات مکاتبات است.</i>",
-    [[{ text: "🌐 صفحهٔ مکاتبات", url: corrLink(env) }]]).catch((e) => console.error("sp main notice", e && e.message));
-  return 1;
+/**
+ * پیامکِ شبیه‌سازی‌شده (پیامک فعلاً خاموش است) در بات مکاتباتِ کارشناس — با لینک پنل، لینک بات و رمز، تا
+ * سمتِ تأمین‌کننده را ببیند. خروجی: به چند گفت‌وگو رسید (۰ یعنی کارشناس هنوز بات مکاتبات را وصل نکرده).
+ */
+export async function deliverSms(env, expertId, sms, rowsIn) {
+  if (!spReady(env) || !sms) return 0;
+  const rows = rowsIn || ((await env.DB.prepare("SELECT * FROM sp_tg WHERE expert_id=?").bind(expertId).all()).results || []);
+  let n = 0;
+  for (const row of rows) {
+    try {
+      const kb = [];
+      if (sms.panel) kb.push([{ text: "🌐 پنل تأمین‌کننده (لینک پیامک)", url: sms.panel }]);
+      if (sms.bot) kb.push([{ text: "🤖 بات تأمین‌کننده (لینک پیامک)", url: sms.bot }]);
+      if (sms.thread_id) kb.push([{ text: "🔀 رفتن به این گفت‌وگو", callback_data: `go:${sms.thread_id}:e` }]);
+      await send(env, row, `📱 <b>پیامک شبیه‌سازی‌شده</b> — به ${esc(sms.to || "")}${sms.label ? ` (${esc(sms.label)})` : ""}${sms.supplier ? ` · ${esc(sms.supplier)}` : ""}${row.role !== "e" ? " <i>(نقش کارشناس)</i>" : ""}\n`
+        + "<i>پیامک فعلاً خاموش است؛ در حالت واقعی همین متن فقط به گوشی تأمین‌کننده می‌رود. رمزِ هر پیامک تا هفت روز (یا تا «خروج») معتبر است.</i>\n"
+        + `<blockquote>${esc(sms.text || "")}</blockquote>`, kb);
+      await save(env, row);
+      n++;
+    } catch (e) { console.error("sp sms", e && e.message); }
+  }
+  return n;
 }
