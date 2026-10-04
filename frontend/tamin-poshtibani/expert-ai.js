@@ -55,7 +55,7 @@
         <h2 style="margin:0">🤖 کارشناس هوشمند</h2>
         <span class="chip ${g.on ? "ok" : "bad"}">${g.on ? "خودکار روشن است" : "خودکار خاموش است"}</span>
         <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "⏸ خاموش کردن خودکار" : "▶️ روشن کردن خودکار"}</button>
-        <span style="margin-inline-start:auto" class="muted">مدل: <b dir="ltr">${esc(A.st.model)}</b> · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
+        <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
       <p class="lead" style="margin-top:10px">با روشن بودن، هر ارجاعی که از این لحظه به این کارشناس برسد خودکار پیش می‌رود: بررسی سوابق و جستجوی هوشمند، دعوت با قالب استاندارد،
         مذاکره و تصمیم (تأیید، برگشت، رد، تأیید نهایی)، و در پایان جدول کمیسیون و نامه. <b>پیامک فقط به شماره‌ای می‌رود که این‌جا تیکِ «پنل» خورده باشد</b> — تیک را فقط شما می‌زنید.
         خاموش کردن هر کاری را همان لحظه نگه می‌دارد.</p>
@@ -167,10 +167,18 @@
         <div class="tp-field"><b>برچسب</b><input class="tp-input" id="ai-np-label" placeholder="همراه مدیر فروش…"></div>
         <div style="padding-bottom:2px"><label class="sp-check"><input type="checkbox" id="ai-np-panel" checked> تیکِ پنل</label> <button class="tp-btn sm primary" data-ai-newphone>➕ ثبت</button></div></div></div>`;
   }
+  const modelOpts = (sel) => (A.st.models || []).map((m) => `<option value="${esc(m.id)}" ${sel === m.id ? "selected" : ""}>${esc(m.fa)} — ورودی $${m.price[0]} / خروجی $${m.price[1]} در هر میلیون توکن</option>`).join("");
+  const effortOpts = (sel) => (A.st.efforts || ["low", "medium", "high"]).map((e) => `<option value="${e}" ${sel === e ? "selected" : ""}>${{ low: "کم (سریع و ارزان)", medium: "متوسط (پیش‌فرض)", high: "زیاد (دقیق‌تر، کندتر)" }[e] || e}</option>`).join("");
   function vSettings() {
     const c = A.st.agent.cfg, mk = A.st.markets;
     const f = (k, lab, hint) => `<div class="tp-field"><b>${lab}</b><input class="tp-input" data-ai-cfg="${k}" inputmode="numeric" value="${esc(c[k])}"><span class="dim" style="font-size:.78rem">${hint}</span></div>`;
-    return `<div class="tp-card tp-pane"><div class="tp-fields3">
+    return `<div class="tp-card tp-pane">
+      <div class="tp-sect" style="margin-top:0"><h3>مدلِ مذاکره و شرحِ پایانی <span>خوانشِ پیش‌فاکتور، تفکیکِ قلم، جستجو و نامه مدلِ خودشان را دارند</span></h3>
+        <div class="tp-fields3"><div class="tp-field" style="min-width:min(520px,100%)"><b>مدل</b><select class="tp-select tp-input" data-ai-model>${modelOpts(c.model)}</select></div>
+          <div class="tp-field"><b>عمقِ فکر (effort)</b><select class="tp-select tp-input" data-ai-effort>${effortOpts(c.effort)}</select></div></div>
+        <p class="dim" style="font-size:.8rem;margin:6px 0 0">گامِ فوریِ بعد از پیامِ تأمین‌کننده همیشه با عمقِ «کم» اجرا می‌شود تا زیرِ ۳۰ ثانیه پاسخ برسد؛ گام‌های Cron با همین انتخاب. Haiku «عمقِ فکر» را نمی‌پذیرد.
+          برای سنجیدنِ تفاوتِ مدل‌ها روی گفت‌وگوهای خودتان: «فراخوانی‌های مدل» ← یک دورِ مذاکره ← «🔬 مقایسه با مدلِ دیگر».</p></div>
+      <div class="tp-fields3">
         ${f("minInvites", "حداقلِ دعوت (هدف)", "بی شمارهٔ پنل دعوتی نمی‌رود؛ کمتر از این، چالش در نامه گفته می‌شود")}
         ${f("maxInvites", "سقفِ دعوت در هر درخواست", "")}
         ${f("quietMin", "پایانِ مذاکره بعد از سکوت (دقیقه)", "وقتی هر قلم پیشنهادِ نهایی دارد و این‌قدر پیامِ تازه‌ای نیامده")}
@@ -216,10 +224,30 @@
     const user = req ? (req.messages || []).map((mm) => (Array.isArray(mm.content) ? mm.content.map((x) => (x.type === "text" ? x.text : `[${x.type}${x.source && x.source.url ? " — پیوستِ سند" : ""}]`)).join("\n") : mm.content)).join("\n\n—\n\n") : (c.request_json || "");
     const out = res ? (res.content || []).map((x) => (x.type === "text" ? x.text : x.type === "tool_use" ? JSON.stringify(x.input, null, 2) : "")).filter(Boolean).join("\n\n") : (c.response_json || "");
     const pre = (t) => `<pre style="white-space:pre-wrap;max-height:42vh;overflow:auto;background:rgba(3,8,20,.5);border:1px solid var(--tp-line);border-radius:8px;padding:8px;font-size:.78rem;direction:auto">${esc(t)}</pre>`;
+    /* مقایسه: همان درخواست با مدل یا عمقِ فکرِ دیگر — فقط دورهای مذاکره و شرحِ پایانی (خروجیِ ساختاریافته) */
+    const canReplay = ["negotiate", "closing", "compare"].includes(c.purpose) && !!req;
     const d = TP.modal(`${esc(c.purpose_fa)} — ${when(c.at)}`, `<div class="muted" style="margin-bottom:6px" dir="ltr">${esc(c.model || "")} · effort ${esc(c.effort || "—")} · ${tok(c)} · ${usd(c.cost_usd)}${c.error ? ` · ${esc(c.error)}` : ""}</div>
       <b>پرامپتِ سیستم</b>${pre(sys || "—")}<b>پیامِ ارسالی</b>${pre(user || "—")}<b>پاسخِ مدل</b>${pre(out || "—")}
-      ${req && req.tools ? `<b>ابزار</b>${pre(JSON.stringify(req.tools, null, 2).slice(0, 6000))}` : ""}${req && req.output_config ? `<b>output_config</b>${pre(JSON.stringify(req.output_config, null, 2).slice(0, 6000))}` : ""}`, null, "بستن", "");
+      ${req && req.tools ? `<b>ابزار</b>${pre(JSON.stringify(req.tools, null, 2).slice(0, 6000))}` : ""}${req && req.output_config ? `<b>output_config</b>${pre(JSON.stringify(req.output_config, null, 2).slice(0, 6000))}` : ""}
+      ${canReplay ? `<div style="margin-top:12px;border-top:1px solid var(--tp-line);padding-top:10px"><b>🔬 مقایسه با مدلِ دیگر</b>
+        <p class="dim" style="font-size:.8rem;margin:4px 0">همین پرامپتِ سیستم و همین پرونده، با مدلِ دیگر؛ فقط پاسخ نشان داده می‌شود و <b>هیچ تصمیمی اجرا نمی‌شود</b>. هزینه دارد و در همین فهرست ثبت می‌شود.</p>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><select class="tp-select tp-input" id="ai-rp-model" style="max-width:520px">${modelOpts(c.model)}</select>
+          <select class="tp-select tp-input" id="ai-rp-effort" style="max-width:220px">${effortOpts(c.effort || "medium")}</select><button class="tp-btn sm primary" id="ai-rp-go">اجرا</button></div>
+        <div id="ai-rp-out" style="margin-top:8px"></div></div>` : ""}`, null, "بستن", "");
     const box = d.querySelector(".tp-modal"); if (box) { box.style.maxWidth = "min(1100px, 96vw)"; box.style.width = "96vw"; }
+    const go = d.querySelector("#ai-rp-go");
+    if (go) go.onclick = async () => {
+      const o = d.querySelector("#ai-rp-out");
+      go.disabled = true; o.innerHTML = `<span class="muted">در حال اجرا…</span>`;
+      try {
+        const r = await api(`/ai/calls/${c.id}/replay`, { body: { model: d.querySelector("#ai-rp-model").value, effort: d.querySelector("#ai-rp-effort").value } });
+        const k = r.call || {};
+        o.innerHTML = `<div class="muted" dir="ltr">${esc(r.model)} · effort ${esc(k.effort || "—")} · ${tok(k)} · ${usd(k.cost_usd)} · ${M(Math.round((r.ms || 0) / 100) / 10)} ث</div>`
+          + `<div style="display:flex;gap:8px;flex-wrap:wrap"><div style="flex:1;min-width:280px"><b>پاسخِ اصلی (${esc(c.model || "")})</b>${pre(out || "—")}</div>`
+          + `<div style="flex:1;min-width:280px"><b>پاسخِ ${esc(r.model)}</b>${pre(JSON.stringify(r.out, null, 2))}</div></div>`;
+      } catch (e) { o.innerHTML = `<div class="tp-note warn">${esc(e.message)}</div>`; }
+      go.disabled = false;
+    };
   }
 
   function wire(root, S, render) {
@@ -255,6 +283,9 @@
       const body = {};
       Q("[data-ai-cfg]").forEach((i) => { body[i.dataset.aiCfg] = Number(TP.digits(i.value)); });
       body.markets = [...Q("[data-ai-mk]")].filter((x) => x.checked).map((x) => x.dataset.aiMk);
+      const mdl = G("[data-ai-model]"), eff = G("[data-ai-effort]");
+      if (mdl) body.model = mdl.value;
+      if (eff) body.effort = eff.value;
       if (body.markets.length > A.st.maxMarkets) return fail(new Error(`حداکثر ${A.st.maxMarkets} بازار.`));
       try { await api("/ai/config", { method: "PUT", body }); await load(); const m = document.getElementById("ai-cfg-msg"); if (m) m.textContent = "ذخیره شد ✓"; } catch (e) { fail(e); }
     };

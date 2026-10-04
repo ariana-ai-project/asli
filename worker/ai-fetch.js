@@ -9,6 +9,7 @@ const T = (v) => String(v == null ? "" : v).trim();
 
 /** دلار به ازای یک میلیون توکن (ورودی، خروجی، خواندن از کش، نوشتن در کشِ ۵ دقیقه‌ای) — جدول قیمتِ مهر ۱۴۰۵ */
 export const PRICES = {
+  "claude-fable-5-1": { in: 10, out: 50, cr: 0.25, cw: 12.5 },
   "claude-opus-5-5": { in: 4, out: 20, cr: 0.2, cw: 5 },
   "claude-opus-5": { in: 5, out: 25, cr: 0.5, cw: 6.25 },
   "claude-opus-4-8": { in: 5, out: 25, cr: 0.5, cw: 6.25 },

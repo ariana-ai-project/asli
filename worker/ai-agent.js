@@ -33,7 +33,7 @@ import { writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { getSettings } from "./settings.js";
 import { fmtFa } from "./time.js";
-import { negotiate, negotiationContext, closingReport, AGENT_MODEL } from "./ai-prompts.js";
+import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
 
@@ -63,7 +63,8 @@ CREATE INDEX IF NOT EXISTS ix_ailog_run ON ai_log(run_id, id);
 `;
 
 /* تنظیماتِ هر کارشناس هوشمند (تب کارشناس هوشمند). minInvites فقط هدف است: بی شمارهٔ پنل دعوتی نمی‌رود */
-export const AI_DEFAULTS = { minInvites: 5, maxInvites: 10, markets: ["IR"], quietMin: 30, maxTurns: 30, maxItems: 10, reuseDays: 14 };
+/* model و effort: مدلِ مذاکره و شرحِ پایانی و «عمق فکر»ش — از تب (ai-prompts.js:AGENT_MODELS) */
+export const AI_DEFAULTS = { minInvites: 5, maxInvites: 10, markets: ["IR"], quietMin: 30, maxTurns: 30, maxItems: 10, reuseDays: 14, model: AGENT_MODEL, effort: "medium" };
 const LIMITS = { minInvites: [1, 20], maxInvites: [1, 30], quietMin: [5, 10080], maxTurns: [3, 80], maxItems: [1, 20], reuseDays: [0, 60] };
 const LOCK_LONG = 16 * 60000;           /* جستجوی هوشمند چند دقیقه طول می‌کشد؛ سقف Cron ۱۵ دقیقه */
 const LOCK_STEP = 4 * 60000;
@@ -71,7 +72,7 @@ const THREAD_LOCK = 3 * 60000;
 /* هر دعوت حدود ۲۵ زیردرخواست دارد (ارسال، پیامک، پخش، ثبت) — یکی در هر اجرا تا زیر سقفِ ۵۰ بماند */
 const INVITES_PER_TICK = 1;
 const STATE_FA = { prep: "آماده‌سازی و بررسی سوابق", search: "جستجوی هوشمند", work: "دعوت و مذاکره", closing: "جدول کمیسیون و نامه", done: "پایان‌یافته", paused: "متوقف", ended: "بسته شد" };
-const PURPOSE_FA = { normalize: "تفکیک قلم (نوع و لایه‌ها)", smart: "جستجوی هوشمند", proforma: "خوانش پیش‌فاکتور", negotiate: "مذاکره", closing: "شرح فرایند و معیارها", letter: "نگارش نامه" };
+const PURPOSE_FA = { normalize: "تفکیک قلم (نوع و لایه‌ها)", smart: "جستجوی هوشمند", proforma: "خوانش پیش‌فاکتور", negotiate: "مذاکره", closing: "شرح فرایند و معیارها", letter: "نگارش نامه", compare: "مقایسهٔ مدل (بی اجرا)" };
 
 export function cfgOf(row) {
   const c = { ...AI_DEFAULTS, ...parse(row && row.config_json, {}) };
@@ -79,6 +80,8 @@ export function cfgOf(row) {
   if (c.maxInvites < c.minInvites) c.maxInvites = c.minInvites;
   c.markets = (Array.isArray(c.markets) ? c.markets : []).filter((k) => MARKETS.some((m) => m.key === k)).slice(0, MAX_MARKETS);
   if (!c.markets.length) c.markets = ["IR"];
+  if (!modelOk(c.model)) c.model = AGENT_MODEL;
+  if (!EFFORTS.includes(c.effort)) c.effort = "medium";
   return c;
 }
 export const agentOf = (env, expertId) => env.DB.prepare("SELECT * FROM ai_agents WHERE expert_id=?").bind(expertId).first().catch(() => null);
@@ -507,7 +510,8 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     const maxId = msgs.length ? msgs[msgs.length - 1].id : st.seen_msg;
     const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs });
     rec.purpose = "negotiate";
-    const res = (await negotiate(rec.env, { company: COMPANY(env), context, effort: fast ? "low" : "medium", timeoutMs: fast ? 24000 : undefined })).out;
+    /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
+    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined })).out;
     const out = [], errors = [];
     for (const a of (Array.isArray(res.actions) ? res.actions : []).slice(0, 5)) {
       const b = bundles.find((x) => x.id === int(a.bundle_id));
@@ -636,13 +640,14 @@ async function saveMd(env, run, ex) {
 /* ------------------------------------------------------------------ */
 /* ۵. پایان: شرح و معیارها ← نامه ← جدول کمیسیون و تحویل ← خداحافظی        */
 /* ------------------------------------------------------------------ */
-async function stepClosing(env, run, { ex, rec }) {
+async function stepClosing(env, run, k) {
+  const { ex, rec } = k;
   const cl = run.data.closing || (run.data.closing = { step: "report" });
   const aid = run.assignment_id;
   if (cl.step === "report") {
     const context = await closingContext(env, run);
     rec.purpose = "closing"; rec.thread = null;
-    const r = (await closingReport(rec.env, { company: COMPANY(env), context })).out;
+    const r = (await closingReport(rec.env, { company: COMPANY(env), context, model: k.cfg.model, effort: k.cfg.effort })).out;
     cl.report = { narrative: T(r.narrative), criteria: (r.criteria || []).map(T).filter(Boolean), challenges: (r.challenges || []).map(T).filter(Boolean), picks: r.picks || [], notes: T(r.notes) };
     cl.step = "letter";
     await env.DB.batch([saveData(env, run),
@@ -882,8 +887,10 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
         FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) ORDER BY a.dispatched_at DESC LIMIT 20`).bind(ex.id).all()).results || [];
     const tot = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM ai_calls WHERE expert_id=?").bind(ex.id).first();
-    return json({ agent: { mode: ag.mode, on: ag.mode === "on", on_at: ag.on_at, cfg: cfgOf(ag), updated_at: ag.updated_at }, defaults: AI_DEFAULTS,
-      markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: env.AI_AGENT_MODEL || AGENT_MODEL, sms: smsReady(env),
+    const cfg = cfgOf(ag);
+    return json({ agent: { mode: ag.mode, on: ag.mode === "on", on_at: ag.on_at, cfg, updated_at: ag.updated_at }, defaults: AI_DEFAULTS,
+      markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env),
+      models: Object.entries(AGENT_MODELS).map(([id, x]) => ({ id, fa: x.fa, price: x.price, effort: x.effort })), efforts: EFFORTS,
       runs: await runsOf(env, ex.id), open: open.filter((a) => a.items > 0), totals: tot || { n: 0, cost: 0 }, purposes: PURPOSE_FA });
   }
   /* روشن/خاموشِ خودکار: خاموش همهٔ کارها را همان لحظه نگه می‌دارد؛ روشن فقط ارجاع‌های بعد از همین لحظه را خودکار برمی‌دارد */
@@ -900,6 +907,8 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
     const cur = cfgOf(ag), nx = { ...cur };
     for (const k of Object.keys(LIMITS)) if (b[k] !== undefined) nx[k] = Number(b[k]);
     if (Array.isArray(b.markets)) nx.markets = b.markets;
+    if (b.model !== undefined) { if (!modelOk(b.model)) throw new HttpError("این مدل در فهرست نیست."); nx.model = b.model; }
+    if (b.effort !== undefined) { if (!EFFORTS.includes(b.effort)) throw new HttpError("عمقِ فکرِ نامعتبر."); nx.effort = b.effort; }
     const c = cfgOf({ config_json: JSON.stringify(nx) });
     await env.DB.prepare("UPDATE ai_agents SET config_json=?, updated_at=?, updated_by=? WHERE expert_id=?").bind(JSON.stringify(c), now(), `expert:${ex.id}`, ex.id).run();
     return json({ ok: true, cfg: c });
@@ -962,6 +971,27 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
     const c = await env.DB.prepare("SELECT * FROM ai_calls WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!c) throw new HttpError("این فراخوانی پیدا نشد.", 404);
     return json({ call: { ...c, purpose_fa: PURPOSE_FA[c.purpose] || c.purpose } });
+  }
+  /* «مقایسهٔ مدل»: همان درخواستِ ضبط‌شدهٔ یک دورِ مذاکره یا شرحِ پایانی با مدل یا عمقِ فکرِ دیگر — فقط خروجی، بی اجرا؛
+     خودش هم با هزینه‌اش در فهرستِ فراخوانی‌ها می‌نشیند (purpose: compare) */
+  if ((mm = /^\/ai\/calls\/(\d+)\/replay$/.exec(path)) && m === "POST") {
+    const b = await readJson(request);
+    const c = await env.DB.prepare("SELECT * FROM ai_calls WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
+    if (!c) throw new HttpError("این فراخوانی پیدا نشد.", 404);
+    if (!["negotiate", "closing", "compare"].includes(c.purpose)) throw new HttpError("فقط دورِ مذاکره و شرحِ پایانی قابلِ مقایسه‌اند.", 422);
+    if (!modelOk(b.model)) throw new HttpError("این مدل در فهرست نیست.");
+    const req = parse(c.request_json, null);
+    if (!req) throw new HttpError("درخواستِ ضبط‌شده کامل نیست (بریده شده) و قابلِ تکرار نیست.", 422);
+    const rec = recorder(env);
+    rec.purpose = "compare"; rec.thread = c.thread_id;
+    const t0 = now();
+    let out, error = null;
+    try { out = await replayCall(rec.env, req, { model: b.model, effort: EFFORTS.includes(b.effort) ? b.effort : "medium" }); }
+    catch (e) { error = e.message; }
+    await flushCalls(env, { id: c.run_id }, ex.id, rec);
+    const last = await env.DB.prepare("SELECT id, model, effort, in_tok, out_tok, cache_read, cost_usd, ms FROM ai_calls WHERE expert_id=? AND purpose='compare' ORDER BY id DESC LIMIT 1").bind(ex.id).first();
+    if (error) throw new HttpError(`مقایسه نشد: ${error}`, 502);
+    return json({ ok: true, out: out.out, model: out.model, call: last, ms: now() - t0 });
   }
   /* پیامک‌ها: هر پیامکِ گفت‌وگوهای همین کارشناس — رفت یا نه، از چه راهی، چرا (متن با رمزِ پوشیده) */
   if (path === "/ai/sms" && m === "GET") {

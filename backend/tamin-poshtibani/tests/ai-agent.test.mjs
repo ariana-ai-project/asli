@@ -298,3 +298,45 @@ test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کر
   assert.equal(go.status, 200, JSON.stringify(go.data));
   assert.equal(DB.raw.prepare("SELECT state FROM ai_runs WHERE assignment_id=2").get().state, "prep");
 });
+
+test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku بی effort و fallbacks؛ «مقایسهٔ مدل» همان پرامپت را بی اجرا تکرار می‌کند", { skip: SKIP }, async () => {
+  const bad = await call("/ai/config", { method: "PUT", headers: EX, body: { model: "gpt-x" } });
+  assert.equal(bad.status, 400, "مدلِ بیرون از فهرست نه");
+  const ok = await call("/ai/config", { method: "PUT", headers: EX, body: { model: "claude-sonnet-5-5", effort: "high" } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  assert.deepEqual([ok.data.cfg.model, ok.data.cfg.effort], ["claude-sonnet-5-5", "high"]);
+  const st = (await call("/ai/state", { headers: EX })).data;
+  assert.equal(st.model, "claude-sonnet-5-5");
+  assert.deepEqual(st.models.map((m) => m.id), ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5"]);
+
+  /* مقایسه: یک دورِ مذاکرهٔ ضبط‌شده با Haiku — بی effort، بی fallbacks و بی هدرِ بتا؛ هیچ تصمیمی اجرا نمی‌شود */
+  const neg = DB.raw.prepare("SELECT id FROM ai_calls WHERE purpose='negotiate' ORDER BY id LIMIT 1").get();
+  const before = DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_msgs").get().n;
+  let seen = null, hdr = null;
+  model = (b) => { seen = b; return jsonOut({ reply: "پاسخِ مدلِ دیگر", actions: [], thread_status: "active", memo: "m", note: "n" }); };
+  const n = calls.length;
+  const rp = await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "claude-haiku-4-5", effort: "high" } });
+  assert.equal(rp.status, 200, JSON.stringify(rp.data));
+  hdr = since(n).find((c) => c.bot === "ai").headers;
+  assert.equal(seen.model, "claude-haiku-4-5");
+  assert.equal(seen.output_config.effort, undefined, "Haiku پارامترِ effort نمی‌گیرد");
+  assert.equal(seen.output_config.format.type, "json_schema");
+  assert.equal(seen.fallbacks, undefined);
+  assert.equal(hdr["anthropic-beta"], undefined);
+  assert.match(seen.system[0].text, /کارشناس هوشمند خرید/, "همان پرامپتِ سیستم");
+  assert.match(seen.messages[0].content[0].text, /\[کد ۱\] گریس نسوز کیلویی/, "همان پرونده");
+  assert.equal(rp.data.out.reply, "پاسخِ مدلِ دیگر");
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_msgs").get().n, before, "مقایسه هیچ پیام یا تصمیمی اجرا نمی‌کند");
+  const cmp = DB.raw.prepare("SELECT * FROM ai_calls WHERE purpose='compare' ORDER BY id DESC LIMIT 1").get();
+  assert.equal(cmp.model, "claude-opus-5-5", "مدلِ پاسخ همان است که API برگرداند (این‌جا بدل)");
+  assert.ok(cmp.cost_usd > 0);
+  /* با Sonnet: effort همان انتخاب و fallbacks */
+  model = (b) => { seen = b; return jsonOut({ reply: "", actions: [], thread_status: "active", memo: "", note: "" }); };
+  await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "claude-sonnet-5-5", effort: "low" } });
+  assert.deepEqual([seen.model, seen.output_config.effort, seen.fallbacks], ["claude-sonnet-5-5", "low", "default"]);
+  /* پیامِ ورودیِ نادرست */
+  const nope = await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "x" } });
+  assert.equal(nope.status, 400);
+  const prf = DB.raw.prepare("SELECT id FROM ai_calls WHERE purpose='proforma' LIMIT 1").get();
+  assert.equal((await call(`/ai/calls/${prf.id}/replay`, { headers: EX, body: { model: "claude-sonnet-5-5" } })).status, 422, "خوانشِ پیش‌فاکتور مقایسه نمی‌شود");
+});

@@ -1,7 +1,7 @@
 /**
  * پرامپت‌ها و فراخوانیِ مدلِ کارشناس هوشمند (مهر ۱۴۰۵)
  *
- * دو کار با مدلِ Claude Opus 5.5 و خروجیِ ساختاریافته (output_config.format — JSON طبق طرح، بی ابزار):
+ * دو کار با مدلِ انتخابیِ تب (پیش‌فرض Claude Opus 5.5) و خروجیِ ساختاریافته (output_config.format — JSON طبق طرح، بی ابزار):
  *   negotiate — یک دورِ مذاکره در یک گفت‌وگو: پاسخ به تأمین‌کننده و تصمیم‌ها روی بسته‌ها.
  *   closing   — شرحِ فرایند، چالش‌ها و معیار انتخاب برای نامه و برگهٔ کمیسیون.
  * پرامپتِ سیستم ثابت است (کش می‌شود)؛ پروندهٔ هر دور در پیامِ کاربر می‌آید. هر فراخوانی با aiFetch در ai_calls ضبط
@@ -15,6 +15,20 @@ export const AGENT_MODEL = "claude-opus-5-5";
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
+/**
+ * مدل‌هایی که کارشناس می‌تواند در تب انتخاب کند (مهر ۱۴۰۵). قیمت: دلار به ازای یک میلیون توکنِ ورودی/خروجی.
+ * effort: Haiku 4.5 پارامترِ «عمق فکر» را نمی‌پذیرد (۴۰۰). fallbacks: فقط مدل‌هایی که طبقه‌بندِ ایمنیِ سمتِ سرور دارند.
+ * همه خروجیِ ساختاریافته (json_schema) را می‌پذیرند.
+ */
+export const AGENT_MODELS = {
+  "claude-opus-5-5": { fa: "Claude Opus 5.5 — پیش‌فرض: داوریِ دقیق در تصمیم‌های چندشرطی", price: [4, 20], effort: true, fallbacks: true },
+  "claude-fable-5-1": { fa: "Claude Fable 5.1 — تواناترین و گران‌ترین", price: [10, 50], effort: true, fallbacks: true },
+  "claude-sonnet-5-5": { fa: "Claude Sonnet 5.5 — سریع‌تر، نصفِ قیمتِ Opus", price: [2, 10], effort: true, fallbacks: true },
+  "claude-haiku-4-5": { fa: "Claude Haiku 4.5 — ارزان‌ترین؛ فقط برای آزمون", price: [1, 5], effort: false, fallbacks: false },
+};
+export const EFFORTS = ["low", "medium", "high"];
+export const modelOk = (m) => Object.prototype.hasOwnProperty.call(AGENT_MODELS, m);
+
 export class AiError extends Error {
   constructor(message, status, code) { super(message); this.status = status || 502; this.code = code || "error"; }
 }
@@ -22,18 +36,21 @@ export class AiError extends Error {
 /**
  * یک درخواست با خروجیِ JSON طبقِ schema. خروجی {out, usage, model}. شکست‌ها AiError با پیام فارسی:
  * refusal (مدل رد کرد)، max_tokens (پاسخ نیمه‌کاره)، bad_json، و خطای HTTP.
+ * model: یکی از AGENT_MODELS (تنظیمِ تب)؛ env.AI_AGENT_MODEL فقط اگر تب چیزی نگفته باشد.
  */
-export async function callModel(env, { system, user, schema, effort = "medium", maxTokens = 16000, timeoutMs }) {
+export async function callModel(env, { system, user, schema, model, effort = "medium", maxTokens = 16000, timeoutMs }) {
   if (!env.ANTHROPIC_API_KEY) throw new AiError("کلید مدل روی این پروژه ست نشده است.", 503, "off");
+  const m = modelOk(model) ? model : modelOk(env.AI_AGENT_MODEL) ? env.AI_AGENT_MODEL : AGENT_MODEL;
+  const cap = AGENT_MODELS[m];
   const body = {
-    model: env.AI_AGENT_MODEL || AGENT_MODEL,
+    model: m,
     max_tokens: maxTokens,
     system: [{ type: "text", text: system, cache_control: { type: "ephemeral" } }],
     messages: [{ role: "user", content: [{ type: "text", text: user }] }],
-    output_config: { effort, format: { type: "json_schema", schema } },
-    fallbacks: "default",
+    output_config: { ...(cap.effort ? { effort: EFFORTS.includes(effort) ? effort : "medium" } : {}), format: { type: "json_schema", schema } },
+    ...(cap.fallbacks ? { fallbacks: "default" } : {}),
   };
-  const headers = { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", "anthropic-beta": FALLBACK_BETA };
+  const headers = { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", ...(cap.fallbacks ? { "anthropic-beta": FALLBACK_BETA } : {}) };
   const go = (b, h) => aiFetch(env, API(env), { method: "POST", headers: h, body: JSON.stringify(b), ...(timeoutMs ? { signal: AbortSignal.timeout(timeoutMs) } : {}) });
   let r = await go(body, headers);
   let d = await r.json().catch(() => ({}));
@@ -223,8 +240,21 @@ export function negotiationContext(c) {
   ].filter((x) => x != null).join("\n");
 }
 
-export async function negotiate(env, { company, context, effort, timeoutMs }) {
-  return callModel(env, { system: negotiateSystem(company), user: context, schema: NEGOTIATE_SCHEMA, effort: effort || "medium", maxTokens: 16000, timeoutMs });
+export async function negotiate(env, { company, context, model, effort, timeoutMs }) {
+  return callModel(env, { system: negotiateSystem(company), user: context, schema: NEGOTIATE_SCHEMA, model, effort: effort || "medium", maxTokens: 16000, timeoutMs });
+}
+
+/**
+ * «مقایسهٔ مدل» (تب کارشناس هوشمند): همان درخواستِ ضبط‌شدهٔ یک دور — همان پرامپتِ سیستم، همان پرونده، همان طرحِ خروجی —
+ * با مدل یا عمقِ فکرِ دیگر. فقط خروجی برمی‌گردد؛ هیچ تصمیمی اجرا نمی‌شود.
+ */
+export async function replayCall(env, request, { model, effort }) {
+  const sys = Array.isArray(request.system) ? request.system.map((x) => x.text).join("\n\n") : String(request.system || "");
+  const msg = (request.messages || [])[0];
+  const user = msg ? (Array.isArray(msg.content) ? msg.content.filter((x) => x.type === "text").map((x) => x.text).join("\n") : String(msg.content || "")) : "";
+  const schema = request.output_config && request.output_config.format && request.output_config.format.schema;
+  if (!sys || !user || !schema) throw new AiError("این فراخوانی قابلِ تکرار نیست (فقط مذاکره و شرحِ پایانی).", 422, "replay");
+  return callModel(env, { system: sys, user, schema, model, effort, maxTokens: request.max_tokens || 16000 });
 }
 
 /* ------------------------------------------------------------------ */
@@ -266,6 +296,6 @@ export const closingSystem = (company) => `تو «کارشناس هوشمند خ
 ۳. تصمیمِ نهایی با کمیسیون است؛ «پیشنهاد می‌شود» بنویس، نه «خریداری شد».
 ۴. فارسیِ اداری، با نیم‌فاصلهٔ درست («تأمین‌کننده»، «پیش‌فاکتور»).`;
 
-export async function closingReport(env, { company, context }) {
-  return callModel(env, { system: closingSystem(company), user: context, schema: CLOSING_SCHEMA, effort: "medium", maxTokens: 16000 });
+export async function closingReport(env, { company, context, model, effort }) {
+  return callModel(env, { system: closingSystem(company), user: context, schema: CLOSING_SCHEMA, model, effort: effort || "medium", maxTokens: 16000 });
 }
