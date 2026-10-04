@@ -38,6 +38,7 @@ import { ascii, nameOf, keyOf, words, catalogMeta, headOfCode, headData, catalog
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
+import { aiFetch } from "./ai-fetch.js";
 
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 /* ۲٫۱: فهرستِ لایه‌ها بی «نمره» و با مساحت، محیط و یال‌ها (یکسان‌سازیِ دوم) */
@@ -285,7 +286,7 @@ export async function settle(env, meta, raw, text, { strict = false } = {}) {
 async function askModel(env, it, meta, cands, samples, conv) {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError("کلید مدل روی این پروژه ست نشده است.", 503);
   const model = env.AI_MODEL || MODEL;
-  const r = await fetch(API(env), {
+  const r = await aiFetch(env, API(env), {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({

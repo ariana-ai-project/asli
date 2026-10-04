@@ -18,6 +18,7 @@
 import { MODEL } from "./extract.js";
 import { HttpError } from "./http.js";
 import { validDtime, normalizeDtime, VAT_RATE, ENUMS } from "./quote-rules.js";
+import { aiFetch } from "./ai-fetch.js";
 
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 export const AI_VERSION = "sp-check/3.0";
@@ -224,7 +225,7 @@ export async function runAiCheck(env, { fileUrl, mime, lines, terms }) {
     tool_choice: { type: "tool", name: TOOL.name },
     messages: [{ role: "user", content: [doc, { type: "text", text: bundlePrompt(lines, terms) }] }],
   };
-  const r = await fetch(API(env), {
+  const r = await aiFetch(env, API(env), {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify(body),

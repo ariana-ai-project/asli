@@ -48,6 +48,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
+import { AI_DDL, aiRoute } from "./ai-agent.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -179,6 +180,7 @@ CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY, assignment_id INTEG
 CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
 ${SP_DDL.trim()}
 ${NAV_DDL}
+${AI_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -1051,7 +1053,9 @@ async function tray(env, ex, url) {
   if (!full) return out;
   const tg = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(ex.id).first();
   const team = ex.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(ex.id).all()).results || [] : [];
-  return { ...out, me: { role: "expert", expert: meOut(ex), team },
+  /* کارشناس هوشمند (worker/ai-agent.js): پنل تبِ «🤖 کارشناس هوشمند» را فقط برای همین‌ها نشان می‌دهد */
+  const ai = await env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null);
+  return { ...out, me: { role: "expert", expert: { ...meOut(ex), ai: ai ? ai.mode : null }, team },
     tg: { connected: !!(tg && tg.telegram_chat), botConfigured: !!env.TG_BOT_TOKEN, bot: env.TG_BOT_USERNAME || null,
       teamBotConfigured: !!env.TG_TEAM_BOT_TOKEN, teamBot: env.TG_TEAM_BOT_USERNAME || null } };
 }
@@ -1307,13 +1311,19 @@ async function route(request, env, ctx) {
       if (!u || !u.update_id) return json({ ok: true });
       const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(-(Math.abs(u.update_id) + 1e12), now()).run();
       if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
-      await handleSpUpdate(env, u);
+      /* ctx: کارِ تأمین‌کننده در گفت‌وگوی کارشناس هوشمند، گامِ مذاکره را بعد از پاسخ (waitUntil) می‌زند */
+      await handleSpUpdate(env, u, ctx);
       return json({ ok: true });
     }
 
     /* پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (worker/sp-api.js) */
     if (path.startsWith("/sp/")) {
       const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json });
+      if (r) return r;
+    }
+    /* تب «کارشناس هوشمند» پنل کارشناس (worker/ai-agent.js) */
+    if (path.startsWith("/ai/")) {
+      const r = await aiRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json });
       if (r) return r;
     }
 
@@ -1399,7 +1409,8 @@ async function route(request, env, ctx) {
       if (who.expert) {
         /* زیرمجموعه‌های کارشناس ارشد — برای «ارجاع به تیم» و تب تیم */
         const team = who.expert.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(who.expert.id).all()).results || [] : [];
-        return json({ ...who, expert: meOut(who.expert), team });
+        const ai = await env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(who.expert.id).first().catch(() => null);
+        return json({ ...who, expert: { ...meOut(who.expert), ai: ai ? ai.mode : null }, team });
       }
       return json(who);
     }

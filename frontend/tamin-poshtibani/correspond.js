@@ -195,7 +195,9 @@
     if (m.kind === "event") { const c = evCard(m); if (c) return c; }
     if (m.kind === "event" || m.kind === "note") return `<div class="sp-msg ev ${m.kind === "note" ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}"` : ""}>${esc(m.body)}${m.kind === "note" ? " <i>(فقط شما می‌بینید)</i>" : ""}<time>${when(m.at)}</time></div>`;
     const me = m.who === "e";
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : esc(S.d.thread.supplier)}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
+    /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
+    const ai = !!(m.meta && m.meta.ai);
+    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? (ai ? "🤖 کارشناس هوشمند" : "شما") : esc(S.d.thread.supplier)}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
   }
   function chatPane() {
     S.unseen = 0;
@@ -425,7 +427,9 @@
     };
   }
   function smsDialog(r) {
-    dlg("📱 پیامک شبیه‌سازی‌شده", `<p class="sp-muted">پیامک فعلاً خاموش است؛ همین متن به‌جای پیامک برای ${esc(r.sms.to)} (${esc(r.sms.label || "—")}) است. لینک‌ها واقعی‌اند — برای دیدن سمت تأمین‌کننده بازشان کنید.</p>
+    /* پیامکِ واقعی (TextBee) رفت: رمزِ ورودِ تأمین‌کننده فقط در گوشیِ خودش است و این‌جا نشان داده نمی‌شود */
+    if (r.sms.sent) return dlg("📱 پیامک فرستاده شد", `<p class="sp-muted">${esc(r.sms.note || "")} لینک پنل، لینک بات و رمز ورود فقط در همان پیامک است؛ گفت‌وگو و پاسخ‌های تأمین‌کننده همین‌جا می‌آید.</p>`);
+    dlg("📱 پیامک شبیه‌سازی‌شده", `<p class="sp-muted">${r.sms.error ? `⚠️ پیامکِ واقعی نرفت: ${esc(r.sms.error)}. ` : "پیامک فعلاً خاموش است؛ "}همین متن به‌جای پیامک برای ${esc(r.sms.to)} (${esc(r.sms.label || "—")}) است. لینک‌ها واقعی‌اند — برای دیدن سمت تأمین‌کننده بازشان کنید.</p>
       <div class="sp-sms">${esc(r.sms.text)}</div>
       <div class="sp-row" style="margin-top:10px"><a class="tp-btn sm" href="${esc(r.links.panel)}" target="_blank" rel="noopener">🌐 پنل تأمین‌کننده</a>${r.links.bot ? `<a class="tp-btn sm" href="${esc(r.links.bot)}" target="_blank" rel="noopener">🤖 بات تأمین‌کننده</a>` : ""}</div>`);
   }

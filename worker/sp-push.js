@@ -108,13 +108,15 @@ export async function setMenuButton(env, chat, role) {
 /* ------------------------------------------------------------------ */
 /* متن‌ها و کارت‌ها                                                       */
 /* ------------------------------------------------------------------ */
-const sideName = (th, who, side) => (who === "e"
-  ? (side === "e" ? "شما" : `کارشناس — ${th.expert_label || th.expert_name}`)
+/* پیامِ کارشناس هوشمند (meta.ai) همه‌جا با «🤖» پیداست — تأمین‌کننده می‌داند طرفش دستیارِ هوشمند است */
+const isAi = (m) => !!(m && m.meta && m.meta.ai);
+const sideName = (th, who, side, m) => (who === "e"
+  ? (side === "e" ? (isAi(m) ? "🤖 کارشناس هوشمند" : "شما") : `${isAi(m) ? "🤖 کارشناس هوشمند" : "کارشناس"} — ${th.expert_label || th.expert_name}`)
   : (side === "s" ? "شما" : th.supplier_name));
 
 export function msgLine(th, m, side) {
-  if (m.kind === "event" || m.kind === "note") return `<i>${esc(m.body)}</i>\n<code>${when(m.at)}</code>`;
-  return `${m.who === side ? "🔹" : "🔸"} <b>${esc(sideName(th, m.who, side))}</b> · ${when(m.at)}\n${esc(m.body)}`;
+  if (m.kind === "event" || m.kind === "note") return `<i>${isAi(m) ? "🤖 " : ""}${esc(m.body)}</i>\n<code>${when(m.at)}</code>`;
+  return `${m.who === side ? "🔹" : "🔸"} <b>${esc(sideName(th, m.who, side, m))}</b> · ${when(m.at)}\n${esc(m.body)}`;
 }
 
 export function headerText(env, th, side) {
@@ -375,8 +377,9 @@ export async function pushMsgs(env, thIn, msgs) {
 }
 
 /**
- * پیامکِ شبیه‌سازی‌شده (پیامک فعلاً خاموش است) در بات مکاتباتِ کارشناس — با لینک پنل، لینک بات و رمز، تا
- * سمتِ تأمین‌کننده را ببیند. خروجی: به چند گفت‌وگو رسید (۰ یعنی کارشناس هنوز بات مکاتبات را وصل نکرده).
+ * پیامکِ شبیه‌سازی‌شده در بات مکاتباتِ کارشناس — با لینک پنل، لینک بات و رمز، تا سمتِ تأمین‌کننده را ببیند: وقتی
+ * درگاه پیامک وصل نیست، پیامکِ واقعی نرفت (sms.error) یا تأمین‌کنندهٔ فرضی است (worker/sp-sms.js).
+ * خروجی: به چند گفت‌وگو رسید (۰ یعنی کارشناس هنوز بات مکاتبات را وصل نکرده).
  */
 export async function deliverSms(env, expertId, sms, rowsIn) {
   if (!spReady(env) || !sms) return 0;
@@ -389,7 +392,8 @@ export async function deliverSms(env, expertId, sms, rowsIn) {
       if (sms.bot) kb.push([{ text: "🤖 بات تأمین‌کننده (لینک پیامک)", url: sms.bot }]);
       if (sms.thread_id) kb.push([{ text: "🔀 رفتن به این گفت‌وگو", callback_data: `go:${sms.thread_id}:e` }]);
       await send(env, row, `📱 <b>پیامک شبیه‌سازی‌شده</b> — به ${esc(sms.to || "")}${sms.label ? ` (${esc(sms.label)})` : ""}${sms.supplier ? ` · ${esc(sms.supplier)}` : ""}${row.role !== "e" ? " <i>(نقش کارشناس)</i>" : ""}\n`
-        + "<i>پیامک فعلاً خاموش است؛ در حالت واقعی همین متن فقط به گوشی تأمین‌کننده می‌رود. رمزِ هر پیامک تا هفت روز (یا تا «خروج») معتبر است.</i>\n"
+        + (sms.error ? `⚠️ <i>پیامکِ واقعی نرفت: ${esc(sms.error)} — متن را خودتان به تأمین‌کننده برسانید.</i>\n`
+          : "<i>پیامک فعلاً خاموش است؛ در حالت واقعی همین متن فقط به گوشی تأمین‌کننده می‌رود. رمزِ هر پیامک تا هفت روز (یا تا «خروج») معتبر است.</i>\n")
         + `<blockquote>${esc(sms.text || "")}</blockquote>`, kb);
       await save(env, row);
       n++;

@@ -11,6 +11,7 @@
  * خودش فایل را از یک لینک امضاشده برمی‌دارد.
  */
 import { ExtractError, MODEL } from "./extract.js";
+import { aiFetch } from "./ai-fetch.js";
 
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 /* ANTHROPIC_API_BASE فقط در توسعهٔ محلی ست می‌شود (مدل بدلی)؛ همان قاعدهٔ discovery.js */
@@ -278,7 +279,7 @@ export async function writeLetter(env, { transcript, request, items, quotes, all
     + `تأمین‌کنندگانِ تیک‌خورده:\n${supplierLines}\n`
     + (notes ? `\nتوضیحات کارشناس در برگهٔ کمیسیون:\n${notes}\n` : "");
 
-  const r = await fetch(AI_URL(env), {
+  const r = await aiFetch(env, AI_URL(env), {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({

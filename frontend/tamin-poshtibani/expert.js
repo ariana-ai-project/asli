@@ -102,9 +102,11 @@
   /* ساعت کاری مانده تا مهلت — منفی یعنی مهلت گذشته */
   const trayLeft = (a) => TP.budget(a.dispatched_at, a.days || 1) - TP.wh(a.dispatched_at, S.now);
   /* نوار تب‌های صفحهٔ کارشناس: کارتابل، (ارشد: تیم کارشناسی و تنظیم اعلانات)، و «حساب من» برای همه */
-  const LIST_TABS = ["team", "alerts", "account"];
+  const LIST_TABS = ["team", "alerts", "account", "ai"];
+  /* کارشناس هوشمند (worker/ai-agent.js): تبِ تنظیمات و جریانِ کارِ مدل — expert-ai.js */
+  const isAi = () => !!(S.expert && S.expert.ai && window.TP_AI);
   function vSeniorTabs() {
-    const T = [["tray", "کارتابل من"], ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
+    const T = [["tray", "کارتابل من"], ...(isAi() ? [["ai", "🤖 کارشناس هوشمند"]] : []), ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
     return `<div class="tp-tabs" style="padding-top:12px">${T.map(([k, l]) => `<button class="tp-tab ${(S.tab === k || (k === "tray" && !LIST_TABS.includes(S.tab))) ? "on" : ""}" data-stab="${k}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div>`;
   }
   /* باکس‌های تب تیم با آستانه‌های تیم (ارشد اگر گذاشته، وگرنه مدیر) — جدا از آستانه‌های کارتابل خودش */
@@ -146,6 +148,7 @@
     if (isSenior() && S.tab === "team") return vSeniorTabs() + vTeam();
     if (isSenior() && S.tab === "alerts") return vSeniorTabs() + vSeniorAlerts();
     if (S.tab === "account") return vSeniorTabs() + vAccount();
+    if (S.tab === "ai" && isAi()) return vSeniorTabs() + window.TP_AI.view(S);
     const rows = trayRows();
     /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
     if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
@@ -1765,6 +1768,8 @@
       catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
     });
     Q("[data-team-link]").forEach((b) => b.onclick = teamLink);
+    /* تب کارشناس هوشمند */
+    if (S.screen === "list" && S.tab === "ai" && isAi()) window.TP_AI.wire(a, S, render);
     /* حساب من */
     const acs = G("[data-acc-save]"); if (acs) acs.onclick = saveCode;
     Q("#acc-cur, #acc-new, #acc-rep").forEach((i) => i.onkeydown = (e) => { if (e.key === "Enter") saveCode(); });

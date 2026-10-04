@@ -28,7 +28,7 @@ const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : 
 /* نمایش: ی و ک فارسی و فاصله‌های یکدست — نیم‌فاصله می‌ماند («آهن‌آلات») */
 export const nrm = (x) => T(x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/\s+/g, " ");
 /* کلیدِ مقایسه: نیم‌فاصله هم فاصله، کوچک‌حرف */
-const nkey = (x) => nrm(x).replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase();
+export const nkey = (x) => nrm(x).replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase();
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
 const FA = "۰۱۲۳۴۵۶۷۸۹", AR = "٠١٢٣٤٥٦٧٨٩";
 export const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => String(FA.indexOf(d))).replace(/[٠-٩]/g, (d) => String(AR.indexOf(d)));
@@ -64,7 +64,12 @@ CREATE INDEX IF NOT EXISTS ix_sppass_phone ON sp_passes(phone_id, created_at);
    — پیام‌ها در دیتابیس می‌مانند و فقط از صفحهٔ همان طرف می‌روند — و شرایطِ فاکتورِ اعلامیِ تأمین‌کننده (و عکسش
    روی هر بسته در لحظهٔ ارسال). */
 export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept_json", "TEXT"], ["sp_links", "payload", "TEXT"],
-  ["sp_threads", "e_clear", "INTEGER"], ["sp_threads", "s_clear", "INTEGER"], ["sp_threads", "terms_json", "TEXT"], ["sp_bundles", "terms_json", "TEXT"]];
+  ["sp_threads", "e_clear", "INTEGER"], ["sp_threads", "s_clear", "INTEGER"], ["sp_threads", "terms_json", "TEXT"], ["sp_bundles", "terms_json", "TEXT"],
+  /* (دور چهارم) پیامکِ واقعی با TextBee: از کدام راه رفت (textbee | sim | hold)، وضعیت، شناسهٔ TextBee و خطا (sp-sms.js) */
+  ["sp_sms", "via", "TEXT"], ["sp_sms", "status", "TEXT"], ["sp_sms", "ref", "TEXT"], ["sp_sms", "error", "TEXT"],
+  /* تیکِ «شمارهٔ پنل»: این شماره واقعاً مال همین تأمین‌کننده است و پنلش به آن وابسته است (چند شماره هم ممکن است).
+     کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد — تیک را فقط انسان می‌زند (worker/ai-agent.js) */
+  ["sp_phones", "panel", "INTEGER"], ["sp_phones", "panel_by", "INTEGER"], ["sp_phones", "panel_at", "INTEGER"]];
 
 /** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
 export async function spBackfill(env) {
@@ -82,6 +87,8 @@ export const COMPANY = (env) => T(env && env.COMPANY) || "تونل سد آریا
 const PASS_TTL = 7 * 86400000;        /* رمز پیامک: هفت روز، یا تا اولین «خروج» */
 const SESSION_TTL = 30 * 86400000;
 const MAX_FAILS = 5, LOCK_MS = 15 * 60000, RESEND_GAP = 60000;
+/* «ارسال رمز» حالا پیامکِ واقعی است (سقف پلنِ TextBee): هر شماره در ۲۴ ساعت حداکثر این‌قدر */
+const RESEND_DAY = 6;
 export const LINE_EDITABLE = ["new", "draft", "returned", "ready"];
 export const LINE_FA = {
   new: "تازه", draft: "پیش‌نویس", ready: "آمادهٔ ارسال", submitted: "در انتظار بررسی کارشناس", returned: "برگشت برای اصلاح",
@@ -283,19 +290,22 @@ export async function resendPassword(env, k) {
   if (!p) throw new HttpError("این لینک ورود معتبر نیست.", 404);
   const t = now();
   if (p.resend_at && t - p.resend_at < RESEND_GAP) throw new HttpError("یک دقیقه صبر کنید و دوباره بخواهید.", 429);
+  const day = await env.DB.prepare("SELECT COUNT(*) AS n FROM sp_sms WHERE phone_id=? AND kind='pass' AND at>?").bind(p.id, t - 86400000).first();
+  if (day && day.n >= RESEND_DAY) throw new HttpError("امروز چند بار رمز فرستاده شده است؛ فردا دوباره بخواهید یا با کارشناس خرید تماس بگیرید.", 429);
   const th = await env.DB.prepare(`SELECT t.id, a.expert_id, e.telegram_chat FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id
     JOIN experts e ON e.id=a.expert_id WHERE t.supplier_id=? ORDER BY t.last_at DESC LIMIT 1`).bind(p.supplier_id).first();
   const sup = await env.DB.prepare("SELECT name, demo FROM sp_suppliers WHERE id=?").bind(p.supplier_id).first();
   const { pass, stmts } = await newPassword(env, p.id);
   const bot = await spBotUser(env);
   const text = smsBody(env, { intro: `رمز تازهٔ ورود به پنل تأمین‌کنندگان شرکت ${COMPANY(env)}`, k: p.k, bot, pass });
-  await env.DB.batch([
+  const res = await env.DB.batch([
     ...stmts,
     env.DB.prepare("UPDATE sp_phones SET resend_at=? WHERE id=?").bind(t, p.id),
     env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'pass',?,?)").bind(p.id, th ? th.id : null, th ? th.expert_id : null, maskPass(text, pass), t),
   ]);
-  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", text, expertChat: th ? th.telegram_chat : null,
-    expertId: th ? th.expert_id : null, threadId: th ? th.id : null, panel: panelLink(env, p.k), bot: botLink(bot, "s" + p.k) };
+  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", demo: !!(sup && sup.demo), text, expertChat: th ? th.telegram_chat : null,
+    expertId: th ? th.expert_id : null, threadId: th ? th.id : null, panel: panelLink(env, p.k), bot: botLink(bot, "s" + p.k),
+    smsId: res[res.length - 1].meta.last_row_id };
 }
 
 /* ------------------------------------------------------------------ */
@@ -338,9 +348,45 @@ export async function demoSupplier(env, by) {
   return { sup, ph: await insertPhone(env, sup.id, DEMO.phone, DEMO.label, by) };
 }
 
+/**
+ * دفترچهٔ شماره‌ها (تب «کارشناس هوشمند»): شمارهٔ تازه برای یک تأمین‌کننده یا ویرایشِ برچسب و تیکِ «پنل» روی شمارهٔ
+ * موجود. هر شماره مالِ یک تأمین‌کننده است؛ یک تأمین‌کننده می‌تواند چند شمارهٔ تیک‌خورده داشته باشد.
+ * panel: true/false — فقط انسان می‌زندش؛ کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد.
+ */
+export async function savePhone(env, by, b) {
+  let sup = int(b.supplier_id) ? await env.DB.prepare("SELECT * FROM sp_suppliers WHERE id=? AND demo=0").bind(int(b.supplier_id)).first() : null;
+  if (!sup) {
+    if (!nrm(b.supplier_name)) throw new HttpError("نام تأمین‌کننده لازم است.");
+    sup = await findOrCreateSupplier(env, b.supplier_name, by);
+  }
+  const num = normPhone(b.phone);
+  if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
+  if (num === DEMO.phone) throw new HttpError("این شمارهٔ تأمین‌کنندهٔ فرضی است.");
+  const label = nrm(b.label).slice(0, 30);
+  let ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
+  if (ph && ph.supplier_id !== sup.id) {
+    const other = await env.DB.prepare("SELECT name FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first();
+    throw new HttpError(`این شماره قبلاً برای «${other ? other.name : "تأمین‌کنندهٔ دیگر"}» ثبت شده است.`, 409);
+  }
+  if (!ph) {
+    if (!label) throw new HttpError("برای شمارهٔ تازه یک برچسب بزنید (مثلاً «همراه مدیر فروش»).");
+    ph = await insertPhone(env, sup.id, num, label, by);
+  } else if (label && label !== ph.label) {
+    await env.DB.prepare("UPDATE sp_phones SET label=? WHERE id=?").bind(label, ph.id).run();
+    ph.label = label;
+  }
+  if (b.panel !== undefined) await setPanel(env, ph.id, !!b.panel, by);
+  const row = await env.DB.prepare("SELECT id, phone, label, panel, panel_at FROM sp_phones WHERE id=?").bind(ph.id).first();
+  return { supplier: { id: sup.id, name: sup.name }, phone: { ...row, panel: !!row.panel } };
+}
+/** تیکِ «پنل» یک شماره — با این‌که چه کسی و کی */
+export async function setPanel(env, phoneId, on, by) {
+  await env.DB.prepare("UPDATE sp_phones SET panel=?, panel_by=?, panel_at=? WHERE id=?").bind(on ? 1 : 0, by || null, now(), int(phoneId)).run();
+}
+
 /** شماره‌های ثبت‌شدهٔ یک تأمین‌کننده (با نام) — برای انتخاب شماره هنگام ارسال */
 export async function phonesOfName(env, name) {
-  return (await env.DB.prepare(`SELECT p.id, p.phone, p.label, s.id AS supplier_id, s.name FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id
+  return (await env.DB.prepare(`SELECT p.id, p.phone, p.label, p.panel, s.id AS supplier_id, s.name FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id
     WHERE s.name_n=? AND s.demo=0 ORDER BY p.id`).bind(nkey(name)).all()).results || [];
 }
 
@@ -350,6 +396,8 @@ export async function phonesOfName(env, name) {
  * باز هم می‌رود — «ارسال» دوباره یعنی یادآوری.
  *
  * b: {assignment_id, item_ids, text, demo} + یا {supplier_id|supplier_name, phone_id | phone+label}
+ *    sms (اختیاری): اولِ پیامک وقتی باید کوتاه‌تر از text (اولین پیامِ گفت‌وگو) باشد.
+ *    silent: گفت‌وگو از قبل هست و این فقط پیامکِ شمارهٔ دیگری از همان تأمین‌کننده است — پیامِ تازه‌ای در گفت‌وگو نمی‌نشیند.
  */
 export async function spSend(env, ex, b) {
   const aid = int(b.assignment_id);
@@ -411,7 +459,9 @@ export async function spSend(env, ex, b) {
     "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'new',?,?,?)",
   ).bind(th.id, i.id, nrm(i.title), locked[n].head, JSON.stringify(locked[n].layers), i.qty, T(i.unit) || null, i.qty, T(i.unit) || null, nos.get(i.id), t, t));
   const { pass, stmts: passStmts } = await newPassword(env, ph.id);
-  stmts.push(...passStmts, env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
+  const silent = !!b.silent && oldRows.length > 0 && !fresh.length;
+  stmts.push(...passStmts, silent ? env.DB.prepare("UPDATE sp_threads SET last_at=? WHERE id=?").bind(t, th.id)
+    : env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
 
   const text = T(b.text).slice(0, 3000);
   /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته و لایه‌های قفل — عکسش در meta برای کارتِ پیام */
@@ -422,19 +472,23 @@ export async function spSend(env, ex, b) {
   });
   const evBody = `${fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم:` : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
   const msgs = [];
-  if (text) msgs.push(["e", "text", text, null]);
-  msgs.push(["e", "event", evBody, { ev: fresh.length ? "rfq" : "remind", items: evLines.map((l) => itemSnap(l, false)) }]);
+  const mark = b.ai ? { ai: true } : null;
+  if (!silent) {
+    if (text) msgs.push(["e", "text", text, mark]);
+    msgs.push(["e", "event", evBody, { ev: fresh.length ? "rfq" : "remind", items: evLines.map((l) => itemSnap(l, false)), ...(mark || {}) }]);
+  }
   const msgAt = stmts.length;
   for (const [who, kind, body, meta] of msgs) stmts.push(msgStmt(env, th.id, who, kind, body, meta, t));
   const bot = await spBotUser(env);
-  const smsTxt = smsBody(env, { intro: text || `استعلام قیمت از شرکت ${COMPANY(env)} — ${faN(fresh.length || its.length)} قلم`, k: ph.k, bot, pass });
+  const smsTxt = smsBody(env, { intro: T(b.sms).slice(0, 600) || text || `استعلام قیمت از شرکت ${COMPANY(env)} — ${faN(fresh.length || its.length)} قلم`, k: ph.k, bot, pass });
+  const smsAt = stmts.length;
   stmts.push(env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'rfq',?,?)").bind(ph.id, th.id, ex.id, maskPass(smsTxt, pass), t));
   const res = await env.DB.batch(stmts);
   const out = msgs.map(([who, kind, body, meta], n) => msgObj(res[msgAt + n].meta.last_row_id, th.id, who, kind, body, meta, t));
   return {
     ok: true, thread_id: th.id, request_id: asg.request_id, added: fresh.length, skipped: its.length - fresh.length,
     supplier: { id: sup.id, name: sup.name, demo: !!sup.demo }, phone: { id: ph.id, phone: ph.phone, label: ph.label, k: ph.k },
-    sms: { to: ph.phone, label: ph.label, text: smsTxt }, links: { panel: panelLink(env, ph.k), bot: botLink(bot, "s" + ph.k) }, msgs: out,
+    sms: { id: res[smsAt].meta.last_row_id, to: ph.phone, label: ph.label, text: smsTxt }, links: { panel: panelLink(env, ph.k), bot: botLink(bot, "s" + ph.k) }, msgs: out,
   };
 }
 
@@ -590,13 +644,15 @@ export async function sendableItems(env, ex, aid) {
 /* ------------------------------------------------------------------ */
 /* گفت‌وگو                                                               */
 /* ------------------------------------------------------------------ */
-export async function postMsg(env, th, side, text) {
+/** meta: علامتِ پیام (مثلاً {ai: true} برای کارشناس هوشمند)؛ kind "note": یادداشتِ درونیِ سمت کارشناس — تأمین‌کننده نمی‌بیند */
+export async function postMsg(env, th, side, text, meta = null, kind = "text") {
   const body = T(text);
   if (!body) throw new HttpError("پیام خالی است.");
   if (body.length > 3000) throw new HttpError("پیام خیلی بلند است (حداکثر ۳۰۰۰ نویسه).");
+  const k = kind === "note" && side === "e" ? "note" : "text";
   const t = now();
-  const [r] = await env.DB.batch([msgStmt(env, th.id, side, "text", body, null, t), touchStmt(env, th.id, t, false)]);
-  return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, "text", body, null, t)] };
+  const [r] = await env.DB.batch([msgStmt(env, th.id, side, k, body, meta, t), touchStmt(env, th.id, t, false)]);
+  return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, k, body, meta, t)] };
 }
 
 /* ------------------------------------------------------------------ */
@@ -815,7 +871,7 @@ const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? a
  * تأیید نهایی فقط وقتی که هر ردیفِ دروازه‌ایِ جدول تطابق ✅ است یا کارشناس تیکش زده (پیش‌فاکتور ملاک؛ sp-ai.js:resolve).
  * فیلدِ اجباری‌ای که با پذیرشِ «نیامده» خالی می‌ماند (gaps)، خط استعلام را از «ثبت موقت» و تیک «تأیید نهایی» بازمی‌دارد.
  */
-export async function decide(env, ex, bundleId, action, { comment } = {}) {
+export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
   const lines = await bundleLines(env, b.id);
   const note = T(comment).slice(0, 1000);
@@ -850,7 +906,7 @@ export async function decide(env, ex, bundleId, action, { comment } = {}) {
       env.DB.prepare("UPDATE sp_lines SET state='final', updated_at=? WHERE bundle_id=?").bind(t, b.id));
     body = `🏁 تأیید نهایی شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else throw new HttpError("تصمیم نامعتبر.");
-  const meta = { ev: action, bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })) };
+  const meta = { ev: action, bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })), ...(ai ? { ai: true } : {}) };
   stmts.push(msgStmt(env, th.id, "e", "event", body, meta, t), touchStmt(env, th.id, t));
   const out = await env.DB.batch(stmts);
   const mid = out[out.length - 2].meta.last_row_id;

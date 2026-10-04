@@ -16,6 +16,8 @@
 #                      نام کاربری‌اش را خودِ Worker از getMe می‌خواند و در settings نگه می‌دارد
 #   TG_WEBHOOK_SECRET  رازی که تلگرام در هدر X-Telegram-Bot-Api-Secret-Token برمی‌گرداند
 #                      (یک راز برای هر سه بات؛ وبهوکشان جداست)
+#   TEXTBEE_API_KEY    کلید درگاه پیامک TextBee (worker/sms.js) — تا ست نشده، پیامک‌ها شبیه‌سازی می‌شوند.
+#                      اختیاری: TEXTBEE_DEVICE_ID (شناسهٔ گوشی؛ بی آن، گوشیِ پیش‌فرضِ حساب TextBee)
 # ============================================================
 name = "asli"
 main = "worker.js"

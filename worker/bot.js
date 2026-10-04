@@ -47,8 +47,10 @@ import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
-import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink } from "./sp-core.js";
-import { pushMsgs as spPush, deliverSms as spDeliverSms } from "./sp-push.js";
+import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone } from "./sp-core.js";
+import { pushMsgs as spPush } from "./sp-push.js";
+import { deliverSms as smsDeliver } from "./sp-sms.js";
+import { aiTick } from "./ai-agent.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
 
@@ -2658,23 +2660,28 @@ async function spSendGo(env, api, chat, ex, f, d, mid) {
   } catch (e) { await api.sendMessage(chat, `⚠️ ${esc(e.message)}`).catch(() => {}); return { ok: true }; }
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
   await spPush(env, { id: r.thread_id }, r.msgs).catch((e) => console.error("sp push", e && e.message));
-  /* مکاتبات فقط در بات مکاتبات (تصمیم مدیر، مهر ۱۴۰۵): پیامکِ شبیه‌سازی‌شده همان‌جا می‌رود؛ اگر کارشناس هنوز
-     وصلش نکرده، با لینکِ اتصال نگه داشته و بعد از اتصال نشان داده می‌شود. این‌جا فقط خبرِ ارسال. */
-  const sms = { thread_id: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label, text: r.sms.text, panel: r.links.panel, bot: r.links.bot };
-  const got = await spDeliverSms(env, ex.id, sms).catch(() => 0);
-  const link = !got && r.links.bot ? await expertLink(env, ex.id, sms).catch(() => null) : null;
-  const plainBot = got && r.links.bot ? r.links.bot.replace(/\?start=.*$/, "") : null;
+  /* پیامکِ واقعی با TextBee اگر درگاه وصل است (worker/sp-sms.js) — کارشناس رمز را نمی‌بیند. اگر نرفت، شبیه‌سازی: مکاتبات
+     فقط در بات مکاتبات است (تصمیم مدیر، مهر ۱۴۰۵)، پس متنِ پیامک همان‌جا می‌رود؛ اگر کارشناس هنوز وصلش نکرده، با لینکِ
+     اتصال نگه داشته و بعد از اتصال نشان داده می‌شود. این‌جا فقط خبرِ ارسال. */
+  const dl = await smsDeliver(env, { smsId: r.sms.id, expertId: ex.id, threadId: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label,
+    text: r.sms.text, panel: r.links.panel, bot: r.links.bot, demo: r.supplier.demo, kind: "rfq" }, { pointer: false }).catch((e) => ({ sent: false, pushed: 0, error: e.message }));
+  const got = dl.pushed;
+  const sms = { thread_id: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label, text: r.sms.text, panel: r.links.panel, bot: r.links.bot, error: dl.error || null };
+  const link = !dl.sent && !got && r.links.bot ? await expertLink(env, ex.id, sms).catch(() => null) : null;
+  const plainBot = (dl.sent || got) && r.links.bot ? r.links.bot.replace(/\?start=.*$/, "") : null;
   const kb = [];
-  if (plainBot || (link && link.url)) kb.push([{ text: got ? "💬 رفتن به بات مکاتبات" : "💬 وصل کردن بات مکاتبات", url: plainBot || link.url }]);
+  if (plainBot || (link && link.url)) kb.push([{ text: plainBot ? "💬 رفتن به بات مکاتبات" : "💬 وصل کردن بات مکاتبات", url: plainBot || link.url }]);
   kb.push([{ text: "🌐 صفحهٔ مکاتبات", url: corrLink(env) }]);
   if (d.src === "hist" && d.hf) kb.push([{ text: "📚 بازگشت به کارت قلم", callback_data: `hv:${d.hf}:${d.item}:${d.m === "e" ? "e" : "h"}:0` }]);
   kb.push(navRow(it.aid));
   const where = got ? "همین الان در «بات مکاتبات» برایتان آمد" : r.links.bot ? "بعد از وصل کردنِ «بات مکاتبات» (دکمهٔ زیر) آن‌جا می‌آید" : "در «صفحهٔ مکاتبات» دیده می‌شود";
+  const smsLine = dl.sent
+    ? `📱 پیامک (لینک پنل، لینک بات و رمز) به ${esc(maskPhone(r.sms.to))} فرستاده شد. گفت‌وگو و پاسخ‌های تأمین‌کننده در «بات مکاتبات» است، نه در این بات.`
+    : `${dl.error ? `⚠️ پیامکِ واقعی نرفت: ${esc(dl.error)}\n` : ""}📱 پیامکِ شبیه‌سازی‌شده (لینک پنل، لینک بات و رمز) ${where}. گفت‌وگو و پاسخ‌های تأمین‌کننده هم همان‌جاست، نه در این بات.`;
   return show(api, chat, mid, `✅ <b>فرستاده شد</b> — استعلام «${esc(short(it.title, 50))}» برای «${esc(r.supplier.name)}» (درخواست ${esc(r.request_id)})`
-    + `${r.added ? "" : " — این قلم قبلاً رفته بود؛ یادآوری با رمز تازه رفت"}.\n\n`
-    + `📱 پیامکِ شبیه‌سازی‌شده (لینک پنل، لینک بات و رمز) ${where}. گفت‌وگو و پاسخ‌های تأمین‌کننده هم همان‌جاست، نه در این بات.`
-    /* بات مکاتبات روی این محیط نیست: پیامک جای دیگری برای دیده شدن ندارد */
-    + (r.links.bot ? "" : `\n<blockquote>${esc(r.sms.text)}</blockquote>`), kb);
+    + `${r.added ? "" : " — این قلم قبلاً رفته بود؛ یادآوری با رمز تازه رفت"}.\n\n${smsLine}`
+    /* بات مکاتبات روی این محیط نیست و پیامک هم نرفت: متن جای دیگری برای دیده شدن ندارد */
+    + (r.links.bot || dl.sent ? "" : `\n<blockquote>${esc(r.sms.text)}</blockquote>`), kb);
 }
 
 async function spSendAction(env, api, chat, ex, parts, mid, ack) {
@@ -3790,8 +3797,10 @@ export async function scheduled(env, cron) {
   }
   if (!cron || !heavy) {
     out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
-    /* منوی ثابتِ کارشناسانی که هنوز نگرفته‌اند — فقط در دقیقه‌ای که جستجوی هوشمندی اجرا نشد (سقف زیردرخواست) */
-    if (!out.jobs && env.TG_BOT_TOKEN) out = { ...out, ...(await pushNavMenus(env, telegram(env)).catch((e) => ({ navError: e && e.message }))) };
+    /* کارشناس هوشمند (worker/ai-agent.js): یک گام — فقط در دقیقه‌ای که جستجوی هوشمندِ صف اجرا نشد (سقف زیردرخواست) */
+    if (!out.jobs) out = { ...out, ...(await aiTick(env).catch((e) => ({ aiError: e && e.message }))) };
+    /* منوی ثابتِ کارشناسانی که هنوز نگرفته‌اند — فقط در دقیقه‌ای که نه جستجو اجرا شد نه گامی از کارشناس هوشمند */
+    if (!out.jobs && !out.ai && env.TG_BOT_TOKEN) out = { ...out, ...(await pushNavMenus(env, telegram(env)).catch((e) => ({ navError: e && e.message }))) };
   }
   return out;
 }

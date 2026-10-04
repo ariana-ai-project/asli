@@ -223,6 +223,9 @@ export async function reassign(env, body, actor = "manager") {
     ...(existed && a.dispatched_at ? [env.DB.prepare("UPDATE assignments SET dispatched_at=?, days=? WHERE id=?").bind(t, newDays, b.id)] : []),
     env.DB.prepare("UPDATE items SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE quotes SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
+    /* گفت‌وگوهای پنل تأمین‌کننده هم با درخواست می‌روند (درس F-05) — وگرنه با حذفِ ارجاعِ قبلی از هر دو صفحه گم می‌شدند.
+       اگر کارشناسِ تازه با همان تأمین‌کننده گفت‌وگوی جدا دارد (UNIQUE)، آن یکی جای خودش می‌ماند */
+    env.DB.prepare("UPDATE OR IGNORE sp_threads SET assignment_id=? WHERE assignment_id=?").bind(b.id, aid),
     env.DB.prepare("UPDATE proformas SET assignment_id=? WHERE assignment_id=? AND supplier_name NOT IN (SELECT supplier_name FROM proformas WHERE assignment_id=?)").bind(b.id, aid, b.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND fired_at IS NULL").bind(t, aid),
     env.DB.prepare("DELETE FROM assignments WHERE id=?").bind(aid),

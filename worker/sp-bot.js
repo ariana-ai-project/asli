@@ -14,10 +14,12 @@
  * وضعیت یکی است: همان توابع sp-core.js که پنل وب صدا می‌زند؛ هر تغییری این‌جا در پنل هم دیده می‌شود.
  * همیشه بی‌استثنا برمی‌گردد تا تلگرام آپدیت را دوباره نفرستد.
  */
-import { telegram, esc, TgError } from "./telegram.js";
+import { esc, TgError } from "./telegram.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
+import { deliverPass } from "./sp-sms.js";
+import { aiKick } from "./ai-agent.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
 
@@ -56,10 +58,11 @@ export async function ensureSpWebhook(env, origin, force) {
 /* ------------------------------------------------------------------ */
 /* ورودی                                                                 */
 /* ------------------------------------------------------------------ */
-export async function handleSpUpdate(env, u) {
+/* ctx (اختیاری): کارِ تأمین‌کننده در گفت‌وگوی کارشناس هوشمند، گامِ مذاکره را بعد از پاسخ می‌زند (aiKick، waitUntil) */
+export async function handleSpUpdate(env, u, ctx) {
   try {
-    if (u.message) return await onMessage(env, u.message);
-    if (u.callback_query) return await onCallback(env, u.callback_query);
+    if (u.message) return await onMessage(env, u.message, ctx);
+    if (u.callback_query) return await onCallback(env, u.callback_query, ctx);
     const m = u.my_chat_member;
     if (m && m.chat && ["left", "kicked"].includes(m.new_chat_member && m.new_chat_member.status)) {
       await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(String(m.chat.id)).run();
@@ -78,7 +81,7 @@ async function plain(env, chat, text, kb) {
   return P.spApi(env).sendMessage(chat, text, kb).catch(() => null);
 }
 
-async function onMessage(env, msg) {
+async function onMessage(env, msg, ctx) {
   const chat = msg.chat && msg.chat.id;
   if (!chat || msg.chat.type !== "private") return { ok: true };
   const text = T(msg.text);
@@ -90,6 +93,7 @@ async function onMessage(env, msg) {
   const row = await P.tgRow(env, chat);
   if (!row) { await plain(env, chat, WELCOME); return { ok: true }; }
   P.track(row, msg.message_id);
+  row._ctx = ctx;
   try {
     /* منتظرِ رمزِ تأمین‌کننده ولی هویتِ کارشناسی هم دارد: /start، انصراف یا دکمهٔ منوی کارشناس یعنی برگشت به
        نقش کارشناس — وگرنه هر متنی رمزِ اشتباه حساب می‌شد و گفت‌وگو در «منتظر رمز» گیر می‌کرد */
@@ -496,6 +500,7 @@ async function supplierMessage(env, row, msg, text) {
       catch (e) { await storage(env).remove(key).catch(() => {}); throw e; }
       P.setFlow(row, null);
       await P.pushMsgs(env, r.thread, r.msgs);
+      aiKick(env, row._ctx, r.thread.id);
       return itemsCardSend(env, row, sup, th.id, null, `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
@@ -516,6 +521,7 @@ async function supplierMessage(env, row, msg, text) {
       if (r.old) await storage(env).remove(r.old).catch(() => {});
       P.setFlow(row, null);
       await P.pushMsgs(env, r.thread, r.msgs);
+      aiKick(env, row._ctx, r.thread.id);
       await P.send(env, row, "✅ پیش‌فاکتور رسید و برای کارشناس فرستاده شد. نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); }
     return { ok: true };
@@ -529,6 +535,7 @@ async function supplierMessage(env, row, msg, text) {
       const r = await C.addFile(env, sup, tg, { skey: key, filename: file.name, mime: file.mime, size: file.size, note: msg.caption });
       P.setFlow(row, null);
       await P.pushMsgs(env, th, r.msgs);
+      aiKick(env, row._ctx, th.id);
       return lineCardSend(env, row, sup, f.line, null, "✅ پیوست ثبت شد.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
@@ -558,6 +565,7 @@ async function supplierMessage(env, row, msg, text) {
   if (!th) { P.setFocus(row, null); return listSupplierThreads(env, row, sup); }
   const r = await C.postMsg(env, th, "s", text);
   await P.pushMsgs(env, th, r.msgs);
+  aiKick(env, row._ctx, th.id);
   return { ok: true };
 }
 
@@ -588,7 +596,7 @@ async function itemsCardSend(env, row, sup, thId, mid, head) {
 /* ------------------------------------------------------------------ */
 /* دکمه‌ها                                                               */
 /* ------------------------------------------------------------------ */
-async function onCallback(env, cq) {
+async function onCallback(env, cq, ctx) {
   const api = P.spApi(env);
   const ack = (text, alert) => api.answerCallback(cq.id, text, alert).catch(() => {});
   const chat = cq.message && cq.message.chat && cq.message.chat.id;
@@ -602,9 +610,10 @@ async function onCallback(env, cq) {
   if (a === "rs") {
     try {
       const r = await C.resendPassword(env, parts[1]);
-      const where = await deliverSimSms(env, r);
-      await ack("فرستاده شد");
-      await plain(env, chat, `📱 رمز تازه به ${esc(r.masked)} پیامک شد.${where ? `\n<i>(دمو: پیامک خاموش است؛ متنش در ${where} آمد.)</i>` : ""}\nرمز را همین‌جا بفرستید.`);
+      const d = await deliverPass(env, r).catch((e) => ({ sent: false, error: e.message, where: "" }));
+      await ack(d.sent ? "فرستاده شد" : "پیامک نرفت");
+      await plain(env, chat, d.sent ? `📱 رمز تازه به ${esc(r.masked)} پیامک شد.\nرمز را همین‌جا بفرستید.`
+        : `📱 رمز تازه ساخته شد ولی پیامکِ واقعی ${d.error ? "نرفت" : "فعلاً خاموش است"}.${d.where ? `\n<i>متنش در ${d.where} آمد؛ کارشناس خرید آن را به شما می‌رساند.</i>` : "\n<i>با کارشناس خرید تماس بگیرید.</i>"}\nرمز را همین‌جا بفرستید.`);
       /* بعد از «خروج» ردیفی نمانده (یا فقط هویتِ کارشناس مانده): همین گفت‌وگو منتظر رمز می‌شود */
       const row0 = await P.tgRow(env, chat);
       if (!row0 || (row0.role === "e" && !row0.phone_id)) await upsertRow(env, chat, "p", { flow: { step: "pass", k: parts[1] } });
@@ -614,6 +623,7 @@ async function onCallback(env, cq) {
 
   const row = await P.tgRow(env, chat);
   if (!row || (row.role !== "e" && row.role !== "s")) { await ack("اول وارد شوید.", true); return { ok: true }; }
+  row._ctx = ctx;
   try {
     if (a === "xc") { P.setFlow(row, null); await ack("انصراف"); return { ok: true }; }
     /* go:<thread>[:e|s] — اگر نقشِ خواسته‌شده نقشِ فعلی نیست و این گفت‌وگو آن هویت را دارد، اول عوض می‌شود */
@@ -757,6 +767,7 @@ async function onCallback(env, cq) {
         const r = await C.submitLines(env, sup, n(1));
         await ack("فرستاده شد");
         await P.pushMsgs(env, r.thread, r.msgs);
+        aiKick(env, row._ctx, r.thread.id);
         return await itemsCardSend(env, row, sup, n(1), mid, `✅ برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
       } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
     }
@@ -778,21 +789,4 @@ async function onCallback(env, cq) {
   }
 }
 
-/**
- * پیامک شبیه‌سازی‌شده (رمز تازه) برای کارشناسِ آخرین استعلامِ همین تأمین‌کننده: در بات مکاتباتِ او. اگر هنوز
- * وصلش نکرده، بات کارشناسان فقط خبر می‌دهد (بی متنِ پیامک) و لینکِ اتصال می‌دهد؛ پیامک با همان لینک نگه داشته
- * و بعد از اتصال نشان داده می‌شود. خروجی: جایی که پیامک آمد (برای متنِ دمو) یا خالی.
- */
-export async function deliverSimSms(env, r) {
-  if (!r || !r.expertId) return "";
-  const sms = { thread_id: r.threadId, supplier: r.supplier, to: r.to, label: r.label, text: r.text, panel: r.panel, bot: r.bot };
-  if (await P.deliverSms(env, r.expertId, sms)) return "گفت‌وگوی کارشناس در بات مکاتبات";
-  if (r.expertChat && env.TG_BOT_TOKEN) {
-    const link = await C.expertLink(env, r.expertId, sms).catch(() => null);
-    await telegram(env).sendMessage(r.expertChat,
-      `📱 «${esc(r.supplier)}» رمز تازه خواست. پیامکِ شبیه‌سازی‌شده‌اش در <b>بات مکاتبات</b> است؛ یک بار وصلش کنید تا آن‌جا ببینید.`,
-      link && link.url ? [[{ text: "💬 بات مکاتبات", url: link.url }]] : null).catch((e) => console.error("sim sms pointer", e && e.message));
-    return "بات مکاتبات (بعد از اتصالِ کارشناس)";
-  }
-  return "";
-}
+/* «ارسال رمز» — پیامکِ واقعی (TextBee) یا شبیه‌سازی در بات مکاتباتِ کارشناس: worker/sp-sms.js:deliverPass */

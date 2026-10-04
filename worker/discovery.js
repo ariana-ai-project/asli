@@ -20,6 +20,7 @@
 
 import { HttpError } from "./http.js";
 import { itemKeys, searchSupplierStmts } from "./records.js";
+import { aiFetch } from "./ai-fetch.js";
 
 const API_BASE = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 /* تصمیم مدیر (شهریور ۱۴۰۵): Haiku 4.5. سقف خروجیِ این مدل ۶۴ هزار توکن است (MAX_TOKENS زیرش است)
@@ -279,7 +280,7 @@ function searchTools(env) {
  * content_block_start می‌رسند) تا در pause_turn عیناً برگردانده شوند.
  */
 async function streamMessage(env, body) {
-  const r = await fetch(API_BASE(env), {
+  const r = await aiFetch(env, API_BASE(env), {
     method: "POST",
     headers: { "content-type": "application/json", accept: "text/event-stream", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
     body: JSON.stringify({ ...body, stream: true }),

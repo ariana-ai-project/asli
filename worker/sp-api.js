@@ -13,7 +13,9 @@ import { HttpError } from "./http.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
-import { ensureSpWebhook, deliverSimSms } from "./sp-bot.js";
+import { ensureSpWebhook } from "./sp-bot.js";
+import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
+import { aiKick } from "./ai-agent.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 
@@ -107,10 +109,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   if (path === "/sp/resend" && m === "POST") {
     const b = await readJson(request);
     const r = await C.resendPassword(env, b.k);
-    const where = r.expertId ? await deliverSimSms(env, r).catch(() => "") : "";
-    return json({ ok: true, to: r.masked, demo: true, note: where
-      ? `پیامک فعلاً خاموش است؛ در این دمو متنِ پیامک (با رمز تازه) در ${where} آمد.`
-      : "پیامک فعلاً خاموش است و هنوز کارشناسی برای این شماره استعلامی نفرستاده؛ رمز تازه ساخته شد ولی جایی نمایش داده نشد." });
+    const d = await deliverPass(env, r).catch((e) => ({ sent: false, error: e.message, where: "" }));
+    /* رمز فقط به گوشیِ خودِ تأمین‌کننده می‌رود؛ اگر پیامکِ واقعی نرفت، همان شبیه‌سازی (متن در گفت‌وگوی کارشناس) */
+    return json({ ok: true, to: r.masked, sent: !!d.sent, demo: !d.sent, note: d.sent ? ""
+      : d.where ? `پیامکِ واقعی ${d.error ? "نرفت" : "فعلاً خاموش است"}؛ متنِ پیامک (با رمز تازه) در ${d.where} آمد و کارشناس خرید آن را به شما می‌رساند.`
+        : "پیامک فرستاده نشد و هنوز کارشناسی برای این شماره استعلامی نفرستاده؛ با کارشناس خرید تماس بگیرید." });
   }
 
   const who = await whoAmI(request, env, deps);
@@ -128,6 +131,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const th = await C.threadFor(env, mm[1], who);
     const r = await C.postMsg(env, th, who.side, (await readJson(request)).text);
     await later(ctx, () => P.pushMsgs(env, th, r.msgs));
+    /* گفت‌وگوی کارشناس هوشمند: پیامِ تأمین‌کننده گامِ مذاکره را همان لحظه می‌زند (worker/ai-agent.js) */
+    if (who.side === "s") aiKick(env, ctx, th.id);
     return json({ ok: true, msgs: r.msgs });
   }
   /* «پاک کردن گفت‌وگو» — فقط از صفحهٔ همین طرف؛ پیام‌ها در دیتابیس می‌مانند */
@@ -167,6 +172,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if ((mm = /^\/sp\/thread\/(\d+)\/submit$/.exec(path)) && m === "POST") {
       const r = await C.submitLines(env, sup, mm[1], (await readJson(request)).line_ids);
       await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      aiKick(env, ctx, r.thread.id);
       return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
     }
     /* ارسالِ مشخصات همراه با پیش‌فاکتور، یک‌جا: بدنه خودِ فایل است، اقلام در ids (۱,۲,…) */
@@ -178,6 +184,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       try { r = await C.submitLines(env, sup, th.id, ids, f); }
       catch (e) { const store = storage(env); if (store) await later(ctx, () => store.remove(f.skey)); throw e; }
       await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      aiKick(env, ctx, r.thread.id);
       return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
     }
     if ((mm = /^\/sp\/line\/(\d+)\/file$/.exec(path)) && m === "POST") {
@@ -186,6 +193,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       const f = await storeBody(env, request, url, th.assignment_id, "sp");
       const r = await C.addFile(env, sup, target, { ...f, note: url.searchParams.get("note") });
       await later(ctx, () => P.pushMsgs(env, th, r.msgs));
+      aiKick(env, ctx, th.id);
       return json({ ok: true, id: r.id });
     }
     if ((mm = /^\/sp\/file\/(\d+)$/.exec(path)) && m === "DELETE") {
@@ -201,6 +209,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       const store = storage(env);
       if (r.old && store) await later(ctx, () => store.remove(r.old));
       await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      aiKick(env, ctx, r.thread.id);
       return json({ ok: true });
     }
     throw new HttpError("مسیر پیدا نشد.", 404);
@@ -217,7 +226,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   if (path === "/sp/x/send" && m === "POST") {
     const r = await C.spSend(env, ex, await readJson(request));
     await later(ctx, () => P.pushMsgs(env, { id: r.thread_id }, r.msgs));
-    return json(r);
+    /* پیامکِ واقعی اگر درگاه وصل است (sp-sms.js)؛ متنِ با رمز فقط وقتی به پنل برمی‌گردد که پیامک نرفت */
+    const d = await deliverSms(env, { smsId: r.sms.id, expertId: ex.id, threadId: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label,
+      text: r.sms.text, panel: r.links.panel, bot: r.links.bot, demo: r.supplier.demo, kind: "rfq" }, { sim: "none" });
+    return json({ ...r, sms: { to: r.sms.to, label: r.sms.label, sent: d.sent, via: d.via, error: d.error, note: smsNote(d, C.maskPhone(r.sms.to)),
+      ...(d.sent ? {} : { text: r.sms.text }) } });
   }
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/decide$/.exec(path)) && m === "POST") {
     const b = await readJson(request);

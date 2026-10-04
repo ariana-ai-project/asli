@@ -48,6 +48,7 @@ if (DB) {
 const calls = [];
 let nextMsg = 3000;
 let aiReply = null;
+let smsReply = { status: 200, body: { data: { success: true, message: "SMS added to queue for processing", smsBatchId: "batch-1", recipientCount: 1 } } };
 const R = (o, status = 200) => ({ ok: status < 300, status, json: async () => o, text: async () => JSON.stringify(o), headers: new Headers({ "content-type": "application/json" }), body: null });
 globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
@@ -64,6 +65,8 @@ globalThis.fetch = async (url, init = {}) => {
   if (u.startsWith("https://sb.test/storage/v1/object/sign/")) return R({ signedURL: "/object/sign/proformas/x?token=abc" });
   if (u.startsWith("https://sb.test/storage/v1/object/")) { calls.push({ bot: "store", method: init.method || "GET", url: u }); return R({ Key: "x" }); }
   if (u.startsWith("https://ai.test/")) { calls.push({ bot: "ai", body: JSON.parse(init.body) }); return R(aiReply); }
+  /* درگاه پیامکِ بدلی (TextBee) */
+  if (u.startsWith("https://sms.test/")) { calls.push({ bot: "sms", url: u, headers: init.headers, body: JSON.parse(init.body) }); return R(smsReply.body, smsReply.status); }
   throw new Error(`fetch بیرونیِ پیش‌بینی‌نشده: ${u}`);
 };
 const pend = [];
@@ -868,4 +871,67 @@ test("بات تأمین‌کننده: شرایط فاکتور گام‌به‌گ
   assert.ok(DB.raw.prepare("SELECT s_clear FROM sp_threads WHERE id=?").get(th).s_clear > 0);
   assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "deleteMessages"), "پیام‌های تلگرامِ صفحه پاک شد");
   assert.ok(sent(n, "sp", C9).some((c) => /هنوز پیامی نیست/.test(c.body.text)), "تاریخچهٔ همین طرف از این به بعد خالی");
+});
+test("پیامکِ واقعی با TextBee: استعلام و «ارسال رمز» به گوشیِ تأمین‌کننده، رمز پیش کارشناس نمی‌آید؛ فرضی هرگز؛ سقفِ پلن ← شبیه‌سازی؛ سقفِ روزانهٔ رمز", { skip: SKIP }, async () => {
+  env.TEXTBEE_API_KEY = "tbk"; env.TEXTBEE_API_BASE = "https://sms.test";
+  try {
+    let n = calls.length;
+    const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت پیامکی", phone: "0935 111 2233", label: "همراه", text: "سلام، استعلام." } });
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    const tb = since(n).filter((c) => c.bot === "sms");
+    assert.equal(tb.length, 1, "یک پیامک");
+    assert.match(tb[0].url, /\/api\/v1\/gateway\/send-sms$/);
+    assert.equal(tb[0].headers["x-api-key"], "tbk");
+    assert.deepEqual(tb[0].body.recipients, ["+989351112233"], "شماره به قالب بین‌المللی");
+    assert.match(tb[0].body.message, /^سلام، استعلام\./);
+    assert.match(tb[0].body.message, /supplier\.html#k=[0-9a-f]{12}/);
+    assert.match(tb[0].body.message, /رمز ورود: \d{6}/);
+    assert.equal(r.data.sms.sent, true);
+    assert.equal(r.data.sms.text, undefined, "متنِ با رمز به پنل کارشناس برنمی‌گردد");
+    assert.match(r.data.sms.note, /0935•••2233/);
+    const row = DB.raw.prepare("SELECT * FROM sp_sms ORDER BY id DESC LIMIT 1").get();
+    assert.deepEqual([row.via, row.status, row.ref, row.error], ["textbee", "queued", "batch-1", null]);
+    assert.ok(!row.body.includes(passOf(tb[0].body.message)), "رمز خام در دیتابیس نمی‌ماند");
+    const k = keyOf(tb[0].body.message);
+
+    /* تأمین‌کنندهٔ فرضی: هرگز پیامکِ واقعی */
+    n = calls.length;
+    const demo = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], demo: true } });
+    assert.equal(since(n).filter((c) => c.bot === "sms").length, 0);
+    assert.equal(demo.data.sms.sent, false);
+    assert.match(demo.data.sms.text, /رمز ورود: \d{6}/, "فرضی: متن برای دیدنِ سمت تأمین‌کننده");
+
+    /* سقفِ پلن: هیچ پیامکی نرفت ← شبیه‌سازی، با دلیل */
+    smsReply = { status: 429, body: { message: "Daily limit exceeded" } };
+    const q = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت سقف", phone: "09357778899", label: "دفتر" } });
+    assert.equal(q.data.sms.sent, false);
+    assert.match(q.data.sms.error, /سقف پیامک/);
+    assert.match(q.data.sms.text, /رمز ورود: \d{6}/, "پیامک نرفت: کارشناس متن را خودش می‌رساند");
+    assert.deepEqual(Object.values(DB.raw.prepare("SELECT via, status FROM sp_sms ORDER BY id DESC LIMIT 1").get()), ["sim", "failed"]);
+    smsReply = { status: 200, body: { data: { success: true, smsBatchId: "batch-2" } } };
+
+    /* «ارسال رمز»: پیامکِ واقعی به همان گوشی؛ متنِ پاسخ رمز ندارد */
+    n = calls.length;
+    const rs = await call("/sp/resend", { body: { k } });
+    assert.equal(rs.status, 200, JSON.stringify(rs.data));
+    assert.equal(rs.data.sent, true);
+    const tb2 = since(n).filter((c) => c.bot === "sms");
+    assert.equal(tb2.length, 1);
+    assert.deepEqual(tb2[0].body.recipients, ["+989351112233"]);
+    assert.match(tb2[0].body.message, /رمز ورود: \d{6}/);
+    assert.ok(!JSON.stringify(rs.data).match(/\d{6}/), "پاسخِ صفحهٔ ورود رمز ندارد");
+    const login = await call("/sp/login", { body: { k, password: passOf(tb2[0].body.message) } });
+    assert.equal(login.status, 200, "رمزِ پیامک ورود می‌دهد");
+
+    /* سقفِ روزانهٔ «ارسال رمز» برای هر شماره */
+    const ph = DB.raw.prepare("SELECT id FROM sp_phones WHERE k=?").get(k);
+    const t = Date.now();
+    for (let i = 0; i < 5; i++) DB.raw.prepare("INSERT INTO sp_sms (phone_id,kind,body,at) VALUES (?,'pass','x',?)").run(ph.id, t - 1000);
+    DB.raw.prepare("UPDATE sp_phones SET resend_at=NULL WHERE id=?").run(ph.id);
+    const cap = await call("/sp/resend", { body: { k } });
+    assert.equal(cap.status, 429);
+    assert.match(cap.data.error, /امروز چند بار رمز/);
+  } finally {
+    delete env.TEXTBEE_API_KEY; delete env.TEXTBEE_API_BASE;
+  }
 });

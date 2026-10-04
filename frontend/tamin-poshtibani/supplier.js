@@ -140,7 +140,11 @@
     $("#go").onclick = go;
     pw.onkeydown = (e) => { if (e.key === "Enter") go(); };
     $("#rs").onclick = async () => {
-      try { const d = await api("/sp/resend", { json: { k: key } }); m.className = "sp-ok"; m.textContent = `رمز تازه به ${d.to} پیامک شد.\n${d.note || ""}`; }
+      try {
+        const d = await api("/sp/resend", { json: { k: key } });
+        m.className = d.sent ? "sp-ok" : "sp-err";
+        m.textContent = d.sent ? `رمز تازه به ${d.to} پیامک شد.` : (d.note || "پیامک فرستاده نشد.");
+      }
       catch (e) { m.className = "sp-err"; m.textContent = e.message; }
     };
   }
@@ -355,7 +359,9 @@
   function msgHtml(m) {
     if (m.kind === "event") return evCard(m) || `<div class="sp-msg ev">${esc(m.body)}<time>${when(m.at)}</time></div>`;
     const me = m.who === "s";
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `کارشناس — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
+    /* طرفِ تأمین‌کننده می‌داند پاسخ‌دهنده دستیارِ هوشمند است */
+    const ai = !!(m.meta && m.meta.ai);
+    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `${ai ? "🤖 کارشناس هوشمند" : "کارشناس"} — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
   }
   function chatPane() {
     S.unseen = 0;
