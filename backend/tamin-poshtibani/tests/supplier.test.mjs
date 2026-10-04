@@ -18,6 +18,7 @@ import { handleUpdate } from "../../../worker/bot.js";
 import { handleSpUpdate } from "../../../worker/sp-bot.js";
 import { verifyInitData } from "../../../worker/sp-api.js";
 import { normPhone, toNum, DEMO } from "../../../worker/sp-core.js";
+import { e164, isMobile } from "../../../worker/sms.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -101,6 +102,20 @@ test("ابزارها: شماره و عدد", () => {
   assert.equal(normPhone("9121234567"), "09121234567");
   assert.equal(normPhone("021 8888 1234"), "02188881234");
   assert.equal(normPhone("12345"), null);
+  /* شمارهٔ کپی‌شده از دفترچهٔ تلفن، تلگرام یا واتس‌اپ جهت‌نماهای نامرئی دارد (گزارشِ کاربر، مهر ۱۴۰۵) */
+  assert.equal(normPhone("+989220022560"), "09220022560");
+  assert.equal(normPhone("‪+98 922 002 2560‬"), "09220022560", "LRE…PDF");
+  assert.equal(normPhone("⁦+989220022560⁩"), "09220022560", "LRI…PDI");
+  assert.equal(normPhone("‏+98‎9220022560﻿"), "09220022560", "RLM، LRM، BOM");
+  assert.equal(normPhone("+98 (0) 922 002 2560"), "09220022560", "صفرِ اضافه بعد از +98");
+  assert.equal(normPhone("0098 922 002 2560"), "09220022560");
+  assert.equal(normPhone("+98 21 8888 1234"), "02188881234");
+  assert.equal(normPhone("+14155550101"), "+14155550101", "شمارهٔ خارجی همان می‌ماند");
+  assert.equal(normPhone("0912 123 4567 / 0935 111 2233"), null, "دو شماره در یک خانه نه");
+  assert.equal(e164("‪+98 922 002 2560‬"), "+989220022560");
+  assert.equal(e164("+98 0922 002 2560"), "+989220022560");
+  assert.equal(isMobile("⁦۰۹۲۲۰۰۲۲۵۶۰⁩"), true);
+  assert.equal(isMobile("02188881234"), false, "ثابت پیامک نمی‌گیرد");
   assert.equal(toNum("۱۲٬۵۰۰"), 12500);
   assert.ok(Number.isNaN(toNum("abc")));
   assert.equal(toNum(""), null);

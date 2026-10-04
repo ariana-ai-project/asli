@@ -155,7 +155,8 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   await aiTick(env);
   assert.equal(smsTo(n).length, 0, "نامزدِ بی تیک هنوز دعوت نمی‌شود");
 
-  /* ۴. تأمین‌کننده (همان شمارهٔ آزمایشی) وارد می‌شود و مشخصات را می‌فرستد ← گامِ فوریِ مذاکره */
+  /* ۴. تأمین‌کننده (همان شمارهٔ آزمایشی) وارد می‌شود و مشخصات را می‌فرستد ← گامِ فوری تصمیمِ بسته را به Cron می‌سپارد ←
+        Cron با عمقِ فکرِ تب تأیید می‌کند و پیش‌فاکتور می‌خواهد */
   const sess = (await call("/sp/login", { body: { k: S.k, password: S.pass } })).data.session;
   assert.ok(sess, "ورود با رمزِ همان پیامک");
   const H = { "X-SP-Session": sess };
@@ -164,6 +165,13 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "1405/08/20", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
   await call(`/sp/line/${line.id}`, { method: "PUT", headers: H, body: { qty: 200, price: 1250000 } });
   await call(`/sp/line/${line.id}/ready`, { headers: H, body: { on: true } });
+  n = calls.length;
+  const sub = await call(`/sp/thread/${S.th}/submit`, { headers: H, body: {} });
+  assert.equal(sub.status, 200, JSON.stringify(sub.data));
+  S.b = sub.data.bundle_id;
+  assert.equal(since(n).filter((c) => c.bot === "ai").length, 0, "گامِ فوری دربارهٔ بستهٔ تازه تصمیم نمی‌گیرد");
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(S.b).state, "pending");
+  assert.ok(DB.raw.prepare("SELECT retry_at FROM ai_threads WHERE thread_id=?").get(S.th).retry_at, "همین گفت‌وگو برای Cron");
   model = (b) => {
     assert.equal(kind(b), "negotiate");
     S.neg = b;
@@ -171,14 +179,13 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
       thread_status: "waiting", memo: "منتظر پیش‌فاکتور؛ هنوز تخفیف نخواسته‌ام.", note: "قیمت در محدودهٔ پیشنهادهاست؛ مشخصات کامل." });
   };
   n = calls.length;
-  const sub = await call(`/sp/thread/${S.th}/submit`, { headers: H, body: {} });
-  assert.equal(sub.status, 200, JSON.stringify(sub.data));
-  S.b = sub.data.bundle_id;
+  r = await aiTick(env);
+  assert.equal(r.step, "turn", JSON.stringify(r));
   assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(S.b).state, "approved", "مدل تأیید کرد و پیش‌فاکتور خواست");
   /* درخواستِ دقیقِ مدل */
   assert.equal(S.neg.model, "claude-opus-5-5");
   assert.equal(S.neg.output_config.format.type, "json_schema");
-  assert.equal(S.neg.output_config.effort, "low", "گامِ فوری: تلاشِ کمتر");
+  assert.equal(S.neg.output_config.effort, "medium", "تصمیمِ بسته با عمقِ فکرِ تب، نه عمقِ کمِ گامِ فوری");
   assert.equal(S.neg.fallbacks, "default");
   assert.equal(since(n).find((c) => c.bot === "ai").headers["anthropic-beta"], "server-side-fallback-2026-07-01");
   assert.equal(S.neg.system[0].cache_control.type, "ephemeral", "پرامپتِ سیستم کش می‌شود");
@@ -195,10 +202,41 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   const call1 = DB.raw.prepare("SELECT * FROM ai_calls WHERE purpose='negotiate' ORDER BY id DESC LIMIT 1").get();
   assert.ok(call1, "فراخوانی ضبط شد");
   assert.match(call1.request_json, /کارشناس هوشمند خرید/, "پرامپتِ دقیق");
-  assert.equal(call1.effort, "low");
+  assert.equal(call1.effort, "medium");
   /* ۶۰۰۰×۴ + ۷۰۰×۲۰ + ۳۰۰۰×۰٫۲ = ۳۸٬۶۰۰ میکرودلار */
   assert.equal(call1.cost_usd, 0.0386);
   assert.equal(DB.raw.prepare("SELECT memo FROM ai_threads WHERE thread_id=?").get(S.th).memo, "منتظر پیش‌فاکتور؛ هنوز تخفیف نخواسته‌ام.");
+
+  /* ۴ب. پیامِ متنی: گامِ فوری فقط پاسخ می‌دهد، با عمقِ کم */
+  model = (b) => {
+    assert.equal(kind(b), "negotiate");
+    assert.equal(b.output_config.effort, "low", "پاسخِ فوری با عمقِ کم");
+    return jsonOut({ reply: "سپاس؛ منتظرِ پیش‌فاکتور هستیم.", actions: [], thread_status: "waiting", memo: "منتظر پیش‌فاکتور.", note: "" });
+  };
+  n = calls.length;
+  await call(`/sp/thread/${S.th}/msg`, { headers: H, body: { text: "پیش‌فاکتور را تا عصر می‌فرستیم." } });
+  assert.equal(since(n).filter((c) => c.bot === "ai").length, 1);
+  assert.ok(DB.raw.prepare("SELECT 1 FROM sp_msgs WHERE thread_id=? AND who='e' AND body LIKE '%منتظرِ پیش‌فاکتور هستیم%'").get(S.th), "پاسخِ فوری رفت");
+  assert.equal(DB.raw.prepare("SELECT retry_at FROM ai_threads WHERE thread_id=?").get(S.th).retry_at, null);
+
+  /* ۴پ. اگر دورِ کم‌عمق تصمیمی بگیرد (این‌جا رد)، نه تصمیم اجرا می‌شود نه پاسخ؛ Cron همان دور را با عمقِ تب می‌زند */
+  const efforts = [];
+  model = (b) => {
+    efforts.push(b.output_config.effort);
+    if (b.output_config.effort === "low") {
+      return jsonOut({ reply: "متأسفیم که امکانِ تأمین نیست.", actions: [{ type: "reject", bundle_id: bundleIn(b, "approved"), comment: "تأمین نمی‌شود.", rows: [] }], thread_status: "declined", memo: "", note: "" });
+    }
+    return jsonOut({ reply: "اگر امکانِ تأمین هست، لطفاً پیش‌فاکتور را بفرستید.", actions: [], thread_status: "waiting", memo: "پرسیدم آیا واقعاً نمی‌تواند.", note: "پیامِ مبهم بود؛ رد نکردم." });
+  };
+  await call(`/sp/thread/${S.th}/msg`, { headers: H, body: { text: "شاید نتوانیم تأمین کنیم." } });
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(S.b).state, "approved", "تصمیمِ دورِ کم‌عمق اجرا نشد");
+  assert.ok(!DB.raw.prepare("SELECT 1 FROM sp_msgs WHERE thread_id=? AND body LIKE '%متأسفیم%'").get(S.th), "پاسخِ همان دور هم نرفت");
+  assert.ok(DB.raw.prepare("SELECT retry_at FROM ai_threads WHERE thread_id=?").get(S.th).retry_at, "همین گفت‌وگو برای Cron");
+  r = await aiTick(env);
+  assert.equal(r.step, "turn", JSON.stringify(r));
+  assert.deepEqual(efforts, ["low", "medium"]);
+  assert.ok(DB.raw.prepare("SELECT 1 FROM sp_msgs WHERE thread_id=? AND body LIKE '%اگر امکانِ تأمین هست%'").get(S.th), "پاسخِ دورِ Cron رفت");
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(S.b).state, "approved");
 
   /* ۵. پیش‌فاکتور ← گامِ فوری فقط خوانش (تصمیم با Cron) */
   model = (b) => {
@@ -339,4 +377,16 @@ test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku �
   assert.equal(nope.status, 400);
   const prf = DB.raw.prepare("SELECT id FROM ai_calls WHERE purpose='proforma' LIMIT 1").get();
   assert.equal((await call(`/ai/calls/${prf.id}/replay`, { headers: EX, body: { model: "claude-sonnet-5-5" } })).status, 422, "خوانشِ پیش‌فاکتور مقایسه نمی‌شود");
+});
+
+test("دفترچهٔ شماره‌ها: شمارهٔ کپی‌شده با جهت‌نماهای نامرئی و +98 پذیرفته می‌شود", { skip: SKIP }, async () => {
+  const r = await call("/ai/phones", { headers: EX, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "‪+98 922 002 2560‬", label: "همراه", panel: true } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.phone.phone, "09220022560");
+  assert.equal(r.data.phone.panel, true);
+  const again = await call("/ai/phones", { headers: EX, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "+989220022560" } });
+  assert.equal(again.status, 200, "همان شماره، بی برچسبِ تازه");
+  assert.equal(again.data.phone.id, r.data.phone.id);
+  const list = (await call("/ai/phones?q=کپی", { headers: EX })).data.suppliers;
+  assert.deepEqual(list.find((s) => s.name === "شمارهٔ کپی‌شده").phones.map((p) => [p.phone, p.mobile]), [["09220022560", true]]);
 });

@@ -469,8 +469,10 @@ async function finishCheck(env, run, { cfg, asg }) {
 const bundleItems = (b, lines) => parse(b.line_ids, []).map((id) => lines.find((l) => l.id === id)).filter(Boolean);
 
 /**
- * fast: از waitUntilِ کارِ تأمین‌کننده (زیر ۳۰ ثانیه): اگر پیش‌فاکتوری خواندنی است فقط همان خوانده می‌شود و تصمیمش با
- * Cron است؛ وگرنه مذاکره با تلاشِ کمتر (effort: low) و سقفِ ۲۴ ثانیه. شکست ← retry_at و همین گفت‌وگو در Cron.
+ * fast: از waitUntilِ کارِ تأمین‌کننده (زیر ۳۰ ثانیه) و فقط برای پاسخ به پیام. اگر پیش‌فاکتوری خواندنی است فقط همان
+ * خوانده می‌شود؛ اگر بسته‌ای تصمیم می‌خواهد (pending، یا پیش‌فاکتورِ خوانده‌شده) یا مدل در همین دورِ کم‌عمق تصمیمی
+ * گرفت، دور به Cronِ بعدی سپرده می‌شود تا تأیید، برگشت، رد و تأیید نهایی همیشه با عمقِ فکرِ تب باشند (حداکثر حدود
+ * یک دقیقه تأخیر). وگرنه پاسخ با تلاشِ کمتر (effort: low) و سقفِ ۲۴ ثانیه. شکست ← retry_at و همین گفت‌وگو در Cron.
  */
 async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
   const t0 = now();
@@ -507,11 +509,19 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       ]);
       return { read: need.id };
     }
+    if (fast) {
+      const due = bundles.filter((b) => b.state === "pending" || (b.state === "proforma" && aiUsable(parse(b.ai_json, null))));
+      if (due.length) return toCron(env, run, threadId, `بستهٔ ${due.map((b) => b.id).join("، ")} تصمیم می‌خواهد؛ دورِ فوری کنار رفت و Cron همین گفت‌وگو را با عمقِ فکرِ تب می‌زند.`);
+    }
     const maxId = msgs.length ? msgs[msgs.length - 1].id : st.seen_msg;
     const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs });
     rec.purpose = "negotiate";
     /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
     const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined })).out;
+    /* دورِ کم‌عمق تصمیمی روی بسته گرفت (مثلاً ردِ بسته پس از پیامِ تأمین‌کننده): نه تصمیم اجرا می‌شود نه پاسخ می‌رود */
+    if (fast && Array.isArray(res.actions) && res.actions.length) {
+      return toCron(env, run, threadId, `دورِ فوری تصمیم گرفت (${res.actions.map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ")})؛ اجرا نشد و Cron همین دور را با عمقِ فکرِ تب می‌زند.`);
+    }
     const out = [], errors = [];
     for (const a of (Array.isArray(res.actions) ? res.actions : []).slice(0, 5)) {
       const b = bundles.find((x) => x.id === int(a.bundle_id));
@@ -553,6 +563,16 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     await log(env, run.id, threadId, "error", `دورِ مذاکره نشد${fast ? " (فوری)" : ""}: ${String((e && e.message) || e).slice(0, 300)}${fails < 4 ? " — دوباره امتحان می‌شود." : " — بعد از چهار شکست متوقف شد؛ از تب «تلاش دوباره» را بزنید."}`);
     return { error: e.message };
   }
+}
+
+/** دورِ فوری کنار می‌رود: همین گفت‌وگو در Cronِ بعدی (هر دقیقه؛ kickNow اجرا را سررسید کرده) با عمقِ فکرِ تب */
+async function toCron(env, run, threadId, why) {
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE ai_threads SET lock_until=NULL, retry_at=?, updated_at=? WHERE thread_id=?").bind(t, t, threadId),
+    logStmt(env, run.id, threadId, "step", why),
+  ]);
+  return { deferred: true };
 }
 
 /** کلیدهای جدول تطابق که در همین بسته‌اند و پذیرفتنی‌اند (غیرسبز) */

@@ -176,7 +176,7 @@
       <div class="tp-sect" style="margin-top:0"><h3>مدلِ مذاکره و شرحِ پایانی <span>خوانشِ پیش‌فاکتور، تفکیکِ قلم، جستجو و نامه مدلِ خودشان را دارند</span></h3>
         <div class="tp-fields3"><div class="tp-field" style="min-width:min(520px,100%)"><b>مدل</b><select class="tp-select tp-input" data-ai-model>${modelOpts(c.model)}</select></div>
           <div class="tp-field"><b>عمقِ فکر (effort)</b><select class="tp-select tp-input" data-ai-effort>${effortOpts(c.effort)}</select></div></div>
-        <p class="dim" style="font-size:.8rem;margin:6px 0 0">گامِ فوریِ بعد از پیامِ تأمین‌کننده همیشه با عمقِ «کم» اجرا می‌شود تا زیرِ ۳۰ ثانیه پاسخ برسد؛ گام‌های Cron با همین انتخاب. Haiku «عمقِ فکر» را نمی‌پذیرد.
+        <p class="dim" style="font-size:.8rem;margin:6px 0 0">گامِ فوریِ بعد از پیامِ تأمین‌کننده فقط به پیام جواب می‌دهد، با عمقِ «کم» و زیرِ ۳۰ ثانیه. هر تصمیم روی بسته (تأیید، برگشت، رد، تأیید نهایی) در Cron و با همین انتخاب گرفته می‌شود، حداکثر حدود یک دقیقه بعد. Haiku «عمقِ فکر» را نمی‌پذیرد.
           برای سنجیدنِ تفاوتِ مدل‌ها روی گفت‌وگوهای خودتان: «فراخوانی‌های مدل» ← یک دورِ مذاکره ← «🔬 مقایسه با مدلِ دیگر».</p></div>
       <div class="tp-fields3">
         ${f("minInvites", "حداقلِ دعوت (هدف)", "بی شمارهٔ پنل دعوتی نمی‌رود؛ کمتر از این، چالش در نامه گفته می‌شود")}

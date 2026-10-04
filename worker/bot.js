@@ -50,6 +50,7 @@ import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./te
 import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone } from "./sp-core.js";
 import { pushMsgs as spPush } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
+import { BIDI } from "./sms.js";
 import { aiTick } from "./ai-agent.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
@@ -2750,7 +2751,8 @@ async function spSendAction(env, api, chat, ex, parts, mid, ack) {
 
 async function onSpSendText(env, api, chat, ex, f, d, text) {
   if (f.step === "need_phone") {
-    const m = /^([+\d۰-۹٠-٩][\d۰-۹٠-٩\s\-()]{6,18}?)\s*([^\d۰-۹٠-٩\s].*)?$/.exec(text.trim());
+    /* شمارهٔ کپی‌شده جهت‌نماهای نامرئی دارد؛ برچسبِ کنارش نیم‌فاصله‌اش را نگه می‌دارد */
+    const m = /^([+\d۰-۹٠-٩][\d۰-۹٠-٩\s\-()]{6,18}?)\s*([^\d۰-۹٠-٩\s].*)?$/.exec(text.replace(BIDI, "").trim());
     const phone = m ? normPhone(m[1]) : null;
     if (!phone || phone === DEMO.phone) { await api.sendMessage(chat, "شماره معتبر نیست. این‌طور بنویسید: <code>09121234567 فروش</code>").catch(() => {}); return { ok: true }; }
     const label = T(m[2]).slice(0, 30);

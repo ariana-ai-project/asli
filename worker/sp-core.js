@@ -21,6 +21,7 @@ import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
+import { phoneChars } from "./sms.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -117,12 +118,14 @@ export const termsMissing = (t) => TERM_REQUIRED.filter((f) => !T(t && t[f])).ma
 /* ------------------------------------------------------------------ */
 /* ابزارها                                                              */
 /* ------------------------------------------------------------------ */
-/** شمارهٔ ایران به شکل 09121234567 (یا ثابت با پیش‌شماره)؛ شمارهٔ خارجی با + ؛ نامعتبر → null */
+/**
+ * شمارهٔ ایران به شکل 09121234567 (یا ثابت با پیش‌شماره)؛ شمارهٔ خارجی با + ؛ نامعتبر → null.
+ * +98، 0098، 98 و «+98 0912…» (با صفرِ اضافه) همه به 09… می‌رسند؛ جهت‌نماهای نامرئیِ شمارهٔ کپی‌شده هم می‌روند (sms.js:phoneChars).
+ */
 export function normPhone(raw) {
-  let s = latin(raw).replace(/[\s\-().]/g, "");
-  if (/^\+98\d{10}$/.test(s)) s = "0" + s.slice(3);
-  else if (/^0098\d{10}$/.test(s)) s = "0" + s.slice(4);
-  else if (/^98\d{10}$/.test(s)) s = "0" + s.slice(2);
+  let s = phoneChars(raw);
+  const ir = /^(?:\+98|0098|98)0?([1-9]\d{9})$/.exec(s);
+  if (ir) s = "0" + ir[1];
   else if (/^9\d{9}$/.test(s)) s = "0" + s;
   if (/^0\d{10}$/.test(s)) return s;
   if (/^\+\d{8,15}$/.test(s)) return s;
