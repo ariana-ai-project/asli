@@ -108,14 +108,15 @@ export async function setMenuButton(env, chat, role) {
 /* ------------------------------------------------------------------ */
 /* متن‌ها و کارت‌ها                                                       */
 /* ------------------------------------------------------------------ */
-/* پیامِ کارشناس هوشمند (meta.ai) همه‌جا با «🤖» پیداست — تأمین‌کننده می‌داند طرفش دستیارِ هوشمند است */
+/* پیامِ کارشناس هوشمند (meta.ai) فقط سمتِ کارشناس با «🤖» پیداست؛ تأمین‌کننده همان پیامِ عادیِ کارشناس را می‌بیند
+   (درخواست کاربر، مهر ۱۴۰۵ — دعوت می‌گوید پیام‌ها را دستیارِ هوشمند جواب می‌دهد) */
 const isAi = (m) => !!(m && m.meta && m.meta.ai);
 const sideName = (th, who, side, m) => (who === "e"
-  ? (side === "e" ? (isAi(m) ? "🤖 کارشناس هوشمند" : "شما") : `${isAi(m) ? "🤖 کارشناس هوشمند" : "کارشناس"} — ${th.expert_label || th.expert_name}`)
+  ? (side === "e" ? (isAi(m) ? "🤖 کارشناس هوشمند" : "شما") : `کارشناس — ${th.expert_label || th.expert_name}`)
   : (side === "s" ? "شما" : th.supplier_name));
 
 export function msgLine(th, m, side) {
-  if (m.kind === "event" || m.kind === "note") return `<i>${isAi(m) ? "🤖 " : ""}${esc(m.body)}</i>\n<code>${when(m.at)}</code>`;
+  if (m.kind === "event" || m.kind === "note") return `<i>${side === "e" && isAi(m) ? "🤖 " : ""}${esc(m.body)}</i>\n<code>${when(m.at)}</code>`;
   return `${m.who === side ? "🔹" : "🔸"} <b>${esc(sideName(th, m.who, side, m))}</b> · ${when(m.at)}\n${esc(m.body)}`;
 }
 

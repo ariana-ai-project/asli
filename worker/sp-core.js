@@ -323,9 +323,40 @@ export async function lockedLayers(env, it) {
     const db = await dbStruct(env, it).catch(() => null);
     if (db && db.struct) { head = head || db.struct.head; layers = db.struct.layers; }
   }
+  return { head: head ? nrm(head) : null, layers: packLayers(layers, it.spec) };
+}
+/** لایه‌های خطِ تأمین‌کننده از ساختارِ قلم؛ قلمِ بی‌لایه با «مشخصات فنی»ِ خودش */
+function packLayers(layers, spec) {
   const out = Object.entries(layers || {}).map(([k, v]) => ({ k: nrm(k), v: nrm(layerText(v)) })).filter((x) => x.k && x.v);
-  if (!out.length && T(it.spec)) out.push({ k: "مشخصات فنی", v: nrm(it.spec).slice(0, 300) });
-  return { head: head ? nrm(head) : null, layers: out };
+  if (!out.length && T(spec)) out.push({ k: "مشخصات فنی", v: nrm(spec).slice(0, 300) });
+  return out;
+}
+
+/**
+ * بستهٔ قفل‌شده (درخواست کاربر، مهر ۱۴۰۵): اولین ارسالِ هر قلم به یک تأمین‌کنندهٔ واقعی عنوان، نوع قلم، لایه‌های ویژگی،
+ * مقدار و واحدش را قفل می‌کند. هر ارسالِ بعدی — به هر تأمین‌کننده، از پنل، بات یا کارشناس هوشمند — عینِ همان می‌رود و
+ * ساختارِ قلم دیگر ویرایش نمی‌شود (api.js: /items/:id/norm و /edit). ارسال به تأمین‌کنندهٔ فرضی (دمو) قفل نمی‌کند.
+ * خروجی Map(item_id → {title, head, layers, qty, unit, at}) — عکسِ همان اولین خطِ تأمین‌کننده.
+ */
+export async function itemLocks(env, itemIds) {
+  const ids = [...new Set((itemIds || []).map(int).filter(Boolean))];
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    const rows = (await env.DB.prepare(`SELECT l.item_id, l.title, l.head, l.layers_json, l.req_qty, l.req_unit, l.created_at FROM sp_lines l
+        JOIN sp_threads t ON t.id=l.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id
+        WHERE s.demo=0 AND l.item_id IN (${part.map(() => "?").join(",")}) ORDER BY l.id`).bind(...part).all()).results || [];
+    for (const r of rows) {
+      if (!out.has(r.item_id)) out.set(r.item_id, { title: r.title, head: r.head, layers: parse(r.layers_json, []), qty: r.req_qty, unit: r.req_unit, at: r.created_at });
+    }
+  }
+  return out;
+}
+export const LOCK_MSG = "این قلم برای تأمین‌کننده فرستاده شده و قفل است: عنوان، نوع قلم و لایه‌های ویژگی‌اش عوض نمی‌شود تا همهٔ تأمین‌کنندگان عینِ همان بسته را بگیرند. نرخ‌های تبدیل را هنوز می‌شود ذخیره کرد.";
+/** ساختارِ تازه همان بستهٔ قفل‌شده است؟ — ذخیرهٔ قلمِ قفل فقط وقتی پذیرفته است که فقط نرخ‌ها عوض شده باشند */
+export function sameAsLock(lock, head, layers, spec) {
+  const key = (xs) => JSON.stringify((xs || []).map((x) => [x.k, x.v]).sort());
+  return nrm(head || "") === nrm(lock.head || "") && key(packLayers(layers, spec)) === key(lock.layers);
 }
 
 async function findOrCreateSupplier(env, name, by) {
@@ -448,11 +479,13 @@ export async function spSend(env, ex, b) {
       .bind(aid, asg.request_id, sup.id, ph.id, ex.id, t, t).run();
     th = { id: r.meta.last_row_id };
   }
-  const oldRows = (await env.DB.prepare("SELECT item_id, no, head, layers_json FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || [];
+  const oldRows = (await env.DB.prepare("SELECT item_id, no, title, head, layers_json, req_qty, req_unit FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || [];
   const old = new Map(oldRows.map((x) => [x.item_id, x.no]));
   const oldById = new Map(oldRows.map((x) => [x.item_id, x]));
   const fresh = its.filter((i) => !old.has(i.id));
-  const locked = await Promise.all(fresh.map((i) => lockedLayers(env, i)));
+  /* بستهٔ قفل‌شده: قلمی که قبلاً برای تأمین‌کنندهٔ واقعیِ دیگری رفته، با همان عنوان، لایه‌ها، مقدار و واحد می‌رود */
+  const locks = await itemLocks(env, fresh.map((i) => i.id));
+  const pack = await Promise.all(fresh.map(async (i) => locks.get(i.id) || { title: nrm(i.title), qty: i.qty, unit: T(i.unit) || null, ...(await lockedLayers(env, i)) }));
   /* کدِ قلم در پنل همین تأمین‌کننده: شمارش افزایشی، جدا از کد راهکاران (که مال خود شرکت است) */
   const top = await env.DB.prepare("SELECT COALESCE(MAX(l.no),0) AS n FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE t.supplier_id=?").bind(sup.id).first();
   const nos = new Map([...old].map(([id, no]) => [id, no]));
@@ -460,7 +493,7 @@ export async function spSend(env, ex, b) {
 
   const stmts = fresh.map((i, n) => env.DB.prepare(
     "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'new',?,?,?)",
-  ).bind(th.id, i.id, nrm(i.title), locked[n].head, JSON.stringify(locked[n].layers), i.qty, T(i.unit) || null, i.qty, T(i.unit) || null, nos.get(i.id), t, t));
+  ).bind(th.id, i.id, pack[n].title, pack[n].head, JSON.stringify(pack[n].layers), pack[n].qty, pack[n].unit, pack[n].qty, pack[n].unit, nos.get(i.id), t, t));
   const { pass, stmts: passStmts } = await newPassword(env, ph.id);
   const silent = !!b.silent && oldRows.length > 0 && !fresh.length;
   stmts.push(...passStmts, silent ? env.DB.prepare("UPDATE sp_threads SET last_at=? WHERE id=?").bind(t, th.id)
@@ -469,9 +502,10 @@ export async function spSend(env, ex, b) {
   const text = T(b.text).slice(0, 3000);
   /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته و لایه‌های قفل — عکسش در meta برای کارتِ پیام */
   const evLines = (fresh.length ? fresh : its).map((i) => {
-    const o = oldById.get(i.id), n = fresh.indexOf(i);
-    return { no: nos.get(i.id), title: nrm(i.title), head: n >= 0 ? locked[n].head : o && o.head, qty: i.qty, unit: T(i.unit) || null,
-      layers: n >= 0 ? locked[n].layers : parse(o && o.layers_json, []), extra: [] };
+    const o = oldById.get(i.id), p = pack[fresh.indexOf(i)];
+    if (p) return { no: nos.get(i.id), title: p.title, head: p.head, qty: p.qty, unit: p.unit, layers: p.layers, extra: [] };
+    return { no: nos.get(i.id), title: (o && o.title) || nrm(i.title), head: o && o.head, qty: o ? o.req_qty : i.qty, unit: o ? o.req_unit : T(i.unit) || null,
+      layers: parse(o && o.layers_json, []), extra: [] };
   });
   const evBody = `${fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم:` : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
   const msgs = [];
@@ -641,7 +675,10 @@ export async function expertThreads(env, ex) {
 export async function sendableItems(env, ex, aid) {
   const a = await env.DB.prepare("SELECT id, expert_id FROM assignments WHERE id=?").bind(int(aid)).first();
   if (!a || a.expert_id !== ex.id) throw new HttpError("این درخواست متعلق به شما نیست.", 403);
-  return ((await env.DB.prepare("SELECT id, line_no, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(a.id).all()).results || []);
+  const its = (await env.DB.prepare("SELECT id, line_no, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(a.id).all()).results || [];
+  /* locked: قبلاً برای تأمین‌کنندهٔ دیگری رفته و عینِ همان بسته می‌رود */
+  const locks = await itemLocks(env, its.map((i) => i.id));
+  return its.map((i) => ({ ...i, locked: locks.has(i.id) }));
 }
 
 /* ------------------------------------------------------------------ */

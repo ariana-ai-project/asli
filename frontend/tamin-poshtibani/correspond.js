@@ -397,7 +397,8 @@
     const items = (await api(`/sp/x/items?aid=${S.aid}`)).items || [];
     if (!items.length) return say("در این درخواست قلم بازی نمانده است.");
     const body = `<p class="sp-muted">درخواست ${esc(g.request_id)} — ${esc(g.party || "")}</p>
-      <b>اقلام</b><div class="sp-modal-list">${items.map((i, n) => `<label><input type="checkbox" data-it="${i.id}" ${n === 0 ? "checked" : ""}> ${esc(i.title)} — ${qty(i.qty)} ${esc(i.unit || "")}</label>`).join("")}</div>
+      <b>اقلام</b><div class="sp-modal-list">${items.map((i, n) => `<label><input type="checkbox" data-it="${i.id}" ${n === 0 ? "checked" : ""}> ${esc(i.title)} — ${qty(i.qty)} ${esc(i.unit || "")}${i.locked ? ` <span title="قبلاً برای تأمین‌کنندهٔ دیگری رفته؛ عنوان، لایه‌ها، مقدار و واحدش قفل است و عیناً همان می‌رود">🔒</span>` : ""}</label>`).join("")}</div>
+      ${items.some((i) => i.locked) ? `<p class="sp-muted">🔒 یعنی آن قلم برای تأمین‌کنندهٔ دیگری فرستاده شده و بسته‌اش قفل است: برای همه عیناً همان عنوان، لایه‌های ویژگی، مقدار و واحد می‌رود.</p>` : ""}
       <b style="display:block;margin-top:10px">تأمین‌کننده</b>
       <label class="sp-check"><input type="radio" name="who" value="demo" checked> 🧪 ${esc(S.demoName)} — پیامکش (شبیه‌سازی) همین‌جا نشان داده می‌شود</label>
       <label class="sp-check"><input type="radio" name="who" value="real"> تأمین‌کنندهٔ دیگر:</label>

@@ -251,10 +251,7 @@ test("مالکیت: کارتِ سوابقِ یک کارشناس از گفت‌و
   assert.equal(r.last, null, "هیچ پیامی برای کارشناس دیگر (جز منوی ثابتِ خودش)");
   assert.ok(r.ack && r.ack.show_alert, "فقط هشدارِ دکمه");
 });
-test("دموی پنل تأمین‌کننده: «📨 ارسال» از کارتِ قلمِ سوابق به تأمین‌کنندهٔ همان سوابق، با قالب و شمارهٔ تازه", { skip: SKIP }, async () => {
-  const off = await press(cbOf((await press("hs:a:1")).kb, "نوع قلم"));
-  assert.equal(cbOf(off.kb, "ارسال به تأمین‌کننده"), null, "بی /azmayesh همان کارت قبلی");
-  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('spDemo','[1]',?)").run(Date.now());
+test("«📨 ارسال» از کارتِ قلمِ سوابق (برای همهٔ کارشناسان) به تأمین‌کنندهٔ همان سوابق، با قالب و شمارهٔ تازه", { skip: SKIP }, async () => {
   const card = await press(cbOf((await press("hs:a:1")).kb, "نوع قلم"));
   const hz = cbOf(card.kb, "ارسال به تأمین‌کننده");
   assert.match(hz, /^hz:\d+:11:h$/);

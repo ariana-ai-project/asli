@@ -15,6 +15,7 @@ import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { aiTick } from "../../../worker/ai-agent.js";
+import { msgLine } from "../../../worker/sp-push.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -146,7 +147,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.equal(ath.source, "manual");
   S.th = ath.thread_id;
   const first = DB.raw.prepare("SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id").all(S.th);
-  assert.match(first[0].body, /تأمین‌کنندهٔ آزمایشی گرامی/, "قالبِ استانداردِ دعوت");
+  assert.match(first[0].body, /^سلام، وقتتون بخیر[\s\S]*تأمین‌کنندهٔ آزمایشی، از واحد تدارکات شرکت/, "قالبِ دعوت، محاوره‌ای");
   assert.equal(JSON.parse(first[0].meta_json).ai, true, "پیامِ کارشناس هوشمند علامت دارد");
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=1 AND supplier_name='تأمین‌کنندهٔ آزمایشی'").get().n, 1, "انتخاب جهت استعلام در تب استعلامات");
   assert.equal(DB.raw.prepare("SELECT via FROM sp_sms ORDER BY id DESC LIMIT 1").get().via, "textbee");
@@ -193,6 +194,10 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.match(ctxText, /\[کد ۱\] گریس نسوز کیلویی/);
   assert.match(ctxText, /لایه‌های قفل‌شده: جنس = نسوز/);
   assert.match(ctxText, /کارهای ممکن: approve، return، reject/);
+  assert.match(ctxText, /تاریخِ نیاز: —/, "تاریخِ نیازِ واقعی (این‌جا نیست)");
+  assert.match(ctxText, /<سابقهٔ_همکاری>[\s\S]*خریدی از همین تأمین‌کننده نیست[\s\S]*<\/سابقهٔ_همکاری>/, "سابقهٔ واقعیِ همکاری");
+  assert.match(S.neg.system[0].text, /هیچ عدد، مقدار، تاریخ، سابقه، رقیب، مهلت، سیاست یا وعده‌ای نساز/, "عدد و سابقهٔ ساختگی ممنوع");
+  assert.match(S.neg.system[0].text, /اگر صادقانه پرسید با آدم حرف می‌زند یا ربات، انکار نکن/);
   assert.match(ctxText, /#### پیام .* · تأمین‌کننده ← شرکت · ارسال مشخصات و قیمت/, "گفت‌وگو همان بخشِ فایل md است");
   assert.doesNotMatch(ctxText, /09121112222/, "شمارهٔ کامل به مدل نمی‌رود");
   const msgs = DB.raw.prepare("SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id").all(S.th);
@@ -389,4 +394,15 @@ test("دفترچهٔ شماره‌ها: شمارهٔ کپی‌شده با جهت
   assert.equal(again.data.phone.id, r.data.phone.id);
   const list = (await call("/ai/phones?q=کپی", { headers: EX })).data.suppliers;
   assert.deepEqual(list.find((s) => s.name === "شمارهٔ کپی‌شده").phones.map((p) => [p.phone, p.mobile]), [["09220022560", true]]);
+});
+
+test("برچسبِ «🤖 کارشناس هوشمند» فقط سمتِ کارشناس؛ تأمین‌کننده پیامِ عادیِ کارشناس می‌بیند", () => {
+  const th = { expert_label: "خرید", expert_name: "خرید", supplier_name: "آقای سیمان" };
+  const m = { who: "e", kind: "text", body: "سلام، وقتتون بخیر", at: Date.now(), meta: { ai: true } };
+  assert.doesNotMatch(msgLine(th, m, "s"), /🤖|هوشمند/);
+  assert.match(msgLine(th, m, "s"), /کارشناس — خرید/);
+  assert.match(msgLine(th, m, "e"), /🤖 کارشناس هوشمند/);
+  const ev = { ...m, kind: "event", body: "📦 استعلام ۱ قلم" };
+  assert.doesNotMatch(msgLine(th, ev, "s"), /🤖/);
+  assert.match(msgLine(th, ev, "e"), /🤖/);
 });

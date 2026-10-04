@@ -494,7 +494,7 @@ async function onMessage(env, msg, apiIn) {
   if (text === "/kartabl") return kartabl(env, api, chat, ex);
   if (text === "/ghaleb") return templateList(env, api, chat, ex, null, "");
   /* دموی پنل تأمین‌کننده: «📨 ارسال» کنار «کپی پیام» فقط برای کارشناسی که خودش روشنش کرده */
-  if (text === "/azmayesh") return toggleSpDemo(env, api, chat, ex);
+  if (text === "/azmayesh") return toggleSpDemo(env, api, chat);
   /* میان‌بُرها به همان مسیرهای منو می‌رسند؛ فقط «کدام درخواست؟» را اول می‌پرسند */
   if (SHORTCUTS[text]) return kartabl(env, api, chat, ex, { target: SHORTCUTS[text] });
 
@@ -1735,8 +1735,8 @@ async function histStart(env, api, chat, ex, aid, mid) {
   const its = await itemsOf(env, aid);
   if (!its.length) { await api.sendMessage(chat, "قلم بازی در این درخواست نمانده است.").catch(() => {}); return { ok: true }; }
   /* pick: اقلامی که سوابقشان خواسته شده — عوض کردنِ حالت همان‌ها را دوباره می‌سنجد.
-     sp: دموی پنل تأمین‌کننده برای این کارشناس روشن است — کارتِ قلم «📨 ارسال به تأمین‌کننده» دارد */
-  const d = { sel: [], single: its.length === 1, pick: its.length === 1 ? [its[0].id] : [], sp: await spDemoOn(env, ex.id) };
+     sp: کارتِ قلم «📨 ارسال به تأمین‌کننده» دارد — از مهر ۱۴۰۵ برای همهٔ کارشناسان */
+  const d = { sel: [], single: its.length === 1, pick: its.length === 1 ? [its[0].id] : [], sp: true };
   const f = await newFlow(env, ex, chat, "hsel", "pick", aid, d);
   if (d.single) return histModeCard(api, chat, f, d, its, asg, mid);
   return histSelCard(api, chat, f, d, its, asg, mid);
@@ -2545,31 +2545,14 @@ async function onTemplateAction(env, api, chat, ex, parts, mid, ack) {
 /* هوشمند): تأمین‌کننده — همان سوابقِ قلم، یا «تأمین‌کنندهٔ فرضی» ← قالب    */
 /* پیام ← شماره (برچسب‌خورده‌های قبلی، یا شمارهٔ تازه با برچسب) ← تأیید ←  */
 /* گفت‌وگو و خطِ مشخصات با لایه‌های قفل ساخته می‌شود (worker/sp-core.js)   */
-/* و متنِ پیامک — فعلاً خاموش — با لینک پنل، لینک بات و رمز همین‌جا       */
-/* نشان داده می‌شود. فقط برای کارشناسی که /azmayesh زده (settings.spDemo). */
+/* و متنِ پیامک با لینک پنل، لینک بات و رمز. از مهر ۱۴۰۵ برای همهٔ کارشناسان    */
+/* (درخواست کاربر) — پیش از آن فقط با /azmayesh.                             */
 /* ------------------------------------------------------------------ */
 const SP_LABELS = ["همراه", "دفتر", "فروش", "مدیر فروش"];
 
-async function spDemoOn(env, exId) {
-  const v = await settingValue(env, "spDemo");
-  return v === true || v === "all" || (Array.isArray(v) && v.includes(exId));
-}
-
-async function toggleSpDemo(env, api, chat, ex) {
-  const v = await settingValue(env, "spDemo");
-  if (v === true || v === "all") { await api.sendMessage(chat, "دموی «ارسال به تأمین‌کننده» برای همهٔ کارشناسان روشن است.").catch(() => {}); return { ok: true }; }
-  const list = Array.isArray(v) ? v.filter((x) => Number.isInteger(x)) : [];
-  const on = !list.includes(ex.id);
-  await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('spDemo',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
-    .bind(JSON.stringify(on ? [...list, ex.id] : list.filter((x) => x !== ex.id)), now()).run();
-  await api.sendMessage(chat, on
-    ? "🧪 <b>دموی پنل تأمین‌کننده برای شما روشن شد.</b>\n\n"
-      + "کارتابل ← درخواست ← «📚 بررسی سوابق» ← کارتِ قلم: حالا دکمهٔ «📨 ارسال به تأمین‌کننده» هم هست. "
-      + "تأمین‌کننده را از همان سوابق انتخاب کنید — یا «🧪 تأمین‌کنندهٔ فرضی» — بعد قالب پیام و شماره، و تأیید. "
-      + "پیامک فعلاً خاموش است؛ متنش با لینک پنل، لینک بات و رمز همین‌جا می‌آید.\n\n"
-      + "در پنل کارشناس هم دکمهٔ «💬 مکاتبات» پیدا می‌شود (درخواست‌ها، تأمین‌کنندگان و گفت‌وگو).\n\n"
-      + "برای خاموش کردن، دوباره /azmayesh بفرستید."
-    : "دموی پنل تأمین‌کننده برای شما خاموش شد.").catch(() => {});
+async function toggleSpDemo(env, api, chat) {
+  await api.sendMessage(chat, "«📨 ارسال به تأمین‌کننده» و «💬 مکاتبات» حالا برای همهٔ کارشناسان روشن است؛ /azmayesh دیگر لازم نیست.\n\n"
+    + "کارتابل ← درخواست ← «📚 بررسی سوابق» ← کارتِ قلم ← «📨 ارسال به تأمین‌کننده»؛ در پنل کارشناس هم دکمهٔ «💬 مکاتبات».").catch(() => {});
   return { ok: true };
 }
 
@@ -3195,7 +3178,6 @@ async function onCallback(env, cq, apiIn) {
     const f = await ownFlow(env, ex, num(1), "hsel");
     if (!f) { await ack("این فهرست دیگر پیدا نمی‌شود.", true); return { ok: true }; }
     if (!(await ownOpenAssignment(env, ex.id, f.assignment_id))) { await ack("این درخواست دیگر فعال نیست.", true); return { ok: true }; }
-    if (!(await spDemoOn(env, ex.id))) { await ack("دموی پنل تأمین‌کننده برای شما خاموش است؛ /azmayesh را بفرستید.", true); return { ok: true }; }
     await ack();
     return spHistStart(env, api, chat, ex, f, num(2), parts[3] === "e" ? "e" : "h");
   }

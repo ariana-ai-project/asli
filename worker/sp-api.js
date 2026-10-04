@@ -223,6 +223,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   }
   if (path === "/sp/x/items" && m === "GET") return json({ items: await C.sendableItems(env, ex, url.searchParams.get("aid")) });
   if (path === "/sp/x/phones" && m === "GET") return json({ phones: await C.phonesOfName(env, url.searchParams.get("name")) });
+  /* شمارهٔ تازه برای تأمین‌کننده — از کارتِ تأمین‌کنندهٔ «بررسی سوابق» در پنل کارشناس (مهر ۱۴۰۵)؛ تیکِ «پنل» اختیاری */
+  if (path === "/sp/x/phones" && m === "POST") return json({ ok: true, ...(await C.savePhone(env, ex.id, await readJson(request))) });
   if (path === "/sp/x/send" && m === "POST") {
     const r = await C.spSend(env, ex, await readJson(request));
     await later(ctx, () => P.pushMsgs(env, { id: r.thread_id }, r.msgs));

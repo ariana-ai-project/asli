@@ -231,7 +231,9 @@ async function stepPrep(env, run, { ex, rec }) {
     const p = await normalizeItem(rec.env, it, { model: true }).catch((e) => ({ error: e.message }));
     if (p && !p.error && p.head && ["model", "cache"].includes(p.source)) {
       const norm = { v: 2, head: p.head, layers: p.layers || {}, residual: p.residual || "", source: "ai", code: null, rates: {}, confirmed_at: now() };
-      await env.DB.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=? AND norm_json IS NULL").bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
+      /* قلمی که برای تأمین‌کننده رفته قفل است (sp-core.js:itemLocks) — ساختارش دست نمی‌خورد */
+      await env.DB.prepare(`UPDATE items SET norm_json=?, norm_at=? WHERE id=? AND norm_json IS NULL AND NOT EXISTS (SELECT 1 FROM sp_lines l
+          JOIN sp_threads t ON t.id=l.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id WHERE l.item_id=items.id AND s.demo=0)`).bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
       it.norm_json = JSON.stringify(norm);
       di.struct = `پیشنهادِ مدل: ${p.head}`;
     } else di.struct = p && p.error ? `ناموفق: ${p.error}` : p && p.head ? `از فهرست اقلام: ${p.head}` : "ساختاری پیدا نشد";
@@ -359,12 +361,15 @@ async function invitable(env, run) {
   return [...bySup.values()].filter((x) => x.items.length).sort((a, b) => (a.src === "manual" ? -1 : 0) - (b.src === "manual" ? -1 : 0) || a.rank - b.rank);
 }
 
-/** قالبِ استانداردِ دعوت — اولین پیامِ گفت‌وگو؛ پیامک کوتاه‌ترش را می‌برد */
+/**
+ * قالبِ دعوت — اولین پیامِ گفت‌وگو، با همان لحنِ محاوره‌ایِ مذاکره (درخواست کاربر، مهر ۱۴۰۵)؛ پیامک کوتاه‌ترش را می‌برد.
+ * یک جمله می‌گوید پیام‌ها را دستیارِ هوشمند جواب می‌دهد — مدل هم اگر صادقانه پرسیده شود انکار نمی‌کند (ai-prompts.js).
+ */
 function inviteText(env, sup, items) {
   const list = items.map((i) => `• ${i.title} — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trim()).join("\n");
-  return `${sup} گرامی، با سلام و احترام\nشرکت ${COMPANY(env)} برای تأمین اقلام زیر از شما استعلام قیمت دارد:\n${list}\n`
-    + "لطفاً مقدار، قیمت واحد (بی ارزش افزوده)، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده را در همین پنل ثبت و «ارسال» بزنید و در صورت امکان پیش‌فاکتور را هم بارگذاری کنید. "
-    + "پاسخ‌های شما را «کارشناس هوشمند خرید» شرکت بررسی می‌کند و همین‌جا گفت‌وگو می‌کند؛ تصمیمِ نهایی با کمیسیون معاملات شرکت است.\nبا تشکر — واحد تدارکات و پشتیبانی";
+  return `سلام، وقتتون بخیر 🌷\n${sup}، از واحد تدارکات شرکت ${COMPANY(env)} مزاحمتون می‌شم؛ برای ${items.length === 1 ? "این قلم" : "این اقلام"} قیمت می‌خواستیم:\n${list}\n`
+    + "اگه لطف کنید مقدار، قیمت واحد (بدون ارزش افزوده)، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده رو همین‌جا توی پنل ثبت کنید و «ارسال» رو بزنید، ممنون می‌شم. اگه پیش‌فاکتور هم دارید، همین‌جا بارگذاری کنید.\n"
+    + "پیام‌هاتون رو دستیارِ هوشمندِ خریدِ ما همین‌جا جواب می‌ده؛ تصمیمِ نهایی هم با کمیسیون معاملات شرکته.\nممنون از همکاری‌تون 🙏";
 }
 const smsIntro = (env, items) => `استعلام قیمت شرکت ${COMPANY(env)}: ${items.length === 1 ? `${items[0].title} (${faN(items[0].qty == null ? "—" : items[0].qty)} ${items[0].unit || ""})`.trim() : `${faN(items.length)} قلم`}. ثبت قیمت و گفت‌وگو با کارشناس خرید:`;
 
@@ -530,7 +535,7 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
         const comment = T(a.comment).slice(0, 1000);
         let r = null;
         if (a.type === "approve" || a.type === "return" || a.type === "reject") {
-          r = await C.decide(env, ex, b.id, a.type, { comment: a.type === "return" ? comment || "لطفاً مشخصات را اصلاح و دوباره ارسال کنید." : comment, ai: true });
+          r = await C.decide(env, ex, b.id, a.type, { comment: a.type === "return" ? comment || "لطفاً مشخصات رو اصلاح کنید و دوباره «ارسال» رو بزنید." : comment, ai: true });
         } else if (a.type === "accept_rows" || a.type === "final") {
           const ok = validKeys(b, a.rows);
           if (ok.length) await C.acceptRows(env, ex, b.id, { keys: ok });
@@ -608,12 +613,25 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
     return { id: b.id, state: b.state, comment: b.comment, terms: C.termsOf(b), pf: b.pf_key ? b.pf_name || "پیش‌فاکتور" : null,
       items: bundleItems(b, lines).map((l) => ({ no: l.no, title: l.title })), ai: usable, accept: acc, match: usable ? resolve(usable, acc) : null };
   });
+  /* حقیقت‌های واقعیِ مذاکره: تاریخِ نیازِ هر قلم (فایلِ درخواست) و سابقهٔ خریدِ شرکت از همین تأمین‌کننده (بررسی سوابق) —
+     مدل فقط به همین‌ها تکیه می‌کند و عدد یا سابقه‌ای نمی‌سازد (ai-prompts.js) */
+  const ids = [...new Set(lineOut.map((l) => l.item_id))];
+  const needOf = new Map(ids.length ? ((await env.DB.prepare(`SELECT id, need_date FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || [])
+    .map((r) => [r.id, T(r.need_date) || null]) : []);
+  const sk = C.nkey(th.supplier_name);
+  const rel = lineOut.map((l) => {
+    const di = run.data.items.find((x) => x.id === l.item_id);
+    const top = (di && di.hist && di.hist.top) || [];
+    const me = top.find((s) => C.nkey(s.name) === sk);
+    return { no: l.no, title: l.title, n: me ? me.n || 0 : 0, last: me ? me.last || null : null, total: top.reduce((a, s) => a + (s.n || 0), 0), sups: top.length };
+  });
   const supplierSrc = SOURCE_FA[st.source] || st.source || "—";
   const tInfo = { thread_id: th.id, supplier: th.supplier_name, supplier_id: th.supplier_id, phone: th.phone, label: th.phone_label, request_id: th.request_id, party: th.party, lines: lineOut };
   const asg = await env.DB.prepare("SELECT deadline_at FROM assignments WHERE id=?").bind(run.assignment_id).first();
   return negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
-    turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc }, lines: lineOut, terms: C.termsOf(th),
+    turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
+    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
     bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), transcript: threadSection(tInfo, msgs, { forModel: true }),
   });
 }

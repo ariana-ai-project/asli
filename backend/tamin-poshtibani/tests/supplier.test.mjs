@@ -606,7 +606,7 @@ test("مینی‌اپ: initData امضاشده با توکن همان بات؛ �
   assert.equal((await call("/me", { headers: { "X-TG-Init": await initData("sptok", { id: EXPERT_CHAT }) } })).status, 401, "امضای بات دیگر برای همان شناسه");
 });
 
-test("«📨 ارسال» از «بررسی سوابق»: فقط با /azmayesh؛ پیامکِ شبیه‌سازی‌شده در بات مکاتبات، نه در بات کارشناسان", { skip: SKIP }, async () => {
+test("«📨 ارسال» از «بررسی سوابق» برای همهٔ کارشناسان؛ پیامکِ شبیه‌سازی‌شده در بات مکاتبات، نه در بات کارشناسان", { skip: SKIP }, async () => {
   const isMenu = (c) => !!(c.body.reply_markup && c.body.reply_markup.keyboard);
   const press = async (data, mid = 700) => {
     const n = calls.length;
@@ -620,13 +620,15 @@ test("«📨 ارسال» از «بررسی سوابق»: فقط با /azmayesh�
   const btn = (kb, t) => { const b = kb.flat().find((x) => x.text.includes(t)); return b && (b.callback_data || b.url || b.copy_text); };
   const flowOf = (kb) => /hx:(\d+):t:/.exec(JSON.stringify(kb))[1];
 
-  /* بی /azmayesh: کارتِ قلمِ سوابق همان کارت قبلی است */
+  /* از مهر ۱۴۰۵ برای همهٔ کارشناسان، بی /azmayesh */
   const sel0 = await press("hs:a:1");
   const card0 = await press(`hv:${flowOf(sel0.kb)}:11:h:0`);
   assert.match(card0.text, /سوابق «پیچ آلن M8 فولادی»/);
-  assert.ok(!btn(card0.kb, "ارسال به تأمین‌کننده"));
+  assert.ok(btn(card0.kb, "ارسال به تأمین‌کننده"), "کارتِ قلمِ سوابق «📨 ارسال» دارد");
 
+  const az = calls.length;
   await handleUpdate(env, { message: { message_id: 1, chat: { id: EXPERT_CHAT, type: "private" }, text: "/azmayesh" } });
+  assert.match(sent(az, "main", EXPERT_CHAT).pop().body.text, /برای همهٔ کارشناسان روشن است/);
   const smart = await press("sg:50:t:0:7:11");
   assert.ok(btn(smart.kb, "کپی پیام"));
   assert.ok(!btn(smart.kb, "ارسال به تأمین‌کننده"), "جستجوی هوشمند دیگر «ارسال» ندارد");
@@ -949,4 +951,46 @@ test("پیامکِ واقعی با TextBee: استعلام و «ارسال رم�
   } finally {
     delete env.TEXTBEE_API_KEY; delete env.TEXTBEE_API_BASE;
   }
+});
+
+test("بستهٔ قفل‌شده: بعد از اولین ارسال به تأمین‌کنندهٔ واقعی، عنوان و لایه‌ها قفل‌اند و هر تأمین‌کنندهٔ بعدی عینِ همان را می‌گیرد", { skip: SKIP }, async () => {
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (13,'R-1','c',3,'میلگرد ۱۲ آجدار',2,'تن','open',1,?)")
+    .run(JSON.stringify({ v: 2, head: "میلگرد", layers: { "قطر": { v: "12", u: "میلی‌متر" }, "نوع": "آجدار" } }));
+  /* تأمین‌کنندهٔ فرضی قفل نمی‌کند */
+  const demo = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [13], demo: true } });
+  assert.equal(demo.status, 200, JSON.stringify(demo.data));
+  assert.equal((await call("/sp/x/items?aid=1", { headers: EX })).data.items.find((i) => i.id === 13).locked, false);
+  assert.equal((await call("/assignments/1", { headers: EX })).data.items.find((i) => i.id === 13).sp_lock, undefined);
+
+  /* اولین تأمین‌کنندهٔ واقعی ← قفل */
+  const a = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [13], supplier_name: "فولاد الف", phone: "09120000071", label: "فروش" } });
+  assert.equal(a.status, 200, JSON.stringify(a.data));
+  const lineA = DB.raw.prepare("SELECT title, head, layers_json, req_qty, req_unit FROM sp_lines WHERE thread_id=? AND item_id=13").get(a.data.thread_id);
+  assert.equal(lineA.head, "میلگرد");
+  const lock = (await call("/assignments/1", { headers: EX })).data.items.find((i) => i.id === 13).sp_lock;
+  assert.deepEqual([lock.title, lock.head, lock.qty, lock.unit], ["میلگرد ۱۲ آجدار", "میلگرد", 2, "تن"]);
+  assert.equal((await call("/sp/x/items?aid=1", { headers: EX })).data.items.find((i) => i.id === 13).locked, true);
+
+  /* ویرایشِ ساختار در سرور پذیرفته نیست */
+  const del = await call("/items/13/norm", { method: "DELETE", headers: EX });
+  assert.equal(del.status, 409);
+  assert.match(del.data.error, /قفل است/);
+  assert.equal((await call("/items/13/edit", { method: "DELETE", headers: EX })).status, 409);
+
+  /* حتی اگر ساختار یا مقدار از راهِ دیگری عوض شود، تأمین‌کنندهٔ دوم عینِ بستهٔ اول را می‌گیرد */
+  DB.raw.prepare("UPDATE items SET norm_json=?, qty=5, unit='کیلوگرم' WHERE id=13").run(JSON.stringify({ v: 2, head: "میلگرد", layers: { "قطر": { v: "14", u: "میلی‌متر" } } }));
+  const b = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [13], supplier_name: "فولاد ب", phone: "09120000072", label: "فروش" } });
+  assert.equal(b.status, 200, JSON.stringify(b.data));
+  const lineB = DB.raw.prepare("SELECT title, head, layers_json, req_qty, req_unit FROM sp_lines WHERE thread_id=? AND item_id=13").get(b.data.thread_id);
+  assert.deepEqual(lineB, lineA, "همان عنوان، لایه‌ها، مقدار و واحد");
+  const ev = DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND kind='event' ORDER BY id DESC LIMIT 1").get(b.data.thread_id).body;
+  assert.match(ev, /میلگرد ۱۲ آجدار/);
+  assert.doesNotMatch(ev, /14/, "کارتِ استعلام هم همان بسته را نشان می‌دهد");
+
+  /* شمارهٔ تازه از کارتِ تأمین‌کنندهٔ سوابق (هر کارشناس) */
+  const ph = await call("/sp/x/phones", { headers: EX, body: { supplier_name: "فولاد الف", phone: "‪+98 912 000 0073‬", label: "همراه مدیر", panel: true } });
+  assert.equal(ph.status, 200, JSON.stringify(ph.data));
+  assert.deepEqual([ph.data.phone.phone, ph.data.phone.panel], ["09120000073", true]);
+  const list = (await call(`/sp/x/phones?name=${encodeURIComponent("فولاد الف")}`, { headers: EX })).data.phones;
+  assert.deepEqual(list.map((x) => x.phone).sort(), ["09120000071", "09120000073"]);
 });

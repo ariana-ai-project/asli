@@ -496,7 +496,44 @@
         ${f("شهر", c.city)}${f("تلفن همراه", c.phone, "num")}${f("تلفن ثابت", c.tel2, "num")}${f("ایمیل", c.email)}${f("وب‌سایت", c.site)}</div>
       ${c.note ? `<div class="desc"><b>توضیحات مدیر:</b> ${esc(c.note)}</div>` : ""}
       <div class="dim" style="font-size:.82rem;margin-top:8px">${p.contact ? "راه‌های تماس از دفترچهٔ تأمین‌کنندگان خوانده شده‌اند."
-        : `راه‌های تماس این تأمین‌کننده هنوز در دفترچه ثبت نشده است. <span class="chip mock">دفترچهٔ تأمین‌کنندگان — مرحلهٔ بعد</span>`}</div></div>`;
+        : `راه‌های تماس این تأمین‌کننده هنوز در دفترچه ثبت نشده است. <span class="chip mock">دفترچهٔ تأمین‌کنندگان — مرحلهٔ بعد</span>`}</div>
+      ${vSpPhones(p.name, c.phone)}</div>`;
+  }
+
+  /* شماره‌های مکاتبات (پنل و بات تأمین‌کننده) همین تأمین‌کننده و افزودنِ شمارهٔ تازه (مهر ۱۴۰۵).
+     تیکِ «پنل» یعنی پنلِ تأمین‌کننده به این شماره وصل است؛ کارشناس هوشمند فقط به شمارهٔ تیک‌خورده پیامک می‌دهد. */
+  const digits = (x) => String(x || "").replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[^\d]/g, "").replace(/^(0098|98|0)/, "");
+  function vSpPhones(name, dirPhone) {
+    const ph = S.spPh[name];
+    if (ph === undefined) loadSpPhones(name);
+    const list = (ph && ph.phones) || [];
+    const fill = dirPhone && !list.some((x) => digits(x.phone) === digits(dirPhone)) ? dirPhone : "";
+    return `<div class="spph" style="margin-top:10px;border-top:1px solid var(--tp-line);padding-top:8px"><b>📱 شماره‌ها برای مکاتبات و پنل تأمین‌کننده</b>
+      <div style="margin-top:4px">${!ph || ph.loading ? `<span class="dim">در حال خواندن…</span>` : ph.err ? `<span class="chip warn">${esc(ph.err)}</span>`
+        : list.length ? list.map((x) => `<span class="chip ${x.panel ? "ok" : ""}" title="${x.panel ? "تیکِ پنل: کارشناس هوشمند به این شماره پیامک می‌دهد" : "بی تیکِ پنل"}">${x.panel ? "☑️ " : ""}<span dir="ltr">${esc(x.phone)}</span>${x.label ? ` · ${esc(x.label)}` : ""}</span>`).join(" ")
+        : `<span class="dim">هنوز شماره‌ای برای مکاتبات ثبت نشده.</span>`}</div>
+      <div class="toolrow" style="margin-top:6px;align-items:end;flex-wrap:wrap;gap:8px">
+        <label class="tp-field"><b>شمارهٔ همراه</b><input class="tp-input" data-pp-phone dir="ltr" inputmode="tel" placeholder="09…" value="${esc(fill)}" style="width:150px"></label>
+        <label class="tp-field"><b>برچسب</b><input class="tp-input" data-pp-label list="pp-labels" placeholder="همراه، فروش، دفتر…" style="width:150px">
+          <datalist id="pp-labels"><option>همراه</option><option>فروش</option><option>دفتر</option><option>مدیر فروش</option></datalist></label>
+        <label class="chkline" title="پنل تأمین‌کننده به این شماره وصل است؛ کارشناس هوشمند فقط به شمارهٔ تیک‌خورده پیامک می‌دهد"><input type="checkbox" data-pp-panel> تیکِ پنل</label>
+        <button class="tp-btn sm primary" data-pp-add="${esc(name)}">➕ افزودن شماره</button></div></div>`;
+  }
+  async function loadSpPhones(name) {
+    S.spPh[name] = { loading: true };
+    try { S.spPh[name] = { phones: (await TP.api(`/sp/x/phones?name=${encodeURIComponent(name)}`)).phones || [] }; }
+    catch (e) { S.spPh[name] = { err: e.message }; }
+    render();
+  }
+  async function addSpPhone(btn) {
+    const box = btn.closest(".spph"), name = btn.dataset.ppAdd;
+    const body = { supplier_name: name, phone: box.querySelector("[data-pp-phone]").value, label: box.querySelector("[data-pp-label]").value, panel: box.querySelector("[data-pp-panel]").checked };
+    try {
+      const r = await TP.api("/sp/x/phones", { body });
+      delete S.spPh[name];
+      TP.modal("شماره ثبت شد", `<span dir="ltr">${esc(r.phone.phone)}</span>${r.phone.label ? ` (${esc(r.phone.label)})` : ""} برای «${esc(r.supplier.name)}» ${r.phone.panel ? "با تیکِ پنل " : ""}ثبت شد؛ در «💬 مکاتبات» هنگامِ ارسال همین شماره پیشنهاد می‌شود.`, null, "باشد", "");
+      render();
+    } catch (e) { TP.modal("ثبت نشد", esc(e.message), null, "باشد", ""); }
   }
 
   /* نمودار روند خرید — پنجرهٔ بزرگ وسط صفحه. افقی: زمان از اولین تا آخرین تأمین، با
@@ -622,7 +659,11 @@
     const where = it.code ? `کد ${it.code}` : "عنوانِ همین قلم";
     const saved = { created: `در دیتابیس اصلی برای ${where} ذخیره شد`, updated: `در دیتابیس اصلی برای ${where} به‌روز شد`,
       same: "همان فهرست اقلام است؛ چیزی در دیتابیس عوض نشد", reverted: "با فهرست اقلام یکی شد؛ ویرایشِ قبلی از دیتابیس برداشته شد" }[d.saved];
-    return `<div class="normbox">
+    /* بستهٔ قفل‌شده: قلمی که برای تأمین‌کننده رفته — نوع قلم و لایه‌ها فقط‌خواندنی؛ سرور هم نمی‌پذیرد (sp-core.js:itemLocks) */
+    const lk = it.sp_lock, dis = lk ? "disabled" : "";
+    const lockNote = lk ? `<div class="tp-note" style="margin:0 0 8px">🔒 <b>این قلم برای تأمین‌کننده فرستاده شده و قفل است.</b> عنوان، نوع قلم و لایه‌های ویژگی همان‌اند که رفته و برای بقیهٔ تأمین‌کنندگان هم عیناً همین می‌رود:
+      <b>${esc(lk.title)}</b>${lk.head ? ` — ${esc(lk.head)}` : ""}${(lk.layers || []).length ? ` · ${lk.layers.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join(" · ")}` : ""}. نرخ‌های تبدیل را هنوز می‌شود عوض و ذخیره کرد.</div>` : "";
+    return `<div class="normbox">${lockNote}
       <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
         <span class="chip ${d.confirmed || fromDb ? "ok" : "warn"}">${d.confirmed ? "ذخیره‌شده — جستجو بر همین است" : fromDb ? "جستجو بر همین است" : "پیشنهاد مدل — جستجو بر همین است، ولی در دیتابیس ذخیره نشده"}</span>
         <span class="chip info" title="${fromDb ? "بی مدل: کد یا عنوانِ عیناً همان در دیتابیس بود" : "کد و عنوان در دیتابیس نبود"}">${esc(SRC_FA[d.source] || d.source)}${d.code ? ` · کد ${esc(d.code)}` : ""}</span>
@@ -631,21 +672,21 @@
         ${saved ? `<span class="chip ok">${esc(saved)}</span>` : ""}
         ${d.known === false ? `<span class="chip warn" title="جستجو چیزی پیدا نمی‌کند مگر نوع قلمِ موجود را انتخاب کنید">این نوع قلم در فهرست نیست — سابقه‌ای ندارد</span>` : ""}</div>
       <div class="normgrid">
-        <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%" title="نوع قلم را می‌توانید عوض کنید: از فهرستِ نوع‌های قلم انتخاب کنید یا بنویسید">
+        <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%" ${dis} title="${lk ? "قفل: این قلم برای تأمین‌کننده رفته است" : "نوع قلم را می‌توانید عوض کنید: از فهرستِ نوع‌های قلم انتخاب کنید یا بنویسید"}">
           <datalist id="nh-${it.id}" data-heads="${esc(JSON.stringify(cands))}">${headOptions(cands)}</datalist>
-          <span class="dim" style="font-size:.8rem;margin-top:3px">قابل تغییر — از فهرست انتخاب کنید یا بنویسید.</span></label>
+          <span class="dim" style="font-size:.8rem;margin-top:3px">${lk ? "🔒 قفل — همان که برای تأمین‌کننده رفته." : "قابل تغییر — از فهرست انتخاب کنید یا بنویسید."}</span></label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
           ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> لایه‌ای را که تیک بزنید، فقط اقلامی از همین نوع قلم می‌آیند که همان لایه را با <b>همان مقدار</b> دارند — از هر کدی (مثلاً «ضخامت ۸ میلی‌متر» ورق‌های ۸ میلِ همهٔ کدها را می‌آورد). بی‌تیک یعنی آن لایه مهم نیست.</div>` : ""}
           ${dr.layers.map((l, i) => { const qn = isQuant(l.k), rf = qn ? refTxt(l.k, l.t, l.u) : ""; return `<div class="normlayer">
             ${pickMode ? `<input type="checkbox" data-pick-l="${esc(l.k)}" ${pk.layers.includes(l.k) ? "checked" : ""} title="در «قلم انتخابی» فقط اقلامی با همین مقدارِ این لایه">` : ""}
-            <select class="tp-input" data-norm-lk="${i}">${opt(l.k)}</select>
-            <input class="tp-input${qn ? " num" : ""}" data-norm-lv="${i}" value="${esc(l.t)}"${qn ? ` placeholder="فقط عدد" title="فقط عدد: ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶ — واحد را از فهرست کنارش انتخاب کنید"` : ""}>
-            ${qn ? `<select class="tp-input nu" data-norm-lu="${i}" title="واحد استاندارد؛ تبدیل و مقایسه بر پایهٔ همین است"><option value="">بی‌واحد</option>${unitsFor(l.k).map((u) => `<option ${u === l.u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : ""}
+            <select class="tp-input" data-norm-lk="${i}" ${dis}>${opt(l.k)}</select>
+            <input class="tp-input${qn ? " num" : ""}" data-norm-lv="${i}" value="${esc(l.t)}" ${dis}${qn ? ` placeholder="فقط عدد" title="فقط عدد: ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶ — واحد را از فهرست کنارش انتخاب کنید"` : ""}>
+            ${qn ? `<select class="tp-input nu" data-norm-lu="${i}" ${dis} title="واحد استاندارد؛ تبدیل و مقایسه بر پایهٔ همین است"><option value="">بی‌واحد</option>${unitsFor(l.k).map((u) => `<option ${u === l.u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : ""}
             ${rf ? `<span class="dim num" style="font-size:.8rem" title="به واحد مرجعِ این لایه — مقایسه و جستجو بر همین است">${esc(rf)}</span>` : ""}
             ${l.i ? `<span class="chip info" title="در عنوان گفته نشده؛ از عرفِ پذیرفته‌شدهٔ همین نوع قلم آمده (یا واحدش از بزرگیِ عدد خوانده شده). با ویرایش، صریح می‌شود.">ضمنی</span>` : ""}
-            <button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button></div>`; }).join("")
+            ${lk ? "" : `<button class="tp-btn xs" data-norm-ldel="${i}" title="حذف این لایه">✕</button>`}</div>`; }).join("")
             || `<div class="dim" style="font-size:.85rem">لایه‌ای ندارد.</div>`}
-          <button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button>
+          ${lk ? "" : `<button class="tp-btn xs" data-norm-ladd style="margin-top:4px">افزودن لایه</button>`}
           <div class="dim" style="font-size:.8rem;margin-top:4px">در لایهٔ کمّی (قطر، طول، ضخامت، مساحت، محیط، یال …) فقط عدد بنویسید و واحد را از فهرست انتخاب کنید؛ «۲ میل»، «2mm» و «۰٫۲ سانتی‌متر» یکی‌اند و هر لایه به واحد مرجعش (طول‌ها میلی‌متر، مساحت متر مربع) سنجیده می‌شود.
             «ضمنی» یعنی در عنوان نیامده و از عرفِ همین نوع قلم آمده (مثلاً ورقِ بی‌جنس ← آهنی).</div></div>
       </div>
@@ -665,8 +706,8 @@
         <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). <b>ایستا</b>: ضریب از خودِ دو واحد است و برای همهٔ اقلام یکی. <b>پویا</b>: ضریب برای هر قلم با فرمول از لایه‌های خودش حساب می‌شود — در جمع و سهمِ تأمین‌کنندگان هم هر قلمِ این نوع با لایه‌های خودش؛ اگر لایهٔ لازم را نداشت، نرخِ ثابتِ فایل با اطمینانِ «پایین». نرخی را که دستی عوض کنید، در جستجو بر فرمول و نرخ فایل مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان فرمول یا نرخ فایل.</div>
         ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="tp-note warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div>` : ""}
       <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و نرخ‌های تبدیل">ذخیره</button>
-        ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن از شما می‌پرسم">تفکیک دوباره با مدل…</button>`}
-        ${d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
+        ${fromDb || lk ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن از شما می‌پرسم">تفکیک دوباره با مدل…</button>`}
+        ${lk ? "" : d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
           : d.confirmed ? `<button class="tp-btn" data-norm-clear title="ذخیرهٔ همین قلم برداشته می‌شود و ساختار دوباره از دیتابیس خوانده می‌شود">برداشتن ذخیره</button>` : ""}</div></div>`;
   }
 
@@ -674,6 +715,7 @@
     const d = S.hist[it.id];
     const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
+      ${it.sp_lock ? `<span class="chip warn" title="برای تأمین‌کننده فرستاده شده: عنوان، نوع قلم و لایه‌ها قفل‌اند و برای بقیهٔ تأمین‌کنندگان هم عیناً همین می‌رود">🔒 بستهٔ قفل‌شده</span>` : ""}
       ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
       <span style="display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = گذشتهٔ دور تقریباً هم‌وزن امروز · ۱۰ = فقط خریدهای تازه وزن دارند">
@@ -935,7 +977,7 @@
   /* S.smart[itemId] = { searches: [...] } — همهٔ جستجوهای همین قلم (هر درخواست و هر کارشناس)،
      تازه‌ترین اول. S.smFresh[itemId] جستجویی است که همین حالا اجرا شد و بالای همه برجسته می‌آید.
      S.chan[phone][platform] وضعیت پیام‌رسان‌های هر شماره است، مشترک بین همه و ذخیره در پایگاه داده. */
-  S.smFresh = {}; S.chan = {}; S.chOpen = {}; S.smOpen = {};
+  S.smFresh = {}; S.chan = {}; S.chOpen = {}; S.smOpen = {}; S.spPh = {};
   const mergeChannels = (ch) => { for (const [ph, v] of Object.entries(ch || {})) S.chan[ph] = { ...(S.chan[ph] || {}), ...v }; };
   const searchOf = (sid) => { const d = S.smart[(item() || {}).id]; return d && d.searches ? d.searches.find((x) => x.search_id === sid) : null; };
   const supOfSearch = (sid, idx) => { const s = searchOf(sid); return s && s.result && (s.result.suppliers || [])[idx]; };
@@ -1718,11 +1760,6 @@
   }
   const reload = () => openDetail(A().id, true);
 
-  /* دموی پنل تأمین‌کننده: دکمهٔ «مکاتبات» فقط برای کارشناسی که /azmayesh را در بات زده (settings.spDemo) */
-  function spDemoOn() {
-    const v = S.settings && S.settings.spDemo;
-    return v === true || v === "all" || (Array.isArray(v) && !!S.expert && v.includes(S.expert.id));
-  }
   /* دکمه‌های تلگرام نوار بالا. کارشناس ارشد دو تلگرام دارد (تصمیم مدیر): «تلگرام کارشناسی» — همان
      بات کارشناسان برای ارجاع‌های خودش (با «ارجاع به تیم» کنار «مشاهده») — و «تلگرام تیمی» برای
      اعلان‌های پایش کارشناسان زیر نظرش. */
@@ -1739,7 +1776,7 @@
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}${spDemoOn() ? `<a class="tp-btn sm" href="correspond.html" title="مکاتبات با تأمین‌کنندگان (دموی پنل تأمین‌کننده)">💬 مکاتبات</a>` : ""}<button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<a class="tp-btn sm" href="correspond.html" title="مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی">💬 مکاتبات</a><button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
@@ -1888,6 +1925,7 @@
     Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });
     const cp = G("[data-close-prof]"); if (cp) cp.onclick = () => { S.prof = null; render(); };
+    const ppa = G("[data-pp-add]"); if (ppa) ppa.onclick = () => addSpPhone(ppa);
     Q("[data-buys]").forEach((b) => b.onclick = () => showBuys(b.dataset.buys));
     Q("[data-to-quote]").forEach((b) => b.onclick = () => addFromHistory(b.dataset.toQuote));
     const rs = G("[data-run-smart]"); if (rs) rs.onclick = runSmart;

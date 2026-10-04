@@ -492,7 +492,7 @@ async function saveEdit(env, it, s, rates, who) {
  * جنسِ آهنی همان «ورق آهنی». نوع قلمِ تازه (نه در فهرست) پذیرفته می‌شود ولی سابقه‌ای ندارد،
  * مگر اقلامی که کارشناس به آن آورده.
  */
-export async function confirmNorm(env, it, body, who = null) {
+export async function confirmNorm(env, it, body, who = null, { check } = {}) {
   const meta = await catalogMeta(env);
   if (!meta) throw new HttpError("فهرست اقلام هنوز بارگذاری نشده است.", 409);
   if (!nameOf(body && body.head)) throw new HttpError("نوع قلم لازم است.");
@@ -506,6 +506,8 @@ export async function confirmNorm(env, it, body, who = null) {
     rates[nameOf(u)] = n;
   }
   const s = await settle(env, meta, { head: body.head, layers: body.layers, residual: body.residual, confidence: "high" }, textOf(it), { strict: true });
+  /* قلمی که برای تأمین‌کننده رفته (sp-core.js:itemLocks): check خطا می‌دهد مگر نوع قلم و لایه‌ها همان بستهٔ رفته باشند */
+  if (check) check(s);
   const saved = await saveEdit(env, it, s, rates, who);
   const db = saved === "created" || saved === "updated" ? await dbStruct(env, it) : null;
   const norm = {

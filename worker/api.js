@@ -43,7 +43,7 @@ import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebho
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
-import { SP_DDL, SP_COLUMNS, spBackfill } from "./sp-core.js";
+import { SP_DDL, SP_COLUMNS, spBackfill, itemLocks, sameAsLock, LOCK_MSG } from "./sp-core.js";
 import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
@@ -1067,6 +1067,9 @@ async function assignmentDetail(env, aid, who) {
   if (!(await canSee(env, who, a.expert_id))) throw new HttpError("این ارجاع متعلق به شما نیست.", 403);
   const request = await env.DB.prepare("SELECT * FROM requests WHERE id=?").bind(a.request_id).first();
   const items = (await env.DB.prepare("SELECT * FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
+  /* بستهٔ قفل‌شده (sp-core.js:itemLocks): قلمی که برای تأمین‌کننده رفته — پنل ساختارش را فقط‌خواندنی نشان می‌دهد */
+  const locks = await itemLocks(env, items.map((i) => i.id));
+  for (const i of items) if (locks.has(i.id)) i.sp_lock = locks.get(i.id);
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
   const decisions = (await env.DB.prepare("SELECT * FROM decisions WHERE assignment_id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(aid).all()).results || [];
@@ -1913,15 +1916,23 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      if (m === "DELETE") return json(await clearNorm(env, it));
-      const r = await confirmNorm(env, it, await readJson(request), who);
+      /* قلمی که برای تأمین‌کننده رفته قفل است: برداشتنِ ذخیره نه، و ذخیره فقط با همان نوع قلم و لایه‌ها (نرخ‌ها آزاد) */
+      const lock = (await itemLocks(env, [it.id])).get(it.id);
+      if (m === "DELETE") {
+        if (lock) throw new HttpError(LOCK_MSG, 409);
+        return json(await clearNorm(env, it));
+      }
+      const check = lock ? (s) => { if (!sameAsLock(lock, s.head, s.layers, it.spec)) throw new HttpError(LOCK_MSG, 409); } : null;
+      const r = await confirmNorm(env, it, await readJson(request), who, { check });
       if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
     }
     /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
       const who = await requireAny(request, env);
-      return json(await revertEdit(env, await ownItem(env, who, int(mm[1]))));
+      const it = await ownItem(env, who, int(mm[1]));
+      if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
+      return json(await revertEdit(env, it));
     }
     /* نام همهٔ نوع‌های قلم — انتخابِ نوع قلم در پنل نرمال‌سازی */
     if (path === "/catalog/heads" && m === "GET") { await requireAny(request, env); return json({ heads: await allHeads(env) }); }

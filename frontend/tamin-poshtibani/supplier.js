@@ -360,8 +360,8 @@
     if (m.kind === "event") return evCard(m) || `<div class="sp-msg ev">${esc(m.body)}<time>${when(m.at)}</time></div>`;
     const me = m.who === "s";
     /* طرفِ تأمین‌کننده می‌داند پاسخ‌دهنده دستیارِ هوشمند است */
-    const ai = !!(m.meta && m.meta.ai);
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `${ai ? "🤖 کارشناس هوشمند" : "کارشناس"} — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
+    /* پیامِ کارشناس هوشمند برای تأمین‌کننده همان پیامِ کارشناس است — «🤖» فقط در صفحهٔ مکاتباتِ کارشناس (مهر ۱۴۰۵) */
+    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `کارشناس — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
   }
   function chatPane() {
     S.unseen = 0;
