@@ -19,8 +19,8 @@ import { HttpError } from "./http.js";
 import { telegram } from "./telegram.js";
 import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
-import { canSave } from "./quote-rules.js";
-import { AI_VERSION, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
+import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
+import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -41,10 +41,10 @@ CREATE TABLE IF NOT EXISTS sp_suppliers (id INTEGER PRIMARY KEY, name TEXT NOT N
 CREATE INDEX IF NOT EXISTS ix_spsup_name ON sp_suppliers(name_n);
 CREATE TABLE IF NOT EXISTS sp_phones (id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, phone TEXT NOT NULL UNIQUE, label TEXT, k TEXT NOT NULL UNIQUE, pass_hash TEXT, pass_at INTEGER, fails INTEGER NOT NULL DEFAULT 0, lock_until INTEGER, resend_at INTEGER, created_by INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_spph_sup ON sp_phones(supplier_id);
-CREATE TABLE IF NOT EXISTS sp_threads (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, supplier_id INTEGER NOT NULL, phone_id INTEGER, created_by INTEGER, e_seen INTEGER NOT NULL DEFAULT 0, s_seen INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL, created_at INTEGER NOT NULL, UNIQUE(assignment_id, supplier_id));
+CREATE TABLE IF NOT EXISTS sp_threads (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, supplier_id INTEGER NOT NULL, phone_id INTEGER, created_by INTEGER, e_seen INTEGER NOT NULL DEFAULT 0, s_seen INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL, created_at INTEGER NOT NULL, e_clear INTEGER, s_clear INTEGER, terms_json TEXT, UNIQUE(assignment_id, supplier_id));
 CREATE INDEX IF NOT EXISTS ix_spth_sup ON sp_threads(supplier_id);
 CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, no INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(thread_id, item_id));
-CREATE TABLE IF NOT EXISTS sp_bundles (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, line_ids TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', comment TEXT, pf_key TEXT, pf_name TEXT, pf_mime TEXT, pf_size INTEGER, pf_at INTEGER, ai_json TEXT, ai_at INTEGER, manual_ok INTEGER, accept_json TEXT, created_at INTEGER NOT NULL, decided_at INTEGER);
+CREATE TABLE IF NOT EXISTS sp_bundles (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, line_ids TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', comment TEXT, pf_key TEXT, pf_name TEXT, pf_mime TEXT, pf_size INTEGER, pf_at INTEGER, ai_json TEXT, ai_at INTEGER, manual_ok INTEGER, accept_json TEXT, terms_json TEXT, created_at INTEGER NOT NULL, decided_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_spb_thread ON sp_bundles(thread_id);
 CREATE TABLE IF NOT EXISTS sp_msgs (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, who TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', body TEXT NOT NULL, meta_json TEXT, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_spm_thread ON sp_msgs(thread_id, id);
@@ -60,8 +60,11 @@ CREATE INDEX IF NOT EXISTS ix_sppass_phone ON sp_passes(phone_id, created_at);
 
 /* ستون‌هایی که بعد از اولین استقرارِ دمو اضافه شدند (CREATE IF NOT EXISTS روی جدولِ موجود اثری ندارد؛ api.js
    آن‌ها را در COLUMN_MIGRATIONS می‌گذارد): کدِ افزایشیِ قلم در پنل هر تأمین‌کننده، پذیرش‌های جدول تطابق،
-   و پیامک‌های شبیه‌سازی‌شده‌ای که منتظرند کارشناس بات مکاتبات را وصل کند. */
-export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept_json", "TEXT"], ["sp_links", "payload", "TEXT"]];
+   پیامک‌های شبیه‌سازی‌شده‌ای که منتظرند کارشناس بات مکاتبات را وصل کند؛ و (دور دوم) «پاک کردن گفت‌وگو»ی هر طرف
+   — پیام‌ها در دیتابیس می‌مانند و فقط از صفحهٔ همان طرف می‌روند — و شرایطِ فاکتورِ اعلامیِ تأمین‌کننده (و عکسش
+   روی هر بسته در لحظهٔ ارسال). */
+export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept_json", "TEXT"], ["sp_links", "payload", "TEXT"],
+  ["sp_threads", "e_clear", "INTEGER"], ["sp_threads", "s_clear", "INTEGER"], ["sp_threads", "terms_json", "TEXT"], ["sp_bundles", "terms_json", "TEXT"]];
 
 /** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
 export async function spBackfill(env) {
@@ -91,6 +94,18 @@ export const BUNDLE_FA = {
 export const FILE_LABELS = ["گواهی کیفیت", "گواهی آزمایشگاه", "تصویر محصول", "کاتالوگ / برگهٔ مشخصات"];
 export const PANEL_PATH = "/tamin-poshtibani/supplier.html";
 export const CORR_PATH = "/tamin-poshtibani/correspond.html";
+
+/**
+ * شرایطِ فاکتورِ اعلامیِ تأمین‌کننده — کادر دومِ کارت هر قلم. همان فیلدهای اجباریِ تب استعلامات که «شرطِ فاکتور»اند
+ * و برای همهٔ خط‌های یک تأمین‌کننده در یک درخواست یکی‌اند (quote-rules.js:PER_SUPPLIER)، پس روی گفت‌وگو می‌مانند
+ * و در هر کارت نشان داده می‌شوند. هر بسته در لحظهٔ ارسال عکسِ خودش را دارد تا جدول تطابق با همان سنجیده شود.
+ */
+export const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
+export const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat"];
+export const TERM_FA = { dtime: "زمان تحویل", pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", valid_days: "اعتبار پیش‌فاکتور (روز)" };
+export const TERM_ENUMS = { pay: ENUMS.pay, invoice: ENUMS.invoice, vat: ENUMS.vat };
+export const termsOf = (row) => { const t = parse(row && row.terms_json, null); return t && typeof t === "object" ? t : {}; };
+export const termsMissing = (t) => TERM_REQUIRED.filter((f) => !T(t && t[f])).map((f) => TERM_FA[f]);
 
 /* ------------------------------------------------------------------ */
 /* ابزارها                                                              */
@@ -161,6 +176,25 @@ const moneyTxt = (n) => faN(fmtMoney(n));
 const codeTxt = (no) => (no ? `کد ${faN(no)} — ` : "");
 /** فهرست اقلامِ یک رخداد، هر قلم با کد و نامش — تا هر پیامِ گفت‌وگو بگوید دقیقاً کدام قلم */
 const itemsTxt = (lines) => lines.map((l) => `• ${codeTxt(l.no)}${l.title}`).join("\n");
+/** مشخصات اصلیِ یک قلم برای پیام‌ها: لایه‌های قفل و افزوده */
+const layersOf = (l) => [...(Array.isArray(l.layers) ? l.layers : parse(l.layers_json, [])), ...(Array.isArray(l.extra) ? l.extra : parse(l.extra_json, []))];
+const specTxt = (l) => layersOf(l).map((x) => `${x.k}: ${x.v}`).join(" · ");
+/**
+ * عکسِ قلم‌های یک رخداد در meta پیام — صفحه‌ها کارتِ مرتبِ پیام را از همین می‌سازند (کد و عنوان، بعد قیمت و
+ * مشخصات) و کلیک روی آن به بخشِ اقدام و تصمیمِ همان بسته یا قلم می‌رود. عکس است تا ویرایشِ بعدی تاریخچه را عوض نکند.
+ */
+const itemSnap = (l, withPrice) => ({
+  no: l.no || null, title: l.title, head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
+  ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: Array.isArray(l.layers) ? l.layers : parse(l.layers_json, []),
+  extra: Array.isArray(l.extra) ? l.extra : parse(l.extra_json, []),
+});
+/** یک قلم در متنِ پیام: سطرِ اول کد و عنوان، زیرش مقدار (و قیمت) و مشخصات اصلی */
+const itemBlock = (l, withPrice) => {
+  const amount = withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
+  const spec = specTxt(l);
+  return `▫️ ${codeTxt(l.no)}${l.title}\n    ${amount}${spec ? `\n    ${spec}` : ""}`;
+};
+const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${faN(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
 /* ------------------------------------------------------------------ */
 /* هویت تأمین‌کننده: لینک + رمز پیامک → نشست                              */
@@ -363,7 +397,9 @@ export async function spSend(env, ex, b) {
       .bind(aid, asg.request_id, sup.id, ph.id, ex.id, t, t).run();
     th = { id: r.meta.last_row_id };
   }
-  const old = new Map(((await env.DB.prepare("SELECT item_id, no FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).map((x) => [x.item_id, x.no]));
+  const oldRows = (await env.DB.prepare("SELECT item_id, no, head, layers_json FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || [];
+  const old = new Map(oldRows.map((x) => [x.item_id, x.no]));
+  const oldById = new Map(oldRows.map((x) => [x.item_id, x]));
   const fresh = its.filter((i) => !old.has(i.id));
   const locked = await Promise.all(fresh.map((i) => lockedLayers(env, i)));
   /* کدِ قلم در پنل همین تأمین‌کننده: شمارش افزایشی، جدا از کد راهکاران (که مال خود شرکت است) */
@@ -378,11 +414,16 @@ export async function spSend(env, ex, b) {
   stmts.push(...passStmts, env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
 
   const text = T(b.text).slice(0, 3000);
-  const titles = (fresh.length ? fresh : its).map((i) => `• ${codeTxt(nos.get(i.id))}${nrm(i.title)} — ${qtyTxt(i.qty)} ${T(i.unit)}`).join("\n");
-  const evBody = fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم فرستاده شد:\n${titles}` : `🔁 یادآوری استعلام:\n${titles}`;
+  /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته و لایه‌های قفل — عکسش در meta برای کارتِ پیام */
+  const evLines = (fresh.length ? fresh : its).map((i) => {
+    const o = oldById.get(i.id), n = fresh.indexOf(i);
+    return { no: nos.get(i.id), title: nrm(i.title), head: n >= 0 ? locked[n].head : o && o.head, qty: i.qty, unit: T(i.unit) || null,
+      layers: n >= 0 ? locked[n].layers : parse(o && o.layers_json, []), extra: [] };
+  });
+  const evBody = `${fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم:` : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
   const msgs = [];
   if (text) msgs.push(["e", "text", text, null]);
-  msgs.push(["e", "event", evBody, { ev: fresh.length ? "rfq" : "remind", items: its.map((i) => i.id) }]);
+  msgs.push(["e", "event", evBody, { ev: fresh.length ? "rfq" : "remind", items: evLines.map((l) => itemSnap(l, false)) }]);
   const msgAt = stmts.length;
   for (const [who, kind, body, meta] of msgs) stmts.push(msgStmt(env, th.id, who, kind, body, meta, t));
   const bot = await spBotUser(env);
@@ -430,10 +471,12 @@ export async function markSeen(env, thId, side) {
 export function threadOut(th, side) {
   return {
     id: th.id, request_id: th.request_id, supplier: th.supplier_name, demo: !!th.demo, expert: th.expert_label || th.expert_name,
-    phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at,
+    phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party } : {}),
   };
 }
+/** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */
+export const clearedUpTo = (th, side) => Number((side === "e" ? th.e_clear : th.s_clear) || 0);
 export function lineOut(l) {
   const qty = l.qty == null ? null : Number(l.qty), price = l.price == null ? null : Number(l.price);
   return {
@@ -444,24 +487,25 @@ export function lineOut(l) {
 }
 /** بسته برای نمایش؛ کارشناس جدول تطابق، پذیرش‌هایش و این‌که تأیید نهایی ممکن است یا چه مانعی مانده را هم می‌بیند */
 export function bundleOut(b, side) {
-  const ai = side === "e" ? parse(b.ai_json, null) : null;
+  const ai0 = side === "e" ? parse(b.ai_json, null) : null;
+  const ai = aiUsable(ai0) ? ai0 : null;
   const accept = side === "e" ? parse(b.accept_json, {}) : null;
-  const match = ai && ai.v === AI_VERSION ? resolve(ai, accept) : null;
+  const match = ai ? resolve(ai, accept) : null;
   return {
-    id: b.id, line_ids: parse(b.line_ids, []), state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment,
+    id: b.id, line_ids: parse(b.line_ids, []), state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment, terms: termsOf(b),
     pf: b.pf_key ? { name: b.pf_name, mime: b.pf_mime, size: b.pf_size, at: b.pf_at } : null,
-    ...(side === "e" ? { ai: ai && ai.v === AI_VERSION ? ai : null, accept, ready: !!(match && match.ready), problems: match ? match.problems : [] } : {}),
+    ...(side === "e" ? { ai, accept, ready: !!(match && match.ready), problems: match ? match.problems : [], gaps: match ? match.gaps : [] } : {}),
     created_at: b.created_at, decided_at: b.decided_at,
   };
 }
 export const lineMissing = (l) => [Number(l.qty) > 0 ? null : "مقدار", T(l.unit) ? null : "واحد", Number(l.price) > 0 ? null : "قیمت واحد"].filter(Boolean);
 
-/** همهٔ یک گفت‌وگو: خط‌ها، بسته‌ها، پیوست‌ها و ۲۰۰ پیام آخر — و خوانده‌شدن */
+/** همهٔ یک گفت‌وگو: خط‌ها، بسته‌ها، پیوست‌ها و ۲۰۰ پیام آخر (بعد از «پاک کردن» همین طرف) — و خوانده‌شدن */
 export async function threadFull(env, th, side) {
   const [lines, bundles, msgs, files] = await Promise.all([
     env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? ORDER BY id").bind(th.id).all(),
     env.DB.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id").bind(th.id).all(),
-    env.DB.prepare(`SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id DESC LIMIT 200) ORDER BY id`).bind(th.id).all(),
+    env.DB.prepare(`SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id DESC LIMIT 200) ORDER BY id`).bind(th.id, clearedUpTo(th, side)).all(),
     env.DB.prepare("SELECT id, line_id, label, note, filename, mime, size, at FROM sp_files WHERE thread_id=? ORDER BY id").bind(th.id).all(),
   ]);
   await markSeen(env, th.id, side);
@@ -477,9 +521,21 @@ export async function threadFull(env, th, side) {
 
 /** نظرسنجیِ سبک صفحه‌ها: پیام‌های بعد از `since` و شمارهٔ نسخهٔ گفت‌وگو (اگر عوض شده، صفحه کل را دوباره می‌خواند) */
 export async function poll(env, th, side, since) {
-  const rows = (await env.DB.prepare(`SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id LIMIT 100`).bind(th.id, Math.max(0, int(since) || 0)).all()).results || [];
+  const from = Math.max(0, int(since) || 0, clearedUpTo(th, side));
+  const rows = (await env.DB.prepare(`SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id LIMIT 100`).bind(th.id, from).all()).results || [];
   if (rows.some((m) => m.who !== side)) await markSeen(env, th.id, side);
   return { msgs: rows.map(msgOut), rev: th.rev };
+}
+
+/**
+ * «پاک کردن گفت‌وگو»: پیام‌های تا این لحظه از صفحهٔ همین طرف می‌روند، در دیتابیس می‌مانند و طرف دیگر هنوز
+ * می‌بیندشان. پیامِ تازه بعد از این دوباره دیده می‌شود. یک نوشتن، بی پیامِ تازه.
+ */
+export async function clearMsgs(env, th, side) {
+  const col = side === "e" ? "e_clear" : "s_clear";
+  await env.DB.prepare(`UPDATE sp_threads SET ${col}=(SELECT COALESCE(MAX(id),0) FROM sp_msgs WHERE thread_id=?1), rev=rev+1 WHERE id=?1`).bind(th.id).run();
+  const r = await env.DB.prepare(`SELECT ${col} AS c FROM sp_threads WHERE id=?`).bind(th.id).first();
+  return { ok: true, cleared: r ? r.c || 0 : 0 };
 }
 
 /** گفت‌وگوهای یک تأمین‌کننده (همهٔ شماره‌هایش یک شرکت‌اند و همه را می‌بینند) */
@@ -593,12 +649,41 @@ export async function lineSave(env, sup, lineId, b) {
   return { ok: true, line: lineOut(await env.DB.prepare("SELECT * FROM sp_lines WHERE id=?").bind(l.id).first()) };
 }
 
-/** «آمادهٔ ارسال» (یا برگشت به پیش‌نویس) — آماده فقط با مقدار، واحد و قیمت واحد */
+/**
+ * شرایطِ فاکتورِ اعلامی (کادر دومِ کارت‌ها) برای همهٔ اقلامِ این گفت‌وگو. فقط فیلدهایی که آمده‌اند؛ خالی یعنی پاک.
+ * زمان تحویل همان قاعدهٔ تب استعلامات را دارد: تاریخ شمسی یا شمار روز.
+ */
+export async function termsSave(env, sup, thId, b) {
+  const th = await threadFor(env, thId, { supplier: sup });
+  const t = { ...termsOf(th) };
+  for (const f of TERM_FIELDS) {
+    if (!(f in (b || {}))) continue;
+    /* رقم فارسی فقط در تاریخ و شمار روز لاتین می‌شود — گزینه‌های فهرستی (مثل «۵۰٪ پیش‌پرداخت») همان‌طورند */
+    const v = TERM_ENUMS[f] ? nrm(b[f]) : nrm(latin(b[f]));
+    if (!v) { delete t[f]; continue; }
+    if (f === "dtime") {
+      if (!validDtime(v)) throw new HttpError("زمان تحویل باید تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری) باشد.", 422, { field: f });
+      t[f] = normalizeDtime(v);
+    } else if (f === "valid_days") {
+      const n = toNum(v);
+      if (n == null || Number.isNaN(n)) throw new HttpError("اعتبار پیش‌فاکتور باید شمار روز باشد.", 422, { field: f });
+      t[f] = Math.round(n);
+    } else {
+      if (!TERM_ENUMS[f].includes(v)) throw new HttpError(`«${TERM_FA[f]}» یکی از این‌ها باشد: ${TERM_ENUMS[f].join("، ")}`, 422, { field: f });
+      t[f] = v;
+    }
+  }
+  await env.DB.batch([env.DB.prepare("UPDATE sp_threads SET terms_json=? WHERE id=?").bind(JSON.stringify(t), th.id), touchStmt(env, th.id, now())]);
+  return { ok: true, terms: t, missing: termsMissing(t) };
+}
+
+/** «آمادهٔ ارسال» (یا برگشت به پیش‌نویس) — آماده فقط با مقدار، واحد، قیمت واحد و شرایطِ اجباریِ فاکتور */
 export async function lineReady(env, sup, lineId, on) {
   const l = await ownLine(env, sup, lineId);
   if (!LINE_EDITABLE.includes(l.state)) throw notEditable(l);
   if (on) {
-    const miss = lineMissing(l);
+    const th = await env.DB.prepare("SELECT terms_json FROM sp_threads WHERE id=?").bind(l.thread_id).first();
+    const miss = [...lineMissing(l), ...termsMissing(termsOf(th))];
     if (miss.length) throw new HttpError(`برای «آمادهٔ ارسال» این‌ها را پر کنید: ${miss.join("، ")}`, 422, { missing: miss });
   }
   const state = on ? "ready" : (l.state === "ready" ? "draft" : l.state);
@@ -607,8 +692,12 @@ export async function lineReady(env, sup, lineId, on) {
   return { ok: true, state };
 }
 
-/** چند قلمِ «آمادهٔ ارسال» با هم: یک بسته برای تصمیم کارشناس */
-export async function submitLines(env, sup, thId, lineIds) {
+/**
+ * چند قلمِ «آمادهٔ ارسال» با هم: یک بسته برای تصمیم کارشناس، با عکسِ شرایطِ اعلامیِ همین لحظه.
+ * pf (اختیاری): پیش‌فاکتوری که تأمین‌کننده همان اول کنار مشخصات می‌فرستد ({skey, filename, mime, size}، فایل را لایهٔ
+ * API در انبار گذاشته) — بسته یک‌راست «پیش‌فاکتور رسید» می‌شود و مرحلهٔ «تأیید و درخواست پیش‌فاکتور» لازم نیست.
+ */
+export async function submitLines(env, sup, thId, lineIds, pf) {
   const th = await threadFor(env, thId, { supplier: sup });
   const want = Array.isArray(lineIds) && lineIds.length ? new Set(lineIds.map(int)) : null;
   const lines = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND state='ready' ORDER BY id").bind(th.id).all()).results || [])
@@ -616,20 +705,27 @@ export async function submitLines(env, sup, thId, lineIds) {
   if (!lines.length) throw new HttpError("هیچ قلمِ «آمادهٔ ارسال»ی انتخاب نشده است.", 422);
   const bad = lines.filter((l) => lineMissing(l).length);
   if (bad.length) throw new HttpError(`این اقلام کامل نیستند: ${bad.map((l) => `${codeTxt(l.no)}«${l.title}»`).join("، ")}`, 422);
+  const terms = termsOf(th);
+  const tmiss = termsMissing(terms);
+  if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
   const t = now();
-  const r = await env.DB.prepare("INSERT INTO sp_bundles (thread_id,line_ids,state,created_at) VALUES (?,?,'pending',?)").bind(th.id, JSON.stringify(lines.map((l) => l.id)), t).run();
+  const state = pf ? "proforma" : "pending";
+  const r = await env.DB.prepare(`INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,pf_key,pf_name,pf_mime,pf_size,pf_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
+    .bind(th.id, JSON.stringify(lines.map((l) => l.id)), state, JSON.stringify(terms), pf ? pf.skey : null, pf ? T(pf.filename).slice(0, 120) || "proforma" : null,
+      pf ? pf.mime || null : null, pf ? pf.size || null : null, pf ? t : null, t).run();
   const bid = r.meta.last_row_id;
   const sum = lines.reduce((s, l) => s + Number(l.qty) * Number(l.price), 0);
-  const body = `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد:\n`
-    + lines.map((l) => `• ${codeTxt(l.no)}${l.title} — ${qtyTxt(l.qty)} ${l.unit} × ${moneyTxt(l.price)} = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال`).join("\n")
-    + `\nجمع: ${moneyTxt(sum)} ریال`;
-  const meta = { ev: "submit", bundle: bid };
+  const pfName = pf ? T(pf.filename) || "پیش‌فاکتور" : null;
+  const body = `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد${pf ? ` همراه با پیش‌فاکتور «${pfName}»` : ""}:\n`
+    + lines.map((l) => itemBlock(l, true)).join("\n")
+    + `\nجمع: ${moneyTxt(sum)} ریال\nشرایط: ${termsLine(terms)}`;
+  const meta = { ev: "submit", bundle: bid, pf: pfName, items: lines.map((l) => itemSnap(l, true)), terms, sum };
   const res = await env.DB.batch([
-    env.DB.prepare(`UPDATE sp_lines SET state='submitted', bundle_id=?, updated_at=? WHERE id IN (${lines.map(() => "?").join(",")})`).bind(bid, t, ...lines.map((l) => l.id)),
+    env.DB.prepare(`UPDATE sp_lines SET state=?, bundle_id=?, updated_at=? WHERE id IN (${lines.map(() => "?").join(",")})`).bind(pf ? "proforma" : "submitted", bid, t, ...lines.map((l) => l.id)),
     msgStmt(env, th.id, "s", "event", body, meta, t),
     touchStmt(env, th.id, t),
   ]);
-  return { ok: true, bundle_id: bid, msgs: [msgObj(res[1].meta.last_row_id, th.id, "s", "event", body, meta, t)], thread: th };
+  return { ok: true, bundle_id: bid, state, msgs: [msgObj(res[1].meta.last_row_id, th.id, "s", "event", body, meta, t)], thread: th };
 }
 
 /* ------------------------------------------------------------------ */
@@ -691,7 +787,7 @@ export async function setProforma(env, target, f) {
   const t = now();
   const lines = await bundleLines(env, b.id);
   const body = `📄 پیش‌فاکتور «${T(f.filename) || "پیش‌فاکتور"}» ${b.state === "proforma" ? "عوض شد" : "رسید"} برای:\n${itemsTxt(lines)}`;
-  const meta = { ev: "pf", bundle: b.id };
+  const meta = { ev: "pf", bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })) };
   const res = await env.DB.batch([
     env.DB.prepare("UPDATE sp_bundles SET state='proforma', pf_key=?, pf_name=?, pf_mime=?, pf_size=?, pf_at=?, ai_json=NULL, ai_at=NULL, manual_ok=NULL, accept_json=NULL WHERE id=?")
       .bind(f.skey, T(f.filename).slice(0, 120) || "proforma", f.mime || null, f.size || null, t, b.id),
@@ -711,12 +807,13 @@ export async function proformaOfBundle(env, who, bundleId) {
 /* ------------------------------------------------------------------ */
 /* تصمیم کارشناس                                                         */
 /* ------------------------------------------------------------------ */
-const aiOf = (b) => { const ai = parse(b.ai_json, null); return ai && ai.v === AI_VERSION ? ai : null; };
+const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? ai : null; };
 
 /**
  * تصمیم روی یک بسته: approve (تأیید مشخصات و درخواست پیش‌فاکتور) · return (برگشت با توضیح؛ قابل ویرایش
  * می‌شود) · reject (رد) · final (تأیید نهایی ← اقلام با مقدارهای پیش‌فاکتور به تب استعلامات).
- * تأیید نهایی فقط وقتی که جدول تطابقِ بررسی هوشمند همه‌جا ✅ است یا مغایرت‌ها پذیرفته شده‌اند (sp-ai.js:resolve).
+ * تأیید نهایی فقط وقتی که هر ردیفِ دروازه‌ایِ جدول تطابق ✅ است یا کارشناس تیکش زده (پیش‌فاکتور ملاک؛ sp-ai.js:resolve).
+ * فیلدِ اجباری‌ای که با پذیرشِ «نیامده» خالی می‌ماند (gaps)، خط استعلام را از «ثبت موقت» و تیک «تأیید نهایی» بازمی‌دارد.
  */
 export async function decide(env, ex, bundleId, action, { comment } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
@@ -724,7 +821,7 @@ export async function decide(env, ex, bundleId, action, { comment } = {}) {
   const note = T(comment).slice(0, 1000);
   const t = now();
   const stmts = [];
-  let body, quoteIds = [];
+  let body, quoteIds = [], gaps = [];
   const open = ["pending", "approved", "proforma"];
   const list = itemsTxt(lines);
   if (action === "approve") {
@@ -747,12 +844,13 @@ export async function decide(env, ex, bundleId, action, { comment } = {}) {
     if (b.state !== "proforma") throw new HttpError(b.state === "approved" ? "پیش‌فاکتور هنوز نرسیده است." : `این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
     const res = resolve(aiOf(b), parse(b.accept_json, {}));
     if (!res.ready) throw new HttpError(`تأیید نهایی هنوز ممکن نیست:\n• ${res.problems.join("\n• ")}`, 422, { problems: res.problems });
+    gaps = res.gaps;
     stmts.push(...await quoteStmts(env, th, b, lines, res, t),
       env.DB.prepare("UPDATE sp_bundles SET state='final', decided_at=? WHERE id=?").bind(t, b.id),
       env.DB.prepare("UPDATE sp_lines SET state='final', updated_at=? WHERE bundle_id=?").bind(t, b.id));
     body = `🏁 تأیید نهایی شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else throw new HttpError("تصمیم نامعتبر.");
-  const meta = { ev: action, bundle: b.id };
+  const meta = { ev: action, bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })) };
   stmts.push(msgStmt(env, th.id, "e", "event", body, meta, t), touchStmt(env, th.id, t));
   const out = await env.DB.batch(stmts);
   const mid = out[out.length - 2].meta.last_row_id;
@@ -765,15 +863,16 @@ export async function decide(env, ex, bundleId, action, { comment } = {}) {
     if (link.length) await env.DB.batch(link);
     quoteIds = lines.map((l) => byItem.get(l.item_id)).filter(Boolean);
   }
-  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, demo: !!th.demo,
+  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, demo: !!th.demo,
     msgs: [msgObj(mid, th.id, "e", "event", body, meta, t)], thread: th };
 }
 
 /**
  * اقلامِ تأییدنهایی‌شده در تب استعلامات — همهٔ مقدارها از پیش‌فاکتور: ردیف‌های ✅ و مغایرت‌هایی که کارشناس
  * پذیرفته (resolve). خطی که برای همین تأمین‌کننده و قلم از قبل هست (مثلاً از «انتخاب جهت استعلام») همان
- * به‌روز می‌شود. خط «ثبت موقت» است اگر همهٔ اجباری‌ها پر باشد، و تیک «تأیید نهایی» می‌خورد تا به جدول
- * کمیسیون برسد. پیش‌فاکتور هم برای همین تأمین‌کننده ثبت می‌شود تا تب استعلامات و کمیسیون همان سند را ببینند.
+ * به‌روز می‌شود. اگر همهٔ اجباری‌ها پر باشد، خط «ثبت موقت» است و تیک «تأیید نهایی» می‌خورد تا به جدول کمیسیون
+ * برسد؛ وگرنه (کارشناس «نیامده» را پذیرفته) همان خط با جاهای خالی می‌ماند و به کمیسیون نمی‌رود. پیش‌فاکتور هم برای
+ * همین تأمین‌کننده ثبت می‌شود تا تب استعلامات و کمیسیون همان سند را ببینند.
  */
 async function quoteStmts(env, th, b, lines, res, t) {
   const have = new Map(((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
@@ -785,16 +884,17 @@ async function quoteStmts(env, th, b, lines, res, t) {
     const v = byLine.get(l.id) || {};
     const spec = [l.head ? `نوع قلم: ${l.head}` : null, ...(v.spec || []).map((x) => `${x.k}: ${x.v}`)].filter(Boolean).join("، ").slice(0, 500) || null;
     const q = { unit: v.unit || null, qty: v.qty ?? null, price: v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
+    const ok = canSave(q) ? 1 : 0;
     const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
-      tm.place || null, tm.place_other || null, canSave(q) ? 1 : 0];
+      tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
     if (have.has(l.item_id)) {
       stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, place=?, place_other=?, saved=?,
-          final=1, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, updated_at=? WHERE id=?`)
-        .bind(...vals, t, b.id, t, have.get(l.item_id)));
+          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, updated_at=? WHERE id=?`)
+        .bind(...vals, b.id, t, have.get(l.item_id)));
     } else {
       stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,?,0,'supplier','supplier',?,?,?)`)
-        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, t, b.id, t, t));
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?)`)
+        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, t, t));
     }
   }
   if (b.pf_key) {
@@ -816,14 +916,14 @@ function matchRows(ai) {
 }
 
 /**
- * پذیرشِ مغایرت‌ها در جدول تطابق: کارشناس قبول می‌کند که پیش‌فاکتور ملاک باشد. فقط ردیفی که سند مقداری برایش
- * دارد (❌، یا ⚠️ای که مدل مطمئن نبود) پذیرفتنی است؛ چیزی که در سند نیست هرگز. `all`: همهٔ پذیرفتنی‌ها.
+ * تیکِ ردیف‌های جدول تطابق: کارشناس قبول می‌کند که پیش‌فاکتور به‌جای درخواست ملاک باشد — هر ردیفِ غیرسبز (⚠️ ⚪ ❌).
+ * مقدار همیشه از سند است؛ اگر سند چیزی نگفته، خالی می‌ماند و چیزی از بستهٔ تأمین‌کننده جایش نمی‌نشیند. `all`: همه.
  */
 export async function acceptRows(env, ex, bundleId, { keys, on = true, all = false } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
   if (b.state !== "proforma") throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
   const ai = aiOf(b);
-  if (!ai) throw new HttpError("اول «بررسی هوشمند» را بزنید تا جدول تطابق ساخته شود.", 409);
+  if (!ai) throw new HttpError("اول «خوانش هوشمند» را بزنید تا جدول تطابق ساخته شود.", 409);
   const acc = parse(b.accept_json, {});
   const rows = matchRows(ai);
   if (all) { for (const x of rows) if (acceptable(x.row)) acc[x.key] = true; }
@@ -831,29 +931,29 @@ export async function acceptRows(env, ex, bundleId, { keys, on = true, all = fal
     for (const k of Array.isArray(keys) ? keys : [keys]) {
       const x = rows.find((y) => y.key === k);
       if (!x) throw new HttpError("این ردیف در جدول تطابق نیست.", 404);
-      if (!acceptable(x.row)) throw new HttpError(x.row.status === "ok" ? "این ردیف همین حالا هم با پیش‌فاکتور یکی است." : "این مورد در پیش‌فاکتور نیامده؛ چیزی برای پذیرفتن نیست — بسته را برای اصلاح برگردانید.", 422);
+      if (!acceptable(x.row)) throw new HttpError("این ردیف همین حالا هم با پیش‌فاکتور یکی است.", 422);
       if (on) acc[k] = true; else delete acc[k];
     }
   }
   await env.DB.batch([env.DB.prepare("UPDATE sp_bundles SET accept_json=? WHERE id=?").bind(JSON.stringify(acc), b.id), touchStmt(env, th.id, now())]);
   const r = resolve(ai, acc);
-  return { ok: true, accept: acc, ready: r.ready, problems: r.problems, thread: th };
+  return { ok: true, accept: acc, ready: r.ready, problems: r.problems, gaps: r.gaps, thread: th };
 }
 
 /** نتیجهٔ «بررسی هوشمند» روی بسته ذخیره می‌شود (sp-ai.js مدل را صدا می‌زند) */
 export async function aiTarget(env, ex, bundleId) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
-  if (b.state !== "proforma" || !b.pf_key) throw new HttpError("بررسی هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);
-  return { b, th, lines: await bundleLines(env, b.id) };
+  if (b.state !== "proforma" || !b.pf_key) throw new HttpError("خوانش هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);
+  return { b, th, lines: await bundleLines(env, b.id), terms: termsOf(b) };
 }
 export async function saveAi(env, target, ai) {
   const { b, th } = target;
   const t = now();
   const rows = matchRows(ai).filter((x) => x.row.gate);
-  const bad = rows.filter((x) => x.row.status === "bad").length, warn = rows.filter((x) => x.row.status === "warn").length;
-  const body = ai.readable === false ? `🤖 بررسی هوشمند: پیش‌فاکتور خوانا نبود${ai.reason ? ` (${ai.reason})` : ""}.`
-    : ai.ok ? "🤖 بررسی هوشمند: همهٔ لایه‌ها و فیلدهای اجباری با پیش‌فاکتور می‌خوانند ✅"
-      : `🤖 بررسی هوشمند: ${faN(bad)} مغایرت ❌ و ${faN(warn)} موردِ نیامده یا نامطمئن ⚠️ — جدول تطابق را ببینید.`;
+  const n = (s) => rows.filter((x) => x.row.status === s).length;
+  const body = ai.readable === false ? `🤖 خوانش هوشمند: پیش‌فاکتور خوانا نبود${ai.reason ? ` (${ai.reason})` : ""}.`
+    : ai.ok ? "🤖 خوانش هوشمند: همهٔ لایه‌ها و فیلدهای اجباری با پیش‌فاکتور می‌خوانند ✅"
+      : `🤖 خوانش هوشمند: ${[["bad", "فرق دارد ❌"], ["none", "نیامده ⚪"], ["warn", "نامطمئن ⚠️"]].filter(([s]) => n(s)).map(([s, f]) => `${faN(n(s))} ${f}`).join("، ")} — جدول تطابق را ببینید.`;
   const meta = { ev: "ai", bundle: b.id, ok: !!ai.ok };
   /* «note»: یادداشتِ درونیِ کارشناس — تأمین‌کننده نمی‌بیند. خواندنِ تازه، پذیرش‌های قبلی را پاک می‌کند */
   const res = await env.DB.batch([

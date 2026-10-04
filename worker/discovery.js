@@ -386,7 +386,7 @@ const T = (v) => { const s = String(v == null ? "" : v).trim(); return s || null
 /** جستجو برای یک قلم، ثبت نتیجه، سبزکردن مرحلهٔ «جستجوی هوشمند». */
 export async function smartSearch(env, it, ex, params, channel) {
   const markets = [...new Set((Array.isArray(params.markets) ? params.markets : []).filter((k) => marketOf(k)))];
-  if (markets.length > MAX_MARKETS) throw new HttpError("هر جستجو حداکثر سه بازار دارد تا هزینه‌اش از سقف نگذرد؛ بازارهای کمتری تیک بزنید.", 422);
+  if (markets.length > MAX_MARKETS) throw new HttpError("هر جستجو حداکثر سه بازار دارد؛ بازارهای کمتری تیک بزنید.", 422);
   const p = {
     item: it.title, itemCode: it.code, code2: it.hist_code || null,
     qty: it.qty, unit: it.unit,

@@ -14,7 +14,7 @@ import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { ensureSpWebhook, deliverSimSms } from "./sp-bot.js";
-import { runAiCheck, AI_COST_HINT } from "./sp-ai.js";
+import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
@@ -97,7 +97,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       const r = await ensureSpWebhook(env, url.origin).catch((e) => ({ error: e.message }));
       if (r && r.username) bot = r.username;
     }
-    return json({ bot, botUrl: C.botLink(bot), company: C.COMPANY(env), labels: C.FILE_LABELS, ai_cost: AI_COST_HINT, telegram: !!env.TG_SP_BOT_TOKEN });
+    return json({ bot, botUrl: C.botLink(bot), company: C.COMPANY(env), labels: C.FILE_LABELS, telegram: !!env.TG_SP_BOT_TOKEN });
   }
   if (path === "/sp/login" && m === "POST") {
     const b = await readJson(request);
@@ -130,6 +130,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     await later(ctx, () => P.pushMsgs(env, th, r.msgs));
     return json({ ok: true, msgs: r.msgs });
   }
+  /* «پاک کردن گفت‌وگو» — فقط از صفحهٔ همین طرف؛ پیام‌ها در دیتابیس می‌مانند */
+  if ((mm = /^\/sp\/thread\/(\d+)\/clear$/.exec(path)) && m === "POST") {
+    const th = await C.threadFor(env, mm[1], who);
+    return json(await C.clearMsgs(env, th, who.side));
+  }
   if ((mm = /^\/sp\/file\/(\d+)\/url$/.exec(path)) && m === "GET") {
     const f = await C.fileFor(env, who, mm[1]);
     return json({ url: await signed(env, f.skey), name: f.filename });
@@ -145,7 +150,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if (path === "/sp/me" && m === "GET") {
       const bot = await C.spBotUser(env);
       return json({ me: meOut(sup), threads: await C.supplierThreads(env, sup), labels: C.FILE_LABELS, company: C.COMPANY(env),
-        bot, botLogin: C.botLink(bot, "s" + sup.k), via: who.tg ? "telegram" : "web" });
+        bot, botLogin: C.botLink(bot, "s" + sup.k), via: who.tg ? "telegram" : "web", term_enums: C.TERM_ENUMS, term_fa: C.TERM_FA });
     }
     if (path === "/sp/logout" && m === "POST") {
       await C.logout(env, sup.phone_id, who.session);
@@ -158,10 +163,22 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     }
     if ((mm = /^\/sp\/line\/(\d+)$/.exec(path)) && m === "PUT") return json(await C.lineSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/line\/(\d+)\/ready$/.exec(path)) && m === "POST") return json(await C.lineReady(env, sup, mm[1], !!(await readJson(request)).on));
+    if ((mm = /^\/sp\/thread\/(\d+)\/terms$/.exec(path)) && (m === "POST" || m === "PUT")) return json(await C.termsSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/thread\/(\d+)\/submit$/.exec(path)) && m === "POST") {
       const r = await C.submitLines(env, sup, mm[1], (await readJson(request)).line_ids);
       await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
-      return json({ ok: true, bundle_id: r.bundle_id });
+      return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
+    }
+    /* ارسالِ مشخصات همراه با پیش‌فاکتور، یک‌جا: بدنه خودِ فایل است، اقلام در ids (۱,۲,…) */
+    if ((mm = /^\/sp\/thread\/(\d+)\/submit-pf$/.exec(path)) && m === "POST") {
+      const th = await C.threadFor(env, mm[1], who);
+      const ids = T(url.searchParams.get("ids")).split(",").map(int).filter(Boolean);
+      const f = await storeBody(env, request, url, th.assignment_id, "sp-pf");
+      let r;
+      try { r = await C.submitLines(env, sup, th.id, ids, f); }
+      catch (e) { const store = storage(env); if (store) await later(ctx, () => store.remove(f.skey)); throw e; }
+      await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
     }
     if ((mm = /^\/sp\/line\/(\d+)\/file$/.exec(path)) && m === "POST") {
       const target = await C.fileTarget(env, sup, mm[1], url.searchParams.get("label"));
@@ -193,7 +210,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   const ex = who.expert;
   if (path === "/sp/x/threads" && m === "GET") {
     return json({ ...(await C.expertThreads(env, ex)), me: { name: ex.name, label: ex.label }, bot: await C.spBotUser(env), via: who.tg ? "telegram" : "web",
-      ai_cost: AI_COST_HINT, labels: C.FILE_LABELS, demo: C.DEMO.name });
+      labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA });
   }
   if (path === "/sp/x/items" && m === "GET") return json({ items: await C.sendableItems(env, ex, url.searchParams.get("aid")) });
   if (path === "/sp/x/phones" && m === "GET") return json({ phones: await C.phonesOfName(env, url.searchParams.get("name")) });
@@ -206,19 +223,19 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const b = await readJson(request);
     const r = await C.decide(env, ex, mm[1], T(b.action), { comment: b.comment });
     await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
-    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, demo: r.demo });
+    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, gaps: r.gaps, demo: r.demo });
   }
   /* جدول تطابق: پذیرفتنِ مغایرت (پیش‌فاکتور ملاک) — keys یا all */
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/accept$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
     const r = await C.acceptRows(env, ex, mm[1], { keys: b.keys || b.key, on: b.on !== false, all: b.all === true });
-    return json({ ok: true, accept: r.accept, ready: r.ready, problems: r.problems });
+    return json({ ok: true, accept: r.accept, ready: r.ready, problems: r.problems, gaps: r.gaps });
   }
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/ai$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
-    if (b.confirm !== true) throw new HttpError(`بررسی هوشمند هزینه دارد (${AI_COST_HINT}) و فقط با تأیید شما اجرا می‌شود.`, 428, { cost: AI_COST_HINT });
+    if (b.confirm !== true) throw new HttpError("خوانش هوشمند فقط با تأیید شما اجرا می‌شود.", 428);
     const tg = await C.aiTarget(env, ex, mm[1]);
-    const ai = await runAiCheck(env, { fileUrl: await signed(env, tg.b.pf_key, 900), mime: tg.b.pf_mime, lines: tg.lines });
+    const ai = await runAiCheck(env, { fileUrl: await signed(env, tg.b.pf_key, 900), mime: tg.b.pf_mime, lines: tg.lines, terms: tg.terms });
     await C.saveAi(env, tg, ai);
     return json({ ok: true, ai });
   }

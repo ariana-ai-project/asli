@@ -534,7 +534,7 @@ test("نرمال‌سازی: کد در فهرست ← بی‌مدل؛ عنوان
     /* مدل هزینه دارد: بی تأییدِ کارشناس (model) صدا زده نمی‌شود و پاسخ فقط می‌گوید «مدل لازم است» */
     const ask = await normalizeItem(env, fresh);
     assert.equal(ask.source, "none"); assert.equal(ask.needsModel, true);
-    assert.ok(ask.costEst > 0, "هزینهٔ تقریبی برای کادرِ تأیید");
+    assert.equal(ask.costEst, undefined, "هزینهٔ کار با مدل به کاربر گفته نمی‌شود");
     assert.equal(calls.length, 0, "بی تأیید، مدل صدا زده نشد");
     const m = await normalizeItem(env, fresh, { model: true });
     assert.equal(m.source, "model");

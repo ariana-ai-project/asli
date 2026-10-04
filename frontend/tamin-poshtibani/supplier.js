@@ -2,8 +2,9 @@
    پنل تأمین‌کنندگان (دموی مهر ۱۴۰۵) — مرورگر و مینی‌اپ تلگرام
    ورود: لینک پیامک (#k=…) + رمز ۶ رقمیِ همان پیامک → نشست (localStorage).
    داخل تلگرام: initData مینی‌اپ (هدر X-TG-Init) — همان گفت‌وگویی که در بات وارد شده.
-   تب‌ها: مشخصات اقلام (کارت هر قلم: لایه‌های قفل، لایهٔ تازه، مقدار/واحد/قیمت، پیوست‌ها) ·
-          آمادهٔ ارسال (چند قلم با هم، و پیش‌فاکتورِ بسته‌های تأییدشده) · گفت‌وگو با کارشناس.
+   تب‌ها: مشخصات اقلام (کارت هر قلم در سه کادر: مقدار و واحد و قیمت · شرایط فاکتور · نوع قلم و لایه‌ها؛
+          تازه‌ترها بالا) · آمادهٔ ارسال (چند قلم با هم، و «📄 پیش‌فاکتور +» برای فرستادنِ پیش‌فاکتور همراهِ مشخصات) ·
+          گفت‌وگو با کارشناس (پیام‌های خودِ تأمین‌کننده سمت راست).
    وضعیت یکی است با بات تأمین‌کنندگان: هر تغییری این‌جا در بات هم دیده می‌شود و برعکس.
    ============================================================ */
 (function () {
@@ -61,7 +62,12 @@
     document.head.appendChild(s);
   }
 
-  const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1, unseen: 0, company: "تونل سد آریانا", labels: [], botLogin: null, busy: false };
+  /* termsDraft: شرایطِ فاکتورِ در حالِ ویرایش (برای همهٔ اقلامِ استعلام یکی است؛ در هر کارت همان نشان داده می‌شود).
+     pfFile: پیش‌فاکتوری که تأمین‌کننده می‌خواهد همراهِ مشخصات بفرستد. */
+  const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1, unseen: 0,
+    company: "تونل سد آریانا", labels: [], botLogin: null, busy: false, enums: {}, termFa: {}, termsDraft: null, termsDirty: false, pfFile: null, goto: null };
+  const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
+  const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat"];
 
   async function api(path, opt) {
     opt = opt || {};
@@ -153,6 +159,7 @@
     try {
       const d = await api("/sp/me");
       S.me = d.me; S.threads = d.threads || []; S.labels = d.labels || []; S.company = d.company || S.company; S.botLogin = d.botLogin;
+      S.enums = d.term_enums || {}; S.termFa = d.term_fa || {};
       if (!S.threads.length) { app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>فعلاً استعلامی نیست</h2><p class="lead">وقتی کارشناس خرید استعلامی بفرستد، همین‌جا دیده می‌شود.</p></div></div>`; return; }
       const want = parseInt(hp.get("t") || store.sget("sp.th"), 10);
       await openThread(S.threads.some((t) => t.id === want) ? want : S.threads[0].id);
@@ -165,15 +172,16 @@
   }
 
   async function openThread(id) {
-    if (S.dirty.size && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return;
+    if ((S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return;
     S.th = id; store.sset("sp.th", String(id));
-    S.dirty.clear(); S.extra = {};
+    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null;
     await loadThread();
   }
   async function loadThread() {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
     for (const l of d.lines) if (!S.dirty.has(l.id)) S.extra[l.id] = l.extra.slice();
+    if (!S.termsDirty) S.termsDraft = { ...(d.thread.terms || {}) };
     const t = S.threads.find((x) => x.id === S.th); if (t) t.unread = 0;
     render();
   }
@@ -192,21 +200,51 @@
       ${S.threads.length > 1 ? `<div class="sp-pills">${S.threads.map((t) => `<button class="sp-pill ${S.th === t.id ? "on" : ""}" data-th="${t.id}">استعلام ${esc(t.request_id)}${t.unread ? ` <span class="sp-badge">${fa(t.unread)}</span>` : ""}${t.need_pf ? ` <span class="sp-badge wait">پیش‌فاکتور</span>` : ""}</button>`).join("")}</div>` : ""}
       <div class="sp-row" style="margin-top:8px"><b>استعلام ${esc(th.request_id)}</b><span class="sp-muted">کارشناس خرید: ${esc(th.expert)}</span>
         <span class="sp-grow"></span>${S.botLogin && !inTg ? `<a class="tp-btn xs" href="${esc(S.botLogin)}" target="_blank" rel="noopener">🤖 همین پنل در تلگرام</a>` : ""}</div>
-      <nav class="sp-tabs">${tabBtn("spec", "مشخصات اقلام", todo)}${tabBtn("ready", "آمادهٔ ارسال", ready + needPf, needPf > 0)}${tabBtn("chat", "گفت‌وگو", S.unseen)}</nav>
+      <nav class="sp-tabs sp-sticky">${tabBtn("spec", "مشخصات اقلام", todo)}${tabBtn("ready", "آمادهٔ ارسال", ready + needPf, needPf > 0)}${tabBtn("chat", "گفت‌وگو", S.unseen)}</nav>
       <section id="pane">${S.tab === "spec" ? specPane() : S.tab === "ready" ? readyPane() : chatPane()}</section>
     </div>`;
     bind();
-    keep();
+    /* نوار تب‌ها زیرِ نوار بالای صفحه می‌چسبد (هر دو sticky)؛ بلندیِ نوار بالا با پهنای صفحه عوض می‌شود */
+    const tb = $(".tp-top"); if (tb) document.documentElement.style.setProperty("--sp-top-h", `${tb.offsetHeight}px`);
+    if (S.goto) { const g = S.goto; S.goto = null; jumpTo(g); } else keep();
     if (S.tab === "chat") { const c = $(".sp-chat"); if (c) c.scrollTop = c.scrollHeight; }
   }
   function keepScroll() { const y = window.scrollY; return () => window.scrollTo(0, y); }
+  /** کلیک روی پیامِ بسته یا قلم: همان کارت پیدا و چشمک‌زن می‌شود */
+  function jumpTo(sel) {
+    const el = $(sel);
+    if (!el) return;
+    el.scrollIntoView({ block: "center" });
+    el.classList.add("sp-flash");
+    setTimeout(() => el.classList.remove("sp-flash"), 1600);
+  }
 
-  /* --- مشخصات --- */
+  /* --- مشخصات: هر قلم در سه کادر --- */
   const fileRow = (f, ed) => `<div class="sp-file"><b>${esc(f.label)}</b><span class="nm" title="${esc(f.filename)}">${esc(f.filename || "")}${f.note ? ` — ${esc(f.note)}` : ""}</span>
     <button class="tp-btn xs" data-open-file="${f.id}">👁 دیدن</button>${ed ? `<button class="tp-btn xs danger" data-del-file="${f.id}">🗑</button>` : ""}</div>`;
   function lockedMsg(l) {
     return { submitted: "فرستاده شد؛ منتظر بررسی کارشناس.", approved: "مشخصات تأیید شد؛ پیش‌فاکتور را از تب «آمادهٔ ارسال» بفرستید.",
       proforma: "پیش‌فاکتور رسید؛ منتظر تأیید نهایی کارشناس.", final: "✓ تأیید نهایی شد.", rejected: "این قلم رد شد." }[l.state] || "";
+  }
+  const termFa = (f) => S.termFa[f] || f;
+  /** شرایطِ فاکتورِ یک قلم: بستهٔ فرستاده‌شده عکسِ خودش را دارد؛ قلمِ قابل ویرایش شرایطِ جاریِ استعلام را */
+  function termsFor(l) {
+    if (l.bundle_id && !EDITABLE.includes(l.state)) { const b = S.d.bundles.find((x) => x.id === l.bundle_id); if (b && b.terms && Object.keys(b.terms).length) return b.terms; }
+    return S.termsDraft || {};
+  }
+  function termsBox(l, ed) {
+    const t = termsFor(l);
+    const opt = (f) => `<option value="">—</option>${(S.enums[f] || []).map((v) => `<option ${t[f] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
+    const ro = ed ? "" : "disabled";
+    const req = (f) => (TERM_REQUIRED.includes(f) ? " <i class=\"sp-req\">*</i>" : "");
+    return `<div class="sp-box3 terms"><b class="sp-bt">🧾 شرایط فاکتور <span class="sp-muted">(برای همهٔ اقلامِ این استعلام یکی است)</span></b>
+      <div class="sp-grid5">
+        <label>${termFa("dtime")}${req("dtime")}<input class="tp-input" data-t="dtime" value="${esc(t.dtime || "")}" placeholder="۱۰ یا ۱۴۰۵/۰۸/۰۱" ${ed ? "" : "readonly"}></label>
+        <label>${termFa("pay")}${req("pay")}<select class="tp-select" data-t="pay" ${ro}>${opt("pay")}</select></label>
+        <label>${termFa("invoice")}${req("invoice")}<select class="tp-select" data-t="invoice" ${ro}>${opt("invoice")}</select></label>
+        <label>${termFa("vat")}${req("vat")}<select class="tp-select" data-t="vat" ${ro}>${opt("vat")}</select></label>
+        <label>${termFa("valid_days")}<input class="tp-input" data-t="valid_days" inputmode="numeric" value="${esc(t.valid_days ?? "")}" ${ed ? "" : "readonly"}></label>
+      </div></div>`;
   }
   /* «آمادهٔ ارسال» که خورد، کارت قفل می‌شود و فقط دو راه دارد: «✏️ ویرایش» (برگشت به پیش‌نویس) یا «📤 ارسال» */
   function lineCard(l) {
@@ -215,40 +253,54 @@
     const files = S.d.files.filter((f) => f.line_id === l.id);
     const extra = S.extra[l.id] || l.extra;
     const opts = S.labels.map((x) => `<option>${esc(x)}</option>`).join("") + `<option value="__o">سایر (برچسب دلخواه)…</option>`;
-    return `<article class="sp-card" data-line="${l.id}">
+    return `<article class="sp-card" data-line="${l.id}" data-line-no="${l.no || ""}">
       <header><h3>${code(l)}${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
-      ${l.head ? `<div class="sp-muted">نوع قلم: ${esc(l.head)}</div>` : ""}
-      <div class="sp-sec"><b>🔒 مشخصات کارشناس — قفل؛ اگر حرفی درباره‌اش دارید در «گفت‌وگو» بنویسید</b>
-        <div class="sp-chips">${l.layers.length ? l.layers.map((x) => `<span class="sp-chip lock"><i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("") : `<span class="sp-muted">—</span>`}</div></div>
-      <div class="sp-sec"><b>➕ لایه‌های افزودهٔ شما (برند، استاندارد، کشور سازنده…)</b>
-        <div class="sp-chips">${extra.length ? extra.map((x, i) => `<span class="sp-chip add"><i>${esc(x.k)}:</i> ${esc(x.v)}${ed ? `<button data-rm-layer="${i}" title="حذف">✕</button>` : ""}</span>`).join("") : `<span class="sp-muted">—</span>`}</div>
-        ${ed ? `<div class="sp-addlayer"><input class="tp-input" data-nk placeholder="نام لایه (مثلاً برند)"><input class="tp-input" data-nv placeholder="مقدار"><button class="tp-btn sm" data-add-layer>افزودن</button></div>` : ""}</div>
-      <div class="sp-sec"><div class="sp-grid4">
+      <div class="sp-box3 amount"><b class="sp-bt">📦 مقدار، واحد و قیمت</b><div class="sp-grid4">
         <label>مقدار<input class="tp-input" data-f="qty" inputmode="decimal" value="${l.qty == null ? "" : esc(l.qty)}" ${ro}></label>
         <label>واحد<input class="tp-input" data-f="unit" value="${esc(l.unit || "")}" ${ro}></label>
         <label>قیمت واحد (ریال، بدون ارزش افزوده)<input class="tp-input" data-f="price" inputmode="numeric" value="${l.price == null ? "" : esc(l.price)}" ${ro}></label>
         <label>قیمت کل (ریال)<div class="sp-total" data-total>${money(l.total)}</div></label>
       </div><div class="sp-muted" style="margin-top:4px">خواستهٔ کارشناس: ${qty(l.req_qty)} ${esc(l.req_unit || "")}</div></div>
+      ${termsBox(l, ed)}
+      <div class="sp-box3 layers"><b class="sp-bt">🔒 نوع قلم و لایه‌های ویژگی</b>
+        ${l.head ? `<div class="sp-head-name">نوع قلم: <b>${esc(l.head)}</b></div>` : ""}
+        <div class="sp-chips">${l.layers.length ? l.layers.map((x) => `<span class="sp-chip lock">🔒 <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("") : `<span class="sp-muted">—</span>`}
+          ${extra.map((x, i) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${ed ? `<button data-rm-layer="${i}" title="حذف">✕</button>` : ""}</span>`).join("")}</div>
+        ${ed ? `<div class="sp-addlayer"><input class="tp-input" data-nk placeholder="لایهٔ تازه (مثلاً برند)"><input class="tp-input" data-nv placeholder="مقدار"><button class="tp-btn sm" data-add-layer>➕ افزودن</button></div>` : ""}</div>
       <div class="sp-sec"><b>توضیح</b><textarea class="tp-input tp-textarea" data-f="note" rows="2" style="min-height:54px" ${ro}>${esc(l.note || "")}</textarea></div>
       <div class="sp-sec"><b>📎 پیوست‌ها — هر پیوست یک برچسب دارد</b><div class="sp-files">${files.map((f) => fileRow(f, ed)).join("") || `<span class="sp-muted">—</span>`}</div>
         ${!["final", "rejected"].includes(l.state) ? `<div class="sp-upl"><select class="tp-select" data-flabel>${opts}</select><input class="tp-input hide" data-flabel2 placeholder="برچسب دلخواه">
           <input class="tp-input" data-fnote placeholder="توضیح پیوست (اختیاری)"><input class="tp-input full" type="file" data-file accept=".pdf,image/*,.doc,.docx,.xls,.xlsx">
           <button class="tp-btn sm full" data-upload>بارگذاری پیوست</button></div>` : ""}</div>
       ${ed ? `<div class="sp-actions"><button class="tp-btn" data-save>ذخیره</button><button class="tp-btn primary" data-ready="1">✓ آمادهٔ ارسال</button></div>`
-        : l.state === "ready" ? `<div class="sp-lockedmsg">✅ این قلم آمادهٔ ارسال است. برای تغییر «✏️ ویرایش»، برای فرستادن به کارشناس «📤 ارسال».</div>
+        : l.state === "ready" ? `<div class="sp-lockedmsg">✅ این قلم آمادهٔ ارسال است. برای تغییر «✏️ ویرایش»، برای فرستادن به کارشناس «📤 ارسال» — اگر پیش‌فاکتور دارید با «📄 پیش‌فاکتور +» همراهش بفرستید.</div>
           <div class="sp-actions"><button class="tp-btn" data-ready="0">✏️ ویرایش</button><button class="tp-btn primary" data-send-ready>📤 ارسال</button></div>`
         : `<div class="sp-lockedmsg">${esc(lockedMsg(l))}</div>`}
     </article>`;
   }
+  /** کادرِ «📄 پیش‌فاکتور +» و ارسال: هم در «مشخصات اقلام»، هم در «آمادهٔ ارسال» */
+  function sendBox(where) {
+    const ready = S.d.lines.filter((l) => l.state === "ready");
+    return `<div class="sp-sendbox">
+      <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${ready.length ? `${fa(ready.length)} قلمِ آماده${where === "spec" ? "" : " (تیک‌خورده‌های جدول)"}` : "هنوز قلمی «آمادهٔ ارسال» نیست"}</span></div>
+      <div class="sp-row" style="margin-top:8px">
+        <label class="tp-btn sm sp-pfplus">📄 پیش‌فاکتور +<input type="file" data-pf-pick accept=".pdf,image/*" hidden></label>
+        ${S.pfFile ? `<span class="sp-pfname">📄 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری — اگر پیش‌فاکتور دارید همین‌جا اضافه کنید تا با مشخصات یک‌جا برود.</span>`}
+        <span class="sp-grow"></span><button class="tp-btn primary" data-send-box="${where}" ${ready.length ? "" : "disabled"}>📤 ارسال${S.pfFile ? " با پیش‌فاکتور" : ""}</button>
+      </div></div>`;
+  }
   function specPane() {
     const d = S.d;
     const ret = d.bundles.filter((b) => b.state === "returned" && b.comment).slice(-1)[0];
+    const lines = d.lines.slice().sort((a, b) => b.id - a.id);
     return `${ret ? `<div class="tp-note warn">↩️ کارشناس برگرداند: ${esc(ret.comment)}</div>` : ""}
-      <p class="sp-muted">برای هر قلم مقدار، واحد و قیمت واحد (ریال، بدون ارزش افزوده) را بنویسید — قیمت کل خودکار است — اگر لازم است لایهٔ تازه و پیوست اضافه کنید و «آمادهٔ ارسال» را بزنید؛ بعد «📤 ارسال». در تب «آمادهٔ ارسال» هم می‌شود چند قلم را با هم فرستاد.</p>
-      ${d.lines.map(lineCard).join("")}`;
+      ${sendBox("spec")}
+      <p class="sp-muted">برای هر قلم مقدار، واحد و قیمت واحد (ریال، بدون ارزش افزوده) و شرایط فاکتور را بنویسید — قیمت کل خودکار است — اگر لازم است لایهٔ تازه و پیوست اضافه کنید و «آمادهٔ ارسال» را بزنید؛ بعد «📤 ارسال». تازه‌ترها بالا هستند.</p>
+      ${lines.map(lineCard).join("")}`;
   }
 
   /* --- آمادهٔ ارسال --- */
+  const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${termFa(f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
   function readyPane() {
     const d = S.d;
     const ready = d.lines.filter((l) => l.state === "ready");
@@ -258,17 +310,18 @@
     h += ready.length ? `<div class="sp-scroll"><table class="sp-table"><thead><tr><th></th><th>قلم</th><th>مقدار</th><th>واحد</th><th>قیمت واحد (ریال)</th><th>قیمت کل (ریال)</th></tr></thead><tbody>
       ${ready.map((l) => `<tr><td><input type="checkbox" data-pick="${l.id}" checked></td><td class="t">${code(l)}${esc(l.title)}</td><td>${qty(l.qty)}</td><td>${esc(l.unit || "")}</td><td>${money(l.price)}</td><td>${money(l.total)}</td></tr>`).join("")}
       </tbody><tfoot><tr><td></td><td class="t">جمع</td><td colspan="3"></td><td>${money(sum)}</td></tr></tfoot></table></div>
-      <div class="sp-actions"><button class="tp-btn primary" data-submit>📤 ارسال مشخصات اقلام تیک‌خورده</button></div>`
+      <div class="sp-muted" style="margin-top:6px">🧾 شرایط فاکتور: ${esc(termsLine(S.termsDraft)) || "—"}</div>`
       : `<p class="sp-muted">هنوز قلمی «آمادهٔ ارسال» نیست. در تب «مشخصات اقلام» هر قلم را کامل کنید و «آمادهٔ ارسال» بزنید.</p>`;
-    h += `</div>`;
+    h += `${sendBox("ready")}</div>`;
     const bundles = d.bundles.slice().reverse();
     if (bundles.length) h += `<h3 style="margin:18px 0 0;font-size:1rem">ارسال‌های شما</h3>`;
     for (const b of bundles) {
       const ls = b.line_ids.map((id) => byId.get(id)).filter(Boolean);
-      h += `<div class="sp-bundle"><header><b>بستهٔ ${fa(b.id)}</b><span class="sp-st ${b.state}">${esc(b.state_fa)}</span><span class="sp-muted">${when(b.created_at)}</span></header>
+      h += `<div class="sp-bundle" data-bundle="${b.id}"><header><b>بستهٔ ${fa(b.id)}</b><span class="sp-st ${b.state}">${esc(b.state_fa)}</span><span class="sp-muted">${when(b.created_at)}</span></header>
         <div class="sp-muted">${ls.map((l) => `${code(l)}${esc(l.title)} — ${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)}`).join("<br>")}</div>
+        ${termsLine(b.terms) ? `<div class="sp-muted">🧾 ${esc(termsLine(b.terms))}</div>` : ""}
         ${b.comment ? `<div class="sp-comment">${esc(b.comment)}</div>` : ""}
-        ${b.state === "approved" ? `<div class="tp-note">مشخصات تأیید شد. پیش‌فاکتورِ همین ${fa(ls.length)} قلم را بارگذاری کنید — لایه‌ها، مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، ارزش افزوده) باید صریح در آن آمده باشد.</div>
+        ${b.state === "approved" ? `<div class="tp-note">مشخصات تأیید شد. پیش‌فاکتورِ همین ${fa(ls.length)} قلم را بارگذاری کنید — لایه‌ها، مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) باید صریح در آن آمده باشد.</div>
           <div class="sp-row"><input class="tp-input sp-grow" type="file" data-pf-file="${b.id}" accept=".pdf,image/*"><button class="tp-btn primary sm" data-pf="${b.id}">بارگذاری پیش‌فاکتور</button></div>` : ""}
         ${b.state === "proforma" ? `<div class="sp-row"><span>📄 ${esc(b.pf ? b.pf.name : "")}</span><button class="tp-btn xs" data-open-pf="${b.id}">👁 دیدن</button>
           <span class="sp-grow"></span><input class="tp-input" type="file" data-pf-file="${b.id}" accept=".pdf,image/*" style="max-width:220px"><button class="tp-btn xs" data-pf="${b.id}">عوض کردن</button></div>
@@ -279,17 +332,37 @@
     return h;
   }
 
-  /* --- گفت‌وگو --- */
+  /* --- گفت‌وگو: پیام‌های خودِ تأمین‌کننده سمت راست؛ رخدادِ بسته و قلم به‌شکل کارت، با کلیک به همان کارت --- */
+  const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
+    pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
+  function evCard(m) {
+    const meta = m.meta || {};
+    const items = Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : [];
+    if (!EV_HEAD[meta.ev] || !items.length) return null;
+    const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
+    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی فرستاده شد${meta.pf ? ` · همراه با پیش‌فاکتور «${esc(meta.pf)}»` : ""}` : EV_HEAD[meta.ev];
+    const note = /💬 ([\s\S]+)$/.exec(m.body || "");
+    const blocks = items.map((x) => {
+      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
+      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
+      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
+        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
+    }).join("");
+    const foot = [meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "", meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
+    return `<div class="sp-msg ev rich ${m.who === "s" ? "me" : ""}" ${goto} title="${goto ? "رفتن به همین بسته" : "رفتن به همین قلم"}"><div class="evh">${head}</div>${blocks}
+      ${foot ? `<div class="evf">${foot}</div>` : ""}${note ? `<div class="evf">💬 ${esc(note[1])}</div>` : ""}<time>${when(m.at)}</time></div>`;
+  }
   function msgHtml(m) {
-    if (m.kind === "event") return `<div class="sp-msg ev">${esc(m.body)}<time>${when(m.at)}</time></div>`;
+    if (m.kind === "event") return evCard(m) || `<div class="sp-msg ev">${esc(m.body)}<time>${when(m.at)}</time></div>`;
     const me = m.who === "s";
     return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `کارشناس — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
   }
   function chatPane() {
     S.unseen = 0;
-    return `<div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
+    return `<div class="sp-chatpane"><div class="sp-chatbar"><span class="sp-muted">گفت‌وگو با کارشناس خرید</span><span class="sp-grow"></span><button class="tp-btn xs" data-clear-chat title="فقط از صفحهٔ شما پاک می‌شود">🧹 پاک کردن گفت‌وگو</button></div>
+      <div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
       <div class="sp-composer"><textarea class="tp-input" id="msgIn" placeholder="پیام به کارشناس خرید…" rows="2"></textarea><button class="tp-btn primary" id="sendMsg">ارسال</button></div>
-      <p class="sp-muted">اگر دربارهٔ مشخصات قفل‌شده (مثلاً جنس یا اندازه) پیشنهاد دیگری دارید، همین‌جا بنویسید؛ تغییرش با کارشناس است.</p>`;
+      <p class="sp-muted">اگر دربارهٔ مشخصات قفل‌شده (مثلاً جنس یا اندازه) پیشنهاد دیگری دارید، همین‌جا بنویسید؛ تغییرش با کارشناس است.</p></div>`;
   }
 
   /* ---------- رفتار ---------- */
@@ -302,6 +375,14 @@
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; render(); }; });
     $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th).catch((e) => say(e.message)); });
     $$("[data-f]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
+    /* شرایط فاکتور در همهٔ کارت‌ها یکی است: نوشتن در یکی، بقیه را هم همان می‌کند */
+    $$("[data-t]").forEach((i) => {
+      const sync = () => {
+        S.termsDraft = { ...(S.termsDraft || {}), [i.dataset.t]: i.value }; S.termsDirty = true;
+        $$(`[data-t="${i.dataset.t}"]`).forEach((o) => { if (o !== i && !o.disabled && !o.readOnly) o.value = i.value; });
+      };
+      i.oninput = sync; i.onchange = sync;
+    });
     $$("[data-add-layer]").forEach((b) => {
       b.onclick = () => {
         const x = cardOf(b); const k = $("[data-nk]", x.c).value.trim(), v = $("[data-nv]", x.c).value.trim();
@@ -318,7 +399,7 @@
       b.onclick = async () => {
         const id = cardOf(b).id;
         try {
-          if (S.dirty.has(id)) await saveLine(id);
+          if (b.dataset.ready === "1") await saveLine(id);
           await api(`/sp/line/${id}/ready`, { json: { on: b.dataset.ready === "1" } });
           await loadThread();
         } catch (e) { say(e.message); }
@@ -328,12 +409,25 @@
     $$("[data-upload]").forEach((b) => { b.onclick = () => uploadFile(cardOf(b)); });
     $$("[data-open-file]").forEach((b) => { b.onclick = () => openUrl(`/sp/file/${b.dataset.openFile}/url`); });
     $$("[data-del-file]").forEach((b) => { b.onclick = () => modal("حذف پیوست", "<p>این پیوست حذف شود؟</p>", async () => { try { await api(`/sp/file/${b.dataset.delFile}`, { method: "DELETE" }); await loadThread(); } catch (e) { say(e.message); } }, "حذف", "انصراف"); });
-    const sub = $("[data-submit]");
-    if (sub) sub.onclick = () => submitDialog($$("[data-pick]").filter((x) => x.checked).map((x) => +x.dataset.pick));
+    /* «📄 پیش‌فاکتور +» و ارسال */
+    $$("[data-pf-pick]").forEach((inp) => { inp.onchange = () => { const f = inp.files && inp.files[0]; if (!f) return; if (f.size > 20 * 1048576) return say("حجم فایل بیشتر از ۲۰ مگابایت است."); S.pfFile = f; render(); }; });
+    $$("[data-pf-clear]").forEach((b) => { b.onclick = () => { S.pfFile = null; render(); }; });
+    $$("[data-send-box]").forEach((b) => {
+      b.onclick = () => submitDialog(b.dataset.sendBox === "ready" && $$("[data-pick]").length
+        ? $$("[data-pick]").filter((x) => x.checked).map((x) => +x.dataset.pick)
+        : S.d.lines.filter((l) => l.state === "ready").map((l) => l.id));
+    });
     /* «📤 ارسال» روی کارتِ قلمِ آماده: همهٔ اقلامِ آمادهٔ همین استعلام (فهرستشان در پنجره هست) */
     $$("[data-send-ready]").forEach((b) => { b.onclick = () => submitDialog(S.d.lines.filter((l) => l.state === "ready").map((l) => l.id)); });
     $$("[data-pf]").forEach((b) => { b.onclick = () => uploadPf(+b.dataset.pf); });
     $$("[data-open-pf]").forEach((b) => { b.onclick = () => openUrl(`/sp/bundle/${b.dataset.openPf}/pf-url`); });
+    /* کلیک روی پیامِ بسته یا قلم در گفت‌وگو */
+    $$("[data-goto-b]").forEach((el) => { el.onclick = () => { S.tab = "ready"; S.goto = `[data-bundle="${el.dataset.gotoB}"]`; render(); }; });
+    $$("[data-goto-no]").forEach((el) => { el.onclick = () => { S.tab = "spec"; S.goto = `[data-line-no="${el.dataset.gotoNo}"]`; render(); }; });
+    const clr = $("[data-clear-chat]");
+    if (clr) clr.onclick = () => modal("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و کارشناس هنوز آن‌ها را می‌بیند.</p>", async () => {
+      try { await api(`/sp/thread/${S.th}/clear`, { json: {} }); await loadThread(); } catch (e) { say(e.message); }
+    }, "🧹 پاک شود", "انصراف");
     const send = $("#sendMsg");
     if (send) {
       const inp = $("#msgIn");
@@ -350,10 +444,20 @@
   function submitDialog(ids) {
     if (!ids.length) return say("دست‌کم یک قلم را تیک بزنید.");
     const ls = S.d.lines.filter((l) => ids.includes(l.id));
+    const pf = S.pfFile;
     modal("ارسال مشخصات", `<p>مشخصات ${fa(ids.length)} قلم برای کارشناس فرستاده شود؟ تا تصمیم کارشناس، این اقلام قابل ویرایش نیستند.</p>
-      <p class="sp-muted">${ls.map((l) => `• ${code(l)}${esc(l.title)} — ${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال`).join("<br>")}</p>`, async () => {
-      try { await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids } }); await loadThread(); say("فرستاده شد. نتیجهٔ بررسی را همین‌جا و در «گفت‌وگو» می‌بینید.", "✓ ارسال شد"); } catch (e) { say(e.message); }
-    }, "📤 ارسال", "انصراف");
+      <p class="sp-muted">${ls.map((l) => `• ${code(l)}${esc(l.title)} — ${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال`).join("<br>")}</p>
+      <p class="sp-muted">🧾 ${esc(termsLine(S.termsDraft)) || "—"}</p>
+      <p>${pf ? `📄 همراه با پیش‌فاکتور «<b>${esc(pf.name)}</b>» — مرحلهٔ «تأیید و درخواست پیش‌فاکتور» لازم نیست.` : "📄 بدون پیش‌فاکتور — بعد از تأیید کارشناس می‌فرستید (یا اول با «📄 پیش‌فاکتور +» اضافه کنید)."}</p>`, async () => {
+      try {
+        if (pf) {
+          await api(`/sp/thread/${S.th}/submit-pf?ids=${ids.join(",")}&filename=${encodeURIComponent(pf.name)}`, { method: "POST", body: pf, headers: { "Content-Type": pf.type || "application/octet-stream" } });
+          S.pfFile = null;
+        } else await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids } });
+        await loadThread();
+        say(pf ? "مشخصات و پیش‌فاکتور با هم فرستاده شد. نتیجهٔ بررسی را همین‌جا و در «گفت‌وگو» می‌بینید." : "فرستاده شد. نتیجهٔ بررسی را همین‌جا و در «گفت‌وگو» می‌بینید.", "✓ ارسال شد");
+      } catch (e) { say(e.message); }
+    }, pf ? "📤 ارسال با پیش‌فاکتور" : "📤 ارسال", "انصراف");
   }
   function rerenderCard(id) {
     const card = $(`[data-line="${id}"]`);
@@ -365,11 +469,17 @@
     recalc(fresh);
     bind();
   }
+  /** ذخیرهٔ کارت: مقدار، واحد، قیمت، توضیح و لایه‌های افزوده — و اگر شرایط فاکتور عوض شده، آن هم (برای همهٔ اقلام) */
   async function saveLine(id) {
     const c = $(`[data-line="${id}"]`);
     const body = { extra: S.extra[id] || [] };
     $$("[data-f]", c).forEach((i) => { body[i.dataset.f] = i.value; });
     for (const f of ["qty", "price"]) { const n = toNum(body[f]); if (Number.isNaN(n)) throw new Error(f === "qty" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد."); body[f] = n; }
+    if (S.termsDirty) {
+      const tb = {}; for (const f of TERM_FIELDS) tb[f] = S.termsDraft ? S.termsDraft[f] ?? "" : "";
+      const r = await api(`/sp/thread/${S.th}/terms`, { json: tb });
+      S.termsDraft = { ...r.terms }; S.termsDirty = false;
+    }
     await api(`/sp/line/${id}`, { method: "PUT", json: body });
     S.dirty.delete(id);
   }
@@ -417,6 +527,7 @@
       const empty = $(".sp-empty", c); if (empty) empty.remove();
       c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join(""));
       c.scrollTop = c.scrollHeight;
+      bind();
     } else if (fresh.some((m) => m.who !== "s")) {
       S.unseen += fresh.filter((m) => m.who !== "s").length;
       const tab = $('[data-tab="chat"]'); if (tab) tab.innerHTML = `گفت‌وگو <span class="sp-badge">${fa(S.unseen)}</span>`;
@@ -431,12 +542,12 @@
     try {
       const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
       addMsgs(r.msgs);
-      if (r.rev !== S.rev && !S.dirty.size && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) await loadThread();
+      if (r.rev !== S.rev && !S.dirty.size && !S.termsDirty && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) await loadThread();
       if (++tick % 5 === 0 && S.threads.length > 1) { const d = await api("/sp/me"); S.threads = d.threads || S.threads; }
     } catch (e) { if (e.status === 401 && !inTg) { stopPoll(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
     S.busy = false;
   }
-  window.addEventListener("beforeunload", (e) => { if (S.dirty.size) { e.preventDefault(); e.returnValue = ""; } });
+  window.addEventListener("beforeunload", (e) => { if (S.dirty.size || S.termsDirty) { e.preventDefault(); e.returnValue = ""; } });
 
   boot();
 })();

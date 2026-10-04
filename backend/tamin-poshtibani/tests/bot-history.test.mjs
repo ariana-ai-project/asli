@@ -15,6 +15,8 @@ import { loadTP, sqliteD1 } from "./run.mjs";
 import * as W from "../../../worker/catalog.js";
 import { ensureSchema } from "../../../worker/api.js";
 import { handleUpdate } from "../../../worker/bot.js";
+import { telegram } from "../../../worker/telegram.js";
+import { pushNavMenus } from "../../../worker/tg-nav.js";
 
 const TP0 = loadTP();
 const XL = TP0.XLSX;
@@ -276,4 +278,31 @@ test("دموی پنل تأمین‌کننده: «📨 ارسال» از کارت
   assert.equal(line.name, "تأمین‌کنندهٔ 01");
   assert.equal(line.head, "پیچ", "نوع قلم از فهرست اقلام (کد 1001)");
   assert.deepEqual(JSON.parse(line.layers_json).map((x) => x.k).sort(), ["اندازه", "جنس"], "لایه‌های قفل از فهرست");
+});
+
+test("منوی ثابت بی آن‌که کارشناس چیزی بفرستد: Cron به کارشناسانِ وصل‌شده می‌فرستد؛ دکمهٔ مینی‌اپِ پیش‌فرض یک بار؛ ارسالِ ناموفق علامت نمی‌خورد", { skip: SKIP }, async () => {
+  const t = Date.now();
+  DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (3,'کارشناس سه','سه','9003',1,1,'888',?), (4,'کارشناس چهار','چهار','9004',1,1,'999',?)").run(t, t);
+  const real = globalThis.fetch;
+  globalThis.fetch = async (url, init) => {
+    const body = JSON.parse((init && init.body) || "{}");
+    if (String(body.chat_id) === "999" && String(url).endsWith("/sendMessage")) return { ok: false, status: 500, json: async () => ({ ok: false, error_code: 500, description: "Internal Server Error" }) };
+    return real(url, init);
+  };
+  try {
+    const from = sent.length;
+    const r = await pushNavMenus(env, telegram(env), 5);
+    const mine = sent.slice(from);
+    const def = mine.find((c) => c.method === "setChatMenuButton" && c.body.chat_id === undefined);
+    assert.ok(def, "دکمهٔ مینی‌اپ برای همهٔ گفت‌وگوهای بات");
+    assert.equal(def.body.menu_button.web_app.url, "https://arianaai.website/tamin-poshtibani/expert.html?tg=1");
+    const menu = mine.find((c) => c.method === "sendMessage" && String(c.body.chat_id) === "888");
+    assert.deepEqual(menu.body.reply_markup.keyboard[0].map((b) => b.text), ["↩️ بازگشت", "📋 کارتابل", "📄 درخواست"], "منو بی آن‌که کارشناس چیزی بفرستد");
+    assert.equal(r.navSent, 1);
+    assert.equal(DB.raw.prepare("SELECT menu_v FROM tg_nav WHERE chat='888'").get().menu_v, 1);
+    const failed = DB.raw.prepare("SELECT menu_v FROM tg_nav WHERE chat='999'").get();
+    assert.ok(!failed || !failed.menu_v, "ارسالِ ناموفق علامت نمی‌خورد — دکمه‌های زیر پیام برداشته نمی‌شوند و دفعهٔ بعد دوباره امتحان می‌شود");
+    assert.equal(DB.raw.prepare("SELECT value FROM settings WHERE key='navMenu'").get().value, "1");
+    assert.equal((await pushNavMenus(env, telegram(env), 5)).navSent, 0, "در هر isolate هر پنج دقیقه یک بار");
+  } finally { globalThis.fetch = real; }
 });

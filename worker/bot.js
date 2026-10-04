@@ -49,7 +49,7 @@ import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
 import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink } from "./sp-core.js";
 import { pushMsgs as spPush, deliverSms as spDeliverSms } from "./sp-push.js";
-import { NAV, navApi, navLoad, navSave, ensureMenu } from "./tg-nav.js";
+import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -2291,7 +2291,7 @@ const supEmailsBot = (s) => (s.emails || []).map((x) => (x && typeof x === "obje
 const supPriceBot = (s) => (s.price && typeof s.price === "object" ? [s.price.text, s.price.unit ? `/ ${s.price.unit}` : ""].filter(Boolean).join(" ") : s.price || "");
 
 /**
- * نتیجهٔ یک جستجو: فقط فهرست تأمین‌کنندگان، و هزینه در یک خط کوچک. هیچ ردیفی کنار
+ * نتیجهٔ یک جستجو: فقط فهرست تأمین‌کنندگان (هزینه به کاربر گفته نمی‌شود — تصمیم مدیر، مهر ۱۴۰۵). هیچ ردیفی کنار
  * گذاشته نمی‌شود؛ اگر در یک پیام جا نشد (سقف ۴۰۹۶ نویسهٔ تلگرام)، در پیام بعدی می‌آید.
  */
 const PLAT_FA = { telegram: "تلگرام", whatsapp: "واتساپ", bale: "بله", rubika: "روبیکا" };
@@ -2307,7 +2307,6 @@ async function smartResultsMessage(env, api, chat, ex, it, params, out, opts = {
     const set = PLATFORMS.filter((p) => c[p] === "ok" || c[p] === "no").map((p) => `${c[p] === "ok" ? "✅" : "❌"}${PLAT_FA[p]}`);
     return set.length ? ` (${set.join(" ")})` : "";
   };
-  const cost = out.cost != null ? `\n\n<i>هزینهٔ این جستجو: ${M(Number(out.cost).toFixed(2))} دلار</i>` : "";
   const head = opts.head || `🔎 <b>نتیجهٔ جستجوی هوشمند «${esc(short(it.title, 40))}»</b> — ${M(sup.length)} تأمین‌کننده`;
   const card = (s2, i) => {
     const phones = supPhonesBot(s2), emails = supEmailsBot(s2), price = supPriceBot(s2);
@@ -2324,7 +2323,7 @@ async function smartResultsMessage(env, api, chat, ex, it, params, out, opts = {
     const c = card(s2, i);
     if (cur.length + c.length + 2 > 3800) { parts.push(cur); cur = c; } else cur += `\n\n${c}`;
   }
-  parts.push(cur + cost);
+  parts.push(cur);
   for (const p of parts) await api.sendMessage(chat, p).catch(() => {});
   if (!sup.length) return { ok: true };
   await api.sendMessage(chat, "با نتایج چه کنم؟", [...smartChoiceKb(out.search_id, it.id), navRow(it.aid)]).catch(() => {});
@@ -3789,6 +3788,10 @@ export async function scheduled(env, cron) {
     const d = await drainOutbox(env, 20);
     out = { ...a, ...d, watched: w.checked, colorChanges: w.changed };
   }
-  if (!cron || !heavy) out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
+  if (!cron || !heavy) {
+    out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
+    /* منوی ثابتِ کارشناسانی که هنوز نگرفته‌اند — فقط در دقیقه‌ای که جستجوی هوشمندی اجرا نشد (سقف زیردرخواست) */
+    if (!out.jobs && env.TG_BOT_TOKEN) out = { ...out, ...(await pushNavMenus(env, telegram(env)).catch((e) => ({ navError: e && e.message }))) };
+  }
   return out;
 }

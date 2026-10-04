@@ -124,11 +124,12 @@ test("ارسال به تأمین‌کنندهٔ فرضی: گفت‌وگو، خط
   assert.equal(lines[0].qty, 100); assert.equal(lines[0].unit, "عدد");
   assert.deepEqual(lines.map((l) => l.no), [1, 2], "کدِ افزایشیِ قلم در پنل همین تأمین‌کننده");
   const ev = r.data.msgs.find((m) => m.kind === "event");
-  assert.match(ev.body, /• کد ۱ — پیچ آلن M8 فولادی — ۱۰۰ عدد\n• کد ۲ — مهره M8 — ۵۰ عدد/, "پیامِ استعلام: نام و کدِ هر قلم");
+  assert.match(ev.body, /📦 استعلام ۲ قلم:\n▫️ کد ۱ — پیچ آلن M8 فولادی\n {4}۱۰۰ عدد\n {4}اندازه: M8 · جنس: فولاد\n▫️ کد ۲ — مهره M8\n {4}۵۰ عدد\n {4}مشخصات فنی: گرید 8\.8/, "پیامِ استعلام: کد و عنوان، زیرش مقدار و مشخصات اصلی");
+  assert.deepEqual(ev.meta.items.map((x) => [x.no, x.title, x.qty, x.unit]), [[1, "پیچ آلن M8 فولادی", 100, "عدد"], [2, "مهره M8", 50, "عدد"]], "عکسِ اقلام برای کارتِ پیام");
 
   const again = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], demo: true } });
   assert.equal(again.data.added, 0, "قلمِ رفته دوباره ساخته نمی‌شود — یادآوری");
-  assert.match(again.data.msgs.find((m) => m.kind === "event").body, /یادآوری استعلام:\n• کد ۱ — پیچ آلن M8 فولادی/, "یادآوری هم با همان کد");
+  assert.match(again.data.msgs.find((m) => m.kind === "event").body, /یادآوری استعلام:\n▫️ کد ۱ — پیچ آلن M8 فولادی\n {4}۱۰۰ عدد\n {4}اندازه: M8/, "یادآوری هم با همان کد و لایه‌ها");
   assert.notEqual(passOf(again.data.sms.text), S.demoPass, "هر ارسال رمز تازه");
   S.demoPass1 = S.demoPass;
   S.demoPass = passOf(again.data.sms.text);
@@ -169,7 +170,16 @@ test("مشخصات: لایهٔ قفل تغییر نمی‌کند، لایهٔ ت
   assert.equal(saved.data.line.state, "draft");
   const notReady = await call(`/sp/line/${l2.id}/ready`, { headers: H, body: { on: true } });
   assert.equal(notReady.status, 422);
-  assert.deepEqual(notReady.data.missing, ["قیمت واحد"]);
+  assert.deepEqual(notReady.data.missing, ["قیمت واحد", "زمان تحویل", "شرایط تسویه", "نوع فاکتور", "ارزش افزوده"], "شرایطِ اجباریِ فاکتور هم لازم است");
+  /* کادر دومِ کارت‌ها: شرایطِ فاکتور برای همهٔ اقلامِ این استعلام */
+  assert.equal((await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "فوری" } })).status, 422, "زمان تحویل: تاریخ شمسی یا شمار روز");
+  assert.equal((await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { pay: "چک" } })).status, 422, "فقط گزینه‌های تب استعلامات");
+  assert.equal((await call(`/sp/thread/${S.th}/terms`, { headers: EX, body: { pay: "نقدی" } })).status, 404, "شرایط را فقط خودِ تأمین‌کننده اعلام می‌کند");
+  const okT = await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "۱۰ روز کاری", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: "۷" } });
+  assert.equal(okT.status, 200, JSON.stringify(okT.data));
+  assert.deepEqual(okT.data.terms, { dtime: "10 روز کاری", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 });
+  assert.deepEqual(okT.data.missing, []);
+  assert.deepEqual((await call(`/sp/thread/${S.th}`, { headers: EX })).data.thread.terms.pay, "نقدی", "کارشناس هم شرایطِ اعلامی را می‌بیند");
   await call(`/sp/line/${l2.id}`, { method: "PUT", headers: H, body: { price: 3000 } });
   for (const id of [l1.id, l2.id]) assert.equal((await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } })).status, 200);
   const up = await call(`/sp/line/${l1.id}/file?filename=cert.pdf&label=${encodeURIComponent("گواهی کیفیت")}&note=x`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" });
@@ -191,7 +201,10 @@ test("ارسال چند قلم ← تأیید ← پیش‌فاکتور ← خو
   assert.equal(g.threads[0].waiting, 1);
   assert.ok(g.threads[0].unread >= 1, "رخدادِ ارسالِ تأمین‌کننده نخوانده است");
   const evs = () => (DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND kind='event' ORDER BY id").all(S.th)).map((m) => m.body);
-  assert.match(evs().pop(), /مشخصات ۲ قلم برای بررسی فرستاده شد:\n• کد ۱ — پیچ آلن M8 فولادی — ۱۰۰ عدد × ۱۲٬۵۰۰ = ۱٬۲۵۰٬۰۰۰ ریال\n• کد ۲ — مهره M8/);
+  assert.match(evs().pop(), /مشخصات ۲ قلم برای بررسی فرستاده شد:\n▫️ کد ۱ — پیچ آلن M8 فولادی\n {4}۱۰۰ عدد × ۱۲٬۵۰۰ ریال = ۱٬۲۵۰٬۰۰۰ ریال\n {4}اندازه: M8 · جنس: فولاد · برند: فولاد البرز\n▫️ کد ۲ — مهره M8[\s\S]*\nشرایط: زمان تحویل: ۱۰ روز کاری · شرایط تسویه: نقدی · نوع فاکتور: رسمی · ارزش افزوده: دارد · اعتبار پیش‌فاکتور: ۷ روز/);
+  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_bundles WHERE id=?").get(S.b).terms_json), { dtime: "10 روز کاری", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 }, "عکسِ شرایطِ همین لحظه روی بسته");
+  const subMeta = JSON.parse(DB.raw.prepare("SELECT meta_json FROM sp_msgs WHERE thread_id=? AND kind='event' ORDER BY id DESC LIMIT 1").get(S.th).meta_json);
+  assert.deepEqual([subMeta.ev, subMeta.bundle, subMeta.items.length, subMeta.items[0].price, subMeta.sum], ["submit", S.b, 2, 12500, 1400000], "کارتِ پیام: اقلام با قیمت، و کلیکش به همین بسته");
 
   assert.equal((await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "return" } })).status, 400, "برگشت بی توضیح نه");
   const ap = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "approve" } });
@@ -205,16 +218,16 @@ test("ارسال چند قلم ← تأیید ← پیش‌فاکتور ← خو
   assert.match(evs().pop(), /📄 پیش‌فاکتور «pf\.pdf» رسید برای:\n• کد ۱ — پیچ آلن M8 فولادی\n• کد ۲ — مهره M8/);
   const guard = await call(`/sp/x/bundle/${S.b}/decide`, { headers: EX, body: { action: "final" } });
   assert.equal(guard.status, 422);
-  assert.match(guard.data.error, /بررسی هوشمند پیش‌فاکتور هنوز انجام نشده است/, "تأیید نهایی فقط با جدول تطابق");
+  assert.match(guard.data.error, /خوانش هوشمند پیش‌فاکتور هنوز انجام نشده است/, "تأیید نهایی فقط با جدول تطابق");
   assert.equal((await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { all: true } })).status, 409, "بی جدول، چیزی برای پذیرفتن نیست");
 
   const noConfirm = await call(`/sp/x/bundle/${S.b}/ai`, { headers: EX, body: {} });
   assert.equal(noConfirm.status, 428, "مدل فقط با تأیید صریح کارشناس");
   /* خوانش ۱: تومان؛ قلم اول همه ✅ (لایهٔ افزوده هم)، قلم دوم قیمت ۳۲۰ تومان = ۳٬۲۰۰ ریال ≠ ۳٬۰۰۰ ❌؛ ارزش افزوده نیامده ⚠️ */
   const lines1 = [
-    { line_id: S.l1, found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(1250),
+    { key: "L1", found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(1250),
       layers: [{ name: "اندازه", status: "explicit", seen: "M8", sure: true }, { name: "جنس", status: "explicit", seen: "فولادی", sure: true }, { name: "برند", status: "explicit", seen: "فولاد البرز", sure: true }] },
-    { line_id: S.l2, found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(320), layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }] },
+    { key: "L2", found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(320), layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }] },
   ];
   aiReply = aiOut({ readable: true, currency: "تومان", vat_included: false, ...terms({ vat: v(null, false) }), lines: lines1 });
   const ai = await call(`/sp/x/bundle/${S.b}/ai`, { headers: EX, body: { confirm: true } });
@@ -228,16 +241,20 @@ test("ارسال چند قلم ← تأیید ← پیش‌فاکتور ← خو
   assert.equal(rowOf(ai.data.ai, null, "vat").status, "warn");
   assert.equal(rowOf(ai.data.ai, null, "invoice").got, "رسمی", "نوع فاکتور: رسمی مگر سند خلافش را بگوید");
   const req = calls.filter((c) => c.bot === "ai").pop().body;
-  assert.match(JSON.stringify(req.messages), /کد 1\)[^"]*پیچ آلن M8 فولادی/, "بستهٔ تأمین‌کننده با کد قلم به مدل می‌رود");
+  assert.match(JSON.stringify(req.messages), /\[L1\] عنوانِ ثبت‌شده: «پیچ آلن M8 فولادی»\\n  نوع قلم: پیچ\\n  لایه‌های ویژگیِ قفل‌شدهٔ خریدار: اندازه = M8 · جنس = فولاد/, "قلم با نوع و لایه‌هایش به مدل می‌رود، نه عنوانِ خام");
+  assert.match(JSON.stringify(req.messages), /شرایطِ اعلامیِ تأمین‌کننده برای کلِ بسته: زمان تحویل «10 روز کاری»/);
+  assert.match(req.system, /از دریچهٔ همین لایه‌ها بخوان/, "پرامپت: سطرِ سند از دریچهٔ لایه‌ها");
 
   const xb = async () => (await call(`/sp/thread/${S.th}`, { headers: EX })).data.bundles.find((b) => b.id === S.b);
   let b = await xb();
   assert.equal(b.ready, false);
   assert.ok(b.problems.some((p) => /«مهره M8» \(کد ۲\): «قیمت واحد \(ریال، بی ارزش افزوده\)» با پیش‌فاکتور فرق دارد/.test(p)), b.problems.join(" | "));
-  assert.ok(b.problems.some((p) => /«ارزش افزوده» در پیش‌فاکتور نیامده/.test(p)));
+  assert.ok(b.problems.some((p) => /«ارزش افزوده» خوانش مطمئن نیست/.test(p)));
+  assert.equal((await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: [`${S.l1}|qty`] } })).status, 422, "ردیفِ ✅ تیک نمی‌خواهد");
   const vat = await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: ["h|vat"] } });
-  assert.equal(vat.status, 422, "آنچه در پیش‌فاکتور نیامده پذیرفتنی نیست — عدد و مشخصه بی پیش‌فاکتور وارد نمی‌شود");
-  assert.match(vat.data.error, /در پیش‌فاکتور نیامده/);
+  assert.equal(vat.status, 200, "هر ردیفِ غیرسبز تیک می‌خورد — پیش‌فاکتور ملاک");
+  assert.ok(vat.data.gaps.includes("«ارزش افزوده»"), "آنچه سند نگفته خالی می‌ماند، نه پر از اعلامِ تأمین‌کننده");
+  assert.equal((await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: ["h|vat"], on: false } })).status, 200, "برداشتنِ تیک");
   const acc = await call(`/sp/x/bundle/${S.b}/accept`, { headers: EX, body: { keys: [`${S.l2}|price`] } });
   assert.equal(acc.status, 200, JSON.stringify(acc.data));
   assert.equal(acc.data.ready, false, "ارزش افزوده هنوز مانع است");
@@ -289,6 +306,7 @@ test("تأمین‌کنندهٔ واقعی: کد از ۱ در پنل خودش؛ 
   const th = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data;
   const id = th.lines[0].id;
   assert.equal(th.lines[0].no, 1, "شمارشِ کد مالِ هر تأمین‌کننده است");
+  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "1405/08/15", pay: "۵۰٪ پیش‌پرداخت", invoice: "رسمی", vat: "دارد" } });
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { qty: 100, price: 11000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
@@ -298,7 +316,7 @@ test("تأمین‌کنندهٔ واقعی: کد از ۱ در پنل خودش؛ 
   assert.equal(manual.status, 422, "تیکِ «خودم بررسی کردم» دیگر راهِ تأیید نهایی نیست");
   /* سند ریالی با ارزش افزودهٔ داخل قیمت: ۱۲٬۱۰۰ ← ۱۱٬۰۰۰ بی ارزش افزوده = همان اعلامی ✅ */
   aiReply = aiOut({ readable: true, currency: "ریال", vat_included: true, vat_rate: 10, ...terms({ delivery: v("۱۴۰۵/۰۸/۱۵"), pay: { value: "۵۰٪ پیش‌پرداخت", sure: true }, invoice: v("رسمی") }),
-    lines: [{ line_id: id, found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(12100),
+    lines: [{ key: "L1", found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(12100),
       layers: [{ name: "اندازه", status: "explicit", seen: "M8", sure: true }, { name: "جنس", status: "explicit", seen: "فولاد", sure: true }] }] });
   const ai = await call(`/sp/x/bundle/${b}/ai`, { headers: EX, body: { confirm: true } });
   assert.equal(ai.data.ai.ok, true, JSON.stringify(ai.data.ai.lines));
@@ -389,7 +407,7 @@ test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آ�
 
   let n = calls.length;
   await cb(SC, `si:${line.id}`);
-  assert.match(lastTo(n, SC).body.text, /کد ۲ · مهره M8[\s\S]*🔒[\s\S]*مشخصات فنی: گرید 8\.8[\s\S]*قیمت واحد \(ریال، بدون ارزش افزوده\)/);
+  assert.match(lastTo(n, SC).body.text, /کد ۲ · مهره M8[\s\S]*📦 <b>مقدار، واحد و قیمت<\/b>[\s\S]*قیمت واحد \(ریال، بدون ارزش افزوده\)[\s\S]*🧾 <b>شرایط فاکتور<\/b>[\s\S]*🔒 <b>نوع قلم و لایه‌های ویژگی<\/b>\n• مشخصات فنی: گرید 8\.8/, "سه بخش: مقدار و قیمت، شرایط، نوع قلم و لایه‌ها");
   /* «🔢 مقدار» ← دکمهٔ «همان مقدار درخواست» ← بات خودش قیمت را می‌پرسد */
   n = calls.length;
   await cb(SC, `sv:${line.id}:q`);
@@ -432,10 +450,15 @@ test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آ�
   await cb(SC, `sr:${line.id}:1`);
   n = calls.length;
   await cb(SC, `ss:${S.realTh}`);
+  const askPf = lastTo(n, SC);
+  assert.match(askPf.body.text, /پیش‌فاکتورِ همین اقلام را هم دارید؟/);
+  assert.deepEqual(btns(askPf).slice(0, 2).map((b) => b.callback_data), [`sq:${S.realTh}:pf`, `sq:${S.realTh}:go`], "با پیش‌فاکتور یا فقط مشخصات");
+  n = calls.length;
+  await cb(SC, `sq:${S.realTh}:go`);
   const bid = DB.raw.prepare("SELECT bundle_id FROM sp_lines WHERE id=?").get(line.id).bundle_id;
   assert.ok(bid);
   const toExpert = sent(n, "sp", EC);
-  assert.ok(toExpert.some((m) => /مشخصات ۱ قلم برای بررسی فرستاده شد:\n• کد ۲ — مهره M8/.test(m.body.text)), "پیامِ ارسال با نام و کدِ قلم");
+  assert.ok(toExpert.some((m) => /مشخصات ۱ قلم برای بررسی فرستاده شد:\n▫️ کد ۲ — مهره M8\n {4}۵۰ عدد × ۳٬۲۰۰ ریال/.test(m.body.text)), "پیامِ ارسال: کد و عنوان، زیرش مقدار و قیمت");
   assert.ok(toExpert.some((m) => btns(m).some((b) => b.callback_data === `xd:${bid}:ok`)), "کارشناسِ همان گفت‌وگو کارت بسته را با دکمه‌های تصمیم می‌گیرد");
 
   n = calls.length;
@@ -457,11 +480,13 @@ test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آ�
   n = calls.length;
   await cb(EC, `xd:${bid}:ai`);
   const cost = lastTo(n, EC);
-  assert.match(cost.body.text, /هزینهٔ تقریبی/, "پیش از مدل، هزینه پرسیده می‌شود");
+  assert.match(cost.body.text, /انجام شود؟/, "پیش از مدل تأیید می‌خواهد");
+  assert.doesNotMatch(cost.body.text, /هزینه|دلار/, "هزینهٔ کار با مدل به کاربر گفته نمی‌شود");
   assert.ok(btns(cost).some((b) => b.callback_data === `xd:${bid}:ai2`));
   /* سند: قیمت ۳٬۳۰۰ ≠ ۳٬۲۰۰ ❌؛ برند «سازه‌گستر» ≠ «نمونه‌سازان» (ردیف اطلاعاتی) */
-  aiReply = aiOut({ readable: true, currency: "ریال", vat_included: false, ...terms(),
-    lines: [{ line_id: line.id, found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(3300),
+  /* شرایطِ سند همان شرایطِ اعلامیِ این گفت‌وگو (آزمون «تأمین‌کنندهٔ واقعی») */
+  aiReply = aiOut({ readable: true, currency: "ریال", vat_included: false, ...terms({ delivery: v("۱۴۰۵/۰۸/۱۵"), pay: { value: "۵۰٪ پیش‌پرداخت", sure: true } }),
+    lines: [{ key: "L1", found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(3300),
       layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }, { name: "برند", status: "different", seen: "سازه‌گستر", sure: true }] }] });
   n = calls.length;
   await cb(EC, `xd:${bid}:ai2`);
@@ -477,7 +502,8 @@ test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آ�
   n = calls.length;
   await cb(EC, priceBtn.callback_data);
   const accepted = lastTo(n, EC);
-  assert.match(accepted.body.text, /✔️ قیمت واحد[^\n]*پذیرفته — پیش‌فاکتور ملاک/);
+  assert.match(accepted.body.text, /❌☑️ قیمت واحد/, "نشانهٔ وضعیت می‌ماند و تیک کنارش");
+  assert.doesNotMatch(accepted.body.text, /دلار/);
   assert.match(accepted.body.text, /همه‌چیز برای تأیید نهایی آماده است/);
   n = calls.length;
   await cb(EC, `xd:${bid}:fn`);
@@ -501,6 +527,7 @@ test("مذاکره: برگشت با توضیح ← اصلاح و ارسال دو
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت سوم", phone: "09120000003", label: "همراه" } });
   const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
   const id = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data.lines[0].id;
+  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "20", pay: "نقدی", invoice: "رسمی", vat: "ندارد" } });
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { price: 99000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b1 = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
@@ -706,4 +733,139 @@ test("خروج: رمز باطل؛ ورود دوباره فقط با رمز تا�
   assert.equal(locked.status, 429);
   const still = await call("/sp/login", { body: { k: S.realK, password: "123456" } });
   assert.equal(still.status, 429, "تا ۱۵ دقیقه بسته");
+});
+
+test("«📄 پیش‌فاکتور +» در پنل وب: مشخصات و پیش‌فاکتور با هم — بسته یک‌راست «پیش‌فاکتور رسید»؛ خوانش و تأیید نهایی بی مرحلهٔ تأیید", { skip: SKIP }, async () => {
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت ششم", phone: "09120000006", label: "فروش" } });
+  const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
+  const th = r.data.thread_id;
+  const id = (await call(`/sp/thread/${th}`, { headers: H })).data.lines[0].id;
+  await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { qty: 50, price: 2900 } });
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "5", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
+  assert.equal((await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } })).status, 200);
+  /* شرطی بعد از «آماده» پاک شد: ارسال نمی‌شود و فایلِ انبارشده برداشته می‌شود */
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { vat: "" } });
+  let n = calls.length;
+  const no = await call(`/sp/thread/${th}/submit-pf?ids=${id}&filename=pf6.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" });
+  assert.equal(no.status, 422);
+  assert.match(no.data.error, /شرایط فاکتور کامل نیست: ارزش افزوده/);
+  assert.ok(since(n).some((c) => c.bot === "store" && c.method === "DELETE"), "فایلِ بی‌صاحب در انبار نمی‌ماند");
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { vat: "دارد" } });
+  const sub = await call(`/sp/thread/${th}/submit-pf?ids=${id}&filename=pf6.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" });
+  assert.equal(sub.status, 200, JSON.stringify(sub.data));
+  assert.equal(sub.data.state, "proforma");
+  const b = DB.raw.prepare("SELECT * FROM sp_bundles WHERE id=?").get(sub.data.bundle_id);
+  assert.deepEqual([b.state, b.pf_name], ["proforma", "pf6.pdf"]);
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_lines WHERE id=?").get(id).state, "proforma");
+  const ev = (await call(`/sp/thread/${th}`, { headers: EX })).data.msgs.filter((m) => m.kind === "event").pop();
+  assert.match(ev.body, /مشخصات ۱ قلم برای بررسی فرستاده شد همراه با پیش‌فاکتور «pf6\.pdf»/);
+  assert.equal(ev.meta.pf, "pf6.pdf");
+  assert.equal((await call(`/sp/x/bundle/${b.id}/decide`, { headers: EX, body: { action: "approve" } })).status, 409, "مرحلهٔ «تأیید و درخواست پیش‌فاکتور» لازم نیست");
+  aiReply = aiOut({ readable: true, currency: "ریال", vat_included: false, ...terms({ delivery: v("5") }),
+    lines: [{ key: "L1", found: true, qty: v(50), unit: { value: "عدد", same: true, sure: true }, unit_price: v(2900), layers: [{ name: "مشخصات فنی", status: "explicit", seen: "گرید 8.8", sure: true }] }] });
+  assert.equal((await call(`/sp/x/bundle/${b.id}/ai`, { headers: EX, body: { confirm: true } })).status, 200);
+  const fin = await call(`/sp/x/bundle/${b.id}/decide`, { headers: EX, body: { action: "final" } });
+  assert.equal(fin.status, 200, JSON.stringify(fin.data));
+  const q = DB.raw.prepare("SELECT * FROM quotes WHERE id=?").get(fin.data.quote_ids[0]);
+  assert.deepEqual([q.price, q.dtime, q.saved, q.final], [2900, "5", 1, 1]);
+  assert.equal(DB.raw.prepare("SELECT source FROM proformas WHERE assignment_id=1 AND supplier_name='شرکت ششم'").get().source, "supplier");
+});
+
+test("تأیید نهایی با فیلدِ اجباریِ خالی (کارشناس «نیامده» را تیک زد): خط استعلام می‌آید ولی «ثبت موقت» و «تأیید نهایی» نمی‌خورد", { skip: SKIP }, async () => {
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت هفتم", phone: "09120000007", label: "فروش" } });
+  const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
+  const th = r.data.thread_id;
+  const id = (await call(`/sp/thread/${th}`, { headers: H })).data.lines[0].id;
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "7", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
+  await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { price: 12000 } });
+  await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
+  const bid = (await call(`/sp/thread/${th}/submit-pf?ids=${id}&filename=pf7.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" })).data.bundle_id;
+  aiReply = aiOut({ readable: true, currency: "ریال", ...terms({ delivery: v(null, true) }),
+    lines: [{ key: "L1", found: true, qty: v(100), unit: { value: "عدد", same: true, sure: true }, unit_price: v(12000),
+      layers: [{ name: "اندازه", status: "explicit", sure: true }, { name: "جنس", status: "missing", sure: true }] }] });
+  await call(`/sp/x/bundle/${bid}/ai`, { headers: EX, body: { confirm: true } });
+  const bx = (await call(`/sp/thread/${th}`, { headers: EX })).data.bundles.find((x) => x.id === bid);
+  assert.deepEqual(bx.ai.header.find((x) => x.key === "dtime").status, "none", "⚪ مطمئن است که زمان تحویل نیامده");
+  assert.equal(bx.ai.lines[0].rows.find((x) => x.key === "L:جنس").status, "none");
+  const all = await call(`/sp/x/bundle/${bid}/accept`, { headers: EX, body: { all: true } });
+  assert.equal(all.data.ready, true);
+  assert.deepEqual(all.data.gaps, ["«زمان تحویل»"]);
+  const fin = await call(`/sp/x/bundle/${bid}/decide`, { headers: EX, body: { action: "final" } });
+  assert.deepEqual(fin.data.gaps, ["«زمان تحویل»"]);
+  const q = DB.raw.prepare("SELECT * FROM quotes WHERE id=?").get(fin.data.quote_ids[0]);
+  assert.deepEqual([q.dtime, q.saved, q.final, q.price], [null, 0, 0, 12000], "زمانِ تحویلی که سند نگفت از اعلامِ تأمین‌کننده پر نمی‌شود");
+  assert.equal(q.spec, "نوع قلم: پیچ، اندازه: M8", "«جنس» که سند نگفت در مشخصات نیست");
+});
+
+test("«🧹 پاک کردن گفت‌وگو»: پیام‌ها از صفحهٔ همان طرف می‌روند، در دیتابیس و پیش طرفِ دیگر می‌مانند؛ پیامِ تازه دوباره دیده می‌شود", { skip: SKIP }, async () => {
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت هشتم", phone: "09120000008", label: "فروش", text: "سلام" } });
+  const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
+  const th = r.data.thread_id;
+  await call(`/sp/thread/${th}/msg`, { headers: H, body: { text: "پیامِ قدیمیِ تأمین‌کننده" } });
+  const before = DB.raw.prepare("SELECT COUNT(*) AS c FROM sp_msgs WHERE thread_id=?").get(th).c;
+  const c = await call(`/sp/thread/${th}/clear`, { headers: H, body: {} });
+  assert.equal(c.status, 200);
+  assert.equal((await call(`/sp/thread/${th}`, { headers: H })).data.msgs.length, 0, "صفحهٔ تأمین‌کننده خالی");
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS c FROM sp_msgs WHERE thread_id=?").get(th).c, before, "چیزی از دیتابیس پاک نشد");
+  assert.equal((await call(`/sp/thread/${th}`, { headers: EX })).data.msgs.length, before, "کارشناس همه را می‌بیند");
+  assert.equal((await call(`/sp/poll?t=${th}&since=0`, { headers: H })).data.msgs.length, 0, "نظرسنجی هم پاک‌شده‌ها را برنمی‌گرداند");
+  await call(`/sp/thread/${th}/msg`, { headers: EX, body: { text: "پیامِ تازهٔ کارشناس" } });
+  const after = (await call(`/sp/thread/${th}`, { headers: H })).data.msgs;
+  assert.deepEqual(after.map((m) => m.body), ["پیامِ تازهٔ کارشناس"], "پیامِ بعد از پاک کردن دیده می‌شود");
+  assert.equal((await call(`/sp/thread/${th}/clear`, { headers: EX, body: {} })).status, 200);
+  assert.equal((await call(`/sp/thread/${th}`, { headers: EX })).data.msgs.length, 0, "کارشناس هم صفحهٔ خودش را پاک می‌کند");
+  assert.equal((await call(`/sp/thread/${th}`, { headers: H })).data.msgs.length, 1, "و صفحهٔ تأمین‌کننده دست نمی‌خورد");
+});
+
+test("بات تأمین‌کننده: شرایط فاکتور گام‌به‌گام (نوشتن و دکمه)، «📤 ارسال» همراه با پیش‌فاکتور، و «🧹 پاک کردن گفت‌وگو»", { skip: SKIP }, async () => {
+  const C9 = 909;
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت نهم", phone: "09120000009", label: "فروش" } });
+  const sp = async (u) => { await handleSpUpdate(env, { update_id: 20000 + calls.length, ...u }); };
+  const cb = (data) => sp({ callback_query: { id: `n${calls.length}`, data, message: { message_id: 1, chat: { id: C9 } } } });
+  const txt = (text, extra) => sp({ message: { message_id: 7000 + calls.length, chat: { id: C9, type: "private" }, text, ...(extra || {}) } });
+  const lastTo = (n) => shown(n, "sp", C9).pop();
+  await txt(`/start s${keyOf(r.data.sms.text)}`);
+  await txt(passOf(r.data.sms.text));
+  const th = r.data.thread_id;
+  const line = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=?").get(th).id;
+  let n = calls.length;
+  await cb(`si:${line}`);
+  const card = lastTo(n);
+  assert.match(card.body.text, /📦 <b>مقدار، واحد و قیمت<\/b>[\s\S]*🧾 <b>شرایط فاکتور<\/b>[\s\S]*🔒 <b>نوع قلم و لایه‌های ویژگی<\/b>/, "کارت قلم در سه بخش");
+  assert.doesNotMatch(card.body.text, /مشخصات کارشناس|برای مذاکره در گفت‌وگو/, "توضیحِ «مشخصات کارشناس — قفل» برداشته شد");
+  assert.ok(btns(card).some((b) => b.callback_data === `tk:${line}:d`) && btns(card).some((b) => b.callback_data === `tk:${line}:p`));
+  await cb(`sv:${line}:qd`);
+  n = calls.length;
+  await txt("2,900");
+  assert.match(lastTo(n).body.text, /زمان تحویل<\/b> را بنویسید/, "بعد از قیمت، خودش شرطِ فاکتور را می‌پرسد");
+  n = calls.length;
+  await txt("فوری");
+  assert.match(lastTo(n).body.text, /تاریخ شمسی/, "قالبِ نادرست");
+  n = calls.length;
+  await txt("۱۰");
+  const payAsk = lastTo(n);
+  assert.match(payAsk.body.text, /شرایط تسویه<\/b> را انتخاب کنید/);
+  await cb(btns(payAsk).find((b) => b.text === "نقدی").callback_data);
+  n = calls.length;
+  await cb(`tv:${line}:i:0`);
+  await cb(`tv:${line}:v:0`);
+  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد" });
+  assert.match(lastTo(n).body.text, /همه‌چیز پر است/);
+  await cb(`sr:${line}:1`);
+  await cb(`ss:${th}`);
+  n = calls.length;
+  await cb(`sq:${th}:pf`);
+  assert.match(lastTo(n).body.text, /فایل پیش‌فاکتور را بفرستید/);
+  await sp({ message: { message_id: 7999, chat: { id: C9, type: "private" }, document: { file_id: "F9", file_size: 10, file_name: "pf9.pdf", mime_type: "application/pdf" } } });
+  const b = DB.raw.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(th);
+  assert.deepEqual([b.state, b.pf_name], ["proforma", "pf9.pdf"], "مشخصات و پیش‌فاکتور یک‌جا از بات");
+  /* پاک کردن گفت‌وگو از بات: می‌پرسد، بعد فقط صفحهٔ همین طرف */
+  n = calls.length;
+  await cb(`cc:${th}`);
+  assert.match(lastTo(n).body.text, /پاک شود؟/);
+  n = calls.length;
+  await cb(`cc:${th}:y`);
+  assert.ok(DB.raw.prepare("SELECT s_clear FROM sp_threads WHERE id=?").get(th).s_clear > 0);
+  assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "deleteMessages"), "پیام‌های تلگرامِ صفحه پاک شد");
+  assert.ok(sent(n, "sp", C9).some((c) => /هنوز پیامی نیست/.test(c.body.text)), "تاریخچهٔ همین طرف از این به بعد خالی");
 });

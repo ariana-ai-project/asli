@@ -443,10 +443,6 @@
     const none = c.used < 0 ? `<div class="fxw">هیچ فرمولی لایه‌هایش را ندارد؛ ${!user && u.rate != null && u.src !== "formula" ? `نرخِ ثابتِ فایل (${fmtRate(u.rate)}) — یک عدد برای همهٔ اقلامِ این نوع — به کار می‌رود` : !user ? "خریدِ این واحد بی‌نرخ می‌ماند" : "نرخِ دستی به کار می‌رود"}. لایهٔ لازم را در «لایه‌های ویژگی» بالا بیفزایید.</div>` : "";
     return `${li ? `<ol class="fxl">${li}</ol>` : ""}${none}${userNote}`;
   }
-  /* هزینهٔ تقریبیِ یک تفکیک با مدل (Haiku) تا وقتی سرور میانگینِ واقعی را نگفته — همان worker/normalize.js:NORM_COST_EST.
-     روی صفحه نشان داده نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵)؛ فقط در کادرِ تأییدی که پیش از هر فراخوانی مدل باز می‌شود. */
-  const NORM_COST_EST = 0.006;
-  const costTxt = (c) => `≈ ${Number(c).toLocaleString("en-US", { maximumFractionDigits: 4 })} دلار`;
   /* «قلم انتخابی» هر قلم: لایه‌های تیک‌خورده، و واحدهای تیک‌خورده (null = همه) */
   const pickOf = (it) => S.pick[it.id] || (S.pick[it.id] = { layers: [], units: null });
   /* پارامترهای جستجو. جستجو همیشه بر ساختارِ نرمال‌سازی است (ذخیره‌شده، یا دیتابیس با کد/عنوان)؛ پیشنهادِ
@@ -603,7 +599,7 @@
     if (n.error) return `<div class="normbox"><div class="tp-note warn" style="margin:0 0 8px">${esc(n.error)}</div><button class="tp-btn sm" data-norm-retry>تلاش دوباره</button></div>`;
     if (n.data && n.data.needsModel) {
       return `<div class="normbox"><div class="toolrow" style="margin-bottom:6px"><b>نرمال‌سازی اقلام</b><span class="chip warn">در دیتابیس نیست</span></div>
-        <div style="font-size:.9rem">کد و عنوانِ این قلم در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌هایش باید عنوان به مدل زبانی داده شود — پیش از آن هزینهٔ تقریبی را می‌پرسم.</div>
+        <div style="font-size:.9rem">کد و عنوانِ این قلم در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌هایش باید عنوان به مدل زبانی داده شود — پیش از آن از شما می‌پرسم.</div>
         <div class="toolrow" style="margin-top:8px"><button class="tp-btn primary" data-norm-model>تفکیک با مدل…</button></div></div>`;
     }
     loadHeads();
@@ -666,7 +662,7 @@
         <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). <b>ایستا</b>: ضریب از خودِ دو واحد است و برای همهٔ اقلام یکی. <b>پویا</b>: ضریب برای هر قلم با فرمول از لایه‌های خودش حساب می‌شود — در جمع و سهمِ تأمین‌کنندگان هم هر قلمِ این نوع با لایه‌های خودش؛ اگر لایهٔ لازم را نداشت، نرخِ ثابتِ فایل با اطمینانِ «پایین». نرخی را که دستی عوض کنید، در جستجو بر فرمول و نرخ فایل مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان فرمول یا نرخ فایل.</div>
         ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="tp-note warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div>` : ""}
       <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و نرخ‌های تبدیل">ذخیره</button>
-        ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن هزینهٔ تقریبی را می‌پرسم">تفکیک دوباره با مدل…</button>`}
+        ${fromDb ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن از شما می‌پرسم">تفکیک دوباره با مدل…</button>`}
         ${d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
           : d.confirmed ? `<button class="tp-btn" data-norm-clear title="ذخیرهٔ همین قلم برداشته می‌شود و ساختار دوباره از دیتابیس خوانده می‌شود">برداشتن ذخیره</button>` : ""}</div></div>`;
   }
@@ -682,7 +678,7 @@
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
       <button class="tp-btn" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده — در پنجرهٔ بزرگ وسط صفحه">نمودار روند</button>
-      <button class="tp-btn primary" data-run-hist title="ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان)؛ اگر نبود، پیش از تفکیک با مدل هزینه را می‌پرسم">${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
+      <button class="tp-btn primary" data-run-hist title="ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان)؛ اگر نبود، پیش از تفکیک با مدل از شما می‌پرسم">${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>
       <div class="toolrow">
         <label class="chkline" title="لایهٔ زیرین را نشان می‌دهد: نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل — برای دیدن و اصلاح. جستجو با تیک یا بی تیک بر همین ساختار است."><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
@@ -759,7 +755,7 @@
 
   /**
    * «بررسی سوابق» هرگز قفل نیست (تصمیم مدیر، مهر ۱۴۰۵): اگر ساختار قلم هنوز خوانده نشده، همین‌جا خودکار
-   * نرمال‌سازی می‌شود — از دیتابیس و بی‌هزینه؛ فقط اگر قلم در دیتابیس نبود، هزینهٔ مدل پرسیده می‌شود.
+   * نرمال‌سازی می‌شود — از دیتابیس؛ فقط اگر قلم در دیتابیس نبود، پیش از مدل از کارشناس پرسیده می‌شود.
    */
   async function ensureNorm(it) {
     let n = S.norm[it.id];
@@ -770,17 +766,15 @@
   }
 
   /**
-   * مدل هزینه دارد، پس هر فراخوانی‌اش با کادرِ تأیید و هزینهٔ تقریبی است (تصمیم مدیر، مهر ۱۴۰۵).
+   * هر فراخوانیِ مدل با کادرِ تأیید است. هزینهٔ کار با مدل به کاربر گفته نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵).
    * true اگر کارشناس تأیید کرد و ساختاری آمد.
    */
   function askModel(it, force) {
     return new Promise((resolve) => {
       let done = false;
       const end = (v) => { if (!done) { done = true; resolve(v); } };
-      const cost = S.normCost || NORM_COST_EST;
       const d = TP.modal("تفکیک با مدل زبانی",
         `${force ? "عنوانِ این قلم دوباره به مدل داده می‌شود تا نوع قلم و لایه‌هایش را از نو پیشنهاد کند." : `کد و عنوانِ «${esc(it.title)}» در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌های ویژگی‌اش باید عنوان به مدل زبانی (Haiku) داده شود.`}
-        <br><br>هزینهٔ تقریبی: <b>${costTxt(cost)}</b> <span class="dim" style="font-size:.85rem">(میانگینِ اجراهای اخیر)</span>
         <br><br>پیشنهادِ مدل تا شما «ذخیره»اش نکنید در دیتابیس نمی‌نشیند؛ جستجو بر همان پیشنهاد انجام می‌شود.`,
         async () => { await runNormalize(!!force, true); const n = S.norm[it.id]; end(!!(n && n.data && !n.data.needsModel && !n.error)); },
         "تأیید و تفکیک", "انصراف");
@@ -850,13 +844,12 @@
   /* پاسخ سرور → {data، draft، base}؛ base پیش‌نویسِ دست‌نخورده است تا ویرایشِ ذخیره‌نشده پیدا شود */
   const normState = (d) => { const draft = normDraft(d); return { data: d, draft, base: JSON.stringify(draft) }; };
 
-  /* `model`: فقط وقتی کارشناس هزینه را دیده و تأیید کرده (askModel) — وگرنه سرور مدل را صدا نمی‌زند */
+  /* `model`: فقط وقتی کارشناس در کادرِ تأیید (askModel) پذیرفته — وگرنه سرور مدل را صدا نمی‌زند */
   async function runNormalize(force, model) {
     const it = item(); if (!it) return;
     S.norm[it.id] = { loading: true }; render();
     try {
       const d = await TP.api(`/items/${it.id}/normalize`, { body: { force: !!force, model: !!model } });
-      if (d.costEst != null) S.normCost = d.costEst;   /* میانگینِ واقعی — برای کادرِ تأییدِ مدل */
       S.norm[it.id] = normState(d);
     } catch (e) { S.norm[it.id] = { error: e.message }; }
     if (item() && item().id === it.id) render();
@@ -1081,7 +1074,7 @@
     return `<div class="tp-scroll" data-keep-scroll><table class="tp-table smres"><thead><tr>
         <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th>وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
       <tbody>${rows || `<tr><td colspan="9"><div class="empty">مدل تأمین‌کننده‌ای برنگرداند.</div></td></tr>`}</tbody></table></div>
-      ${srch.cost != null ? `<div class="dim smcost">هزینهٔ این جستجو: ${faDigits(Number(srch.cost).toFixed(2))} دلار</div>` : ""}`;
+`;
   }
 
   function vSmart(it) {
@@ -1878,7 +1871,7 @@
       if (cell && orig) cell.innerHTML = fxHtml(n, orig, live);
     });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
-    /* هر فراخوانی مدل با کادرِ تأیید و هزینهٔ تقریبی */
+    /* هر فراخوانی مدل با کادرِ تأیید */
     const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
     const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);
     const nrt = G("[data-norm-retry]"); if (nrt) nrt.onclick = () => runNormalize(false);
@@ -1901,7 +1894,7 @@
       /* سقف هزینهٔ هر جستجو: بیش از سه بازار میان پنج جستجو پخش نمی‌شود */
       if (e.target.checked && i < 0 && sm.markets.length >= cap) {
         e.target.checked = false;
-        return TP.modal("حداکثر سه بازار", "برای اینکه هزینهٔ هر جستجو از سقف ۲۰ سنت نگذرد، هر اجرا حداکثر سه بازار دارد. اول تیک یکی را بردارید.", null, "باشد", "");
+        return TP.modal("حداکثر سه بازار", "هر جستجو حداکثر سه بازار دارد. اول تیک یکی را بردارید.", null, "باشد", "");
       }
       if (e.target.checked && i < 0) sm.markets.push(k);
       if (!e.target.checked && i >= 0) sm.markets.splice(i, 1);

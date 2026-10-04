@@ -85,16 +85,58 @@ export function navApi(api, st) {
   };
 }
 
-/** منوی ثابت و دکمهٔ مینی‌اپِ کنار کادر پیام — یک بار برای هر گفت‌وگو (یا با force بعد از اتصال) */
+/**
+ * منوی ثابت و دکمهٔ مینی‌اپِ کنار کادر پیام — یک بار برای هر گفت‌وگو (یا با force بعد از اتصال). فقط اگر پیامِ
+ * منو واقعاً رسید علامت می‌خورد؛ وگرنه دکمه‌های راهبری از پیام‌ها برداشته می‌شدند و کارشناس راهِ برگشت نداشت.
+ * گفت‌وگویی که بات را بسته (۴۰۳) یا دیگر نیست، دوباره امتحان نمی‌شود.
+ */
 export async function ensureMenu(env, api, st, force) {
   if (!st || (!force && st.menu_v >= MENU_V)) return false;
-  await api.call("sendMessage", {
-    chat_id: st.chat, parse_mode: "HTML", reply_markup: navKeyboard(env),
-    text: "📌 <b>منوی پایین</b>: «↩️ بازگشت» به صفحهٔ قبل، «📋 کارتابل»، «📄 درخواست» (همان درخواستی که رویش هستید) و «🧩 پنل کارشناس» (مینی‌اپ) همیشه همین پایین‌اند؛ دیگر زیر هر پیام تکرار نمی‌شوند.",
-  }).catch((e) => console.error("nav menu", e && e.message));
-  await api.call("setChatMenuButton", { chat_id: st.chat, menu_button: { type: "web_app", text: "پنل کارشناس", web_app: { url: expertAppUrl(env) } } })
-    .catch((e) => console.error("nav menu button", e && e.message));
-  st.menu_v = MENU_V;
-  st.dirty = true;
-  return true;
+  let ok = false, gone = false;
+  try {
+    await api.call("sendMessage", {
+      chat_id: st.chat, parse_mode: "HTML", reply_markup: navKeyboard(env),
+      text: "📌 <b>منوی پایین</b>: «↩️ بازگشت» به صفحهٔ قبل، «📋 کارتابل»، «📄 درخواست» (همان درخواستی که رویش هستید) و «🧩 پنل کارشناس» (مینی‌اپ) همیشه همین پایین‌اند؛ دیگر زیر هر پیام تکرار نمی‌شوند.",
+    });
+    ok = true;
+  } catch (e) {
+    gone = !!(e && (e.code === 403 || /chat not found|bot was blocked|user is deactivated/i.test(e.description || e.message || "")));
+    console.error("nav menu", e && e.message);
+  }
+  if (ok) {
+    await api.call("setChatMenuButton", { chat_id: st.chat, menu_button: { type: "web_app", text: "پنل کارشناس", web_app: { url: expertAppUrl(env) } } })
+      .catch((e) => console.error("nav menu button", e && e.message));
+  }
+  if (ok || gone) { st.menu_v = MENU_V; st.dirty = true; }
+  return ok;
+}
+
+/**
+ * منو برای کارشناسانی که بات را وصل کرده‌اند ولی هنوز منو نگرفته‌اند — از Cron، بی آن‌که منتظرِ پیامِ بعدیِ کارشناس
+ * بمانیم (درس مهر ۱۴۰۵: کارشناسی که بعد از استقرار چیزی به بات نفرستاد، منو را هیچ‌وقت نمی‌دید). دکمهٔ مینی‌اپِ
+ * کنار کادر پیام هم یک بار برای همهٔ گفت‌وگوهای بات (بی chat_id) گذاشته می‌شود. هر بار چند گفت‌وگو، و در هر
+ * isolate هر پنج دقیقه یک بار — تا سقف زیردرخواست‌های Cron نشکند.
+ */
+let lastPush = 0;
+export async function pushNavMenus(env, api, limit = 3) {
+  if (Date.now() - lastPush < 5 * 60000) return { navSent: 0 };
+  lastPush = Date.now();
+  const cur = await env.DB.prepare("SELECT value FROM settings WHERE key='navMenu'").first().catch(() => null);
+  if (!cur || Number(cur.value) !== MENU_V) {
+    const ok = await api.call("setChatMenuButton", { menu_button: { type: "web_app", text: "پنل کارشناس", web_app: { url: expertAppUrl(env) } } })
+      .then(() => true).catch((e) => { console.error("nav default menu button", e && e.message); return false; });
+    if (ok) {
+      await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('navMenu',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+        .bind(String(MENU_V), Date.now()).run();
+    }
+  }
+  const rows = (await env.DB.prepare(`SELECT e.telegram_chat AS chat FROM experts e LEFT JOIN tg_nav n ON n.chat=e.telegram_chat
+      WHERE e.active=1 AND e.telegram_chat IS NOT NULL AND (n.menu_v IS NULL OR n.menu_v < ?) LIMIT ?`).bind(MENU_V, limit).all()).results || [];
+  let sent = 0;
+  for (const r of rows) {
+    const st = await navLoad(env, r.chat);
+    if (await ensureMenu(env, api, st, true)) sent++;
+    await navSave(env, st).catch((e) => console.error("nav save", e && e.message));
+  }
+  return { navSent: sent };
 }

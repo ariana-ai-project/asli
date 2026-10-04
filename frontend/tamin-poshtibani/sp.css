@@ -39,7 +39,22 @@
 .sp-pill.on { border-color: var(--tp-accent); box-shadow: inset 0 0 0 1px var(--tp-accent); }
 
 /* کارت قلم */
-.sp-card { background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 14px; margin-bottom: 14px; }
+.sp-card { background: var(--tp-surface); border: 1px solid var(--tp-line-2); border-radius: var(--tp-radius); padding: 14px; margin-bottom: 18px; box-shadow: 0 6px 18px -12px rgba(0,0,0,.55); }
+/* سه کادرِ هر قلم: مقدار و واحد و قیمت · شرایط فاکتور · نوع قلم و لایه‌ها — هر کدام با رنگِ کمرنگِ خودش */
+.sp-box3 { border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; margin-top: 10px; }
+.sp-box3 > .sp-bt { display: block; font-size: .82rem; font-weight: 700; margin-bottom: 7px; }
+.sp-box3.amount { background: rgba(79,140,255,.07); border-color: rgba(79,140,255,.28); }
+.sp-box3.terms { background: rgba(242,194,48,.06); border-color: rgba(242,194,48,.28); }
+.sp-box3.layers { background: rgba(34,197,94,.05); border-color: rgba(34,197,94,.25); }
+.sp-head-name { font-size: .88rem; margin-bottom: 6px; }
+.sp-grid5 { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
+.sp-grid5 label { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--tp-muted); }
+.sp-grid5 .tp-input, .sp-grid5 .tp-select { width: 100%; }
+.sp-req { color: var(--tp-over); font-style: normal; }
+/* کادرِ «📄 پیش‌فاکتور +» و ارسال */
+.sp-sendbox { border: 1px dashed var(--tp-accent); border-radius: 12px; padding: 10px 12px; margin: 10px 0 14px; background: rgba(79,140,255,.05); }
+.sp-pfplus { cursor: pointer; }
+.sp-pfname { display: inline-flex; gap: 6px; align-items: center; font-size: .85rem; }
 .sp-card > header { display: flex; gap: 10px; align-items: flex-start; justify-content: space-between; margin-bottom: 8px; }
 .sp-card h3 { margin: 0; font-size: 1rem; line-height: 1.6; }
 .sp-sec { margin-top: 10px; }
@@ -81,12 +96,29 @@
 
 /* گفت‌وگو */
 .sp-chat { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid var(--tp-line); border-radius: var(--tp-radius); background: var(--tp-surface); min-height: 260px; max-height: 62vh; overflow-y: auto; }
-.sp-msg { max-width: 82%; border-radius: 14px; padding: 7px 11px; font-size: .92rem; white-space: pre-wrap; word-break: break-word; align-self: flex-start; background: rgba(120,165,255,.1); border: 1px solid var(--tp-line); }
-.sp-msg.me { align-self: flex-end; background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.45); }
+.sp-msg { max-width: 82%; border-radius: 14px; padding: 7px 11px; font-size: .92rem; white-space: pre-wrap; word-break: break-word; align-self: flex-end; background: rgba(120,165,255,.1); border: 1px solid var(--tp-line); }
+/* در راست‌به‌چپ، flex-start یعنی راست: پیامِ خودِ هر طرف سمت راست، طرفِ مقابل سمت چپ */
+.sp-msg.me { align-self: flex-start; background: rgba(79,140,255,.22); border-color: rgba(79,140,255,.45); }
 .sp-msg .who { display: block; font-size: .72rem; color: var(--tp-muted); margin-bottom: 2px; }
 .sp-msg time { display: block; font-size: .7rem; color: var(--tp-dim); margin-top: 3px; text-align: left; }
 .sp-msg.ev { align-self: center; max-width: 94%; background: transparent; border: 1px dashed var(--tp-line-2); color: var(--tp-muted); font-size: .84rem; text-align: center; }
 .sp-msg.note { border-color: rgba(242,194,48,.55); }
+.sp-msg.ev.rich { align-self: flex-end; max-width: 92%; width: 340px; text-align: right; color: var(--tp-fg); border-style: solid; background: var(--tp-surface); white-space: normal; padding: 8px 10px; }
+.sp-msg.ev.rich.me { align-self: flex-start; }
+.sp-msg[data-goto-b], .evi[data-goto-no] { cursor: pointer; }
+.sp-msg[data-goto-b]:hover, .evi[data-goto-no]:hover { border-color: var(--tp-accent); }
+.evh { font-weight: 700; font-size: .84rem; margin-bottom: 6px; }
+.evi { border: 1px solid var(--tp-line); border-radius: 10px; padding: 6px 8px; margin-top: 6px; background: rgba(120,165,255,.06); }
+.evt { display: flex; gap: 6px; align-items: center; font-weight: 700; font-size: .9rem; }
+.evd { font-size: .84rem; margin-top: 3px; }
+.evs { font-size: .78rem; color: var(--tp-muted); margin-top: 2px; }
+.evf { font-size: .8rem; color: var(--tp-muted); margin-top: 6px; }
+.sp-chatbar { display: flex; gap: 8px; align-items: center; margin-bottom: 6px; }
+.sp-flash { animation: spflash 1.6s ease-out; }
+@keyframes spflash { 0%, 40% { box-shadow: 0 0 0 3px var(--tp-accent); } 100% { box-shadow: 0 0 0 0 transparent; } }
+/* نوار تب‌ها با اسکرول بالای صفحه می‌ماند — تب «گفت‌وگو» وقتی روی تصمیم‌ها می‌رویم محو نمی‌شود */
+.sp-sticky { position: sticky; top: var(--sp-top-h, 0); z-index: 6; background: var(--tp-bg); }
+.sp-tab:not(.on) { color: var(--tp-fg); opacity: .8; }
 .sp-composer { display: flex; gap: 8px; margin-top: 10px; align-items: flex-end; }
 .sp-composer textarea { flex: 1; min-height: 46px; max-height: 160px; resize: vertical; }
 .sp-empty { color: var(--tp-muted); text-align: center; padding: 30px 10px; font-size: .9rem; }
@@ -101,8 +133,13 @@
 .sp-col .scroll { flex: 1; min-height: 0; overflow-y: auto; }
 .sp-colfoot { padding: 10px 12px; border-top: 1px solid var(--tp-line); flex-shrink: 0; }
 .sp-main { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow-y: auto; padding: 12px 16px 16px; }
-.sp-chatpane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.sp-chatpane .sp-chat { flex: 1; min-height: 160px; max-height: none; }
+.sp-conv { width: 100%; max-width: 1040px; margin-inline: auto; }
+.sp-conv.is-chat { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sp-main .sp-sticky { top: 0; }
+/* گفت‌وگو به اندازهٔ یک گفت‌وگوی موبایلی (تصمیم مدیر، مهر ۱۴۰۵) — در هر دو صفحه */
+.sp-chatpane { width: 100%; max-width: 480px; margin-inline: auto; }
+.sp-conv.is-chat .sp-chatpane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sp-conv.is-chat .sp-chatpane .sp-chat { flex: 1; min-height: 160px; max-height: none; }
 .sp-h3 { margin: 18px 0 6px; font-size: 1rem; }
 .sp-h3:first-child { margin-top: 2px; }
 .sp-code { display: inline-block; font-size: .72rem; font-weight: 700; border: 1px solid var(--tp-accent); color: var(--tp-accent); border-radius: 6px; padding: 0 6px; margin-inline-end: 2px; vertical-align: middle; white-space: nowrap; line-height: 1.6; }
@@ -113,6 +150,10 @@
 .sp-mt td { vertical-align: top; }
 .sp-mt td.sp-mst { font-size: 1.05rem; }
 .sp-mt tr.info td { opacity: .78; }
+.sp-mt tr.acc td { background: rgba(34,197,94,.07); }
+.sp-dot { display: inline-block; width: 1em; height: 1em; border-radius: 50%; background: #9aa4b2; vertical-align: -0.15em; box-shadow: inset 0 0 0 1px rgba(0,0,0,.15); }
+.sp-legend { font-size: .78rem; color: var(--tp-muted); margin: 4px 0 2px; }
+.sp-warn { color: var(--tp-warn); font-size: .82rem; margin-top: 6px; }
 .sp-acc { display: inline-flex; gap: 5px; align-items: center; font-size: .78rem; white-space: nowrap; cursor: pointer; }
 .sp-item { display: block; width: 100%; text-align: right; background: none; border: none; border-bottom: 1px solid var(--tp-line); padding: 9px 12px; }
 .sp-item:hover { background: rgba(120,165,255,.08); }
@@ -147,9 +188,14 @@
   .sp-cols[data-view="chat"] .sp-col.reqs, .sp-cols[data-view="chat"] .sp-col.sups { display: none; }
   .sp-back { display: inline-flex; }
 }
+@media (max-width: 860px) {
+  .sp-grid5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
 @media (max-width: 640px) {
   .sp-wrap { padding: 10px 10px 80px; }
   .sp-grid4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-grid5 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .sp-msg.ev.rich { width: auto; }
   .sp-upl { grid-template-columns: 1fr; }
   .sp-addlayer { grid-template-columns: 1fr 1fr; }
   .sp-addlayer button { grid-column: 1 / -1; }

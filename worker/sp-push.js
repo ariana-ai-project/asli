@@ -7,14 +7,16 @@
  * یک گفت‌وگوی تلگرام می‌تواند هر دو هویت را داشته باشد (کارشناس و تأمین‌کننده — برای آزمودن هر دو سو با یک
  * حساب)؛ نقشِ فعلی با «🔁» عوض می‌شود و پیامِ نقشِ دیگر به‌شکل هشدار با دکمهٔ رفتن می‌رسد.
  *
- * پاک‌کردن گفت‌وگو: تلگرام فقط پیام‌های زیر ۴۸ ساعت را پاک می‌کند (deleteMessages، ۱۰۰ تا در هر
- * فراخوانی). پس شناسهٔ هر پیامی که بات می‌فرستد و هر پیامی که کاربر می‌نویسد در sp_tg.ids_json می‌ماند؛
- * با عوض شدنِ گفت‌وگو، تازه‌ها پاک و تاریخچهٔ گفت‌وگوی تازه یکجا نوشته می‌شود.
+ * پاک‌کردن صفحه: تلگرام فقط پیام‌های زیر ۴۸ ساعت را پاک می‌کند (deleteMessages، ۱۰۰ تا در هر فراخوانی). پس
+ * شناسهٔ هر پیامی که بات می‌فرستد و هر پیامی که کاربر می‌نویسد در sp_tg.ids_json می‌ماند؛ با عوض شدنِ گفت‌وگو،
+ * تازه‌ها پاک و تاریخچهٔ گفت‌وگوی تازه یکجا نوشته می‌شود. «🧹 پاک کردن گفت‌وگو» هم همین را می‌کند و تاریخچهٔ
+ * همان طرف را از این به بعد نشان نمی‌دهد (پیام‌ها در دیتابیس می‌مانند — sp-core.js:clearMsgs).
  */
 import { telegram, esc, TgError } from "./telegram.js";
 import { tehranParts } from "./time.js";
-import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, lineMissing } from "./sp-core.js";
-import { AI_COST_HINT, AI_VERSION, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
+import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, lineMissing,
+  termsOf, termsMissing, TERM_FIELDS, TERM_FA, clearedUpTo } from "./sp-core.js";
+import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -37,6 +39,8 @@ export function when(ms) {
 export const short = (s, n = 28) => { const x = T(s); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
 /** «کد ۷ · عنوان» — کدِ افزایشیِ قلم در پنلِ همان تأمین‌کننده */
 export const lineTag = (l, n = 60) => `${l.no ? `کد ${fa(l.no)} · ` : ""}${short(l.title, n)}`;
+/** شرایطِ فاکتور در یک خط: «زمان تحویل: ۱۰ روز · شرایط تسویه: نقدی · …» */
+export const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
 export const spReady = (env) => !!env.TG_SP_BOT_TOKEN;
 export const spApi = (env) => telegram(env, "sp");
@@ -125,10 +129,13 @@ export function headerText(env, th, side) {
 }
 
 const lineSum = (l) => `${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} = ${money(l.qty != null && l.price != null ? l.qty * l.price : null)} ریال`;
-const ICON = { ok: "✅", warn: "⚠️", bad: "❌" };
-const cell = (v, row) => (v == null || v === "" ? "—" : row && row.key === "price" ? money(v) : typeof v === "number" ? qty(v) : esc(v));
+/* ✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد — و ☑️ کنارِ ردیفی که کارشناس تیک زده */
+export const ICON = { ok: "✅", warn: "⚠️", none: "⚪", bad: "❌" };
+export const LEGEND = "✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد · ☑️ تیک‌خورده (پیش‌فاکتور ملاک)";
+/* شرط‌ها (تاریخ، روز) با رقم فارسی — اعلامی و سند یک‌شکل دیده شوند */
+const cell = (v, row) => (v == null || v === "" ? "—" : row && row.key === "price" ? money(v) : typeof v === "number" ? qty(v) : row && row.kind === "terms" ? esc(String(v).replace(/\d/g, (d) => FA[+d])) : esc(v));
 
-/** ردیف‌های پذیرفتنیِ جدول تطابق به ترتیبِ ثابت — دکمه‌های پذیرش با شمارهٔ همین فهرست */
+/** همهٔ ردیف‌های غیرسبزِ جدول تطابق به ترتیبِ ثابت — دکمه‌های تیک با شمارهٔ همین فهرست */
 export function acceptList(ai) {
   const out = [];
   for (const ln of (ai && ai.lines) || []) for (const row of ln.rows || []) if (acceptable(row)) out.push({ key: lineKey(ln.line_id, row), row, line: ln });
@@ -136,21 +143,20 @@ export function acceptList(ai) {
   return out;
 }
 
-/** جدول تطابق به متن: هر لایه و هر فیلد اجباری با ✅/⚠️/❌، مقدارِ بسته و مقدارِ سند، و پذیرفته‌شده‌ها */
+/** جدول تطابق به متن: هر لایه، هر فیلد اجباری و هر شرط با نشانه‌اش، مقدارِ بسته و مقدارِ سند، و تیک‌خورده‌ها */
 function matchText(ai, accept) {
   const acc = accept || {};
   const rowTxt = (row, k) => {
-    const accepted = acc[k] && acceptable(row);
+    const on = acc[k] && acceptable(row);
     const want = row.want != null && row.want !== "" ? cell(row.want, row) : null;
     const got = cell(row.got, row);
-    const tail = row.kind === "terms"
-      ? `: ${got}${row.def ? " <i>(پیش‌فرضِ شرکت)</i>" : ""}`
-      : row.status === "ok" ? `: ${want || got}` : `: ${want || "—"} ← سند: ${got}`;
-    return `  ${accepted ? "✔️" : ICON[row.status]} ${esc(row.label)}${tail}${accepted ? " <i>(پذیرفته — پیش‌فاکتور ملاک)</i>" : ""}${row.gate ? "" : " <i>(اطلاعاتی)</i>"}`;
+    const def = row.def ? " <i>(پیش‌فرضِ شرکت)</i>" : "";
+    const tail = row.status === "ok" ? `: ${row.kind === "terms" ? got : want || got}${def}` : `: ${want != null ? `${want} ← ` : ""}سند: ${got}${def}`;
+    return `  ${ICON[row.status] || "⚠️"}${on ? "☑️" : ""} ${esc(row.label)}${tail}${row.gate ? "" : " <i>(اطلاعاتی)</i>"}`;
   };
-  let s = "\n\n🤖 <b>جدول تطابق با پیش‌فاکتور</b> — ✅ همان · ⚠️ نیامده یا نامطمئن · ❌ فرق دارد";
+  let s = `\n\n🤖 <b>جدول تطابق با پیش‌فاکتور</b>\n<i>${LEGEND}</i>`;
   for (const ln of ai.lines || []) {
-    s += `\n▪️ <b>${esc(lineTag(ln, 40))}</b>${ln.found ? "" : " — <i>در سند پیدا نشد</i>"}`;
+    s += `\n▪️ <b>${esc(lineTag(ln, 40))}</b>${ln.found === false ? " — <i>در سند پیدا نشد</i>" : ln.doc_title ? ` — <i>در سند: «${esc(short(ln.doc_title, 40))}»</i>` : ""}`;
     for (const row of ln.rows || []) s += `\n${rowTxt(row, lineKey(ln.line_id, row))}`;
   }
   s += "\n▪️ <b>شرایط فاکتور</b>";
@@ -158,15 +164,17 @@ function matchText(ai, accept) {
   return s;
 }
 
-/** کارت یک بسته برای کارشناس، با جدول تطابق و دکمه‌های تصمیمِ همان وضعیت */
+/** کارت یک بسته برای کارشناس، با جدول تطابق، تیکِ هر ردیفِ غیرسبز و دکمه‌های تصمیمِ همان وضعیت */
 export function bundleCard(th, b, lines) {
   const ai0 = parse(b.ai_json, null);
-  const ai = ai0 && ai0.v === AI_VERSION ? ai0 : null;
+  const ai = aiUsable(ai0) ? ai0 : null;
   const acc = parse(b.accept_json, {});
+  const tm = termsOf(b);
   let text = `📦 <b>بستهٔ ${fa(b.id)}</b> — ${esc(BUNDLE_FA[b.state] || b.state)}\n`
     + lines.map((l) => `• <b>${esc(lineTag(l))}</b>\n   ${lineSum(l)}`
       + (parse(l.extra_json, []).length ? `\n   ➕ ${parse(l.extra_json, []).map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ")}` : "")).join("\n")
     + `\n<b>جمع: ${money(lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0))} ریال</b>`;
+  if (termsLine(tm)) text += `\n🧾 شرایط اعلامی: ${esc(termsLine(tm))}`;
   if (b.comment && ["returned", "rejected"].includes(b.state)) text += `\n💬 ${esc(b.comment)}`;
   if (b.pf_key) text += `\n📄 پیش‌فاکتور: ${esc(b.pf_name || "")}`;
   const kb = [];
@@ -181,14 +189,15 @@ export function bundleCard(th, b, lines) {
     if (ai) {
       text += matchText(ai, acc);
       const r = resolve(ai, acc);
-      text += r.ready ? "\n\n✅ <b>همه‌چیز برای تأیید نهایی آماده است.</b>"
-        : `\n\n⛔ <b>مانده:</b>\n${r.problems.slice(0, 4).map((p) => `• ${esc(p)}`).join("\n")}${r.problems.length > 4 ? `\n• … و ${fa(r.problems.length - 4)} مورد دیگر` : ""}`;
+      text += r.ready
+        ? `\n\n✅ <b>همه‌چیز برای تأیید نهایی آماده است.</b>${r.gaps.length ? `\n<i>خالی می‌ماند و خط استعلام «ثبت موقت» نمی‌شود: ${esc(r.gaps.slice(0, 6).join("، "))}</i>` : ""}`
+        : `\n\n⛔ <b>مانده — تیک بزنید (پیش‌فاکتور ملاک) یا برگردانید:</b>\n${r.problems.slice(0, 4).map((p) => `• ${esc(p)}`).join("\n")}${r.problems.length > 4 ? `\n• … و ${fa(r.problems.length - 4)} مورد دیگر` : ""}`;
       const list = acceptList(ai);
       const open = list.filter((x) => !acc[x.key]);
-      if (open.length > 1) kb.push([{ text: `✔️ پذیرش همهٔ مغایرت‌ها (${fa(open.length)}) — پیش‌فاکتور ملاک`, callback_data: `xd:${b.id}:aa` }]);
-      list.slice(0, 8).forEach((x, i) => {
+      if (open.length > 1) kb.push([{ text: `☑️ تیکِ همهٔ غیرسبزها (${fa(open.length)}) — پیش‌فاکتور ملاک`, callback_data: `xd:${b.id}:aa` }]);
+      list.slice(0, 24).forEach((x, i) => {
         if (i % 2 === 0) kb.push([]);
-        kb[kb.length - 1].push({ text: `${acc[x.key] ? "✔️" : "◻️"} ${short(x.row.label, 14)}${x.line && x.line.no ? ` (کد ${fa(x.line.no)})` : ""}`, callback_data: `xa:${b.id}:${i}` });
+        kb[kb.length - 1].push({ text: `${acc[x.key] ? "☑️" : "⬜"} ${ICON[x.row.status] || ""} ${short(x.row.label, 12)}${x.line && x.line.no ? ` (کد ${fa(x.line.no)})` : ""}`, callback_data: `xa:${b.id}:${i}` });
       });
     } else text += "\n\n<i>برای جدول تطابق و پر شدنِ فیلدها از پیش‌فاکتور، «🤖 خوانش هوشمند» را بزنید.</i>";
     kb.push([{ text: "🏁 تأیید نهایی", callback_data: `xd:${b.id}:fn` }]);
@@ -196,17 +205,25 @@ export function bundleCard(th, b, lines) {
   }
   return { text: text.length > 4000 ? text.slice(0, 3990) + "…" : text, kb };
 }
-export const aiConfirmKb = (bid) => [[{ text: `🤖 بله، بخوان (${AI_COST_HINT})`, callback_data: `xd:${bid}:ai2` }], [{ text: "✖️ نه", callback_data: `xd:${bid}:card` }]];
+export const aiConfirmKb = (bid) => [[{ text: "🤖 بله، بخوان", callback_data: `xd:${bid}:ai2` }], [{ text: "✖️ نه", callback_data: `xd:${bid}:card` }]];
 
-/** کارت اقلام برای تأمین‌کننده */
+/** شرایطِ فاکتور: کلیدِ کوتاهِ دکمه‌ها (d زمان تحویل · p تسویه · i نوع فاکتور · v ارزش افزوده · x اعتبار) */
+export const TERM_KEY = { d: "dtime", p: "pay", i: "invoice", v: "vat", x: "valid_days" };
+export const TERM_BTN = { d: "🚚 زمان تحویل", p: "💳 تسویه", i: "🧾 نوع فاکتور", v: "➕ ارزش افزوده", x: "📅 اعتبار" };
+const termsBlock = (tm) => TERM_FIELDS.map((f) => `${TERM_FA[f]}: <b>${T(tm[f]) ? esc(fa(tm[f])) : "—"}</b>`).join("\n");
+
+/** کارت اقلام برای تأمین‌کننده — تازه‌ترها بالا */
 export function itemsCard(env, th, lines, bundles) {
-  const ready = lines.filter((l) => l.state === "ready");
-  let text = `📦 <b>اقلام استعلام ${esc(th.request_id)}</b>\n`
-    + lines.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}`).join("\n");
+  const L = lines.slice().sort((a, b) => b.id - a.id);
+  const ready = L.filter((l) => l.state === "ready");
+  const tm = termsOf(th), tmiss = termsMissing(tm);
+  let text = `📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i>\n`
+    + L.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}`).join("\n");
+  text += `\n\n🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${tmiss.length ? `\n<i>مانده: ${esc(tmiss.join("، "))}</i>` : ""}`;
   const waitPf = bundles.filter((b) => b.state === "approved");
   if (waitPf.length) text += `\n\n📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.`;
-  text += "\n\n<i>روی هر قلم بزنید تا مقدار و قیمت واحد را ثبت کنید؛ بعد «آمادهٔ ارسال».</i>";
-  const kb = lines.slice(0, 30).map((l) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${lineTag(l, 30)}`, callback_data: `si:${l.id}` }]);
+  text += "\n\n<i>روی هر قلم بزنید تا مقدار، قیمت واحد و شرایط را ثبت کنید؛ بعد «آمادهٔ ارسال».</i>";
+  const kb = L.slice(0, 30).map((l) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${lineTag(l, 30)}`, callback_data: `si:${l.id}` }]);
   if (ready.length) kb.push([{ text: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, callback_data: `ss:${th.id}` }]);
   for (const b of waitPf) kb.push([{ text: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, callback_data: `sp:${b.id}` }]);
   kb.push([{ text: "🧩 باز کردن در پنل", web_app: { url: appUrl(env, "s") } }]);
@@ -214,19 +231,21 @@ export function itemsCard(env, th, lines, bundles) {
 }
 
 /**
- * کارت یک قلم برای تأمین‌کننده. «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش» (برگشت به پیش‌نویس)
- * یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر قلم دیگری مانده).
+ * کارت یک قلم برای تأمین‌کننده، در سه بخش: مقدار و واحد و قیمت · شرایط فاکتور (برای همهٔ اقلام همین استعلام) ·
+ * نوع قلم و لایه‌های ویژگیِ قفل (و لایه‌های افزوده). «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش»
+ * (برگشت به پیش‌نویس) یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر مانده).
  */
-export function lineCard(l, files, others) {
+export function lineCard(l, files, others, terms) {
   const locked = parse(l.layers_json, []), extra = parse(l.extra_json, []);
   const editable = ["new", "draft", "returned"].includes(l.state);
+  const tm = terms || {};
   let text = `✏️ <b>${esc(lineTag(l, 80))}</b>\nوضعیت: <i>${esc(LINE_FA[l.state] || l.state)}</i>\n`;
-  if (l.head) text += `نوع قلم: ${esc(l.head)}\n`;
-  text += `\n🔒 <b>مشخصات کارشناس</b> (قفل؛ برای مذاکره در گفت‌وگو بنویسید):\n${locked.length ? locked.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("\n") : "—"}\n`;
-  text += `\n➕ <b>لایه‌های افزودهٔ شما:</b>\n${extra.length ? extra.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("\n") : "—"}\n`;
-  text += `\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b> (درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})`
-    + `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال`;
-  if (l.note) text += `\nتوضیح: ${esc(l.note)}`;
+  text += `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b> <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>`
+    + `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
+  text += `\n🧾 <b>شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i>\n${termsBlock(tm)}\n`;
+  text += `\n🔒 <b>نوع قلم و لایه‌های ویژگی</b>\n${l.head ? `نوع قلم: ${esc(l.head)}\n` : ""}${locked.length ? locked.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("\n") : "—"}`
+    + `\n➕ لایه‌های افزودهٔ شما: ${extra.length ? extra.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ") : "—"}\n`;
+  if (l.note) text += `\n📝 توضیح: ${esc(l.note)}`;
   text += `\n📎 پیوست‌ها: ${files.length ? files.map((f) => esc(f.label)).join("، ") : "—"}`;
   const kb = [];
   if (l.state === "ready") {
@@ -235,10 +254,12 @@ export function lineCard(l, files, others) {
     if (others) kb.push([{ text: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, callback_data: `ic:${l.thread_id}` }]);
     return { text, kb };
   }
-  const miss = lineMissing(l);
+  const miss = [...lineMissing(l), ...termsMissing(tm)];
   if (editable && miss.length) text += `\n\n<i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   if (editable) {
-    kb.push([{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }, { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }, { text: "📏 واحد", callback_data: `sv:${l.id}:u` }]);
+    kb.push([{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }, { text: "📏 واحد", callback_data: `sv:${l.id}:u` }, { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }]);
+    kb.push(["d", "p", "i"].map((k) => ({ text: TERM_BTN[k], callback_data: `tk:${l.id}:${k}` })));
+    kb.push(["v", "x"].map((k) => ({ text: TERM_BTN[k], callback_data: `tk:${l.id}:${k}` })));
     kb.push([{ text: "➕ لایهٔ تازه", callback_data: `sv:${l.id}:l` }, { text: "📝 توضیح", callback_data: `sv:${l.id}:n` }, { text: "📎 پیوست", callback_data: `sa:${l.id}` }]);
     extra.slice(0, 8).forEach((x, i) => { if (i % 2 === 0) kb.push([]); kb[kb.length - 1].push({ text: `🗑 ${short(x.k, 14)}`, callback_data: `sl:${l.id}:${i}` }); });
     kb.push([{ text: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
@@ -255,7 +276,8 @@ export async function showThread(env, row, th) {
   await clearChat(env, row);
   setFocus(row, th.id); setFlow(row, null);
   await send(env, row, headerText(env, th, side), menuKb(env, side, hasBoth(row)));
-  const msgs = (await env.DB.prepare(`SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id DESC LIMIT 40) ORDER BY id`).bind(th.id).all()).results || [];
+  const msgs = (await env.DB.prepare(`SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id DESC LIMIT 40) ORDER BY id`)
+    .bind(th.id, clearedUpTo(th, side)).all()).results || [];
   const chunks = [];
   let cur = "";
   for (const m of msgs) {
@@ -264,7 +286,9 @@ export async function showThread(env, row, th) {
     cur += (cur ? "\n\n" : "") + s;
   }
   if (cur) chunks.push(cur);
-  for (const c of chunks.length ? chunks : ["<i>هنوز پیامی نیست.</i>"]) await send(env, row, c);
+  if (!chunks.length) await send(env, row, "<i>هنوز پیامی نیست.</i>");
+  /* «🧹 پاک کردن گفت‌وگو» زیرِ آخرین تکهٔ تاریخچه — فقط از صفحهٔ همین طرف */
+  for (let i = 0; i < chunks.length; i++) await send(env, row, chunks[i], i === chunks.length - 1 ? [[{ text: "🧹 پاک کردن گفت‌وگو از صفحهٔ من", callback_data: `cc:${th.id}` }]] : null);
   await markSeen(env, th.id, side);
   await sendWork(env, row, th);
 }

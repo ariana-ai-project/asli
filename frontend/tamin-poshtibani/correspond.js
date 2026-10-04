@@ -1,9 +1,11 @@
 /* ============================================================
    مکاتبات کارشناس با تأمین‌کنندگان (دموی مهر ۱۴۰۵) — مرورگر و مینی‌اپ تلگرام
    چیدمان: دو ستونِ چسبیده به هم و به لبهٔ راست — درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار
-   نخوانده) — و بقیهٔ صفحه گفت‌وگو. هر گفت‌وگو = یک درخواست × یک تأمین‌کننده. تب «اقلام و تصمیم‌ها»:
-   بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول تطابق (✅/⚠️/❌)، پذیرش
-   مغایرت‌ها (پیش‌فاکتور ملاک) و تأیید نهایی ← تب استعلامات. ورود: کد کارشناس یا initData مینی‌اپ.
+   نخوانده) — و بقیهٔ صفحه گفت‌وگو، به اندازهٔ یک گفت‌وگوی موبایلی. هر گفت‌وگو = یک درخواست × یک تأمین‌کننده.
+   تب «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول
+   تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید نهایی ← تب استعلامات. پیامِ هر بسته در
+   گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود؛ نوار تب‌ها همیشه بالای صفحه می‌ماند.
+   ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
   "use strict";
@@ -49,7 +51,9 @@
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
   const S = { me: null, reqs: [], unread: 0, waiting: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", aiCost: "", demoName: "", busy: false };
+    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null };
+  const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
+  const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
   /* ---------- پنجره با دکمه‌های دلخواه؛ fn(close) — اگر false برگرداند پنجره می‌ماند ---------- */
   function dlg(title, body, buttons) {
@@ -77,7 +81,7 @@
   }
   function renderLogin(msg) {
     app.classList.remove("sp-app");
-    app.innerHTML =`${top()}<div class="sp-center"><div class="sp-box"><h2>ورود کارشناس</h2><p class="lead">همان کد ورود پنل کارشناس.</p>
+    app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>ورود کارشناس</h2><p class="lead">همان کد ورود پنل کارشناس.</p>
       <input class="tp-input" id="code" inputmode="numeric" placeholder="کد ورود" style="width:100%"><div class="sp-row" style="margin-top:12px"><button class="tp-btn primary sp-grow" id="go">ورود</button></div>
       <div class="sp-err" id="msg">${esc(msg || "")}</div></div></div>`;
     const go = async () => {
@@ -90,7 +94,7 @@
   /* ---------- بارگذاری ---------- */
   async function loadList() {
     const d = await api("/sp/x/threads");
-    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.me = d.me; S.bot = d.bot; S.via = d.via; S.aiCost = d.ai_cost; S.demoName = d.demo;
+    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
   }
   async function boot() {
     const ses = TP.session.get();
@@ -145,53 +149,91 @@
     </div></div>`;
     bind();
     const c = $("#chat"); if (c) c.scrollTop = c.scrollHeight;
-    if (S.tab === "items" && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
+    if (S.goto) { const sel = S.goto; S.goto = null; jumpTo(sel); }
+    else if (S.tab === "items" && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
+  }
+  /** کلیک روی پیامِ بسته یا قلم: همان کارت پیدا و چشمک‌زن می‌شود — نوار تب‌ها بالا می‌ماند */
+  function jumpTo(sel) {
+    const el = $(sel);
+    if (!el) return;
+    el.scrollIntoView({ block: "start" });
+    const m = $(".sp-main"); if (m) m.scrollTop = Math.max(0, m.scrollTop - 56);
+    el.classList.add("sp-flash");
+    setTimeout(() => el.classList.remove("sp-flash"), 1600);
   }
   function convo() {
     const th = S.d.thread;
     const waiting = S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
-    return `<div class="sp-head"><button class="tp-btn xs sp-back" data-back="sup">→</button><h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
+    return `<div class="sp-conv ${S.tab === "chat" ? "is-chat" : ""}"><div class="sp-head"><button class="tp-btn xs sp-back" data-back="sup">→</button><h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
       <span class="sp-muted">📞 ${esc(th.phone || "")}${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست ${esc(th.request_id)}</span></div>
-      <nav class="sp-tabs"><button class="sp-tab ${S.tab === "chat" ? "on" : ""}" data-tab="chat">گفت‌وگو</button>
-        <button class="sp-tab ${S.tab === "items" ? "on" : ""}" data-tab="items">اقلام و تصمیم‌ها${badge(waiting, "wait")}</button></nav>
-      <div id="pane" class="${S.tab === "chat" ? "sp-chatpane" : ""}">${S.tab === "chat" ? chatPane() : itemsPane()}</div>`;
+      <nav class="sp-tabs sp-sticky"><button class="sp-tab ${S.tab === "chat" ? "on" : ""}" data-tab="chat">💬 گفت‌وگو${badge(S.unseen)}</button>
+        <button class="sp-tab ${S.tab === "items" ? "on" : ""}" data-tab="items">📦 اقلام و تصمیم‌ها${badge(waiting, "wait")}</button></nav>
+      <div id="pane" class="${S.tab === "chat" ? "sp-chatpane" : ""}">${S.tab === "chat" ? chatPane() : itemsPane()}</div></div>`;
+  }
+
+  /* --- گفت‌وگو: پیام‌های خودِ کارشناس سمت راست؛ رخدادِ بسته و قلم به‌شکل کارت، با کلیک به همان بسته --- */
+  const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
+    pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
+  function evCard(m) {
+    const meta = m.meta || {};
+    const items = Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : [];
+    if (!EV_HEAD[meta.ev] || !items.length) return null;
+    const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
+    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی فرستاده شد${meta.pf ? ` · همراه با پیش‌فاکتور «${esc(meta.pf)}»` : ""}` : EV_HEAD[meta.ev];
+    const note = /💬 ([\s\S]+)$/.exec(m.body || "");
+    const blocks = items.map((x) => {
+      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
+      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
+      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
+        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
+    }).join("");
+    const foot = [meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "", meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
+    return `<div class="sp-msg ev rich ${m.who === "e" ? "me" : ""}" ${goto} title="${goto ? "رفتن به همین بسته در «اقلام و تصمیم‌ها»" : "رفتن به همین قلم"}"><div class="evh">${head}</div>${blocks}
+      ${foot ? `<div class="evf">${foot}</div>` : ""}${note ? `<div class="evf">💬 ${esc(note[1])}</div>` : ""}<time>${when(m.at)}</time></div>`;
   }
   function msgHtml(m) {
-    if (m.kind === "event" || m.kind === "note") return `<div class="sp-msg ev ${m.kind === "note" ? "note" : ""}">${esc(m.body)}${m.kind === "note" ? " <i>(فقط شما می‌بینید)</i>" : ""}<time>${when(m.at)}</time></div>`;
+    if (m.kind === "event") { const c = evCard(m); if (c) return c; }
+    if (m.kind === "event" || m.kind === "note") return `<div class="sp-msg ev ${m.kind === "note" ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}"` : ""}>${esc(m.body)}${m.kind === "note" ? " <i>(فقط شما می‌بینید)</i>" : ""}<time>${when(m.at)}</time></div>`;
     const me = m.who === "e";
     return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : esc(S.d.thread.supplier)}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
   }
   function chatPane() {
-    return `<div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
+    S.unseen = 0;
+    return `<div class="sp-chatbar"><span class="sp-muted">${esc(S.d.thread.supplier)}</span><span class="sp-grow"></span><button class="tp-btn xs" data-clear-chat title="فقط از صفحهٔ شما پاک می‌شود">🧹 پاک کردن گفت‌وگو</button></div>
+      <div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
       <div class="sp-composer"><textarea class="tp-input" id="msgIn" rows="2" placeholder="پیام به ${esc(S.d.thread.supplier)}…"></textarea><button class="tp-btn primary" id="sendMsg">ارسال</button></div>`;
   }
 
-  /* --- جدول تطابق --- */
-  const ICON = { ok: "✅", warn: "⚠️", bad: "❌" };
-  const acceptable = (row) => row.status !== "ok" && row.got != null && row.got !== "" && !row.noaccept;
-  const val = (v, row) => (v == null || v === "" ? "—" : row.key === "price" ? money(v) : typeof v === "number" ? qty(v) : esc(v));
+  /* --- جدول تطابق: ✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد --- */
+  const ICON = { ok: "✅", warn: "⚠️", none: '<span class="sp-dot"></span>', bad: "❌" };
+  const TIP = { ok: "همان", warn: "خوانش مطمئن نیست", none: "مطمئن است که در پیش‌فاکتور نیامده", bad: "مطمئن است که با پیش‌فاکتور فرق دارد" };
+  /* هر ردیفِ غیرسبز تیک می‌خورد: پیش‌فاکتور به‌جای درخواست ملاک — مقدارِ سند، یا خالی اگر سند چیزی نگفته */
+  const acceptable = (row) => !!row && row.status !== "ok";
+  const val = (v, row) => (v == null || v === "" ? "—" : row.key === "price" ? money(v) : typeof v === "number" ? qty(v) : row.kind === "terms" ? esc(fa(v)) : esc(v));
   function matchTable(b) {
     const ai = b.ai, acc = b.accept || {};
     const tr = (row, k) => {
       const on = !!acc[k] && acceptable(row);
-      return `<tr class="${row.gate ? "" : "info"}"><td class="t">${esc(row.label)}${row.gate ? "" : ` <span class="sp-muted">(اطلاعاتی)</span>`}</td>
-        <td>${row.kind === "terms" ? `<span class="sp-muted">—</span>` : val(row.want, row)}</td>
-        <td>${val(row.got, row)}${row.def ? ` <span class="sp-muted">(پیش‌فرض شرکت)</span>` : ""}${row.note ? `<div class="sp-muted">${esc(row.note)}</div>` : ""}</td>
-        <td class="sp-mst">${on ? "✔️" : ICON[row.status]}</td>
-        <td>${acceptable(row) && b.state === "proforma" ? `<label class="sp-acc"><input type="checkbox" data-acc="${esc(k)}" ${on ? "checked" : ""}> پیش‌فاکتور ملاک</label>` : ""}</td></tr>`;
+      const empty = on && (row.val === null || (row.val === undefined && (row.got == null || row.got === "")));
+      return `<tr class="${row.gate ? "" : "info"} ${on ? "acc" : ""}"><td class="t">${esc(row.label)}${row.gate ? "" : ` <span class="sp-muted">(اطلاعاتی)</span>`}</td>
+        <td>${row.kind === "terms" && (row.want == null || row.want === "") ? `<span class="sp-muted">—</span>` : val(row.want, row)}</td>
+        <td>${val(row.got, row)}${row.def ? ` <span class="sp-muted">(پیش‌فرض شرکت)</span>` : ""}${row.note ? `<div class="sp-muted">${esc(row.note)}</div>` : ""}${empty ? `<div class="sp-warn">خالی می‌ماند</div>` : ""}</td>
+        <td class="sp-mst" title="${TIP[row.status] || ""}">${ICON[row.status] || "⚠️"}</td>
+        <td>${acceptable(row) && b.state === "proforma" ? `<label class="sp-acc" title="پیش‌فاکتور به‌جای درخواست ملاک شود"><input type="checkbox" data-acc="${esc(k)}" ${on ? "checked" : ""}> پیش‌فاکتور ملاک</label>` : ""}</td></tr>`;
     };
-    let h = `<div class="sp-match"><div class="sp-row"><b>🤖 جدول تطابق با پیش‌فاکتور</b><span class="sp-muted">✅ همان · ⚠️ نیامده یا نامطمئن · ❌ فرق دارد · ✔️ پذیرفته (پیش‌فاکتور ملاک)</span></div>`;
+    let h = `<div class="sp-match"><div class="sp-row"><b>🤖 جدول تطابق با پیش‌فاکتور</b></div>
+      <div class="sp-legend">✅ همان · ⚠️ مطمئن نیست · <span class="sp-dot"></span> مطمئن است که نیامده · ❌ مطمئن است که فرق دارد · ☑️ تیک: پیش‌فاکتور به‌جای درخواست ملاک</div>`;
     for (const ln of ai.lines || []) {
       const l = S.d.lines.find((x) => x.id === ln.line_id) || ln;
-      h += `<h5>${code(l)}${esc(ln.title)}${ln.found ? "" : ` <span class="sp-err">— در پیش‌فاکتور پیدا نشد</span>`}</h5>
-        <div class="sp-scroll"><table class="sp-table sp-mt"><thead><tr><th class="t">لایه / فیلد</th><th>بستهٔ تأمین‌کننده</th><th>پیش‌فاکتور</th><th>وضعیت</th><th>پذیرش</th></tr></thead>
+      h += `<h5>${code(l)}${esc(ln.title)}${ln.found === false ? ` <span class="sp-err">— در پیش‌فاکتور پیدا نشد</span>` : ln.doc_title ? ` <span class="sp-muted">— در سند: «${esc(ln.doc_title)}»</span>` : ""}</h5>
+        <div class="sp-scroll"><table class="sp-table sp-mt"><thead><tr><th class="t">لایه / فیلد</th><th>بستهٔ تأمین‌کننده</th><th>پیش‌فاکتور</th><th>وضعیت</th><th>تیک</th></tr></thead>
         <tbody>${(ln.rows || []).map((row) => tr(row, `${ln.line_id}|${row.key}`)).join("")}</tbody></table></div>`;
     }
-    h += `<h5>شرایط فاکتور</h5><div class="sp-scroll"><table class="sp-table sp-mt"><thead><tr><th class="t">فیلد</th><th></th><th>پیش‌فاکتور</th><th>وضعیت</th><th>پذیرش</th></tr></thead>
+    h += `<h5>شرایط فاکتور</h5><div class="sp-scroll"><table class="sp-table sp-mt"><thead><tr><th class="t">فیلد</th><th>اعلامِ تأمین‌کننده</th><th>پیش‌فاکتور</th><th>وضعیت</th><th>تیک</th></tr></thead>
       <tbody>${(ai.header || []).map((row) => tr(row, `h|${row.key}`)).join("")}</tbody></table></div>`;
     h += b.ready ? `<div class="sp-ok">✅ همه‌چیز برای تأیید نهایی آماده است — مقدارهای پیش‌فاکتور به تب استعلامات می‌روند.</div>`
-      : `<div class="sp-err">⛔ مانده:\n${(b.problems || []).map((p) => `• ${esc(p)}`).join("\n")}</div>`;
-    if (ai.cost_usd != null) h += `<div class="sp-muted">هزینهٔ این خوانش: ${fa(ai.cost_usd)} دلار</div>`;
+      + (b.gaps && b.gaps.length ? `<div class="sp-warn">این‌ها خالی می‌مانند و خط استعلام «ثبت موقت» نمی‌شود: ${b.gaps.map(esc).join("، ")}</div>` : "")
+      : `<div class="sp-err">⛔ مانده — تیک بزنید (پیش‌فاکتور ملاک) یا بسته را برگردانید:\n${(b.problems || []).map((p) => `• ${esc(p)}`).join("\n")}</div>`;
     return h + `</div>`;
   }
 
@@ -206,6 +248,7 @@
       ${ls.map((l) => `<tr><td class="t">${code(l)}${esc(l.title)}${l.extra.length ? `<div class="sp-muted">➕ ${l.extra.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ")}</div>` : ""}${fileLinks(l.id) ? `<div>${fileLinks(l.id)}</div>` : ""}</td>
         <td>${qty(l.qty)} ${esc(l.unit || "")}</td><td>${money(l.price)}</td><td>${money(l.total)}</td></tr>`).join("")}
       </tbody><tfoot><tr><td class="t">جمع</td><td></td><td></td><td>${money(sum)}</td></tr></tfoot></table></div>`;
+    if (termsLine(b.terms)) h += `<div class="sp-muted" style="margin-top:4px">🧾 شرایط اعلامی: ${esc(termsLine(b.terms))}</div>`;
     if (b.comment) h += `<div class="sp-comment">${esc(b.comment)}</div>`;
     if (b.pf) h += `<div class="sp-row" style="margin-top:6px">📄 پیش‌فاکتور: <b>${esc(b.pf.name || "")}</b><button class="tp-btn xs" data-pf="${b.id}">👁 دیدن</button></div>`;
     if (b.ai && b.state === "proforma") h += matchTable(b);
@@ -216,7 +259,7 @@
     } else if (b.state === "proforma") {
       const open = b.ai ? countOpen(b) : 0;
       h += `<div class="sp-actions"><button class="tp-btn ${b.ai ? "" : "primary"}" data-act="ai">🤖 ${b.ai ? "خوانش دوباره" : "خوانش هوشمند پیش‌فاکتور"}</button>
-        ${open > 1 ? `<button class="tp-btn" data-act="acceptall">✔️ پذیرش همهٔ مغایرت‌ها (${fa(open)})</button>` : ""}
+        ${open > 1 ? `<button class="tp-btn" data-act="acceptall">☑️ تیکِ همهٔ غیرسبزها (${fa(open)})</button>` : ""}
         <button class="tp-btn ${b.ready ? "primary" : ""}" data-act="final" ${b.ai ? "" : "title=\"اول خوانش هوشمند\""}>🏁 تأیید نهایی</button>
         <button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>
         ${b.ai ? "" : `<div class="sp-muted">برای پر شدنِ همهٔ فیلدهای اجباری از پیش‌فاکتور و جدول تطابق، «خوانش هوشمند» را بزنید — تأیید نهایی بدون آن ممکن نیست.</div>`}`;
@@ -235,7 +278,8 @@
     const done = d.bundles.filter((b) => !["pending", "approved", "proforma"].includes(b.state)).reverse();
     let h = open.length ? `<h3 class="sp-h3">منتظر تصمیم شما</h3>${open.map((b) => bundleCard(b, byId)).join("")}` : `<div class="tp-note">بسته‌ای منتظر تصمیم نیست.</div>`;
     h += `<h3 class="sp-h3">همهٔ اقلام این گفت‌وگو</h3>`;
-    h += d.lines.map((l) => `<div class="sp-card"><header><h3>${code(l)}${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
+    if (termsLine(d.thread.terms)) h += `<div class="sp-muted" style="margin-bottom:8px">🧾 شرایطِ فاکتورِ اعلامیِ تأمین‌کننده: ${esc(termsLine(d.thread.terms))}</div>`;
+    h += d.lines.slice().sort((a, b) => b.id - a.id).map((l) => `<div class="sp-card" data-no="${l.no || ""}"><header><h3>${code(l)}${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
       <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map((x) => `<span class="sp-chip lock">🔒 <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("")}${l.extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("")}</div>
       <div class="sp-row" style="margin-top:8px">${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال = <b>${money(l.total)}</b> ریال <span class="sp-muted">(خواسته: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
       ${l.note ? `<div class="sp-muted">توضیح تأمین‌کننده: ${esc(l.note)}</div>` : ""}${fileLinks(l.id) ? `<div style="margin-top:6px">${fileLinks(l.id)}</div>` : ""}
@@ -247,7 +291,7 @@
   /* ---------- رفتار ---------- */
   function bind() {
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; ss.set("sp.aid", String(S.aid)); render(); }; });
-    $$("[data-th]").forEach((b) => { b.onclick = () => { S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; loadThread().catch((e) => say(e.message)); }; });
+    $$("[data-th]").forEach((b) => { b.onclick = () => { S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0; loadThread().catch((e) => say(e.message)); }; });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
@@ -263,6 +307,12 @@
         catch (e) { c.checked = !c.checked; say(e.message); }
       };
     });
+    /* کلیک روی کارتِ پیامِ بسته یا قلم: به «اقلام و تصمیم‌ها»، روی همان بسته یا قلم */
+    $$("[data-goto-b]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-b="${el.dataset.gotoB}"]`; render(); }; });
+    $$("[data-goto-no]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-no="${el.dataset.gotoNo}"]`; render(); }; });
+    const clr = $("[data-clear-chat]");
+    if (clr) clr.onclick = () => dlg("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و تأمین‌کننده هنوز آن‌ها را می‌بیند.</p><div class=\"sp-err\" data-err></div>",
+      [{ label: "🧹 پاک شود", cls: "primary", fn: async () => { await api(`/sp/thread/${S.th}/clear`, { body: {} }); await loadThread(); } }, { label: "انصراف" }]);
     const send = $("#sendMsg");
     if (send) {
       const inp = $("#msgIn");
@@ -290,8 +340,8 @@
       [{ label: ret ? "برگرداندن" : "رد", cls: ret ? "warn" : "danger", fn: (d) => decide(bid, action, { comment: $("[data-c]", d).value }) }, { label: "انصراف" }]);
     }
     if (action === "ai") {
-      return dlg("🤖 خوانش هوشمند پیش‌فاکتور", `<p>مدل <b>Claude Haiku 4.5</b> پیش‌فاکتور را می‌خواند: مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) را برمی‌دارد و هر لایهٔ ویژگی و هر فیلد اجباری را با بستهٔ تأمین‌کننده می‌سنجد (✅ / ⚠️ / ❌).</p>
-        <p>هزینهٔ تقریبی هر بار: <b>${esc(S.aiCost)}</b>. انجام شود؟</p><div class="sp-err" data-err></div>`,
+      return dlg("🤖 خوانش هوشمند پیش‌فاکتور", `<p>مدل پیش‌فاکتور را می‌خواند: هر سطرِ سند را از دریچهٔ نوع قلم و لایه‌های ویژگی می‌سنجد، مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده، اعتبار) را برمی‌دارد و هر کدام را با بستهٔ تأمین‌کننده مقایسه می‌کند (✅ ⚠️ ⚪ ❌).</p>
+        <p>انجام شود؟</p><div class="sp-err" data-err></div>`,
       [{ label: "بله، بخوان", cls: "primary", fn: async (d) => {
         $(".tp-body", d).insertAdjacentHTML("beforeend", `<p class="sp-muted">در حال خواندن پیش‌فاکتور… (چند ثانیه)</p>`);
         await api(`/sp/x/bundle/${bid}/ai`, { body: { confirm: true } });
@@ -299,15 +349,22 @@
       } }, { label: "انصراف" }]);
     }
     if (action === "acceptall") {
-      return dlg("پذیرش همهٔ مغایرت‌ها", "<p>برای همهٔ ردیف‌های ❌ و ⚠️ای که پیش‌فاکتور برایشان مقدار دارد، <b>پیش‌فاکتور ملاک</b> شود؟ آنچه در پیش‌فاکتور نیامده پذیرفتنی نیست.</p><div class=\"sp-err\" data-err></div>",
+      return dlg("تیکِ همهٔ غیرسبزها", "<p>برای همهٔ ردیف‌های ⚠️ ⚪ ❌ <b>پیش‌فاکتور به‌جای درخواست ملاک</b> شود؟ مقدار همیشه از سند است؛ آنچه سند نگفته خالی می‌ماند.</p><div class=\"sp-err\" data-err></div>",
         [{ label: "بله، پیش‌فاکتور ملاک", cls: "primary", fn: async () => { await api(`/sp/x/bundle/${bid}/accept`, { body: { all: true } }); await loadThread(); } }, { label: "انصراف" }]);
     }
     if (action === "final") {
-      try {
+      const b = S.d.bundles.find((x) => x.id === bid) || {};
+      const go = async () => {
         const r = await api(`/sp/x/bundle/${bid}/decide`, { body: { action: "final" } });
         await afterDecide();
-        say(`تأیید نهایی شد و ${fa(r.quote_ids.length)} قلم با مقدارهای پیش‌فاکتور به تب استعلامات همین درخواست رفت (ثبت موقت و تیک «تأیید نهایی»).`, "🏁 تأیید نهایی");
-      } catch (e) { say(`${e.message}\n\nاگر چیزی در پیش‌فاکتور نیامده، بسته را با توضیح برگردانید تا تأمین‌کننده پیش‌فاکتور کامل بفرستد.`, "هنوز نه"); }
+        say(`تأیید نهایی شد و ${fa(r.quote_ids.length)} قلم با مقدارهای پیش‌فاکتور به تب استعلامات همین درخواست رفت${r.gaps && r.gaps.length ? `؛ این‌ها خالی ماند و آن خط‌ها «ثبت موقت» نشدند: ${r.gaps.join("، ")}` : " (ثبت موقت و تیک «تأیید نهایی»)"}.`, "🏁 تأیید نهایی");
+      };
+      if (b.ready && b.gaps && b.gaps.length) {
+        return dlg("🏁 تأیید نهایی با جای خالی", `<p>با تیک‌هایی که زده‌اید این فیلدهای اجباری از پیش‌فاکتور خالی می‌مانند و خط استعلامِ آن اقلام «ثبت موقت» نمی‌شود:</p><p>${b.gaps.map(esc).join("<br>")}</p><p>ادامه می‌دهید؟</p><div class="sp-err" data-err></div>`,
+          [{ label: "بله، تأیید نهایی", cls: "primary", fn: go }, { label: "انصراف" }]);
+      }
+      try { await go(); }
+      catch (e) { say(`${e.message}\n\nهر ردیفِ غیرسبز را می‌توانید تیک بزنید (پیش‌فاکتور ملاک)؛ یا بسته را با توضیح برگردانید تا تأمین‌کننده پیش‌فاکتور کامل بفرستد.`, "هنوز نه"); }
     }
   }
   async function decide(bid, action, opts) {
@@ -379,7 +436,15 @@
     if (!fresh.length) return;
     S.d.msgs.push(...fresh); S.lastMsg = fresh[fresh.length - 1].id;
     const c = $("#chat");
-    if (c) { const e = $(".sp-empty", c); if (e) e.remove(); c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join("")); c.scrollTop = c.scrollHeight; }
+    if (c && S.tab === "chat") {
+      const e = $(".sp-empty", c); if (e) e.remove();
+      c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join("")); c.scrollTop = c.scrollHeight;
+      bind();
+    } else {
+      /* روی «اقلام و تصمیم‌ها» هستیم: تب گفت‌وگو شمارِ تازه‌ها را نشان می‌دهد و محو نمی‌شود */
+      const n = fresh.filter((m) => m.who !== "e").length;
+      if (n) { S.unseen += n; const t = $('[data-tab="chat"]'); if (t) t.innerHTML = `💬 گفت‌وگو${badge(S.unseen)}`; }
+    }
   }
   let timer = null, tick = 0;
   function startPoll() { if (timer) clearInterval(timer); timer = setInterval(poll, 5000); }
@@ -391,7 +456,7 @@
         const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
         addMsgs(r.msgs);
         const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-        if (r.rev !== S.rev && !typing) { const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0; await loadThread(); }
+        if (r.rev !== S.rev && !typing) { const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0; const keep = S.unseen; await loadThread(); S.unseen = S.tab === "chat" ? 0 : keep; }
       }
       if (++tick % 4 === 0) {
         await loadList();
@@ -400,7 +465,7 @@
         if (b) b.innerHTML = supList();
         bind();
       }
-    } catch (e) { if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست تمام شد؛ دوباره وارد شوید."); } }
+    } catch (e) { if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
     S.busy = false;
   }
 

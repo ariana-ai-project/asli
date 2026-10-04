@@ -18,7 +18,8 @@ import { telegram, esc, TgError } from "./telegram.js";
 import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
-import { runAiCheck, AI_COST_HINT, AI_VERSION } from "./sp-ai.js";
+import { runAiCheck, aiUsable } from "./sp-ai.js";
+import { ENUMS } from "./quote-rules.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -329,7 +330,7 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
   }
   if (act === "fn") { await ack(); return decideAndShow(env, row, ex, bid, "final", {}, null); }
   if (act === "aa") {
-    try { await C.acceptRows(env, ex, bid, { all: true }); await ack("همهٔ مغایرت‌ها پذیرفته شد"); }
+    try { await C.acceptRows(env, ex, bid, { all: true }); await ack("همهٔ غیرسبزها تیک خورد — پیش‌فاکتور ملاک"); }
     catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
     return bundleCardSend(env, row, ex, bid, mid);
   }
@@ -343,8 +344,7 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
   }
   if (act === "ai") {
     await ack();
-    await P.send(env, row, "🤖 <b>خوانش هوشمند پیش‌فاکتور</b>\nمدل Claude Haiku 4.5 پیش‌فاکتور را می‌خواند: مقدار، واحد، قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) را برمی‌دارد و هر لایهٔ ویژگی و فیلد اجباری را با بستهٔ تأمین‌کننده می‌سنجد (✅/⚠️/❌).\n\n"
-      + `هزینهٔ تقریبی: <b>${AI_COST_HINT}</b> برای هر بار. انجام شود؟`, P.aiConfirmKb(bid));
+    await P.send(env, row, "🤖 <b>خوانش هوشمند پیش‌فاکتور</b>\nمدل پیش‌فاکتور را می‌خواند: هر سطرِ سند را از دریچهٔ نوع قلم و لایه‌های ویژگی می‌سنجد، مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده، اعتبار) را برمی‌دارد و هر کدام را با بستهٔ تأمین‌کننده مقایسه می‌کند (✅ ⚠️ ⚪ ❌).\n\nانجام شود؟", P.aiConfirmKb(bid));
     return { ok: true };
   }
   if (act === "ai2") {
@@ -353,9 +353,9 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
       const tg = await C.aiTarget(env, ex, bid);
       const store = storage(env);
       if (!store || !store.signedUrl) throw new Error("انبار فایل وصل نیست.");
-      const ai = await runAiCheck(env, { fileUrl: await store.signedUrl(tg.b.pf_key, 900), mime: tg.b.pf_mime, lines: tg.lines });
+      const ai = await runAiCheck(env, { fileUrl: await store.signedUrl(tg.b.pf_key, 900), mime: tg.b.pf_mime, lines: tg.lines, terms: tg.terms });
       await C.saveAi(env, tg, ai);
-      return bundleCardSend(env, row, ex, bid, mid, `<i>هزینهٔ همین خوانش: ${fa(ai.cost_usd)} دلار</i>`);
+      return bundleCardSend(env, row, ex, bid, mid, "<i>خوانش هوشمند انجام شد. هر ردیفِ غیرسبز را می‌توانید تیک بزنید (پیش‌فاکتور ملاک).</i>");
     } catch (e) { await P.send(env, row, `⚠️ خوانش هوشمند نشد: ${esc(e.message)}`); }
     return { ok: true };
   }
@@ -364,14 +364,14 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
   return { ok: true };
 }
 
-/** xa:<bundle>:<i> — پذیرش (یا پس گرفتنِ پذیرشِ) یک ردیفِ جدول تطابق */
+/** xa:<bundle>:<i> — تیک (یا برداشتنِ تیکِ) یک ردیفِ غیرسبزِ جدول تطابق: پیش‌فاکتور به‌جای درخواست ملاک */
 async function toggleAccept(env, row, ex, bid, i, mid, ack) {
   const b = await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(bid).first();
   const ai = b ? parse(b.ai_json, null) : null;
-  const x = ai && ai.v === AI_VERSION ? P.acceptList(ai)[i] : null;
+  const x = aiUsable(ai) ? P.acceptList(ai)[i] : null;
   if (!x) { await ack("این ردیف دیگر در جدول نیست.", true); return { ok: true }; }
   const on = !parse(b.accept_json, {})[x.key];
-  try { await C.acceptRows(env, ex, bid, { keys: [x.key], on }); await ack(on ? "پذیرفته شد — پیش‌فاکتور ملاک" : "پذیرش برداشته شد"); }
+  try { await C.acceptRows(env, ex, bid, { keys: [x.key], on }); await ack(on ? "تیک خورد — پیش‌فاکتور ملاک" : "تیک برداشته شد"); }
   catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
   return bundleCardSend(env, row, ex, bid, mid);
 }
@@ -426,15 +426,38 @@ async function askValue(env, row, l, f, head) {
   await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${VAL_PROMPT[f]}`, kb);
   return { ok: true };
 }
-/** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده، همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
+/* شرایطِ فاکتور (برای همهٔ اقلامِ استعلام): فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
+const TERM_PROMPT = {
+  d: "🚚 <b>زمان تحویل</b> را بنویسید — تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری):",
+  x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):",
+};
+const TERM_OPTS = { p: ENUMS.pay, i: ENUMS.invoice, v: ENUMS.vat };
+async function askTerm(env, row, l, k, head) {
+  const f = P.TERM_KEY[k];
+  const top = `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n`;
+  if (TERM_OPTS[k]) {
+    P.setFlow(row, null);
+    const kb = TERM_OPTS[k].map((v, i) => [{ text: v, callback_data: `tv:${l.id}:${k}:${i}` }]);
+    kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
+    await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:`, kb);
+    return { ok: true };
+  }
+  P.setFlow(row, { step: "term", line: l.id, k });
+  await P.send(env, row, `${top}${TERM_PROMPT[k]}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [[{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+  return { ok: true };
+}
+/** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده — مقدار، قیمت یا شرطِ فاکتور — همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
 async function afterSave(env, row, sup, lineId, head) {
-  const l = await env.DB.prepare("SELECT * FROM sp_lines WHERE id=?").bind(lineId).first();
+  const l = await env.DB.prepare("SELECT l.*, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   const miss = C.lineMissing(l || {});
+  const tm = C.termsOf(l);
   if (l && C.LINE_EDITABLE.includes(l.state) && l.state !== "ready") {
     if (miss.includes("مقدار")) return askValue(env, row, l, "q", head);
     if (miss.includes("قیمت واحد")) return askValue(env, row, l, "p", head);
+    for (const k of ["d", "p", "i", "v"]) if (!String(tm[P.TERM_KEY[k]] ?? "").trim()) return askTerm(env, row, l, k, head);
   }
-  return lineCardSend(env, row, sup, lineId, null, `${head}${miss.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
+  const all = [...miss, ...C.termsMissing(tm)];
+  return lineCardSend(env, row, sup, lineId, null, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
 }
 
 async function supplierMessage(env, row, msg, text) {
@@ -462,6 +485,28 @@ async function supplierMessage(env, row, msg, text) {
   }
   const f = P.flowOf(row);
   const file = fileOf(msg);
+  /* «📤 ارسال» همراه با پیش‌فاکتور: فایل که رسید، مشخصاتِ اقلامِ آماده و پیش‌فاکتور یک‌جا می‌روند */
+  if (f && f.step === "subpf") {
+    if (!file) { await P.send(env, row, "فایل پیش‌فاکتور را بفرستید (PDF یا عکس)، یا «انصراف»."); return { ok: true }; }
+    try {
+      const th = await C.threadFor(env, f.th, { supplier: sup });
+      const key = await storeTgFile(env, th.assignment_id, file);
+      let r;
+      try { r = await C.submitLines(env, sup, th.id, null, { skey: key, filename: file.name, mime: file.mime, size: file.size }); }
+      catch (e) { await storage(env).remove(key).catch(() => {}); throw e; }
+      P.setFlow(row, null);
+      await P.pushMsgs(env, r.thread, r.msgs);
+      return itemsCardSend(env, row, sup, th.id, null, `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
+    } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
+  }
+  if (f && f.step === "term" && text) {
+    try {
+      const l = await env.DB.prepare("SELECT thread_id FROM sp_lines WHERE id=?").bind(f.line).first();
+      await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[f.k]]: text });
+      P.setFlow(row, null);
+      return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
+    } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
+  }
   if (f && f.step === "pf") {
     if (!file) { await P.send(env, row, "فایل پیش‌فاکتور را بفرستید (PDF یا عکس)، یا «انصراف»."); return { ok: true }; }
     try {
@@ -517,13 +562,13 @@ async function supplierMessage(env, row, msg, text) {
 }
 
 async function lineCardSend(env, row, sup, lineId, mid, head) {
-  const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
+  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   if (!l || l.supplier_id !== sup.supplier_id) { await P.send(env, row, "این قلم پیدا نشد."); return { ok: true }; }
   const [files, rest] = await Promise.all([
     env.DB.prepare("SELECT label FROM sp_files WHERE line_id=? ORDER BY id").bind(l.id).all(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM sp_lines WHERE thread_id=? AND id!=? AND state IN ('new','draft','returned')").bind(l.thread_id, l.id).first(),
   ]);
-  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0);
+  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l));
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }
@@ -577,6 +622,23 @@ async function onCallback(env, cq) {
       row.role = parts[2]; P.setFlow(row, null); row._dirty = true;
       await P.setMenuButton(env, row.chat, row.role);
     }
+    /* «🧹 پاک کردن گفت‌وگو» — هر دو نقش؛ فقط از صفحهٔ همین طرف (پیام‌ها در دیتابیس می‌مانند) */
+    if (a === "cc") {
+      const who = row.role === "e" ? { expert: await expertOf(env, row) } : { supplier: await supplierOf(env, row) };
+      if (!who.expert && !who.supplier) { await ack(); return { ok: true }; }
+      const th = await C.threadFor(env, n(1), who).catch(() => null);
+      if (!th) { await ack("این گفت‌وگو در دسترس نیست.", true); return { ok: true }; }
+      if (parts[2] !== "y") {
+        await ack();
+        await P.send(env, row, "🧹 <b>پاک کردن گفت‌وگو</b>\nپیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند؛ در سامانه می‌مانند و طرف دیگر هنوز آن‌ها را می‌بیند. پاک شود؟",
+          [[{ text: "🧹 بله، پاک شود", callback_data: `cc:${th.id}:y` }], [{ text: "✖️ نه", callback_data: "xc:0" }]]);
+        return { ok: true };
+      }
+      await C.clearMsgs(env, th, row.role);
+      await ack("پاک شد");
+      await P.showThread(env, row, await C.threadFor(env, th.id, who));
+      return { ok: true };
+    }
     if (row.role === "e") {
       const ex = await expertOf(env, row);
       if (!ex) { await ack(); return { ok: true }; }
@@ -621,6 +683,20 @@ async function onCallback(env, cq) {
       await ack();
       return await askValue(env, row, l, f);
     }
+    if (a === "tk") {
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id || !P.TERM_KEY[parts[2]]) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
+      await ack();
+      return await askTerm(env, row, l, parts[2]);
+    }
+    if (a === "tv") {
+      const k = parts[2], v = TERM_OPTS[k] && TERM_OPTS[k][n(3)];
+      const l = await env.DB.prepare("SELECT l.thread_id, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id || !v) { await ack("این گزینه پیدا نشد.", true); return { ok: true }; }
+      try { await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[k]]: v }); await ack(v); }
+      catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+      return await afterSave(env, row, sup, n(1), `✅ ${C.TERM_FA[P.TERM_KEY[k]]}: ${v}`);
+    }
     if (a === "sl") {
       const l = await env.DB.prepare("SELECT extra_json FROM sp_lines WHERE id=?").bind(n(1)).first();
       const extra = JSON.parse((l && l.extra_json) || "[]");
@@ -656,7 +732,27 @@ async function onCallback(env, cq) {
       }
       return await lineCardSend(env, row, sup, n(1), mid, on ? null : "✏️ حالا می‌توانید ویرایش کنید؛ بعد دوباره «✅ آمادهٔ ارسال».");
     }
+    /* «📤 ارسال»: اول می‌پرسد پیش‌فاکتور هم همراهش هست یا نه (sq:<th>:pf | sq:<th>:go) */
     if (a === "ss") {
+      const th = await C.threadFor(env, n(1), { supplier: sup }).catch(() => null);
+      if (!th) { await ack("این استعلام پیدا نشد.", true); return { ok: true }; }
+      const cnt = (await env.DB.prepare("SELECT COUNT(*) AS c FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th.id).first() || {}).c || 0;
+      if (!cnt) { await ack("هیچ قلمِ «آمادهٔ ارسال»ی نیست.", true); return { ok: true }; }
+      await ack();
+      await P.send(env, row, `📤 <b>ارسالِ ${fa(cnt)} قلمِ آماده برای کارشناس</b>\nپیش‌فاکتورِ همین اقلام را هم دارید؟ اگر همراهش بفرستید، مرحلهٔ «تأیید مشخصات و درخواست پیش‌فاکتور» لازم نیست.`,
+        [[{ text: "📄 بله، همراه با پیش‌فاکتور", callback_data: `sq:${th.id}:pf` }], [{ text: "📤 نه، فقط مشخصات", callback_data: `sq:${th.id}:go` }], [{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+      return { ok: true };
+    }
+    if (a === "sq") {
+      if (parts[2] === "pf") {
+        const th = await C.threadFor(env, n(1), { supplier: sup }).catch(() => null);
+        if (!th) { await ack("این استعلام پیدا نشد.", true); return { ok: true }; }
+        await ack();
+        P.setFlow(row, { step: "subpf", th: th.id });
+        await P.send(env, row, "📄 فایل پیش‌فاکتور را بفرستید (PDF یا عکس). لایه‌ها، مقدار، واحد، قیمت واحد و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) باید صریح در آن آمده باشد.",
+          [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+        return { ok: true };
+      }
       try {
         const r = await C.submitLines(env, sup, n(1));
         await ack("فرستاده شد");

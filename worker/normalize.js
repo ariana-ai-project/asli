@@ -376,16 +376,6 @@ export function ratesView(hd, code, override, layers = null) {
   return { ref: hd.ref, units: [...units].sort().map((u) => ({ unit: u, ...rateView(hd, item, u, override) })) };
 }
 
-/* هزینهٔ تقریبیِ یک تفکیک با مدل — میانگینِ ۵۰ اجرای آخرِ همین نسخهٔ پرامپت، هر ده دقیقه یک بار */
-let costCache = { at: 0, v: null };
-export async function costEstimate(env) {
-  if (costCache.v != null && now() - costCache.at < 10 * 60000) return costCache.v;
-  const r = await env.DB.prepare(`SELECT AVG(cost_usd) AS a, COUNT(*) AS n FROM (SELECT cost_usd FROM norm_cache
-      WHERE cost_usd > 0 AND json_extract(result, '$.v') = ? ORDER BY created_at DESC LIMIT 50)`).bind(NORM_V).first().catch(() => null);
-  costCache = { at: now(), v: r && r.n >= 5 && r.a > 0 ? r.a : NORM_COST_EST };
-  return costCache.v;
-}
-
 /**
  * پیشنهاد تفکیک یک قلم. `force`: تأییدِ همین قلم و کشِ مدل را نادیده بگیر و از مدل بپرس — ولی
  * قلمی که کد یا عنوانش در دیتابیس هست هرگز به مدل نمی‌رود.
@@ -394,10 +384,10 @@ export async function costEstimate(env) {
 export async function normalizeItem(env, it, opts = {}) {
   const meta = await catalogMeta(env);
   if (!meta) throw new HttpError("فهرست اقلام هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند.", 409);
-  /* نام لایه‌های استاندارد همراه هر پاسخ — پنل برای ویرایش لایه‌ها فهرستشان را لازم دارد؛
-     costEst: هزینهٔ تقریبیِ «تفکیک دوباره با مدل»، کنار همان دکمه */
-  const [p, costEst] = await Promise.all([proposal(env, it, meta, opts), costEstimate(env)]);
-  return { ...p, layerNames: RULES.layerList(meta.layers).map((l) => l.fa), costEst };
+  /* نام لایه‌های استاندارد همراه هر پاسخ — پنل برای ویرایش لایه‌ها فهرستشان را لازم دارد.
+     هزینهٔ کار با مدل به کاربر گفته نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵) */
+  const p = await proposal(env, it, meta, opts);
+  return { ...p, layerNames: RULES.layerList(meta.layers).map((l) => l.fa) };
 }
 
 /**
