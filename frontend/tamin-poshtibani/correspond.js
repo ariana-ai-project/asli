@@ -1,10 +1,12 @@
 /* ============================================================
    مکاتبات کارشناس با تأمین‌کنندگان (دموی مهر ۱۴۰۵) — مرورگر و مینی‌اپ تلگرام
-   چیدمان: دو ستونِ چسبیده به هم و به لبهٔ راست — درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار
-   نخوانده) — و بقیهٔ صفحه گفت‌وگو، به اندازهٔ یک گفت‌وگوی موبایلی. هر گفت‌وگو = یک درخواست × یک تأمین‌کننده.
-   تب «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول
-   تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید نهایی ← تب استعلامات. پیامِ هر بسته در
-   گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود؛ نوار تب‌ها همیشه بالای صفحه می‌ماند.
+   چیدمان (از ۹۶۱ پیکسل به بالا): راست، دو ستونِ درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار
+   نخوانده)؛ وسط، «اقلام و تصمیم‌ها»؛ چپ، گفت‌وگو داخلِ قابِ آیفون به سبک پیام‌رسانِ iOS 26 (درخواست مالک،
+   مهر ۱۴۰۵): حباب‌های شیشه‌ای — پیامِ ما آبیِ لوگو، پیامِ تأمین‌کننده طوسیِ خیلی کمرنگ. زیرِ آن پهنا (گوشی
+   واقعی و مینی‌اپ) همان صفحهٔ گفت‌وگو تمام‌صفحه و بی‌قاب است و «اقلام و تصمیم‌ها» با دکمهٔ 📦 بالای گفت‌وگو باز می‌شود.
+   هر گفت‌وگو = یک درخواست × یک تأمین‌کننده. «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی
+   آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید
+   نهایی ← تب استعلامات. پیامِ هر بسته در گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -23,6 +25,22 @@
     try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); }
     catch (_) { return fa(new Date(ms).toLocaleTimeString()); }
   }
+  const dtf = (o) => { try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", ...o }); } catch (_) { return null; } };
+  const F_HM = dtf({ hour: "2-digit", minute: "2-digit", hour12: false }), F_DAY = dtf({ weekday: "long", day: "numeric", month: "long" }), F_KEY = dtf({ year: "numeric", month: "2-digit", day: "2-digit" });
+  const hm = (ms) => (F_HM ? F_HM.format(new Date(ms)) : fa(new Date(ms).toLocaleTimeString()));
+  const dayKey = (ms) => (F_KEY ? F_KEY.format(new Date(ms)) : new Date(ms).toDateString());
+  /** سرِ گروهِ پیام‌ها به سبک پیام‌رسانِ iOS: «امروز ۱۴:۰۵» */
+  function stamp(ms) {
+    const k = dayKey(ms), now = Date.now();
+    const d = k === dayKey(now) ? "امروز" : k === dayKey(now - 864e5) ? "دیروز" : F_DAY ? F_DAY.format(new Date(ms)) : "";
+    return `<b>${d}</b> ${hm(ms)}`;
+  }
+
+  /* قابِ آیفون فقط از ۹۶۱ پیکسل به بالا؛ با عبور از این مرز صفحه دوباره رسم می‌شود */
+  const PHONE = window.matchMedia("(min-width: 961px)");
+  let phoneMode = PHONE.matches;
+  const onPhoneMode = () => { if (phoneMode === PHONE.matches) return; phoneMode = PHONE.matches; if (app.classList.contains("sp-app")) render(); };
+  if (PHONE.addEventListener) PHONE.addEventListener("change", onPhoneMode); else if (PHONE.addListener) PHONE.addListener(onPhoneMode);
 
   /* ---------- مینی‌اپ تلگرام ---------- */
   const hp = new URLSearchParams(location.hash.slice(1));
@@ -51,7 +69,7 @@
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
   const S = { me: null, reqs: [], unread: 0, waiting: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null };
+    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {} };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -140,17 +158,26 @@
   }
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
+    /* پیش‌نویسِ نیمه‌کارهٔ هر گفت‌وگو با رسمِ دوباره (تغییر پهنا، تصمیم روی بسته) پاک نمی‌شود */
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
+    const on = !!(S.th && S.d);
+    const screenInMain = !phoneMode && on && S.tab !== "items";
+    const main = !on ? `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">${phoneMode ? "گفت‌وگو در گوشیِ کنار صفحه و اقلام و تصمیم‌ها همین‌جا می‌آیند." : "پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند."}</span></div>`
+      : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
-    app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols" data-view="${S.view}">
+    app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols ${phoneMode ? "ph-mode" : ""}" data-view="${S.view}">
       <aside class="sp-col reqs"><h4>درخواست‌ها ${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
-      <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
+      <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req" aria-label="بازگشت به درخواست‌ها">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
         <div class="scroll" data-sups>${supList()}</div>${g && g.open_items ? `<div class="sp-colfoot"><button class="tp-btn primary sm" data-send>➕ ارسال استعلام</button></div>` : ""}</aside>
-      <section class="sp-main">${S.th && S.d ? convo() : `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند.</span></div>`}</section>
+      <section class="sp-main ${screenInMain ? "is-screen" : ""}">${main}</section>
+      ${phoneMode ? `<section class="ph-stage"><div class="ph"><img class="ph-frame" src="phone-frame.svg" alt="" draggable="false">${screen(true)}</div></section>` : ""}
     </div></div>`;
     bind();
-    const c = $("#chat"); if (c) c.scrollTop = c.scrollHeight;
+    const inp = $("#msgIn"); if (inp && S.drafts[S.th]) { inp.value = S.drafts[S.th]; composerState(inp); }
+    const c = $("#chat"); if (c) c.scrollTop = S.chatPos != null ? S.chatPos : c.scrollHeight;
+    S.chatPos = null;
     if (S.goto) { const sel = S.goto; S.goto = null; jumpTo(sel); }
-    else if (S.tab === "items" && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
+    else if ((phoneMode || S.tab === "items") && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
   }
   /** کلیک روی پیامِ بسته یا قلم: همان کارت پیدا و چشمک‌زن می‌شود — نوار تب‌ها بالا می‌ماند */
   function jumpTo(sel) {
@@ -161,49 +188,113 @@
     el.classList.add("sp-flash");
     setTimeout(() => el.classList.remove("sp-flash"), 1600);
   }
+  const waitingCount = () => S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
+  /** اقلام و تصمیم‌ها: در چیدمانِ گوشی ستونِ وسط؛ در صفحهٔ باریک جای گفت‌وگو با دکمهٔ برگشت به آن */
   function convo() {
     const th = S.d.thread;
-    const waiting = S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
-    return `<div class="sp-conv ${S.tab === "chat" ? "is-chat" : ""}"><div class="sp-head"><button class="tp-btn xs sp-back" data-back="sup">→</button><h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
+    const back = phoneMode ? "" : `<button class="tp-btn sm" data-tab="chat" title="برگشت به گفت‌وگو">→ گفت‌وگو${badge(S.unseen)}</button>`;
+    return `<div class="sp-conv"><div class="sp-head ${phoneMode ? "" : "sp-sticky"}">${back}<h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
       <span class="sp-muted">📞 ${esc(th.phone || "")}${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست ${esc(th.request_id)}</span></div>
-      <nav class="sp-tabs sp-sticky"><button class="sp-tab ${S.tab === "chat" ? "on" : ""}" data-tab="chat">💬 گفت‌وگو${badge(S.unseen)}</button>
-        <button class="sp-tab ${S.tab === "items" ? "on" : ""}" data-tab="items">📦 اقلام و تصمیم‌ها${badge(waiting, "wait")}</button></nav>
-      <div id="pane" class="${S.tab === "chat" ? "sp-chatpane" : ""}">${S.tab === "chat" ? chatPane() : itemsPane()}</div></div>`;
+      <div id="pane">${itemsPane()}</div></div>`;
   }
 
-  /* --- گفت‌وگو: پیام‌های خودِ کارشناس سمت راست؛ رخدادِ بسته و قلم به‌شکل کارت، با کلیک به همان بسته --- */
+  /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26: پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ تأمین‌کننده
+     سمت چپ و طوسیِ خیلی کمرنگ؛ پیام‌های پشت‌سرهمِ یک طرف یک گروه‌اند و فقط آخرینِ گروه دُم و ساعت دارد؛ رخدادِ بسته
+     و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
   const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
     pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
+  const evItems = (m) => { const meta = m.meta || {}; return EV_HEAD[meta.ev] && Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : []; };
   function evCard(m) {
     const meta = m.meta || {};
-    const items = Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : [];
-    if (!EV_HEAD[meta.ev] || !items.length) return null;
+    const items = evItems(m);
     const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
-    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی فرستاده شد${meta.pf ? ` · همراه با پیش‌فاکتور «${esc(meta.pf)}»` : ""}` : EV_HEAD[meta.ev];
+    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی` : EV_HEAD[meta.ev];
     const note = /💬 ([\s\S]+)$/.exec(m.body || "");
     const blocks = items.map((x) => {
       const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
-      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
-      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
+      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
+      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}" role="button" tabindex="0"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
         ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
     }).join("");
-    const foot = [meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "", meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
-    return `<div class="sp-msg ev rich ${m.who === "e" ? "me" : ""}" ${goto} title="${goto ? "رفتن به همین بسته در «اقلام و تصمیم‌ها»" : "رفتن به همین قلم"}"><div class="evh">${head}</div>${blocks}
-      ${foot ? `<div class="evf">${foot}</div>` : ""}${note ? `<div class="evf">💬 ${esc(note[1])}</div>` : ""}<time>${when(m.at)}</time></div>`;
+    const foot = [meta.pf && meta.ev === "submit" ? `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»` : "", meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "",
+      meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
+    return `<div class="ph-card ${m.who === "e" ? "me" : "them"}" ${goto ? `${goto} role="button" tabindex="0"` : ""} title="${hm(m.at)}${goto ? " — رفتن به همین بسته در «اقلام و تصمیم‌ها»" : ""}">
+      <div class="ph-card-h">${head}</div>${blocks}
+      ${foot ? `<div class="ph-card-f">${foot}</div>` : ""}${note ? `<div class="ph-card-f">💬 ${esc(note[1])}</div>` : ""}
+      ${goto ? `<div class="ph-card-go">دیدن در اقلام و تصمیم‌ها ‹</div>` : ""}</div>`;
   }
-  function msgHtml(m) {
-    if (m.kind === "event") { const c = evCard(m); if (c) return c; }
-    if (m.kind === "event" || m.kind === "note") return `<div class="sp-msg ev ${m.kind === "note" ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}"` : ""}>${esc(m.body)}${m.kind === "note" ? " <i>(فقط شما می‌بینید)</i>" : ""}<time>${when(m.at)}</time></div>`;
-    const me = m.who === "e";
-    /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
-    const ai = !!(m.meta && m.meta.ai);
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? (ai ? "🤖 کارشناس هوشمند" : "شما") : esc(S.d.thread.supplier)}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
+  /* نوعِ هر پیام برای گروه‌بندی: حباب (text)، کارتِ رخداد (rich) یا خطِ وسطِ صفحه (sys: رخدادِ ساده و یادداشتِ خصوصی) */
+  const kindOf = (m) => (m.kind === "event" ? (evItems(m).length ? "rich" : "sys") : m.kind === "note" ? "sys" : "text");
+  const sideOf = (m) => (m.who === "e" ? "me" : "them");
+  const isAi = (m) => !!(m.meta && m.meta.ai); /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
+  const GAP = 60 * 60e3, GROUP = 3 * 60e3;
+  const sameGroup = (a, b) => !!a && !!b && kindOf(a) !== "sys" && kindOf(b) !== "sys" && sideOf(a) === sideOf(b) && isAi(a) === isAi(b)
+    && b.at - a.at < GROUP && dayKey(a.at) === dayKey(b.at);
+  function msgsHtml() {
+    const L = S.d.msgs;
+    if (!L.length) return `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`;
+    let h = "";
+    L.forEach((m, i) => {
+      const prev = L[i - 1], next = L[i + 1];
+      if (!prev || m.at - prev.at > GAP || dayKey(m.at) !== dayKey(prev.at)) h += `<div class="ph-stamp">${stamp(m.at)}</div>`;
+      const k = kindOf(m);
+      if (k === "sys") {
+        const note = m.kind === "note";
+        h += `<div class="ph-sys ${note ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}" role="button" tabindex="0"` : ""}>${note ? "🔒 " : ""}${esc(m.body)}${note ? ` <i>· فقط شما می‌بینید</i>` : ""} <span class="t">${hm(m.at)}</span></div>`;
+        return;
+      }
+      const side = sideOf(m), ai = isAi(m);
+      const first = !sameGroup(prev, m), last = !sameGroup(m, next);
+      const cap = first && ai ? `<div class="ph-cap">🤖 <span>کارشناس هوشمند</span></div>` : "";
+      const body = k === "rich" ? evCard(m) : `<div class="ph-b ${side}${ai ? " ai" : ""}${last ? " tail" : ""}" title="${hm(m.at)}">${esc(m.body)}</div>`;
+      h += `<div class="ph-row ${side}${first ? " first" : ""}">${cap}${body}${last ? `<div class="ph-meta">${hm(m.at)}</div>` : ""}</div>`;
+    });
+    return h;
   }
-  function chatPane() {
+
+  /* نمادهای خطیِ صفحهٔ گوشی (رنگ از currentColor) */
+  const I = {
+    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
+    chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>',
+    box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 2.8l8 4.3v9.8l-8 4.3-8-4.3V7.1z"/><path d="M4 7.1l8 4.4 8-4.4M12 11.5v9.7"/><path d="M8 4.9l8 4.4" stroke-width="1.5"/></svg>',
+    erase: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 20H20"/><path d="M4.6 14.6l9.9-9.9a2 2 0 012.8 0l2.5 2.5a2 2 0 010 2.8L11 18.8a4 4 0 01-2.8 1.2H7.4a2 2 0 01-1.4-.6l-1.4-1.4a2 2 0 010-2.8z"/><path d="M9.2 10l4.8 4.8"/></svg>',
+    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg>',
+    bars: '<svg viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>',
+    wifi: '<svg viewBox="0 0 16 12" fill="currentColor"><path d="M8 2.4c2.3 0 4.4.9 6 2.4l1.2-1.3A10.3 10.3 0 008 .6 10.3 10.3 0 00.8 3.5L2 4.8a8.5 8.5 0 016-2.4z"/><path d="M8 5.9c1.4 0 2.6.5 3.6 1.4l1.2-1.3A7 7 0 008 4.1 7 7 0 003.2 6l1.2 1.3A5.2 5.2 0 018 5.9z"/><path d="M8 9.3c.5 0 1 .2 1.3.5L8 11.2 6.7 9.8c.3-.3.8-.5 1.3-.5z"/></svg>',
+    batt: '<svg viewBox="0 0 27 13" fill="none"><rect x=".5" y=".5" width="23" height="12" rx="3.6" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="2.2" fill="currentColor"/><path d="M25 4.4v4.2c.8-.3 1.4-1.1 1.4-2.1S25.8 4.7 25 4.4z" fill="currentColor" opacity=".45"/></svg>',
+  };
+  const clock = () => hm(Date.now());
+  /** صفحهٔ گفت‌وگو: framed = داخلِ قابِ آیفون (با نوار وضعیت و جزیرهٔ دوربین)؛ وگرنه تمام‌صفحه در گوشیِ واقعی */
+  function screen(framed) {
+    const on = !!(S.th && S.d);
+    const chrome = framed ? `<div class="ph-status" aria-hidden="true"><span class="ph-clock">${clock()}</span><span></span><span class="ph-icons">${I.bars}${I.wifi}${I.batt}</span></div>
+      <div class="ph-island" aria-hidden="true"><i></i></div><div class="ph-home" aria-hidden="true"></div>` : "";
+    if (!on) {
+      const g = S.reqs.find((x) => x.assignment_id === S.aid);
+      return `<div class="ph-screen ${framed ? "" : "full"}"><div class="ph-wall"></div>${chrome}
+        <div class="ph-void center">${g && !g.threads.length ? `<b>هنوز گفت‌وگویی نیست</b>برای ${esc(g.request_id)} از ستونِ تأمین‌کنندگان «ارسال استعلام» را بزنید.` : `<b>مکاتبات</b>یک تأمین‌کننده را از فهرست انتخاب کنید تا گفت‌وگو این‌جا باز شود.`}</div></div>`;
+    }
     S.unseen = 0;
-    return `<div class="sp-chatbar"><span class="sp-muted">${esc(S.d.thread.supplier)}</span><span class="sp-grow"></span><button class="tp-btn xs" data-clear-chat title="فقط از صفحهٔ شما پاک می‌شود">🧹 پاک کردن گفت‌وگو</button></div>
-      <div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
-      <div class="sp-composer"><textarea class="tp-input" id="msgIn" rows="2" placeholder="پیام به ${esc(S.d.thread.supplier)}…"></textarea><button class="tp-btn primary" id="sendMsg">ارسال</button></div>`;
+    const th = S.d.thread, waiting = waitingCount();
+    const initial = (String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟");
+    return `<div class="ph-screen ${framed ? "" : "full"}"><div class="ph-wall"></div>
+      <div class="ph-scroll" id="chat" role="log" aria-live="polite" aria-label="گفت‌وگو با ${esc(th.supplier)}">${msgsHtml()}</div>
+      <div class="ph-edge top" aria-hidden="true"></div><div class="ph-edge bot" aria-hidden="true"></div>${chrome}
+      <header class="ph-nav">
+        <div>${framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`}</div>
+        <button class="ph-who" data-items title="${esc(th.supplier)} · 📞 ${esc(th.phone || "")} · درخواست ${esc(th.request_id)}"><span class="ph-av">${esc(initial)}</span>
+          <span class="ph-name ph-glass"><span>${esc(th.supplier)}</span>${I.chev}</span></button>
+        <div class="ph-acts"><button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
+          <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button></div>
+      </header>
+      <div class="ph-compose"><div class="ph-field ph-glass"><textarea id="msgIn" data-draft="${S.th}" rows="1" placeholder="پیام به ${esc(th.supplier)}" aria-label="پیام به ${esc(th.supplier)}"></textarea>
+        <button id="sendMsg" class="ph-send" aria-label="ارسال" title="ارسال (Enter)" disabled>${I.up}</button></div></div></div>`;
+  }
+  /** کادرِ پیام با متن بلند می‌شود (تا پنج خط) و دکمهٔ ارسال فقط با متن روشن است */
+  function composerState(inp) {
+    inp.style.height = "auto";
+    inp.style.height = `${Math.min(inp.scrollHeight, parseFloat(getComputedStyle(inp).lineHeight) * 5 + 8)}px`;
+    const b = $("#sendMsg"); if (b) b.disabled = !inp.value.trim();
   }
 
   /* --- جدول تطابق: ✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد --- */
@@ -293,7 +384,7 @@
   /* ---------- رفتار ---------- */
   function bind() {
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; ss.set("sp.aid", String(S.aid)); render(); }; });
-    $$("[data-th]").forEach((b) => { b.onclick = () => { S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0; loadThread().catch((e) => say(e.message)); }; });
+    $$("[data-th]").forEach((b) => { b.onclick = () => { const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value; S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0; loadThread().catch((e) => say(e.message)); }; });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
@@ -309,9 +400,22 @@
         catch (e) { c.checked = !c.checked; say(e.message); }
       };
     });
-    /* کلیک روی کارتِ پیامِ بسته یا قلم: به «اقلام و تصمیم‌ها»، روی همان بسته یا قلم */
-    $$("[data-goto-b]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-b="${el.dataset.gotoB}"]`; render(); }; });
-    $$("[data-goto-no]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-no="${el.dataset.gotoNo}"]`; render(); }; });
+    /* کلیک روی کارتِ پیامِ بسته یا قلم: «اقلام و تصمیم‌ها» روی همان بسته یا قلم — در چیدمانِ گوشی ستونِ وسط همان‌جا
+       اسکرول می‌خورد و گفت‌وگو سرِ جایش می‌ماند */
+    const goto = (sel) => { if (phoneMode) return jumpTo(sel); S.tab = "items"; S.goto = sel; render(); };
+    const press = (el, fn) => { el.onclick = (e) => { e.stopPropagation(); fn(); }; el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } }; };
+    $$("[data-goto-b]").forEach((el) => press(el, () => goto(`[data-b="${el.dataset.gotoB}"]`)));
+    $$("[data-goto-no]").forEach((el) => press(el, () => goto(`[data-no="${el.dataset.gotoNo}"]`)));
+    /* 📦 و نامِ تأمین‌کننده بالای گفت‌وگو: اقلام و تصمیم‌ها — اولین بستهٔ منتظر تصمیم، وگرنه سرِ همان ستون */
+    $$("[data-items]").forEach((el) => {
+      el.onclick = () => {
+        if (!phoneMode) { S.tab = "items"; S.mainScroll = 0; return render(); }
+        const open = S.d && S.d.bundles.filter((b) => ["pending", "approved", "proforma"].includes(b.state)).pop();
+        if (open) return jumpTo(`[data-b="${open.id}"]`);
+        const m = $(".sp-main"); if (m) m.scrollTo({ top: 0, behavior: "smooth" });
+        const hd = $(".sp-main .sp-head"); if (hd) { hd.classList.add("sp-flash"); setTimeout(() => hd.classList.remove("sp-flash"), 1600); }
+      };
+    });
     const clr = $("[data-clear-chat]");
     if (clr) clr.onclick = () => dlg("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و تأمین‌کننده هنوز آن‌ها را می‌بیند.</p><div class=\"sp-err\" data-err></div>",
       [{ label: "🧹 پاک شود", cls: "primary", fn: async () => { await api(`/sp/thread/${S.th}/clear`, { body: {} }); await loadThread(); } }, { label: "انصراف" }]);
@@ -321,11 +425,12 @@
       const go = async () => {
         const text = inp.value.trim(); if (!text) return;
         send.disabled = true;
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
-        send.disabled = false; inp.focus();
+        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
+        composerState(inp); inp.focus();
       };
       send.onclick = go;
-      inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } };
+      inp.oninput = () => composerState(inp);
+      inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); } };
     }
   }
 
@@ -441,28 +546,37 @@
     if (!fresh.length) return;
     S.d.msgs.push(...fresh); S.lastMsg = fresh[fresh.length - 1].id;
     const c = $("#chat");
-    if (c && S.tab === "chat") {
-      const e = $(".sp-empty", c); if (e) e.remove();
-      c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join("")); c.scrollTop = c.scrollHeight;
+    if (c) {
+      /* گروه‌بندی و دُمِ حباب‌ها به پیامِ قبلی بسته است، پس فهرست از نو رسم می‌شود؛ اگر کاربر بالاتر را می‌خواند
+         سرِ جایش می‌ماند، مگر پیامِ تازه از خودِ ما باشد */
+      const atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 90;
+      c.innerHTML = msgsHtml();
+      if (atEnd || fresh.some((m) => m.who === "e")) c.scrollTop = c.scrollHeight;
       bind();
     } else {
-      /* روی «اقلام و تصمیم‌ها» هستیم: تب گفت‌وگو شمارِ تازه‌ها را نشان می‌دهد و محو نمی‌شود */
+      /* روی «اقلام و تصمیم‌ها»ی صفحهٔ باریک هستیم: دکمهٔ برگشت به گفت‌وگو شمارِ تازه‌ها را نشان می‌دهد */
       const n = fresh.filter((m) => m.who !== "e").length;
-      if (n) { S.unseen += n; const t = $('[data-tab="chat"]'); if (t) t.innerHTML = `💬 گفت‌وگو${badge(S.unseen)}`; }
+      if (n) { S.unseen += n; const t = $('[data-tab="chat"]'); if (t) t.innerHTML = `→ گفت‌وگو${badge(S.unseen)}`; }
     }
   }
   let timer = null, tick = 0;
   function startPoll() { if (timer) clearInterval(timer); timer = setInterval(poll, 5000); }
   async function poll() {
     if (document.hidden || S.busy || document.querySelector(".tp-modal-bg")) return;
+    onPhoneMode(); /* پشتیبانِ رویدادِ change در جاهایی که نمی‌رسد (پنجرهٔ پس‌زمینه) */
     S.busy = true;
     try {
       if (S.th && S.d) {
         const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
         addMsgs(r.msgs);
         const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-        if (r.rev !== S.rev && !typing) { const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0; const keep = S.unseen; await loadThread(); S.unseen = S.tab === "chat" ? 0 : keep; }
+        if (r.rev !== S.rev && !typing) {
+          const m = $(".sp-main"), c = $("#chat"); S.mainScroll = m ? m.scrollTop : 0;
+          S.chatPos = c && c.scrollHeight - c.scrollTop - c.clientHeight > 90 ? c.scrollTop : null;
+          const keep = S.unseen; await loadThread(); S.unseen = phoneMode || S.tab === "chat" ? 0 : keep;
+        }
       }
+      const ck = $(".ph-clock"); if (ck) ck.textContent = clock();
       if (++tick % 4 === 0) {
         await loadList();
         const a = $("[data-reqs]"), b = $("[data-sups]");
