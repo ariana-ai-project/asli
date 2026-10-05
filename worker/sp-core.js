@@ -57,7 +57,6 @@ CREATE TABLE IF NOT EXISTS sp_links (token TEXT PRIMARY KEY, expert_id INTEGER N
 CREATE TABLE IF NOT EXISTS sp_sms (id INTEGER PRIMARY KEY, phone_id INTEGER NOT NULL, thread_id INTEGER, expert_id INTEGER, kind TEXT NOT NULL, body TEXT NOT NULL, at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sp_passes (id INTEGER PRIMARY KEY, phone_id INTEGER NOT NULL, hash TEXT NOT NULL, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_sppass_phone ON sp_passes(phone_id, created_at);
-CREATE TABLE IF NOT EXISTS voice_notes (id INTEGER PRIMARY KEY, chat TEXT NOT NULL, tg_user TEXT, text TEXT NOT NULL, chars INTEGER NOT NULL, secs REAL, el_id TEXT, model TEXT, created_at INTEGER NOT NULL);
 `;
 
 /* ستون‌هایی که بعد از اولین استقرارِ دمو اضافه شدند (CREATE IF NOT EXISTS روی جدولِ موجود اثری ندارد؛ api.js

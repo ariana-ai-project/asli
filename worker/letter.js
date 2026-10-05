@@ -47,10 +47,46 @@ export async function transcribe(env, fileUrl) {
   form.append("source_url", fileUrl);
 
   const r = await fetch(STT_URL, { method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, body: form });
-  const d = await r.json().catch(() => ({}));
-  if (!r.ok) throw new ExtractError(`تبدیل صوت به متن نشد: ${sttWhy(d, r.status)}`, r.status === 429 ? 429 : 502);
+  const raw = await r.text().catch(() => "");
+  const d = r.ok ? sttFields(raw) : parseJson(raw);
+  if (!r.ok) {
+    const e = new ExtractError(`تبدیل صوت به متن نشد: ${sttWhy(d, r.status)}`, r.status === 429 ? 429 : 502);
+    e.http = r.status;   /* وضعیتِ خودِ ElevenLabs — صفِ ویس با آن می‌فهمد دوباره امتحان کند یا نه (voice-core.js) */
+    throw e;
+  }
   return { text: String(d.text || "").trim(), language: d.language_code, confidence: d.language_probability,
     id: d.transcription_id || null, secs: d.audio_duration_secs ?? null, model: env.STT_MODEL || "scribe_v2" };
+}
+const parseJson = (s) => { try { return JSON.parse(s || "{}"); } catch (_) { return {}; } };
+/**
+ * پاسخِ تبدیل برای صوتِ بلند چند مگابایت است — زمان‌بندیِ تک‌تکِ واژه‌ها در «words» — و JSON.parse همه‌اش از سقفِ CPU
+ * Worker (۱۰ میلی‌ثانیه در پلن رایگان) می‌گذرد. «text» پیش از «words» می‌آید، پس برای پاسخِ بزرگ فقط همان رشته و چند
+ * فیلدِ کوچک خوانده می‌شوند؛ اگر ترتیب جور دیگری بود، همان JSON.parse کامل.
+ */
+export function sttFields(raw) {
+  const s = String(raw || "");
+  if (s.length < 300000) return parseJson(s);
+  const k = s.indexOf('"text"'), w = s.indexOf('"words"');
+  if (k < 0 || (w >= 0 && w < k)) return parseJson(s);
+  const pick = (re) => { const m = re.exec(s); return m ? m[1] : null; };
+  const secs = pick(/"audio_duration_secs"\s*:\s*([0-9.]+)/);
+  return {
+    text: jsonStringAt(s, s.indexOf('"', s.indexOf(":", k + 6))),
+    transcription_id: pick(/"transcription_id"\s*:\s*"([^"]+)"/), audio_duration_secs: secs == null ? null : Number(secs),
+    language_code: pick(/"language_code"\s*:\s*"([^"]*)"/),
+  };
+}
+/** رشتهٔ JSON که از گیومهٔ جایگاهِ q شروع می‌شود — پایانش اولین گیومه‌ای است که بک‌اسلشِ فرد پیش از خود ندارد */
+function jsonStringAt(s, q) {
+  if (q < 0) return "";
+  for (let j = q + 1; ;) {
+    const e = s.indexOf('"', j);
+    if (e < 0) return "";
+    let b = 0;
+    for (let i = e - 1; s.charCodeAt(i) === 92; i--) b++;
+    if (b % 2 === 0) { try { return JSON.parse(s.slice(q, e + 1)); } catch (_) { return ""; } }
+    j = e + 1;
+  }
 }
 const sttWhy = (d, status) => {
   const msg = (d && (d.detail?.message || d.detail || d.message)) || `خطای ${status}`;
@@ -73,6 +109,12 @@ export async function deleteTranscript(env, id) {
   if (r.ok || r.status === 404) return true;
   const d = await r.json().catch(() => ({}));
   throw new ExtractError(`متن از ElevenLabs پاک نشد: ${sttWhy(d, r.status)}`, 502);
+}
+/** سنجشِ پاک شدن: همان شناسه دیگر خوانده نمی‌شود (۴۰۴) ← true؛ هنوز هست ← false؛ پاسخِ دیگر ← null (نامعلوم) */
+export async function transcriptGone(env, id) {
+  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  if (r.body && r.body.cancel) await r.body.cancel().catch(() => {});
+  return r.status === 404 ? true : r.ok ? false : null;
 }
 
 /* ------------------------------------------------------------------ */

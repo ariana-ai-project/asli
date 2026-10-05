@@ -20,6 +20,8 @@ import { verifyInitData } from "../../../worker/sp-api.js";
 import { normPhone, toNum, DEMO } from "../../../worker/sp-core.js";
 import { e164, isMobile } from "../../../worker/sms.js";
 import { msgEntry } from "../../../worker/ai-md.js";
+import { runVoiceJobs } from "../../../worker/voice-core.js";
+import { handler as spVoiceHandler } from "../../../worker/sp-voicemode.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -1010,30 +1012,45 @@ test("بستهٔ قفل‌شده: بعد از اولین ارسال به تأم�
   assert.deepEqual(list.map((x) => x.phone).sort(), ["09120000071", "09120000073"]);
 });
 
-test("حالتِ صوت در بات مکاتبات: رمزِ ثابت به‌جای رمزِ پیامک ← ویس ← متنِ کامل ← ذخیره (بله) یا پاکِ همه‌جا (نه)", { skip: SKIP }, async () => {
-  env.VOICE_PASS = "1975"; env.ELEVENLABS_API_KEY = "el";
+test("حالتِ صوت در بات مکاتبات: رمز ← ویس ← متنِ کامل ← «پاک شود؟» (بله: از گفت‌وگو و ElevenLabs، نه: می‌ماند)؛ تغییرِ رمز روی هر پیام؛ ویسِ بلند با Cron؛ بی voice_notes", { skip: SKIP }, async () => {
+  env.VOICE_PASS = "5308"; env.ELEVENLABS_API_KEY = "el";
   try {
-    const CV = 990, CW = 991;
+    const CV = 990, CW = 991, CX = 992;
     const sp = async (u) => { await handleSpUpdate(env, { update_id: 40000 + calls.length, ...u }); };
     const txt = (chat, text, mid) => sp({ message: { message_id: mid || 9000 + calls.length, chat: { id: chat, type: "private" }, from: { id: chat }, text } });
     const voice = (chat, mid, extra) => sp({ message: { message_id: mid, chat: { id: chat, type: "private" }, from: { id: chat }, voice: { file_id: `v${mid}`, duration: 75, mime_type: "audio/ogg", file_size: 120000, ...(extra || {}) } } });
     const cb = (chat, data, mid) => sp({ callback_query: { id: `vq${calls.length}`, data, from: { id: chat }, message: { message_id: mid || 1, chat: { id: chat } } } });
     const out = (n, chat) => since(n).filter((c) => c.bot === "sp" && String(c.body.chat_id) === String(chat));
+    const msgs = (n, chat) => out(n, chat).filter((c) => c.method === "sendMessage");
+    const hasPw = (m) => btns(m).some((b) => b.callback_data === "vo:pw") || JSON.stringify(m.body.reply_markup || {}).includes("🔑 تغییر رمز");
+    const job = (chat) => DB.raw.prepare("SELECT * FROM voice_jobs WHERE bot='sp' AND chat=? ORDER BY id DESC LIMIT 1").get(String(chat));
+    const role = (chat) => (DB.raw.prepare("SELECT role FROM sp_tg WHERE chat=?").get(String(chat)) || {}).role;
+
+    /* جدولِ متن‌های ذخیره‌شده دیگر نیست */
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='voice_notes'").get().n, 0);
+
     /* شمارهٔ تازه (لینکِ پیامکش): شکست‌های ورودِ آزمون‌های دیگر رویش نیست */
     const np = await call("/sp/x/phones", { headers: EX, body: { supplier_name: "آزمونِ صوت", phone: "09120000081", label: "همراه" } });
     assert.equal(np.status, 200, JSON.stringify(np.data));
     const ph = DB.raw.prepare("SELECT id, k, fails FROM sp_phones WHERE id=?").get(np.data.phone.id);
 
-    /* ورود با لینکِ پیامک و رمزِ ثابت (رقمِ فارسی هم) — هویتِ تأمین‌کننده نمی‌گیرد و شکستِ ورود هم حساب نمی‌شود */
+    /* ورود با لینکِ پیامک و رمزِ حالتِ صوت (رقمِ فارسی هم) — هویتِ تأمین‌کننده نمی‌گیرد و شکستِ ورود هم حساب نمی‌شود */
     await txt(CV, `/start s${ph.k}`);
     let n = calls.length;
-    await txt(CV, "۱۹۷۵");
-    assert.match(out(n, CV).map((c) => c.body.text).join("\n"), /حالتِ صوت/);
+    await txt(CV, "۵۳۰۸");
+    const hello = msgs(n, CV).pop();
+    assert.match(hello.body.text, /حالتِ صوت/);
+    assert.ok(hasPw(hello), "دکمهٔ «🔑 تغییر رمز» از همان اولین پیام");
+    assert.doesNotMatch(hello.body.text, /حداکثر|سقفِ امروز/, "سقفِ زمانی ندارد");
     const row = DB.raw.prepare("SELECT * FROM sp_tg WHERE chat=?").get(String(CV));
     assert.deepEqual([row.role, row.phone_id], ["v", null]);
     assert.equal(DB.raw.prepare("SELECT fails FROM sp_phones WHERE id=?").get(ph.id).fails, ph.fails);
+    /* گفت‌وگوی دوم هم با همان رمز وارد می‌شود (بعد از تغییرِ رمز باید بیرون برود) */
+    await txt(CW, `/start s${ph.k}`);
+    await txt(CW, "5308");
+    assert.equal(role(CW), "v");
 
-    /* ویس ← انبار (موقت) ← ElevenLabs با لینکِ امضاشده ← متنِ کامل در چند پیام ← «ذخیره شود؟» */
+    /* ویس ← انبار (موقت) ← ElevenLabs با لینکِ امضاشده ← متنِ کامل در چند پیام، همه با «🔑 تغییر رمز» ← «پاک شود؟» */
     const long = Array.from({ length: 900 }, (_, i) => `واژه${i}`).join(" ");
     elStt = { text: long, transcription_id: "tr-1", audio_duration_secs: 75 }; elStore["tr-1"] = long;
     n = calls.length;
@@ -1042,61 +1059,131 @@ test("حالتِ صوت در بات مکاتبات: رمزِ ثابت به‌ج�
     assert.equal(el.length, 1);
     assert.deepEqual([el[0].method, el[0].form.model_id, el[0].form.language_code], ["POST", "scribe_v2", "fa"]);
     assert.match(el[0].form.source_url, /^https:\/\/sb\.test\/storage\/v1\/object\/sign\//, "لینکِ امضاشدهٔ انبار، نه نشانیِ فایلِ تلگرام (توکنِ بات)");
-    const store = since(n).filter((c) => c.bot === "store");
-    assert.deepEqual(store.map((c) => c.method), ["POST", "DELETE"], "صوت فقط تا تبدیل در انبار است");
-    const texts = out(n, CV).filter((c) => c.method === "sendMessage").map((c) => c.body.text);
-    const body = texts.filter((t) => /واژه/.test(t)).map((t) => t.replace(/^📝[^\n]*\n\n/, "")).join(" ");
-    assert.equal(body, long, "متنِ کامل، در چند پیام");
-    assert.ok(texts.filter((t) => /واژه/.test(t)).length >= 2);
-    const ask = out(n, CV).filter((c) => c.method === "sendMessage").pop();
-    assert.match(ask.body.text, /ذخیره شود؟/);
-    assert.deepEqual(ask.body.reply_markup.inline_keyboard.flat().map((b) => b.callback_data), ["vo:y", "vo:n"]);
-    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM voice_notes").get().n, 0, "تا «بله» در پایگاهِ ما چیزی نیست");
-    assert.doesNotMatch(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(CV)).flow_json, /واژه/, "متن در flow هم نیست");
+    assert.deepEqual(since(n).filter((c) => c.bot === "store").map((c) => c.method), ["POST", "DELETE"], "صوت فقط تا تبدیل در انبار است");
+    const sentNow = msgs(n, CV);
+    const parts = sentNow.filter((c) => /واژه/.test(c.body.text));
+    assert.ok(parts.length >= 2, "متنِ بلند در چند پیام");
+    assert.equal(parts.map((c) => c.body.text.replace(/^📝[^\n]*\n\n/, "").replace(/^<i>\([^)]*\)<\/i>\n/, "")).join(" "), long, "متنِ کامل");
+    assert.equal(parts[0].body.reply_parameters.message_id, 801, "اولین تکه پاسخ به خودِ ویس است");
+    assert.ok(sentNow.every(hasPw), "هر پیام «🔑 تغییر رمز» دارد");
+    const ask = sentNow.pop();
+    assert.match(ask.body.text, /پاک شود؟/);
+    const j1 = job(CV);
+    assert.deepEqual(btns(ask).map((b) => b.callback_data), [`vo:y:${j1.id}`, `vo:n:${j1.id}`, "vo:pw"]);
+    assert.deepEqual([j1.state, j1.el, j1.mid], ["ask", "tr-1", 801]);
+    assert.doesNotMatch(JSON.stringify(j1), /واژه/, "متن در صف هم نیست؛ فقط شناسه‌ها");
+    assert.doesNotMatch(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(CV)).flow_json || "", /واژه/);
 
     /* تکرارِ همان آپدیت از تلگرام: دوباره تبدیل نمی‌شود */
     n = calls.length;
     await voice(CV, 801);
     assert.equal(since(n).filter((c) => c.bot === "el").length, 0);
 
-    /* بله ← متن از ElevenLabs خوانده و ذخیره می‌شود */
+    /* نه ← همه‌جا می‌ماند */
     n = calls.length;
-    await cb(CV, "vo:y");
-    assert.ok(since(n).some((c) => c.bot === "el" && c.method === "GET" && /transcripts\/tr-1$/.test(c.url)));
-    const note = DB.raw.prepare("SELECT * FROM voice_notes ORDER BY id DESC LIMIT 1").get();
-    assert.deepEqual([note.text, note.chars, note.el_id, note.chat], [long, long.length, "tr-1", String(CV)]);
-    assert.ok(out(n, CV).some((c) => c.method === "editMessageText" && /ذخیره شد/.test(c.body.text)));
+    await cb(CV, `vo:n:${j1.id}`);
+    assert.equal(since(n).filter((c) => c.bot === "el").length, 0, "به ElevenLabs دست نمی‌زند");
+    assert.equal(elStore["tr-1"], long);
+    assert.equal(out(n, CV).filter((c) => /^deleteMessage/.test(c.method)).length, 0);
+    assert.ok(out(n, CV).some((c) => c.method === "editMessageText" && /ماند/.test(c.body.text)));
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM voice_jobs WHERE id=?").get(j1.id).n, 0);
 
-    /* ویسِ دوم ← نه ← از ElevenLabs و از گفت‌وگو پاک؛ هیچ‌جا ذخیره نمی‌شود */
+    /* ویسِ دوم ← بله ← از ElevenLabs پاک و سنجیده، و پیام‌های متن و خودِ ویس از گفت‌وگو */
     elStt = { text: "این یکی نباید بماند.", transcription_id: "tr-2", audio_duration_secs: 10 }; elStore["tr-2"] = "این یکی نباید بماند.";
     await voice(CV, 802, { duration: 10 });
-    const fl = JSON.parse(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(CV)).flow_json);
+    const j2 = job(CV);
     n = calls.length;
-    await cb(CV, "vo:n");
-    assert.ok(since(n).some((c) => c.bot === "el" && c.method === "DELETE" && /transcripts\/tr-2$/.test(c.url)));
+    await cb(CV, `vo:y:${j2.id}`);
+    const elc = since(n).filter((c) => c.bot === "el").map((c) => `${c.method} ${c.url.split("/").pop()}`);
+    assert.deepEqual(elc, ["DELETE tr-2", "GET tr-2"], "پاک و بعد سنجیده (۴۰۴)");
     assert.equal(elStore["tr-2"], undefined);
-    const del = out(n, CV).filter((c) => c.method === "deleteMessage").map((c) => c.body.message_id);
-    for (const id of [...fl.mids, fl.ask, 802]) assert.ok(del.includes(id), `پیامِ ${id} پاک شد`);
-    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM voice_notes").get().n, 1);
-    assert.match(out(n, CV).filter((c) => c.method === "sendMessage").pop().body.text, /هیچ‌جا ذخیره نشد/);
-
-    /* بلندتر از سقف: تبدیل نمی‌شود */
+    const gone = out(n, CV).filter((c) => c.method === "deleteMessages").flatMap((c) => c.body.message_ids);
+    for (const id of [...JSON.parse(j2.mids_json), 802]) assert.ok(gone.includes(id), `پیامِ ${id} پاک شد`);
+    assert.match(msgs(n, CV).pop().body.text, /پاک شد — از این گفت‌وگو و از ElevenLabs \(و تأیید شد/);
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM voice_jobs WHERE id=?").get(j2.id).n, 0);
+    /* دکمهٔ پیام‌های نسخهٔ قبلی کاری نمی‌کند */
     n = calls.length;
-    await voice(CV, 803, { duration: 31 * 60 });
+    await cb(CV, "vo:y");
     assert.equal(since(n).filter((c) => c.bot === "el").length, 0);
-    assert.match(out(n, CV).pop().body.text, /حداکثر ۳۰ دقیقه/);
 
-    /* رمزِ اشتباه همان رمزِ اشتباهِ تأمین‌کننده است (قفلِ پنج‌باره) */
-    await txt(CW, `/start s${ph.k}`);
-    await txt(CW, "1976");
-    assert.equal(DB.raw.prepare("SELECT role FROM sp_tg WHERE chat=?").get(String(CW)).role, "p");
+    /* ویسِ بلند (۱۵ دقیقه): در صف، و Cronِ ویس تبدیلش می‌کند؛ سقفِ زمانی نیست */
+    const big = Array.from({ length: 3000 }, (_, i) => `بخش${i}`).join(" ");
+    elStt = { text: big, transcription_id: "tr-3", audio_duration_secs: 900 }; elStore["tr-3"] = big;
+    n = calls.length;
+    await voice(CV, 803, { duration: 900, file_size: 4000000 });
+    assert.equal(since(n).filter((c) => c.bot === "el").length, 0, "در وبهوک تبدیل نمی‌شود");
+    const queued = msgs(n, CV).pop();
+    assert.match(queued.body.text, /در صفِ تبدیل/);
+    assert.ok(hasPw(queued));
+    const q3 = job(CV);
+    assert.deepEqual([q3.state, q3.mid], ["queued", 803]);
+    assert.ok(q3.smid, "شمارهٔ پیامِ «در صف» برای پاک کردن بعد از تبدیل");
+    n = calls.length;
+    const tick = await runVoiceJobs(env, { sp: spVoiceHandler(env) });
+    assert.equal(tick.voice, 1);
+    assert.equal(since(n).filter((c) => c.bot === "el" && c.method === "POST").length, 1);
+    const bigParts = msgs(n, CV).filter((c) => /بخش/.test(c.body.text));
+    assert.ok(bigParts.length >= 6, "متنِ کامل در چند پیام");
+    assert.ok(bigParts.every(hasPw));
+    assert.equal(bigParts.map((c) => c.body.text.replace(/^📝[^\n]*\n\n/, "").replace(/^<i>\([^)]*\)<\/i>\n/, "")).join(" "), big);
+    assert.ok(out(n, CV).some((c) => c.method === "deleteMessages" && c.body.message_ids.includes(q3.smid)), "پیامِ «در صف» پاک شد");
+    assert.equal(job(CV).state, "ask");
+    assert.equal((await runVoiceJobs(env, { sp: spVoiceHandler(env) })).voice, 0, "صف خالی");
+
+    /* تغییرِ رمز از دکمهٔ روی پیام: دو بار، پیام‌های رمز پاک می‌شوند؛ رمزِ تازه جای قبلی را می‌گیرد */
+    n = calls.length;
+    await cb(CV, "vo:pw");
+    assert.match(msgs(n, CV).pop().body.text, /رمزِ تازه را بفرستید/);
+    n = calls.length;
+    await txt(CV, "12", 7701);
+    assert.match(msgs(n, CV).pop().body.text, /۴ تا ۳۲ نویسه/);
+    await txt(CV, "۲۴۶۸۱۳", 7702);
+    n = calls.length;
+    await txt(CV, "246813", 7703);
+    assert.match(msgs(n, CV).pop().body.text, /رمزِ حالتِ صوت عوض شد/);
+    const delPw = calls.filter((c) => c.bot === "sp" && c.method === "deleteMessage" && String(c.body.chat_id) === String(CV)).map((c) => c.body.message_id);
+    for (const id of [7701, 7702, 7703]) assert.ok(delPw.includes(id), `پیامِ رمزِ ${id} پاک شد`);
+    const rec = JSON.parse(DB.raw.prepare("SELECT value FROM settings WHERE key='voicePass:sp'").get().value);
+    assert.ok(rec.salt && rec.hash && !JSON.stringify(rec).includes("246813"), "فقط نمک و هش");
+    assert.equal(role(CV), "v", "خودِ همین گفت‌وگو بیرون نمی‌رود");
+    n = calls.length;
+    await voice(CV, 804, { duration: 5 });
+    assert.ok(since(n).some((c) => c.bot === "el"), "با رمزِ تازه ادامه می‌دهد");
+
+    /* گفت‌وگوی دیگری که با رمزِ قبلی وارد شده بود، بیرون می‌رود */
+    n = calls.length;
+    await txt(CW, "سلام");
+    assert.match(msgs(n, CW).pop().body.text, /رمزِ حالتِ صوت عوض شده/);
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_tg WHERE chat=?").get(String(CW)).n, 0);
+
+    /* رمزِ قبلی دیگر کار نمی‌کند (رمزِ اشتباهِ تأمین‌کننده حساب می‌شود)، تازه می‌کند */
+    await txt(CX, `/start s${ph.k}`);
+    await txt(CX, "5308");
+    assert.equal(role(CX), "p");
     assert.equal(DB.raw.prepare("SELECT fails FROM sp_phones WHERE id=?").get(ph.id).fails, ph.fails + 1);
+    await txt(CX, "246813");
+    assert.equal(role(CX), "v");
 
     /* خروج */
     await txt(CV, "🚪 خروج از حالت صوت");
     assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_tg WHERE chat=?").get(String(CV)).n, 0);
+    /* «پاک شود؟» بعد از خروج هم جواب می‌دهد */
+    const j4 = job(CV);
+    n = calls.length;
+    await cb(CV, `vo:y:${j4.id}`);
+    assert.ok(since(n).some((c) => c.bot === "el" && c.method === "DELETE"));
+
+    /* فراموشیِ رمز: فقط مدیر، و برگشت به رمزِ اولیه — گفت‌وگوهای واردشده با رمزِ تازه بیرون می‌روند */
+    env.MANAGER_CODE = "4321";
+    assert.equal((await call("/voice/reset", { body: { bot: "sp" } })).status, 401);
+    const rs = await call("/voice/reset", { body: { bot: "sp" }, headers: { "X-Manager-Code": "4321" } });
+    assert.equal(rs.status, 200, JSON.stringify(rs.data));
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM settings WHERE key='voicePass:sp'").get().n, 0);
+    await txt(CX, "سلام");
+    assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_tg WHERE chat=?").get(String(CX)).n, 0);
   } finally {
-    delete env.VOICE_PASS; delete env.ELEVENLABS_API_KEY;
+    delete env.VOICE_PASS; delete env.ELEVENLABS_API_KEY; delete env.MANAGER_CODE;
+    DB.raw.exec("DELETE FROM settings WHERE key LIKE 'voicePass:%'");
   }
 });
 

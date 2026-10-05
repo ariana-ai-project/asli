@@ -51,6 +51,8 @@ import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute } from "./ai-agent.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
+import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
+import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -183,6 +185,7 @@ CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
 ${SP_DDL.trim()}
 ${NAV_DDL}
 ${AI_DDL.trim()}
+${VOICE_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -277,7 +280,9 @@ const COLUMN_RENAMES = [["proformas", "r2_key", "storage_key"]];
    DROP یک جدول ۷۰٬۸۲۵ ردیفی با ۴ ایندکس فقط ۵ «ردیف نوشته‌شده» از سهمیهٔ روزانه برد (نه به
    ازای هر ردیف)، و حجم دیتابیس از ۵۶٫۷ به ۲۶٫۶ مگابایت رسید. این‌جا هست تا دیتابیسِ دیگری
    (نسخهٔ محلی، بازیابی) هم پاکش کند. */
-const DROPPED_TABLES = ["supply_history", "history_batches", "purchase_history"];
+/* voice_notes: متن‌های ذخیره‌شدهٔ «حالتِ صوت» (مهر ۱۴۰۵). کاربر خواست هیچ متنی جدا ذخیره نشود — جدول حذف شد؛ پیش از
+   حذف در تولید خالی بود (۰ ردیف). */
+const DROPPED_TABLES = ["supply_history", "history_batches", "purchase_history", "voice_notes"];
 
 /* کارشناسان اولیه — همان config.js؛ اینجا تکرار شده تا سرور به فایل استاتیک وابسته نباشد.
    بعد از اولین اجرا، منبعِ حقیقت جدول experts است (مدیر می‌تواند فعال/غیرفعال کند). */
@@ -1343,6 +1348,27 @@ async function route(request, env, ctx) {
       return json({ ok: true });
     }
 
+    /* وبهوکِ بات ویس (ویس ← متن، worker/voice-bot.js). همان راز؛ شناسهٔ آپدیت در بازهٔ جدای خودش در tg_seen. */
+    if (path === "/tg/vb-webhook" && m === "POST") {
+      if (!env.TG_WEBHOOK_SECRET || request.headers.get("X-Telegram-Bot-Api-Secret-Token") !== env.TG_WEBHOOK_SECRET) {
+        return new Response("forbidden", { status: 403 });
+      }
+      const u = await request.json().catch(() => null);
+      if (!u || !u.update_id) return json({ ok: true });
+      const fresh = await env.DB.prepare("INSERT INTO tg_seen (update_id,seen_at) VALUES (?,?) ON CONFLICT(update_id) DO NOTHING").bind(-(Math.abs(u.update_id) + 2e12), now()).run();
+      if (!fresh.meta.changes) return json({ ok: true, duplicate: true });
+      await handleVbUpdate(env, u);
+      return json({ ok: true });
+    }
+    /* فراموشیِ رمزِ ویس (حالتِ صوتِ بات مکاتبات «sp» یا بات ویس «vb»): فقط مدیر؛ رمز برمی‌گردد به VOICE_PASS */
+    if (path === "/voice/reset" && m === "POST") {
+      requireManager(request, env);
+      const b = await readJson(request);
+      if (!["sp", "vb"].includes(b.bot)) throw new HttpError("bot باید sp یا vb باشد.");
+      await resetVoicePass(env, b.bot);
+      return json({ ok: true, bot: b.bot });
+    }
+
     /* پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (worker/sp-api.js) */
     if (path.startsWith("/sp/")) {
       const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json });
@@ -1385,7 +1411,9 @@ async function route(request, env, ctx) {
       const team = env.TG_TEAM_BOT_TOKEN ? await ensureTeamWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
       /* بات مکاتبات تأمین‌کنندگان هم اگر توکنش ست شده */
       const sp = env.TG_SP_BOT_TOKEN ? await ensureSpWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
-      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team, sp });
+      /* و بات ویس */
+      const vb = env.TG_VB_BOT_TOKEN ? await ensureVbWebhook(env, url.origin, true).catch((e) => ({ error: e.message })) : null;
+      return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team, sp, vb });
     }
     if (path === "/tg/setup" && m === "GET") {
       requireManager(request, env);

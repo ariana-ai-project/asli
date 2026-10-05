@@ -35,9 +35,10 @@ export class TgError extends Error {
 /**
  * `which`: خالی = بات اصلی (کارشناسان و کانال مدیر، TG_BOT_TOKEN)؛ «team» = بات تیمیِ کارشناسان
  * ارشد (Supply Senior، TG_TEAM_BOT_TOKEN) که فقط اعلان‌های پایش تیم را می‌فرستد؛ «sp» = بات مکاتبات
- * تأمین‌کنندگان (TG_SP_BOT_TOKEN) — گفت‌وگوی کارشناس و تأمین‌کننده (worker/sp-bot.js).
+ * تأمین‌کنندگان (TG_SP_BOT_TOKEN) — گفت‌وگوی کارشناس و تأمین‌کننده (worker/sp-bot.js)؛ «vb» = بات ویس (TG_VB_BOT_TOKEN) —
+ * ویس به متن (worker/voice-bot.js).
  */
-const TOKEN_VAR = { team: "TG_TEAM_BOT_TOKEN", sp: "TG_SP_BOT_TOKEN" };
+const TOKEN_VAR = { team: "TG_TEAM_BOT_TOKEN", sp: "TG_SP_BOT_TOKEN", vb: "TG_VB_BOT_TOKEN" };
 export function telegram(env, which) {
   const name = TOKEN_VAR[which] || "TG_BOT_TOKEN";
   const token = env[name];

@@ -104,8 +104,8 @@ async function onMessage(env, msg, ctx) {
       row.role = "e"; P.setFlow(row, null);
       if (!eMenu) return await home(env, row, "باشد، ورودِ تأمین‌کننده کنار گذاشته شد.");
     }
-    /* حالتِ صوت — رمزِ ثابتِ VOICE_PASS در صفحهٔ ورود (worker/sp-voice.js) */
-    if (row.role === "v") return st ? await V.enterVoice(env, row) : await V.voiceMessage(env, row, msg, text, () => exitVoice(env, row));
+    /* حالتِ صوت — رمزِ حالتِ صوت در صفحهٔ ورود (worker/sp-voicemode.js) */
+    if (row.role === "v") return await V.voiceUpdate(env, row, msg, text, !!st, (why) => exitVoice(env, row, why));
     if (st) {
       if (row.role === "e" || row.role === "s") return await home(env, row, "سلام 👋");
       await P.send(env, row, WELCOME);
@@ -163,8 +163,9 @@ async function startSupplier(env, chat, row, k, startMid) {
 async function pendingPass(env, row, text) {
   const f = P.flowOf(row) || {};
   if (!f.k) { await P.send(env, row, WELCOME); return { ok: true }; }
-  /* رمزِ ثابتِ حالتِ صوت به‌جای رمزِ پیامک: هویتِ تأمین‌کننده نمی‌دهد؛ هر رمزِ دیگری همان C.login است با قفلِ پنج‌باره */
-  if (V.isVoicePass(env, text)) return V.enterVoice(env, row);
+  /* رمزِ حالتِ صوت به‌جای رمزِ پیامک: هویتِ تأمین‌کننده نمی‌دهد؛ هر رمزِ دیگری همان C.login است با قفلِ پنج‌باره */
+  const voiceVer = await V.voicePassVer(env, text);
+  if (voiceVer !== null) return V.enterVoice(env, row, voiceVer);
   try {
     const sup = await C.login(env, f.k, text);
     await env.DB.prepare("UPDATE sp_tg SET role='s', phone_id=?, flow_json=NULL, focus=NULL, updated_at=? WHERE chat=?").bind(sup.phone_id, now(), row.chat).run();
@@ -178,17 +179,18 @@ async function pendingPass(env, row, text) {
   }
 }
 
-/** بیرون از حالتِ صوت: نقشِ کارشناس یا تأمین‌کنندهٔ همین گفت‌وگو اگر هست، وگرنه ردیف پاک می‌شود */
-async function exitVoice(env, row) {
+/** بیرون از حالتِ صوت: نقشِ کارشناس یا تأمین‌کنندهٔ همین گفت‌وگو اگر هست، وگرنه ردیف پاک می‌شود. why: دلیل (مثلاً رمز عوض شده) */
+async function exitVoice(env, row, why) {
+  const say = why || "از حالتِ صوت بیرون آمدید.";
   P.setFlow(row, null);
   if (row.expert_id || row.phone_id) {
     row.role = row.expert_id ? "e" : "s";
     await P.setMenuButton(env, row.chat, row.role);
-    return home(env, row, "از حالتِ صوت بیرون آمدید.");
+    return home(env, row, say);
   }
   await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
   row._dirty = false;
-  await P.spApi(env).call("sendMessage", { chat_id: row.chat, text: "از حالتِ صوت بیرون آمدید.", reply_markup: { remove_keyboard: true } }).catch(() => {});
+  await P.spApi(env).call("sendMessage", { chat_id: row.chat, text: say, parse_mode: "HTML", reply_markup: { remove_keyboard: true } }).catch(() => {});
   return { ok: true };
 }
 
@@ -666,11 +668,10 @@ async function onCallback(env, cq, ctx) {
   }
 
   const row = await P.tgRow(env, chat);
-  /* حالتِ صوت: «ذخیره شود؟» (worker/sp-voice.js) */
+  /* حالتِ صوت: «پاک شود؟» و «🔑 تغییر رمز» (worker/sp-voicemode.js) */
   if (a === "vo") {
-    if (!row || row.role !== "v") { await ack("حالتِ صوت بسته شده است.", true); return { ok: true }; }
-    try { return await V.voiceCallback(env, row, parts[1], ack); }
-    finally { await P.save(env, row).catch((e) => console.error("sp save", e && e.message)); }
+    try { return await V.voiceCallback(env, row, chat, parts, ack, (why) => exitVoice(env, row, why)); }
+    finally { if (row) await P.save(env, row).catch((e) => console.error("sp save", e && e.message)); }
   }
   if (!row || (row.role !== "e" && row.role !== "s")) { await ack("اول وارد شوید.", true); return { ok: true }; }
   row._ctx = ctx;
