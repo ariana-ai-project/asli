@@ -994,3 +994,28 @@ test("بستهٔ قفل‌شده: بعد از اولین ارسال به تأم�
   const list = (await call(`/sp/x/phones?name=${encodeURIComponent("فولاد الف")}`, { headers: EX })).data.phones;
   assert.deepEqual(list.map((x) => x.phone).sort(), ["09120000071", "09120000073"]);
 });
+
+test("اعلانِ گوشهٔ پنل کارشناس (/sp/x/inbox): فقط پیامِ تازه و نخواندهٔ تأمین‌کنندهٔ گفت‌وگوهای خودِ همان کارشناس", { skip: SKIP }, async () => {
+  const start = (await call("/sp/x/inbox", { headers: EX })).data;
+  assert.ok(start.last > 0, "نقطهٔ شروع: بالاترین شناسهٔ پیام");
+  assert.deepEqual(start.msgs, [], "بی since فقط نقطهٔ شروع و شمارِ نخوانده");
+  const at = Date.now();
+  const add = (who, kind, body) => Number(DB.raw.prepare("INSERT INTO sp_msgs (thread_id, who, kind, body, at) VALUES (?,?,?,?,?)").run(S.th, who, kind, body, at).lastInsertRowid);
+  const s1 = add("s", "text", "سلام، قیمت را ثبت کردم.");
+  add("e", "text", "ممنون");
+  add("e", "note", "یادداشت");
+  const s2 = add("s", "event", "📤 مشخصات ۱ قلم برای بررسی فرستاده شد:\n▫️ کد ۱ — پیچ");
+  const r = (await call(`/sp/x/inbox?since=${start.last}`, { headers: EX })).data;
+  assert.deepEqual(r.msgs.map((m) => m.id), [s1, s2], "فقط پیامِ تأمین‌کننده، به ترتیب");
+  assert.deepEqual([r.msgs[0].thread_id, r.msgs[0].assignment_id, r.msgs[0].request_id, r.msgs[0].supplier], [S.th, 1, "R-1", DEMO.name]);
+  assert.equal(r.last, s2);
+  assert.ok(r.unread >= 2);
+  const other = (await call(`/sp/x/inbox?since=${start.last}`, { headers: { "X-Expert-Code": "9002" } })).data;
+  assert.deepEqual(other.msgs, [], "کارشناسِ دیگر پیامِ گفت‌وگوی این کارشناس را نمی‌بیند");
+  /* کارشناس گفت‌وگو را باز کرد: دیگر اعلان نمی‌شود */
+  await call(`/sp/thread/${S.th}`, { headers: EX });
+  const after = (await call(`/sp/x/inbox?since=${start.last}`, { headers: EX })).data;
+  assert.deepEqual(after.msgs, [], "دیده‌شده اعلان نمی‌شود");
+  assert.equal(after.unread, r.unread - 2);
+  assert.equal((await call("/sp/x/inbox", { headers: { "X-SP-Session": "nope" } })).status, 401, "فقط کارشناس");
+});

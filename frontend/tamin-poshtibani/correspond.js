@@ -124,12 +124,29 @@
       if (!S.aid) { const g = S.reqs.find((x) => x.threads.length); if (g) S.aid = g.assignment_id; }
       if (S.th) { S.view = "chat"; await loadThread(); } else { S.view = S.aid ? "sup" : "req"; render(); }
       startPoll();
+      /* اعلانِ گوشهٔ صفحه برای پیامِ تأمین‌کنندهٔ دیگری جز گفت‌وگوی باز (shared.js: TP.inbox)؛ کلیکش همان گفت‌وگو را
+         همین‌جا باز می‌کند و فهرست‌ها شمارِ نخوانده را همان لحظه می‌گیرند */
+      TP.inbox.start({ api, summary: false, active: () => !!S.me, current: () => (S.d ? S.th : null),
+        open: (m) => { if (m) openThread(m.thread_id); }, onNew: () => refreshLists().catch(() => {}) });
     } catch (e) {
       if (e.status === 401 && !inTg) { TP.session.clear(); return renderLogin(e.message); }
       app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
     }
   }
   function findThread(id) { for (const g of S.reqs) for (const t of g.threads) if (t.id === id) return { g, t }; return null; }
+  /** باز کردنِ یک گفت‌وگو — از فهرستِ تأمین‌کنندگان یا از اعلانِ گوشهٔ صفحه؛ پیش‌نویسِ گفت‌وگوی قبلی می‌ماند */
+  function openThread(id) {
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
+    S.th = id; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0;
+    loadThread().catch((e) => say(e.message));
+  }
+  async function refreshLists() {
+    await loadList();
+    const a = $("[data-reqs]"), b = $("[data-sups]");
+    if (a) a.innerHTML = reqList();
+    if (b) b.innerHTML = supList();
+    bind();
+  }
   async function loadThread() {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
@@ -384,7 +401,7 @@
   /* ---------- رفتار ---------- */
   function bind() {
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; ss.set("sp.aid", String(S.aid)); render(); }; });
-    $$("[data-th]").forEach((b) => { b.onclick = () => { const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value; S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0; loadThread().catch((e) => say(e.message)); }; });
+    $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
@@ -577,13 +594,7 @@
         }
       }
       const ck = $(".ph-clock"); if (ck) ck.textContent = clock();
-      if (++tick % 4 === 0) {
-        await loadList();
-        const a = $("[data-reqs]"), b = $("[data-sups]");
-        if (a) a.innerHTML = reqList();
-        if (b) b.innerHTML = supList();
-        bind();
-      }
+      if (++tick % 4 === 0) await refreshLists();
     } catch (e) { if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
     S.busy = false;
   }

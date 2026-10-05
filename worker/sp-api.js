@@ -221,6 +221,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     return json({ ...(await C.expertThreads(env, ex)), me: { name: ex.name, label: ex.label }, bot: await C.spBotUser(env), via: who.tg ? "telegram" : "web",
       labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA });
   }
+  /* اعلانِ گوشهٔ پنل کارشناس: پیام‌های تازهٔ تأمین‌کنندگان (هر چند ثانیه، از همهٔ صفحه‌های پنل) */
+  if (path === "/sp/x/inbox" && m === "GET") return json(await C.expertInbox(env, ex, url.searchParams.get("since")));
   if (path === "/sp/x/items" && m === "GET") return json({ items: await C.sendableItems(env, ex, url.searchParams.get("aid")) });
   if (path === "/sp/x/phones" && m === "GET") return json({ phones: await C.phonesOfName(env, url.searchParams.get("name")) });
   /* شمارهٔ تازه برای تأمین‌کننده — از کارتِ تأمین‌کنندهٔ «بررسی سوابق» در پنل کارشناس (مهر ۱۴۰۵)؛ تیکِ «پنل» اختیاری */

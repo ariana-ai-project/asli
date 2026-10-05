@@ -547,3 +547,50 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
    خانهٔ اجباریِ خالی قرمز است. */
 .tp-table.q td.ro { color: var(--tp-fg); }
 .tp-table.q td.miss { color: var(--tp-over); font-weight: 700; background: rgba(229, 72, 77, 0.08); }
+
+/* ============================================================
+   اعلانِ پیامِ تأمین‌کننده در گوشهٔ پنل کارشناس (مهر ۱۴۰۵) — shared.js: TP.inbox
+   بنرِ شیشه‌ای به سبکِ اعلان‌های iOS 26 در گوشهٔ بالا-چپ (سمتِ پایانِ صفحهٔ راست‌به‌چپ، دور از نام و منو)؛
+   در صفحهٔ مکاتبات کنارِ قابِ گوشی، تا روی گفت‌وگو نیفتد. تاریِ پشت فقط روی همین چند اعلان است.
+   ============================================================ */
+.tp-toasts { position: fixed; z-index: 960; top: 76px; left: 18px; width: min(380px, calc(100vw - 36px)); display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+:root:has(.sp-cols.ph-mode) .tp-toasts { left: calc(clamp(560px, calc(100dvh - 92px), 960px) * 780 / 1621 + 74px); }
+@media (min-width: 961px) and (max-width: 1279px) { :root:has(.sp-cols.ph-mode) .tp-toasts { left: calc(clamp(560px, calc(100dvh - 92px), 960px) * 780 / 1621 + 50px); } }
+.tp-toast {
+  pointer-events: auto; position: relative; border-radius: 22px; color: #f3f6ff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 60%), rgba(22, 30, 58, 0.66);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8);
+  border: .5px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 18px 40px -12px rgba(0, 0, 0, 0.65), 0 2px 6px rgba(0, 0, 0, 0.25);
+  animation: tpToastIn .45s cubic-bezier(.2, .9, .25, 1.12) both;
+}
+:root[data-theme="light"] .tp-toast {
+  color: #0d1220; background: linear-gradient(180deg, rgba(255, 255, 255, 0.5), rgba(255, 255, 255, 0.2) 60%), rgba(246, 248, 253, 0.72);
+  border-color: rgba(255, 255, 255, 0.95); box-shadow: inset 0 1px 0 #fff, 0 18px 40px -14px rgba(20, 40, 80, 0.38), 0 2px 6px rgba(20, 40, 80, 0.12);
+}
+.tp-toast-main { width: 100%; display: flex; gap: 11px; align-items: flex-start; padding: 12px 14px 13px; background: none; border: 0; border-radius: inherit; color: inherit; font: inherit; text-align: right; cursor: pointer; }
+.tp-toast-main:focus-visible { outline: 2px solid #8fb0ff; outline-offset: 2px; }
+.tp-toast-main img { width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; background: #fff; box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3), inset 0 0 0 .5px rgba(0, 0, 0, 0.1); }
+.tp-toast-txt { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.tp-toast-h { display: flex; gap: 8px; align-items: baseline; }
+.tp-toast-h b { flex: 1; min-width: 0; font-size: .92rem; font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-toast-h time { font-size: .74rem; opacity: .65; flex-shrink: 0; }
+.tp-toast-s { font-size: .78rem; opacity: .72; }
+.tp-toast-b { font-size: .88rem; line-height: 1.6; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+/* دکمهٔ بستن مثل اعلان‌های macOS: با نشستنِ موشواره، روی گوشهٔ نماد */
+.tp-toast-x { position: absolute; top: -7px; right: -7px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; padding: 0;
+  font-size: 16px; line-height: 1; color: inherit; cursor: pointer; opacity: 0; transition: opacity .15s ease;
+  background: rgba(40, 48, 78, 0.92); border: .5px solid rgba(255, 255, 255, 0.25); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35); }
+:root[data-theme="light"] .tp-toast-x { background: rgba(255, 255, 255, 0.96); border-color: rgba(20, 30, 60, 0.15); }
+.tp-toast:hover .tp-toast-x, .tp-toast:focus-within .tp-toast-x { opacity: 1; }
+.tp-toast.bump { animation: tpToastBump .4s ease; }
+.tp-toast.out { animation: tpToastOut .32s ease-in both; pointer-events: none; }
+@keyframes tpToastIn { from { opacity: 0; transform: translateY(-16px) scale(.96); } }
+@keyframes tpToastBump { 40% { transform: scale(1.025); } }
+@keyframes tpToastOut { to { opacity: 0; transform: translateX(-34px) scale(.97); } }
+@media (max-width: 640px) {
+  .tp-toasts { top: max(10px, env(safe-area-inset-top)); left: 10px; right: 10px; width: auto; }
+}
+@media (prefers-reduced-motion: reduce) { .tp-toast, .tp-toast.bump, .tp-toast.out { animation-duration: .01s; } }
+@media (prefers-reduced-transparency: reduce) { .tp-toast { -webkit-backdrop-filter: none; backdrop-filter: none; background: #18203c; } :root[data-theme="light"] .tp-toast { background: #fff; } }
+@media (prefers-contrast: more) { .tp-toast { border: 1px solid currentColor; } }

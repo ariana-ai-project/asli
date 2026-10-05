@@ -671,6 +671,28 @@ export async function expertThreads(env, ex) {
   return { requests, unread: requests.reduce((s, g) => s + g.unread, 0), waiting: requests.reduce((s, g) => s + g.waiting, 0) };
 }
 
+/**
+ * اعلانِ گوشهٔ پنل کارشناس (مهر ۱۴۰۵): پیام‌های تازهٔ تأمین‌کنندگان بعد از `since` که کارشناس هنوز ندیده (و از
+ * صفحه‌اش پاک نکرده)، حداکثر شش تای آخر. `last` بالاترین شناسهٔ پیام در کل سامانه است — صفحه با آن شروع می‌کند تا
+ * فقط پیام‌هایی که بعد از باز شدنش می‌رسند اعلان شوند. بی `since` فقط `last` و شمارِ نخوانده‌ها (برای یک اعلانِ خلاصه).
+ */
+export async function expertInbox(env, ex, since) {
+  const s = Math.max(0, int(since) || 0);
+  const [top, unread, rows] = await Promise.all([
+    env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM sp_msgs").first(),
+    env.DB.prepare(`SELECT COUNT(*) AS n FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id
+      WHERE a.expert_id=? AND m.who='s' AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0)`).bind(ex.id).first(),
+    s ? env.DB.prepare(`SELECT m.id, m.thread_id, m.kind, m.body, m.at, t.assignment_id, t.request_id, sup.name AS supplier, sup.demo
+        FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id
+        WHERE a.expert_id=? AND m.who='s' AND m.id>? AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) ORDER BY m.id DESC LIMIT 6`).bind(ex.id, s).all() : null,
+  ]);
+  const msgs = ((rows && rows.results) || []).reverse().map((m) => ({
+    id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier, demo: !!m.demo,
+    kind: m.kind, body: T(m.body).slice(0, 300), at: m.at,
+  }));
+  return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs };
+}
+
 /** اقلام باز یک ارجاعِ همین کارشناس — برای پنجرهٔ «ارسال استعلام» صفحهٔ مکاتبات */
 export async function sendableItems(env, ex, aid) {
   const a = await env.DB.prepare("SELECT id, expert_id FROM assignments WHERE id=?").bind(int(aid)).first();
