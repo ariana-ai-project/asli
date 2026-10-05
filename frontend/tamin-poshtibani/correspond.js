@@ -1,10 +1,12 @@
 /* ============================================================
    مکاتبات کارشناس با تأمین‌کنندگان (دموی مهر ۱۴۰۵) — مرورگر و مینی‌اپ تلگرام
-   چیدمان: دو ستونِ چسبیده به هم و به لبهٔ راست — درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار
-   نخوانده) — و بقیهٔ صفحه گفت‌وگو، به اندازهٔ یک گفت‌وگوی موبایلی. هر گفت‌وگو = یک درخواست × یک تأمین‌کننده.
-   تب «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول
-   تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید نهایی ← تب استعلامات. پیامِ هر بسته در
-   گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود؛ نوار تب‌ها همیشه بالای صفحه می‌ماند.
+   چیدمان (از ۹۶۱ پیکسل به بالا): راست، دو ستونِ درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار
+   نخوانده)؛ وسط، «اقلام و تصمیم‌ها»؛ چپ، گفت‌وگو داخلِ قابِ آیفون به سبک پیام‌رسانِ iOS 26 (درخواست مالک،
+   مهر ۱۴۰۵): حباب‌های شیشه‌ای — پیامِ ما آبیِ لوگو، پیامِ تأمین‌کننده طوسیِ خیلی کمرنگ. زیرِ آن پهنا (گوشی
+   واقعی و مینی‌اپ) همان صفحهٔ گفت‌وگو تمام‌صفحه و بی‌قاب است و «اقلام و تصمیم‌ها» با دکمهٔ 📦 بالای گفت‌وگو باز می‌شود.
+   هر گفت‌وگو = یک درخواست × یک تأمین‌کننده. «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی
+   آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید
+   نهایی ← تب استعلامات. پیامِ هر بسته در گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -23,6 +25,14 @@
     try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); }
     catch (_) { return fa(new Date(ms).toLocaleTimeString()); }
   }
+  /* گوشی و گفت‌وگو: ph-chat.js (مشترک با پنل تأمین‌کننده) */
+  const PH = window.PH;
+
+  /* قابِ آیفون فقط از ۹۶۱ پیکسل به بالا؛ با عبور از این مرز صفحه دوباره رسم می‌شود */
+  const PHONE = window.matchMedia("(min-width: 961px)");
+  let phoneMode = PHONE.matches;
+  const onPhoneMode = () => { if (phoneMode === PHONE.matches) return; phoneMode = PHONE.matches; if (app.classList.contains("sp-app")) render(); };
+  if (PHONE.addEventListener) PHONE.addEventListener("change", onPhoneMode); else if (PHONE.addListener) PHONE.addListener(onPhoneMode);
 
   /* ---------- مینی‌اپ تلگرام ---------- */
   const hp = new URLSearchParams(location.hash.slice(1));
@@ -51,7 +61,7 @@
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
   const S = { me: null, reqs: [], unread: 0, waiting: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null };
+    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {} };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -106,12 +116,29 @@
       if (!S.aid) { const g = S.reqs.find((x) => x.threads.length); if (g) S.aid = g.assignment_id; }
       if (S.th) { S.view = "chat"; await loadThread(); } else { S.view = S.aid ? "sup" : "req"; render(); }
       startPoll();
+      /* اعلانِ گوشهٔ صفحه برای پیامِ تأمین‌کنندهٔ دیگری جز گفت‌وگوی باز (shared.js: TP.inbox)؛ کلیکش همان گفت‌وگو را
+         همین‌جا باز می‌کند و فهرست‌ها شمارِ نخوانده را همان لحظه می‌گیرند */
+      TP.inbox.start({ api, summary: false, active: () => !!S.me, current: () => (S.d ? S.th : null),
+        open: (m) => { if (m) openThread(m.thread_id); }, onNew: () => refreshLists().catch(() => {}) });
     } catch (e) {
       if (e.status === 401 && !inTg) { TP.session.clear(); return renderLogin(e.message); }
       app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
     }
   }
   function findThread(id) { for (const g of S.reqs) for (const t of g.threads) if (t.id === id) return { g, t }; return null; }
+  /** باز کردنِ یک گفت‌وگو — از فهرستِ تأمین‌کنندگان یا از اعلانِ گوشهٔ صفحه؛ پیش‌نویسِ گفت‌وگوی قبلی می‌ماند */
+  function openThread(id) {
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
+    S.th = id; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0;
+    loadThread().catch((e) => say(e.message));
+  }
+  async function refreshLists() {
+    await loadList();
+    const a = $("[data-reqs]"), b = $("[data-sups]");
+    if (a) a.innerHTML = reqList();
+    if (b) b.innerHTML = supList();
+    bind();
+  }
   async function loadThread() {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
@@ -140,17 +167,26 @@
   }
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
+    /* پیش‌نویسِ نیمه‌کارهٔ هر گفت‌وگو با رسمِ دوباره (تغییر پهنا، تصمیم روی بسته) پاک نمی‌شود */
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
+    const on = !!(S.th && S.d);
+    const screenInMain = !phoneMode && on && S.tab !== "items";
+    const main = !on ? `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">${phoneMode ? "گفت‌وگو در گوشیِ کنار صفحه و اقلام و تصمیم‌ها همین‌جا می‌آیند." : "پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند."}</span></div>`
+      : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
-    app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols" data-view="${S.view}">
+    app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols ${phoneMode ? "ph-mode" : ""}" data-view="${S.view}">
       <aside class="sp-col reqs"><h4>درخواست‌ها ${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
-      <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
+      <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req" aria-label="بازگشت به درخواست‌ها">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
         <div class="scroll" data-sups>${supList()}</div>${g && g.open_items ? `<div class="sp-colfoot"><button class="tp-btn primary sm" data-send>➕ ارسال استعلام</button></div>` : ""}</aside>
-      <section class="sp-main">${S.th && S.d ? convo() : `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند.</span></div>`}</section>
+      <section class="sp-main ${screenInMain ? "is-screen" : ""}">${main}</section>
+      ${phoneMode ? `<section class="ph-stage"><div class="ph"><img class="ph-frame" src="phone-frame.svg" alt="" draggable="false">${screen(true)}</div></section>` : ""}
     </div></div>`;
     bind();
-    const c = $("#chat"); if (c) c.scrollTop = c.scrollHeight;
+    const inp = $("#msgIn"); if (inp && S.drafts[S.th]) { inp.value = S.drafts[S.th]; composerState(inp); }
+    const c = $("#chat"); if (c) c.scrollTop = S.chatPos != null ? S.chatPos : c.scrollHeight;
+    S.chatPos = null;
     if (S.goto) { const sel = S.goto; S.goto = null; jumpTo(sel); }
-    else if (S.tab === "items" && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
+    else if ((phoneMode || S.tab === "items") && S.mainScroll) { const m = $(".sp-main"); if (m) m.scrollTop = S.mainScroll; }
   }
   /** کلیک روی پیامِ بسته یا قلم: همان کارت پیدا و چشمک‌زن می‌شود — نوار تب‌ها بالا می‌ماند */
   function jumpTo(sel) {
@@ -161,49 +197,54 @@
     el.classList.add("sp-flash");
     setTimeout(() => el.classList.remove("sp-flash"), 1600);
   }
+  const waitingCount = () => S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
+  /** اقلام و تصمیم‌ها: در چیدمانِ گوشی ستونِ وسط؛ در صفحهٔ باریک جای گفت‌وگو با دکمهٔ برگشت به آن */
   function convo() {
     const th = S.d.thread;
-    const waiting = S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
-    return `<div class="sp-conv ${S.tab === "chat" ? "is-chat" : ""}"><div class="sp-head"><button class="tp-btn xs sp-back" data-back="sup">→</button><h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
+    const back = phoneMode ? "" : `<button class="tp-btn sm" data-tab="chat" title="برگشت به گفت‌وگو">→ گفت‌وگو${badge(S.unseen)}</button>`;
+    return `<div class="sp-conv"><div class="sp-head ${phoneMode ? "" : "sp-sticky"}">${back}<h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
       <span class="sp-muted">📞 ${esc(th.phone || "")}${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست ${esc(th.request_id)}</span></div>
-      <nav class="sp-tabs sp-sticky"><button class="sp-tab ${S.tab === "chat" ? "on" : ""}" data-tab="chat">💬 گفت‌وگو${badge(S.unseen)}</button>
-        <button class="sp-tab ${S.tab === "items" ? "on" : ""}" data-tab="items">📦 اقلام و تصمیم‌ها${badge(waiting, "wait")}</button></nav>
-      <div id="pane" class="${S.tab === "chat" ? "sp-chatpane" : ""}">${S.tab === "chat" ? chatPane() : itemsPane()}</div></div>`;
+      <div id="pane">${itemsPane()}</div></div>`;
   }
 
-  /* --- گفت‌وگو: پیام‌های خودِ کارشناس سمت راست؛ رخدادِ بسته و قلم به‌شکل کارت، با کلیک به همان بسته --- */
-  const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
-    pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
-  function evCard(m) {
-    const meta = m.meta || {};
-    const items = Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : [];
-    if (!EV_HEAD[meta.ev] || !items.length) return null;
-    const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
-    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی فرستاده شد${meta.pf ? ` · همراه با پیش‌فاکتور «${esc(meta.pf)}»` : ""}` : EV_HEAD[meta.ev];
-    const note = /💬 ([\s\S]+)$/.exec(m.body || "");
-    const blocks = items.map((x) => {
-      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
-      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
-      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
-        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
-    }).join("");
-    const foot = [meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "", meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
-    return `<div class="sp-msg ev rich ${m.who === "e" ? "me" : ""}" ${goto} title="${goto ? "رفتن به همین بسته در «اقلام و تصمیم‌ها»" : "رفتن به همین قلم"}"><div class="evh">${head}</div>${blocks}
-      ${foot ? `<div class="evf">${foot}</div>` : ""}${note ? `<div class="evf">💬 ${esc(note[1])}</div>` : ""}<time>${when(m.at)}</time></div>`;
-  }
-  function msgHtml(m) {
-    if (m.kind === "event") { const c = evCard(m); if (c) return c; }
-    if (m.kind === "event" || m.kind === "note") return `<div class="sp-msg ev ${m.kind === "note" ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}"` : ""}>${esc(m.body)}${m.kind === "note" ? " <i>(فقط شما می‌بینید)</i>" : ""}<time>${when(m.at)}</time></div>`;
-    const me = m.who === "e";
-    /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
-    const ai = !!(m.meta && m.meta.ai);
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? (ai ? "🤖 کارشناس هوشمند" : "شما") : esc(S.d.thread.supplier)}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
-  }
-  function chatPane() {
+  /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26 (ph-chat.js): پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ
+     تأمین‌کننده سمت چپ و طوسیِ خیلی کمرنگ؛ پیامِ صوتیِ تأمین‌کننده با پخش و متنِ پیاده‌شده‌اش (فقط همین‌جا — تأمین‌کننده
+     متن را نمی‌بیند)؛ رخدادِ بسته و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
+  const msgsHtml = () => PH.feed(S.d.msgs, {
+    mine: (m) => m.who === "e",
+    ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
+    rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine, goLabel: "دیدن در اقلام و تصمیم‌ها" }),
+    transcript: true,
+    empty: `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`,
+  });
+  const I = PH.I;
+  const clock = PH.clock;
+  /** صفحهٔ گفت‌وگو: framed = داخلِ قابِ آیفون (با نوار وضعیت و جزیرهٔ دوربین)؛ وگرنه تمام‌صفحه در گوشیِ واقعی */
+  function screen(framed) {
+    if (!(S.th && S.d)) {
+      const g = S.reqs.find((x) => x.assignment_id === S.aid);
+      return PH.screen({ framed, body: null, void: g && !g.threads.length ? `<b>هنوز گفت‌وگویی نیست</b>برای ${esc(g.request_id)} از ستونِ تأمین‌کنندگان «ارسال استعلام» را بزنید.` : `<b>مکاتبات</b>یک تأمین‌کننده را از فهرست انتخاب کنید تا گفت‌وگو این‌جا باز شود.` });
+    }
     S.unseen = 0;
-    return `<div class="sp-chatbar"><span class="sp-muted">${esc(S.d.thread.supplier)}</span><span class="sp-grow"></span><button class="tp-btn xs" data-clear-chat title="فقط از صفحهٔ شما پاک می‌شود">🧹 پاک کردن گفت‌وگو</button></div>
-      <div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
-      <div class="sp-composer"><textarea class="tp-input" id="msgIn" rows="2" placeholder="پیام به ${esc(S.d.thread.supplier)}…"></textarea><button class="tp-btn primary" id="sendMsg">ارسال</button></div>`;
+    const th = S.d.thread, waiting = waitingCount();
+    return PH.screen({
+      framed, body: msgsHtml(), label: `گفت‌وگو با ${th.supplier}`,
+      nav: {
+        start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
+        title: th.supplier, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
+        whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
+        acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
+          <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
+      },
+      composer: { placeholder: `پیام به ${th.supplier}`, draft: S.th },
+    });
+  }
+  const composerState = PH.grow;
+  /** صدای پیامِ صوتی با همان هدرِ ورودِ این صفحه */
+  async function loadVoice(id) {
+    const r = await fetch(`${(window.TAMIN_POSHTIBANI_CONFIG || {}).apiBase || "/tamin-poshtibani/api"}/sp/msg/${id}/voice`, { headers: { ...TP.authHeaders(), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
+    if (!r.ok) throw new Error("پخش نشد");
+    return r.blob();
   }
 
   /* --- جدول تطابق: ✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد --- */
@@ -293,7 +334,7 @@
   /* ---------- رفتار ---------- */
   function bind() {
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; ss.set("sp.aid", String(S.aid)); render(); }; });
-    $$("[data-th]").forEach((b) => { b.onclick = () => { S.th = +b.dataset.th; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0; loadThread().catch((e) => say(e.message)); }; });
+    $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
@@ -309,9 +350,23 @@
         catch (e) { c.checked = !c.checked; say(e.message); }
       };
     });
-    /* کلیک روی کارتِ پیامِ بسته یا قلم: به «اقلام و تصمیم‌ها»، روی همان بسته یا قلم */
-    $$("[data-goto-b]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-b="${el.dataset.gotoB}"]`; render(); }; });
-    $$("[data-goto-no]").forEach((el) => { el.onclick = () => { S.tab = "items"; S.goto = `[data-no="${el.dataset.gotoNo}"]`; render(); }; });
+    /* کلیک روی کارتِ پیامِ بسته یا قلم: «اقلام و تصمیم‌ها» روی همان بسته یا قلم — در چیدمانِ گوشی ستونِ وسط همان‌جا
+       اسکرول می‌خورد و گفت‌وگو سرِ جایش می‌ماند */
+    const goto = (sel) => { if (phoneMode) return jumpTo(sel); S.tab = "items"; S.goto = sel; render(); };
+    const press = (el, fn) => { el.onclick = (e) => { e.stopPropagation(); fn(); }; el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } }; };
+    $$("[data-goto-b]").forEach((el) => press(el, () => goto(`[data-b="${el.dataset.gotoB}"]`)));
+    $$("[data-goto-no]").forEach((el) => press(el, () => goto(`[data-no="${el.dataset.gotoNo}"]`)));
+    /* 📦 و نامِ تأمین‌کننده بالای گفت‌وگو: اقلام و تصمیم‌ها — اولین بستهٔ منتظر تصمیم، وگرنه سرِ همان ستون */
+    $$("[data-items]").forEach((el) => {
+      el.onclick = () => {
+        if (!phoneMode) { S.tab = "items"; S.mainScroll = 0; return render(); }
+        const open = S.d && S.d.bundles.filter((b) => ["pending", "approved", "proforma"].includes(b.state)).pop();
+        if (open) return jumpTo(`[data-b="${open.id}"]`);
+        const m = $(".sp-main"); if (m) m.scrollTo({ top: 0, behavior: "smooth" });
+        const hd = $(".sp-main .sp-head"); if (hd) { hd.classList.add("sp-flash"); setTimeout(() => hd.classList.remove("sp-flash"), 1600); }
+      };
+    });
+    const chat = $("#chat"); if (chat) PH.bindVoices(chat, loadVoice);
     const clr = $("[data-clear-chat]");
     if (clr) clr.onclick = () => dlg("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و تأمین‌کننده هنوز آن‌ها را می‌بیند.</p><div class=\"sp-err\" data-err></div>",
       [{ label: "🧹 پاک شود", cls: "primary", fn: async () => { await api(`/sp/thread/${S.th}/clear`, { body: {} }); await loadThread(); } }, { label: "انصراف" }]);
@@ -321,11 +376,12 @@
       const go = async () => {
         const text = inp.value.trim(); if (!text) return;
         send.disabled = true;
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
-        send.disabled = false; inp.focus();
+        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
+        composerState(inp); inp.focus();
       };
       send.onclick = go;
-      inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } };
+      inp.oninput = () => composerState(inp);
+      inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); go(); } };
     }
   }
 
@@ -441,35 +497,38 @@
     if (!fresh.length) return;
     S.d.msgs.push(...fresh); S.lastMsg = fresh[fresh.length - 1].id;
     const c = $("#chat");
-    if (c && S.tab === "chat") {
-      const e = $(".sp-empty", c); if (e) e.remove();
-      c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join("")); c.scrollTop = c.scrollHeight;
+    if (c) {
+      /* گروه‌بندی و دُمِ حباب‌ها به پیامِ قبلی بسته است، پس فهرست از نو رسم می‌شود؛ اگر کاربر بالاتر را می‌خواند
+         سرِ جایش می‌ماند، مگر پیامِ تازه از خودِ ما باشد */
+      const atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 90;
+      c.innerHTML = msgsHtml();
+      if (atEnd || fresh.some((m) => m.who === "e")) c.scrollTop = c.scrollHeight;
       bind();
     } else {
-      /* روی «اقلام و تصمیم‌ها» هستیم: تب گفت‌وگو شمارِ تازه‌ها را نشان می‌دهد و محو نمی‌شود */
+      /* روی «اقلام و تصمیم‌ها»ی صفحهٔ باریک هستیم: دکمهٔ برگشت به گفت‌وگو شمارِ تازه‌ها را نشان می‌دهد */
       const n = fresh.filter((m) => m.who !== "e").length;
-      if (n) { S.unseen += n; const t = $('[data-tab="chat"]'); if (t) t.innerHTML = `💬 گفت‌وگو${badge(S.unseen)}`; }
+      if (n) { S.unseen += n; const t = $('[data-tab="chat"]'); if (t) t.innerHTML = `→ گفت‌وگو${badge(S.unseen)}`; }
     }
   }
   let timer = null, tick = 0;
   function startPoll() { if (timer) clearInterval(timer); timer = setInterval(poll, 5000); }
   async function poll() {
     if (document.hidden || S.busy || document.querySelector(".tp-modal-bg")) return;
+    onPhoneMode(); /* پشتیبانِ رویدادِ change در جاهایی که نمی‌رسد (پنجرهٔ پس‌زمینه) */
     S.busy = true;
     try {
       if (S.th && S.d) {
         const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
         addMsgs(r.msgs);
         const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-        if (r.rev !== S.rev && !typing) { const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0; const keep = S.unseen; await loadThread(); S.unseen = S.tab === "chat" ? 0 : keep; }
+        if (r.rev !== S.rev && !typing) {
+          const m = $(".sp-main"), c = $("#chat"); S.mainScroll = m ? m.scrollTop : 0;
+          S.chatPos = c && c.scrollHeight - c.scrollTop - c.clientHeight > 90 ? c.scrollTop : null;
+          const keep = S.unseen; await loadThread(); S.unseen = phoneMode || S.tab === "chat" ? 0 : keep;
+        }
       }
-      if (++tick % 4 === 0) {
-        await loadList();
-        const a = $("[data-reqs]"), b = $("[data-sups]");
-        if (a) a.innerHTML = reqList();
-        if (b) b.innerHTML = supList();
-        bind();
-      }
+      const ck = $(".ph-clock"); if (ck) ck.textContent = clock();
+      if (++tick % 4 === 0) await refreshLists();
     } catch (e) { if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
     S.busy = false;
   }

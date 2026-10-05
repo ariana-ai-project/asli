@@ -17,6 +17,7 @@ import { tehranParts } from "./time.js";
 import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, lineMissing,
   termsOf, termsMissing, TERM_FIELDS, TERM_FA, clearedUpTo } from "./sp-core.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
+import { storage } from "./storage.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -115,8 +116,16 @@ const sideName = (th, who, side, m) => (who === "e"
   ? (side === "e" ? (isAi(m) ? "🤖 کارشناس هوشمند" : "شما") : `کارشناس — ${th.expert_label || th.expert_name}`)
   : (side === "s" ? "شما" : th.supplier_name));
 
+const durTxt = (s) => (s ? ` ${fa(`${Math.floor(s / 60)}:${String(Math.round(s) % 60).padStart(2, "0")}`)}` : "");
 export function msgLine(th, m, side) {
   if (m.kind === "event" || m.kind === "note") return `<i>${side === "e" && isAi(m) ? "🤖 " : ""}${esc(m.body)}</i>\n<code>${when(m.at)}</code>`;
+  /* پیامِ صوتی: کارشناس متنِ پیاده‌شده را هم می‌بیند؛ تأمین‌کننده فقط «پیام صوتی» (sp-core.js:msgFor) */
+  if (m.kind === "voice") {
+    const v = (m.meta && m.meta.voice) || {}, st = (m.meta && m.meta.stt) || {};
+    const head = `${m.who === side ? "🔹" : "🔸"} <b>${esc(sideName(th, m.who, side, m))}</b> · ${when(m.at)}\n🎤 <i>پیام صوتی${durTxt(v.dur)}</i>`;
+    if (side !== "e") return head;
+    return `${head}\n${T(m.body) ? `«${esc(m.body)}»` : `<i>متنش پیاده نشد${st.error ? ` — ${esc(st.error)}` : ""}</i>`}`;
+  }
   return `${m.who === side ? "🔹" : "🔸"} <b>${esc(sideName(th, m.who, side, m))}</b> · ${when(m.at)}\n${esc(m.body)}`;
 }
 
@@ -356,6 +365,7 @@ export async function pushMsgs(env, thIn, msgs) {
             const a = await actionKb(env, th, m, side);
             if (a && a.text) { await send(env, row, msgLine(th, m, side)); await send(env, row, a.text, a.kb); }
             else await send(env, row, msgLine(th, m, side), a && a.kb);
+            if (m.kind === "voice" && side === "e") await voiceTo(env, row, m);
             sent++;
           }
           await markSeen(env, th.id, side);
@@ -363,7 +373,8 @@ export async function pushMsgs(env, thIn, msgs) {
           const last = mine[mine.length - 1];
           const who = last.who === "s" ? th.supplier_name : `کارشناس — ${th.expert_label || th.expert_name}`;
           const role = row.role !== side ? (side === "e" ? " <i>(نقش کارشناس)</i>" : " <i>(نقش تأمین‌کننده)</i>") : "";
-          await send(env, row, `🔔 <b>${esc(who)}</b> — ${side === "e" ? "درخواست" : "استعلام"} ${esc(th.request_id)}${mine.length > 1 ? ` (${fa(mine.length)} پیام)` : ""}${role}\n${esc(short(last.body.replace(/\s+/g, " "), 200))}`,
+          const lastTxt = last.kind === "voice" ? (side === "e" ? `🎤 ${last.body || "پیام صوتی"}` : "🎤 پیام صوتی") : last.body;
+          await send(env, row, `🔔 <b>${esc(who)}</b> — ${side === "e" ? "درخواست" : "استعلام"} ${esc(th.request_id)}${mine.length > 1 ? ` (${fa(mine.length)} پیام)` : ""}${role}\n${esc(short(lastTxt.replace(/\s+/g, " "), 200))}`,
             [[{ text: "🔀 رفتن به این گفت‌وگو", callback_data: `go:${th.id}:${side}` }]]);
           sent++;
         }
@@ -375,6 +386,16 @@ export async function pushMsgs(env, thIn, msgs) {
     }
   }
   return { sent };
+}
+
+/** خودِ صدا برای کارشناس در تلگرام: ویسِ تلگرامی با همان file_id؛ صدای پنل وب با لینکِ امضاشدهٔ هفت‌روزه (اگر انبار بدهد) */
+async function voiceTo(env, row, m) {
+  const v = (m.meta && m.meta.voice) || {};
+  try {
+    if (v.tg) { const r = await spApi(env).call("sendVoice", { chat_id: row.chat, voice: v.tg }); track(row, r && r.message_id); return; }
+    const store = storage(env);
+    if (v.key && store && store.signedUrl) await send(env, row, "🎧 صدای همین پیام:", [[{ text: "▶️ شنیدن پیام صوتی", url: await store.signedUrl(v.key, 7 * 86400) }]]);
+  } catch (e) { console.error("sp voice push", e && e.message); }
 }
 
 /**

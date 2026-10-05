@@ -354,6 +354,101 @@
     return data;
   };
 
+  /* ---------- اعلانِ پیامِ تأمین‌کننده در گوشهٔ پنل کارشناس (مهر ۱۴۰۵) ----------
+     هر صفحهٔ پنل کارشناس (پنل و مکاتبات) هر ۱۰ ثانیه (پنجرهٔ پس‌زمینه ۳۰ ثانیه) از /sp/x/inbox می‌پرسد پیامِ تازه‌ای
+     از تأمین‌کنندگان رسیده یا نه؛ هر گفت‌وگو یک اعلانِ شیشه‌ای به سبک iOS در گوشهٔ بالا-چپ می‌شود (پیام‌های بعدیِ همان
+     گفت‌وگو همان اعلان را تازه می‌کنند) و کلیکش همان گفت‌وگو را باز می‌کند. فقط پیام‌هایی که بعد از باز شدنِ صفحه
+     می‌رسند؛ نخوانده‌های قبلی یک اعلانِ خلاصه، یک بار در هر تب. پیامِ گفت‌وگویی که همین حالا باز است اعلان نمی‌شود.
+     TP.inbox.start({ api, active, current, open, onNew, summary }) */
+  TP.inbox = (() => {
+    const FAD = "۰۱۲۳۴۵۶۷۸۹", faD = (s) => String(s).replace(/\d/g, (d) => FAD[+d]);
+    const LIFE = 9000, MAX = 4;
+    let on = false, opt = {}, since = 0, timer = null, busy = false, box = null, ticker = null, baseTitle = "";
+    const seen = new Set();
+    const ss = { get(k) { try { return sessionStorage.getItem(k) || ""; } catch (_) { return ""; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (_) { /* حالت خصوصی */ } } };
+    /** پیش‌فرض (پنل کارشناس): صفحهٔ مکاتبات روی همان گفت‌وگو — correspond.js گفت‌وگوی بازِ تب را از sessionStorage برمی‌دارد */
+    const openDefault = (m) => { if (m && m.thread_id) { ss.set("sp.th.e", String(m.thread_id)); ss.set("sp.aid", String(m.assignment_id || "")); } location.href = "correspond.html"; };
+    const host = () => {
+      if (!box || !box.isConnected) { box = document.createElement("div"); box.className = "tp-toasts"; box.setAttribute("role", "status"); box.setAttribute("aria-live", "polite"); document.body.appendChild(box); }
+      return box;
+    };
+    const firstLine = (s) => String(s || "").split("\n").map((x) => x.trim()).filter(Boolean)[0] || "";
+    function drop(el) { if (!el.isConnected || el.classList.contains("out")) return; el.classList.add("out"); setTimeout(() => el.remove(), 320); }
+    /* یک ساعت برای همه: عمرِ هر اعلان فقط وقتی کم می‌شود که صفحه دیده می‌شود و موشواره رویش نیست */
+    function tick() {
+      const all = box ? [...box.children].filter((x) => !x.classList.contains("out")) : [];
+      if (!all.length) { clearInterval(ticker); ticker = null; return; }
+      if (document.hidden) return;
+      for (const el of all) if (!el.matches(":hover") && !el.contains(document.activeElement)) { el._left -= 250; if (el._left <= 0) drop(el); }
+    }
+    function toast(key, { title, sub, body, onClick }) {
+      const b = host();
+      let el = key ? b.querySelector(`[data-toast="${key}"]`) : null;
+      if (el && el.classList.contains("out")) el = null;
+      if (!el) {
+        el = document.createElement("div"); el.className = "tp-toast"; if (key) el.dataset.toast = key;
+        el.innerHTML = `<button class="tp-toast-main" type="button"><img src="../assets/logo-new.jpg" alt=""><span class="tp-toast-txt"><span class="tp-toast-h"><b></b><time>اکنون</time></span>
+          <span class="tp-toast-s"></span><span class="tp-toast-b"></span></span></button><button class="tp-toast-x" type="button" aria-label="بستن اعلان" title="بستن">×</button>`;
+        el.querySelector(".tp-toast-x").onclick = () => drop(el);
+        b.prepend(el);
+        [...b.children].filter((x) => !x.classList.contains("out")).slice(MAX).forEach(drop);
+      } else { b.prepend(el); el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
+      el.querySelector(".tp-toast-h b").textContent = title;
+      const s = el.querySelector(".tp-toast-s"); s.textContent = sub || ""; s.hidden = !sub;
+      el.querySelector(".tp-toast-b").textContent = body;
+      el.querySelector(".tp-toast-main").onclick = () => { drop(el); onClick(); };
+      el._left = LIFE;
+      if (!ticker) ticker = setInterval(tick, 250);
+    }
+    function setTitle(unread) {
+      if (!baseTitle) baseTitle = document.title.replace(/^\(\S+\)\s/, "");
+      document.title = unread && document.hidden ? `(${faD(unread)}) ${baseTitle}` : baseTitle;
+    }
+    function handle(r) {
+      const open = opt.open || openDefault;
+      if (!since) {
+        since = r.last || 0;
+        const key = `${since}:${r.unread}`;
+        if (opt.summary !== false && r.unread > 0 && ss.get("tp.inbox.sum") !== key) {
+          ss.set("tp.inbox.sum", key);
+          toast("sum", { title: "مکاتبات", sub: "", body: `${faD(r.unread)} پیامِ خوانده‌نشده از تأمین‌کنندگان`, onClick: () => open(null) });
+        }
+      } else {
+        since = Math.max(since, r.last || 0);
+        const cur = opt.current ? opt.current() : null;
+        const fresh = (r.msgs || []).filter((m) => !seen.has(m.id) && m.thread_id !== cur);
+        fresh.forEach((m) => seen.add(m.id));
+        const by = new Map();
+        for (const m of fresh) { if (!by.has(m.thread_id)) by.set(m.thread_id, []); by.get(m.thread_id).push(m); }
+        for (const [th, list] of by) {
+          const m = list[list.length - 1];
+          const key = `t${th}`, prev = box && box.querySelector(`[data-toast="${key}"]:not(.out)`);
+          const n = list.length + (prev ? +prev.dataset.n || 1 : 0);
+          toast(key, { title: m.supplier, sub: `درخواست ${m.request_id || ""}${n > 1 ? ` · ${faD(n)} پیامِ تازه` : ""}`, body: firstLine(m.body), onClick: () => open(m) });
+          box.querySelector(`[data-toast="${key}"]`).dataset.n = n;
+        }
+        if (fresh.length && opt.onNew) opt.onNew(fresh);
+      }
+      setTitle(r.unread);
+    }
+    function schedule(ms) { clearTimeout(timer); timer = setTimeout(poll, ms); }
+    async function poll() {
+      if (!on) return;
+      if (!busy && (!opt.active || opt.active())) {
+        busy = true;
+        try { handle(await (opt.api || TP.api)(`/sp/x/inbox${since ? `?since=${since}` : ""}`)); } catch (_) { /* بی‌صدا: اعلان فرعی است */ }
+        busy = false;
+      }
+      schedule(document.hidden ? 30000 : 10000);
+    }
+    /* تست‌ها shared.js را بی مرورگر (vm) بار می‌کنند */
+    if (inBrowser) document.addEventListener("visibilitychange", () => { if (!on) return; if (!document.hidden) { setTitle(0); schedule(300); } });
+    return {
+      start(o) { opt = o || {}; if (on) return; on = true; schedule(1200); },
+      stop() { on = false; clearTimeout(timer); },
+    };
+  })();
+
   /* ---------- قالب فیلدهای خط استعلام (همان قاعدهٔ worker/quote-rules.js) ----------
      قیمت و مقدار عدد (اعشار مجاز)، اعتبار عدد روز، زمان تحویل تاریخ شمسی یا عدد روز.
      خطا برمی‌گرداند یا null. */

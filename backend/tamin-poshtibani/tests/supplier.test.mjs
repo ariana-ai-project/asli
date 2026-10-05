@@ -19,6 +19,7 @@ import { handleSpUpdate } from "../../../worker/sp-bot.js";
 import { verifyInitData } from "../../../worker/sp-api.js";
 import { normPhone, toNum, DEMO } from "../../../worker/sp-core.js";
 import { e164, isMobile } from "../../../worker/sms.js";
+import { msgEntry } from "../../../worker/ai-md.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -49,6 +50,7 @@ if (DB) {
 const calls = [];
 let nextMsg = 3000;
 let aiReply = null;
+let sttReply = { status: 200, body: { text: "" } };
 let smsReply = { status: 200, body: { data: { success: true, message: "SMS added to queue for processing", smsBatchId: "batch-1", recipientCount: 1 } } };
 let elStt = null;                 /* پاسخِ تبدیلِ بعدی */
 const elStore = {};               /* متن‌هایی که ElevenLabs نگه داشته (شناسه ← متن) */
@@ -64,7 +66,9 @@ globalThis.fetch = async (url, init = {}) => {
     if (method === "getFile") return R({ ok: true, result: { file_path: "documents/pf.pdf" } });
     return R({ ok: true, result: method === "sendMessage" ? { message_id: ++nextMsg } : true });
   }
-  if (u.startsWith("https://tgfile.test/")) return { ok: true, status: 200, body: new Response("PDFDATA").body };
+  if (u.startsWith("https://tgfile.test/")) return new Response("PDFDATA");
+  /* ElevenLabs بدلی (پیاده کردنِ پیامِ صوتی) */
+  if (u.startsWith("https://el.test/")) { const fd = init.body; calls.push({ bot: "stt", url: u, headers: init.headers, model: fd.get("model_id"), lang: fd.get("language_code"), size: fd.get("file").size }); return R(sttReply.body, sttReply.status); }
   if (u.startsWith("https://sb.test/storage/v1/object/sign/")) return R({ signedURL: "/object/sign/proformas/x?token=abc" });
   if (u.startsWith("https://sb.test/storage/v1/object/")) { calls.push({ bot: "store", method: init.method || "GET", url: u }); return R({ Key: "x" }); }
   if (u.startsWith("https://ai.test/")) { calls.push({ bot: "ai", body: JSON.parse(init.body) }); return R(aiReply); }
@@ -1094,4 +1098,112 @@ test("حالتِ صوت در بات مکاتبات: رمزِ ثابت به‌ج�
   } finally {
     delete env.VOICE_PASS; delete env.ELEVENLABS_API_KEY;
   }
+});
+
+test("اعلانِ گوشهٔ پنل کارشناس (/sp/x/inbox): فقط پیامِ تازه و نخواندهٔ تأمین‌کنندهٔ گفت‌وگوهای خودِ همان کارشناس", { skip: SKIP }, async () => {
+  const start = (await call("/sp/x/inbox", { headers: EX })).data;
+  assert.ok(start.last > 0, "نقطهٔ شروع: بالاترین شناسهٔ پیام");
+  assert.deepEqual(start.msgs, [], "بی since فقط نقطهٔ شروع و شمارِ نخوانده");
+  const at = Date.now();
+  const add = (who, kind, body) => Number(DB.raw.prepare("INSERT INTO sp_msgs (thread_id, who, kind, body, at) VALUES (?,?,?,?,?)").run(S.th, who, kind, body, at).lastInsertRowid);
+  const s1 = add("s", "text", "سلام، قیمت را ثبت کردم.");
+  add("e", "text", "ممنون");
+  add("e", "note", "یادداشت");
+  const s2 = add("s", "event", "📤 مشخصات ۱ قلم برای بررسی فرستاده شد:\n▫️ کد ۱ — پیچ");
+  const r = (await call(`/sp/x/inbox?since=${start.last}`, { headers: EX })).data;
+  assert.deepEqual(r.msgs.map((m) => m.id), [s1, s2], "فقط پیامِ تأمین‌کننده، به ترتیب");
+  assert.deepEqual([r.msgs[0].thread_id, r.msgs[0].assignment_id, r.msgs[0].request_id, r.msgs[0].supplier], [S.th, 1, "R-1", DEMO.name]);
+  assert.equal(r.last, s2);
+  assert.ok(r.unread >= 2);
+  const other = (await call(`/sp/x/inbox?since=${start.last}`, { headers: { "X-Expert-Code": "9002" } })).data;
+  assert.deepEqual(other.msgs, [], "کارشناسِ دیگر پیامِ گفت‌وگوی این کارشناس را نمی‌بیند");
+  /* کارشناس گفت‌وگو را باز کرد: دیگر اعلان نمی‌شود */
+  await call(`/sp/thread/${S.th}`, { headers: EX });
+  const after = (await call(`/sp/x/inbox?since=${start.last}`, { headers: EX })).data;
+  assert.deepEqual(after.msgs, [], "دیده‌شده اعلان نمی‌شود");
+  assert.equal(after.unread, r.unread - 2);
+  assert.equal((await call("/sp/x/inbox", { headers: { "X-SP-Session": "nope" } })).status, 401, "فقط کارشناس");
+});
+test("پیامِ صوتیِ تأمین‌کننده (وب و تلگرام): صدا در انبار، متنش با ElevenLabs فقط برای کارشناس و کارشناس هوشمند", { skip: SKIP }, async () => {
+  env.ELEVENLABS_API_KEY = "el-key"; env.ELEVENLABS_API_BASE = "https://el.test";
+  const raw = async (path, headers) => route(new Request(`https://site.test/tamin-poshtibani/api${path}`, { headers }), env, ctx);
+  try {
+    const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت صدا", phone: "09120000019", label: "فروش", text: "سلام" } });
+    const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
+    const th = r.data.thread_id;
+    const said = "سلام، قیمت مهره رو هشت هزار ریال حساب کردم";
+    sttReply = { status: 200, body: { text: said, language_code: "fas", audio_duration_secs: 4.2 } };
+    let n = calls.length;
+    const v = await call(`/sp/thread/${th}/voice?dur=4`, { headers: { ...H, "Content-Type": "audio/webm;codecs=opus" }, raw: "OPUSDATA" });
+    assert.equal(v.status, 200, JSON.stringify(v.data));
+    const m = v.data.msgs[0];
+    assert.deepEqual([m.kind, m.who, m.body], ["voice", "s", ""], "تأمین‌کننده متنِ پیاده‌شده را نمی‌بیند");
+    assert.equal(m.meta.voice.dur, 4);
+    assert.equal(m.meta.voice.key, undefined, "کلیدِ انبار بیرون نمی‌رود");
+    assert.equal(m.meta.stt, undefined);
+    const stt = since(n).find((c) => c.bot === "stt");
+    assert.ok(stt, "ElevenLabs صدا زده شد");
+    assert.deepEqual([stt.url, stt.headers["xi-api-key"], stt.model, stt.lang, stt.size], ["https://el.test/v1/speech-to-text", "el-key", "scribe_v2", "fa", 8]);
+    assert.ok(since(n).some((c) => c.bot === "store" && c.method === "POST" && /sp-voice\.webm$/.test(c.url)), "صدا در انبار");
+    assert.equal((await call(`/sp/thread/${th}`, { headers: H })).data.msgs.find((x) => x.id === m.id).body, "", "در پنلِ تأمین‌کننده هم متن نیست");
+    assert.equal((await call(`/sp/poll?t=${th}&since=${m.id - 1}`, { headers: H })).data.msgs[0].body, "");
+    const ex = (await call(`/sp/thread/${th}`, { headers: EX })).data.msgs.find((x) => x.id === m.id);
+    assert.deepEqual([ex.body, ex.meta.voice.dur, ex.meta.voice.key, ex.meta.stt.ok], [said, 4, undefined, true], "کارشناس متن را می‌بیند");
+    assert.equal((await raw(`/sp/msg/${m.id}/voice`, H)).status, 200, "صدا برای خودِ تأمین‌کننده");
+    assert.equal((await raw(`/sp/msg/${m.id}/voice`, EX)).status, 200, "و کارشناس");
+    assert.equal((await raw(`/sp/msg/${m.id}/voice`, { "X-Expert-Code": "9002" })).status, 403, "نه کارشناسِ دیگر");
+    /* کارشناس هوشمند: همین متن با برچسبِ پیامِ صوتی */
+    const md = msgEntry({ ...ex, meta: { voice: { dur: 4 }, stt: { ok: true } } }, { request_id: "R-1", supplier: "شرکت صدا", lines: [] });
+    assert.match(md, /تأمین‌کننده ← شرکت · پیام صوتی \(متنِ پیاده‌شده از صدا\)/);
+    assert.match(md, new RegExp(`> ${said}`));
+    assert.match(msgEntry({ ...ex, body: "", meta: { stt: { ok: false, error: "x" } } }, { request_id: "R-1", supplier: "s", lines: [] }), /\[پیام صوتی — متنش پیاده نشد: x\]/);
+
+    /* تلگرام: ویسِ تأمین‌کننده ← همان راه؛ کارشناسِ همان گفت‌وگو متن و خودِ ویس را می‌گیرد، تأمین‌کننده چیزی نمی‌گیرد */
+    const pid = DB.raw.prepare("SELECT id FROM sp_phones WHERE phone='09120000019'").get().id;
+    DB.raw.prepare("INSERT OR REPLACE INTO sp_tg (chat, role, phone_id, focus, ids_json, updated_at) VALUES ('7701','s',?,?,'[]',?)").run(pid, th, Date.now());
+    DB.raw.prepare("INSERT OR REPLACE INTO sp_tg (chat, role, expert_id, focus, ids_json, updated_at) VALUES ('7702','e',1,?,'[]',?)").run(th, Date.now());
+    sttReply = { status: 200, body: { text: "پیش‌فاکتور رو فردا می‌فرستم", language_code: "fas" } };
+    n = calls.length;
+    await handleSpUpdate(env, { update_id: 99, message: { message_id: 501, chat: { id: 7701, type: "private" }, voice: { file_id: "VOICE1", duration: 3, mime_type: "audio/ogg", file_size: 1200 } } });
+    await Promise.all(pend.splice(0));
+    const tm = DB.raw.prepare("SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(th);
+    assert.deepEqual([tm.kind, tm.who, tm.body], ["voice", "s", "پیش‌فاکتور رو فردا می‌فرستم"]);
+    assert.equal(JSON.parse(tm.meta_json).voice.tg, "VOICE1");
+    assert.equal(since(n).filter((c) => c.bot === "sp" && String(c.body.chat_id) === "7701" && c.method !== "getFile").length, 0, "به تأمین‌کننده پاسخی (و متنی) نمی‌رود");
+    const toEx = sent(n, "sp", 7702).map((c) => c.body.text).join("\n");
+    assert.match(toEx, /🎤 <i>پیام صوتی ۰:۰۳<\/i>\n«پیش‌فاکتور رو فردا می‌فرستم»/);
+    assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "sendVoice" && c.body.voice === "VOICE1" && String(c.body.chat_id) === "7702"), "خودِ ویس هم برای کارشناس");
+
+    /* اعلانِ گوشهٔ پنل کارشناس: «🎤» و متن */
+    const inbox = (await call(`/sp/x/inbox?since=${m.id - 1}`, { headers: EX })).data;
+    assert.ok(inbox.msgs.some((x) => x.body === `🎤 ${said}`) || inbox.msgs.length === 0);
+
+    /* بی کلید: پیامِ صوتی ذخیره می‌شود، متنش خالی و دلیلش برای کارشناس */
+    delete env.ELEVENLABS_API_KEY;
+    const v2 = await call(`/sp/thread/${th}/voice`, { headers: { ...H, "Content-Type": "audio/mp4" }, raw: "M4A" });
+    assert.equal(v2.status, 200);
+    const ex2 = (await call(`/sp/thread/${th}`, { headers: EX })).data.msgs.find((x) => x.id === v2.data.msgs[0].id);
+    assert.equal(ex2.body, "");
+    assert.match(ex2.meta.stt.error, /ELEVENLABS_API_KEY/);
+    assert.equal((await call(`/sp/thread/${th}/voice`, { headers: { ...EX, "Content-Type": "audio/webm" }, raw: "X" })).status, 404, "کارشناس پیامِ صوتی نمی‌فرستد");
+  } finally { delete env.ELEVENLABS_API_KEY; delete env.ELEVENLABS_API_BASE; }
+});
+
+test("تأمین‌کننده هیچ‌جا «🤖» نمی‌بیند: پیامک، پیامِ کارشناس هوشمند در بات و پنل", { skip: SKIP }, async () => {
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت بی‌ربات", phone: "09120000020", label: "فروش" } });
+  assert.doesNotMatch(r.data.sms.text, /🤖/, "متنِ پیامک");
+  const th = r.data.thread_id;
+  const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
+  DB.raw.prepare("INSERT INTO sp_msgs (thread_id, who, kind, body, meta_json, at) VALUES (?,'e','text','قیمت‌تون رو دیدم، ممنون',?,?)").run(th, JSON.stringify({ ai: true }), Date.now());
+  DB.raw.prepare("INSERT INTO sp_msgs (thread_id, who, kind, body, meta_json, at) VALUES (?,'e','note','🤖 یادداشتِ درونی',?,?)").run(th, JSON.stringify({ ai: true }), Date.now());
+  const d = (await call(`/sp/thread/${th}`, { headers: H })).data;
+  assert.ok(!d.msgs.some((m) => m.kind === "note"), "یادداشتِ درونی نه");
+  assert.ok(!JSON.stringify(d.msgs.map((m) => m.body)).includes("🤖"));
+  const pid = DB.raw.prepare("SELECT id FROM sp_phones WHERE phone='09120000020'").get().id;
+  DB.raw.prepare("INSERT OR REPLACE INTO sp_tg (chat, role, phone_id, focus, ids_json, updated_at) VALUES ('7703','s',?,NULL,'[]',?)").run(pid, Date.now());
+  const n = calls.length;
+  await handleSpUpdate(env, { update_id: 100, callback_query: { id: "cq9", data: `st:${th}`, message: { message_id: 1, chat: { id: 7703, type: "private" } } } });
+  const shownTxt = sent(n, "sp", 7703).map((c) => c.body.text + JSON.stringify(c.body.reply_markup || {})).join("\n");
+  assert.match(shownTxt, /قیمت‌تون رو دیدم، ممنون/);
+  assert.doesNotMatch(shownTxt, /🤖/, "تاریخچه و کارت‌ها در بات");
 });

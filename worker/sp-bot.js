@@ -22,7 +22,8 @@ import { deliverPass } from "./sp-sms.js";
 import { aiKick } from "./ai-agent.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
-import * as V from "./sp-voice.js";
+import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
+import * as V from "./sp-voicemode.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -508,6 +509,12 @@ async function supplierMessage(env, row, msg, text) {
   }
   const f = P.flowOf(row);
   const file = fileOf(msg);
+  /* پیامِ صوتی (ویس یا فایلِ صوتی) برای کارشناس — متنش پیاده می‌شود ولی این‌جا نشان داده نمی‌شود (sp-voice.js) */
+  const voice = msg.voice || msg.audio || null;
+  if (voice && !(f && ["subpf", "pf", "file"].includes(f.step))) {
+    if (f && ["val", "term", "label"].includes(f.step)) { await P.send(env, row, "این‌جا لطفاً بنویسید؛ پیام صوتی برای گفت‌وگو با کارشناس است."); return { ok: true }; }
+    return voiceToExpert(env, row, sup, voice);
+  }
   /* «📤 ارسال» همراه با پیش‌فاکتور: فایل که رسید، مشخصاتِ اقلامِ آماده و پیش‌فاکتور یک‌جا می‌روند */
   if (f && f.step === "subpf") {
     if (!file) { await P.send(env, row, "فایل پیش‌فاکتور را بفرستید (PDF یا عکس)، یا «انصراف»."); return { ok: true }; }
@@ -587,6 +594,24 @@ async function supplierMessage(env, row, msg, text) {
   aiKick(env, row._ctx, th.id);
   return { ok: true };
 }
+
+/** ویسِ تأمین‌کننده در بات: از تلگرام گرفته و مثل پنل وب ثبت می‌شود؛ خودِ ویس در گفت‌وگوی او هست، پاسخی لازم نیست */
+async function voiceToExpert(env, row, sup, v) {
+  if (!row.focus) return listSupplierThreads(env, row, sup);
+  const th = await C.threadFor(env, row.focus, { supplier: sup }).catch(() => null);
+  if (!th) { P.setFocus(row, null); return listSupplierThreads(env, row, sup); }
+  try {
+    if ((v.file_size || 0) > VOICE_MAX) throw new Error("پیام صوتی بیش از حد بلند است.");
+    const api = P.spApi(env);
+    const f = await api.getFile(v.file_id);
+    const src = await fetch(api.fileUrl(f.file_path));
+    if (!src.ok) throw new Error("دریافت صدا از تلگرام نشد.");
+    await ingestVoice(env, row._ctx, th, { bytes: await src.arrayBuffer(), mime: v.mime_type || "audio/ogg", dur: v.duration || null, tg: msgVoiceId(v) }, (fn) => fn());
+  } catch (e) { await P.send(env, row, `⚠️ پیام صوتی نرسید: ${esc(e.message)}`); }
+  return { ok: true };
+}
+/* فقط ویسِ واقعی دوباره با sendVoice برای کارشناس می‌رود؛ فایلِ صوتیِ معمولی نه */
+const msgVoiceId = (v) => (v && v.file_id && /ogg|opus/i.test(v.mime_type || "audio/ogg") ? v.file_id : null);
 
 async function lineCardSend(env, row, sup, lineId, mid, head) {
   const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();

@@ -20,7 +20,11 @@ const EV_FA = {
   approve: "تأیید مشخصات و درخواست پیش‌فاکتور", return: "برگشت برای اصلاح", reject: "رد", final: "تأیید نهایی", ai: "خوانش هوشمند پیش‌فاکتور",
 };
 
-const kindOf = (m, meta) => (m.kind === "note" ? "یادداشت درونی" : m.kind === "event" ? EV_FA[meta && meta.ev] || "رخداد" : "پیام");
+/* پیامِ صوتیِ تأمین‌کننده: body متنی است که ElevenLabs از صدا پیاده کرده (worker/stt.js) */
+const kindOf = (m, meta) => (m.kind === "note" ? "یادداشت درونی" : m.kind === "event" ? EV_FA[meta && meta.ev] || "رخداد"
+  : m.kind === "voice" ? "پیام صوتی (متنِ پیاده‌شده از صدا)" : "پیام");
+const bodyOf = (m, meta) => (m.kind === "voice" && !T(m.body)
+  ? `[پیام صوتی — متنش پیاده نشد${meta && meta.stt && meta.stt.error ? `: ${meta.stt.error}` : ""}]` : m.body);
 const dirOf = (m, meta) => (m.who === "s" ? "تأمین‌کننده ← شرکت"
   : m.kind === "note" ? (meta && meta.ai ? "یادداشتِ کارشناس هوشمند (تأمین‌کننده نمی‌بیند)" : "یادداشتِ درونی (تأمین‌کننده نمی‌بیند)")
     : meta && meta.ai ? "کارشناس هوشمند → تأمین‌کننده" : "کارشناس → تأمین‌کننده");
@@ -40,7 +44,7 @@ export function msgEntry(m, t, { full } = {}) {
     `- قلم: ${itemsOf(meta, t.lines)}`,
     `- تأمین‌کننده: ${t.supplier}${full ? ` · ${t.phone || "—"}` : t.phone ? ` · ${mask(t.phone)}` : ""}${t.label ? ` (${t.label})` : ""}`,
     "",
-    quote(m.body),
+    quote(bodyOf(m, meta)),
   ].join("\n");
 }
 

@@ -18,6 +18,7 @@ import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
 import { aiKick } from "./ai-agent.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
+import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -140,6 +141,14 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const th = await C.threadFor(env, mm[1], who);
     return json(await C.clearMsgs(env, th, who.side));
   }
+  /* صدای یک پیامِ صوتی — هر دو طرفِ همان گفت‌وگو؛ از خودِ Worker (انبار KV لینک امضاشده ندارد) */
+  if ((mm = /^\/sp\/msg\/(\d+)\/voice$/.exec(path)) && m === "GET") {
+    const v = await C.voiceOf(env, who, mm[1]);
+    const store = storage(env);
+    const f = store ? await store.get(v.key) : null;
+    if (!f) throw new HttpError("صدای این پیام در انبار پیدا نشد.", 404);
+    return new Response(f.body, { headers: { "content-type": v.mime || f.contentType || "audio/webm", "cache-control": "private, max-age=86400" } });
+  }
   if ((mm = /^\/sp\/file\/(\d+)\/url$/.exec(path)) && m === "GET") {
     const f = await C.fileFor(env, who, mm[1]);
     return json({ url: await signed(env, f.skey), name: f.filename });
@@ -165,6 +174,16 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
         else await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(who.tg.chat).run();
       }
       return json({ ok: true });
+    }
+    /* پیامِ صوتی از پنل وب: بدنه خودِ صدا (MediaRecorder)، dur ثانیه؛ پاسخ بی متنِ پیاده‌شده (msgFor) */
+    if ((mm = /^\/sp\/thread\/(\d+)\/voice$/.exec(path)) && m === "POST") {
+      const th = await C.threadFor(env, mm[1], who);
+      const size = int(request.headers.get("content-length")) || 0;
+      if (size > VOICE_MAX) throw new HttpError("پیام صوتی بیش از حد بلند است (حداکثر ۱۰ مگابایت).", 413);
+      const bytes = await request.arrayBuffer();
+      const r = await ingestVoice(env, ctx, th, { bytes, mime: request.headers.get("content-type"), dur: Math.min(int(url.searchParams.get("dur")) || 0, 3600) || null },
+        (fn) => later(ctx, fn));
+      return json({ ok: true, msgs: r.msgs.map((x) => C.msgFor(x, "s")) });
     }
     if ((mm = /^\/sp\/line\/(\d+)$/.exec(path)) && m === "PUT") return json(await C.lineSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/line\/(\d+)\/ready$/.exec(path)) && m === "POST") return json(await C.lineReady(env, sup, mm[1], !!(await readJson(request)).on));
@@ -221,6 +240,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     return json({ ...(await C.expertThreads(env, ex)), me: { name: ex.name, label: ex.label }, bot: await C.spBotUser(env), via: who.tg ? "telegram" : "web",
       labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA });
   }
+  /* اعلانِ گوشهٔ پنل کارشناس: پیام‌های تازهٔ تأمین‌کنندگان (هر چند ثانیه، از همهٔ صفحه‌های پنل) */
+  if (path === "/sp/x/inbox" && m === "GET") return json(await C.expertInbox(env, ex, url.searchParams.get("since")));
   if (path === "/sp/x/items" && m === "GET") return json({ items: await C.sendableItems(env, ex, url.searchParams.get("aid")) });
   if (path === "/sp/x/phones" && m === "GET") return json({ phones: await C.phonesOfName(env, url.searchParams.get("name")) });
   /* شمارهٔ تازه برای تأمین‌کننده — از کارتِ تأمین‌کنندهٔ «بررسی سوابق» در پنل کارشناس (مهر ۱۴۰۵)؛ تیکِ «پنل» اختیاری */
