@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>پنل پشتیبانی تدارکات | سامانه هوشمند آریانا</title>
+  <meta name="robots" content="noindex, nofollow" />
+  <meta name="theme-color" content="#030814" />
+  <link rel="icon" type="image/jpeg" href="../assets/logo-new.jpg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="panel.css" />
+  <style>
+    /* فقط آنچه پنل پشتیبانی بیش از panel.css لازم دارد: نمای جزئیات، گفت‌وگو و گزارش رخدادها */
+    .sup-split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 14px; align-items: start; }
+    @media (max-width: 900px) { .sup-split { grid-template-columns: 1fr; } }
+    .sup-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 230px); overflow: auto; padding: 2px; }
+    .sup-th { text-align: right; border: 1px solid var(--tp-line); border-radius: 12px; padding: 8px 10px; background: rgba(3, 8, 20, .35); width: 100%; }
+    .sup-th:hover { border-color: var(--tp-line-2); background: rgba(120, 165, 255, .07); }
+    .sup-th.on { border-color: var(--tp-accent); background: rgba(79, 140, 255, .12); }
+    .sup-th .l1 { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-weight: 700; font-size: .92rem; }
+    .sup-th .l2 { color: var(--tp-muted); font-size: .78rem; display: flex; gap: 8px; flex-wrap: wrap; }
+    .sup-th .l3 { color: var(--tp-dim); font-size: .8rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .sup-chat { display: flex; flex-direction: column; gap: 8px; padding: 12px; max-height: calc(100vh - 330px); min-height: 240px; overflow: auto; border: 1px solid var(--tp-line); border-radius: 12px; background: rgba(3, 8, 20, .35); }
+    .bub { max-width: 78%; padding: 7px 11px; border-radius: 14px; font-size: .9rem; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
+    .bub .meta { display: block; font-size: .72rem; color: var(--tp-dim); margin-top: 3px; }
+    .bub.e { align-self: flex-start; background: rgba(47, 111, 228, .28); border: 1px solid rgba(79, 140, 255, .4); border-start-start-radius: 4px; }
+    .bub.ai { background: rgba(124, 58, 237, .22); border-color: rgba(167, 139, 250, .45); }
+    .bub.s { align-self: flex-end; background: rgba(158, 178, 216, .14); border: 1px solid var(--tp-line-2); border-start-end-radius: 4px; }
+    .bub.note { align-self: center; max-width: 92%; background: rgba(242, 194, 48, .08); border: 1px dashed rgba(242, 194, 48, .45); font-size: .82rem; }
+    .bub.ev { align-self: center; max-width: 92%; background: rgba(3, 8, 20, .5); border: 1px solid var(--tp-line); font-size: .8rem; color: var(--tp-muted); }
+    .sup-feed td.txt { text-align: right; white-space: normal; min-width: 320px; max-width: 640px; }
+    .sup-feed td.t { font-variant-numeric: tabular-nums; font-size: .82rem; color: var(--tp-muted); }
+    .by { display: inline-block; font-size: .74rem; padding: 0 8px; border-radius: 999px; border: 1px solid var(--tp-line-2); white-space: nowrap; }
+    .by-manager { background: rgba(255, 140, 66, .14); border-color: rgba(255, 140, 66, .45); color: #ffc49b; }
+    .by-expert { background: rgba(79, 140, 255, .14); border-color: rgba(79, 140, 255, .45); color: #bcd6ff; }
+    .by-ai { background: rgba(124, 58, 237, .16); border-color: rgba(167, 139, 250, .5); color: #d8c8ff; }
+    .by-supplier { background: rgba(34, 197, 94, .12); border-color: rgba(34, 197, 94, .4); color: #6ee7b7; }
+    .by-support { background: rgba(242, 194, 48, .14); border-color: rgba(242, 194, 48, .45); color: #fcd34d; }
+    .by-system { color: var(--tp-muted); }
+    .sup-ov { position: fixed; inset: 0; z-index: 800; background: rgba(3, 8, 20, .66); backdrop-filter: blur(3px); display: flex; justify-content: center; align-items: flex-start; padding: 4vh 16px; overflow: auto; }
+    .sup-ov .sheet { width: min(1180px, 100%); padding: 16px 18px 22px; }
+    .sup-ov .sheet .hd { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+    .sup-ov .sheet .hd h3 { margin: 0; font-size: 1.05rem; }
+    .sup-ov iframe { width: 100%; height: 70vh; border: 1px solid var(--tp-line); border-radius: 10px; background: #fff; }
+    .sup-tbl { width: 100%; border-collapse: collapse; font-size: .86rem; }
+    .sup-tbl th, .sup-tbl td { padding: 4px 8px; border-bottom: 1px dashed rgba(158, 197, 255, .16); text-align: right; vertical-align: top; }
+    .sup-tbl th { color: var(--tp-muted); font-weight: 600; font-size: .78rem; white-space: nowrap; }
+    .sup-tbl td.c, .sup-tbl th.c { text-align: center; }
+    .sup-h { margin: 16px 0 6px; font-size: .95rem; }
+    .sup-login .alt { margin-top: 14px; font-size: .85rem; }
+    .sup-login .alt button { background: none; border: 0; color: var(--tp-accent); text-decoration: underline; padding: 0; }
+    .sup-login input + input { margin-top: 10px; }
+    .rowlink { cursor: pointer; }
+    .ok-mark { color: var(--tp-ok); font-weight: 800; }
+    :root[data-theme="light"] .bub.e { background: rgba(47, 111, 228, .12); }
+    :root[data-theme="light"] .bub.ai { background: rgba(124, 58, 237, .1); }
+    :root[data-theme="light"] .bub.s { background: #f1f4f9; }
+    :root[data-theme="light"] .bub.ev, :root[data-theme="light"] .sup-chat, :root[data-theme="light"] .sup-th { background: #f7f9fc; }
+    :root[data-theme="light"] .sup-ov { background: rgba(15, 27, 51, .35); }
+    :root[data-theme="light"] .by-manager { color: #b45309; } :root[data-theme="light"] .by-expert { color: #1d4ed8; }
+    :root[data-theme="light"] .by-ai { color: #6d28d9; } :root[data-theme="light"] .by-supplier { color: #047857; }
+    :root[data-theme="light"] .by-support { color: #a16207; }
+  </style>
+  <!-- حالت شب/روز پیش از اولین رسم -->
+  <script>try { document.documentElement.dataset.theme = localStorage.getItem("tp.theme") === "light" ? "light" : "dark"; } catch (e) { document.documentElement.dataset.theme = "dark"; }</script>
+</head>
+<body class="tp-body">
+  <div id="app" aria-live="polite"></div>
+
+  <script src="config.js"></script>
+  <script src="shared.js"></script>
+  <script src="support-panel.js"></script>
+</body>
+</html>

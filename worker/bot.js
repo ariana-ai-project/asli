@@ -1329,18 +1329,18 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   /* تصمیم مدیر: کنار «تحویل»، همان‌جا «تولید نامه» هم هست */
   return show(api, chat, null, `✅ <b>جدول کمیسیون تولید شد.</b>${warn.length ? "\n" + warn.join("\n") : ""}\n\nدرخواست تا «خاتمه» در کارتابل می‌ماند. قدم بعد؟`, [
     [{ text: "📦 تحویل", callback_data: `dvo:${aid}` }, { text: "✉️ تولید نامه", callback_data: `rq:${aid}:l` }],
-    [{ text: "🔒 خاتمه (تأیید کمیسیون)", callback_data: `cm:${aid}:card:0` }],
+    [{ text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }],
     [{ text: "📊 جدول کمیسیون", callback_data: `ct:${aid}:start:0` }],
     navRow(aid),
   ]);
 }
 
 /**
- * کارتِ «تأیید کمیسیون و خاتمه».
+ * کارتِ «خاتمه».
  *
- * اقلامِ بازِ درخواست چندانتخابی‌اند: کارشناس هر کدام را که کمیسیون تأیید کرده
- * تیک می‌زند و «خاتمه» را می‌زند. فقط همان‌ها بسته می‌شوند؛ اگر همه بودند درخواست
- * از کارتابل می‌رود، وگرنه با باقی اقلام در جریان می‌ماند.
+ * تیکِ «تأیید کمیسیون» هر قلم را حالا فقط پنل پشتیبانی می‌زند (درخواست مالک، مهر ۱۴۰۵ — worker/support.js)؛
+ * این کارت فقط نشان می‌دهد پشتیبانی کدام اقلام را تأیید کرده و «خاتمه» همان‌ها را می‌بندد. اگر همه بودند
+ * درخواست از کارتابل می‌رود، وگرنه با باقی اقلام در جریان می‌ماند.
  */
 async function closeCard(env, api, chat, ex, aid, messageId, head) {
   const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
@@ -1351,21 +1351,21 @@ async function closeCard(env, api, chat, ex, aid, messageId, head) {
   if (!its.length) return show(api, chat, messageId, "این درخواست قلمِ بازی ندارد.", [[KARTABL_BTN]]);
   const n = its.filter((i) => i.commission_ok).length;
   const s = await getSettings(env);
+  const list = its.map((i) => `${i.commission_ok ? "✅" : "⏳"} ${esc(short(i.title, 40))}${i.qty != null ? ` — ${M(i.qty)} ${esc(i.unit || "")}` : ""}`).join("\n");
 
-  const kb = its.map((i) => [{
-    text: `${i.commission_ok ? "☑" : "☐"} ${short(i.title, 30)}${i.qty != null ? ` — ${M(i.qty)} ${i.unit || ""}` : ""}`,
-    callback_data: `cm:${aid}:t:${i.id}`,
-  }]);
-  kb.push([{ text: "☑ همه", callback_data: `cm:${aid}:all:0` }, { text: "☐ هیچ", callback_data: `cm:${aid}:none:0` }]);
-  kb.push([{ text: `🔒 خاتمه (${M(n)} قلم)`, callback_data: `cm:${aid}:end:0` }]);
+  const kb = [];
+  if (n) kb.push([{ text: `🔒 خاتمه (${M(n)} قلم)`, callback_data: `cm:${aid}:end:0` }]);
+  kb.push([{ text: "🔄 تازه کردن", callback_data: `cm:${aid}:rf:0` }]);
   kb.push([{ text: "📦 تحویل", callback_data: `dvo:${aid}` }], navRow(aid));
 
-  return show(api, chat, messageId, `${head ? head + "\n\n" : ""}🧾 <b>تأیید کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`
-    + "کدام اقلام را کمیسیون تأیید کرد؟ روی هر قلم بزنید تا تیک بخورد؛ بعد «خاتمه».\n"
-    + `<b>${M(n)}</b> از ${M(its.length)} قلم تیک خورده.\n\n`
-    + (s.approvalRequired
-      ? "<i>چون «تصمیم کارشناس منوط به تأیید مدیر» فعال است، خاتمه اول برای مدیر می‌رود.</i>"
-      : "<i>«خاتمه» همان لحظه اقلامِ تیک‌خورده را می‌بندد؛ اگر همه بودند، درخواست از کارتابل می‌رود.</i>"), kb);
+  return show(api, chat, messageId, `${head ? head + "\n\n" : ""}🧾 <b>خاتمه — درخواست ${esc(own.request_id)}</b>\n\n`
+    + `${list}\n\n`
+    + `✅ = کمیسیونش را پشتیبانی تأیید کرده (<b>${M(n)}</b> از ${M(its.length)} قلم) · ⏳ = منتظر تأیید پشتیبانی\n`
+    + "<i>تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود؛ هر تأیید همین‌جا خبر داده می‌شود.</i>\n\n"
+    + (!n ? "<i>هنوز قلمی تأیید نشده، پس «خاتمه» فعلاً نیست.</i>"
+      : s.approvalRequired
+        ? "<i>چون «تصمیم کارشناس منوط به تأیید مدیر» فعال است، خاتمه اول برای مدیر می‌رود.</i>"
+        : "<i>«خاتمه» همان لحظه اقلامِ تأییدشده را می‌بندد؛ اگر همه بودند، درخواست از کارتابل می‌رود.</i>"), kb);
 }
 
 /** خلاصهٔ خوانا از خروجی مدل، تا کارشناس پیش از ثبت ببیند چه چیزی قرار است بنشیند */
@@ -2891,7 +2891,7 @@ async function deliverSend(env, api, chat, ex, f, d, mid) {
     ...notes,
     failed.length ? `⚠️ فرستاده نشد: ${esc(failed.join("، "))}` : "",
     "<i>درخواست تا «خاتمه» در کارتابل می‌ماند.</i>",
-  ].filter(Boolean).join("\n"), [[{ text: "🔒 خاتمه (تأیید کمیسیون)", callback_data: `cm:${aid}:card:0` }], navRow(aid)]).catch(() => {});
+  ].filter(Boolean).join("\n"), [[{ text: "🔒 خاتمه", callback_data: `cm:${aid}:card:0` }], navRow(aid)]).catch(() => {});
   return { ok: true };
 }
 
@@ -3515,22 +3515,17 @@ async function onCallback(env, cq, apiIn) {
     return tableSelect(env, api, chat, ex, aid, null);
   }
 
-  /* تأیید کمیسیون و خاتمه: cm:<aid>:t:<item> · all · none · end · card */
+  /* خاتمه: cm:<aid>:end · card. تیک‌های قدیمیِ t/all/none (دکمه‌های پیام‌های پیشین) دیگر چیزی را عوض
+     نمی‌کنند — تأیید کمیسیون فقط از پنل پشتیبانی است */
   if (action === "cm") {
     const aid = num(1), step = parts[2];
     const own = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
     if (!own) { await ack("این ارجاع متعلق به شما نیست.", true); return { ok: true }; }
-    if (step === "t") {
-      await env.DB.prepare("UPDATE items SET commission_ok=CASE WHEN commission_ok=1 THEN 0 ELSE 1 END WHERE id=? AND assignment_id=? AND state='open'")
-        .bind(num(3), aid).run();
-      await ack();
+    if (step === "t" || step === "all" || step === "none") {
+      await ack("تیکِ تأیید کمیسیون حالا فقط در پنل پشتیبانی است.", true);
       return closeCard(env, api, chat, ex, aid, mid);
     }
-    if (step === "all" || step === "none") {
-      await env.DB.prepare("UPDATE items SET commission_ok=? WHERE assignment_id=? AND state='open'").bind(step === "all" ? 1 : 0, aid).run();
-      await ack();
-      return closeCard(env, api, chat, ex, aid, mid);
-    }
+    if (step === "rf") { await ack(); return closeCard(env, api, chat, ex, aid, mid); }
     if (step === "end") {
       let res;
       try { res = await expertDecision(env, ex, aid, { action: "end" }); }

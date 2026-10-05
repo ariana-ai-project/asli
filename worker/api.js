@@ -49,6 +49,8 @@ import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute } from "./ai-agent.js";
+import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
+  supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -1167,7 +1169,10 @@ async function quoteUpdate(env, ex, id, body) {
   } else if (contentEdited) sets.push("saved=0");
   if (!sets.length) return { ok: true };
   sets.push("updated_at=?"); args.push(now(), id);
-  await env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args).run();
+  const upd = env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args);
+  /* گزارش رخدادهای پنل پشتیبانی: «ثبت موقت» از پنل هم مثل بات (bot.js، quote_saved) با زمانش می‌ماند */
+  if (body.save === true) await env.DB.batch([upd, ev(env, `expert:${ex.id}`, "quote_saved", null, q.item_id, { assignment_id: q.assignment_id, supplier: q.supplier_name, channel: "panel" })]);
+  else await upd.run();
   return { ok: true };
 }
 /* حذف: از تب و بات کامل بیرون می‌رود، نسخه‌اش در quotes_deleted می‌ماند (records.js) */
@@ -1255,6 +1260,25 @@ async function letterOf(env, aid, id) {
 /* خطای letter.js/extract.js پیام فارسیِ آمادهٔ نمایش دارد؛ بدون این، پنل «خطای داخلی» می‌بیند */
 const asHttp = (e) => (e instanceof ExtractError ? new HttpError(e.message, e.status || 502) : e);
 
+/** برگهٔ درخواست خرید یا جدول کمیسیونِ یک ارجاع — پنل کارشناس، مدیر و پشتیبانی (دسترسی را مسیر پیش از این سنجیده) */
+async function sheetOut(env, aid, kind, url) {
+  const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
+  const cd = { ...d, notes: d.assignment.notes };
+  /* format=html: همان برگه برای پیش‌نمایش و چاپ پنل، از همان مدلی که فایل را می‌سازد */
+  if (url.searchParams.get("format") === "html") {
+    return json(kind === "request" ? { html: requestHtml(d), css: REQUEST_CSS } : { html: commissionHtml(cd), css: SHEET_CSS });
+  }
+  /* برگهٔ درخواست خرید فایل Word است (قالب چاپ راهکاران)، جدول کمیسیون xlsx واقعی (فرم TSA-PS-FO-02) */
+  const isReq = kind === "request";
+  const body = isReq ? await renderRequestDoc(d) : await commissionXlsx(cd);
+  const name = `${isReq ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.${isReq ? "docx" : "xlsx"}`;
+  return new Response(body, { headers: {
+    "content-type": isReq ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : XLSX_MIME,
+    "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
+    "cache-control": "private, no-store",
+  } });
+}
+
 /* ------------------------------------------------------------------ */
 /* روتر                                                                 */
 /* ------------------------------------------------------------------ */
@@ -1265,7 +1289,7 @@ async function route(request, env, ctx) {
   if (path.length > 1 && path.endsWith("/")) path = path.slice(0, -1);
   const m = request.method.toUpperCase();
 
-  if (m === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": url.origin, "access-control-allow-headers": "content-type,x-manager-code,x-expert-code,x-role,x-sp-session,x-tg-init", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
+  if (m === "OPTIONS") return new Response(null, { status: 204, headers: { "access-control-allow-origin": url.origin, "access-control-allow-headers": "content-type,x-manager-code,x-expert-code,x-role,x-sp-session,x-tg-init,x-support-token", "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS" } });
 
   try {
     await ensureSchema(env);
@@ -1472,6 +1496,35 @@ async function route(request, env, ctx) {
       return json({ ok: true, count: rows.length });
     }
     let mm;
+
+    /* --- پنل «پشتیبانی» (worker/support.js): نظارتِ فقط‌خواندنی + تیک تأیید کمیسیون --- */
+    if (path.startsWith("/support/")) {
+      if (path === "/support/status" && m === "GET") return json(await supportStatus(env));
+      if (path === "/support/setup" && m === "POST") return json(await supportSetup(env, await readJson(request)));
+      if (path === "/support/login" && m === "POST") return json(await supportLogin(env, await readJson(request)));
+      /* فراموشیِ رمز: فقط مدیر، با کد مدیر */
+      if (path === "/support/reset" && m === "POST") { requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
+      await requireSupport(request, env);
+      if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));
+      if (path === "/support/desk" && m === "GET") {
+        /* همان میز مدیر، بی امتیازها و تصمیم‌ها (with) و بی کد ورود و تلگرامِ کارشناسان */
+        const du = new URL(url.origin);
+        for (const k of ["from", "id", "scope", "limit", "offset"]) { const v = url.searchParams.get(k); if (v != null) du.searchParams.set(k, v); }
+        const d = await desk(env, du);
+        return json({ ...d, experts: d.experts.map(pubExpert) });
+      }
+      if (path === "/support/experts" && m === "GET") return json(await supportExperts(env));
+      if ((mm = /^\/support\/experts\/(\d+)$/.exec(path)) && m === "GET") return json(await supportExpert(env, int(mm[1])));
+      if (path === "/support/activity" && m === "GET") return json(await supportActivity(env, url));
+      if (path === "/support/threads" && m === "GET") return json(await supportThreads(env, url));
+      if ((mm = /^\/support\/threads\/(\d+)$/.exec(path)) && m === "GET") return json(await supportThread(env, int(mm[1])));
+      if ((mm = /^\/support\/assignments\/(\d+)$/.exec(path)) && m === "GET") return json(await assignmentDetail(env, int(mm[1]), { role: "manager" }));
+      if ((mm = /^\/support\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") return sheetOut(env, int(mm[1]), mm[2], url);
+      if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
+      if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
+      throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
+    }
+
     if ((mm = /^\/experts\/(\d+)$/.exec(path)) && m === "PUT") {
       requireManager(request, env);
       return json(await updateExpert(env, int(mm[1]), await readJson(request)));
@@ -1558,10 +1611,11 @@ async function route(request, env, ctx) {
       flush(env, ctx, 1); return json(r);
     }
     if ((mm = /^\/items\/(\d+)\/progress$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); const b = await readJson(request); return json(await markProgress(env, ex, int(mm[1]), b.stage)); }
+    /* تیک «تأیید کمیسیون» از پنل و بات کارشناس برداشته شد (درخواست مالک، مهر ۱۴۰۵): فقط پنل پشتیبانی
+       (/support/commission) آن را می‌زند و کارشناس «خاتمه»ی اقلامِ تأییدشده را */
     if ((mm = /^\/items\/(\d+)\/commission$/.exec(path)) && m === "POST") {
-      const ex = await requireExpert(request, env); const b = await readJson(request);
-      const r = await env.DB.prepare("UPDATE items SET commission_ok=? WHERE id=? AND assignment_id IN (SELECT id FROM assignments WHERE expert_id=?)").bind(b.ok ? 1 : 0, int(mm[1]), ex.id).run();
-      if (!r.meta.changes) throw new HttpError("قلم متعلق به شما نیست.", 403); return json({ ok: true });
+      await requireExpert(request, env);
+      throw new HttpError("تأیید کمیسیون فقط در پنل پشتیبانی است؛ بعد از تأییدِ پشتیبانی، «خاتمه» را بزنید.", 403);
     }
     if ((mm = /^\/requests\/([^/]+)\/head$/.exec(path)) && m === "PUT") {
       const ex = await requireExpert(request, env); const b = await readJson(request);
@@ -1739,23 +1793,9 @@ async function route(request, env, ctx) {
        kind: request | commission */
     if ((mm = /^\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") {
       const who = await requireAny(request, env);
-      const aid = int(mm[1]); const kind = mm[2];
+      const aid = int(mm[1]);
       if (who.expert) await ownAssignment(env, who.expert, aid);
-      const d = await bundleData(env, aid, await getSettings(env), env.COMPANY || "تونل سد آریانا");
-      const cd = { ...d, notes: d.assignment.notes };
-      /* format=html: همان برگه برای پیش‌نمایش و چاپ پنل، از همان مدلی که فایل را می‌سازد */
-      if (url.searchParams.get("format") === "html") {
-        return json(kind === "request" ? { html: requestHtml(d), css: REQUEST_CSS } : { html: commissionHtml(cd), css: SHEET_CSS });
-      }
-      /* برگهٔ درخواست خرید فایل Word است (قالب چاپ راهکاران)، جدول کمیسیون xlsx واقعی (فرم TSA-PS-FO-02) */
-      const isReq = kind === "request";
-      const body = isReq ? await renderRequestDoc(d) : await commissionXlsx(cd);
-      const name = `${isReq ? "درخواست-خرید" : "کمیسیون"}-${d.request.id}.${isReq ? "docx" : "xlsx"}`;
-      return new Response(body, { headers: {
-        "content-type": isReq ? "application/vnd.openxmlformats-officedocument.wordprocessingml.document" : XLSX_MIME,
-        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(name)}`,
-        "cache-control": "private, no-store",
-      } });
+      return sheetOut(env, aid, mm[2], url);
     }
     /* وضعیت آمادگی بسته — پنل با آن می‌گوید چه چیزی هنوز مانده */
     if ((mm = /^\/assignments\/(\d+)\/bundle$/.exec(path)) && m === "GET") {
@@ -1920,7 +1960,10 @@ async function route(request, env, ctx) {
       const lock = (await itemLocks(env, [it.id])).get(it.id);
       if (m === "DELETE") {
         if (lock) throw new HttpError(LOCK_MSG, 409);
-        return json(await clearNorm(env, it));
+        const r = await clearNorm(env, it);
+        /* تأییدِ نرمال‌سازی با items.norm_at در گزارش رخدادها هست؛ برداشتنش زمان را پاک می‌کند، پس رخداد جدا */
+        await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_clear", it.request_id, it.id, { assignment_id: it.aid }).run();
+        return json(r);
       }
       const check = lock ? (s) => { if (!sameAsLock(lock, s.head, s.layers, it.spec)) throw new HttpError(LOCK_MSG, 409); } : null;
       const r = await confirmNorm(env, it, await readJson(request), who, { check });
@@ -1932,7 +1975,9 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
       if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
-      return json(await revertEdit(env, it));
+      const r = await revertEdit(env, it);
+      if (r.removed !== false) await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_revert", it.request_id, it.id, { assignment_id: it.aid }).run();
+      return json(r);
     }
     /* نام همهٔ نوع‌های قلم — انتخابِ نوع قلم در پنل نرمال‌سازی */
     if (path === "/catalog/heads" && m === "GET") { await requireAny(request, env); return json({ heads: await allHeads(env) }); }

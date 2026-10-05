@@ -311,7 +311,7 @@
     const pend = S.d.pendingDecisions.length;
     return `<div class="endbar">
       <span class="st ${o ? "st-run" : "st-cls"}">${o ? "در جریان" : "بدون قلم باز"}</span>
-      <span class="muted" style="font-size:.88rem">${k} از ${n} قلم را کمیسیون تأیید کرده${o < n ? ` · ${n - o} قلم بسته/متوقف` : ""}</span>
+      <span class="muted" style="font-size:.88rem" title="تیکِ تأیید کمیسیون را پنل پشتیبانی می‌زند؛ «خاتمه» همان اقلام را می‌بندد">${k} از ${n} قلم را پشتیبانی تأیید کمیسیون کرده${o < n ? ` · ${n - o} قلم بسته/متوقف` : ""}</span>
       <span style="margin-inline-start:auto"></span>
       ${pend ? `<span class="chip warn">در انتظار تأیید مدیر (${pend})</span>` : settings().approvalRequired ? `<span class="chip warn">تصمیم شما نیاز به تأیید مدیر دارد</span>` : ""}
       <button class="tp-btn sm" data-tpl>قالب‌های پیام</button>
@@ -338,7 +338,8 @@
       ${vEndBar()}
       <div class="strip">${its.map((x, i) => `<div class="pill ${i === S.itemIdx ? "sel" : ""} ${x.state !== "open" ? "closed" : ""}">
         <span class="t" data-item="${i}" title="${esc(x.title)}">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
-        ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : `<label><input type="checkbox" data-idone="${x.id}" ${x.commission_ok ? "checked" : ""}> تأیید کمیسیون</label>`}</div>`).join("")}</div>
+        ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" style="margin-top:6px" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ تأیید کمیسیون</span>`
+          : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}</div>`).join("")}</div>
       <div class="tabs">
         <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">بررسی سوابق</button>
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">جستجوی هوشمند</button>
@@ -1826,7 +1827,6 @@
     const bk = G("[data-back]"); if (bk) bk.onclick = () => { if (S.lt.on) recStop(true); S.screen = "list"; S.d = null; S.letter = null; if (S.fromTeam) { S.tab = "team"; S.fromTeam = false; loadTeam(true); } loadTray(); };
     Q("[data-item]").forEach((x) => x.onclick = () => { S.itemIdx = +x.dataset.item; render(); });
     Q("[data-tab]").forEach((x) => x.onclick = () => { if (S.lt.on && x.dataset.tab !== "letter") recStop(true); S.tab = x.dataset.tab; render(); });
-    Q("[data-idone]").forEach((c) => c.onchange = async (e) => { try { await TP.api(`/items/${e.target.dataset.idone}/commission`, { body: { ok: e.target.checked } }); await reload(); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } });
     Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
     const tp = G("[data-tpl]"); if (tp) tp.onclick = pickTemplate;
     /* سوابق */
@@ -2034,8 +2034,8 @@
     const its = items(), n = its.length, done = its.filter((i) => i.commission_ok && i.state === "open");
     const lbl = { hold: "تعلیق", stop: "توقف", end: "خاتمه" }[act];
     let body = "";
-    if (act === "end") body = done.length === openItems().length ? `هر <b>${done.length}</b> قلم باز را کمیسیون تأیید کرده است.<br><br>این اقلام <b>«بسته شده»</b> ثبت می‌شوند و درخواست از کارتابل شما خارج می‌شود.`
-      : `<b>${done.length}</b> قلم از <b>${n}</b> قلم تأیید شده است:<br><br>${done.map((i) => "• " + esc(i.title)).join("<br>")}<br><br>این اقلام بسته می‌شوند و از کارتابل خارج می‌شوند؛ باقی اقلام همچنان پیگیری می‌شوند (خاتمهٔ جزئی).`;
+    if (act === "end") body = done.length === openItems().length ? `پشتیبانی کمیسیونِ هر <b>${done.length}</b> قلم باز را تأیید کرده است.<br><br>این اقلام <b>«بسته شده»</b> ثبت می‌شوند و درخواست از کارتابل شما خارج می‌شود.`
+      : `کمیسیونِ <b>${done.length}</b> قلم از <b>${n}</b> قلم را پشتیبانی تأیید کرده است:<br><br>${done.map((i) => "• " + esc(i.title)).join("<br>")}<br><br>این اقلام بسته می‌شوند و از کارتابل خارج می‌شوند؛ باقی اقلام همچنان پیگیری می‌شوند (خاتمهٔ جزئی).`;
     else body = `با این کار پایش و اعلان این درخواست متوقف می‌شود و از کارتابل شما خارج می‌شود.`;
     body += `<br><br><div class="tp-note" style="margin:0">${settings().approvalRequired ? "چون مدیر گزینهٔ «تصمیم کارشناس منوط به تأیید من» را فعال کرده، این درخواست ابتدا برای <b>تأیید مدیر</b> می‌رود و تا تأیید او اعمال نمی‌شود." : "تصمیم بلافاصله اعمال می‌شود و برای مدیر ثبت می‌شود."} نتیجه در تلگرام هم می‌آید.</div>`;
     TP.modal(`${lbl} — درخواست ${esc(S.d.request.id)}`, body, async () => {

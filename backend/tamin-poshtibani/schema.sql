@@ -117,7 +117,7 @@ CREATE TABLE IF NOT EXISTS items (
   hist_code      TEXT,                    -- کد استاندارد سوابق («نرمال‌سازی اقلام» — مرحلهٔ بعد)
   hist_done_at   INTEGER,                 -- مرحلهٔ «بررسی سوابق»
   smart_done_at  INTEGER,                 -- مرحلهٔ «جستجوی هوشمند»
-  commission_ok  INTEGER NOT NULL DEFAULT 0,  -- تأیید کمیسیون این قلم
+  commission_ok  INTEGER NOT NULL DEFAULT 0,  -- تأیید کمیسیون این قلم — از مهر ۱۴۰۵ فقط پنل پشتیبانی می‌زند (worker/support.js)
   quote_deadline TEXT,                    -- مهلت استعلام (ستون فایل راهکاران)
   currency       TEXT, fee REAL, amount REAL,  -- ارز / فی / مبلغ (بایگانی)
   UNIQUE(request_id, item_key)
