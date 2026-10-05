@@ -48,11 +48,31 @@ export async function transcribe(env, fileUrl) {
 
   const r = await fetch(STT_URL, { method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, body: form });
   const d = await r.json().catch(() => ({}));
-  if (!r.ok) {
-    const msg = (d && (d.detail?.message || d.detail || d.message)) || `خطای ${r.status}`;
-    throw new ExtractError(`تبدیل صوت به متن نشد: ${String(typeof msg === "string" ? msg : JSON.stringify(msg)).slice(0, 200)}`, r.status === 429 ? 429 : 502);
-  }
-  return { text: String(d.text || "").trim(), language: d.language_code, confidence: d.language_probability };
+  if (!r.ok) throw new ExtractError(`تبدیل صوت به متن نشد: ${sttWhy(d, r.status)}`, r.status === 429 ? 429 : 502);
+  return { text: String(d.text || "").trim(), language: d.language_code, confidence: d.language_probability,
+    id: d.transcription_id || null, secs: d.audio_duration_secs ?? null, model: env.STT_MODEL || "scribe_v2" };
+}
+const sttWhy = (d, status) => {
+  const msg = (d && (d.detail?.message || d.detail || d.message)) || `خطای ${status}`;
+  return String(typeof msg === "string" ? msg : JSON.stringify(msg)).slice(0, 200);
+};
+
+/**
+ * متنی که ElevenLabs در سوابقِ خودش نگه داشته — با همان transcription_id (حالتِ صوتِ بات مکاتبات، worker/sp-voice.js:
+ * تا کاربر «ذخیره شود» نگفته، متن فقط آن‌جاست).
+ */
+export async function getTranscript(env, id) {
+  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new ExtractError(`متن از ElevenLabs خوانده نشد: ${sttWhy(d, r.status)}`, r.status === 404 ? 404 : 502);
+  return String(d.text || "").trim();
+}
+/** پاک کردنِ متن از سوابقِ ElevenLabs. پیش‌تر پاک‌شده (۴۰۴) هم یعنی دیگر آن‌جا نیست. */
+export async function deleteTranscript(env, id) {
+  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  if (r.ok || r.status === 404) return true;
+  const d = await r.json().catch(() => ({}));
+  throw new ExtractError(`متن از ElevenLabs پاک نشد: ${sttWhy(d, r.status)}`, 502);
 }
 
 /* ------------------------------------------------------------------ */

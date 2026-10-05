@@ -22,6 +22,7 @@ import { deliverPass } from "./sp-sms.js";
 import { aiKick } from "./ai-agent.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
+import * as V from "./sp-voice.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -102,6 +103,8 @@ async function onMessage(env, msg, ctx) {
       row.role = "e"; P.setFlow(row, null);
       if (!eMenu) return await home(env, row, "باشد، ورودِ تأمین‌کننده کنار گذاشته شد.");
     }
+    /* حالتِ صوت — رمزِ ثابتِ VOICE_PASS در صفحهٔ ورود (worker/sp-voice.js) */
+    if (row.role === "v") return st ? await V.enterVoice(env, row) : await V.voiceMessage(env, row, msg, text, () => exitVoice(env, row));
     if (st) {
       if (row.role === "e" || row.role === "s") return await home(env, row, "سلام 👋");
       await P.send(env, row, WELCOME);
@@ -159,6 +162,8 @@ async function startSupplier(env, chat, row, k, startMid) {
 async function pendingPass(env, row, text) {
   const f = P.flowOf(row) || {};
   if (!f.k) { await P.send(env, row, WELCOME); return { ok: true }; }
+  /* رمزِ ثابتِ حالتِ صوت به‌جای رمزِ پیامک: هویتِ تأمین‌کننده نمی‌دهد؛ هر رمزِ دیگری همان C.login است با قفلِ پنج‌باره */
+  if (V.isVoicePass(env, text)) return V.enterVoice(env, row);
   try {
     const sup = await C.login(env, f.k, text);
     await env.DB.prepare("UPDATE sp_tg SET role='s', phone_id=?, flow_json=NULL, focus=NULL, updated_at=? WHERE chat=?").bind(sup.phone_id, now(), row.chat).run();
@@ -170,6 +175,20 @@ async function pendingPass(env, row, text) {
     await P.send(env, row, `⚠️ ${esc(e.message)}`, [[{ text: "📱 ارسال رمز به پیامک", callback_data: `rs:${f.k}` }]]);
     return { ok: true };
   }
+}
+
+/** بیرون از حالتِ صوت: نقشِ کارشناس یا تأمین‌کنندهٔ همین گفت‌وگو اگر هست، وگرنه ردیف پاک می‌شود */
+async function exitVoice(env, row) {
+  P.setFlow(row, null);
+  if (row.expert_id || row.phone_id) {
+    row.role = row.expert_id ? "e" : "s";
+    await P.setMenuButton(env, row.chat, row.role);
+    return home(env, row, "از حالتِ صوت بیرون آمدید.");
+  }
+  await env.DB.prepare("DELETE FROM sp_tg WHERE chat=?").bind(row.chat).run();
+  row._dirty = false;
+  await P.spApi(env).call("sendMessage", { chat_id: row.chat, text: "از حالتِ صوت بیرون آمدید.", reply_markup: { remove_keyboard: true } }).catch(() => {});
+  return { ok: true };
 }
 
 async function startExpert(env, chat, row, token, startMid) {
@@ -622,6 +641,12 @@ async function onCallback(env, cq, ctx) {
   }
 
   const row = await P.tgRow(env, chat);
+  /* حالتِ صوت: «ذخیره شود؟» (worker/sp-voice.js) */
+  if (a === "vo") {
+    if (!row || row.role !== "v") { await ack("حالتِ صوت بسته شده است.", true); return { ok: true }; }
+    try { return await V.voiceCallback(env, row, parts[1], ack); }
+    finally { await P.save(env, row).catch((e) => console.error("sp save", e && e.message)); }
+  }
   if (!row || (row.role !== "e" && row.role !== "s")) { await ack("اول وارد شوید.", true); return { ok: true }; }
   row._ctx = ctx;
   try {
