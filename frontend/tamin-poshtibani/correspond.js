@@ -25,16 +25,8 @@
     try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); }
     catch (_) { return fa(new Date(ms).toLocaleTimeString()); }
   }
-  const dtf = (o) => { try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", ...o }); } catch (_) { return null; } };
-  const F_HM = dtf({ hour: "2-digit", minute: "2-digit", hour12: false }), F_DAY = dtf({ weekday: "long", day: "numeric", month: "long" }), F_KEY = dtf({ year: "numeric", month: "2-digit", day: "2-digit" });
-  const hm = (ms) => (F_HM ? F_HM.format(new Date(ms)) : fa(new Date(ms).toLocaleTimeString()));
-  const dayKey = (ms) => (F_KEY ? F_KEY.format(new Date(ms)) : new Date(ms).toDateString());
-  /** سرِ گروهِ پیام‌ها به سبک پیام‌رسانِ iOS: «امروز ۱۴:۰۵» */
-  function stamp(ms) {
-    const k = dayKey(ms), now = Date.now();
-    const d = k === dayKey(now) ? "امروز" : k === dayKey(now - 864e5) ? "دیروز" : F_DAY ? F_DAY.format(new Date(ms)) : "";
-    return `<b>${d}</b> ${hm(ms)}`;
-  }
+  /* گوشی و گفت‌وگو: ph-chat.js (مشترک با پنل تأمین‌کننده) */
+  const PH = window.PH;
 
   /* قابِ آیفون فقط از ۹۶۱ پیکسل به بالا؛ با عبور از این مرز صفحه دوباره رسم می‌شود */
   const PHONE = window.matchMedia("(min-width: 961px)");
@@ -215,103 +207,44 @@
       <div id="pane">${itemsPane()}</div></div>`;
   }
 
-  /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26: پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ تأمین‌کننده
-     سمت چپ و طوسیِ خیلی کمرنگ؛ پیام‌های پشت‌سرهمِ یک طرف یک گروه‌اند و فقط آخرینِ گروه دُم و ساعت دارد؛ رخدادِ بسته
-     و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
-  const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
-    pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
-  const evItems = (m) => { const meta = m.meta || {}; return EV_HEAD[meta.ev] && Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : []; };
-  function evCard(m) {
-    const meta = m.meta || {};
-    const items = evItems(m);
-    const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
-    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی` : EV_HEAD[meta.ev];
-    const note = /💬 ([\s\S]+)$/.exec(m.body || "");
-    const blocks = items.map((x) => {
-      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
-      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
-      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}" role="button" tabindex="0"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
-        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
-    }).join("");
-    const foot = [meta.pf && meta.ev === "submit" ? `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»` : "", meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "",
-      meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
-    return `<div class="ph-card ${m.who === "e" ? "me" : "them"}" ${goto ? `${goto} role="button" tabindex="0"` : ""} title="${hm(m.at)}${goto ? " — رفتن به همین بسته در «اقلام و تصمیم‌ها»" : ""}">
-      <div class="ph-card-h">${head}</div>${blocks}
-      ${foot ? `<div class="ph-card-f">${foot}</div>` : ""}${note ? `<div class="ph-card-f">💬 ${esc(note[1])}</div>` : ""}
-      ${goto ? `<div class="ph-card-go">دیدن در اقلام و تصمیم‌ها ‹</div>` : ""}</div>`;
-  }
-  /* نوعِ هر پیام برای گروه‌بندی: حباب (text)، کارتِ رخداد (rich) یا خطِ وسطِ صفحه (sys: رخدادِ ساده و یادداشتِ خصوصی) */
-  const kindOf = (m) => (m.kind === "event" ? (evItems(m).length ? "rich" : "sys") : m.kind === "note" ? "sys" : "text");
-  const sideOf = (m) => (m.who === "e" ? "me" : "them");
-  const isAi = (m) => !!(m.meta && m.meta.ai); /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
-  const GAP = 60 * 60e3, GROUP = 3 * 60e3;
-  const sameGroup = (a, b) => !!a && !!b && kindOf(a) !== "sys" && kindOf(b) !== "sys" && sideOf(a) === sideOf(b) && isAi(a) === isAi(b)
-    && b.at - a.at < GROUP && dayKey(a.at) === dayKey(b.at);
-  function msgsHtml() {
-    const L = S.d.msgs;
-    if (!L.length) return `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`;
-    let h = "";
-    L.forEach((m, i) => {
-      const prev = L[i - 1], next = L[i + 1];
-      if (!prev || m.at - prev.at > GAP || dayKey(m.at) !== dayKey(prev.at)) h += `<div class="ph-stamp">${stamp(m.at)}</div>`;
-      const k = kindOf(m);
-      if (k === "sys") {
-        const note = m.kind === "note";
-        h += `<div class="ph-sys ${note ? "note" : ""}" ${m.meta && m.meta.bundle ? `data-goto-b="${m.meta.bundle}" role="button" tabindex="0"` : ""}>${note ? "🔒 " : ""}${esc(m.body)}${note ? ` <i>· فقط شما می‌بینید</i>` : ""} <span class="t">${hm(m.at)}</span></div>`;
-        return;
-      }
-      const side = sideOf(m), ai = isAi(m);
-      const first = !sameGroup(prev, m), last = !sameGroup(m, next);
-      const cap = first && ai ? `<div class="ph-cap">🤖 <span>کارشناس هوشمند</span></div>` : "";
-      const body = k === "rich" ? evCard(m) : `<div class="ph-b ${side}${ai ? " ai" : ""}${last ? " tail" : ""}" title="${hm(m.at)}">${esc(m.body)}</div>`;
-      h += `<div class="ph-row ${side}${first ? " first" : ""}">${cap}${body}${last ? `<div class="ph-meta">${hm(m.at)}</div>` : ""}</div>`;
-    });
-    return h;
-  }
-
-  /* نمادهای خطیِ صفحهٔ گوشی (رنگ از currentColor) */
-  const I = {
-    back: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>',
-    chev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>',
-    box: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round"><path d="M12 2.8l8 4.3v9.8l-8 4.3-8-4.3V7.1z"/><path d="M4 7.1l8 4.4 8-4.4M12 11.5v9.7"/><path d="M8 4.9l8 4.4" stroke-width="1.5"/></svg>',
-    erase: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 20H20"/><path d="M4.6 14.6l9.9-9.9a2 2 0 012.8 0l2.5 2.5a2 2 0 010 2.8L11 18.8a4 4 0 01-2.8 1.2H7.4a2 2 0 01-1.4-.6l-1.4-1.4a2 2 0 010-2.8z"/><path d="M9.2 10l4.8 4.8"/></svg>',
-    up: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5.5 11.5L12 5l6.5 6.5"/></svg>',
-    bars: '<svg viewBox="0 0 18 12" fill="currentColor"><rect x="0" y="8" width="3" height="4" rx="1"/><rect x="5" y="5.5" width="3" height="6.5" rx="1"/><rect x="10" y="3" width="3" height="9" rx="1"/><rect x="15" y="0" width="3" height="12" rx="1"/></svg>',
-    wifi: '<svg viewBox="0 0 16 12" fill="currentColor"><path d="M8 2.4c2.3 0 4.4.9 6 2.4l1.2-1.3A10.3 10.3 0 008 .6 10.3 10.3 0 00.8 3.5L2 4.8a8.5 8.5 0 016-2.4z"/><path d="M8 5.9c1.4 0 2.6.5 3.6 1.4l1.2-1.3A7 7 0 008 4.1 7 7 0 003.2 6l1.2 1.3A5.2 5.2 0 018 5.9z"/><path d="M8 9.3c.5 0 1 .2 1.3.5L8 11.2 6.7 9.8c.3-.3.8-.5 1.3-.5z"/></svg>',
-    batt: '<svg viewBox="0 0 27 13" fill="none"><rect x=".5" y=".5" width="23" height="12" rx="3.6" stroke="currentColor" opacity=".4"/><rect x="2" y="2" width="17" height="9" rx="2.2" fill="currentColor"/><path d="M25 4.4v4.2c.8-.3 1.4-1.1 1.4-2.1S25.8 4.7 25 4.4z" fill="currentColor" opacity=".45"/></svg>',
-  };
-  const clock = () => hm(Date.now());
+  /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26 (ph-chat.js): پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ
+     تأمین‌کننده سمت چپ و طوسیِ خیلی کمرنگ؛ پیامِ صوتیِ تأمین‌کننده با پخش و متنِ پیاده‌شده‌اش (فقط همین‌جا — تأمین‌کننده
+     متن را نمی‌بیند)؛ رخدادِ بسته و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
+  const msgsHtml = () => PH.feed(S.d.msgs, {
+    mine: (m) => m.who === "e",
+    ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
+    rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine, goLabel: "دیدن در اقلام و تصمیم‌ها" }),
+    transcript: true,
+    empty: `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`,
+  });
+  const I = PH.I;
+  const clock = PH.clock;
   /** صفحهٔ گفت‌وگو: framed = داخلِ قابِ آیفون (با نوار وضعیت و جزیرهٔ دوربین)؛ وگرنه تمام‌صفحه در گوشیِ واقعی */
   function screen(framed) {
-    const on = !!(S.th && S.d);
-    const chrome = framed ? `<div class="ph-status" aria-hidden="true"><span class="ph-clock">${clock()}</span><span></span><span class="ph-icons">${I.bars}${I.wifi}${I.batt}</span></div>
-      <div class="ph-island" aria-hidden="true"><i></i></div><div class="ph-home" aria-hidden="true"></div>` : "";
-    if (!on) {
+    if (!(S.th && S.d)) {
       const g = S.reqs.find((x) => x.assignment_id === S.aid);
-      return `<div class="ph-screen ${framed ? "" : "full"}"><div class="ph-wall"></div>${chrome}
-        <div class="ph-void center">${g && !g.threads.length ? `<b>هنوز گفت‌وگویی نیست</b>برای ${esc(g.request_id)} از ستونِ تأمین‌کنندگان «ارسال استعلام» را بزنید.` : `<b>مکاتبات</b>یک تأمین‌کننده را از فهرست انتخاب کنید تا گفت‌وگو این‌جا باز شود.`}</div></div>`;
+      return PH.screen({ framed, body: null, void: g && !g.threads.length ? `<b>هنوز گفت‌وگویی نیست</b>برای ${esc(g.request_id)} از ستونِ تأمین‌کنندگان «ارسال استعلام» را بزنید.` : `<b>مکاتبات</b>یک تأمین‌کننده را از فهرست انتخاب کنید تا گفت‌وگو این‌جا باز شود.` });
     }
     S.unseen = 0;
     const th = S.d.thread, waiting = waitingCount();
-    const initial = (String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟");
-    return `<div class="ph-screen ${framed ? "" : "full"}"><div class="ph-wall"></div>
-      <div class="ph-scroll" id="chat" role="log" aria-live="polite" aria-label="گفت‌وگو با ${esc(th.supplier)}">${msgsHtml()}</div>
-      <div class="ph-edge top" aria-hidden="true"></div><div class="ph-edge bot" aria-hidden="true"></div>${chrome}
-      <header class="ph-nav">
-        <div>${framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`}</div>
-        <button class="ph-who" data-items title="${esc(th.supplier)} · 📞 ${esc(th.phone || "")} · درخواست ${esc(th.request_id)}"><span class="ph-av">${esc(initial)}</span>
-          <span class="ph-name ph-glass"><span>${esc(th.supplier)}</span>${I.chev}</span></button>
-        <div class="ph-acts"><button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
-          <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button></div>
-      </header>
-      <div class="ph-compose"><div class="ph-field ph-glass"><textarea id="msgIn" data-draft="${S.th}" rows="1" placeholder="پیام به ${esc(th.supplier)}" aria-label="پیام به ${esc(th.supplier)}"></textarea>
-        <button id="sendMsg" class="ph-send" aria-label="ارسال" title="ارسال (Enter)" disabled>${I.up}</button></div></div></div>`;
+    return PH.screen({
+      framed, body: msgsHtml(), label: `گفت‌وگو با ${th.supplier}`,
+      nav: {
+        start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
+        title: th.supplier, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
+        whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
+        acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
+          <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
+      },
+      composer: { placeholder: `پیام به ${th.supplier}`, draft: S.th },
+    });
   }
-  /** کادرِ پیام با متن بلند می‌شود (تا پنج خط) و دکمهٔ ارسال فقط با متن روشن است */
-  function composerState(inp) {
-    inp.style.height = "auto";
-    inp.style.height = `${Math.min(inp.scrollHeight, parseFloat(getComputedStyle(inp).lineHeight) * 5 + 8)}px`;
-    const b = $("#sendMsg"); if (b) b.disabled = !inp.value.trim();
+  const composerState = PH.grow;
+  /** صدای پیامِ صوتی با همان هدرِ ورودِ این صفحه */
+  async function loadVoice(id) {
+    const r = await fetch(`${(window.TAMIN_POSHTIBANI_CONFIG || {}).apiBase || "/tamin-poshtibani/api"}/sp/msg/${id}/voice`, { headers: { ...TP.authHeaders(), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
+    if (!r.ok) throw new Error("پخش نشد");
+    return r.blob();
   }
 
   /* --- جدول تطابق: ✅ همان · ⚠️ مطمئن نیست · ⚪ مطمئن است که نیامده · ❌ مطمئن است که فرق دارد --- */
@@ -433,6 +366,7 @@
         const hd = $(".sp-main .sp-head"); if (hd) { hd.classList.add("sp-flash"); setTimeout(() => hd.classList.remove("sp-flash"), 1600); }
       };
     });
+    const chat = $("#chat"); if (chat) PH.bindVoices(chat, loadVoice);
     const clr = $("[data-clear-chat]");
     if (clr) clr.onclick = () => dlg("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و تأمین‌کننده هنوز آن‌ها را می‌بیند.</p><div class=\"sp-err\" data-err></div>",
       [{ label: "🧹 پاک شود", cls: "primary", fn: async () => { await api(`/sp/thread/${S.th}/clear`, { body: {} }); await loadThread(); } }, { label: "انصراف" }]);

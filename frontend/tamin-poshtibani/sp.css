@@ -225,7 +225,7 @@
 .ph > .ph-screen {
   position: absolute; left: 5.769%; top: 1.974%; width: 88.333%; height: 95.928%;
   border-radius: calc(var(--ph-h) * 0.0666); font-size: clamp(12.5px, calc(var(--ph-h) * 0.0176), 16.5px);
-  --ph-navtop: 3.5em; --ph-pt: 9.2em; --ph-pb: 5.2em;
+  --ph-navtop: 3.5em; --ph-pt: 9.2em; --ph-pb0: 5.2em;
 }
 
 /* --- رنگ‌های صفحهٔ گوشی: شب و روز --- */
@@ -239,6 +239,7 @@
   --ph-glass: rgba(34, 42, 74, 0.46); --ph-glass-hover: rgba(52, 62, 100, 0.6);
   --ph-glass-edge: rgba(255, 255, 255, 0.16); --ph-glass-rim: rgba(255, 255, 255, 0.24);
   --ph-solid: #1b2242; --ph-edge-c: rgba(6, 10, 30, 0.9); --ph-sys-bg: rgba(255, 255, 255, 0.09);
+  --ph-pb0: 4.4em; --ph-kb: 0em; --ph-hint: 0em; --ph-pb: calc(var(--ph-pb0) + var(--ph-kb) + var(--ph-hint));
   position: relative; overflow: hidden; isolation: isolate; color: var(--ph-fg); background: #04060f;
   line-height: 1.55; font-size: 15.5px; -webkit-font-smoothing: antialiased;
 }
@@ -391,7 +392,7 @@
 
 /* --- صفحهٔ گفت‌وگوی تمام‌صفحه در گوشیِ واقعی و مینی‌اپ (بی‌قاب) --- */
 .sp-main.is-screen { padding: 0; overflow: hidden; }
-.ph-screen.full { flex: 1; min-height: 0; --ph-navtop: .55em; --ph-pt: 6.4em; --ph-pb: 4.4em; }
+.ph-screen.full { flex: 1; min-height: 0; --ph-navtop: .55em; --ph-pt: 6.4em; --ph-pb0: 4.4em; }
 .ph-screen.full .ph-compose { bottom: max(.7em, env(safe-area-inset-bottom)); }
 
 /* --- دسترس‌پذیری: کنتراستِ بیشتر و شفافیتِ کمتر --- */
@@ -414,3 +415,88 @@
   .sp-cols.ph-mode .sp-back { display: inline-flex; }
   .ph-stage { padding: 12px 18px 12px 14px; }
 }
+
+/* ============================================================
+   صفحه‌کلیدِ منو، گامِ بات، ضبط و پخشِ صدا، کارت‌های بات (ph-chat.js — پنل تأمین‌کننده و مکاتبات کارشناس)
+   ============================================================ */
+.ph-screen.has-kb { --ph-kb: 2.6em; }
+.ph-screen.has-hint { --ph-hint: 2.5em; }
+.ph-kb { display: flex; gap: .35em; overflow-x: auto; margin-bottom: .45em; padding: .05em .1em; scrollbar-width: none; }
+.ph-kb::-webkit-scrollbar { display: none; }
+.ph-key { flex: 0 0 auto; border-radius: 999px; padding: .36em .85em; font: inherit; font-size: .8em; font-weight: 700; color: var(--ph-fg); cursor: pointer; white-space: nowrap; transition: background-color .15s ease, transform .15s ease; }
+.ph-key:hover { background-color: var(--ph-glass-hover); }
+.ph-key:active { transform: scale(.96); }
+.ph-hint { display: flex; align-items: center; gap: .45em; border-radius: 1em; padding: .38em .45em .38em .85em; padding-inline-start: .85em; margin-bottom: .45em; font-size: .78em; line-height: 1.5; }
+.ph-hint > span { flex: 1; min-width: 0; }
+.ph-hint button { flex-shrink: 0; width: 1.9em; height: 1.9em; border-radius: 50%; border: none; display: grid; place-items: center; background: rgba(255, 255, 255, 0.12); color: inherit; cursor: pointer; padding: 0; }
+.ph-hint button svg { width: .9em; height: .9em; }
+:root[data-theme="light"] .ph-hint button { background: rgba(20, 30, 60, 0.08); }
+.ph-mic { width: 2.05em; height: 2.05em; flex-shrink: 0; border: none; border-radius: 50%; display: grid; place-items: center; background: none; color: var(--ph-fg); opacity: .78; cursor: pointer; padding: 0; transition: opacity .15s ease, transform .15s ease; }
+.ph-mic:hover { opacity: 1; }
+.ph-mic:active { transform: scale(.92); }
+.ph-mic svg { width: 1.2em; height: 1.2em; }
+.ph-send[hidden], .ph-mic[hidden], .ph-field[hidden], .ph-rec[hidden] { display: none !important; }
+.ph-rec { display: flex; align-items: center; gap: .55em; border-radius: 1.4em; padding: .3em; }
+.ph-rec-x { width: 2.05em; height: 2.05em; border-radius: 50%; border: none; display: grid; place-items: center; background: rgba(255, 59, 48, 0.14); color: #ff6b61; cursor: pointer; padding: 0; }
+.ph-rec-x svg { width: 1em; height: 1em; }
+.ph-rec-dot { width: .7em; height: .7em; border-radius: 50%; background: #ff3b30; box-shadow: 0 0 0 0 rgba(255, 59, 48, 0.6); animation: phRec 1.2s ease-out infinite; }
+.ph-rec-t { font-weight: 700; font-variant-numeric: tabular-nums; direction: ltr; }
+.ph-rec-l { flex: 1; color: var(--ph-muted); font-size: .85em; }
+@keyframes phRec { 70% { box-shadow: 0 0 0 .55em rgba(255, 59, 48, 0); } 100% { box-shadow: 0 0 0 0 rgba(255, 59, 48, 0); } }
+
+/* پیامِ صوتی */
+.ph-b.voice { display: flex; align-items: center; gap: .5em; padding: .38em .75em .38em .45em; min-width: 11.5em; white-space: normal; }
+.ph-play { width: 2.15em; height: 2.15em; flex-shrink: 0; border-radius: 50%; border: none; display: grid; place-items: center; cursor: pointer; padding: 0; position: relative; z-index: 1; }
+.ph-play svg { width: 1em; height: 1em; }
+.ph-b.voice.me .ph-play { background: rgba(255, 255, 255, 0.24); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.ph-b.voice.them .ph-play { background: linear-gradient(180deg, #4673dc, #1c3c8c); color: #fff; box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.ph-wave { flex: 1; display: flex; align-items: center; gap: 2px; height: 1.7em; direction: ltr; position: relative; z-index: 1; }
+.ph-wave i { flex: 1; min-width: 2px; max-width: 4px; height: calc(var(--h) * 100%); border-radius: 2px; background: currentColor; opacity: .42; transition: opacity .12s linear; }
+.ph-wave i.on { opacity: 1; }
+.ph-b.voice.them .ph-wave { color: #1c3c8c; }
+.ph-dur { font-size: .72em; font-variant-numeric: tabular-nums; min-width: 2.4em; position: relative; z-index: 1; opacity: .9; }
+.ph-b.voice.sending { opacity: .72; }
+.ph-spin { width: .95em; height: .95em; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: phSpin .8s linear infinite; }
+@keyframes phSpin { to { transform: rotate(360deg); } }
+/* متنِ پیاده‌شدهٔ صوتی — فقط صفحهٔ کارشناس */
+.ph-tr { max-width: 78%; margin-top: .3em; padding: .45em .75em; border-radius: .95em; font-size: .8em; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere;
+  color: var(--ph-fg); background: var(--ph-sys-bg); box-shadow: inset 0 0 0 .5px var(--ph-glass-edge); }
+.ph-tr b { display: block; font-size: .85em; opacity: .7; margin-bottom: .1em; }
+
+/* کارتِ بات (طرفِ شرکت) با دکمه‌های درون‌خطی، مثل بات تلگرام */
+.ph-bot { width: 88%; border-radius: 1.15em; padding: .7em .85em .6em; font-size: .88em; line-height: 1.65; color: #141a2c; text-align: right;
+  background: linear-gradient(180deg, #ffffff, #f1f3f8); box-shadow: inset 0 1px 0 #fff, 0 0 0 .5px rgba(20, 26, 44, 0.1), 0 .6em 1.4em -.8em rgba(0, 0, 0, 0.55); }
+.ph-bot-t { margin-bottom: .35em; }
+.ph-bot-t:last-child { margin-bottom: 0; }
+.ph-bot i { color: #4c566c; }
+.ph-bot-sec { border-top: 1px solid rgba(20, 30, 60, 0.08); padding-top: .4em; margin-top: .45em; }
+.ph-bot-sec > b:first-child { display: block; margin-bottom: .15em; }
+.ph-bot-l { list-style: none; margin: .2em 0 .4em; padding: 0; }
+.ph-bot-l li { padding: .3em 0; border-top: 1px solid rgba(20, 30, 60, 0.07); }
+.ph-bot-l li:first-child { border-top: none; }
+.ph-bot-s { font-size: .9em; color: #4c566c; }
+.ph-bot .sp-st { color: #3d4a66; border-color: rgba(20, 30, 60, 0.18); font-size: .72em; }
+.ph-bot .sp-st.final { color: #15803d; border-color: rgba(21, 128, 61, 0.45); }
+.ph-bot .sp-st.ready, .ph-bot .sp-st.proforma { color: #1c3c8c; border-color: rgba(28, 60, 140, 0.45); }
+.ph-ikb { display: flex; flex-direction: column; gap: .3em; margin-top: .6em; }
+.ph-ikb .r { display: flex; gap: .3em; }
+.ph-ib { flex: 1; min-width: 0; min-height: 2.25em; border-radius: .75em; padding: .35em .5em; font: inherit; font-size: .86em; font-weight: 700; line-height: 1.4; color: #1c3c8c; cursor: pointer;
+  border: .5px solid rgba(28, 60, 140, 0.22); background: linear-gradient(180deg, #ffffff, #eef2fb); box-shadow: inset 0 1px 0 #fff, 0 .15em .4em -.2em rgba(20, 40, 90, 0.35);
+  transition: transform .12s ease, background-color .12s ease; }
+.ph-ib:hover { background: linear-gradient(180deg, #ffffff, #e3eafb); }
+.ph-ib:active { transform: scale(.97); }
+.ph-card .ph-ikb { padding: 0 .8em .75em; margin-top: .3em; }
+
+/* ============================================================
+   پنل تأمین‌کننده — دسکتاپ: فرمِ مشخصات راست و گوشی چپ؛ موبایل: فقط گفت‌وگو
+   ============================================================ */
+#app.sup-app .sp-full { display: flex; flex-direction: column; }
+.sup-cols { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+.sup-side { min-height: 0; overflow-y: auto; padding: 14px 24px 48px; }
+.sup-in { max-width: 1020px; margin-inline: auto; }
+.sup-head { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; margin: 8px 0 2px; }
+.sup-head h2 { margin: 0; font-size: 1.15rem; }
+.sup-side .sp-sticky { top: 0; }
+.sup-mobile { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.sup-mobile .ph-screen.full { flex: 1; }.ph-av.img { background: #fff; padding: .28em; }
+.ph-av.img img { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }

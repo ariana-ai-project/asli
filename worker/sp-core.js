@@ -177,6 +177,16 @@ const msgStmt = (env, thId, who, kind, body, meta, t) =>
 const touchStmt = (env, thId, t, rev = true) => env.DB.prepare(`UPDATE sp_threads SET last_at=?${rev ? ", rev=rev+1" : ""} WHERE id=?`).bind(t, thId);
 const msgObj = (id, thId, who, kind, body, meta, t) => ({ id, thread_id: thId, who, kind, body, meta: meta || null, at: t });
 export const msgOut = (m) => ({ id: m.id, who: m.who, kind: m.kind, body: m.body, meta: m.meta !== undefined ? m.meta : parse(m.meta_json, null), at: m.at });
+/**
+ * پیام برای صفحهٔ یک طرف. پیامِ صوتی (kind «voice»): متنِ پیاده‌شده از صدا فقط سمتِ کارشناس — تأمین‌کننده فقط صدای خودش
+ * را می‌بیند (درخواست مالک، مهر ۱۴۰۵) — و کلیدِ انبار هیچ‌جا بیرون نمی‌رود (صدا از /sp/msg/:id/voice با سنجشِ دسترسی).
+ */
+export function msgFor(m, side) {
+  if (!m || m.kind !== "voice") return m;
+  const v = (m.meta && m.meta.voice) || {};
+  const voice = { dur: v.dur || null, mime: v.mime || null };
+  return side === "e" ? { ...m, meta: { ...m.meta, voice } } : { ...m, body: "", meta: { voice } };
+}
 export const fmtMoney = (n) => (n == null || !Number.isFinite(Number(n)) ? "—" : Number(n).toLocaleString("en-US"));
 /* متن رخدادها با رقم فارسی (عنوان قلم دست نمی‌خورد — «M8» باید M8 بماند) */
 const faN = (s) => String(s).replace(/\d/g, (d) => FA[+d]).replace(/,/g, "٬").replace(/\./g, "٫");
@@ -282,7 +292,7 @@ async function newPassword(env, phoneId) {
 
 /** متن پیامک — همان که به‌جای پیامک (فعلاً خاموش) در گفت‌وگوی کارشناس نشان داده می‌شود */
 function smsBody(env, { intro, k, bot, pass }) {
-  return [T(intro), "", `🔗 پنل تأمین‌کننده: ${panelLink(env, k)}`, bot ? `🤖 یا در تلگرام: ${botLink(bot, "s" + k)}` : null, `🔑 رمز ورود: ${pass}`]
+  return [T(intro), "", `🔗 پنل تأمین‌کننده: ${panelLink(env, k)}`, bot ? `📲 یا در تلگرام: ${botLink(bot, "s" + k)}` : null, `🔑 رمز ورود: ${pass}`]
     .filter((x) => x != null).join("\n");
 }
 const maskPass = (text, pass) => String(text).split(pass).join("••••••");
@@ -604,7 +614,7 @@ export async function threadFull(env, th, side) {
     thread: threadOut(th, side),
     lines: (lines.results || []).map(lineOut),
     bundles: (bundles.results || []).map((b) => bundleOut(b, side)),
-    msgs: (msgs.results || []).map(msgOut),
+    msgs: (msgs.results || []).map((m) => msgFor(msgOut(m), side)),
     files: files.results || [],
     labels: FILE_LABELS,
   };
@@ -615,7 +625,7 @@ export async function poll(env, th, side, since) {
   const from = Math.max(0, int(since) || 0, clearedUpTo(th, side));
   const rows = (await env.DB.prepare(`SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id LIMIT 100`).bind(th.id, from).all()).results || [];
   if (rows.some((m) => m.who !== side)) await markSeen(env, th.id, side);
-  return { msgs: rows.map(msgOut), rev: th.rev };
+  return { msgs: rows.map((m) => msgFor(msgOut(m), side)), rev: th.rev };
 }
 
 /**
@@ -688,7 +698,7 @@ export async function expertInbox(env, ex, since) {
   ]);
   const msgs = ((rows && rows.results) || []).reverse().map((m) => ({
     id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier, demo: !!m.demo,
-    kind: m.kind, body: T(m.body).slice(0, 300), at: m.at,
+    kind: m.kind, body: m.kind === "voice" ? `🎤 ${T(m.body) || "پیام صوتی"}`.slice(0, 300) : T(m.body).slice(0, 300), at: m.at,
   }));
   return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs };
 }
@@ -715,6 +725,31 @@ export async function postMsg(env, th, side, text, meta = null, kind = "text") {
   const t = now();
   const [r] = await env.DB.batch([msgStmt(env, th.id, side, k, body, meta, t), touchStmt(env, th.id, t, false)]);
   return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, k, body, meta, t)] };
+}
+
+/**
+ * پیامِ صوتیِ تأمین‌کننده (پنل وب یا بات): صدا در انبار و متنِ پیاده‌شده‌اش (ElevenLabs، worker/stt.js) در body —
+ * کارشناس و کارشناس هوشمند همین متن را می‌خوانند؛ اگر پیاده نشد body خالی و stt.error. tg: file_id تلگرامِ بات مکاتبات
+ * (برای فرستادنِ همان صدا به کارشناس در تلگرام).
+ */
+export async function postVoice(env, th, side, v) {
+  const t = now();
+  const body = T(v.text).slice(0, 4000);
+  const meta = {
+    voice: { key: v.key, mime: v.mime || null, size: v.size || null, dur: v.dur || null, ...(v.tg ? { tg: v.tg } : {}) },
+    stt: v.error ? { ok: false, error: T(v.error).slice(0, 200) } : { ok: true, lang: v.lang || null },
+  };
+  const [r] = await env.DB.batch([msgStmt(env, th.id, side, "voice", body, meta, t), touchStmt(env, th.id, t, false)]);
+  return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, "voice", body, meta, t)] };
+}
+/** صدای یک پیامِ صوتی با سنجشِ دسترسی به گفت‌وگو */
+export async function voiceOf(env, who, msgId) {
+  const m = int(msgId) ? await env.DB.prepare("SELECT * FROM sp_msgs WHERE id=?").bind(int(msgId)).first() : null;
+  if (!m || m.kind !== "voice") throw new HttpError("این پیام صوتی پیدا نشد.", 404);
+  await threadFor(env, m.thread_id, who);
+  const v = (parse(m.meta_json, {}) || {}).voice || {};
+  if (!v.key) throw new HttpError("صدای این پیام در انبار نیست.", 404);
+  return v;
 }
 
 /* ------------------------------------------------------------------ */

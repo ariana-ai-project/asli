@@ -2,34 +2,38 @@
    پنل تأمین‌کنندگان (دموی مهر ۱۴۰۵) — مرورگر و مینی‌اپ تلگرام
    ورود: لینک پیامک (#k=…) + رمز ۶ رقمیِ همان پیامک → نشست (localStorage).
    داخل تلگرام: initData مینی‌اپ (هدر X-TG-Init) — همان گفت‌وگویی که در بات وارد شده.
-   تب‌ها: مشخصات اقلام (کارت هر قلم در سه کادر: مقدار و واحد و قیمت · شرایط فاکتور · نوع قلم و لایه‌ها؛
-          تازه‌ترها بالا) · آمادهٔ ارسال (چند قلم با هم، و «📄 پیش‌فاکتور +» برای فرستادنِ پیش‌فاکتور همراهِ مشخصات) ·
-          گفت‌وگو با کارشناس (پیام‌های خودِ تأمین‌کننده سمت راست).
+
+   چیدمان (درخواست مالک، مهر ۱۴۰۵):
+   • دسکتاپ (از ۹۶۱ پیکسل): یک صفحه — چپ، گوشی با گفت‌وگوی زنده (ph-chat.js، همان طراحیِ مکاتباتِ کارشناس)؛ راست،
+     مشخصات اقلام و درخواست: کارت هر قلم در سه کادر (مقدار و واحد و قیمت · شرایط فاکتور · نوع قلم و لایه‌ها)، «آمادهٔ
+     ارسال» و «📤 ارسال» — که مشخصات را به‌شکل کارت در همان گفت‌وگو می‌نشاند — و ارسال‌ها و پیش‌فاکتور.
+   • موبایل: فقط همان گفت‌وگو، با همهٔ کارهای بات تأمین‌کنندهٔ تلگرام همان‌جا (worker/sp-bot.js): منوی ثابت (📋 استعلام‌ها ·
+     📦 اقلام · 💬 گفت‌وگو · 🚪 خروج)، کارت اقلام و کارت هر قلم با دکمه‌ها، پر کردن گام‌به‌گامِ مقدار و قیمت و شرایط،
+     «✅ آمادهٔ ارسال» ← «✏️ ویرایش» یا «📤 ارسال» (با پیش‌فاکتور یا بی آن)، پیش‌فاکتور، پیوست. منوی بات در گوشیِ دسکتاپ هم هست.
+   • پیامِ صوتی در هر دو (دکمهٔ میکروفون)؛ متنش برای کارشناس و کارشناس هوشمند پیاده می‌شود و این‌جا نشان داده نمی‌شود.
+   • پیامِ کارشناس هوشمند همان پیامِ کارشناس است — «🤖» هیچ‌جا برای تأمین‌کننده نیست.
    وضعیت یکی است با بات تأمین‌کنندگان: هر تغییری این‌جا در بات هم دیده می‌شود و برعکس.
    ============================================================ */
 (function () {
   "use strict";
+  const PH = window.PH;
   const API = "/tamin-poshtibani/api";
   const app = document.getElementById("app");
   const $ = (s, r) => (r || document).querySelector(s);
   const $$ = (s, r) => [...(r || document).querySelectorAll(s)];
-  const esc = (s) => String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  const { esc, fa, money, qty } = PH;
   const FA = "۰۱۲۳۴۵۶۷۸۹";
-  const fa = (s) => String(s == null ? "" : s).replace(/\d/g, (d) => FA[+d]);
   const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => FA.indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
   const toNum = (v) => { const s = latin(v).replace(/[,٬،\s]/g, "").replace(/٫/g, "."); if (!s) return null; const n = Number(s); return isFinite(n) && n >= 0 ? n : NaN; };
-  const money = (n) => (n == null || !isFinite(n) ? "—" : fa(Math.round(Number(n)).toLocaleString("en-US")).replace(/,/g, "٬"));
-  const qty = (n) => (n == null ? "—" : fa(String(Math.round(Number(n) * 1000) / 1000)));
   /* کدِ افزایشیِ قلم در پنل همین تأمین‌کننده — در پیام‌ها و بات هم همین کد می‌آید */
   const code = (l) => (l && l.no ? `<span class="sp-code">کد ${fa(l.no)}</span> ` : "");
+  const tag = (l, n = 60) => { const t = String(l.title || ""); return `${l.no ? `کد ${fa(l.no)} · ` : ""}${t.length > n ? t.slice(0, n - 1) + "…" : t}`; };
   const EDITABLE = ["new", "draft", "returned", "ready"];
+  const FILLING = ["new", "draft", "returned"];
   const pad = (n) => String(n).padStart(2, "0");
   function when(ms) {
-    try {
-      const d = new Date(ms);
-      const p = new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(d);
-      return p;
-    } catch (_) { const d = new Date(ms); return fa(`${pad(d.getHours())}:${pad(d.getMinutes())}`); }
+    try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); }
+    catch (_) { const d = new Date(ms); return fa(`${pad(d.getHours())}:${pad(d.getMinutes())}`); }
   }
 
   /* ---------- پارامترهای ورود: لینک پیامک یا مینی‌اپ تلگرام ---------- */
@@ -42,7 +46,6 @@
   };
   let tgData = hp.get("tgWebAppData") || "";
   if (tgData) store.sset("sp.tg", tgData); else tgData = store.sget("sp.tg");
-  if (!tgData && /[?&]tg=1/.test(location.search)) tgData = "";
   const inTg = !!tgData;
   const key = hp.get("k") || store.get("sp.k");
   if (hp.get("k")) store.set("sp.k", hp.get("k"));
@@ -62,24 +65,37 @@
     document.head.appendChild(s);
   }
 
-  /* termsDraft: شرایطِ فاکتورِ در حالِ ویرایش (برای همهٔ اقلامِ استعلام یکی است؛ در هر کارت همان نشان داده می‌شود).
-     pfFile: پیش‌فاکتوری که تأمین‌کننده می‌خواهد همراهِ مشخصات بفرستد. */
-  const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1, unseen: 0,
-    company: "تونل سد آریانا", labels: [], botLogin: null, busy: false, enums: {}, termFa: {}, termsDraft: null, termsDirty: false, pfFile: null, goto: null };
+  /* termsDraft: شرایطِ فاکتورِ در حالِ ویرایش در فرمِ راست (برای همهٔ اقلامِ استعلام یکی است). pfFile: پیش‌فاکتوری که با «📄
+     پیش‌فاکتور +» همراهِ مشخصات می‌رود. bot: کارت‌های گذرای بات در گفت‌وگو ({id, after: شناسهٔ آخرین پیام، html}) و flow:
+     گامِ نیمه‌کارهٔ بات (مقدار، قیمت، شرط، برچسب پیوست) که متنِ بعدیِ کادرِ پیام جوابِ آن است. pending: صوتی‌های در راه. */
+  const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1,
+    company: "تونل سد آریانا", labels: [], botLogin: null, busy: false, enums: {}, termFa: {}, termsDraft: null, termsDirty: false, pfFile: null,
+    bot: [], seq: 0, flow: null, pending: [], drafts: {} };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat"];
 
+  /* دسکتاپ: گوشی + فرم؛ زیرش فقط گفت‌وگو */
+  const PHONE = window.matchMedia("(min-width: 961px)");
+  let phoneMode = PHONE.matches;
+  const onPhoneMode = () => { if (phoneMode === PHONE.matches) return; phoneMode = PHONE.matches; if (S.d) renderAll(); };
+  if (PHONE.addEventListener) PHONE.addEventListener("change", onPhoneMode); else if (PHONE.addListener) PHONE.addListener(onPhoneMode);
+
+  const authHeaders = () => (inTg ? { "X-TG-Init": tgData } : S.session ? { "X-SP-Session": S.session } : {});
   async function api(path, opt) {
     opt = opt || {};
-    const headers = { Accept: "application/json", ...(opt.headers || {}) };
+    const headers = { Accept: "application/json", ...(opt.headers || {}), ...authHeaders() };
     if (opt.json !== undefined) headers["Content-Type"] = "application/json";
-    if (inTg) headers["X-TG-Init"] = tgData; else if (S.session) headers["X-SP-Session"] = S.session;
     const res = await fetch(API + path, { method: opt.method || (opt.json !== undefined || opt.body ? "POST" : "GET"), headers, body: opt.json !== undefined ? JSON.stringify(opt.json) : opt.body });
     const txt = await res.text();
     let data = null;
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 200) }; }
     if (!res.ok) { const e = new Error((data && data.error) || `خطای سرور ${res.status}`); e.status = res.status; e.data = data; throw e; }
     return data;
+  }
+  async function loadVoice(id) {
+    const r = await fetch(`${API}/sp/msg/${id}/voice`, { headers: authHeaders() });
+    if (!r.ok) throw new Error("پخش نشد");
+    return r.blob();
   }
 
   function modal(title, body, onYes, yes, no) {
@@ -94,28 +110,30 @@
   }
   const say = (msg, title) => modal(title || "توجه", `<p style="white-space:pre-line">${esc(msg)}</p>`, null, "باشد");
 
-  /* ---------- سرآیند ---------- */
+  /* ---------- سرآیند (دسکتاپ و صفحهٔ ورود) ---------- */
+  const isDark = () => document.documentElement.dataset.theme === "dark";
   function top() {
-    const dark = document.documentElement.dataset.theme === "dark";
     return `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل تأمین‌کنندگان</h1>
       <div class="sub">${S.me ? `${esc(S.me.name)}${S.me.demo ? " <span class=\"sp-tag\">فرضی</span>" : ""} · ` : ""}شرکت ${esc(S.company)}</div></div></div>
-      <span class="spacer"></span><button class="tp-btn sm" data-theme-btn title="${dark ? "حالت روز" : "حالت شب"}">${dark ? "☀️" : "🌙"}</button>
+      <span class="spacer"></span><button class="tp-btn sm" data-theme-btn title="${isDark() ? "حالت روز" : "حالت شب"}">${isDark() ? "☀️" : "🌙"}</button>
       ${S.me ? `<button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>`;
   }
   /* «data-theme» روی خودِ <html> است؛ دکمه نام دیگری دارد تا closest به ریشهٔ صفحه نرسد */
   document.addEventListener("click", (e) => {
     const b = e.target.closest("[data-theme-btn]");
     if (b) {
-      const t = document.documentElement.dataset.theme === "dark" ? "light" : "dark";
+      const t = isDark() ? "light" : "dark";
       document.documentElement.dataset.theme = t; store.set("sp.theme", t);
-      b.textContent = t === "dark" ? "☀️" : "🌙";
+      $$("[data-theme-btn]").forEach((x) => { x.innerHTML = x.classList.contains("ph-circ") ? (t === "dark" ? "☀️" : "🌙") : t === "dark" ? "☀️" : "🌙"; x.title = t === "dark" ? "حالت روز" : "حالت شب"; });
     }
-    if (e.target.closest("[data-logout]")) modal("خروج", "<p>بعد از خروج، برای ورود دوباره باید «ارسال رمز به پیامک» را بزنید.</p>", logout, "خروج", "انصراف");
+    if (e.target.closest("[data-logout]")) askLogout();
   });
+  const askLogout = () => modal("خروج", "<p>بعد از خروج، برای ورود دوباره باید «ارسال رمز به پیامک» را بزنید.</p>", logout, "خروج", "انصراف");
 
   /* ---------- ورود ---------- */
   function renderLogin(msg, ok) {
     S.me = null;
+    app.className = "";
     app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box">
       <h2>ورود به پنل تأمین‌کنندگان</h2>
       <p class="lead">رمز ۶ رقمیِ پیامک را وارد کنید. همین پنل را در تلگرام هم دارید (لینک دوم پیامک).</p>
@@ -153,7 +171,7 @@
     try { await api("/sp/logout", { json: {} }); } catch (_) { /* نشست از قبل باطل */ }
     S.session = ""; store.set("sp.session", "");
     stopPoll();
-    if (inTg) { app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>خارج شدید</h2><p class="lead">اتصال این گفت‌وگوی تلگرام برداشته شد. برای ورود دوباره، لینک پیامک را در بات باز کنید و «ارسال رمز به پیامک» را بزنید.</p></div></div>`; return; }
+    if (inTg) { app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>خارج شدید</h2><p class="lead">اتصال این گفت‌وگوی تلگرام برداشته شد. برای ورود دوباره، لینک پیامک را در بات باز کنید و «ارسال رمز به پیامک» را بزنید.</p></div></div>`; return; }
     renderLogin("خارج شدید. برای ورود دوباره «ارسال رمز به پیامک» را بزنید.", true);
   }
 
@@ -164,57 +182,444 @@
       const d = await api("/sp/me");
       S.me = d.me; S.threads = d.threads || []; S.labels = d.labels || []; S.company = d.company || S.company; S.botLogin = d.botLogin;
       S.enums = d.term_enums || {}; S.termFa = d.term_fa || {};
-      if (!S.threads.length) { app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>فعلاً استعلامی نیست</h2><p class="lead">وقتی کارشناس خرید استعلامی بفرستد، همین‌جا دیده می‌شود.</p></div></div>`; return; }
+      if (!S.threads.length) { app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>فعلاً استعلامی نیست</h2><p class="lead">وقتی کارشناس خرید استعلامی بفرستد، همین‌جا دیده می‌شود.</p></div></div>`; return; }
       const want = parseInt(hp.get("t") || store.sget("sp.th"), 10);
-      await openThread(S.threads.some((t) => t.id === want) ? want : S.threads[0].id);
+      await openThread(S.threads.some((t) => t.id === want) ? want : S.threads[0].id, true);
       startPoll();
     } catch (e) {
       if (e.status === 401 && !inTg) { S.session = ""; store.set("sp.session", ""); return renderLogin(e.data && e.data.relogin ? "نشست شما تمام شده است؛ دوباره وارد شوید." : ""); }
       if (e.status === 404 && inTg) e.message = "این صفحهٔ تأمین‌کننده است؛ این گفت‌وگوی تلگرام به‌عنوان کارشناس وصل است.";
-      app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
+      app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
     }
   }
 
-  async function openThread(id) {
-    if ((S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return;
+  async function openThread(id, first) {
+    if (!first && (S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return false;
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; store.sset("sp.th", String(id));
-    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null;
+    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.pending = [];
     await loadThread();
+    return true;
   }
-  async function loadThread() {
+  /** خواندنِ دوبارهٔ استعلام؛ quiet: فقط داده (کارِ بات خودش کارت می‌گذارد و یک بار رسم می‌کند) */
+  async function loadThread(quiet) {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
     for (const l of d.lines) if (!S.dirty.has(l.id)) S.extra[l.id] = l.extra.slice();
     if (!S.termsDirty) S.termsDraft = { ...(d.thread.terms || {}) };
     const t = S.threads.find((x) => x.id === S.th); if (t) t.unread = 0;
-    render();
+    if (!quiet) renderAll();
+  }
+  const lineOf = (id) => S.d.lines.find((x) => x.id === +id);
+  const termFa = (f) => S.termFa[f] || f;
+  const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${termFa(f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
+  const threadTerms = () => (S.d && S.d.thread.terms) || {};
+  const termsMissing = (t) => TERM_REQUIRED.filter((f) => !String((t || {})[f] ?? "").trim()).map(termFa);
+
+  /* ================================================================
+     رسم
+     ================================================================ */
+  function renderAll() {
+    const keepSide = keepSideState();
+    const chatPos = chatScroll();
+    app.className = "sp-app sup-app";
+    app.innerHTML = phoneMode
+      ? `${top()}<div class="sp-full"><div class="sup-cols"><section class="sup-side" id="side">${sideHtml()}</section>
+          <section class="ph-stage">${PH.frame(screenHtml(true))}</section></div></div>`
+      : `<div class="sp-full sup-mobile">${screenHtml(false)}</div>`;
+    bindSide(); bindChat();
+    keepSide();
+    restoreChat(chatPos);
+  }
+  /** فقط گوشی دوباره رسم می‌شود (پیامِ تازه، کارتِ بات) — فرمِ راست با چیزهای نیمه‌نوشته‌اش دست نمی‌خورد */
+  function renderChat(stick) {
+    const scr = $(".ph-screen");
+    if (!scr) return renderAll();
+    const pos = chatScroll();
+    const focused = document.activeElement && document.activeElement.id === "msgIn";
+    const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
+    const t = document.createElement("div"); t.innerHTML = screenHtml(!!scr.closest(".ph"));
+    scr.replaceWith(t.firstElementChild);
+    bindChat();
+    restoreChat(stick ? null : pos);
+    if (focused) { const i = $("#msgIn"); if (i) i.focus(); }
+  }
+  const chatScroll = () => { const c = $("#chat"); if (!c) return null; return c.scrollHeight - c.scrollTop - c.clientHeight < 90 ? null : c.scrollTop; };
+  function restoreChat(pos) {
+    const c = $("#chat"); if (c) c.scrollTop = pos == null ? c.scrollHeight : pos;
+    const inp = $("#msgIn"); if (inp && S.drafts[S.th]) { inp.value = S.drafts[S.th]; PH.grow(inp); }
   }
 
-  /* ---------- رسم ---------- */
-  function tabBtn(id, label, n, warn) {
-    return `<button class="sp-tab ${S.tab === id ? "on" : ""}" data-tab="${id}">${label}${n ? ` <span class="sp-badge ${warn ? "wait" : "soft"}">${fa(n)}</span>` : ""}</button>`;
+  /* ---------- گوشی: گفت‌وگو + بات ---------- */
+  const MENU = [{ key: "list", label: "📋 استعلام‌ها" }, { key: "items", label: "📦 اقلام" }, { key: "chat", label: "💬 گفت‌وگو" }, { key: "out", label: "🚪 خروج" }];
+  function screenHtml(framed) {
+    const th = S.d.thread;
+    const lastId = S.d.msgs.length ? S.d.msgs[S.d.msgs.length - 1].id : 0;
+    const after = {};
+    for (const c of S.bot) { const a = c.after > lastId ? lastId : c.after; after[a] = (after[a] || "") + c.html; }
+    const list = S.d.msgs.concat(S.pending.map((p, i) => ({ id: -(i + 1), pending: true, who: "s", kind: "voice", at: p.at, meta: { voice: { dur: p.dur } } })));
+    const body = PH.feed(list, {
+      mine: (m) => m.who === "s",
+      rich: (m) => PH.evCard(m, { mine: m.who === "s", termsLine, goLabel: phoneMode ? "دیدن در فرمِ کنار" : "دیدن و پر کردن", actions: evActions }),
+      transcript: false, after,
+      empty: `<div class="ph-void"><b>گفت‌وگو با کارشناس خرید</b>هر پیامی این‌جا بنویسید یا با 🎤 بگویید برای کارشناس فرستاده می‌شود؛ برای پر کردن اقلام «📦 اقلام» را بزنید.</div>`,
+    });
+    const waiting = S.d.lines.filter((l) => FILLING.includes(l.state)).length + S.d.bundles.filter((b) => b.state === "approved").length;
+    return PH.screen({
+      framed, body, label: "گفت‌وگو با کارشناس خرید",
+      nav: {
+        start: !framed ? `<button class="ph-glass ph-circ" data-theme-btn title="${isDark() ? "حالت روز" : "حالت شب"}" aria-label="حالت روز یا شب">${isDark() ? "☀️" : "🌙"}</button>` : "",
+        title: th.expert ? `کارشناس خرید — ${th.expert}` : "کارشناس خرید", avatar: '<img src="../assets/logo-new.jpg" alt="">',
+        whoAttrs: 'data-bot="ic"', whoTitle: `استعلام ${th.request_id} · شرکت ${S.company}${th.expert ? ` · ${th.expert}` : ""}`,
+        acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${PH.I.erase}</button>
+          <button class="ph-glass ph-circ" data-bot="ic" aria-label="اقلام${waiting ? ` — ${fa(waiting)} کار مانده` : ""}" title="اقلام و قیمت‌ها">${PH.I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
+      },
+      composer: { placeholder: S.flow ? S.flow.ph || "بنویسید…" : "پیام به کارشناس خرید", draft: S.th, hint: S.flow ? S.flow.hint : "", keys: MENU, mic: true },
+    });
   }
-  function render() {
+  /** دکمهٔ زیرِ کارتِ رخداد — همان دکمه‌های بات (sp-push.js:actionKb) */
+  function evActions(m) {
+    const ev = m.meta && m.meta.ev;
+    if (ev === "approve" && m.meta.bundle) {
+      const b = S.d.bundles.find((x) => x.id === m.meta.bundle);
+      if (b && b.state === "approved") return ikb([[{ t: "📄 ارسال پیش‌فاکتور", d: `sp:${b.id}` }]]);
+    }
+    if (["rfq", "remind", "return"].includes(ev) && S.d.lines.some((l) => FILLING.includes(l.state))) return ikb([[{ t: "📝 دیدن و پر کردن اقلام", d: "ic" }]]);
+    return "";
+  }
+
+  /* --- کارت‌های بات: پیامِ طرفِ شرکت با دکمه‌های زیرش (مثل صفحه‌کلیدِ درون‌خطیِ تلگرام) --- */
+  const ikb = (rows) => (rows && rows.length ? `<div class="ph-ikb">${rows.filter((r) => r.length).map((r) => `<div class="r">${r.map((b) => `<button type="button" class="ph-ib" data-bot="${esc(b.d)}">${esc(b.t)}</button>`).join("")}</div>`).join("")}</div>` : "");
+  const lastRealId = () => (S.d.msgs.length ? S.d.msgs[S.d.msgs.length - 1].id : 0);
+  /** کارتِ تازه (یا ویرایشِ همان کارت، مثل editMessageText بات) */
+  function card(html, kb, replace) {
+    const body = `<div class="ph-row them first"><div class="ph-bot">${html}${ikb(kb)}</div></div>`;
+    const old = replace ? S.bot.find((c) => c.id === replace) : null;
+    if (old) { old.html = body.replace('class="ph-bot"', `class="ph-bot" data-card="${old.id}"`); renderChat(false); return old.id; }
+    const id = ++S.seq;
+    S.bot.push({ id, after: lastRealId(), html: body.replace('class="ph-bot"', `class="ph-bot" data-card="${id}"`) });
+    renderChat(true);
+    return id;
+  }
+  /** متنی که تأمین‌کننده در جوابِ بات نوشت — مثل تلگرام در گفت‌وگو می‌ماند ولی برای کارشناس نمی‌رود */
+  function echo(text) { S.bot.push({ id: ++S.seq, after: lastRealId(), html: `<div class="ph-row me first"><div class="ph-b me tail">${esc(text)}</div></div>` }); }
+  const say2 = (msg, replace) => card(`<div class="ph-bot-t">⚠️ ${esc(msg)}</div>`, null, replace);
+
+  const VAL_PROMPT = {
+    q: "🔢 مقدار را بنویسید (فقط عدد):", u: "📏 واحد را بنویسید (مثلاً عدد، کیلوگرم، متر):", p: "💰 قیمت واحد را به <b>ریال و بدون ارزش افزوده</b> بنویسید:",
+    n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):", l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»",
+  };
+  const VAL_PH = { q: "مقدار (عدد)…", u: "واحد…", p: "قیمت واحد به ریال…", n: "توضیح…", l: "نام لایه: مقدار" };
+  const TERM_KEY = { d: "dtime", p: "pay", i: "invoice", v: "vat", x: "valid_days" };
+  const TERM_BTN = { d: "🚚 زمان تحویل", p: "💳 تسویه", i: "🧾 نوع فاکتور", v: "➕ ارزش افزوده", x: "📅 اعتبار" };
+  const TERM_PROMPT = { d: "🚚 <b>زمان تحویل</b> را بنویسید — تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری):", x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):" };
+  const TERM_OPTS = { p: "pay", i: "invoice", v: "vat" };
+  const lineSumTxt = (l) => `${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} = ${money(l.qty != null && l.price != null ? l.qty * l.price : null)} ریال`;
+
+  function threadsCard(replace) {
+    const kb = S.threads.map((t) => [{ t: `${t.unread ? `🔴${fa(t.unread)} ` : ""}${t.need_pf ? "📄 " : ""}استعلام ${t.request_id} — ${fa(t.lines)} قلم${t.todo ? ` (${fa(t.todo)} مانده)` : ""}${t.id === S.th ? " ✓" : ""}`, d: `st:${t.id}` }]);
+    return card(`<div class="ph-bot-t">📋 <b>استعلام‌های شما</b><br><i>🔴 پیام نخوانده · 📄 منتظر پیش‌فاکتور</i></div>`, kb, replace);
+  }
+  function itemsCard(head, replace) {
+    const th = S.d.thread, L = S.d.lines.slice().sort((a, b) => b.id - a.id);
+    const ready = L.filter((l) => l.state === "ready"), tm = threadTerms(), miss = termsMissing(tm);
+    const waitPf = S.d.bundles.filter((b) => b.state === "approved");
+    const rows = L.map((l) => `<li><b>${esc(tag(l))}</b> <span class="sp-st ${l.state}">${esc(l.state_fa)}</span><div class="ph-bot-s">${lineSumTxt(l)}</div></li>`).join("");
+    const html = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t">📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i></div><ul class="ph-bot-l">${rows}</ul>
+      <div class="ph-bot-t">🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${miss.length ? `<br><i>مانده: ${esc(miss.join("، "))}</i>` : ""}</div>
+      ${waitPf.length ? `<div class="ph-bot-t">📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.</div>` : ""}
+      <div class="ph-bot-t"><i>روی هر قلم بزنید تا مقدار، قیمت واحد و شرایط را ثبت کنید؛ بعد «آمادهٔ ارسال».</i></div>`;
+    const kb = L.slice(0, 30).map((l) => [{ t: `${FILLING.includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${tag(l, 30)}`, d: `si:${l.id}` }]);
+    if (ready.length) kb.push([{ t: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, d: "ss" }]);
+    for (const b of waitPf) kb.push([{ t: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, d: `sp:${b.id}` }]);
+    return card(html, kb, replace);
+  }
+  /** کارت یک قلم — همان سه بخشِ بات و همان دکمه‌ها؛ «آمادهٔ ارسال» که خورد فقط «✏️ ویرایش» و «📤 ارسال» */
+  function lineCard(l, head, replace) {
+    const tm = threadTerms(), files = S.d.files.filter((f) => f.line_id === l.id);
+    const others = S.d.lines.filter((x) => x.id !== l.id && FILLING.includes(x.state)).length;
+    const ed = FILLING.includes(l.state);
+    let h = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t">✏️ <b>${esc(tag(l, 80))}</b><br>وضعیت: <i>${esc(l.state_fa)}</i></div>
+      <div class="ph-bot-sec"><b>📦 مقدار، واحد و قیمت</b>مقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b> <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i><br>
+        قیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b><br>قیمت کل: <b>${money(l.total)}</b> ریال</div>
+      <div class="ph-bot-sec"><b>🧾 شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i><br>${TERM_FIELDS.map((f) => `${esc(termFa(f))}: <b>${String(tm[f] ?? "").trim() ? esc(fa(tm[f])) : "—"}</b>`).join("<br>")}</div>
+      <div class="ph-bot-sec"><b>🔒 نوع قلم و لایه‌های ویژگی</b>${l.head ? `نوع قلم: ${esc(l.head)}<br>` : ""}${l.layers.length ? l.layers.map((x) => `• ${esc(x.k)}: ${esc(x.v)}`).join("<br>") : "—"}
+        <br>➕ لایه‌های افزودهٔ شما: ${l.extra.length ? l.extra.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ") : "—"}</div>
+      ${l.note ? `<div class="ph-bot-t">📝 توضیح: ${esc(l.note)}</div>` : ""}<div class="ph-bot-t">📎 پیوست‌ها: ${files.length ? files.map((f) => esc(f.label)).join("، ") : "—"}</div>`;
+    const kb = [];
+    if (l.state === "ready") {
+      h += `<div class="ph-bot-t">✅ <b>این قلم آمادهٔ ارسال است.</b> برای تغییر «✏️ ویرایش»، برای فرستادن برای کارشناس «📤 ارسال».</div>`;
+      kb.push([{ t: "✏️ ویرایش", d: `sr:${l.id}:0` }, { t: "📤 ارسال", d: "ss" }]);
+      if (others) kb.push([{ t: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, d: "ic" }]);
+      return card(h, kb, replace);
+    }
+    const miss = [...(l.missing || []), ...termsMissing(tm)];
+    if (ed && miss.length) h += `<div class="ph-bot-t"><i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i></div>`;
+    if (!ed && !EDITABLE.includes(l.state)) h += `<div class="ph-bot-t"><i>${esc(lockedMsg(l))}</i></div>`;
+    if (ed) {
+      kb.push([{ t: "🔢 مقدار", d: `sv:${l.id}:q` }, { t: "📏 واحد", d: `sv:${l.id}:u` }, { t: "💰 قیمت واحد", d: `sv:${l.id}:p` }]);
+      kb.push(["d", "p", "i"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
+      kb.push(["v", "x"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
+      kb.push([{ t: "➕ لایهٔ تازه", d: `sv:${l.id}:l` }, { t: "📝 توضیح", d: `sv:${l.id}:n` }, { t: "📎 پیوست", d: `sa:${l.id}` }]);
+      const ex = []; l.extra.slice(0, 8).forEach((x, i) => ex.push({ t: `🗑 ${x.k.length > 14 ? x.k.slice(0, 13) + "…" : x.k}`, d: `sl:${l.id}:${i}` }));
+      for (let i = 0; i < ex.length; i += 2) kb.push(ex.slice(i, i + 2));
+      kb.push([{ t: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
+    }
+    kb.push([{ t: "📦 فهرست اقلام", d: "ic" }]);
+    return card(h, kb, replace);
+  }
+  function lockedMsg(l) {
+    return { submitted: "فرستاده شد؛ منتظر بررسی کارشناس.", approved: "مشخصات تأیید شد؛ پیش‌فاکتور را بفرستید.",
+      proforma: "پیش‌فاکتور رسید؛ منتظر تأیید نهایی کارشناس.", final: "✓ تأیید نهایی شد.", rejected: "این قلم رد شد." }[l.state] || "";
+  }
+  /** پرسیدنِ یک مقدار؛ جواب، متنِ بعدیِ کادرِ پیام است */
+  function askValue(l, f, head) {
+    S.flow = { step: "val", line: l.id, f, hint: `${VAL_PROMPT[f].replace(/<[^>]+>/g, "")} — ${tag(l, 30)}`, ph: VAL_PH[f] };
+    const kb = [];
+    if (f === "q" && l.req_qty != null) kb.push([{ t: `✔️ همان مقدار درخواست (${qty(l.req_qty)} ${l.req_unit || ""})`, d: `sv:${l.id}:qd` }]);
+    kb.push([{ t: "✖️ انصراف", d: `si:${l.id}` }]);
+    card(`${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b><br>${VAL_PROMPT[f]}</div>`, kb);
+    focusComposer();
+  }
+  function askTerm(l, k, head) {
+    const f = TERM_KEY[k];
+    const top = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b></div>`;
+    if (TERM_OPTS[k]) {
+      S.flow = null;
+      const kb = (S.enums[TERM_OPTS[k]] || []).map((v, i) => [{ t: v, d: `tv:${l.id}:${k}:${i}` }]);
+      kb.push([{ t: "✖️ انصراف", d: `si:${l.id}` }]);
+      return card(`${top}<div class="ph-bot-t">🧾 <b>${esc(termFa(f))}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:</div>`, kb);
+    }
+    S.flow = { step: "term", line: l.id, k, hint: `${TERM_PROMPT[k].replace(/<[^>]+>/g, "")}`, ph: k === "d" ? "۱۰ روز کاری یا ۱۴۰۵/۰۸/۰۱" : "شمار روز…" };
+    card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
+    focusComposer();
+  }
+  const focusComposer = () => { const i = $("#msgIn"); if (i && phoneMode) i.focus(); };
+  /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
+  async function afterSave(lineId, head) {
+    await loadThread(true);
+    refreshSide();
+    const l = lineOf(lineId);
+    if (!l) return itemsCard(head);
+    const tm = threadTerms();
+    if (FILLING.includes(l.state)) {
+      if ((l.missing || []).includes("مقدار")) return askValue(l, "q", head);
+      if ((l.missing || []).includes("قیمت واحد")) return askValue(l, "p", head);
+      for (const k of ["d", "p", "i", "v"]) if (!String(tm[TERM_KEY[k]] ?? "").trim()) return askTerm(l, k, head);
+    }
+    const all = [...(l.missing || []), ...termsMissing(tm)];
+    return lineCard(l, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
+  }
+  /** فرمِ راست (دسکتاپ) بعد از کارِ بات، بی آن‌که چیزی که کاربر نیمه نوشته بپرد */
+  function refreshSide() {
+    const side = $("#side"); if (!side) return;
+    if (S.dirty.size || S.termsDirty) return;
+    const keep = keepSideState();
+    side.innerHTML = sideHtml(); bindSide(); keep();
+  }
+
+  /** فایل‌گیر — باید در همان کلیک باز شود (مرورگر بی کلیکِ کاربر پنجرهٔ فایل باز نمی‌کند) */
+  function pickFile(accept, fn) {
+    const inp = document.createElement("input");
+    inp.type = "file"; inp.accept = accept; inp.style.display = "none";
+    inp.onchange = () => { const f = inp.files && inp.files[0]; inp.remove(); if (!f) return; if (f.size > 20 * 1048576) return say2("حجم فایل بیشتر از ۲۰ مگابایت است."); fn(f); };
+    document.body.appendChild(inp); inp.click();
+  }
+
+  /** دکمه‌های بات (همان callback_dataهای worker/sp-bot.js) */
+  async function bot(data, cardId) {
+    const p = String(data).split(":"), a = p[0], n = (i) => parseInt(p[i], 10) || 0;
+    try {
+      if (a === "ic") { S.flow = null; return itemsCard("", cardId); }
+      if (a === "list") return threadsCard();
+      if (a === "st") { if (n(1) !== S.th) { if (await openThread(n(1))) itemsCard(); return; } return itemsCard("", cardId); }
+      if (a === "si") { S.flow = null; const l = lineOf(n(1)); return l ? lineCard(l, "", cardId) : itemsCard("", cardId); }
+      if (a === "sv") {
+        const l = lineOf(n(1)); if (!l) return;
+        if (p[2] === "qd") {
+          await api(`/sp/line/${l.id}`, { method: "PUT", json: { qty: l.req_qty, unit: l.req_unit } });
+          S.flow = null; return afterSave(l.id, "✅ مقدار ثبت شد.");
+        }
+        return askValue(l, p[2]);
+      }
+      if (a === "tk") { const l = lineOf(n(1)); return l ? askTerm(l, p[2]) : null; }
+      if (a === "tv") {
+        const v = (S.enums[TERM_OPTS[p[2]]] || [])[n(3)]; if (!v) return;
+        const r = await api(`/sp/thread/${S.th}/terms`, { json: { [TERM_KEY[p[2]]]: v } });
+        if (!S.termsDirty) S.termsDraft = { ...r.terms };
+        return afterSave(n(1), `✅ ${termFa(TERM_KEY[p[2]])}: ${esc(v)}`);
+      }
+      if (a === "sl") {
+        const l = lineOf(n(1)); if (!l) return;
+        const extra = l.extra.slice(); extra.splice(n(2), 1);
+        await api(`/sp/line/${l.id}`, { method: "PUT", json: { extra } });
+        await loadThread(true); refreshSide();
+        return lineCard(lineOf(l.id), "", cardId);
+      }
+      if (a === "sa") {
+        const l = lineOf(n(1)); if (!l) return;
+        if (p[2] === undefined) {
+          const kb = S.labels.map((x, i) => [{ t: x, d: `sa:${l.id}:${i}` }]);
+          kb.push([{ t: "✏️ برچسب دیگر…", d: `sa:${l.id}:o` }], [{ t: "↩️ کارت قلم", d: `si:${l.id}` }]);
+          return card(`<div class="ph-bot-t">📎 برچسب این پیوست چیست؟ <i>(${esc(tag(l, 30))})</i></div>`, kb, cardId);
+        }
+        if (p[2] === "o") { S.flow = { step: "label", line: l.id, hint: "برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»)", ph: "برچسب پیوست…" }; card(`<div class="ph-bot-t">برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»):</div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]); return focusComposer(); }
+        const label = S.labels[n(2)]; if (!label) return;
+        return pickFile(".pdf,image/*,.doc,.docx,.xls,.xlsx", (f) => uploadAttach(l.id, label, f));
+      }
+      if (a === "sf") { const l = lineOf(n(1)); const label = decodeURIComponent(p.slice(2).join(":")); return l ? pickFile(".pdf,image/*,.doc,.docx,.xls,.xlsx", (f) => uploadAttach(l.id, label, f)) : null; }
+      if (a === "sr") {
+        const on = p[2] === "1";
+        try { await api(`/sp/line/${n(1)}/ready`, { json: { on } }); }
+        catch (e) { if (on) return afterSave(n(1), `⚠️ هنوز کامل نیست: ${esc(e.message)}`); throw e; }
+        await loadThread(true); refreshSide();
+        return lineCard(lineOf(n(1)), on ? "" : "✏️ حالا می‌توانید ویرایش کنید؛ بعد دوباره «✅ آمادهٔ ارسال».", cardId);
+      }
+      if (a === "ss") {
+        const cnt = S.d.lines.filter((l) => l.state === "ready").length;
+        if (!cnt) return say2("هیچ قلمِ «آمادهٔ ارسال»ی نیست.");
+        return card(`<div class="ph-bot-t">📤 <b>ارسالِ ${fa(cnt)} قلمِ آماده برای کارشناس</b><br>پیش‌فاکتورِ همین اقلام را هم دارید؟ اگر همراهش بفرستید، مرحلهٔ «تأیید مشخصات و درخواست پیش‌فاکتور» لازم نیست.</div>`,
+          [[{ t: "📄 بله، همراه با پیش‌فاکتور", d: "sq:pf" }], [{ t: "📤 نه، فقط مشخصات", d: "sq:go" }], [{ t: "✖️ انصراف", d: "x" }]]);
+      }
+      if (a === "sq") {
+        const ids = S.d.lines.filter((l) => l.state === "ready").map((l) => l.id);
+        if (!ids.length) return say2("هیچ قلمِ «آمادهٔ ارسال»ی نیست.");
+        if (p[1] === "pf") return pickFile(".pdf,image/*", (f) => submitBot(ids, f, cardId));
+        return submitBot(ids, null, cardId);
+      }
+      if (a === "sp") return pickFile(".pdf,image/*", (f) => pfBot(n(1), f));
+      if (a === "x") { S.flow = null; return card(`<div class="ph-bot-t">باشد، کنار گذاشته شد.</div>`, null, cardId); }
+    } catch (e) { say2(e.message); }
+  }
+  async function uploadAttach(lineId, label, file) {
+    try {
+      await api(`/sp/line/${lineId}/file?filename=${encodeURIComponent(file.name)}&label=${encodeURIComponent(label)}&note=`, { method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+      S.flow = null; await loadThread(true); refreshSide();
+      lineCard(lineOf(lineId), `✅ پیوستِ «${esc(label)}» ثبت شد.`);
+    } catch (e) { say2(e.message); }
+  }
+  async function submitBot(ids, pf, cardId) {
+    try {
+      const r = pf
+        ? await api(`/sp/thread/${S.th}/submit-pf?ids=${ids.join(",")}&filename=${encodeURIComponent(pf.name)}`, { method: "POST", body: pf, headers: { "Content-Type": pf.type || "application/octet-stream" } })
+        : await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids } });
+      await loadThread(true); refreshSide();
+      itemsCard(`✅ ${pf ? "مشخصات و پیش‌فاکتور با هم" : ""}${pf ? " " : ""}برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`, cardId);
+    } catch (e) { say2(e.message); }
+  }
+  async function pfBot(bid, file) {
+    try {
+      await api(`/sp/bundle/${bid}/proforma?filename=${encodeURIComponent(file.name)}`, { method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
+      await loadThread(true); refreshSide();
+      card(`<div class="ph-bot-t">✅ پیش‌فاکتور رسید و برای کارشناس فرستاده شد. نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.</div>`);
+    } catch (e) { say2(e.message); }
+  }
+  /** متنِ کادرِ پیام وقتی بات منتظر جواب است (مقدار، قیمت، شرط، برچسب) */
+  async function flowInput(text) {
+    const f = S.flow;
+    echo(text);
+    if (f.step === "val") {
+      const body = f.f === "q" ? { qty: toNum(text) } : f.f === "p" ? { price: toNum(text) } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: text === "-" ? "" : text } : null;
+      try {
+        if (f.f === "l") {
+          const m = /^(.{1,40}?)\s*[:：=]\s*(.+)$/.exec(text);
+          if (!m) { renderChat(true); return say2("به این شکل بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»"); }
+          const l = lineOf(f.line);
+          if (l.layers.some((y) => y.k.trim() === m[1].trim())) { renderChat(true); return say2(`«${m[1].trim()}» لایهٔ قفل‌شدهٔ کارشناس است؛ تغییرش فقط با مذاکره در گفت‌وگوست.`); }
+          await api(`/sp/line/${f.line}`, { method: "PUT", json: { extra: [...l.extra.filter((x) => x.k !== m[1].trim()), { k: m[1].trim(), v: m[2].trim() }] } });
+        } else {
+          if ((f.f === "q" || f.f === "p") && (body[f.f === "q" ? "qty" : "price"] == null || Number.isNaN(body[f.f === "q" ? "qty" : "price"]))) { renderChat(true); return say2(f.f === "q" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد."); }
+          await api(`/sp/line/${f.line}`, { method: "PUT", json: body });
+        }
+        S.flow = null;
+        return afterSave(f.line, "✅ ذخیره شد.");
+      } catch (e) { renderChat(true); return say2(e.message); }
+    }
+    if (f.step === "term") {
+      try {
+        const r = await api(`/sp/thread/${S.th}/terms`, { json: { [TERM_KEY[f.k]]: text } });
+        if (!S.termsDirty) S.termsDraft = { ...r.terms };
+        S.flow = null;
+        return afterSave(f.line, "✅ ذخیره شد.");
+      } catch (e) { renderChat(true); return say2(e.message); }
+    }
+    if (f.step === "label") {
+      const label = text.slice(0, 40);
+      S.flow = null;
+      return card(`<div class="ph-bot-t">حالا فایلِ «${esc(label)}» را انتخاب کنید — PDF یا عکس.</div>`, [[{ t: "📎 انتخاب فایل", d: `sf:${f.line}:${encodeURIComponent(label)}` }], [{ t: "✖️ انصراف", d: `si:${f.line}` }]]);
+    }
+  }
+
+  /* --- رفتارِ گوشی --- */
+  function bindChat() {
+    const scr = $(".ph-screen"); if (!scr) return;
+    PH.bindComposer(scr, {
+      /* کادر پیش از رسمِ دوباره خالی می‌شود — وگرنه پیش‌نویسِ نگه‌داشته همان متنِ فرستاده را برمی‌گرداند */
+      onSend: async (text) => {
+        const clear = () => { const i = $("#msgIn"); if (i) i.value = ""; S.drafts[S.th] = ""; };
+        if (S.flow) { clear(); await flowInput(text); return; }
+        try { const r = await api(`/sp/thread/${S.th}/msg`, { json: { text } }); clear(); addMsgs(r.msgs, true); }
+        catch (e) { say(e.message); throw e; }
+      },
+      onVoice: sendVoice,
+      onKey: (k) => {
+        if (k === "list") return bot("list");
+        if (k === "items") return bot("ic");
+        if (k === "chat") { S.bot = []; S.flow = null; return renderChat(true); }
+        if (k === "out") return askLogout();
+      },
+      onFlowCancel: () => { S.flow = null; renderChat(false); },
+      onError: (m) => say(m),
+    });
+    $$("[data-bot]", scr).forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const c = b.closest("[data-card]"); bot(b.dataset.bot, c ? +c.dataset.card : null); }; });
+    const chat = $("#chat"); if (chat) PH.bindVoices(chat, loadVoice);
+    /* کلیک روی کارتِ رخداد: دسکتاپ همان بسته یا قلم در فرمِ کنار؛ موبایل کارتِ بات */
+    const go = (sel, fallback) => { if (phoneMode) { S.tab = sel.startsWith("[data-bundle") ? "ready" : "spec"; const side = $("#side"); if (side) { side.innerHTML = sideHtml(); bindSide(); } return jumpTo(sel); } fallback(); };
+    $$("[data-goto-b]", scr).forEach((el) => { el.onclick = () => go(`[data-bundle="${el.dataset.gotoB}"]`, () => bot("ic")); });
+    $$("[data-goto-no]", scr).forEach((el) => { el.onclick = (e) => { e.stopPropagation(); const l = S.d.lines.find((x) => String(x.no) === el.dataset.gotoNo); go(`[data-line-no="${el.dataset.gotoNo}"]`, () => (l ? lineCard(l) : bot("ic"))); }; });
+    const clr = $("[data-clear-chat]", scr);
+    if (clr) clr.onclick = () => modal("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و کارشناس هنوز آن‌ها را می‌بیند.</p>", async () => {
+      try { await api(`/sp/thread/${S.th}/clear`, { json: {} }); S.bot = []; S.flow = null; await loadThread(); } catch (e) { say(e.message); }
+    }, "🧹 پاک شود", "انصراف");
+  }
+  /** پیامِ صوتی: تا رسیدن، حبابِ «در حال ارسال»؛ متنش را این‌جا هرگز نمی‌بینیم */
+  async function sendVoice(blob, dur) {
+    const p = { at: Date.now(), dur };
+    S.pending.push(p); renderChat(true);
+    try {
+      const r = await api(`/sp/thread/${S.th}/voice?dur=${dur}`, { method: "POST", body: blob, headers: { "Content-Type": blob.type || "audio/webm" } });
+      S.pending = S.pending.filter((x) => x !== p);
+      addMsgs(r.msgs, true);
+    } catch (e) { S.pending = S.pending.filter((x) => x !== p); renderChat(false); say(e.message); }
+  }
+
+  /* ================================================================
+     فرمِ راست (دسکتاپ): مشخصات اقلام · ارسال‌ها و پیش‌فاکتور
+     ================================================================ */
+  function sideHtml() {
     const d = S.d, th = d.thread;
-    const todo = d.lines.filter((l) => EDITABLE.includes(l.state) && l.state !== "ready").length;
+    const todo = d.lines.filter((l) => FILLING.includes(l.state)).length;
     const ready = d.lines.filter((l) => l.state === "ready").length;
     const needPf = d.bundles.filter((b) => b.state === "approved").length;
-    const keep = keepScroll();
-    app.innerHTML = `${top()}<div class="sp-wrap">
+    const tab = (id, label, n, warn) => `<button class="sp-tab ${S.tab === id ? "on" : ""}" data-tab="${id}">${label}${n ? ` <span class="sp-badge ${warn ? "wait" : "soft"}">${fa(n)}</span>` : ""}</button>`;
+    return `<div class="sup-in">
       ${S.threads.length > 1 ? `<div class="sp-pills">${S.threads.map((t) => `<button class="sp-pill ${S.th === t.id ? "on" : ""}" data-th="${t.id}">استعلام ${esc(t.request_id)}${t.unread ? ` <span class="sp-badge">${fa(t.unread)}</span>` : ""}${t.need_pf ? ` <span class="sp-badge wait">پیش‌فاکتور</span>` : ""}</button>`).join("")}</div>` : ""}
-      <div class="sp-row" style="margin-top:8px"><b>استعلام ${esc(th.request_id)}</b><span class="sp-muted">کارشناس خرید: ${esc(th.expert)}</span>
-        <span class="sp-grow"></span>${S.botLogin && !inTg ? `<a class="tp-btn xs" href="${esc(S.botLogin)}" target="_blank" rel="noopener">🤖 همین پنل در تلگرام</a>` : ""}</div>
-      <nav class="sp-tabs sp-sticky">${tabBtn("spec", "مشخصات اقلام", todo)}${tabBtn("ready", "آمادهٔ ارسال", ready + needPf, needPf > 0)}${tabBtn("chat", "گفت‌وگو", S.unseen)}</nav>
-      <section id="pane">${S.tab === "spec" ? specPane() : S.tab === "ready" ? readyPane() : chatPane()}</section>
-    </div>`;
-    bind();
-    /* نوار تب‌ها زیرِ نوار بالای صفحه می‌چسبد (هر دو sticky)؛ بلندیِ نوار بالا با پهنای صفحه عوض می‌شود */
-    const tb = $(".tp-top"); if (tb) document.documentElement.style.setProperty("--sp-top-h", `${tb.offsetHeight}px`);
-    if (S.goto) { const g = S.goto; S.goto = null; jumpTo(g); } else keep();
-    if (S.tab === "chat") { const c = $(".sp-chat"); if (c) c.scrollTop = c.scrollHeight; }
+      <div class="sup-head"><div><h2>استعلام ${esc(th.request_id)}</h2><div class="sp-muted">کارشناس خرید: ${esc(th.expert)} · شرکت ${esc(S.company)}</div></div>
+        ${S.botLogin && !inTg ? `<a class="tp-btn xs" href="${esc(S.botLogin)}" target="_blank" rel="noopener">📲 همین پنل در تلگرام</a>` : ""}</div>
+      <nav class="sp-tabs sp-sticky">${tab("spec", "📝 مشخصات اقلام", todo)}${tab("ready", "📤 ارسال‌ها و پیش‌فاکتور", ready + needPf, needPf > 0)}</nav>
+      <section id="pane">${S.tab === "spec" ? specPane() : readyPane()}</section></div>`;
   }
-  function keepScroll() { const y = window.scrollY; return () => window.scrollTo(0, y); }
-  /** کلیک روی پیامِ بسته یا قلم: همان کارت پیدا و چشمک‌زن می‌شود */
+  /** پیش از رسمِ دوبارهٔ فرم: مقدارهای نیمه‌نوشتهٔ کارت‌های تغییرکرده و جای اسکرول */
+  function keepSideState() {
+    const side = $("#side");
+    const y = side ? side.scrollTop : 0;
+    const vals = {};
+    for (const id of S.dirty) { const c = $(`[data-line="${id}"]`); if (c) { vals[id] = {}; $$("[data-f]", c).forEach((i) => { vals[id][i.dataset.f] = i.value; }); } }
+    return () => {
+      const s = $("#side"); if (s) s.scrollTop = y;
+      for (const id of Object.keys(vals)) { const c = $(`[data-line="${id}"]`); if (!c) continue; $$("[data-f]", c).forEach((i) => { if (vals[id][i.dataset.f] !== undefined) i.value = vals[id][i.dataset.f]; }); recalc(c); }
+    };
+  }
   function jumpTo(sel) {
     const el = $(sel);
     if (!el) return;
@@ -226,11 +631,6 @@
   /* --- مشخصات: هر قلم در سه کادر --- */
   const fileRow = (f, ed) => `<div class="sp-file"><b>${esc(f.label)}</b><span class="nm" title="${esc(f.filename)}">${esc(f.filename || "")}${f.note ? ` — ${esc(f.note)}` : ""}</span>
     <button class="tp-btn xs" data-open-file="${f.id}">👁 دیدن</button>${ed ? `<button class="tp-btn xs danger" data-del-file="${f.id}">🗑</button>` : ""}</div>`;
-  function lockedMsg(l) {
-    return { submitted: "فرستاده شد؛ منتظر بررسی کارشناس.", approved: "مشخصات تأیید شد؛ پیش‌فاکتور را از تب «آمادهٔ ارسال» بفرستید.",
-      proforma: "پیش‌فاکتور رسید؛ منتظر تأیید نهایی کارشناس.", final: "✓ تأیید نهایی شد.", rejected: "این قلم رد شد." }[l.state] || "";
-  }
-  const termFa = (f) => S.termFa[f] || f;
   /** شرایطِ فاکتورِ یک قلم: بستهٔ فرستاده‌شده عکسِ خودش را دارد؛ قلمِ قابل ویرایش شرایطِ جاریِ استعلام را */
   function termsFor(l) {
     if (l.bundle_id && !EDITABLE.includes(l.state)) { const b = S.d.bundles.find((x) => x.id === l.bundle_id); if (b && b.terms && Object.keys(b.terms).length) return b.terms; }
@@ -251,8 +651,8 @@
       </div></div>`;
   }
   /* «آمادهٔ ارسال» که خورد، کارت قفل می‌شود و فقط دو راه دارد: «✏️ ویرایش» (برگشت به پیش‌نویس) یا «📤 ارسال» */
-  function lineCard(l) {
-    const ed = EDITABLE.includes(l.state) && l.state !== "ready";
+  function formCard(l) {
+    const ed = FILLING.includes(l.state);
     const ro = ed ? "" : "readonly";
     const files = S.d.files.filter((f) => f.line_id === l.id);
     const extra = S.extra[l.id] || l.extra;
@@ -282,11 +682,11 @@
         : `<div class="sp-lockedmsg">${esc(lockedMsg(l))}</div>`}
     </article>`;
   }
-  /** کادرِ «📄 پیش‌فاکتور +» و ارسال: هم در «مشخصات اقلام»، هم در «آمادهٔ ارسال» */
+  /** کادرِ «📄 پیش‌فاکتور +» و ارسال: هم در «مشخصات اقلام»، هم در «ارسال‌ها» */
   function sendBox(where) {
     const ready = S.d.lines.filter((l) => l.state === "ready");
     return `<div class="sp-sendbox">
-      <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${ready.length ? `${fa(ready.length)} قلمِ آماده${where === "spec" ? "" : " (تیک‌خورده‌های جدول)"}` : "هنوز قلمی «آمادهٔ ارسال» نیست"}</span></div>
+      <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${ready.length ? `${fa(ready.length)} قلمِ آماده${where === "spec" ? "" : " (تیک‌خورده‌های جدول)"}` : "هنوز قلمی «آمادهٔ ارسال» نیست"} — مشخصات به‌شکل کارت در گفت‌وگو هم می‌نشیند.</span></div>
       <div class="sp-row" style="margin-top:8px">
         <label class="tp-btn sm sp-pfplus">📄 پیش‌فاکتور +<input type="file" data-pf-pick accept=".pdf,image/*" hidden></label>
         ${S.pfFile ? `<span class="sp-pfname">📄 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری — اگر پیش‌فاکتور دارید همین‌جا اضافه کنید تا با مشخصات یک‌جا برود.</span>`}
@@ -300,11 +700,8 @@
     return `${ret ? `<div class="tp-note warn">↩️ کارشناس برگرداند: ${esc(ret.comment)}</div>` : ""}
       ${sendBox("spec")}
       <p class="sp-muted">برای هر قلم مقدار، واحد و قیمت واحد (ریال، بدون ارزش افزوده) و شرایط فاکتور را بنویسید — قیمت کل خودکار است — اگر لازم است لایهٔ تازه و پیوست اضافه کنید و «آمادهٔ ارسال» را بزنید؛ بعد «📤 ارسال». تازه‌ترها بالا هستند.</p>
-      ${lines.map(lineCard).join("")}`;
+      ${lines.map(formCard).join("")}`;
   }
-
-  /* --- آمادهٔ ارسال --- */
-  const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${termFa(f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
   function readyPane() {
     const d = S.d;
     const ready = d.lines.filter((l) => l.state === "ready");
@@ -315,7 +712,7 @@
       ${ready.map((l) => `<tr><td><input type="checkbox" data-pick="${l.id}" checked></td><td class="t">${code(l)}${esc(l.title)}</td><td>${qty(l.qty)}</td><td>${esc(l.unit || "")}</td><td>${money(l.price)}</td><td>${money(l.total)}</td></tr>`).join("")}
       </tbody><tfoot><tr><td></td><td class="t">جمع</td><td colspan="3"></td><td>${money(sum)}</td></tr></tfoot></table></div>
       <div class="sp-muted" style="margin-top:6px">🧾 شرایط فاکتور: ${esc(termsLine(S.termsDraft)) || "—"}</div>`
-      : `<p class="sp-muted">هنوز قلمی «آمادهٔ ارسال» نیست. در تب «مشخصات اقلام» هر قلم را کامل کنید و «آمادهٔ ارسال» بزنید.</p>`;
+      : `<p class="sp-muted">هنوز قلمی «آمادهٔ ارسال» نیست. در «مشخصات اقلام» هر قلم را کامل کنید و «آمادهٔ ارسال» بزنید.</p>`;
     h += `${sendBox("ready")}</div>`;
     const bundles = d.bundles.slice().reverse();
     if (bundles.length) h += `<h3 style="margin:18px 0 0;font-size:1rem">ارسال‌های شما</h3>`;
@@ -336,72 +733,38 @@
     return h;
   }
 
-  /* --- گفت‌وگو: پیام‌های خودِ تأمین‌کننده سمت راست؛ رخدادِ بسته و قلم به‌شکل کارت، با کلیک به همان کارت --- */
-  const EV_HEAD = { rfq: "📦 استعلام", remind: "🔁 یادآوری استعلام", submit: "📤 مشخصات برای بررسی فرستاده شد", approve: "✅ مشخصات تأیید شد — پیش‌فاکتور خواسته شد",
-    pf: "📄 پیش‌فاکتور رسید", return: "↩️ برای اصلاح برگشت خورد", reject: "❌ رد شد", final: "🏁 تأیید نهایی شد" };
-  function evCard(m) {
-    const meta = m.meta || {};
-    const items = Array.isArray(meta.items) ? meta.items.filter((x) => x && typeof x === "object") : [];
-    if (!EV_HEAD[meta.ev] || !items.length) return null;
-    const goto = meta.bundle ? `data-goto-b="${meta.bundle}"` : "";
-    const head = meta.ev === "rfq" ? `📦 استعلام ${fa(items.length)} قلم` : meta.ev === "submit" ? `📤 مشخصات ${fa(items.length)} قلم برای بررسی فرستاده شد${meta.pf ? ` · همراه با پیش‌فاکتور «${esc(meta.pf)}»` : ""}` : EV_HEAD[meta.ev];
-    const note = /💬 ([\s\S]+)$/.exec(m.body || "");
-    const blocks = items.map((x) => {
-      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
-      const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
-      return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
-        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
-    }).join("");
-    const foot = [meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "", meta.terms && termsLine(meta.terms) ? `🧾 ${esc(termsLine(meta.terms))}` : ""].filter(Boolean).join("<br>");
-    return `<div class="sp-msg ev rich ${m.who === "s" ? "me" : ""}" ${goto} title="${goto ? "رفتن به همین بسته" : "رفتن به همین قلم"}"><div class="evh">${head}</div>${blocks}
-      ${foot ? `<div class="evf">${foot}</div>` : ""}${note ? `<div class="evf">💬 ${esc(note[1])}</div>` : ""}<time>${when(m.at)}</time></div>`;
-  }
-  function msgHtml(m) {
-    if (m.kind === "event") return evCard(m) || `<div class="sp-msg ev">${esc(m.body)}<time>${when(m.at)}</time></div>`;
-    const me = m.who === "s";
-    /* طرفِ تأمین‌کننده می‌داند پاسخ‌دهنده دستیارِ هوشمند است */
-    /* پیامِ کارشناس هوشمند برای تأمین‌کننده همان پیامِ کارشناس است — «🤖» فقط در صفحهٔ مکاتباتِ کارشناس (مهر ۱۴۰۵) */
-    return `<div class="sp-msg ${me ? "me" : ""}"><span class="who">${me ? "شما" : `کارشناس — ${esc(S.d.thread.expert)}`}</span>${esc(m.body)}<time>${when(m.at)}</time></div>`;
-  }
-  function chatPane() {
-    S.unseen = 0;
-    return `<div class="sp-chatpane"><div class="sp-chatbar"><span class="sp-muted">گفت‌وگو با کارشناس خرید</span><span class="sp-grow"></span><button class="tp-btn xs" data-clear-chat title="فقط از صفحهٔ شما پاک می‌شود">🧹 پاک کردن گفت‌وگو</button></div>
-      <div class="sp-chat" id="chat">${S.d.msgs.length ? S.d.msgs.map(msgHtml).join("") : `<div class="sp-empty">هنوز پیامی نیست.</div>`}</div>
-      <div class="sp-composer"><textarea class="tp-input" id="msgIn" placeholder="پیام به کارشناس خرید…" rows="2"></textarea><button class="tp-btn primary" id="sendMsg">ارسال</button></div>
-      <p class="sp-muted">اگر دربارهٔ مشخصات قفل‌شده (مثلاً جنس یا اندازه) پیشنهاد دیگری دارید، همین‌جا بنویسید؛ تغییرش با کارشناس است.</p></div>`;
-  }
-
-  /* ---------- رفتار ---------- */
   function cardOf(el) { const c = el.closest("[data-line]"); return c ? { c, id: +c.dataset.line } : null; }
   function recalc(c) {
     const q = toNum($('[data-f="qty"]', c).value), p = toNum($('[data-f="price"]', c).value);
     $("[data-total]", c).textContent = q != null && p != null && !isNaN(q) && !isNaN(p) ? money(q * p) : "—";
   }
-  function bind() {
-    $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; render(); }; });
-    $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th).catch((e) => say(e.message)); });
-    $$("[data-f]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
+  function bindSide() {
+    const side = $("#side"); if (!side) return;
+    const Q = (s) => $$(s, side);
+    Q("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; side.innerHTML = sideHtml(); bindSide(); }; });
+    Q("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th).catch((e) => say(e.message)); });
+    Q("[data-f]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
     /* شرایط فاکتور در همهٔ کارت‌ها یکی است: نوشتن در یکی، بقیه را هم همان می‌کند */
-    $$("[data-t]").forEach((i) => {
+    Q("[data-t]").forEach((i) => {
       const sync = () => {
         S.termsDraft = { ...(S.termsDraft || {}), [i.dataset.t]: i.value }; S.termsDirty = true;
-        $$(`[data-t="${i.dataset.t}"]`).forEach((o) => { if (o !== i && !o.disabled && !o.readOnly) o.value = i.value; });
+        Q(`[data-t="${i.dataset.t}"]`).forEach((o) => { if (o !== i && !o.disabled && !o.readOnly) o.value = i.value; });
       };
       i.oninput = sync; i.onchange = sync;
     });
-    $$("[data-add-layer]").forEach((b) => {
+    Q("[data-add-layer]").forEach((b) => {
       b.onclick = () => {
         const x = cardOf(b); const k = $("[data-nk]", x.c).value.trim(), v = $("[data-nv]", x.c).value.trim();
         if (!k || !v) return say("نام لایه و مقدارش را بنویسید.");
-        const l = S.d.lines.find((y) => y.id === x.id);
+        const l = lineOf(x.id);
         if (l.layers.some((y) => y.k.trim() === k)) return say(`«${k}» لایهٔ قفل‌شدهٔ کارشناس است؛ تغییرش فقط با مذاکره در گفت‌وگوست.`);
         S.extra[x.id] = [...(S.extra[x.id] || []).filter((y) => y.k !== k), { k, v }];
         S.dirty.add(x.id); rerenderCard(x.id);
       };
     });
-    $$("[data-rm-layer]").forEach((b) => { b.onclick = () => { const x = cardOf(b); S.extra[x.id].splice(+b.dataset.rmLayer, 1); S.dirty.add(x.id); rerenderCard(x.id); }; });
-    $$("[data-save]").forEach((b) => { b.onclick = () => saveLine(cardOf(b).id).then(() => loadThread()).catch((e) => say(e.message)); });
-    $$("[data-ready]").forEach((b) => {
+    Q("[data-rm-layer]").forEach((b) => { b.onclick = () => { const x = cardOf(b); S.extra[x.id].splice(+b.dataset.rmLayer, 1); S.dirty.add(x.id); rerenderCard(x.id); }; });
+    Q("[data-save]").forEach((b) => { b.onclick = () => saveLine(cardOf(b).id).then(() => loadThread()).catch((e) => say(e.message)); });
+    Q("[data-ready]").forEach((b) => {
       b.onclick = async () => {
         const id = cardOf(b).id;
         try {
@@ -411,41 +774,20 @@
         } catch (e) { say(e.message); }
       };
     });
-    $$("[data-flabel]").forEach((s) => { s.onchange = () => $("[data-flabel2]", cardOf(s).c).classList.toggle("hide", s.value !== "__o"); });
-    $$("[data-upload]").forEach((b) => { b.onclick = () => uploadFile(cardOf(b)); });
-    $$("[data-open-file]").forEach((b) => { b.onclick = () => openUrl(`/sp/file/${b.dataset.openFile}/url`); });
-    $$("[data-del-file]").forEach((b) => { b.onclick = () => modal("حذف پیوست", "<p>این پیوست حذف شود؟</p>", async () => { try { await api(`/sp/file/${b.dataset.delFile}`, { method: "DELETE" }); await loadThread(); } catch (e) { say(e.message); } }, "حذف", "انصراف"); });
-    /* «📄 پیش‌فاکتور +» و ارسال */
-    $$("[data-pf-pick]").forEach((inp) => { inp.onchange = () => { const f = inp.files && inp.files[0]; if (!f) return; if (f.size > 20 * 1048576) return say("حجم فایل بیشتر از ۲۰ مگابایت است."); S.pfFile = f; render(); }; });
-    $$("[data-pf-clear]").forEach((b) => { b.onclick = () => { S.pfFile = null; render(); }; });
-    $$("[data-send-box]").forEach((b) => {
-      b.onclick = () => submitDialog(b.dataset.sendBox === "ready" && $$("[data-pick]").length
-        ? $$("[data-pick]").filter((x) => x.checked).map((x) => +x.dataset.pick)
+    Q("[data-flabel]").forEach((s) => { s.onchange = () => $("[data-flabel2]", cardOf(s).c).classList.toggle("hide", s.value !== "__o"); });
+    Q("[data-upload]").forEach((b) => { b.onclick = () => uploadFile(cardOf(b)); });
+    Q("[data-open-file]").forEach((b) => { b.onclick = () => openUrl(`/sp/file/${b.dataset.openFile}/url`); });
+    Q("[data-del-file]").forEach((b) => { b.onclick = () => modal("حذف پیوست", "<p>این پیوست حذف شود؟</p>", async () => { try { await api(`/sp/file/${b.dataset.delFile}`, { method: "DELETE" }); await loadThread(); } catch (e) { say(e.message); } }, "حذف", "انصراف"); });
+    Q("[data-pf-pick]").forEach((inp) => { inp.onchange = () => { const f = inp.files && inp.files[0]; if (!f) return; if (f.size > 20 * 1048576) return say("حجم فایل بیشتر از ۲۰ مگابایت است."); S.pfFile = f; side.innerHTML = sideHtml(); bindSide(); }; });
+    Q("[data-pf-clear]").forEach((b) => { b.onclick = () => { S.pfFile = null; side.innerHTML = sideHtml(); bindSide(); }; });
+    Q("[data-send-box]").forEach((b) => {
+      b.onclick = () => submitDialog(b.dataset.sendBox === "ready" && Q("[data-pick]").length
+        ? Q("[data-pick]").filter((x) => x.checked).map((x) => +x.dataset.pick)
         : S.d.lines.filter((l) => l.state === "ready").map((l) => l.id));
     });
-    /* «📤 ارسال» روی کارتِ قلمِ آماده: همهٔ اقلامِ آمادهٔ همین استعلام (فهرستشان در پنجره هست) */
-    $$("[data-send-ready]").forEach((b) => { b.onclick = () => submitDialog(S.d.lines.filter((l) => l.state === "ready").map((l) => l.id)); });
-    $$("[data-pf]").forEach((b) => { b.onclick = () => uploadPf(+b.dataset.pf); });
-    $$("[data-open-pf]").forEach((b) => { b.onclick = () => openUrl(`/sp/bundle/${b.dataset.openPf}/pf-url`); });
-    /* کلیک روی پیامِ بسته یا قلم در گفت‌وگو */
-    $$("[data-goto-b]").forEach((el) => { el.onclick = () => { S.tab = "ready"; S.goto = `[data-bundle="${el.dataset.gotoB}"]`; render(); }; });
-    $$("[data-goto-no]").forEach((el) => { el.onclick = () => { S.tab = "spec"; S.goto = `[data-line-no="${el.dataset.gotoNo}"]`; render(); }; });
-    const clr = $("[data-clear-chat]");
-    if (clr) clr.onclick = () => modal("پاک کردن گفت‌وگو", "<p>پیام‌های تا این لحظه از صفحهٔ شما پاک می‌شوند. در سامانه می‌مانند و کارشناس هنوز آن‌ها را می‌بیند.</p>", async () => {
-      try { await api(`/sp/thread/${S.th}/clear`, { json: {} }); await loadThread(); } catch (e) { say(e.message); }
-    }, "🧹 پاک شود", "انصراف");
-    const send = $("#sendMsg");
-    if (send) {
-      const inp = $("#msgIn");
-      const go = async () => {
-        const text = inp.value.trim(); if (!text) return;
-        send.disabled = true;
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { json: { text } }); inp.value = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
-        send.disabled = false; inp.focus();
-      };
-      send.onclick = go;
-      inp.onkeydown = (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); go(); } };
-    }
+    Q("[data-send-ready]").forEach((b) => { b.onclick = () => submitDialog(S.d.lines.filter((l) => l.state === "ready").map((l) => l.id)); });
+    Q("[data-pf]").forEach((b) => { b.onclick = () => uploadPf(+b.dataset.pf); });
+    Q("[data-open-pf]").forEach((b) => { b.onclick = () => openUrl(`/sp/bundle/${b.dataset.openPf}/pf-url`); });
   }
   function submitDialog(ids) {
     if (!ids.length) return say("دست‌کم یک قلم را تیک بزنید.");
@@ -461,19 +803,17 @@
           S.pfFile = null;
         } else await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids } });
         await loadThread();
-        say(pf ? "مشخصات و پیش‌فاکتور با هم فرستاده شد. نتیجهٔ بررسی را همین‌جا و در «گفت‌وگو» می‌بینید." : "فرستاده شد. نتیجهٔ بررسی را همین‌جا و در «گفت‌وگو» می‌بینید.", "✓ ارسال شد");
       } catch (e) { say(e.message); }
     }, pf ? "📤 ارسال با پیش‌فاکتور" : "📤 ارسال", "انصراف");
   }
   function rerenderCard(id) {
-    const card = $(`[data-line="${id}"]`);
-    const l = S.d.lines.find((x) => x.id === id);
-    const vals = {}; $$("[data-f]", card).forEach((i) => { vals[i.dataset.f] = i.value; });
-    const t = document.createElement("div"); t.innerHTML = lineCard(l);
-    const fresh = t.firstElementChild; card.replaceWith(fresh);
+    const c = $(`[data-line="${id}"]`);
+    const vals = {}; $$("[data-f]", c).forEach((i) => { vals[i.dataset.f] = i.value; });
+    const t = document.createElement("div"); t.innerHTML = formCard(lineOf(id));
+    const fresh = t.firstElementChild; c.replaceWith(fresh);
     $$("[data-f]", fresh).forEach((i) => { if (vals[i.dataset.f] !== undefined) i.value = vals[i.dataset.f]; });
     recalc(fresh);
-    bind();
+    bindSide();
   }
   /** ذخیرهٔ کارت: مقدار، واحد، قیمت، توضیح و لایه‌های افزوده — و اگر شرایط فاکتور عوض شده، آن هم (برای همهٔ اقلام) */
   async function saveLine(id) {
@@ -524,32 +864,26 @@
   }
 
   /* ---------- پیام‌های تازه (نظرسنجی سبک) ---------- */
-  function addMsgs(list) {
+  function addMsgs(list, mine) {
     const fresh = (list || []).filter((m) => m.id > S.lastMsg);
     if (!fresh.length) return;
     S.d.msgs.push(...fresh); S.lastMsg = fresh[fresh.length - 1].id;
-    const c = $("#chat");
-    if (S.tab === "chat" && c) {
-      const empty = $(".sp-empty", c); if (empty) empty.remove();
-      c.insertAdjacentHTML("beforeend", fresh.map(msgHtml).join(""));
-      c.scrollTop = c.scrollHeight;
-      bind();
-    } else if (fresh.some((m) => m.who !== "s")) {
-      S.unseen += fresh.filter((m) => m.who !== "s").length;
-      const tab = $('[data-tab="chat"]'); if (tab) tab.innerHTML = `گفت‌وگو <span class="sp-badge">${fa(S.unseen)}</span>`;
-    }
+    renderChat(!!mine || chatScroll() == null);
   }
   let timer = null, tick = 0;
   function startPoll() { stopPoll(); timer = setInterval(poll, 6000); }
   function stopPoll() { if (timer) clearInterval(timer); timer = null; }
   async function poll() {
-    if (document.hidden || !S.th || S.busy) return;
+    if (document.hidden || !S.th || S.busy || document.querySelector(".tp-modal-bg")) return;
+    onPhoneMode();
     S.busy = true;
     try {
       const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
       addMsgs(r.msgs);
-      if (r.rev !== S.rev && !S.dirty.size && !S.termsDirty && !(document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName))) await loadThread();
+      const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+      if (r.rev !== S.rev && !S.dirty.size && !S.termsDirty && !typing && !S.flow) await loadThread();
       if (++tick % 5 === 0 && S.threads.length > 1) { const d = await api("/sp/me"); S.threads = d.threads || S.threads; }
+      const ck = $(".ph-clock"); if (ck) ck.textContent = PH.clock();
     } catch (e) { if (e.status === 401 && !inTg) { stopPoll(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
     S.busy = false;
   }
