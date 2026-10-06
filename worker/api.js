@@ -49,7 +49,8 @@ import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute, aiAdmin } from "./ai-agent.js";
-import { aiOwned, aiQuote, aiQuoteNames, aiAsks, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
+import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
+import { getRules, coverOf } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
@@ -269,6 +270,8 @@ const COLUMN_MIGRATIONS = [
   ...SP_COLUMNS,
   /* (فاز ۲ پنل پشتیبانی) «پرسش از کارشناس»: سؤالِ کارشناس هوشمند، زمانش و پاسخِ کارشناس (ai-lock.js) */
   ["ai_threads", "ask_json", "TEXT"],
+  ["ai_runs", "handover_at", "INTEGER"],     /* فاز ۳: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد (ai-rules.js) */
+  ["ai_runs", "review_json", "TEXT"],        /* فاز ۳: تحویلِ کارشناس هوشمند در پنل پشتیبانی — {state: new|ok|rejected, …} */
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -454,10 +457,13 @@ function ev(env, actor, kind, request_id, item_id, payload) {
 /**
  * قفلِ «کارشناس هوشمند» (فاز ۲ پنل پشتیبانی، ai-lock.js): ارجاعی که دستِ اوست، برای کارشناس — نه مدیر و نه پشتیبانی — قفل
  * است؛ بررسی سوابق، جستجوی هوشمند، ساختار قلم، جدول کمیسیون و نامه را خودش انجام می‌دهد. who: {expert} یا {role: "expert"}.
+ * kind «research» (سوابق، جستجو، ساختار): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) برای کارشناس باز است؛ جدول و
+ * نامه تا پایانِ کارِ کارشناس هوشمند قفل می‌مانند.
  */
-async function aiGuard(env, who, assignmentId) {
+async function aiGuard(env, who, assignmentId, kind) {
   if (!who || !(who.expert || who.role === "expert") || !assignmentId) return;
-  if (await aiOwned(env, assignmentId)) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
+  const o = await aiOwned(env, assignmentId);
+  if (kind === "research" ? aiResearchLocked(o) : o) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
 }
 /** خطِ استعلامی که کارشناس هوشمند ساخته (یا از گفت‌وگوی او آمده) — برای کارشناس دست‌نخوردنی */
 async function aiQuoteGuard(env, q) {
@@ -1058,7 +1064,7 @@ async function settingsFor(env, expertId, settings) {
 
 /* ارجاعِ دستِ کارشناس هوشمند در یک ستون (همان قاعدهٔ ai-lock.js:aiOwned) — a: assignments؛ کارتابل نشانِ 🤖 می‌زند */
 const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0
-    WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN 1 ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
+    WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN (CASE WHEN x.handover_at IS NULL THEN 1 ELSE 2 END) ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
     WHEN a.dispatched_at>=COALESCE(g.on_at,0) AND a.closed_at IS NULL THEN 1 ELSE 0 END FROM ai_agents g WHERE g.expert_id=a.expert_id)`;
 
 async function tray(env, ex, url) {
@@ -1105,13 +1111,19 @@ async function assignmentDetail(env, aid, who) {
   /* فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستِ دستِ کارشناس هوشمند (قفلِ سوابق، جستجو، ساختار، کمیسیون و نامه)، خط‌های استعلامِ
      او (q.ai — دست‌نخوردنی) و «پرسش از کارشناس»های بی‌پاسخِ همین درخواست */
   const owned = await aiOwned(env, aid);
-  const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state } : null, asks: 0 };
+  const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state, handover: owned.handover || null } : null, asks: 0 };
   const names = await aiQuoteNames(env, aid);
   const aiMode = !!owned || names.size > 0 || !!(await env.DB.prepare("SELECT 1 AS x FROM ai_agents WHERE expert_id=? AND mode='on'").bind(a.expert_id).first());
-  for (const q of quotes) q.ai = aiMode && (q.source === "ai" || names.has(q.supplier_name)) ? 1 : 0;
+  /* فاز ۳: تحویلِ ردشده در پنل پشتیبانی درخواست را کامل به کارشناس برمی‌گرداند — خط‌های کارشناس هوشمند هم آزاد */
+  const rv = aiMode ? await env.DB.prepare("SELECT review_json FROM ai_runs WHERE assignment_id=?").bind(aid).first() : null;
+  const released = !!rv && aiRejected(rv.review_json);
+  for (const q of quotes) q.ai = aiMode && !released && (q.source === "ai" || names.has(q.supplier_name)) ? 1 : 0;
   if (aiMode) {
     const k = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id WHERE t.assignment_id=? AND ${AI_ASK_SQL}`).bind(aid).first();
     ai.asks = k ? k.n : 0;
+    if (rv && rv.review_json) { try { ai.review = JSON.parse(rv.review_json); } catch (_) { /* بی بررسی */ } }
+    /* حداقلِ استعلامِ هر قلم (قواعدِ پنل پشتیبانی) و آنچه رسیده — نوارِ کارشناس هوشمند و «واگذاری» */
+    if (owned) ai.cover = await coverOf(env, aid, await getRules(env), (await getSettings(env)).minSuppliers);
   }
   ai.mode = aiMode;
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
@@ -1131,7 +1143,7 @@ async function ownItem(env, who, itemId) {
 async function markProgress(env, ex, itemId, stage) {
   const it = await env.DB.prepare("SELECT i.id, i.assignment_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(itemId, ex.id).first();
   if (!it) throw new HttpError("قلم متعلق به شما نیست.", 403);
-  await aiGuard(env, { expert: ex }, it.assignment_id);
+  await aiGuard(env, { expert: ex }, it.assignment_id, "research");
   const col = stage === "hist" ? "hist_done_at" : stage === "smart" ? "smart_done_at" : null;
   if (!col) throw new HttpError("stage باید hist یا smart باشد.");
   await env.DB.prepare(`UPDATE items SET ${col}=COALESCE(${col},?) WHERE id=?`).bind(now(), itemId).run();
@@ -1604,7 +1616,7 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") return sheetOut(env, int(mm[1]), mm[2], url);
       if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));
       /* کارشناس هوشمند (فاز ۲): تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارهایش (worker/ai-agent.js:aiAdmin) */
-      if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson });
+      if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson, flush: (k) => flush(env, ctx, k) });
       if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
       if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
@@ -1985,7 +1997,7 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       const it = await ownItem(env, who, int(b.item_id));
       /* درخواستِ دستِ کارشناس هوشمند: جستجوی هوشمند را خودش می‌کند (ai-lock.js) */
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
       /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
          یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را
@@ -2038,7 +2050,7 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
       /* ساختارِ قلمِ درخواستِ دستِ کارشناس هوشمند را خودش می‌سازد (ai-lock.js) */
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       const b = await readJson(request);
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
@@ -2049,7 +2061,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       /* قلمی که برای تأمین‌کننده رفته قفل است: برداشتنِ ذخیره نه، و ذخیره فقط با همان نوع قلم و لایه‌ها (نرخ‌ها آزاد) */
       const lock = (await itemLocks(env, [it.id])).get(it.id);
       if (m === "DELETE") {
@@ -2068,7 +2080,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
       const r = await revertEdit(env, it);
       if (r.removed !== false) await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_revert", it.request_id, it.id, { assignment_id: it.aid }).run();
@@ -2094,20 +2106,20 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       /* درخواستِ دستِ کارشناس هوشمند: بررسی سوابق را خودش می‌کند (ai-lock.js) */
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       return json(await itemHistory(env, it, histOpts()));
     }
     if (path === "/suppliers/history/buys" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       return json(await supplierBuys(env, it, url.searchParams.get("supplier"), histOpts()));
     }
     /* نقاط نمودار روند خرید قلم (تاریخ × مقدار به واحد مرجع، به تفکیک تأمین‌کننده) */
     if (path === "/suppliers/history/series" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      await aiGuard(env, who, it.aid);
+      await aiGuard(env, who, it.aid, "research");
       return json(await itemSeries(env, it, histOpts()));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }

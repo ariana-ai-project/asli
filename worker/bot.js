@@ -52,7 +52,7 @@ import { pushMsgs as spPush } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
 import { aiTick } from "./ai-agent.js";
-import { aiOwned, aiQuote, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
+import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
 
@@ -171,8 +171,11 @@ const navRow = (aid) => [KARTABL_BTN, reqBtn(aid)];
  * فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستی که دستِ کارشناس هوشمند است برای کارشناس قفل است — بررسی سوابق، جستجوی
  * هوشمند، جدول کمیسیون و نامه را خودش انجام می‌دهد. پیامِ کوتاه و true، تا تابع همان‌جا برگردد.
  */
-async function aiBlocked(env, api, chat, aid, mid) {
-  if (!aid || !(await aiOwned(env, aid))) return false;
+async function aiBlocked(env, api, chat, aid, mid, kind) {
+  if (!aid) return false;
+  const o = await aiOwned(env, aid);
+  /* «research» (سوابق و جستجو): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) باز است */
+  if (!(kind === "research" ? aiResearchLocked(o) : o)) return false;
   await show(api, chat, mid || null, esc(AI_LOCK_MSG), [navRow(aid)]);
   return true;
 }
@@ -1745,7 +1748,7 @@ const mOf = (c) => (c === "e" ? "exact" : "head");
 const otherMode = (m) => (m === "exact" ? "head" : "exact");
 
 async function histStart(env, api, chat, ex, aid, mid) {
-  if (await aiBlocked(env, api, chat, aid, mid)) return { ok: true };
+  if (await aiBlocked(env, api, chat, aid, mid, "research")) return { ok: true };
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
@@ -2239,7 +2242,7 @@ async function smartItemOf(env, exId, itemId) {
 }
 
 async function smartPickItem(env, api, chat, ex, aid) {
-  if (await aiBlocked(env, api, chat, aid, null)) return { ok: true };
+  if (await aiBlocked(env, api, chat, aid, null, "research")) return { ok: true };
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
@@ -2255,7 +2258,7 @@ async function smartPrefsCard(env, api, chat, ex, itemId) {
   const it = await smartItemOf(env, ex.id, itemId);
   if (!it) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
   const own = await env.DB.prepare("SELECT assignment_id FROM items WHERE id=?").bind(itemId).first();
-  if (await aiBlocked(env, api, chat, own && own.assignment_id, null)) return { ok: true };
+  if (await aiBlocked(env, api, chat, own && own.assignment_id, null, "research")) return { ok: true };
   await closeInputs(env, ex.id);
   const t = now();
   /* جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پیش از خرج کردنِ جستجوی تازه */

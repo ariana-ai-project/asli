@@ -8,8 +8,9 @@
  *      لینک پنل و بات (spSend)، و پیامک فقط به شماره‌های تیک‌خورده — پیش از هر پیامک تیک دوباره سنجیده می‌شود.
  *   ۴. مذاکره در هر گفت‌وگو: مدل (ai-prompts.js) پرونده را می‌خواند، پاسخ می‌دهد و تصمیم می‌گیرد — تأیید، برگشت، رد،
  *      پذیرش مغایرت، تأیید نهایی — با همان توابعِ صفحهٔ مکاتبات. پیش‌فاکتور اول با همان «خوانش هوشمند» خوانده می‌شود.
- *   ۵. پایان (هر قلم دست‌کم یک خطِ «تأیید نهایی»، و سکوتِ تأمین‌کنندگان یا «پایان» کارشناس): شرحِ فرایند، چالش‌ها و
- *      معیار انتخاب ← نامه، و جدول کمیسیون — به تلگرام کارشناس و پنل.
+ *   ۵. پایان (هر قلم به «حداقلِ استعلامِ» خودش رسیده — قواعدِ پنل پشتیبانی، ai-rules.js — و سکوتِ تأمین‌کنندگان یا «پایان»
+ *      از پنل): شرحِ فرایند، چالش‌ها و معیار انتخاب ← نامه، و جدول کمیسیون — به تلگرام کارشناس، و «تحویل» در پنل پشتیبانی
+ *      برای تأیید یا ردِ کمیسیون (فاز ۳). اگر در مهلتِ قواعد به حد نرسید، کار به کارشناس «واگذار» می‌شود (handOver).
  * همه با Cron، یک گام در هر اجرا (سقف ۵۰ زیردرخواست و ۱۰ms CPU پلن رایگان)، با قفل روی هر اجرا و هر گفت‌وگو. کارِ
  * تأمین‌کننده (پیام، ارسال، پیش‌فاکتور) گامِ همان گفت‌وگو را بلافاصله هم می‌زند (waitUntil، زیر ۳۰ ثانیه).
  * شفافیت: هر فراخوانیِ مدل با پرامپتِ دقیق، پاسخ و تخمین هزینه در ai_calls؛ هر گام در ai_log؛ هر پیامک در sp_sms؛ و همهٔ
@@ -37,6 +38,10 @@ import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, 
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
 import { AI_ASK_SQL } from "./ai-lock.js";
+import { getRules, saveRules, coverOf, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
+import { expertAppUrl } from "./tg-nav.js";
+import { setCommission } from "./support.js";
+import { queueStmt } from "./queue.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -445,29 +450,81 @@ async function stepWork(env, run, k) {
   return finishCheck(env, run, k);
 }
 
-/** پایانِ مذاکره: هر قلمِ باز دست‌کم یک خطِ «ثبت موقت + تأیید نهایی»، و (سکوتِ تأمین‌کنندگان، «پایان» کارشناس یا نزدیکیِ مهلت) */
-async function finishCheck(env, run, { cfg, asg }) {
-  const its = (await env.DB.prepare(`SELECT i.id, i.title, (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.saved=1 AND q.final=1) AS n
-      FROM items i WHERE i.assignment_id=? AND i.state='open'`).bind(run.assignment_id).all()).results || [];
-  const covered = its.length > 0 && its.every((i) => i.n > 0);
+/** حداقلِ استعلامِ اقلامِ بازِ یک ارجاع با قواعدِ پنل پشتیبانی و حدِ پایهٔ مدیر (ai-rules.js) */
+const coverNow = async (env, aid) => coverOf(env, aid, await getRules(env), (await getSettings(env)).minSuppliers);
+const shortOf = (cover) => cover.filter((c) => c.have < c.need).map((c) => ({ id: c.id, title: c.title, need: c.need, have: c.have }));
+
+/**
+ * پایانِ مذاکره: هر قلمِ باز به «حداقلِ استعلامِ» خودش رسیده (شمارِ تأمین‌کنندگانِ مختلف با «ثبت موقت + تأیید نهایی»؛ حد از
+ * قواعدِ پنل پشتیبانی و «حداقل تأمین‌کننده»ی مدیر)، و (سکوتِ تأمین‌کنندگان، «پایان» از پنل یا نزدیکیِ مهلت). «پایان»ِ پشتیبانی
+ * با کمتر از حد هم می‌بندد اگر هر قلم دست‌کم یک پیشنهادِ تأییدنهایی دارد — کمبود در شرح و نامه گفته می‌شود. اگر در مهلتِ قواعد
+ * به حد نرسید، یک بار به کارشناس «واگذار» می‌شود (handOver) و کار ادامه دارد.
+ */
+async function finishCheck(env, run, { cfg, asg, ex }) {
+  const rules = await getRules(env);
+  const cover = await coverOf(env, run.assignment_id, rules, (await getSettings(env)).minSuppliers);
+  const covered = cover.length > 0 && cover.every((c) => c.have >= c.need);
+  const some = cover.length > 0 && cover.every((c) => c.have > 0);
   const last = await env.DB.prepare("SELECT MAX(m.at) AS at FROM sp_msgs m JOIN ai_threads x ON x.thread_id=m.thread_id WHERE x.run_id=? AND m.who='s'").bind(run.id).first();
   const since = Math.max((last && last.at) || 0, run.data.invited_at || 0, run.created_at);
   const quiet = now() - since >= cfg.quietMin * 60000;
   const soon = !!(asg && asg.deadline_at && asg.deadline_at - now() < 2 * 3600000);
-  const why = run.finish_at ? "دستورِ «پایان مذاکره» از تب" : quiet ? `${faN(cfg.quietMin)} دقیقه بی پیامِ تازه از تأمین‌کنندگان` : soon ? "نزدیکیِ مهلتِ ارجاع" : null;
-  run.data.cover = its.map((i) => ({ id: i.id, title: i.title, n: i.n }));
-  if (covered && why) {
-    run.data.closing = { step: "report", why };
-    await env.DB.batch([saveData(env, run), next(env, run, 0, "closing"), logStmt(env, run.id, null, "step", `پایانِ مذاکره (${why}): هر قلم دست‌کم یک پیشنهادِ تأییدنهایی‌شده دارد. جدول کمیسیون و نامه آماده می‌شود.`)]);
-    return { step: "finish" };
+  const why = run.finish_at ? `دستورِ «پایان مذاکره» از پنل پشتیبانی${covered ? "" : "، با کمتر از حداقلِ استعلام"}` : quiet ? `${faN(cfg.quietMin)} دقیقه بی پیامِ تازه از تأمین‌کنندگان` : soon ? "نزدیکیِ مهلتِ ارجاع" : null;
+  run.data.cover = cover.map((c) => ({ id: c.id, title: c.title, n: c.have, need: c.need, why: c.why }));
+  if ((covered && why) || (run.finish_at && some)) {
+    const short = shortOf(cover);
+    run.data.closing = { step: "report", why, ...(short.length ? { short } : {}) };
+    await env.DB.batch([saveData(env, run), next(env, run, 0, "closing"), logStmt(env, run.id, null, "step", short.length
+      ? `پایانِ مذاکره (${why}): این اقلام کمتر از حداقلِ استعلام دارند — ${short.map((c) => `«${c.title}» ${faN(c.have)} از ${faN(c.need)}`).join("، ")}. جدول کمیسیون و نامه آماده می‌شود و کمبود در آن‌ها گفته می‌شود.`
+      : `پایانِ مذاکره (${why}): هر قلم به حداقلِ استعلامِ خودش رسید. جدول کمیسیون و نامه آماده می‌شود.`)]);
+    return { step: "finish", short: short.length };
   }
   /* «پایان» خواسته شد ولی قلمی بی پیشنهاد است: یک بار برای هر بار زدنِ دکمه (finish_at) گفته می‌شود */
-  if (run.finish_at && !covered && run.data.finishWarned !== run.finish_at) {
+  if (run.finish_at && !some && run.data.finishWarned !== run.finish_at) {
     run.data.finishWarned = run.finish_at;
-    await log(env, run.id, null, "step", `«پایان مذاکره» خواسته شد ولی این اقلام هنوز پیشنهادِ تأییدنهایی‌شده ندارند: ${its.filter((i) => !i.n).map((i) => `«${i.title}»`).join("، ")}`);
+    await log(env, run.id, null, "step", `«پایان مذاکره» خواسته شد ولی این اقلام هنوز پیشنهادِ تأییدنهایی‌شده ندارند: ${cover.filter((c) => !c.have).map((c) => `«${c.title}»`).join("، ")}`);
+  }
+  /* مهلتِ رسیدن به حد (قواعدِ پنل پشتیبانی) گذشت و هنوز نرسیده: آلارم به کارشناس و واگذاریِ سوابق و جستجو — یک بار */
+  const start = run.data.invited_at || run.created_at;
+  if (!covered && !run.handover_at && rules.waitHours > 0 && now() - start >= rules.waitHours * 3600000) {
+    await handOver(env, run, ex, cover, rules);
+    return { step: "handover", short: shortOf(cover).length };
   }
   await env.DB.batch([saveData(env, run), next(env, run, 60000)]);
   return { step: "wait", covered };
+}
+
+/**
+ * «واگذاری» (فاز ۳): مهلتِ قواعدِ پنل پشتیبانی گذشت و قلمی هنوز به حداقلِ استعلامش نرسیده. کارشناس در تلگرام آلارم می‌گیرد
+ * و بررسی سوابق، جستجوی هوشمند و ساختارِ همین درخواست برایش باز می‌شود (ai-lock.js:aiResearchLocked) تا استعلامِ کم را خودش
+ * بگیرد («ارسال استعلام» در مکاتبات یا خطِ دستیِ ✋). کارشناس هوشمند گفت‌وگوهایش را ادامه می‌دهد و وقتی حد پر شد (با
+ * خط‌های کارشناس هم)، جدول و نامه را خودش می‌سازد.
+ */
+async function handOver(env, run, ex, cover, rules) {
+  const t = now();
+  const short = shortOf(cover);
+  run.data.handover = { at: t, hours: rules.waitHours, items: short };
+  run.handover_at = t;
+  await env.DB.batch([
+    env.DB.prepare("UPDATE ai_runs SET data_json=?, handover_at=?, next_at=?, error=NULL, updated_at=? WHERE id=?").bind(JSON.stringify(run.data), t, t + 60000, t, run.id),
+    logStmt(env, run.id, null, "handover", `⚠️ مهلتِ ${faN(rules.waitHours)} ساعته گذشت و این اقلام به حداقلِ استعلام نرسیدند: ${short.map((c) => `«${c.title}» ${faN(c.have)} از ${faN(c.need)}`).join("، ")}. `
+      + "کار به کارشناس واگذار شد: بررسی سوابق و جستجوی هوشمند برایش باز است؛ گفت‌وگوها ادامه دارند و جدول و نامه با کارشناس هوشمند است."),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_handover", run.request_id,
+      JSON.stringify({ assignment_id: run.assignment_id, hours: rules.waitHours, items: short, channel: "ai" })),
+  ]);
+  await handoverAlarm(env, ex, run, short, rules.waitHours).catch((e) => console.error("ai handover alarm", e && e.message));
+}
+/** آلارمِ واگذاری در بات کارشناسان — همان لحظه، با دکمهٔ مینی‌اپِ پنل کارشناس */
+async function handoverAlarm(env, ex, run, short, hours) {
+  if (!ex.telegram_chat || !env.TG_BOT_TOKEN) return 0;
+  const text = `⚠️ <b>کارشناس هوشمند به حداقلِ استعلامِ درخواست ${esc(run.request_id)} نرسید</b>\n\n`
+    + `بعد از ${faN(hours)} ساعت، این اقلام هنوز کمتر از حدی که پنل پشتیبانی تعیین کرده پیشنهادِ تأییدنهایی دارند:\n`
+    + short.map((c) => `• ${esc(c.title)} — ${faN(c.have)} از ${faN(c.need)}`).join("\n")
+    + "\n\n<b>لطفاً خودتان وارد شوید:</b> بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است. تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید "
+    + "(«ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور). گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.";
+  await telegram(env).call("sendMessage", { chat_id: ex.telegram_chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
+    reply_markup: { inline_keyboard: [[{ text: "📋 باز کردنِ پنل کارشناس", web_app: { url: expertAppUrl(env) } }]] } });
+  return 1;
 }
 
 /* ------------------------------------------------------------------ */
@@ -659,6 +716,9 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   const rowsOf = ids.length ? ((await env.DB.prepare(`SELECT id, need_date, spec, note, consumer FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || []) : [];
   const needOf = new Map(rowsOf.map((r) => [r.id, T(r.need_date) || null]));
   const descOf = new Map(rowsOf.map((r) => [r.id, [T(r.spec), T(r.note), T(r.consumer) ? `مصرف‌کننده: ${T(r.consumer)}` : ""].filter(Boolean).join(" · ") || null]));
+  /* حداقلِ استعلامِ هر قلم (قواعدِ پنل پشتیبانی) و آنچه تا حالا رسیده — مدل می‌داند هنوز چند پیشنهادِ کامل لازم است */
+  const cover = await coverNow(env, run.assignment_id);
+  const minOf = new Map(cover.map((c) => [c.id, { need: c.need, have: c.have, why: c.why }]));
   const sk = C.nkey(th.supplier_name);
   const rel = lineOut.map((l) => {
     const di = run.data.items.find((x) => x.id === l.item_id);
@@ -672,7 +732,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   return negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
-    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
+    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
     bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), ask: parse(st.ask_json, null), transcript: threadSection(tInfo, msgs, { forModel: true }),
   });
 }
@@ -781,6 +841,10 @@ async function stepClosing(env, run, k) {
     await env.DB.batch([
       env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND fired_at IS NULL AND canceled_at IS NULL").bind(t, aid),
       env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "commission_table", run.request_id, JSON.stringify({ assignment_id: aid, lines: finals.length, commission_no: d.commission_no, channel: "ai" })),
+      /* «تحویل» در پنل پشتیبانی (فاز ۳): جدول، برگهٔ درخواست و نامه برای تأیید یا ردِ کمیسیون */
+      env.DB.prepare("UPDATE ai_runs SET review_json=? WHERE id=? AND review_json IS NULL").bind(JSON.stringify({ state: "new", at: t }), run.id),
+      env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_delivery", run.request_id,
+        JSON.stringify({ assignment_id: aid, run_id: run.id, commission_no: d.commission_no, lines: finals.length, short: (cl.short || []).length, channel: "ai" })),
     ]);
     /* تحویل در بات کارشناسان (همان «تحویل»): خلاصه، جدول، نامه و پروندهٔ md */
     let sent = 0;
@@ -789,7 +853,8 @@ async function stepClosing(env, run, k) {
       const rep = cl.report || {};
       await api.sendMessage(ex.telegram_chat, [`🤖 <b>کارشناس هوشمند — تحویلِ درخواست ${esc(run.request_id)}</b>`, `جدول کمیسیون (کد TSA-PS-FO-${faN(d.commission_no)}) با ${faN(finals.length)} خطِ تأییدنهایی‌شده، نامهٔ پیوست و پروندهٔ مذاکره.`,
         rep.picks && rep.picks.length ? `\n<b>پیشنهاد:</b>\n${rep.picks.map((p) => `• ${esc(p.item)}: ${esc(p.supplier)} — ${esc(p.why)}`).join("\n")}` : "",
-        "\n<i>تصمیمِ نهایی با کمیسیون است؛ درخواست تا «خاتمه» در کارتابل می‌ماند.</i>"].filter(Boolean).join("\n")).then(() => sent++).catch(() => {});
+        cl.short && cl.short.length ? `\n⚠️ <b>کمتر از حداقلِ استعلام:</b> ${cl.short.map((c) => `${esc(c.title)} ${faN(c.have)} از ${faN(c.need)}`).join("، ")}` : "",
+        "\n<i>این تحویل در «پنل پشتیبانی» برای تأیید کمیسیون است؛ درخواست تا «خاتمه» در کارتابل می‌ماند.</i>"].filter(Boolean).join("\n")).then(() => sent++).catch(() => {});
       await api.sendDocument(ex.telegram_chat, `کمیسیون-${run.request_id}.xlsx`, await commissionXlsx({ ...d, notes: d.assignment.notes })).then(() => sent++).catch(() => {});
       const store = storage(env);
       const L = cl.letter_id ? await env.DB.prepare("SELECT docx_key FROM letters WHERE id=?").bind(cl.letter_id).first() : null;
@@ -843,11 +908,15 @@ async function closingContext(env, run) {
   const ths = threads.map((t) => `- ${t.supplier} (${SOURCE_FA[t.source] || t.source}) — ${faN(t.replies)} پیام از تأمین‌کننده، ${faN(t.turns)} دورِ مذاکره، وضعیت ${t.state}`
     + `${bundles.filter((b) => b.thread_id === t.thread_id && b.comment).map((b) => `\n    ${b.state === "returned" ? "برگشت" : b.state === "rejected" ? "رد" : b.state}: ${b.comment}`).join("")}`
     + `${t.memo ? `\n    یادداشتِ مذاکره: ${t.memo}` : ""}`).join("\n");
-  const settings = await getSettings(env);
+  const cover = await coverNow(env, run.assignment_id);
   const noPanel = cands.filter((c) => !threads.some((t) => C.nkey(t.supplier) === c.key)).length;
+  const ho = d.handover;
   return [
     `درخواست خرید: ${run.request_id}`,
-    `حداقلِ استعلامِ شرکت برای هر قلم: ${faN(Math.max(1, Number(settings.minSuppliers) || 1))}`,
+    "", "<حداقل_استعلام>",
+    cover.map((c) => `- ${c.title}: لازم ${faN(c.need)} پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف (${c.why}) — رسید ${faN(c.have)}${c.have < c.need ? " ⚠️ کمتر از حداقل" : ""}`).join("\n") || "—",
+    ho ? `مهلتِ ${faN(ho.hours)} ساعتهٔ رسیدن به حد گذشت و ${fmtFa(ho.at)} کار برای استعلامِ بیشتر به کارشناسِ خرید هم واگذار شد.` : "",
+    "</حداقل_استعلام>",
     "", "<اقلام_و_پیشنهادها>", items, "</اقلام_و_پیشنهادها>",
     "", `<نامزدها>\n${faN(cands.length)} تأمین‌کنندهٔ نامزد از سوابق خرید و جستجوی هوشمند پیدا شد؛ ${faN(noPanel)} نامزد شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`,
     "", "<دعوت‌ها_و_گفت‌وگوها>", ths || "دعوتی نرفت.", "</دعوت‌ها_و_گفت‌وگوها>",
@@ -928,15 +997,15 @@ async function runDetail(env, ex, id) {
     env.DB.prepare("SELECT id, thread_id, at, kind, body FROM ai_log WHERE run_id=? ORDER BY id DESC LIMIT 200").bind(run.id),
     env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM ai_calls WHERE run_id=?").bind(run.id),
   ]);
-  const cover = (await env.DB.prepare(`SELECT i.id, i.title, (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.saved=1 AND q.final=1) AS n
-      FROM items i WHERE i.assignment_id=? AND i.state='open'`).bind(run.assignment_id).all()).results || [];
+  const cover = await coverNow(env, run.assignment_id);
   const L = run.data.closing && run.data.closing.letter_id ? await env.DB.prepare("SELECT id, state, docx_key FROM letters WHERE id=?").bind(run.data.closing.letter_id).first() : null;
   return {
     run: { id: run.id, assignment_id: run.assignment_id, request_id: run.request_id, state: run.state, state_fa: STATE_FA[run.state] || run.state, error: run.error, md: !!run.md_key,
       created_at: run.created_at, finished_at: run.finished_at, finish: !!run.finish_at, closing: run.data.closing ? { step: run.data.closing.step, why: run.data.closing.why, report: run.data.closing.report || null,
-        commission_no: run.data.closing.commission_no || null, letter: L ? { id: L.id, state: L.state, file: !!L.docx_key } : null } : null },
+        commission_no: run.data.closing.commission_no || null, letter: L ? { id: L.id, state: L.state, file: !!L.docx_key } : null, short: run.data.closing.short || [] } : null,
+      handover: run.data.handover || null, review: parse(r.review_json, null) },
     items: (run.data.items || []).map((i) => ({ id: i.id, title: i.title, qty: i.qty, unit: i.unit, struct: i.struct || null, hist: i.hist ? { ok: i.hist.ok, msg: i.hist.msg, n: i.hist.n } : null, smart: i.smart || null,
-      covered: (cover.find((c) => c.id === i.id) || {}).n || 0 })),
+      covered: (cover.find((c) => c.id === i.id) || {}).have || 0, need: (cover.find((c) => c.id === i.id) || {}).need || 1, why: (cover.find((c) => c.id === i.id) || {}).why || null })),
     candidates: await candidatesView(env, run),
     threads: (th.results || []).map((x) => ({ thread_id: x.thread_id, supplier: x.supplier, phone: x.phone, label: x.label, source: x.source, source_fa: SOURCE_FA[x.source] || x.source, state: x.state,
       turns: x.turns, replies: x.replies, bundles: x.bundles ? x.bundles.split(",") : [], memo: x.memo, fails: x.fails, retry_at: x.retry_at, last_ai_at: x.last_ai_at,
@@ -960,7 +1029,7 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
 
 /** صفحهٔ اولِ تبِ پشتیبانی: کارشناسانِ فعال با تیکِ «هوشمند / دستی»، کارهای زنده، و «پرسش از کارشناس»های بی‌پاسخ */
 async function aiExperts(env) {
-  const [ex, asks] = await env.DB.batch([
+  const [ex, asks, ho, dl] = await env.DB.batch([
     env.DB.prepare(`SELECT e.id, e.name, e.label, e.senior, (e.telegram_chat IS NOT NULL) AS tg, g.mode, g.on_at, g.updated_at, g.updated_by,
         (SELECT COUNT(*) FROM ai_runs r WHERE r.expert_id=e.id AND r.finished_at IS NULL) AS live,
         (SELECT COUNT(*) FROM ai_runs r WHERE r.expert_id=e.id) AS runs,
@@ -970,12 +1039,94 @@ async function aiExperts(env) {
     env.DB.prepare(`SELECT x.thread_id, x.ask_json, x.updated_at, r.expert_id, r.id AS run_id, t.request_id, s.name AS supplier
       FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers s ON s.id=t.supplier_id
       WHERE ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 50`),
+    /* فاز ۳: کارهایی که به حداقلِ استعلام نرسیدند و به کارشناس واگذار شدند (هنوز باز)، و تحویل‌های بررسی‌نشده */
+    env.DB.prepare(`SELECT r.id, r.assignment_id, r.expert_id, r.request_id, r.handover_at, json_extract(r.data_json,'$.handover.items') AS items
+      FROM ai_runs r WHERE r.handover_at IS NOT NULL AND r.finished_at IS NULL ORDER BY r.handover_at DESC LIMIT 30`),
+    env.DB.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE json_extract(review_json,'$.state')='new'"),
   ]);
   return {
     experts: (ex.results || []).map((e) => ({ ...e, tg: !!e.tg, on: e.mode === "on", senior: e.senior ? 1 : 0 })),
     asks: (asks.results || []).map((a) => { const k = parse(a.ask_json, {}) || {}; return { thread_id: a.thread_id, run_id: a.run_id, expert_id: a.expert_id, request_id: a.request_id, supplier: a.supplier, q: k.q || "", at: k.at || a.updated_at }; }),
+    handovers: (ho.results || []).map((h) => ({ id: h.id, assignment_id: h.assignment_id, expert_id: h.expert_id, request_id: h.request_id, at: h.handover_at, items: parse(h.items, []) || [] })),
+    deliveries: { new: ((dl.results || [])[0] || {}).n || 0 },
     sms: smsReady(env),
   };
+}
+
+/* ------------------------------------------------------------------ */
+/* تحویل‌های کارشناس هوشمند — بررسی و تأیید یا ردِ کمیسیون در پنل پشتیبانی (فاز ۳) */
+/* ------------------------------------------------------------------ */
+const REVIEW_FA = { new: "🆕 منتظرِ بررسی", ok: "✓ کمیسیون تأیید شد", rejected: "✗ رد شد" };
+/** فهرستِ تحویل‌ها: هر کاری که جدول کمیسیونش ساخته شد — state: new | ok | rejected | (همه) */
+async function deliveries(env, url) {
+  const st = T(url.searchParams.get("state"));
+  const cond = ["new", "ok", "rejected"].includes(st) ? `json_extract(r.review_json,'$.state')='${st}'` : "r.review_json IS NOT NULL";
+  const rows = (await env.DB.prepare(`SELECT r.id, r.assignment_id, r.expert_id, r.request_id, r.state, r.review_json, r.finished_at, r.updated_at, r.handover_at, rq.party,
+      a.commission_no, a.commission_at, json_extract(r.data_json,'$.closing.why') AS why, json_extract(r.data_json,'$.closing.short') AS short,
+      (SELECT COUNT(*) FROM items i WHERE i.assignment_id=r.assignment_id AND i.state='open') AS items,
+      (SELECT COUNT(*) FROM items i WHERE i.assignment_id=r.assignment_id AND i.state='open' AND i.commission_ok=1) AS ok_items,
+      (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=r.assignment_id AND q.saved=1 AND q.final=1) AS finals
+    FROM ai_runs r JOIN requests rq ON rq.id=r.request_id JOIN assignments a ON a.id=r.assignment_id WHERE ${cond} ORDER BY r.id DESC LIMIT 100`).all()).results || [];
+  return { deliveries: rows.map(({ review_json, short, ...r }) => { const rv = parse(review_json, {}) || {}; return { ...r, review: rv, review_fa: REVIEW_FA[rv.state] || "—", short: parse(short, []) || [] }; }) };
+}
+/** یک تحویل: شرحِ فرایند، حداقلِ استعلام و پیشنهادهای هر قلم، و متنِ نامه — فایل‌ها از مسیرهای /support/assignments/… */
+async function delivery(env, id) {
+  const r = await env.DB.prepare("SELECT * FROM ai_runs WHERE id=?").bind(id).first();
+  if (!r || !r.review_json) throw new HttpError("این تحویل پیدا نشد.", 404);
+  const run = { ...r, data: parse(r.data_json, {}) };
+  const cl = run.data.closing || {};
+  const [ar, ir, qr, lr] = await env.DB.batch([
+    env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.commission_no, a.commission_at, a.notes, a.closed_at, rq.party, rq.date, e.name AS expert_name, e.label AS expert_label
+      FROM assignments a JOIN requests rq ON rq.id=a.request_id JOIN experts e ON e.id=a.expert_id WHERE a.id=?`).bind(run.assignment_id),
+    env.DB.prepare("SELECT id, title, qty, unit, state, commission_ok FROM items WHERE assignment_id=? ORDER BY line_no, id").bind(run.assignment_id),
+    env.DB.prepare(`SELECT item_id, supplier_name, qty, unit, price, dtime, pay, invoice, vat, valid_days, source FROM quotes WHERE assignment_id=? AND saved=1 AND final=1
+      ORDER BY item_id, price`).bind(run.assignment_id),
+    env.DB.prepare("SELECT id, state, letter_json, docx_key FROM letters WHERE id=?").bind(cl.letter_id || 0),
+  ]);
+  const a = (ar.results || [])[0] || {};
+  const L = (lr.results || [])[0] || null;
+  const letter = L ? parse(L.letter_json, null) : null;
+  const cover = await coverNow(env, run.assignment_id);
+  const rv = parse(r.review_json, {}) || {};
+  return {
+    run: { id: r.id, assignment_id: r.assignment_id, expert_id: r.expert_id, request_id: r.request_id, state: r.state, state_fa: STATE_FA[r.state] || r.state, finished_at: r.finished_at,
+      handover: run.data.handover || null, review: rv, review_fa: REVIEW_FA[rv.state] || "—", md: !!r.md_key },
+    request: { id: a.request_id, party: a.party, date: a.date, expert: a.expert_label || a.expert_name, commission_no: a.commission_no, commission_at: a.commission_at, notes: a.notes, closed: !!a.closed_at },
+    report: cl.report || null, why: cl.why || null, short: cl.short || [],
+    items: (ir.results || []).map((i) => ({ ...i, cover: cover.find((c) => c.id === i.id) || null, quotes: (qr.results || []).filter((q) => q.item_id === i.id) })),
+    letter: letter ? { to: letter.to || null, subject: letter.subject || null, paragraphs: letter.paragraphs || [], closing: letter.closing || null, file: !!(L && L.docx_key) } : null,
+  };
+}
+/**
+ * تصمیمِ پشتیبانی روی یک تحویل. ok: تیکِ «تأیید کمیسیون» همهٔ اقلامِ بازِ همان درخواست (همان مسیرِ تبِ «تأیید کمیسیون»:
+ * رخداد و پیامِ «🔒 خاتمه» به کارشناس). رد (با دلیل): درخواست کامل به کارشناس برمی‌گردد — گفت‌وگوها و خط‌های کارشناس هوشمند
+ * هم آزاد (ai-lock.js:aiRejected) — تأییدِ قبلی برداشته می‌شود و دلیل در تلگرامِ کارشناس می‌رود. تصمیم را می‌شود عوض کرد.
+ */
+async function reviewDelivery(env, id, b, deps) {
+  const r = await env.DB.prepare("SELECT id, assignment_id, expert_id, request_id, review_json FROM ai_runs WHERE id=?").bind(id).first();
+  if (!r || !r.review_json) throw new HttpError("این تحویل پیدا نشد.", 404);
+  const ok = !!(b && b.ok === true);
+  const reason = T(b && b.reason).slice(0, 1000);
+  if (!ok && !reason) throw new HttpError("دلیلِ رد را بنویسید — برای کارشناس فرستاده می‌شود.");
+  const t = now();
+  const review = { ...(parse(r.review_json, {}) || {}), state: ok ? "ok" : "rejected", decided_at: t, by: "support", reason: ok ? null : reason };
+  await env.DB.prepare("UPDATE ai_runs SET review_json=?, updated_at=? WHERE id=?").bind(JSON.stringify(review), t, r.id).run();
+  const ids = ((await env.DB.prepare("SELECT id FROM items WHERE assignment_id=? AND state='open'").bind(r.assignment_id).all()).results || []).map((x) => x.id);
+  const res = ids.length ? await setCommission(env, { item_ids: ids, ok }) : { changed: 0, notified: 0 };
+  if (!ok) {
+    const ex = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(r.expert_id).first();
+    const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, "support", "ai_reject", r.request_id,
+      JSON.stringify({ assignment_id: r.assignment_id, expert_id: r.expert_id, run_id: r.id, reason }))];
+    if (ex && ex.telegram_chat) {
+      stmts.push(queueStmt(env, `ai-rej:${r.id}:${t}`, ex.telegram_chat, `↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند برای درخواست ${esc(r.request_id)} را رد کرد</b>\n\nدلیل: ${esc(reason)}\n\n`
+        + "این درخواست حالا کامل دستِ شماست: گفت‌وگوها و خط‌های استعلامِ کارشناس هوشمند هم برایتان باز شد و کار را خودتان ادامه می‌دهید.",
+        [[{ text: "📋 باز کردنِ پنل کارشناس", web_app: { url: expertAppUrl(env) } }]]));
+      res.notified = (res.notified || 0) + 1;
+    }
+    await env.DB.batch(stmts);
+  }
+  if (deps && deps.flush) deps.flush(res.notified);
+  return { ok: true, review, changed: res.changed || 0, notified: res.notified || 0 };
 }
 
 /**
@@ -986,6 +1137,20 @@ async function aiExperts(env) {
 export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   const { json, readJson } = deps;
   if (sub === "/experts" && m === "GET") return json(await aiExperts(env));
+  /* فاز ۳: قواعدِ «حداقلِ استعلام» (سراسری) و تحویل‌های کارشناس هوشمند */
+  if (sub === "/rules" && m === "GET") {
+    return json({ rules: await getRules(env), base: Math.max(1, Number((await getSettings(env)).minSuppliers) || 1), dims: DIMS.map((d) => ({ key: d, fa: DIM_FA[d], unit: DIM_UNIT[d] })) });
+  }
+  if (sub === "/rules" && m === "PUT") {
+    const rules = await saveRules(env, await readJson(request), "support");
+    /* کارهای در حالِ مذاکره همین حالا با قواعدِ تازه دوباره بسنجند */
+    await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE state='work' AND finished_at IS NULL AND next_at>?").bind(now(), now()).run();
+    return json({ ok: true, rules });
+  }
+  if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
+  let dm;
+  if ((dm = /^\/deliveries\/(\d+)$/.exec(sub)) && m === "GET") return json(await delivery(env, int(dm[1])));
+  if ((dm = /^\/deliveries\/(\d+)\/review$/.exec(sub)) && m === "POST") return json(await reviewDelivery(env, int(dm[1]), await readJson(request), deps));
   const top = /^\/(\d+)(\/.*)$/.exec(sub);
   if (!top) throw new HttpError("مسیر پیدا نشد.", 404);
   const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(int(top[1])).first();

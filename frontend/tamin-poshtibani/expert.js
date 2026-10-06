@@ -164,7 +164,7 @@
         <th><button class="sortbtn ${S.traySort ? "on" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th>${teamCol ? `<th>ارجاع به تیم</th>` : ""}</tr></thead><tbody>
         ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
           const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
+          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai === 2 ? ` <span class="chip warn" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ بررسی سوابق و جستجو برای شما باز شد">⚠️🤖</span>` : a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
             <td class="num">${a.open_count} از ${a.item_count}</td><td class="num">${a.days} روز</td>
             <td class="num" style="${lf <= 0 ? "color:#fca5a5;font-weight:700" : ""}">${lf <= 0 ? "تمام شد" : lf.toFixed(1) + " ساعت کاری"}</td>
             <td>${boxes(a, done, true, true)}</td><td class="num">${a.quote_count}</td>${teamCol ? `<td data-stop><button class="tp-btn xs" data-delegate="${a.id}" title="این درخواست به یکی از کارشناسان تیم داده شود">ارجاع به تیم</button></td>` : ""}</tr>`; }).join("")}
@@ -308,15 +308,26 @@
   /* ---------- کارشناس هوشمند (فاز ۲ پنل پشتیبانی) ----------
      تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس در پنل پشتیبانی است. درخواستی که دستِ کارشناس هوشمند است: بررسی سوابق، جستجوی
      هوشمند، ساختار قلم، جدول کمیسیون و نامه را خودش انجام می‌دهد و برای کارشناس قفل است؛ خط‌های استعلامِ او (🤖) دست‌نخوردنی‌اند
-     و کارشناس فقط خطِ دستیِ خودش (✋) را می‌افزاید — پیش‌فاکتورش را بارگذاری و استخراج می‌کند. سرور هم همین را می‌سنجد (ai-lock.js). */
+     و کارشناس فقط خطِ دستیِ خودش (✋) را می‌افزاید — پیش‌فاکتورش را بارگذاری و استخراج می‌کند. سرور هم همین را می‌سنجد (ai-lock.js).
+     فاز ۳: کارشناس هوشمند تا هر قلم به «حداقلِ استعلامِ» پنل پشتیبانی نرسد نمی‌بندد؛ اگر در مهلتش نرسید، کار «واگذار» می‌شود:
+     بررسی سوابق و جستجوی هوشمند برای کارشناس باز (جدول و نامه هنوز با کارشناس هوشمند). ردِ تحویل در پنل پشتیبانی همه‌چیز را آزاد می‌کند. */
   const aiOwned = () => !!(S.d && S.d.ai && S.d.ai.owned);
   const aiMode = () => !!(S.d && S.d.ai && S.d.ai.mode);
+  const aiHandover = () => !!(aiOwned() && S.d.ai.owned.handover);
+  /** بررسی سوابق و جستجوی هوشمند قفل است؟ — نه بعد از واگذاری */
+  const aiResearch = () => aiOwned() && !aiHandover();
   function vAiBar() {
-    if (!aiOwned()) return "";
-    const k = S.d.ai.asks || 0;
+    const ai = (S.d && S.d.ai) || {};
+    if (!aiOwned()) return ai.review && ai.review.state === "rejected"
+      ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>` : "";
+    const k = ai.asks || 0, cv = ai.cover || [];
+    const ask = k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : "";
+    const need = cv.length ? `<br>حداقلِ استعلام (پنل پشتیبانی): ${cv.map((c) => `${esc(c.title)} <b>${c.have} از ${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join("، ")}` : "";
+    if (aiHandover()) return `<div class="tp-note warn" style="margin:10px 0">⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید و کار به شما واگذار شد.</b>
+      بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است: تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید («ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور).
+      گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.${need}${ask}</div>`;
     return `<div class="tp-note" style="margin:10px 0">🤖 <b>این درخواست دستِ کارشناس هوشمند است.</b> بررسی سوابق، جستجوی هوشمند، مذاکره با تأمین‌کنندگان، جدول کمیسیون و نامه را خودش انجام می‌دهد
-      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.
-      ${k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : ""}</div>`;
+      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.${need}${ask}</div>`;
   }
   function vAiLocked(tab) {
     const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
@@ -359,12 +370,12 @@
           : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}</div>`).join("")}</div>
       ${vAiBar()}
       <div class="tabs">
-        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiOwned() ? "🔒 " : ""}بررسی سوابق</button>
-        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiOwned() ? "🔒 " : ""}جستجوی هوشمند</button>
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
+        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiOwned() && ["history", "smart", "letter"].includes(S.tab) ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
@@ -1769,7 +1780,7 @@
     try { const d = await TP.api(`/assignments/${aid}`);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
-      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
+      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && !d.ai.owned.handover ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
       /* نامه را بات تلگرام هم جلو می‌برد، پس ↻ باید وضعیتش را از نو بگیرد؛
          تب نامه خودش تنبلانه دوباره می‌خواند. */
       S.letter = null;

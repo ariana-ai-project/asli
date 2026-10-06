@@ -205,9 +205,9 @@ export async function supportExpert(env, id) {
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -220,6 +220,8 @@ const EV_FA = {
   norm_clear: "برداشتن نرمال‌سازی قلم", norm_revert: "برگرداندن قلم به فهرست اقلام",
   commission_ok: "تأیید کمیسیون", commission_off: "برداشتن تأیید کمیسیون", support_login: "ورود به پنل پشتیبانی", support_pass: "رمز پشتیبانی",
   ai_on: "کارشناس «🤖 هوشمند» شد", ai_off: "کارشناس «✋ دستی» شد", ai_ask: "🚨 پرسش از کارشناس", ai_answer: "پاسخِ کارشناس به پرسشِ کارشناس هوشمند",
+  ai_handover: "⚠️ کارشناس هوشمند به حداقلِ استعلام نرسید — واگذاری به کارشناس", ai_delivery: "📥 تحویلِ کارشناس هوشمند برای تأیید کمیسیون",
+  ai_reject: "✗ ردِ تحویلِ کارشناس هوشمند", ai_rules: "قواعدِ حداقلِ استعلام عوض شد",
 };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
 const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
@@ -239,6 +241,10 @@ function evText(r, p) {
   if (p.commission_no) bits.push(`کد TSA-PS-FO-${faN(p.commission_no)}`);
   if (r.kind === "close") bits.push(`${faN(p.closed || 0)} قلم${p.fully_closed ? " — درخواست کامل بسته شد" : ""}`);
   if (r.kind === "ai_ask" && p.q) bits.push(`«${short(p.q, 160)}»`);
+  if (r.kind === "ai_handover" && Array.isArray(p.items)) bits.push(`بعد از ${faN(p.hours || 0)} ساعت: ${p.items.map((x) => `${short(x.title, 40)} ${faN(x.have)} از ${faN(x.need)}`).join("، ")}`);
+  if (r.kind === "ai_delivery" && p.short) bits.push(`⚠️ ${faN(p.short)} قلم کمتر از حداقلِ استعلام`);
+  if (r.kind === "ai_reject" && p.reason) bits.push(`دلیل: ${short(p.reason, 120)}`);
+  if (r.kind === "ai_rules") bits.push(`${faN((p.unit || 0) + (p.total || 0) + (p.qty || 0))} بازه · مهلت ${faN(p.wait || 0)} ساعت`);
   if (r.kind === "import") bits.push(p.closeCandidates ? `${faN(p.closeCandidates)} نامزدِ بستن` : "");
   if (r.kind === "delete") bits.push(p.all ? "همهٔ میز" : `${faN(p.requests || 0)} درخواست`);
   if (r.kind === "dispatch" && p.days) bits.push(`مهلت ${faN(p.days)} روز کاری`);

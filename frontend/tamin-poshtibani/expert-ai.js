@@ -11,7 +11,8 @@
   "use strict";
   const TP = window.TP, esc = TP.esc, M = TP.M;
   const A = { st: null, run: null, runId: null, sub: "runs", calls: null, sms: null, phones: null, q: "", err: "", timer: 0, render: null, loading: false };
-  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️" };
+  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️", ask: "🚨", handover: "⚠️" };
+  const REVIEW_FA = { new: "📥 تحویل شد — منتظرِ بررسیِ پشتیبانی", ok: "✓ کمیسیون تأیید شد", rejected: "✗ پشتیبانی رد کرد" };
   const ST_CHIP = { prep: "info", search: "info", work: "warn", closing: "info", done: "ok", paused: "bad", ended: "bad" };
   const TH_FA = { invited: "دعوت شد", active: "در مذاکره", ask: "🚨 پرسش از کارشناس", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };
   const VIA_FA = { textbee: "✅ پیامک رفت", sim: "🧪 شبیه‌سازی", hold: "⛔ نرفت" };
@@ -94,7 +95,7 @@
     const d = A.run, r = d.run;
     const acts = [
       r.state === "paused" ? `<button class="tp-btn sm primary" data-ai-act="resume">▶️ ادامه</button>` : !r.finished_at ? `<button class="tp-btn sm warn" data-ai-act="pause">⏸ توقف</button>` : "",
-      r.state === "work" ? `<button class="tp-btn sm" data-ai-act="finish" title="اگر هر قلم دست‌کم یک پیشنهادِ تأییدنهایی‌شده دارد، جدول کمیسیون و نامه همین حالا آماده شود">🏁 پایان مذاکره و تحویل</button>` : "",
+      r.state === "work" ? `<button class="tp-btn sm" data-ai-act="finish" title="اگر هر قلم دست‌کم یک پیشنهادِ تأییدنهایی‌شده دارد، جدول کمیسیون و نامه همین حالا آماده شود — اگر کمتر از حداقلِ استعلام باشد، کمبود در نامه گفته می‌شود">🏁 پایان مذاکره و تحویل</button>` : "",
       !r.finished_at ? `<button class="tp-btn sm" data-ai-act="retry">🔁 تلاش دوباره</button>` : "",
       r.md ? `<button class="tp-btn sm" data-ai-dl="/ai/runs/${r.id}/md" data-name="پرونده-مذاکره-${esc(r.request_id)}.md">📄 پروندهٔ مذاکره (md)</button>` : "",
       C.chat(r),
@@ -104,7 +105,7 @@
     const items = d.items.map((i) => `<tr><td class="rt">${esc(i.title)}</td><td class="num">${M(i.qty)} ${esc(i.unit || "")}</td><td class="rt muted">${esc(i.struct || "—")}</td>
         <td>${i.hist ? (i.hist.ok ? `${M(i.hist.n)} تأمین‌کننده` : `<span class="muted" title="${esc(i.hist.msg || "")}">بی سابقه</span>`) : "…"}</td>
         <td>${i.smart ? (i.smart.err ? `<span class="chip bad" title="${esc(i.smart.err)}">نشد</span>` : `${M(i.smart.n || 0)}${i.smart.reused ? " <span class=\"muted\">(جستجوی اخیر)</span>" : ""}`) : "…"}</td>
-        <td>${i.covered ? `<span class="chip ok">✅ ${M(i.covered)}</span>` : `<span class="chip">هنوز نه</span>`}</td></tr>`).join("");
+        <td title="${esc(i.why || "")}">${i.covered >= (i.need || 1) ? `<span class="chip ok">✅ ${M(i.covered)} از ${M(i.need || 1)}</span>` : i.covered ? `<span class="chip warn">${M(i.covered)} از ${M(i.need || 1)}</span>` : `<span class="chip">۰ از ${M(i.need || 1)}</span>`}</td></tr>`).join("");
     const phoneCell = (c) => [
       ...c.phones.map((p) => `<label class="sp-check" style="display:inline-flex;gap:4px;margin-inline-end:10px" title="${p.panel ? "تیکِ پنل: کارشناس هوشمند به این شماره پیامک می‌دهد" : "بی تیک: پیامکی نمی‌رود"}">
           <input type="checkbox" data-ai-panel="${p.id}" ${p.panel ? "checked" : ""} ${p.mobile ? "" : "disabled"}> <span dir="ltr">${esc(p.phone)}</span> <span class="muted">${esc(p.label || "")}${p.mobile ? "" : " — ثابت، پیامک نمی‌گیرد"}</span></label>`),
@@ -126,8 +127,11 @@
         <span class="muted">${M(d.calls.n)} فراخوانی · <span dir="ltr">${usd(d.calls.cost)}</span></span>
         <button class="tp-btn xs" data-ai-sub="calls" data-ai-runcalls="1">فراخوانی‌های همین کار</button></div>
       ${r.error ? `<div class="tp-note warn">${esc(r.error)}</div>` : ""}
+      ${r.handover ? `<div class="tp-note warn">⚠️ ${when(r.handover.at)}: مهلتِ ${M(r.handover.hours)} ساعتهٔ حداقلِ استعلام گذشت و کار به کارشناس واگذار شد (سوابق و جستجو برایش باز) — ${(r.handover.items || []).map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
+      ${r.review ? `<div class="tp-note ${r.review.state === "rejected" ? "warn" : ""}">${REVIEW_FA[r.review.state] || ""}${r.review.reason ? `: ${esc(r.review.reason)}` : ""} — تبِ «📥 تحویل‌های هوشمند»</div>` : ""}
+      ${r.closing && r.closing.short && r.closing.short.length ? `<div class="tp-note warn">⚠️ با کمتر از حداقلِ استعلام بسته شد: ${r.closing.short.map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
       <div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap">${acts}</div>
-      <div class="tp-sect"><h3>اقلام</h3><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th class="rt">ساختار</th><th>سوابق</th><th>جستجو</th><th>پیشنهادِ نهایی</th></tr></thead><tbody>${items}</tbody></table></div></div>
+      <div class="tp-sect"><h3>اقلام</h3><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th class="rt">ساختار</th><th>سوابق</th><th>جستجو</th><th title="پیشنهادهای تأییدنهایی از تأمین‌کنندگانِ مختلف / حداقلِ استعلامِ قلم (قواعدِ پنل پشتیبانی)">پیشنهادِ نهایی / حداقل</th></tr></thead><tbody>${items}</tbody></table></div></div>
       <div class="tp-sect"><h3>تأمین‌کنندگانِ نامزد <span>دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ دعوت: ${M(A.st.agent.cfg.maxInvites)}</span></h3>
         <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">تأمین‌کننده</th><th>منبع</th><th class="rt">شماره‌ها (☑️ = پنل)</th></tr></thead>
           <tbody>${cands || `<tr><td colspan="3"><div class="empty">هنوز نامزدی نیست (بعد از سوابق و جستجو).</div></td></tr>`}</tbody></table></div>

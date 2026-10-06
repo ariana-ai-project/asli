@@ -22,7 +22,7 @@ import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
-import { aiThread, askAnswered, AI_THREAD_MSG, AI_ASK_SQL } from "./ai-lock.js";
+import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_ASK_SQL, AI_REJECTED_SQL } from "./ai-lock.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -678,7 +678,7 @@ export async function expertThreads(env, ex) {
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_items
       FROM assignments a JOIN requests r ON r.id=a.request_id
       WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL ORDER BY a.dispatched_at DESC LIMIT 80`).bind(ex.id).all(),
-    env.DB.prepare(`SELECT x.thread_id, x.state, x.ask_json, r.expert_id AS run_expert FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id
+    env.DB.prepare(`SELECT x.thread_id, x.state, x.ask_json, r.expert_id AS run_expert, r.review_json FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id
       JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=?`).bind(ex.id).all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null),
   ]);
@@ -687,7 +687,7 @@ export async function expertThreads(env, ex) {
   const aiOf = (id) => {
     const x = aiBy.get(id);
     if (!x) return { ai: null, ask: null };
-    if (!aiOn || x.run_expert !== ex.id) return { ai: "open", ask: null };
+    if (!aiOn || x.run_expert !== ex.id || aiRejected(x.review_json)) return { ai: "open", ask: null };
     return x.state === "ask" ? { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "" } : { ai: "locked", ask: null };
   };
   const byA = new Map();
@@ -736,7 +736,7 @@ export async function expertInbox(env, ex, since) {
 }
 /* گفت‌وگوی بستهٔ کارشناس هوشمند (ai-lock.js) برای کارشناس اعلان و شمرده نمی‌شود — t: sp_threads، a: assignments */
 const AI_SHUT_SQL = `NOT EXISTS (SELECT 1 FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id AND g.mode='on'
-  WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask')`;
+  WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask' AND NOT ${AI_REJECTED_SQL("r")})`;
 
 /** اقلام باز یک ارجاعِ همین کارشناس — برای پنجرهٔ «ارسال استعلام» صفحهٔ مکاتبات */
 export async function sendableItems(env, ex, aid) {
