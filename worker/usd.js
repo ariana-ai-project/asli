@@ -5,7 +5,8 @@
  *  - «قیمت روز»ِ سوابق پیش‌فرض با نسبتِ نرخ دلارِ امروز به نرخِ روزِ خرید تعدیل می‌شود؛ تیکِ «مرکز آمار» همان تعدیلِ
  *    فصلیِ زمستان ۱۴۰۴ را نشان می‌دهد. مبنای رتبه‌بندی همیشه دلار است.
  *  - روزی که نرخ ندارد (جمعه، تعطیل) با درون‌یابی خطیِ ساده بین نزدیک‌ترین روزِ قبل و بعد پر می‌شود.
- *  - هر روز صبح نرخ دیروز از کانال تلگرام خوانده و ثبت می‌شود.
+ *  - هر روز صبح نرخ دیروز از کانال تلگرام خوانده و ثبت می‌شود — روزی یک بار، ساعت ۶:۰۳ تهران («روزی یک بار کافی است»)؛
+ *    روزی که نشد، صبحِ فردا همراهِ دیروز خوانده می‌شود.
  *
  * منبع: کانال عمومی «قیمت لحظه‌ای دلار تهران» (t.me/dollar_tehran3bze). این فایل نسخهٔ جاوااسکریپتِ ربات پایتونیِ خود
  * کاربر (dollar_bot.py) است با همان قاعده: نرخ هر روز عدد «آخرین معامله» (در ۹۸–۹۹ «کلوز») در پیام «پایان معاملات»
@@ -31,8 +32,8 @@ const CUTOFF_HOUR = 4;                       /* پیامِ پیش از ۴ صبح
 const PRICE_MIN = 3000, PRICE_MAX = 5000000; /* بازهٔ معقولِ نرخ، به تومان */
 const RATE_MIN = 30000, RATE_MAX = 100000000;/* بازهٔ پذیرفتنیِ نرخ دستی یا فایل، به ریال */
 const MAX_BACK = 14;                         /* حداکثر چند روزِ عقب‌مانده در یک اجرا */
-const MAX_TRIES = 12;                        /* روزِ ناموفق چند بار دوباره سنجیده شود (هر ۱۰ دقیقه یک بار) */
-const BOT_FROM_HOUR = 6;                     /* «هر روز صبح»: از ساعت ۶ تهران */
+const MAX_TRIES = 12;                        /* روزِ ناموفق چند صبحِ دیگر دوباره سنجیده شود */
+const BOT_HOUR = 6, BOT_MINUTE = 3;          /* «هر روز صبح»، روزی یک بار: ۶:۰۳ تهران */
 
 /* ------------------------------------------------------------------ */
 /* روزهای شمسی                                                          */
@@ -380,11 +381,11 @@ async function readState(env) {
 const stateStmt = (env, st, now) => env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
   .bind(STATE_KEY, JSON.stringify(st), now);
 
-/** این دقیقه نوبتِ ربات نرخ است؟ از ساعت ۶ صبح تهران، هر ۱۰ دقیقه یک بار (دقیقهٔ ۳، ۱۳، …)؛ اجرای دستی همیشه */
+/** این دقیقه نوبتِ ربات نرخ است؟ روزی یک بار، ساعت ۶:۰۳ صبح تهران؛ اجرای دستی (/tg/tick و دکمهٔ پنل پشتیبانی) همیشه */
 export function usdSlot(now, cron) {
   if (!cron) return true;
   const p = tehranParts(now);
-  return p.hour >= BOT_FROM_HOUR && p.minute % 10 === 3;
+  return p.hour === BOT_HOUR && p.minute === BOT_MINUTE;
 }
 
 /**
@@ -492,7 +493,7 @@ export async function usdStatus(env, url) {
     count: cnt ? cnt.n : 0, real: cnt ? cnt.real || 0 : 0, first: cnt && cnt.first, last: cnt && cnt.last,
     latest: results && results[0] ? results[0] : null,
     rows: results || [],
-    bot: { at: st.at || null, runs: (st.runs || []).slice(0, 10), none: (st.none || []).slice(-15), fail: st.fail || {}, fromHour: BOT_FROM_HOUR },
+    bot: { at: st.at || null, runs: (st.runs || []).slice(0, 10), none: (st.none || []).slice(-15), fail: st.fail || {}, time: `${BOT_HOUR}:${String(BOT_MINUTE).padStart(2, "0")}` },
   };
 }
 

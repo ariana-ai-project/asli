@@ -106,12 +106,13 @@ test("درون‌یابی خطیِ روزهای خالی", () => {
   assert.deepEqual(rows.map((r) => [r.jday, r.rate]), [["1405/07/10", 2638500], ["1405/07/12", 2692000], ["1405/07/13", 2697000], ["1405/07/14", 2702000]]);
 });
 
-test("نوبت ربات: از ۶ صبح تهران، هر ۱۰ دقیقه؛ اجرای دستی همیشه", () => {
+test("نوبت ربات: روزی یک بار، ۶:۰۳ صبح تهران؛ اجرای دستی همیشه", () => {
   const at = (hh, mm) => Date.parse(`2026-10-06T00:00:00Z`) + ((hh - 3.5) * 60 + mm) * 60000;
   assert.equal(usdSlot(at(5, 53), "* * * * *"), false);
   assert.equal(usdSlot(at(6, 3), "* * * * *"), true);
   assert.equal(usdSlot(at(6, 4), "* * * * *"), false);
-  assert.equal(usdSlot(at(21, 43), "* * * * *"), true);
+  assert.equal(usdSlot(at(6, 13), "* * * * *"), false, "روزی یک بار");
+  assert.equal(usdSlot(at(21, 43), "* * * * *"), false);
   assert.equal(usdSlot(at(2, 4), undefined), true);
 });
 

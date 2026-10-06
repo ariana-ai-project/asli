@@ -3818,7 +3818,7 @@ export async function scheduled(env, cron) {
     out = { ...a, ...d, watched: w.checked, colorChanges: w.changed };
   }
   if (!cron || !heavy) {
-    /* نرخ دلار (worker/usd.js): از ۶ صبح تهران هر ۱۰ دقیقه می‌سنجد نرخ دیروز آمده یا نه (دو خواندن از D1)؛ اگر از کانال
+    /* نرخ دلار (worker/usd.js): روزی یک بار، ساعت ۶:۰۳ صبح تهران، نرخِ دیروز (و روزهای جاافتاده) از کانال؛ اگر از کانال
        خواند، این دقیقه فقط همین است — سقف زیردرخواست‌ها */
     if (usdSlot(Date.now(), cron)) {
       const u = await usdDaily(env).catch((e) => ({ usdError: e && e.message }));

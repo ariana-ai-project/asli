@@ -770,7 +770,7 @@
   function vUsd() {
     let h = `<div class="tp-note">«قیمت روز»ِ سوابق خرید با نسبتِ <b>نرخ دلارِ امروز به نرخِ روزِ خرید</b> حساب می‌شود و رتبهٔ «ارزش خرید» هم بر همین پایه است
       (تیکِ «مرکز آمار» در سوابق، تعدیلِ فصلیِ زمستان ۱۴۰۴ را نشان می‌دهد). نرخ هر روز از کانال عمومی «قیمت لحظه‌ای دلار تهران» خوانده می‌شود:
-      هر روز از ساعت ۶ صبح، نرخِ پایانیِ دیروز (عدد «آخرین معامله»ٔ پیام «پایان معاملات»؛ اگر عدد نداشت، آخرین «معامله شد»ِ فردایی پیش از آن).
+      روزی یک بار، ساعت ۶:۰۳ صبح، نرخِ پایانیِ دیروز (عدد «آخرین معامله»ٔ پیام «پایان معاملات»؛ اگر عدد نداشت، آخرین «معامله شد»ِ فردایی پیش از آن)؛ روزی که نشد، صبحِ بعد همراهِ دیروز.
       روزهای بی‌معامله (جمعه، تعطیل) با درون‌یابیِ خطی بین روزِ قبل و بعد پر می‌شوند.</div>`;
     if (S.usdErr) h += `<div class="tp-note warn">${esc(S.usdErr)}</div>`;
     const U = S.usd;
@@ -783,7 +783,7 @@
       <div><div class="dim" style="font-size:.8rem">روزهای ثبت‌شده</div><div class="num"><b>${M(U.count)}</b> روز <span class="dim">(${M(U.real)} نرخِ واقعی، ${M(U.count - U.real)} درون‌یابی)</span></div>
         <div class="dim" style="font-size:.82rem">${U.first ? `از ${esc(U.first)} تا ${esc(U.last)}` : ""}</div></div>
       <div><div class="dim" style="font-size:.8rem">ربات روزانه</div><div>${last ? `آخرین اجرا ${fmtShort(last.at)}` : "هنوز اجرا نشده"}</div>
-        <div class="dim" style="font-size:.82rem">${last ? (last.error ? `⚠️ ${esc(last.error)}` : last.found.length ? `ثبت: ${last.found.map((x) => esc(x.jday)).join("، ")}` : last.failed.length ? `هنوز نیامده: ${last.failed.map(esc).join("، ")}` : "چیزِ تازه‌ای نبود") : `هر روز از ساعت ${M(U.bot.fromHour)} صبح، هر ۱۰ دقیقه تا نرخ دیروز بیاید`}</div></div>
+        <div class="dim" style="font-size:.82rem">${last ? (last.error ? `⚠️ ${esc(last.error)}` : last.found.length ? `ثبت: ${last.found.map((x) => esc(x.jday)).join("، ")}` : last.failed.length ? `هنوز نیامده: ${last.failed.map(esc).join("، ")}` : "چیزِ تازه‌ای نبود") : `روزی یک بار، ساعت ${esc(U.bot.time || "6:03")} صبح — روزِ جاافتاده صبحِ بعد خوانده می‌شود`}</div></div>
       <span style="flex:1"></span>
       <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="tp-btn sm" data-usdfetch>🔄 خواندن از کانال</button>
         <label class="tp-btn sm" style="cursor:pointer">📤 بارگذاری فایل نرخ‌ها<input type="file" accept=".xlsx,.xls" data-usdfile hidden></label>
