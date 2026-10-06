@@ -55,6 +55,7 @@ import { supportStatus, supportSetup, supportLogin, supportReset, supportChangeP
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
+import { USD_DDL, usdAdmin } from "./usd.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -188,6 +189,7 @@ ${SP_DDL.trim()}
 ${NAV_DDL}
 ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
+${USD_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -1617,6 +1619,8 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));
       /* کارشناس هوشمند (فاز ۲): تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارهایش (worker/ai-agent.js:aiAdmin) */
       if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson, flush: (k) => flush(env, ctx, k) });
+      /* نرخ دلار (worker/usd.js): پایهٔ «قیمت روز»ِ سوابق — وضعیت ربات روزانه، خواندن دستی از کانال و بارگذاری فایل */
+      if (path === "/support/usd" || path.startsWith("/support/usd/")) return await usdAdmin(request, env, path.slice("/support/usd".length), m, url, { json, readJson });
       if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
       if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);

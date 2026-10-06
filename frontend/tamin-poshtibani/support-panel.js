@@ -6,7 +6,7 @@
    برداشته شد. سرور: worker/support.js (مسیرهای /support/*).
    ورود با رمز مشترک پشتیبانی: اولین بازدیدکننده رمز را می‌گذارد و اگر فراموش شد، مدیر با کد مدیر رمز تازه
    می‌گذارد. نشانهٔ ورود (۱۲ ساعته) فقط در sessionStorage همین تب می‌ماند.
-   فاز ۲: تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارشناس هوشمند. فاز ۳: قواعدِ «حداقلِ استعلام» و مهلتش (زیرِ تبِ
+   فاز ۲: تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارشناس هوشمند. طرح «خرید هوشمند»: زیرنمای «💵 نرخ دلار» (worker/usd.js). فاز ۳: قواعدِ «حداقلِ استعلام» و مهلتش (زیرِ تبِ
    کارشناس هوشمند، worker/ai-rules.js)، کارهای «واگذارشده» به کارشناس، و تبِ «📥 تحویل‌های هوشمند»: جدول کمیسیون، برگهٔ
    درخواست و نامهٔ هر کارِ تمام‌شده، با تأیید یا ردِ کمیسیون.
    ============================================================ */
@@ -69,6 +69,8 @@
     /* فاز ۳: قواعدِ «حداقلِ استعلام» (زیرنمای تبِ کارشناس هوشمند) و تحویل‌های کارشناس هوشمند */
     aiView: "list", rules: null, rulesDraft: null, rulesErr: "", rulesBusy: false,
     dl: null, dlErr: "", dlLoading: false, dlF: { state: "new" }, dlId: null, dlD: null, dlDErr: "",
+    /* طرح «خرید هوشمند، کارشناس ناظر»: نرخ دلار (زیرنمای تبِ کارشناس هوشمند، worker/usd.js) */
+    usd: null, usdErr: "", usdLoading: false,
   };
   const thr = () => (S.settings && S.settings.thresholds) || (CFG.defaults && CFG.defaults.thresholds) || [10, 30, 50, 70, 90, 100];
   const exName = (id) => { const e = S.experts.find((x) => x.id === Number(id)); return e ? e.label || e.name : id ? `کارشناس ${id}` : "—"; };
@@ -150,7 +152,7 @@
     else if (S.tab === "chat" && (force || !S.th)) loadThreads();
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
-    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); }
+    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
   }
@@ -570,8 +572,9 @@
       return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
         <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
     }
-    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
+    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["usd", "💵 نرخ دلار"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
     if (S.aiView === "rules") return sub + vRules();
+    if (S.aiView === "usd") return sub + vUsd();
     let h = sub + `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: هر ارجاعِ تازهٔ این کارشناس را کارشناس هوشمند پیش می‌برد — بررسی سوابق، جستجوی هوشمند، دعوت و مذاکره، جدول کمیسیون و نامه —
       و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
       («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
@@ -644,6 +647,112 @@
         <button class="tp-btn" data-rreset>برگرداندنِ تغییرها</button>
         <span class="dim">${S.rules.rules.updated_at ? `آخرین تغییر: ${fmtShort(S.rules.rules.updated_at)}` : "هنوز ذخیره نشده — پیش‌فرض: بی بازه، مهلت ۲۴ ساعت"}</span></div>`;
     return h;
+  }
+
+  /* ---------- «💵 نرخ دلار» (طرح «خرید هوشمند، کارشناس ناظر»، مهر ۱۴۰۵) ----------
+     پایهٔ «قیمت روز»ِ سوابق و رتبهٔ «ارزش خرید»: نرخ هر روز از کانال عمومی «قیمت لحظه‌ای دلار تهران» (ربات روزانه از ۶ صبح)،
+     از فایل اکسلِ همان ربات یا دستی؛ روزهای بی‌معامله با درون‌یابیِ خطی (worker/usd.js). */
+  const USD_SRC = { excel: ["فایل", ""], bot: ["کانال", "ok"], manual: ["دستی", "warn"], interp: ["درون‌یابی", ""] };
+  const USD_HOW = { summary: "پیام «پایان معاملات»", last_trade: "آخرین «معامله شد» (پیام پایانی عدد نداشت)", last_trade_no_marker: "آخرین «معامله شد» روز", last_trade_fix: "آخرین «معامله شد» (عدد پیام پایانی اشتباه بود)" };
+  const wdOf = (j) => { const ms = TP.jStr2ms(j); return ms ? TP.WD[new Date(ms).getDay()] : ""; };
+  async function loadUsd() {
+    S.usdLoading = true; S.usdErr = ""; render();
+    try { S.usd = await api("/usd?days=60"); } catch (e) { S.usdErr = e.message; }
+    S.usdLoading = false; render();
+  }
+  function vUsd() {
+    let h = `<div class="tp-note">«قیمت روز»ِ سوابق خرید با نسبتِ <b>نرخ دلارِ امروز به نرخِ روزِ خرید</b> حساب می‌شود و رتبهٔ «ارزش خرید» هم بر همین پایه است
+      (تیکِ «مرکز آمار» در سوابق، تعدیلِ فصلیِ زمستان ۱۴۰۴ را نشان می‌دهد). نرخ هر روز از کانال عمومی «قیمت لحظه‌ای دلار تهران» خوانده می‌شود:
+      هر روز از ساعت ۶ صبح، نرخِ پایانیِ دیروز (عدد «آخرین معامله»ٔ پیام «پایان معاملات»؛ اگر عدد نداشت، آخرین «معامله شد»ِ فردایی پیش از آن).
+      روزهای بی‌معامله (جمعه، تعطیل) با درون‌یابیِ خطی بین روزِ قبل و بعد پر می‌شوند.</div>`;
+    if (S.usdErr) h += `<div class="tp-note warn">${esc(S.usdErr)}</div>`;
+    const U = S.usd;
+    if (!U) return h + (S.usdLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    const L = U.latest, last = U.bot.runs[0];
+    const chip = (src) => { const c = USD_SRC[src] || [src, ""]; return `<span class="chip ${c[1]}">${c[0]}</span>`; };
+    h += `<div class="tp-card" style="padding:12px 16px;margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">
+      <div><div class="dim" style="font-size:.8rem">آخرین نرخ</div><div style="font-size:1.35rem;font-weight:700" class="num">${L ? M(L.rate) : "—"} <span class="dim" style="font-size:.85rem">ریال</span></div>
+        <div class="dim" style="font-size:.82rem">${L ? `${esc(wdOf(L.jday))} ${esc(L.jday)} ${chip(L.src)}` : "هنوز نرخی نیست — فایل نرخ‌ها را بارگذاری کنید"}</div></div>
+      <div><div class="dim" style="font-size:.8rem">روزهای ثبت‌شده</div><div class="num"><b>${M(U.count)}</b> روز <span class="dim">(${M(U.real)} نرخِ واقعی، ${M(U.count - U.real)} درون‌یابی)</span></div>
+        <div class="dim" style="font-size:.82rem">${U.first ? `از ${esc(U.first)} تا ${esc(U.last)}` : ""}</div></div>
+      <div><div class="dim" style="font-size:.8rem">ربات روزانه</div><div>${last ? `آخرین اجرا ${fmtShort(last.at)}` : "هنوز اجرا نشده"}</div>
+        <div class="dim" style="font-size:.82rem">${last ? (last.error ? `⚠️ ${esc(last.error)}` : last.found.length ? `ثبت: ${last.found.map((x) => esc(x.jday)).join("، ")}` : last.failed.length ? `هنوز نیامده: ${last.failed.map(esc).join("، ")}` : "چیزِ تازه‌ای نبود") : `هر روز از ساعت ${M(U.bot.fromHour)} صبح، هر ۱۰ دقیقه تا نرخ دیروز بیاید`}</div></div>
+      <span style="flex:1"></span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="tp-btn sm" data-usdfetch>🔄 خواندن از کانال</button>
+        <label class="tp-btn sm" style="cursor:pointer">📤 بارگذاری فایل نرخ‌ها<input type="file" accept=".xlsx,.xls" data-usdfile hidden></label>
+        <button class="tp-btn sm" data-usdman>✏️ نرخ دستیِ یک روز</button></div></div>`;
+    if (U.rows.length) {
+      h += `<h3 class="sup-h">${M(U.rows.length)} روزِ آخر</h3><div class="tp-scroll"><table class="tp-table" data-stick><thead><tr><th>روز</th><th class="c">نرخ دلار (ریال)</th><th>منبع</th><th class="rt">مأخذ</th></tr></thead><tbody>
+        ${U.rows.map((r) => `<tr${r.src === "interp" ? ` class="dim"` : ""}><td class="num">${esc(wdOf(r.jday))} ${esc(r.jday)}</td><td class="c num">${M(r.rate)}</td><td>${chip(r.src)}</td>
+          <td class="rt" style="font-size:.8rem">${r.src === "bot" && r.ref ? `<a href="https://${esc(r.ref)}" target="_blank" rel="noopener" dir="ltr">${esc(r.ref)}</a>` : r.src === "interp" ? `بینِ ${esc(String(r.ref || "").replace("~", " و "))}` : esc(r.ref || "")}</td></tr>`).join("")}</tbody></table></div>`;
+    }
+    if (U.bot.runs.length) {
+      h += `<h3 class="sup-h">اجراهای ربات</h3><div class="tp-scroll"><table class="tp-table"><thead><tr><th>زمان</th><th class="rt">نتیجه</th><th class="c">درخواست به کانال</th></tr></thead><tbody>
+        ${U.bot.runs.map((r) => `<tr><td class="num" style="font-size:.8rem">${fmtShort(r.at)}</td><td class="rt" style="white-space:normal">
+          ${r.found.map((x) => `<div>✓ ${esc(x.jday)}: <b class="num">${M(x.rate)}</b> — ${esc(USD_HOW[x.how] || x.how)}${x.note ? ` <span class="dim">(${esc(x.note)})</span>` : ""}</div>`).join("")}
+          ${r.none.length ? `<div class="dim">بی‌معامله: ${r.none.map(esc).join("، ")}</div>` : ""}${r.failed.length ? `<div>⏳ هنوز نیامده: ${r.failed.map(esc).join("، ")}</div>` : ""}${r.error ? `<div>⚠️ ${esc(r.error)}</div>` : ""}</td>
+          <td class="c num">${M(r.requests)}</td></tr>`).join("")}</tbody></table></div>`;
+    }
+    return h;
+  }
+  async function usdFetch() {
+    const b = TP.busy("خواندن از کانال…", "نرخ دلارِ روزهای جاافتاده");
+    try {
+      const r = (await api("/usd/fetch", { method: "POST" })).usd || {};
+      const msg = r.state === "upToDate" ? `نرخ‌ها به‌روزند (آخرین روز: ${esc(r.last)}).` : r.state === "empty" ? esc(r.note || "")
+        : (r.found && r.found.length ? `ثبت شد: ${r.found.map((x) => `${esc(x.jday)} ← ${M(x.rate)} ریال`).join("، ")}` : "نرخِ تازه‌ای پیدا نشد.")
+          + (r.none && r.none.length ? `<br>بی‌معامله: ${r.none.map(esc).join("، ")}` : "") + (r.failed && r.failed.length ? `<br>هنوز نیامده: ${r.failed.map(esc).join("، ")}` : "")
+          + (r.error ? `<br>⚠️ ${esc(r.error)}` : "");
+      b.close();
+      TP.modal("نرخ دلار", msg, null, "باشد", "");
+      await loadUsd();
+    } catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+  }
+  /** کتابخانهٔ اکسل فقط وقتِ بارگذاری (۹۰۰ کیلوبایت) */
+  function ensureXlsx() {
+    if (window.XLSX) return Promise.resolve();
+    return new Promise((ok, no) => { const sc = document.createElement("script"); sc.src = "vendor/xlsx.full.min.js"; sc.onload = ok; sc.onerror = () => no(new Error("کتابخانهٔ اکسل بار نشد.")); document.head.appendChild(sc); });
+  }
+  /** فایلِ ربات نرخ دلار: برگهٔ «نرخ دلار» با «سال | ماه | روز | نرخ دلار (ریال)»؛ اگر سرستون «تومان» بگوید ×۱۰ */
+  async function usdUpload(file) {
+    const b = TP.busy("بارگذاری نرخ‌ها…", esc(file.name));
+    const num = (v) => { const x = Number(digits(String(v == null ? "" : v)).replace(/[,٬\s]/g, "")); return Number.isFinite(x) ? x : null; };
+    try {
+      await ensureXlsx();
+      const wb = window.XLSX.read(await file.arrayBuffer());
+      const sheets = wb.SheetNames.map((name) => ({ name, rows: window.XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null }) }));
+      const head = (sh) => String((sh.rows[0] || [])[3] || "");
+      const sh = sheets.find((x) => /ریال/.test(head(x))) || sheets.find((x) => x.name === "نرخ دلار") || sheets[0];
+      const k = sh && /تومان/.test(head(sh)) ? 10 : 1;
+      const rows = [];
+      for (const r of (sh ? sh.rows : [])) {
+        const y = num(r[0]), m = num(r[1]), d = num(r[2]), v = num(r[3]);
+        if (y >= 1300 && y <= 1500 && m >= 1 && m <= 12 && d >= 1 && d <= 31 && v > 0) rows.push({ jday: `${y}/${p2(m)}/${p2(d)}`, rate: Math.round(v * k) });
+      }
+      if (!rows.length) throw new Error("ردیفی با «سال، ماه، روز و نرخ دلار (ریال)» پیدا نشد.");
+      let written = 0, bad = 0;
+      for (let i = 0; i < rows.length; i += 300) {
+        b.set(`${esc(file.name)}<br>${M(Math.min(i + 300, rows.length))} از ${M(rows.length)} روز…`);
+        const r = await api("/usd/rows", { body: { rows: rows.slice(i, i + 300), file: file.name } });
+        written += r.written || 0; bad += r.bad || 0;
+      }
+      b.close();
+      TP.modal("بارگذاری شد", `${M(written)} روز ثبت شد${bad ? `؛ ${M(bad)} ردیفِ نامعتبر کنار گذاشته شد` : ""}. روزهای خالیِ میانِ آن‌ها با درون‌یابی پر شد.`, null, "باشد", "");
+      await loadUsd();
+    } catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+  }
+  function usdManual() {
+    const d = TP.modal("✏️ نرخ دستیِ یک روز", `<div style="display:flex;flex-direction:column;gap:8px">
+        <label>روز (شمسی)<input class="tp-input" data-um="jday" placeholder="1405/07/13" dir="ltr"></label>
+        <label>نرخ دلار (ریال)<input class="tp-input num" data-um="rate" inputmode="numeric" dir="ltr"></label>
+        <span class="dim" style="font-size:.85rem">نرخ را خالی بگذارید تا نرخِ آن روز برداشته شود (با درون‌یابی پر می‌شود).</span></div>`, async () => {
+      const g = (k) => digits(d.querySelector(`[data-um="${k}"]`).value).trim();
+      try {
+        const r = await api("/usd/rows", { body: { rows: [{ jday: g("jday"), rate: g("rate").replace(/[,٬\s]/g, "") || null }], src: "manual" } });
+        if (!r.written) throw new Error("روز یا نرخ نامعتبر است (نرخ به ریال، مثلاً ۲٬۶۹۴٬۰۰۰).");
+        await loadUsd();
+      } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "ثبت");
   }
 
   /* ---------- تبِ «📥 تحویل‌های هوشمند» (فاز ۳) ----------
@@ -756,7 +865,7 @@
     let r; try { r = await api("/ai/experts"); } catch (_) { return; }
     S.ai = r;
     const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
-    if (S.tab === "ai" && !S.aiEx && S.aiView !== "rules") { if (!typing) render(); return; }
+    if (S.tab === "ai" && !S.aiEx && S.aiView === "list") { if (!typing) render(); return; }
     const bar = app.querySelector(".tp-tabs"); if (bar) bar.outerHTML = vTabs();
   }
   setInterval(aiPulse, 45000);
@@ -831,7 +940,9 @@
     if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
     if (d.aitoggle) return aiToggle(Number(d.aitoggle), d.on === "1");
     /* فاز ۳: قواعدِ حداقلِ استعلام و تحویل‌ها */
-    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); return render(); }
+    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); return render(); }
+    if (d.usdfetch !== undefined) return usdFetch();
+    if (d.usdman !== undefined) return usdManual();
     if (d.radd) { S.rulesDraft[d.radd].push({ from: "", to: "", min: "" }); return render(); }
     if (d.rdel) { const [k, i] = d.rdel.split(":"); S.rulesDraft[k].splice(Number(i), 1); return render(); }
     if (d.rsave !== undefined) return saveRulesUi();
@@ -847,7 +958,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
@@ -861,6 +972,7 @@
     if (d.cf) { S.cmF[d.cf] = t.value; S.cmSel.clear(); return loadCm(); }
     if (d.cpick) { const id = Number(d.cpick); if (t.checked) S.cmSel.add(id); else S.cmSel.delete(id); return render(); }
     if (d.dlf) { S.dlF[d.dlf] = t.value; return loadDls(); }
+    if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
     return null;
   });
   /* جستجوی متنی: با هر نویسه، بی از دست رفتنِ فوکوس */

@@ -52,6 +52,7 @@ import { pushMsgs as spPush } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
 import { aiTick } from "./ai-agent.js";
+import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
@@ -3802,6 +3803,13 @@ export async function scheduled(env, cron) {
     out = { ...a, ...d, watched: w.checked, colorChanges: w.changed };
   }
   if (!cron || !heavy) {
+    /* نرخ دلار (worker/usd.js): از ۶ صبح تهران هر ۱۰ دقیقه می‌سنجد نرخ دیروز آمده یا نه (دو خواندن از D1)؛ اگر از کانال
+       خواند، این دقیقه فقط همین است — سقف زیردرخواست‌ها */
+    if (usdSlot(Date.now(), cron)) {
+      const u = await usdDaily(env).catch((e) => ({ usdError: e && e.message }));
+      if (cron && (u.usd || u.usdError)) return { ...out, ...u };
+      out = { ...out, ...u };
+    }
     out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
     /* کارشناس هوشمند (worker/ai-agent.js): یک گام — فقط در دقیقه‌ای که جستجوی هوشمندِ صف اجرا نشد (سقف زیردرخواست) */
     if (!out.jobs) out = { ...out, ...(await aiTick(env).catch((e) => ({ aiError: e && e.message }))) };
