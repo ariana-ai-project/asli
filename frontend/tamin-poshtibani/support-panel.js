@@ -6,7 +6,7 @@
    برداشته شد. سرور: worker/support.js (مسیرهای /support/*).
    ورود با رمز مشترک پشتیبانی: اولین بازدیدکننده رمز را می‌گذارد و اگر فراموش شد، مدیر با کد مدیر رمز تازه
    می‌گذارد. نشانهٔ ورود (۱۲ ساعته) فقط در sessionStorage همین تب می‌ماند.
-   فاز ۲: تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارشناس هوشمند. طرح «خرید هوشمند»: زیرنمای «💵 نرخ دلار» (worker/usd.js). فاز ۳: قواعدِ «حداقلِ استعلام» و مهلتش (زیرِ تبِ
+   فاز ۲: تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارشناس هوشمند. طرح «خرید هوشمند»: زیرنمای «💵 نرخ دلار» (worker/usd.js) و تبِ «🧩 تغییرات اقلام» (worker/structure.js). فاز ۳: قواعدِ «حداقلِ استعلام» و مهلتش (زیرِ تبِ
    کارشناس هوشمند، worker/ai-rules.js)، کارهای «واگذارشده» به کارشناس، و تبِ «📥 تحویل‌های هوشمند»: جدول کمیسیون، برگهٔ
    درخواست و نامهٔ هر کارِ تمام‌شده، با تأیید یا ردِ کمیسیون.
    ============================================================ */
@@ -53,7 +53,7 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["chat", "مکاتبات"], ["log", "گزارش رخدادها"], ["cm", "تأیید کمیسیون"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chg", "🧩 تغییرات اقلام"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["chat", "مکاتبات"], ["log", "گزارش رخدادها"], ["cm", "تأیید کمیسیون"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
@@ -71,6 +71,8 @@
     dl: null, dlErr: "", dlLoading: false, dlF: { state: "new" }, dlId: null, dlD: null, dlDErr: "",
     /* طرح «خرید هوشمند، کارشناس ناظر»: نرخ دلار (زیرنمای تبِ کارشناس هوشمند، worker/usd.js) */
     usd: null, usdErr: "", usdLoading: false,
+    /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
+    chg: null, chgErr: "", chgLoading: false, chgF: { expert: "", rid: "", changed: "1", frozen: "" }, chgMore: false, chgNext: null,
   };
   const thr = () => (S.settings && S.settings.thresholds) || (CFG.defaults && CFG.defaults.thresholds) || [10, 30, 50, 70, 90, 100];
   const exName = (id) => { const e = S.experts.find((x) => x.id === Number(id)); return e ? e.label || e.name : id ? `کارشناس ${id}` : "—"; };
@@ -152,6 +154,7 @@
     else if (S.tab === "chat" && (force || !S.th)) loadThreads();
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
+    else if (S.tab === "chg" && (force || !S.chg)) loadChg();
     else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
@@ -649,6 +652,64 @@
     return h;
   }
 
+  /* ---------- تبِ «🧩 تغییرات اقلام» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۱) ----------
+     برای هر قلمی که کارشناس ساختارش را تأیید کرده یک پیام: چه کسی، کی، و دقیقاً چه چیزی با پیشنهادِ سامانه فرق دارد (نوع قلم،
+     لایه‌ها، نرخ‌های تبدیل، 🔒/🔓)؛ «تاریخچه» همهٔ ذخیره‌های همان قلم را نشان می‌دهد (worker/structure.js). */
+  const CHG_KIND = { norm: "ذخیرهٔ ساختار", clear: "برداشتنِ ذخیره", revert: "برگشت به فهرست اقلام", freeze: "🤖 سپردن به کارشناس هوشمند (انجماد)" };
+  const SUGG_SRC = { catalog: "فهرست اقلام — همین کد", title: "فهرست اقلام — همین عنوان", edit: "ویرایشِ قبلیِ کارشناسان در دیتابیس", cache: "پیشنهادِ مدل (از پیش)", model: "پیشنهادِ مدل" };
+  const actorFa = (a) => { const m = /^expert:(\d+)$/.exec(String(a || "")); return m ? exName(m[1]) : a === "support" ? "پشتیبانی" : a === "manager" ? "مدیر" : a || "—"; };
+  async function loadChg(more) {
+    S.chgLoading = true; S.chgErr = ""; render();
+    const qs = new URLSearchParams({ limit: "120" });
+    for (const [k, v] of Object.entries(S.chgF)) if (v) qs.set(k, v);
+    if (more && S.chgNext != null) qs.set("offset", String(S.chgNext));
+    try {
+      const r = await api(`/changes?${qs}`);
+      S.chg = more && S.chg ? [...S.chg, ...r.items] : r.items; S.chgMore = !!r.more; S.chgNext = r.next;
+    } catch (e) { S.chgErr = e.message; }
+    S.chgLoading = false; render();
+  }
+  function vChg() {
+    const f = S.chgF;
+    let h = `<div class="tp-filters">
+      <span class="lab">کارشناس</span><select class="tp-select" data-chgf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select>
+      <span class="lab">درخواست</span><input class="tp-input num" data-chgf="rid" value="${esc(f.rid)}" placeholder="شماره" style="width:110px">
+      <label class="chkline"><input type="checkbox" data-chgf="changed" ${f.changed ? "checked" : ""}> فقط اقلامِ تغییرکرده</label>
+      <label class="chkline"><input type="checkbox" data-chgf="frozen" ${f.frozen ? "checked" : ""}> فقط سپرده‌شده به کارشناس هوشمند</label>
+      <span class="end">${S.chg ? `${M(S.chg.length)} قلم${S.chgMore ? "+" : ""}` : ""}${S.chgLoading ? " · در حال بارگذاری…" : ""}</span></div>
+      <div class="tp-note">نرمال‌سازی اجباری است و اول از همه: کارشناس ساختارِ هر قلم را می‌بیند، اصلاح یا تأیید می‌کند و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 می‌گذارد.
+      برای هر قلم یک پیام می‌آید: ساختارِ تأییدشده دقیقاً در چه با <b>پیشنهادِ سامانه</b> (همان که کارشناس اول دید) فرق دارد. با «بررسی سوابق و سپردن به کارشناس هوشمند»، ساختار منجمد می‌شود (🔒 منجمد).
+      «تاریخچه» هر ذخیره را با کنشگر و زمان نشان می‌دهد.</div>`;
+    if (S.chgErr) h += `<div class="tp-note warn">${esc(S.chgErr)}</div>`;
+    if (!S.chg) return h + (S.chgLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!S.chg.length) return h + `<div class="empty"><b>قلمی نیست.</b>${f.changed ? "قلمِ تغییرکرده‌ای با این صافی‌ها نیست؛ تیکِ «فقط اقلامِ تغییرکرده» را بردارید تا همهٔ اقلامِ نرمال‌شده بیایند." : ""}</div>`;
+    const lockTxt = (k) => `${k.title ? "🔒" : "🔓"} عنوان · ${k.qty ? "🔒" : "🔓"} مقدار${Object.entries(k.layers || {}).map(([n, v]) => ` · ${v ? "🔒" : "🔓"} ${esc(n)}`).join("")}`;
+    h += S.chg.map((x) => `<div class="tp-card" style="padding:12px 16px;margin:10px 0">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><b>${esc(x.title)}</b>
+        <span class="chip num">${esc(x.request_id)}</span><span class="dim">${esc(x.party || "")}</span>
+        <span style="flex:1"></span>${x.frozen_at ? `<span class="chip info" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد ${fmtShort(x.frozen_at)}</span>` : ""}
+        <span class="dim" style="font-size:.8rem" title="آخرین تأییدِ ساختار">${fmtS(x.norm_at)}</span></div>
+      <div class="dim" style="font-size:.85rem;margin:4px 0 6px">کارشناس: ${esc(exName(x.expert_id))}${x.by && x.by !== `expert:${x.expert_id}` ? ` (ذخیره: ${esc(actorFa(x.by))})` : ""} · نوع قلم: <b>${esc(x.head)}</b>${x.qty != null ? ` · مقدار ${M(x.qty)} ${esc(x.unit || "")}` : ""}${x.sugg_source ? ` · پیشنهادِ سامانه از: ${esc(SUGG_SRC[x.sugg_source] || x.sugg_source)}` : ""}</div>
+      ${x.lines.length ? `<ul style="margin:0;padding-inline-start:20px;line-height:1.9">${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+        : x.has_sugg ? `<div style="color:#86efac">✓ بی‌تغییر — همان پیشنهادِ سامانه تأیید شد (همه 🔒).</div>`
+        : `<div class="dim">پیشنهادِ سامانه برای این قلم ثبت نشده (پیش از این بخش نرمال شده بود).</div>`}
+      <div class="dim" style="font-size:.8rem;margin-top:6px">${lockTxt(x.locks)}</div>
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="tp-btn xs" data-chglog="${x.id}">تاریخچه (${M(x.changes)})</button><button class="tp-btn xs" data-asg="${x.aid}">جزئیاتِ ارجاع</button></div></div>`).join("");
+    if (S.chgMore) h += `<div style="text-align:center;margin:10px 0"><button class="tp-btn sm" data-chgmore>بیشتر…</button></div>`;
+    return h;
+  }
+  async function chgLog(id) {
+    const ov = overlay("تاریخچهٔ ساختارِ قلم", `<div class="empty">در حال بارگذاری…</div>`);
+    try {
+      const r = await api(`/changes/${id}`);
+      const it = r.item || {};
+      ov.set(`تاریخچهٔ ساختار — ${esc(it.title || "")}`, r.changes.length ? `<div class="tp-scroll"><table class="tp-table"><thead><tr><th>زمان</th><th>کنشگر</th><th>کار</th><th class="rt">تغییرها</th></tr></thead><tbody>
+        ${r.changes.map((c) => `<tr><td class="num" style="font-size:.8rem">${fmtS(c.at)}</td><td>${esc(actorFa(c.actor))}</td><td>${esc(CHG_KIND[c.kind] || c.kind)}</td>
+          <td class="rt" style="white-space:normal">${c.lines.length ? c.lines.map((l) => `<div>${esc(l)}</div>`).join("") : `<span class="dim">${c.kind === "norm" || c.kind === "freeze" ? "بی‌تغییر" : "—"}</span>`}</td></tr>`).join("")}</tbody></table></div>`
+        : `<div class="empty">هنوز تغییری ثبت نشده — این قلم پیش از این بخش نرمال شده بود.</div>`);
+    } catch (e) { ov.set("خطا", `<div class="tp-note warn">${esc(e.message)}</div>`); }
+  }
+
   /* ---------- «💵 نرخ دلار» (طرح «خرید هوشمند، کارشناس ناظر»، مهر ۱۴۰۵) ----------
      پایهٔ «قیمت روز»ِ سوابق و رتبهٔ «ارزش خرید»: نرخ هر روز از کانال عمومی «قیمت لحظه‌ای دلار تهران» (ربات روزانه از ۶ صبح)،
      از فایل اکسلِ همان ربات یا دستی؛ روزهای بی‌معامله با درون‌یابیِ خطی (worker/usd.js). */
@@ -884,6 +945,7 @@
   function vTab() {
     if (S.tab === "ai") return vAi();
     if (S.tab === "dl") return vDl();
+    if (S.tab === "chg") return vChg();
     if (S.tab === "req") return vReq();
     if (S.tab === "exp") return S.exId ? vExpert() : vExperts();
     if (S.tab === "chat") return vChat();
@@ -942,6 +1004,8 @@
     /* فاز ۳: قواعدِ حداقلِ استعلام و تحویل‌ها */
     if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); return render(); }
     if (d.usdfetch !== undefined) return usdFetch();
+    if (d.chglog) return chgLog(Number(d.chglog));
+    if (d.chgmore !== undefined) return loadChg(true);
     if (d.usdman !== undefined) return usdManual();
     if (d.radd) { S.rulesDraft[d.radd].push({ from: "", to: "", min: "" }); return render(); }
     if (d.rdel) { const [k, i] = d.rdel.split(":"); S.rulesDraft[k].splice(Number(i), 1); return render(); }
@@ -958,7 +1022,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
@@ -973,6 +1037,7 @@
     if (d.cpick) { const id = Number(d.cpick); if (t.checked) S.cmSel.add(id); else S.cmSel.delete(id); return render(); }
     if (d.dlf) { S.dlF[d.dlf] = t.value; return loadDls(); }
     if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
+    if (d.chgf) { S.chgF[d.chgf] = t.type === "checkbox" ? (t.checked ? "1" : "") : t.value.trim(); S.chg = null; return loadChg(); }
     return null;
   });
   /* جستجوی متنی: با هر نویسه، بی از دست رفتنِ فوکوس */

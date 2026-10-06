@@ -17,6 +17,7 @@ import { ensureSchema } from "../../../worker/api.js";
 import { handleUpdate } from "../../../worker/bot.js";
 import { telegram } from "../../../worker/telegram.js";
 import { pushNavMenus } from "../../../worker/tg-nav.js";
+import { normalizeItem } from "../../../worker/normalize.js";
 
 const TP0 = loadTP();
 const XL = TP0.XLSX;
@@ -88,6 +89,16 @@ if (DB) {
   ins.run(11, "R-1", "a", 1, "1001", "پیچ آلن M8 فولادی", 10, "عدد", 1);
   ins.run(21, "R-2", "a", 1, "1001", "پیچ آلن M8 فولادی", 10, "عدد", 2);
   ins.run(22, "R-2", "b", 2, "2001", "مهره M8", 4, "عدد", 2);
+  /* نرمال‌سازی اجباری (طرح «خرید هوشمند» فاز ۱): کارشناس ساختارِ پیشنهادیِ فهرست اقلام را در پنل تأیید کرده است */
+  for (const id of [11, 21, 22]) {
+    const p = await normalizeItem(env, DB.raw.prepare("SELECT * FROM items WHERE id=?").get(id));
+    DB.raw.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=?")
+      .run(JSON.stringify({ v: 2, head: p.head, layers: p.layers, residual: p.residual || "", source: p.source, code: p.code || null, rates: {}, confirmed_at: t }), t, id);
+  }
+  /* درخواستِ سوم: قلمی که ساختارش هنوز تأیید نشده */
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-3','1405/07/02','پروژهٔ سه')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,dispatched_at,created_at) VALUES (3,'R-3',1,?,?)").run(t, t);
+  ins.run(31, "R-3", "a", 1, "1001", "پیچ آلن M8 فولادی", 6, "عدد", 3);
 }
 
 /* ---------- تلگرامِ بدلی ---------- */
@@ -302,4 +313,17 @@ test("منوی ثابت بی آن‌که کارشناس چیزی بفرستد: C
     assert.equal(DB.raw.prepare("SELECT value FROM settings WHERE key='navMenu'").get().value, "1");
     assert.equal((await pushNavMenus(env, telegram(env), 5)).navSent, 0, "در هر isolate هر پنج دقیقه یک بار");
   } finally { globalThis.fetch = real; }
+});
+test("نرمال‌سازی اجباری: سوابقِ قلمی که ساختارش تأیید نشده در بات خوانده نمی‌شود — دکمهٔ پنل کارشناس؛ بعد از تأیید، همان سوابق", { skip: SKIP }, async () => {
+  const start = await press("hs:a:3");
+  const r = await press(cbOf(start.kb, "نوع قلم"));
+  assert.match(r.text, /نرمال‌سازی اجباری است/);
+  assert.match(r.text, /پیچ آلن M8 فولادی/);
+  const app = r.kb.flat().find((b) => b.web_app);
+  assert.ok(app && /پنل کارشناس/.test(app.text), "دکمهٔ مینی‌اپِ پنل کارشناس");
+  assert.equal(DB.raw.prepare("SELECT hist_done_at FROM items WHERE id=31").get().hist_done_at, null, "مرحله ثبت نمی‌شود");
+  const p = await normalizeItem(env, DB.raw.prepare("SELECT * FROM items WHERE id=31").get());
+  DB.raw.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=31").run(JSON.stringify({ v: 2, head: p.head, layers: p.layers, source: p.source, code: "1001", rates: {}, confirmed_at: Date.now() }), Date.now());
+  const ok = await press(cbOf((await press("hs:a:3")).kb, "نوع قلم"));
+  assert.match(ok.text, /🔹 <b>نوع قلم<\/b> — پیچ/);
 });

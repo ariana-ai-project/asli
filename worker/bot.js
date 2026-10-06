@@ -54,7 +54,8 @@ import { BIDI } from "./sms.js";
 import { aiTick } from "./ai-agent.js";
 import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
-import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
+import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus, expertAppUrl } from "./tg-nav.js";
+import { normConfirmed } from "./structure.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -177,6 +178,13 @@ async function aiBlocked(env, api, chat, aid, mid, kind) {
   const o = await aiOwned(env, aid);
   /* «research» (سوابق و جستجو): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) باز است */
   if (!(kind === "research" ? aiResearchLocked(o) : o)) return false;
+  /* هنوز سپرده نشده (طرح «خرید هوشمند» فاز ۱): کارِ کارشناس نرمال‌سازیِ اقلام و سپردن است — در پنل کارشناس */
+  if (o.state === "pending") {
+    await show(api, chat, mid || null, "🤖 <b>این درخواست در حالت هوشمند است.</b>\n\nبررسی سوابق، جستجو، دعوت و مذاکره را کارشناس هوشمند انجام می‌دهد. "
+      + "کارِ شما پیش از آن: در پنل کارشناس ساختارِ هر قلم را ببینید، اصلاح یا تأیید کنید و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 بگذارید؛ "
+      + "بعد «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید.", [[{ text: "🧩 پنل کارشناس", web_app: { url: expertAppUrl(env) } }], navRow(aid)]);
+    return true;
+  }
   await show(api, chat, mid || null, esc(AI_LOCK_MSG), [navRow(aid)]);
   return true;
 }
@@ -1791,10 +1799,17 @@ function histSelCard(api, chat, f, d, its, asg, mid) {
 /** سوابقِ اقلام `ids` در حالت d.mode — دسته‌دسته (HIST_BATCH)؛ ثبتِ مرحله؛ بعد پیامِ خلاصه یا کارتِ قلم */
 async function histRun(env, api, chat, ex, f, d, asg, ids, mid) {
   const aid = f.assignment_id, mode = d.mode || "head";
-  const want = (await itemsOf(env, aid)).filter((i) => ids.includes(i.id));
+  const all = (await itemsOf(env, aid)).filter((i) => ids.includes(i.id));
+  /* نرمال‌سازی اجباری و اول از همه (طرح «خرید هوشمند» فاز ۱): سوابقِ قلمی که ساختارش تأیید نشده خوانده نمی‌شود؛
+     ساختار در پنل کارشناس تأیید می‌شود (بات ویرایشگرِ ساختار ندارد) */
+  const raw = all.filter((i) => !normConfirmed(i)), want = all.filter((i) => normConfirmed(i));
   const its = want.slice(0, HIST_BATCH);
   d.rest = want.slice(HIST_BATCH).map((i) => i.id);
-  if (!its.length) return show(api, chat, mid, "این اقلام دیگر باز نیستند.", [navRow(aid)]);
+  const rawNote = raw.length ? `🧩 <b>نرمال‌سازی اجباری است.</b> ساختارِ ${raw.slice(0, 6).map((i) => `«${esc(short(i.title, 40))}»`).join("، ")}${raw.length > 6 ? "، …" : ""} هنوز تأیید نشده؛ `
+    + "در پنل کارشناس نوع قلم، لایه‌ها و نرخ‌ها را ببینید، 🔒/🔓 بگذارید و «تأیید» بزنید — بعد سوابقش این‌جا هم خوانده می‌شود." : "";
+  const normKb = [{ text: "🧩 تأییدِ ساختار در پنل کارشناس", web_app: { url: expertAppUrl(env) } }];
+  if (!its.length) return show(api, chat, mid, rawNote || "این اقلام دیگر باز نیستند.", raw.length ? [normKb, navRow(aid)] : [navRow(aid)]);
+  if (rawNote) await api.sendMessage(chat, rawNote, [normKb]).catch(() => {});
   const cur = await activeImport(env);
   if (!cur) return show(api, chat, mid, "📚 فایل سوابق خرید هنوز بارگذاری نشده است؛ مدیر آن را از تب «سوابق تأمین» بارگذاری می‌کند.", [navRow(aid)]);
 

@@ -102,8 +102,16 @@ const v = (value, sure = true) => ({ value, sure });
 const S = {};
 
 test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون — پیامک فقط به شمارهٔ پنل، هر پرامپت با هزینه ثبت", { skip: SKIP }, async () => {
-  /* ۱. ارجاعِ تازه ← اجرا؛ آماده‌سازی (ساختارِ تأییدشده، سوابق بارگذاری‌نشده) */
+  /* ۱. ارجاعِ تازه: کار خودکار شروع نمی‌شود (طرح «خرید هوشمند» فاز ۱) — کارشناس ساختار را تأیید کرده و «سپردن» را می‌زند؛
+        بعد اجرا و آماده‌سازی (سوابق بارگذاری‌نشده) */
   let r = await aiTick(env);
+  assert.ok(!DB.raw.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=1").get(), "بی سپردن، کاری ساخته نمی‌شود");
+  const ho = await call("/assignments/1/handoff", { headers: EX, body: {} });
+  assert.equal(ho.status, 200, JSON.stringify(ho.data));
+  assert.equal(ho.data.items, 1);
+  assert.ok(DB.raw.prepare("SELECT frozen_at FROM items WHERE id=31").get().frozen_at, "ساختار منجمد شد");
+  assert.equal((await call("/items/31/norm", { method: "PUT", headers: EX, body: { head: "گریس", layers: {} } })).status, 409, "ساختارِ منجمد عوض نمی‌شود");
+  r = await aiTick(env);
   assert.equal(r.ai, 1, JSON.stringify(r));
   const run = DB.raw.prepare("SELECT * FROM ai_runs WHERE assignment_id=1").get();
   assert.ok(run, "اجرا ساخته شد");
@@ -342,9 +350,16 @@ test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کر
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE assignment_id=2").get().n, 0, "ارجاعِ پیش از روشن شدن فقط با «▶️ شروع»");
   const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.deepEqual(st.open.map((a) => a.request_id), ["R-AI2"]);
+  /* «▶️ شروع»ِ پشتیبانی هم همان شرطِ سپردن را دارد: ساختارِ همهٔ اقلام تأییدشده (نرمال‌سازی اجباری) */
+  const no = await call("/support/ai/1/runs", { headers: SUP, body: { assignment_id: 2 } });
+  assert.equal(no.status, 409, JSON.stringify(no.data));
+  assert.match(no.data.error, /نرمال‌سازی اجباری است/);
+  assert.deepEqual(no.data.missing, [32]);
+  DB.raw.prepare("UPDATE items SET norm_json=? WHERE id=32").run(JSON.stringify({ v: 2, head: "پیچ", layers: {}, source: "catalog" }));
   const go = await call("/support/ai/1/runs", { headers: SUP, body: { assignment_id: 2 } });
   assert.equal(go.status, 200, JSON.stringify(go.data));
   assert.equal(DB.raw.prepare("SELECT state FROM ai_runs WHERE assignment_id=2").get().state, "prep");
+  assert.equal(DB.raw.prepare("SELECT frozen_by FROM items WHERE id=32").get().frozen_by, "support");
 });
 
 test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku بی effort و fallbacks؛ «مقایسهٔ مدل» همان پرامپت را بی اجرا تکرار می‌کند", { skip: SKIP }, async () => {

@@ -39,6 +39,7 @@ import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
 import { aiFetch } from "./ai-fetch.js";
+import { cleanLocks } from "./structure.js";
 
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 /* ۲٫۱: فهرستِ لایه‌ها بی «نمره» و با مساحت، محیط و یال‌ها (یکسان‌سازیِ دوم) */
@@ -515,6 +516,8 @@ export async function confirmNorm(env, it, body, who = null, { check } = {}) {
     source: saved === "created" || saved === "updated" ? "edit" : saved === "reverted" ? "catalog"
       : ["catalog", "title", "edit", "cache", "model", "manual"].includes(body.source) ? body.source : "manual",
     code: T(body.code) || null, rates, confirmed_at: now(),
+    /* فاز ۱ طرح «خرید هوشمند»: 🔒/🔓ِ عنوان، مقدار و هر لایه برای تأمین‌کننده (پیش‌فرض همه 🔒 — worker/structure.js) */
+    locks: cleanLocks(body && body.locks, s.layers),
   };
   await env.DB.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=?").bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
   /* نوع قلم پس از ذخیره — اگر قلم به نوع قلمِ دیگری رفت، حالا جزء آن است */

@@ -1,7 +1,9 @@
 /**
  * کارشناس هوشمند (مهر ۱۴۰۵، کارشناس «test») — کارشناسی که ردیفِ ai_agents دارد و «خودکار»ش روشن است، کارِ هر ارجاعِ
  * تازه‌اش را خودِ سامانه انجام می‌دهد:
- *   ۱. آماده‌سازیِ هر قلم: ساختار (نوع قلم و لایه‌ها) و «بررسی سوابق» — همان itemHistory پنل.
+ *   ۰. (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۱) کار فقط با «بررسی سوابق و سپردن به کارشناس هوشمند» شروع می‌شود (aiHandoff): کارشناس
+ *      ساختارِ هر قلم را تأیید و 🔒/🔓 کرده، و ساختار منجمد است — دیگر شروعِ خودکار با رسیدنِ ارجاع نیست.
+ *   ۱. آماده‌سازیِ هر قلم: «بررسی سوابق» بر همان ساختارِ منجمد — همان itemHistory پنل.
  *   ۲. «جستجوی هوشمند» هر قلم — همان smartSearch پنل و بات (جستجوی تازهٔ همان قلم در چند روزِ اخیر دوباره خرج نمی‌شود).
  *   ۳. دعوت — فقط تأمین‌کنندگانی که دست‌کم یک «شمارهٔ پنل» تیک‌خورده دارند. تیک را فقط انسان می‌زند (تب کارشناس
  *      هوشمند): نامزدها از سوابق و جستجو، و هر تأمین‌کننده‌ای که کارشناس دستی به همان درخواست افزوده. قالبِ استاندارد +
@@ -42,6 +44,7 @@ import { getRules, saveRules, coverOf, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
 import { queueStmt } from "./queue.js";
+import { NORM_OK_SQL, changeStmt } from "./structure.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -125,13 +128,50 @@ async function flushCalls(env, run, expertId, rec) {
 /* ------------------------------------------------------------------ */
 /* اجرا: ساختن و برداشتن                                                 */
 /* ------------------------------------------------------------------ */
-/** ارجاع‌های تازهٔ کارشناس‌های هوشمندِ روشن — فقط ارسال‌شده بعد از روشن شدن؛ قدیمی‌ترها با «▶️ شروع» در تب */
+/**
+ * کار فقط با سپردنِ کارشناس شروع می‌شود (aiHandoff). این‌جا فقط بازیابی: ارجاعی که ساختارش منجمد شده ولی کارش ساخته نشد
+ * (مثلاً خطا میانِ سپردن) — نه هر ارجاعِ تازه، که اول باید نرمال شود.
+ */
 async function discover(env) {
   const rows = (await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id FROM ai_agents g JOIN assignments a ON a.expert_id=g.expert_id
-      WHERE g.mode='on' AND a.dispatched_at IS NOT NULL AND a.dispatched_at>=COALESCE(g.on_at,0) AND a.closed_at IS NULL
-        AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.assignment_id=a.id) ORDER BY a.id LIMIT 2`).all()).results || [];
-  for (const a of rows) await createRun(env, a, "auto").catch((e) => console.error("ai run", e && e.message));
+      WHERE g.mode='on' AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL
+        AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.assignment_id=a.id)
+        AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open' AND i.frozen_at IS NOT NULL) ORDER BY a.id LIMIT 2`).all()).results || [];
+  for (const a of rows) await createRun(env, a, "handoff").catch((e) => console.error("ai run", e && e.message));
   return rows.length;
+}
+
+/**
+ * «بررسی سوابق و سپردن به کارشناس هوشمند» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۱؛ تصمیم ۱: یک دکمه برای کل درخواست):
+ * ساختارِ اقلامِ بازِ ارجاع — که کارشناس یکی‌یکی تأیید و 🔒/🔓 کرده — منجمد می‌شود، برای هر قلم پیامِ «تغییرات اقلام» (فرقِ
+ * پیشنهادِ سامانه با ساختارِ منجمد) در item_changes می‌نشیند و کار شروع می‌شود. نرمال‌سازی اجباری است: قلمِ تأییدنشده ← ۴۰۹.
+ * actor: expert:<id> (دکمهٔ کارشناس) | support («▶️ شروع»ِ پنل پشتیبانی، با همان شرط).
+ */
+export async function aiHandoff(env, a, actor) {
+  const ag = await agentOf(env, a.expert_id);
+  if (!ag || ag.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس روشن نیست؛ «بررسی سوابق» هر قلم را خودِ کارشناس می‌زند.", 409);
+  if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
+  if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(a.id).first()) throw new HttpError("این درخواست از قبل به کارشناس هوشمند سپرده شده است.", 409);
+  const its = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.norm_json, i.sugg_json, ${NORM_OK_SQL("i")} AS ok FROM items i
+      WHERE i.assignment_id=? AND i.state='open' ORDER BY i.line_no`).bind(a.id).all()).results || [];
+  if (!its.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
+  const miss = its.filter((i) => !i.ok);
+  if (miss.length) {
+    throw new HttpError(`نرمال‌سازی اجباری است: ساختارِ ${miss.length === its.length ? "هیچ قلمی" : `${faN(miss.length)} قلم از ${faN(its.length)}`} هنوز تأیید نشده — ${miss.slice(0, 4).map((i) => `«${i.title}»`).join("، ")}${miss.length > 4 ? "، …" : ""}.`, 409, { missing: miss.map((i) => i.id) });
+  }
+  const runId = await createRun(env, a, actor === "support" ? "manual" : "handoff");
+  /* فقط اقلامی که در همین کارند (سقفِ maxItems) منجمد می‌شوند */
+  const run = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(runId).first();
+  const inRun = new Set((parse(run && run.data_json, {}).items || []).map((x) => x.id));
+  const frozen = its.filter((i) => inRun.has(i.id));
+  const t = now();
+  await env.DB.batch([
+    ...frozen.map((i) => env.DB.prepare("UPDATE items SET frozen_at=?, frozen_by=? WHERE id=? AND frozen_at IS NULL").bind(t, actor, i.id)),
+    ...frozen.map((i) => changeStmt(env, { id: i.id, request_id: i.request_id, aid: a.id }, actor, "freeze", parse(i.sugg_json, null), parse(i.norm_json, null), t)),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, actor, "ai_handoff", a.request_id,
+      JSON.stringify({ assignment_id: a.id, run_id: runId, items: frozen.length })),
+  ]);
+  return { ok: true, run_id: runId, items: frozen.length, left: its.length - frozen.length };
 }
 
 export async function createRun(env, a, how) {
@@ -150,7 +190,7 @@ export async function createRun(env, a, how) {
     env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(t, a.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=0 AND fired_at IS NULL").bind(t, a.id),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${a.expert_id}`, "viewed", a.request_id, JSON.stringify({ assignment_id: a.id, channel: "ai" })),
-    logStmt(env, runId, null, "run", `شروعِ کار روی درخواست ${a.request_id} — ${faN(its.length)} قلم (${how === "manual" ? "دستی از تب" : "ارجاعِ تازه"})`),
+    logStmt(env, runId, null, "run", `شروعِ کار روی درخواست ${a.request_id} — ${faN(its.length)} قلم (${how === "manual" ? "«▶️ شروع»ِ پنل پشتیبانی" : how === "handoff" ? "سپردنِ کارشناس، بعد از نرمال‌سازی و انجمادِ ساختار" : "ارجاعِ تازه"})`),
   ]);
   return runId;
 }
@@ -1204,7 +1244,9 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
     if (!a || a.expert_id !== ex.id) throw new HttpError("این ارجاع مالِ این کارشناس نیست.", 403);
     if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
-    return json({ ok: true, run_id: await createRun(env, a, "manual") });
+    /* همان شرطِ سپردنِ کارشناس: ساختارِ همهٔ اقلام تأییدشده؛ منجمد می‌شود */
+    const r = await aiHandoff(env, a, "support");
+    return json({ ok: true, run_id: r.run_id, items: r.items });
   }
   if ((mm = /^\/runs\/(\d+)$/.exec(path)) && m === "GET") return json(await runDetail(env, ex, mm[1]));
   if ((mm = /^\/runs\/(\d+)\/act$/.exec(path)) && m === "POST") {

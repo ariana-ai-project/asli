@@ -48,7 +48,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute, aiAdmin } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin, aiHandoff } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
 import { getRules, coverOf } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
@@ -56,6 +56,7 @@ import { supportStatus, supportSetup, supportLogin, supportReset, supportChangeP
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
+import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -190,6 +191,7 @@ ${NAV_DDL}
 ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
+${STRUCT_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -274,6 +276,8 @@ const COLUMN_MIGRATIONS = [
   ["ai_threads", "ask_json", "TEXT"],
   ["ai_runs", "handover_at", "INTEGER"],     /* فاز ۳: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد (ai-rules.js) */
   ["ai_runs", "review_json", "TEXT"],        /* فاز ۳: تحویلِ کارشناس هوشمند در پنل پشتیبانی — {state: new|ok|rejected, …} */
+  /* طرح «خرید هوشمند، کارشناس ناظر» فاز ۱: پیشنهادِ سامانه، انجمادِ ساختار با سپردن به کارشناس هوشمند (worker/structure.js) */
+  ...STRUCT_COLUMNS,
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -465,8 +469,16 @@ function ev(env, actor, kind, request_id, item_id, payload) {
 async function aiGuard(env, who, assignmentId, kind) {
   if (!who || !(who.expert || who.role === "expert") || !assignmentId) return;
   const o = await aiOwned(env, assignmentId);
-  if (kind === "research" ? aiResearchLocked(o) : o) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
+  /* «norm» (طرح «خرید هوشمند» فاز ۱): ساختارِ قلم کارِ خودِ کارشناس است، پیش از سپردن (کارِ «pending») هم — فقط کارِ زندهٔ
+     کارشناس هوشمند (پیش از واگذاری) قفلش می‌کند؛ قلمِ سپرده‌شده را انجماد (frozenGuard) هم نگه می‌دارد */
+  const locked = kind === "norm" ? !!o && !!o.run_id && !o.handover : kind === "research" ? aiResearchLocked(o) : !!o;
+  if (locked) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
 }
+/** ساختارِ قلمِ سپرده‌شده به کارشناس هوشمند تا کار دستِ اوست منجمد است (worker/structure.js) */
+async function frozenGuard(env, it) {
+  if (it && it.frozen_at && await aiOwned(env, it.aid)) throw new HttpError(FROZEN_MSG(it.frozen_at), 409, { frozen: true });
+}
+const actorOf = (who) => (who && who.expert ? `expert:${who.expert.id}` : "manager");
 /** خطِ استعلامی که کارشناس هوشمند ساخته (یا از گفت‌وگوی او آمده) — برای کارشناس دست‌نخوردنی */
 async function aiQuoteGuard(env, q) {
   if (await aiQuote(env, q)) throw new HttpError(AI_QUOTE_MSG, 423, { ai_locked: true });
@@ -1078,6 +1090,9 @@ async function tray(env, ex, url) {
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.hist_done_at IS NOT NULL) AS hist_count,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart_count,
+      (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open' AND ${NORM_OK_SQL("i")}) AS norm_count,
+      (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open' AND i.frozen_at IS NOT NULL) AS frozen_count,
+      (SELECT COUNT(*) FROM ai_runs x WHERE x.assignment_id=a.id) AS ai_run,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.commission_ok=1) AS ok_count,
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quote_count,
       (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count,
@@ -1128,6 +1143,9 @@ async function assignmentDetail(env, aid, who) {
     if (owned) ai.cover = await coverOf(env, aid, await getRules(env), (await getSettings(env)).minSuppliers);
   }
   ai.mode = aiMode;
+  /* طرح «خرید هوشمند» فاز ۱: «بررسی سوابق و سپردن به کارشناس هوشمند» — کارِ «pending» (هنوز سپرده نشده) و شمارِ اقلامِ نرمال‌شده */
+  const open = items.filter((i) => i.state === "open");
+  ai.handoff = { total: open.length, ok: open.filter((i) => normConfirmed(i)).length, frozen: open.filter((i) => i.frozen_at).length, pending: !!(owned && !owned.run_id) };
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
 }
 
@@ -1135,7 +1153,7 @@ async function assignmentDetail(env, aid, who) {
    مدیر هر قلمی را می‌بیند (پنل فقط‌خواندنی‌اش همین را لازم دارد). */
 async function ownItem(env, who, itemId) {
   if (!itemId) throw new HttpError("item_id لازم است.");
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.norm_json, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.norm_json, i.sugg_json, i.frozen_at, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
     FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (who.role === "expert" && it.expert_id !== who.expert.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
@@ -1619,6 +1637,9 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));
       /* کارشناس هوشمند (فاز ۲): تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارهایش (worker/ai-agent.js:aiAdmin) */
       if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson, flush: (k) => flush(env, ctx, k) });
+      /* «🧩 تغییرات اقلام» (طرح «خرید هوشمند» فاز ۱): برای هر قلم یک پیام — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه — و تاریخچه‌اش */
+      if (path === "/support/changes" && m === "GET") return json(await changesList(env, url));
+      if ((mm = /^\/support\/changes\/(\d+)$/.exec(path)) && m === "GET") return json(await changeLog(env, int(mm[1])));
       /* نرخ دلار (worker/usd.js): پایهٔ «قیمت روز»ِ سوابق — وضعیت ربات روزانه، خواندن دستی از کانال و بارگذاری فایل */
       if (path === "/support/usd" || path.startsWith("/support/usd/")) return await usdAdmin(request, env, path.slice("/support/usd".length), m, url, { json, readJson });
       if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
@@ -1707,6 +1728,13 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)$/.exec(path)) && m === "GET") { const who = await requireAny(request, env); return json(await assignmentDetail(env, int(mm[1]), who)); }
     if ((mm = /^\/assignments\/(\d+)\/viewed$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); await ownAssignment(env, ex, int(mm[1])); await env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(now(), int(mm[1])).run(); return json({ ok: true }); }
     if ((mm = /^\/assignments\/(\d+)\/commission$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await commission(env, ex, int(mm[1]))); }
+    /* طرح «خرید هوشمند» فاز ۱: ساختارِ همهٔ اقلام منجمد و کار به کارشناس هوشمند سپرده می‌شود (worker/ai-agent.js:aiHandoff) */
+    if ((mm = /^\/assignments\/(\d+)\/handoff$/.exec(path)) && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at FROM assignments WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
+      if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
+      return json(await aiHandoff(env, a, `expert:${ex.id}`));
+    }
     if ((mm = /^\/assignments\/(\d+)\/decision$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env); const r = await expertDecision(env, ex, int(mm[1]), await readJson(request));
       flush(env, ctx, 1); return json(r);
@@ -2053,11 +2081,14 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      /* ساختارِ قلمِ درخواستِ دستِ کارشناس هوشمند را خودش می‌سازد (ai-lock.js) */
-      await aiGuard(env, who, it.aid, "research");
+      /* نرمال‌سازی کارِ خودِ کارشناس است، پیش از سپردن به کارشناس هوشمند هم (طرح «خرید هوشمند» فاز ۱) */
+      await aiGuard(env, who, it.aid, "norm");
       const b = await readJson(request);
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
+      /* «پیشنهادِ سامانه»: اولین پیشنهادی که کارشناس برای همین قلم دید — مبنای پیامِ «تغییرات اقلام» (یک بار برای هر قلم) */
+      const sg = !it.sugg_json && who.role === "expert" ? suggOf(p) : null;
+      if (sg) await env.DB.prepare("UPDATE items SET sugg_json=? WHERE id=? AND sugg_json IS NULL").bind(JSON.stringify(sg), it.id).run();
       /* کنار هر نرخ، سهمِ همان واحد از کلِ خریدِ این نوع قلم */
       if (p.head && p.rates) p.rates = await ratesWithShares(env, p.rates, p.head, p.code || null, p.layers || null);
       return json(p);
@@ -2065,18 +2096,23 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      await aiGuard(env, who, it.aid, "research");
+      /* منجمد (سپرده‌شده) پیامِ روشن‌تری از قفلِ کارشناس هوشمند دارد */
+      await frozenGuard(env, it);
+      await aiGuard(env, who, it.aid, "norm");
       /* قلمی که برای تأمین‌کننده رفته قفل است: برداشتنِ ذخیره نه، و ذخیره فقط با همان نوع قلم و لایه‌ها (نرخ‌ها آزاد) */
       const lock = (await itemLocks(env, [it.id])).get(it.id);
+      const before = normConfirmed(it) ? JSON.parse(it.norm_json) : it.sugg_json ? JSON.parse(it.sugg_json) : null;
       if (m === "DELETE") {
         if (lock) throw new HttpError(LOCK_MSG, 409);
         const r = await clearNorm(env, it);
         /* تأییدِ نرمال‌سازی با items.norm_at در گزارش رخدادها هست؛ برداشتنش زمان را پاک می‌کند، پس رخداد جدا */
-        await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_clear", it.request_id, it.id, { assignment_id: it.aid }).run();
+        await env.DB.batch([ev(env, actorOf(who), "norm_clear", it.request_id, it.id, { assignment_id: it.aid }), changeStmt(env, it, actorOf(who), "clear", before, null)]);
         return json(r);
       }
       const check = lock ? (s) => { if (!sameAsLock(lock, s.head, s.layers, it.spec)) throw new HttpError(LOCK_MSG, 409); } : null;
       const r = await confirmNorm(env, it, await readJson(request), who, { check });
+      /* سابقهٔ تغییرات (طرح «خرید هوشمند»): هر ذخیره — کنشگر، زمان، قبل ← بعد */
+      await changeStmt(env, it, actorOf(who), "norm", before, r.norm).run();
       if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
     }
@@ -2084,10 +2120,13 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
-      await aiGuard(env, who, it.aid, "research");
+      /* منجمد (سپرده‌شده) پیامِ روشن‌تری از قفلِ کارشناس هوشمند دارد */
+      await frozenGuard(env, it);
+      await aiGuard(env, who, it.aid, "norm");
       if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
       const r = await revertEdit(env, it);
-      if (r.removed !== false) await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_revert", it.request_id, it.id, { assignment_id: it.aid }).run();
+      if (r.removed !== false) await env.DB.batch([ev(env, actorOf(who), "norm_revert", it.request_id, it.id, { assignment_id: it.aid }),
+        changeStmt(env, it, actorOf(who), "revert", normConfirmed(it) ? JSON.parse(it.norm_json) : null, null)]);
       return json(r);
     }
     /* نام همهٔ نوع‌های قلم — انتخابِ نوع قلم در پنل نرمال‌سازی */
@@ -2111,12 +2150,15 @@ async function route(request, env, ctx) {
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       /* درخواستِ دستِ کارشناس هوشمند: بررسی سوابق را خودش می‌کند (ai-lock.js) */
       await aiGuard(env, who, it.aid, "research");
+      /* نرمال‌سازی اجباری و اول از همه (طرح «خرید هوشمند» فاز ۱): سوابقِ قلمِ تأییدنشده خوانده نمی‌شود */
+      if (who.role === "expert" && !normConfirmed(it)) return json({ available: false, need_norm: true, message: NEED_NORM_MSG });
       return json(await itemHistory(env, it, histOpts()));
     }
     if (path === "/suppliers/history/buys" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       await aiGuard(env, who, it.aid, "research");
+      if (who.role === "expert" && !normConfirmed(it)) throw new HttpError(NEED_NORM_MSG, 409, { need_norm: true });
       return json(await supplierBuys(env, it, url.searchParams.get("supplier"), histOpts()));
     }
     /* نقاط نمودار روند خرید قلم (تاریخ × مقدار به واحد مرجع، به تفکیک تأمین‌کننده) */
@@ -2124,6 +2166,7 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       await aiGuard(env, who, it.aid, "research");
+      if (who.role === "expert" && !normConfirmed(it)) throw new HttpError(NEED_NORM_MSG, 409, { need_norm: true });
       return json(await itemSeries(env, it, histOpts()));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }

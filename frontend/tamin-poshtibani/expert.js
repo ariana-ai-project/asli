@@ -152,7 +152,7 @@
     /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
     if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
     const teamCol = isSenior() && (S.team ? S.team.team : []).length;
-    return `${vSeniorTabs()}<div class="tp-wrap" style="padding-bottom:20px">${aiOn() ? `<div class="tp-note" style="max-width:none;margin:0 0 10px">🤖 تیکِ شما در «پنل پشتیبانی» روی <b>هوشمند</b> است: هر ارجاعِ تازه (نشانِ 🤖) را کارشناس هوشمند پیش می‌برد و بررسی سوابق، جستجوی هوشمند، جدول و نامه‌اش برای شما قفل است. اگر سؤالی از شما داشته باشد، کنارِ «💬 مکاتبات» 🚨 می‌آید و در تلگرام هم خبر می‌دهد.</div>` : ""}<div class="tp-card">
+    return `${vSeniorTabs()}<div class="tp-wrap" style="padding-bottom:20px">${aiOn() ? `<div class="tp-note" style="max-width:none;margin:0 0 10px">🤖 تیکِ شما در «پنل پشتیبانی» روی <b>هوشمند</b> است: در هر ارجاعِ تازه (نشانِ 🤖) ساختارِ اقلام را خودتان تأیید و 🔒/🔓 می‌کنید (🧩) و «بررسی سوابق و سپردن به کارشناس هوشمند» را می‌زنید؛ از آن پس بررسی سوابق، جستجوی هوشمند، مذاکره، جدول و نامه با کارشناس هوشمند است و برای شما قفل. اگر سؤالی از شما داشته باشد، کنارِ «💬 مکاتبات» 🚨 می‌آید و در تلگرام هم خبر می‌دهد.</div>` : ""}<div class="tp-card">
       <div class="tp-filters" style="border-top:0;border-radius:16px 16px 0 0">
         <span class="lab">شماره درخواست</span><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" style="width:120px">
         <span class="lab">تاریخ</span><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="انتخاب تاریخ" readonly style="width:170px">
@@ -164,7 +164,7 @@
         <th><button class="sortbtn ${S.traySort ? "on" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th>${teamCol ? `<th>ارجاع به تیم</th>` : ""}</tr></thead><tbody>
         ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
           const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai === 2 ? ` <span class="chip warn" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ بررسی سوابق و جستجو برای شما باز شد">⚠️🤖</span>` : a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
+          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai === 1 && !a.ai_run ? ` <span class="chip ${a.norm_count >= a.open_count ? "ok" : "warn"}" title="حالتِ هوشمند: ساختارِ اقلام را تأیید کنید و «بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید">🧩 ${a.norm_count} از ${a.open_count}</span>` : ""}${a.ai === 2 ? ` <span class="chip warn" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ بررسی سوابق و جستجو برای شما باز شد">⚠️🤖</span>` : a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
             <td class="num">${a.open_count} از ${a.item_count}</td><td class="num">${a.days} روز</td>
             <td class="num" style="${lf <= 0 ? "color:#fca5a5;font-weight:700" : ""}">${lf <= 0 ? "تمام شد" : lf.toFixed(1) + " ساعت کاری"}</td>
             <td>${boxes(a, done, true, true)}</td><td class="num">${a.quote_count}</td>${teamCol ? `<td data-stop><button class="tp-btn xs" data-delegate="${a.id}" title="این درخواست به یکی از کارشناسان تیم داده شود">ارجاع به تیم</button></td>` : ""}</tr>`; }).join("")}
@@ -316,8 +316,16 @@
   const aiHandover = () => !!(aiOwned() && S.d.ai.owned.handover);
   /** بررسی سوابق و جستجوی هوشمند قفل است؟ — نه بعد از واگذاری */
   const aiResearch = () => aiOwned() && !aiHandover();
+  /* طرح «خرید هوشمند، کارشناس ناظر» (فاز ۱): کارشناسِ 🤖 درخواست را اول خودش نرمال می‌کند و با «بررسی سوابق و سپردن به کارشناس
+     هوشمند» می‌سپارد — تا آن موقع کار «pending» است (ai.owned بی run_id). نرمال‌سازی برای همه اجباری و اول از همه است: سوابقِ قلمِ
+     تأییدنشده خوانده نمی‌شود. با سپردن، ساختار منجمد است (frozen_at) تا کار دستِ کارشناس هوشمند است (worker/structure.js). */
+  const aiPending = () => aiOwned() && !S.d.ai.owned.run_id;
+  const normOk = (it) => { try { const x = it && it.norm_json ? JSON.parse(it.norm_json) : null; return !!(x && x.head && x.source !== "ai"); } catch (_) { return false; } };
+  const frozen = (it) => !!(it && it.frozen_at && aiOwned());
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
+    if (aiPending()) return `<div class="tp-note" style="margin:10px 0">🤖 <b>حالتِ هوشمند — هنوز سپرده نشده.</b> نرمال‌سازی اجباری و کارِ شماست: در تبِ «🤖 بررسی سوابق» ساختارِ هر قلم را ببینید، اصلاح یا تأیید کنید
+      و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 بگذارید؛ بعد «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید. از آن پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است.</div>`;
     if (!aiOwned()) return ai.review && ai.review.state === "rejected"
       ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
@@ -367,16 +375,47 @@
       <div class="strip">${its.map((x, i) => `<div class="pill ${i === S.itemIdx ? "sel" : ""} ${x.state !== "open" ? "closed" : ""}">
         <span class="t" data-item="${i}" title="${esc(x.title)}">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
         ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" style="margin-top:6px" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ تأیید کمیسیون</span>`
-          : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}</div>`).join("")}</div>
+          : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}
+        ${x.state === "open" ? (frozen(x) ? ` <span class="chip info" style="margin-top:6px" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد</span>` : normOk(x) ? ` <span class="chip ok" style="margin-top:6px" title="ساختارِ قلم (نوع، لایه‌ها، نرخ‌ها و قفل‌ها) تأیید شده">🧩 ✓</span>`
+          : ` <span class="chip warn" style="margin-top:6px" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}</div>`).join("")}</div>
       ${vAiBar()}
       <div class="tabs">
-        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiPending() ? "🤖 " : aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiPending() && S.tab === "history" ? vHandoff(it) : (aiResearch() && ["history", "smart"].includes(S.tab)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
+  }
+
+  /* ---------- «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» (طرح «خرید هوشمند» فاز ۱؛ تصمیم ۱: یک دکمه برای کل درخواست) ----------
+     تا همهٔ اقلامِ باز نرمال نشده‌اند بسته است؛ زیرش ویرایشگرِ ساختارِ قلمِ برگزیده با 🔒/🔓ِ عنوان، مقدار و هر لایه. */
+  function vHandoff(it) {
+    const op = openItems(), ok = op.filter(normOk).length, all = op.length > 0 && ok === op.length;
+    const rows = op.map((x) => { const i = items().indexOf(x); return `<tr class="${i === S.itemIdx ? "sel" : ""}" data-item="${i}" style="cursor:pointer" title="ساختارِ همین قلم را زیرِ همین جدول ببینید">
+      <td class="rt">${esc(x.title)}</td><td class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</td>
+      <td>${normOk(x) ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip warn">⏳ تأیید نشده</span>`}</td></tr>`; }).join("");
+    return `<div class="pad"><div class="handoff">
+      <div class="toolrow"><b style="font-size:1.02rem">🤖 سپردن به کارشناس هوشمند</b><span class="chip ${all ? "ok" : "warn"}">${M(ok)} از ${M(op.length)} قلم نرمال شده</span>
+        <span style="margin-inline-start:auto"></span>
+        <button class="tp-btn primary" data-handoff ${all ? "" : "disabled"} title="${all ? "ساختارِ همهٔ اقلام منجمد می‌شود و کارشناس هوشمند بررسی سوابق را شروع می‌کند" : "اول ساختارِ همهٔ اقلام را تأیید کنید"}">🤖 بررسی سوابق و سپردن به کارشناس هوشمند</button></div>
+      <div class="tp-note" style="margin:8px 0">نرمال‌سازی اجباری و کارِ شماست: برای هر قلم نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل را ببینید، اصلاح یا تأیید کنید و کنارِ <b>عنوان، مقدار و هر لایه</b> 🔒 یا 🔓 بگذارید —
+        🔒 یعنی تأمین‌کننده نمی‌تواند عوضش کند؛ مقدارِ 🔓 یعنی می‌تواند مقدارِ کمتری پیشنهاد دهد. با «سپردن» ساختار منجمد می‌شود و بررسی سوابق، جستجو، دعوت، مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است؛
+        هر تغییرِ شما نسبت به پیشنهادِ سامانه برای پشتیبانی ثبت می‌شود.</div>
+      <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th>ساختار</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+      <div style="margin-top:12px"><div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}</div>${it.state === "open" ? vNorm(it) : `<div class="dim">این قلم باز نیست.</div>`}</div></div>`;
+  }
+  function handoffUI() {
+    const op = openItems();
+    const dirty = op.find((x) => normDirty(x));
+    if (dirty) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(dirty.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
+    return TP.modal("🤖 سپردن به کارشناس هوشمند", `ساختارِ ${M(op.length)} قلم منجمد می‌شود و از این پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است؛
+      شما در «استعلامات» خطِ دستیِ خودتان (✋) را می‌افزایید و به «🚨 پرسش»‌های کارشناس هوشمند جواب می‌دهید. سپرده شود؟`, async () => {
+      const b = TP.busy("سپردن به کارشناس هوشمند…", "");
+      try { await TP.api(`/assignments/${A().id}/handoff`, { method: "POST", body: {} }); b.close(); await reload(); }
+      catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "بسپار", "انصراف");
   }
 
   /* ---------- تب بررسی سوابق ----------
@@ -690,12 +729,16 @@
     const saved = { created: `در دیتابیس اصلی برای ${where} ذخیره شد`, updated: `در دیتابیس اصلی برای ${where} به‌روز شد`,
       same: "همان فهرست اقلام است؛ چیزی در دیتابیس عوض نشد", reverted: "با فهرست اقلام یکی شد؛ ویرایشِ قبلی از دیتابیس برداشته شد" }[d.saved];
     /* بستهٔ قفل‌شده: قلمی که برای تأمین‌کننده رفته — نوع قلم و لایه‌ها فقط‌خواندنی؛ سرور هم نمی‌پذیرد (sp-core.js:itemLocks) */
-    const lk = it.sp_lock, dis = lk ? "disabled" : "";
+    const lk = it.sp_lock, fz = frozen(it), dis = lk || fz ? "disabled" : "";
+    /* 🔒/🔓 برای تأمین‌کننده (طرح «خرید هوشمند» فاز ۱): پیش‌فرض همه 🔒؛ قلمی که رفته یا منجمد است عوض نمی‌شود */
+    const ldis = lk || fz ? "disabled" : "";
+    const lockBtn = (key, on, label, tip) => `<button class="tp-btn xs lockbtn ${on ? "on" : ""}" data-norm-lock="${key}" ${ldis} title="${esc(tip)}">${on ? "🔒" : "🔓"}${label ? ` ${label}` : ""}</button>`;
     const lockNote = lk ? `<div class="tp-note" style="margin:0 0 8px">🔒 <b>این قلم برای تأمین‌کننده فرستاده شده و قفل است.</b> عنوان، نوع قلم و لایه‌های ویژگی همان‌اند که رفته و برای بقیهٔ تأمین‌کنندگان هم عیناً همین می‌رود:
       <b>${esc(lk.title)}</b>${lk.head ? ` — ${esc(lk.head)}` : ""}${(lk.layers || []).length ? ` · ${lk.layers.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join(" · ")}` : ""}. نرخ‌های تبدیل را هنوز می‌شود عوض و ذخیره کرد.</div>` : "";
-    return `<div class="normbox">${lockNote}
+    const fzNote = fz ? `<div class="tp-note" style="margin:0 0 8px">🔒 <b>ساختارِ این قلم ${TP.fmt(it.frozen_at)} منجمد شد و به کارشناس هوشمند سپرده شد.</b> تا وقتی کار دستِ اوست عوض نمی‌شود.</div>` : "";
+    return `<div class="normbox">${fzNote}${lockNote}
       <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
-        <span class="chip ${d.confirmed || fromDb ? "ok" : "warn"}">${d.confirmed ? "ذخیره‌شده — جستجو بر همین است" : fromDb ? "جستجو بر همین است" : "پیشنهاد مدل — جستجو بر همین است، ولی در دیتابیس ذخیره نشده"}</span>
+        <span class="chip ${d.confirmed ? "ok" : "warn"}" title="نرمال‌سازی اجباری است: سوابق فقط بر ساختارِ تأییدشده خوانده می‌شود">${d.confirmed ? "✓ تأییدشده — سوابق بر همین است" : fromDb ? "پیشنهادِ سامانه از دیتابیس — هنوز تأیید نشده" : "پیشنهادِ مدل — هنوز تأیید نشده"}</span>
         <span class="chip info" title="${fromDb ? "بی مدل: کد یا عنوانِ عیناً همان در دیتابیس بود" : "کد و عنوان در دیتابیس نبود"}">${esc(SRC_FA[d.source] || d.source)}${d.code ? ` · کد ${esc(d.code)}` : ""}</span>
         ${d.source === "title" && d.title ? `<span class="chip" title="قلمِ دیتابیس با همین عنوان">${esc(d.title)}</span>` : ""}
         ${d.edit ? `<span class="chip" title="آخرین ذخیرهٔ این قلم در دیتابیس اصلی">${esc(d.edit.by || "کارشناس")} · ${esc(TP.fmt(d.edit.at))}</span>` : ""}
@@ -704,11 +747,16 @@
       <div class="normgrid">
         <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%" ${dis} title="${lk ? "قفل: این قلم برای تأمین‌کننده رفته است" : "نوع قلم را می‌توانید عوض کنید: از فهرستِ نوع‌های قلم انتخاب کنید یا بنویسید"}">
           <datalist id="nh-${it.id}" data-heads="${esc(JSON.stringify(cands))}">${headOptions(cands)}</datalist>
-          <span class="dim" style="font-size:.8rem;margin-top:3px">${lk ? "🔒 قفل — همان که برای تأمین‌کننده رفته." : "قابل تغییر — از فهرست انتخاب کنید یا بنویسید."}</span></label>
+          <span class="dim" style="font-size:.8rem;margin-top:3px">${lk ? "🔒 قفل — همان که برای تأمین‌کننده رفته." : "قابل تغییر — از فهرست انتخاب کنید یا بنویسید."}</span>
+          <b style="margin-top:10px">قفل برای تأمین‌کننده</b>
+          <div class="toolrow" style="gap:6px;margin:3px 0 0">${lockBtn("title", dr.tl, "عنوان", dr.tl ? "🔒 تأمین‌کننده عنوان را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند عنوان را اصلاح کند — کلیک: قفل")}
+            ${lockBtn("qty", dr.ql, `مقدار${it.qty != null ? ` (${M(it.qty)} ${esc(it.unit || "")})` : ""}`, dr.ql ? "🔒 کلِ مقدار لازم است — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد — کلیک: قفل")}</div>
+          <span class="dim" style="font-size:.78rem;margin-top:3px">🔒: تأمین‌کننده نمی‌تواند عوضش کند (مقدارِ 🔒 یعنی کلِ مقدار). 🔓: می‌تواند اصلاح کند — مقدارِ 🔓 یعنی کمتر هم پذیرفته است. کنارِ هر لایه هم همین.</span></label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
           ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> لایه‌ای را که تیک بزنید، فقط اقلامی از همین نوع قلم می‌آیند که همان لایه را با <b>همان مقدار</b> دارند — از هر کدی (مثلاً «ضخامت ۸ میلی‌متر» ورق‌های ۸ میلِ همهٔ کدها را می‌آورد). بی‌تیک یعنی آن لایه مهم نیست.</div>` : ""}
           ${dr.layers.map((l, i) => { const qn = isQuant(l.k), rf = qn ? refTxt(l.k, l.t, l.u) : ""; return `<div class="normlayer">
             ${pickMode ? `<input type="checkbox" data-pick-l="${esc(l.k)}" ${pk.layers.includes(l.k) ? "checked" : ""} title="در «قلم انتخابی» فقط اقلامی با همین مقدارِ این لایه">` : ""}
+            ${lockBtn(`l:${i}`, l.lk !== false, "", l.lk !== false ? "🔒 تأمین‌کننده این لایه را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند این لایه را اصلاح کند — کلیک: قفل")}
             <select class="tp-input" data-norm-lk="${i}" ${dis}>${opt(l.k)}</select>
             <input class="tp-input${qn ? " num" : ""}" data-norm-lv="${i}" value="${esc(l.t)}" ${dis}${qn ? ` placeholder="فقط عدد" title="فقط عدد: ۲، ۱ ۱/۲، ۶۵۰×۱۵۲۰ یا ۱۰-۱۶ — واحد را از فهرست کنارش انتخاب کنید"` : ""}>
             ${qn ? `<select class="tp-input nu" data-norm-lu="${i}" ${dis} title="واحد استاندارد؛ تبدیل و مقایسه بر پایهٔ همین است"><option value="">بی‌واحد</option>${unitsFor(l.k).map((u) => `<option ${u === l.u ? "selected" : ""}>${esc(u)}</option>`).join("")}</select>` : ""}
@@ -730,15 +778,16 @@
           ${rv.refRow ? `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(rv.refRow.unit)}" ${unitOn(rv.refRow.unit) ? "checked" : ""}></td>` : ""}<td><b>${esc(rv.refRow.unit)}</b></td><td><span class="chip">مرجع</span></td><td class="num">۱</td><td class="rt">واحد مرجع</td><td><span class="chip ok">قطعی</span></td><td>${shareCell(rv.refRow)}</td></tr>` : ""}
           ${(rv.units || []).map((u) => { const cv = liveConv(n, u.unit), kind = (cv && cv.type) || u.kind; return `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(u.unit)}" ${unitOn(u.unit) ? "checked" : ""}></td>` : ""}<td>${esc(u.unit)}</td>
             <td>${KIND_FA[kind] ? `<span class="chip ${kind === "dynamic" ? "info" : "ok"}" title="${esc(KIND_TIP[kind] || "")}">${KIND_FA[kind]}</span>` : `<span class="dim" title="${esc(KIND_TIP.unknown)}">—</span>`}</td>
-            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(rateShown(n, u, cv), false))}" inputmode="decimal" style="width:110px" title="${kind === "dynamic" ? "حاصلِ فرمول برای همین قلم؛ عددی که بنویسید نرخِ دستیِ همین قلم می‌شود و بر فرمول مقدم است" : "نرخی که بنویسید بر نرخ فایل مقدم است"}"></td>
+            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(rateShown(n, u, cv), false))}" inputmode="decimal" style="width:110px" ${fz ? "disabled" : ""} title="${kind === "dynamic" ? "حاصلِ فرمول برای همین قلم؛ عددی که بنویسید نرخِ دستیِ همین قلم می‌شود و بر فرمول مقدم است" : "نرخی که بنویسید بر نرخ فایل مقدم است"}"></td>
             <td class="rt fxcell" data-norm-fx="${esc(u.unit)}">${fxHtml(n, u, cv)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td><td>${shareCell(u)}</td></tr>`; }).join("")}
         </tbody></table>
         <div class="dim" style="font-size:.82rem">مقدار به واحد مرجع = مقدار ثبت‌شده × نرخ (نمایش با دو رقم اعشار). <b>ایستا</b>: ضریب از خودِ دو واحد است و برای همهٔ اقلام یکی. <b>پویا</b>: ضریب برای هر قلم با فرمول از لایه‌های خودش حساب می‌شود — در جمع و سهمِ تأمین‌کنندگان هم هر قلمِ این نوع با لایه‌های خودش؛ اگر لایهٔ لازم را نداشت، نرخِ ثابتِ فایل با اطمینانِ «پایین». نرخی را که دستی عوض کنید، در جستجو بر فرمول و نرخ فایل مقدم است و با «ذخیره» برای همین کد در دیتابیس می‌ماند؛ خالی گذاشتن یعنی همان فرمول یا نرخ فایل.</div>
         ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="tp-note warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div>` : ""}
-      <div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و نرخ‌های تبدیل">ذخیره</button>
+      ${fz ? "" : `<div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها، نرخ‌های تبدیل و قفل‌ها؛ هر تغییر برای پشتیبانی ثبت می‌شود">${d.confirmed ? "ذخیره" : "✓ تأییدِ ساختار"}</button>
+        ${d.confirmed ? "" : `<span class="chip warn" title="نرمال‌سازی اجباری است: بی تأیید، سوابقِ این قلم خوانده نمی‌شود">هنوز تأیید نشده</span>`}
         ${fromDb || lk ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن از شما می‌پرسم">تفکیک دوباره با مدل…</button>`}
         ${lk ? "" : d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
-          : d.confirmed ? `<button class="tp-btn" data-norm-clear title="ذخیرهٔ همین قلم برداشته می‌شود و ساختار دوباره از دیتابیس خوانده می‌شود">برداشتن ذخیره</button>` : ""}</div></div>`;
+          : d.confirmed ? `<button class="tp-btn" data-norm-clear title="ذخیرهٔ همین قلم برداشته می‌شود و ساختار دوباره از دیتابیس خوانده می‌شود">برداشتن ذخیره</button>` : ""}</div>`}</div>`;
   }
 
   function vHistory(it) {
@@ -753,7 +802,7 @@
         <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff">
         <b class="num" data-mom-val style="min-width:1.4em;text-align:center">${M(S.mom)}</b></span>
       <button class="tp-btn" data-chart ${canChart ? "" : "disabled"} title="روند مقدار خرید در زمان، به تفکیک تأمین‌کننده — در پنجرهٔ بزرگ وسط صفحه">نمودار روند</button>
-      <button class="tp-btn primary" data-run-hist title="ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان)؛ اگر نبود، پیش از تفکیک با مدل از شما می‌پرسم">${d ? "بررسی دوباره" : "بررسی سوابق"}</button>
+      <button class="tp-btn primary" data-run-hist title="نرمال‌سازی اجباری است: ساختارِ قلم اول تأیید می‌شود، بعد سوابق خوانده می‌شود">${d ? "بررسی دوباره" : normOk(it) ? "بررسی سوابق" : "تأییدِ ساختار و بررسی سوابق"}</button>
       ${it.hist_done_at ? "" : `<button class="tp-btn" data-mark="hist" title="اگر سوابق را بیرون از سامانه بررسی کرده‌اید">علامت بزن</button>`}</div>
       <div class="toolrow">
         <label class="chkline" title="لایهٔ زیرین را نشان می‌دهد: نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل — برای دیدن و اصلاح. جستجو با تیک یا بی تیک بر همین ساختار است."><input type="checkbox" data-norm-on ${S.normOn ? "checked" : ""}> <b>نرمال‌سازی اقلام</b></label>
@@ -764,7 +813,8 @@
         ${S.hmode === "pick" ? `<span class="dim" style="font-size:.85rem">لایه‌ها و واحدهایی را که می‌خواهید در کادرِ نرمال‌سازی تیک بزنید، بعد «بررسی سوابق».</span>` : ""}</div>`;
     /* کادر نرمال‌سازی: تا سوابق خوانده نشده زیر همین نوار است؛ بعد از «بررسی سوابق» زیر فهرست تأمین‌کنندگان (تصمیم مدیر، مهر ۱۴۰۵).
        «قلم انتخابی» بی آن معنا ندارد، پس در آن حالت همیشه باز است. */
-    const norm = S.normOn || S.hmode === "pick" ? vNorm(it) : "";
+    /* نرمال‌سازی اجباری: تا ساختارِ قلم تأیید نشده، کادرش باز است */
+    const norm = S.normOn || S.hmode === "pick" || !normOk(it) ? vNorm(it) : "";
 
     if (!d) return `<div class="pad">${head}${norm}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
       حالت «نوع قلم»، «قلم انتخابی» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید؛ ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان).
@@ -861,6 +911,11 @@
   async function runHist() {
     const it = item(); if (!it) return;
     if (!(await ensureNorm(it))) return;
+    /* نرمال‌سازی اجباری و اول از همه (طرح «خرید هوشمند» فاز ۱): سوابقِ قلمِ تأییدنشده خوانده نمی‌شود — سرور هم نمی‌خواند */
+    if (!normOk(it)) {
+      return TP.modal("اول ساختارِ قلم", `نرمال‌سازی اجباری است: پیش از بررسی سوابق، ساختارِ «${esc(it.title)}» — نوع قلم، لایه‌ها، نرخ‌های تبدیل و 🔒/🔓ِ عنوان، مقدار و هر لایه —
+        را در کادرِ «نرمال‌سازی اقلام» ببینید و تأیید کنید.`, async () => { if (await confirmNormUI()) runHist(); }, "تأییدِ همین ساختار و بررسی سوابق", "ویرایش");
+    }
     /* جستجو بر ساختارِ ذخیره‌شده است؛ ویرایشِ ذخیره‌نشده اول ذخیره شود */
     if (normDirty(it)) {
       return TP.modal("تغییرات ذخیره نشده", "نوع قلم، لایه‌ها یا نرخ‌هایی را که عوض کرده‌اید هنوز ذخیره نکرده‌اید و جستجو بر ساختارِ ذخیره‌شده انجام می‌شود.",
@@ -913,7 +968,10 @@
       const q = isQuant(k) ? RL().quantWith(k, v, null) : null;
       return q && !Array.isArray(q) && q.u ? { k, t: q.v, u: q.u, i: false } : { k, t: String(v == null ? "" : v), u: "", i: false };
     });
-    return { head: d.head || "", layers, rates };
+    /* 🔒/🔓 (طرح «خرید هوشمند» فاز ۱): پیش‌فرض همه 🔒 — tl عنوان، ql مقدار، lk هر لایه */
+    const lk = d.locks || {};
+    for (const l of layers) l.lk = !(lk.layers && lk.layers[l.k] === false);
+    return { head: d.head || "", layers, rates, tl: lk.title !== false, ql: lk.qty !== false };
   }
 
   /* پاسخ سرور → {data، draft، base}؛ base پیش‌نویسِ دست‌نخورده است تا ویرایشِ ذخیره‌نشده پیدا شود */
@@ -949,7 +1007,8 @@
     /* نرخ‌های جدول به واحد مرجعِ نوع قلمِ قبلی‌اند؛ نوع قلم که عوض شد، نرخ‌های نوع قلمِ تازه بعد از ذخیره می‌آیند */
     const headChanged = String(dr.head || "").trim() !== String(n.data.head || "").trim();
     try {
-      const r = await TP.api(`/items/${it.id}/norm`, { method: "PUT", body: { head: dr.head, layers, rates: headChanged ? {} : dr.rates, residual: n.data.residual, source: n.data.source, code: n.data.code } });
+      const locks = { title: dr.tl !== false, qty: dr.ql !== false, layers: Object.fromEntries(dr.layers.filter((l) => l.k && String(l.t || "").trim()).map((l) => [l.k, l.lk !== false])) };
+      const r = await TP.api(`/items/${it.id}/norm`, { method: "PUT", body: { head: dr.head, layers, rates: headChanged ? {} : dr.rates, residual: n.data.residual, source: n.data.source, code: n.data.code, locks } });
       S.norm[it.id] = normState({ ...n.data, ...r.norm, confirmed: true, known: r.known, rates: r.rates, saved: r.saved, edit: r.saved === "reverted" ? null : r.edit || n.data.edit || null });
       dropHist(it);
       const row = items().find((x) => x.id === it.id); if (row) row.norm_json = JSON.stringify(r.norm);
@@ -1780,7 +1839,7 @@
     try { const d = await TP.api(`/assignments/${aid}`);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
-      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && !d.ai.owned.handover ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
+      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && d.ai.owned.run_id && !d.ai.owned.handover ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
       /* نامه را بات تلگرام هم جلو می‌برد، پس ↻ باید وضعیتش را از نو بگیرد؛
          تب نامه خودش تنبلانه دوباره می‌خواند. */
       S.letter = null;
@@ -1925,7 +1984,7 @@
     if (nla) nla.onclick = () => {
       const n = S.norm[item().id]; if (!n || !n.draft) return;
       const used = new Set(n.draft.layers.map((l) => l.k));
-      n.draft.layers.push({ k: (n.data.layerNames || []).find((x) => !used.has(x)) || "", t: "", u: "", i: false }); render();
+      n.draft.layers.push({ k: (n.data.layerNames || []).find((x) => !used.has(x)) || "", t: "", u: "", i: false, lk: true }); render();
     };
     Q("[data-norm-rate]").forEach((x) => x.oninput = (e) => {
       const n = S.norm[item().id]; if (!n || !n.draft) return;
@@ -1941,6 +2000,14 @@
       if (cell && orig) cell.innerHTML = fxHtml(n, orig, live);
     });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
+    /* 🔒/🔓ِ عنوان، مقدار و هر لایه — در پیش‌نویس؛ با «تأیید» ذخیره می‌شود */
+    Q("[data-norm-lock]").forEach((b) => b.onclick = () => {
+      const d = nd(); if (!d) return;
+      const k = b.dataset.normLock;
+      if (k === "title") d.tl = !d.tl; else if (k === "qty") d.ql = !d.ql; else { const l = d.layers[+k.slice(2)]; if (l) l.lk = l.lk === false; }
+      render();
+    });
+    const hof = G("[data-handoff]"); if (hof) hof.onclick = handoffUI;
     /* هر فراخوانی مدل با کادرِ تأیید */
     const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
     const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);
@@ -1948,7 +2015,7 @@
     const ncl = G("[data-norm-clear]"); if (ncl) ncl.onclick = clearNormUI;
     const nrv = G("[data-norm-revert]"); if (nrv) nrv.onclick = revertEditUI;
     /* کادر باز است و این قلم هنوز ساختاری ندارد → خودکار از دیتابیس خوانده می‌شود (بی مدل؛ Task.txt: «به شکل خودکار») */
-    if (S.screen === "detail" && S.tab === "history" && (S.normOn || S.hmode === "pick") && item() && !S.norm[item().id]) runNormalize(false);
+    if (S.screen === "detail" && S.tab === "history" && (S.normOn || S.hmode === "pick" || aiPending() || !normOk(item())) && item() && item().state === "open" && !S.norm[item().id]) runNormalize(false);
     const chb = G("[data-chart]"); if (chb) chb.onclick = () => openChart(item());
     Q("[data-hsort]").forEach((el) => el.onclick = () => { S.hsort = el.dataset.hsort; render(); });
     Q("[data-prof]").forEach((el) => el.onclick = () => { S.prof = S.prof === el.dataset.prof ? null : el.dataset.prof; render(); });
