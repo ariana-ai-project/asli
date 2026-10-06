@@ -71,6 +71,8 @@
     dl: null, dlErr: "", dlLoading: false, dlF: { state: "new" }, dlId: null, dlD: null, dlDErr: "",
     /* طرح «خرید هوشمند، کارشناس ناظر»: نرخ دلار (زیرنمای تبِ کارشناس هوشمند، worker/usd.js) */
     usd: null, usdErr: "", usdLoading: false,
+    /* فاز ۲: وزن‌های رتبهٔ نهایی و «قاعدهٔ دعوت» (worker/ranking.js) */
+    rank: null, rankDraft: null, rankErr: "", rankBusy: false,
     /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
     chg: null, chgErr: "", chgLoading: false, chgF: { expert: "", rid: "", changed: "1", frozen: "" }, chgMore: false, chgNext: null,
   };
@@ -155,7 +157,7 @@
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
-    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); }
+    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
   }
@@ -575,9 +577,10 @@
       return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
         <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
     }
-    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["usd", "💵 نرخ دلار"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
+    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
     if (S.aiView === "rules") return sub + vRules();
     if (S.aiView === "usd") return sub + vUsd();
+    if (S.aiView === "rank") return sub + vRank();
     let h = sub + `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: هر ارجاعِ تازهٔ این کارشناس را کارشناس هوشمند پیش می‌برد — بررسی سوابق، جستجوی هوشمند، دعوت و مذاکره، جدول کمیسیون و نامه —
       و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
       («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
@@ -708,6 +711,49 @@
           <td class="rt" style="white-space:normal">${c.lines.length ? c.lines.map((l) => `<div>${esc(l)}</div>`).join("") : `<span class="dim">${c.kind === "norm" || c.kind === "freeze" ? "بی‌تغییر" : "—"}</span>`}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty">هنوز تغییری ثبت نشده — این قلم پیش از این بخش نرمال شده بود.</div>`);
     } catch (e) { ov.set("خطا", `<div class="tp-note warn">${esc(e.message)}</div>`); }
+  }
+
+  /* ---------- «🏅 رتبه‌بندی و دعوت» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۲) ----------
+     وزن‌های رتبهٔ نهایی (میانگینِ وزنیِ رتبه‌های نسبیِ دفعات، مقدار، گشتاور، ارزش خرید به قیمت روز، و رده) و «قاعدهٔ دعوت»: کدام
+     رده‌های سوابقِ عین قلم جدا از رتبه و تا چند نفر، و بعد از آن نوع قلم یا عین قلم — worker/ranking.js. */
+  async function loadRank() {
+    S.rankErr = ""; render();
+    try {
+      S.rank = await api("/ai/ranking");
+      S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } };
+    } catch (e) { S.rankErr = e.message; }
+    render();
+  }
+  async function saveRankUi() {
+    S.rankBusy = true; S.rankErr = ""; render();
+    try {
+      const r = await api("/ai/ranking", { method: "PUT", body: S.rankDraft });
+      S.rank = { ...S.rank, ...r }; S.rankDraft = { weights: { ...r.weights }, dispatch: { tier: { ...r.dispatch.tier }, then: r.dispatch.then } };
+      TP.modal("ذخیره شد", "وزن‌ها و قاعدهٔ دعوت ذخیره شد؛ از همین حالا در جدول سوابقِ کارشناسان و نوبتِ پیامک‌های کارشناس هوشمند (کارهای تازه) به کار می‌رود.", null, "باشد", "");
+    } catch (e) { S.rankErr = e.message; }
+    S.rankBusy = false; render();
+  }
+  function vRank() {
+    let h = `<div class="tp-note"><b>رتبهٔ نهایی</b> هر تأمین‌کننده در سوابق، میانگینِ وزنیِ رتبه‌های نسبیِ او در چهار ستون است — دفعات خرید، مقدار، امتیاز گشتاوری و
+      <b>ارزش خرید به قیمت روز</b> (با نرخ دلار) — به‌اضافهٔ ردهٔ او (A صد درصد، B شصت‌وشش، C سی‌وسه، بی‌رده صفر). جدول سوابقِ کارشناسان پیش‌فرض با همین مرتب می‌شود
+      و کارشناس هوشمند پیامک‌ها را به همین ترتیب (با «قاعدهٔ دعوت» پایین) می‌فرستد — فقط به شماره‌هایی که تیکِ «پنل» دارند.</div>`;
+    if (S.rankErr) h += `<div class="tp-note warn">${esc(S.rankErr)}</div>`;
+    if (!S.rank || !S.rankDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    const W = S.rankDraft.weights, D = S.rankDraft.dispatch, fa = S.rank.fa || {}, tf = S.rank.then_fa || {};
+    const inp = (attr, v, w = 80) => `<input class="tp-input num" ${attr} value="${esc(v)}" inputmode="decimal" dir="ltr" style="width:${w}px">`;
+    h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">وزن‌های رتبهٔ نهایی <span class="dim">(۰ تا ۱۰؛ صفر یعنی آن ستون اثری ندارد)</span></h3>
+      <table class="sup-tbl" style="width:auto"><tbody>${Object.keys(fa).map((k) => `<tr><td>${esc(fa[k])}</td><td>${inp(`data-rw="${k}"`, W[k])}</td></tr>`).join("")}
+        <tr><td>ضریب گشتاور <span class="dim">(۱ تا ۱۰ — ۱: گذشتهٔ دور تقریباً هم‌وزنِ امروز، ۱۰: فقط خریدهای تازه)</span></td><td>${inp(`data-rw="k"`, W.k, 60)}</td></tr></tbody></table></div>
+      <div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">قاعدهٔ دعوت</h3>
+      <p style="margin:0 0 6px"><b>۱.</b> از سوابقِ <b>«عین قلم»</b>، جدا از رتبهٔ نهایی، این رده‌ها اول دعوت می‌شوند (درونِ هر رده به ترتیبِ رتبهٔ نهایی؛ ۰ یعنی آن رده جدا نمی‌آید):</p>
+      <div style="display:flex;gap:16px;flex-wrap:wrap;margin:0 0 10px">${["A", "B", "C"].map((g) => `<label>ردهٔ <b>${g}</b> تا ${inp(`data-rt="${g}"`, D.tier[g], 60)} نفر</label>`).join("")}</div>
+      <p style="margin:0 0 6px"><b>۲.</b> بعد از آن:</p>
+      ${Object.entries(tf).map(([k, l]) => `<label class="chkline" style="display:flex;margin:3px 0"><input type="radio" name="rthen" data-rthen="${k}" ${D.then === k ? "checked" : ""}> ${esc(l)}</label>`).join("")}
+      <p class="dim" style="margin:8px 0 0"><b>۳.</b> بعد تأمین‌کنندگانِ جستجوی هوشمند. سقفِ دعوتِ هر کار و مدلِ مذاکره: داشبوردِ همان کارشناس ← «تنظیمات». قاعدهٔ تازه برای کارهایی است که از این پس فهرستِ دعوتشان ساخته می‌شود.</p></div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-rksave ${S.rankBusy ? "disabled" : ""}>ذخیرهٔ وزن‌ها و قاعده</button>
+        <button class="tp-btn" data-rkreset>برگرداندنِ تغییرها</button>
+        <span class="dim">${S.rank.updated_at ? `آخرین تغییر: ${fmtShort(S.rank.updated_at)}` : "هنوز ذخیره نشده — پیش‌فرض: دفعات ۱، مقدار ۰، گشتاور ۱، ارزش ۱، رده ۱، ضریب گشتاور ۵؛ ردهٔ A عین قلم تا ۵ نفر، بعد نوع قلم"}</span></div>`;
+    return h;
   }
 
   /* ---------- «💵 نرخ دلار» (طرح «خرید هوشمند، کارشناس ناظر»، مهر ۱۴۰۵) ----------
@@ -1002,7 +1048,9 @@
     if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
     if (d.aitoggle) return aiToggle(Number(d.aitoggle), d.on === "1");
     /* فاز ۳: قواعدِ حداقلِ استعلام و تحویل‌ها */
-    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); return render(); }
+    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); if (S.aiView === "rank" && !S.rank) return loadRank(); return render(); }
+    if (d.rksave !== undefined) return saveRankUi();
+    if (d.rkreset !== undefined) { S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } }; S.rankErr = ""; return render(); }
     if (d.usdfetch !== undefined) return usdFetch();
     if (d.chglog) return chgLog(Number(d.chglog));
     if (d.chgmore !== undefined) return loadChg(true);
@@ -1022,7 +1070,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
@@ -1037,6 +1085,7 @@
     if (d.cpick) { const id = Number(d.cpick); if (t.checked) S.cmSel.add(id); else S.cmSel.delete(id); return render(); }
     if (d.dlf) { S.dlF[d.dlf] = t.value; return loadDls(); }
     if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
+    if (d.rthen && S.rankDraft) { S.rankDraft.dispatch.then = d.rthen; return null; }
     if (d.chgf) { S.chgF[d.chgf] = t.type === "checkbox" ? (t.checked ? "1" : "") : t.value.trim(); S.chg = null; return loadChg(); }
     return null;
   });
@@ -1046,6 +1095,9 @@
     /* پیش‌نویسِ قواعد: بی رسمِ دوباره، تا فوکوس نپرد */
     if (t.dataset.rr && S.rulesDraft) { const [dm, i, fk] = t.dataset.rr.split(":"); if (S.rulesDraft[dm] && S.rulesDraft[dm][+i]) S.rulesDraft[dm][+i][fk] = t.value; return; }
     if (t.dataset.rwait !== undefined && S.rulesDraft) { S.rulesDraft.waitHours = t.value; return; }
+    /* وزن‌ها و سقفِ رده‌ها (فاز ۲): همان پیش‌نویس، بی رسمِ دوباره */
+    if (t.dataset.rw && S.rankDraft) { S.rankDraft.weights[t.dataset.rw] = t.value; return; }
+    if (t.dataset.rt && S.rankDraft) { S.rankDraft.dispatch.tier[t.dataset.rt] = t.value; return; }
     if (!k) return;
     if (k === "req") S.rf.q = t.value; else if (k === "th") S.thF.q = t.value; else if (k === "cm") S.cmF.q = t.value;
     TP.keepFocus(t, "fq", render);

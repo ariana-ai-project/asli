@@ -24,12 +24,19 @@
  * مبنای مقایسهٔ تأمین‌کنندگان (تصمیم مدیر) سه ستون است، نه قیمت: دفعات خرید، جمع
  * مقدار، و «گشتاور» — همان جمع مقدار وقتی خریدِ تازه‌تر سنگین‌تر شمرده شود (شیب از
  * نوار ۱..۱۰ کارشناس). در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، B، C) جلوتر است.
+ *
+ * طرح «خرید هوشمند، کارشناس ناظر» (فاز ۲، مهر ۱۴۰۵): «قیمت روز» — مبلغِ هر خرید × نرخ دلارِ امروز ÷ نرخ دلارِ روزِ خرید
+ * (worker/usd.js؛ تیکِ «مرکز آمار» در پنل همان تعدیلِ زمستان ۱۴۰۴ را نشان می‌دهد) — و ستونِ چهارم: «ارزش خرید به قیمت روز» با
+ * رتبه‌اش (rankV). «رتبهٔ نهایی» (rankF) میانگینِ وزنیِ این چهار رتبه و رده است با وزن‌های پنل پشتیبانی (worker/ranking.js)؛
+ * پیش‌فرضِ مرتب‌سازیِ پنل و ترتیبِ دعوتِ کارشناس هوشمند همین است. مبنای رتبه همیشه دلار است.
  */
 import { HttpError } from "./http.js";
 import { activeImport, catalogMeta, headData, keyOf, layersEqual, nameOf, rateFor, rateView } from "./catalog.js";
 import { normOf, catalogStruct, dbStruct, canonStruct } from "./normalize.js";
 import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
+import { usdBounds, usdTable } from "./usd.js";
+import { getRanking, GRADE_SCORE } from "./ranking.js";
 
 export { activeImport } from "./catalog.js";
 
@@ -89,6 +96,31 @@ export const rankBy = (rows, field, rankField, tie) => {
     x[rankField] = i > 0 && key(p) === key(x) && tk(p) === tk(x) ? p[rankField] : i + 1;
   });
 };
+
+/**
+ * رتبهٔ نهایی (فاز ۲ طرح «خرید هوشمند»؛ تصمیم ۶): میانگینِ وزنیِ رتبه‌های نسبی — رتبهٔ r در فهرستِ N تایی ← (N − r) ÷ (N − ۱)،
+ * اول ۱ و آخر ۰ — و ردهٔ تأمین‌کننده (A ۱۰۰٪، B ۶۶٪، C ۳۳٪، بی‌رده صفر)، با وزن‌های پنل پشتیبانی (worker/ranking.js).
+ * score ۰ تا ۱۰۰؛ rankF رقابتی، در امتیاز برابر ردهٔ بالاتر جلوتر. پیش‌نیاز: rankN، rankQty، rankM و rankV.
+ */
+export function finalRank(rows, w) {
+  const N = rows.length;
+  const rel = (r) => (N > 1 ? (N - r) / (N - 1) : 1);
+  const parts = [["n", "rankN"], ["qty", "rankQty"], ["qtyM", "rankM"], ["val", "rankV"]];
+  const tot = parts.reduce((a, [k]) => a + (w[k] || 0), 0) + (w.grade || 0);
+  for (const x of rows) {
+    const sum = parts.reduce((a, [k, rk]) => a + (w[k] || 0) * rel(x[rk]), 0) + (w.grade || 0) * (GRADE_SCORE[x.grade] || 0);
+    x.score = tot > 0 ? Math.round(sum / tot * 1000) / 10 : 0;
+  }
+  rankBy(rows, "score", "rankF", gradeKey);
+}
+
+/* «قیمت روز» به زبان SQLite: نرخِ روزِ خرید از usd_rates (هر روز یک ردیف — روزهای بی‌معامله درون‌یابی شده‌اند)؛ خریدِ پیش
+   از اولین نرخ (کانال از ۱۳۹۸/۰۳/۲۷) نرخِ اولین روز را می‌گیرد و جدا شمرده می‌شود (early)، و خریدِ بعد از آخرین نرخ همان
+   آخرین نرخ. عددها از خودِ جدول‌اند (usdBounds — عدد صحیح و تاریخِ بازبینی‌شده)، پس در متن می‌نشینند و از سقفِ صد
+   پارامترِ D1 چیزی کم نمی‌کنند. */
+const USD_JOIN = "LEFT JOIN usd_rates ur ON ur.jday=purchases.order_date";
+const usdRate = (b) => `COALESCE(ur.rate, CASE WHEN purchases.order_date < '${b.firstDay}' THEN ${b.first} ELSE ${b.latest} END)`;
+const usdAmt = (b) => `(purchases.amount * ${b.latest}.0 / ${usdRate(b)})`;
 
 /* ------------------------------------------------------------------ */
 /* قلم → ردیف‌های خرید                                                  */
@@ -174,8 +206,8 @@ const unitOk = (sc, u) => !sc.units || sc.units.has(nameOf(u));
  * می‌آید.
  * ترتیب پارامترها: `args` (بخش SELECT)، شرط محدوده، `tailArgs` (بخش بعد از WHERE).
  */
-async function scoped(env, sc, select, tail, args = [], tailArgs = []) {
-  const run = (where, wargs) => env.DB.prepare(`${select} FROM purchases WHERE ${where} ${tail}`).bind(...args, ...wargs, ...tailArgs).all().then((r) => r.results || []);
+async function scoped(env, sc, select, tail, args = [], tailArgs = [], join = "") {
+  const run = (where, wargs) => env.DB.prepare(`${select} FROM purchases ${join} WHERE ${where} ${tail}`).bind(...args, ...wargs, ...tailArgs).all().then((r) => r.results || []);
   const q = (xs) => xs.map(() => "?").join(",");
   const hd = sc.hd, inc = hd.inc || [], out = hd.out || [];
   const src = hd.src && hd.src.length ? hd.src : hd.made ? [] : [hd.head];
@@ -231,11 +263,15 @@ export async function itemHistory(env, it, opts = {}) {
   const ageMax = Math.max(1, Number(cur.stats.ageMax) || 1);
   const k = clampK(opts.k);
   const w = wArgs(k, ageMax);
+  /* فاز ۲ طرح «خرید هوشمند»: نرخ دلار (قیمت روز) و وزن‌های رتبهٔ نهایی */
+  const [ub, rk] = await Promise.all([usdBounds(env), getRanking(env)]);
 
   const sc = await resolveScope(env, it, opts);
   const head = {
     available: true, format: 2,
     base: { ym: BASE_YM, label: "اسفند ۱۴۰۴", priceLabel: "زمستان ۱۴۰۴", ageMax, k, decay: decayPerMonth(k, ageMax) },
+    usd: ub ? { latest: ub.latest, latestDay: ub.latestDay, firstDay: ub.firstDay } : null,
+    weights: rk.weights,
     source: { filename: cur.filename, imported_at: cur.finished_at || cur.imported_at, rows: cur.row_count },
     groups: { item: true, itemParty: false },   /* خرید قلم فعال؛ خرید قلم در پروژه در انتظار داده */
   };
@@ -254,11 +290,14 @@ export async function itemHistory(env, it, opts = {}) {
   }
 
   /* ۱) خریدها به تفکیک تأمین‌کننده × کد × واحد — تبدیل واحد به ازای (کد، واحد) است */
+  const usdCols = ub ? `, SUM(${usdAmt(ub)}) AS usd, SUM(purchases.order_date < '${ub.firstDay}') AS early,
+      MIN(CASE WHEN qty>0 THEN ${usdAmt(ub)}/qty END) AS min_usd, MAX(CASE WHEN qty>0 THEN ${usdAmt(ub)}/qty END) AS max_usd`
+    : ", NULL AS usd, 0 AS early, NULL AS min_usd, NULL AS max_usd";
   const groups = await scoped(env, sc, `SELECT supplier_n AS sn, MAX(supplier) AS name, item_code, unit,
       COUNT(*) AS n, SUM(COALESCE(qty,0)) AS qty, SUM(COALESCE(qty,0) * ${W_SQL}) AS qtym,
       SUM(amount_adj) AS adj, MIN(order_date) AS first_date, MAX(order_date) AS last_date,
-      MIN(CASE WHEN qty>0 THEN amount_adj/qty END) AS min_u, MAX(CASE WHEN qty>0 THEN amount_adj/qty END) AS max_u`,
-  "GROUP BY supplier_n, item_code, unit", w);
+      MIN(CASE WHEN qty>0 THEN amount_adj/qty END) AS min_u, MAX(CASE WHEN qty>0 THEN amount_adj/qty END) AS max_u${usdCols}`,
+  "GROUP BY supplier_n, item_code, unit", w, [], ub ? USD_JOIN : "");
 
   const per = new Map(), excluded = new Map(), units = new Map();
   let lowConf = 0, unitDropped = 0, fixedDyn = 0;
@@ -281,14 +320,19 @@ export async function itemHistory(env, it, opts = {}) {
       x.n += g.n; if (rt) x.qty += (g.qty || 0) * rt.rate;
       excluded.set(g.sn, x); continue;
     }
-    const s = per.get(g.sn) || { key: g.sn, name: g.name, n: 0, qty: 0, qtyM: 0, adj: 0, qtyForAvg: 0, unconv: 0, firstDate: null, lastDate: null, minUnit: null, maxUnit: null };
+    const s = per.get(g.sn) || { key: g.sn, name: g.name, n: 0, qty: 0, qtyM: 0, adj: 0, qtyForAvg: 0, unconv: 0, firstDate: null, lastDate: null, minUnit: null, maxUnit: null,
+      adjAll: 0, usdAll: 0, usd: 0, minUsd: null, maxUsd: null, early: 0 };
     s.n += g.n;
+    /* ارزشِ خرید (فاز ۲): جمعِ مبلغ‌ها — به تبدیلِ واحد نیاز ندارد، پس همهٔ ردیف‌ها */
+    s.adjAll += g.adj || 0; s.usdAll += g.usd || 0; s.early += g.early || 0;
     if (rt) {
       s.qty += (g.qty || 0) * rt.rate; s.qtyM += (g.qtym || 0) * rt.rate;
-      if (g.adj != null && g.qty > 0) { s.adj += g.adj; s.qtyForAvg += g.qty * rt.rate; }
+      if (g.adj != null && g.qty > 0) { s.adj += g.adj; s.qtyForAvg += g.qty * rt.rate; if (g.usd != null) s.usd += g.usd; }
       /* قیمت واحدِ ثبت‌شده ÷ نرخ = قیمت به ازای واحد مرجع */
       if (g.min_u != null) { const v = g.min_u / rt.rate; if (s.minUnit == null || v < s.minUnit) s.minUnit = v; }
       if (g.max_u != null) { const v = g.max_u / rt.rate; if (s.maxUnit == null || v > s.maxUnit) s.maxUnit = v; }
+      if (g.min_usd != null) { const v = g.min_usd / rt.rate; if (s.minUsd == null || v < s.minUsd) s.minUsd = v; }
+      if (g.max_usd != null) { const v = g.max_usd / rt.rate; if (s.maxUsd == null || v > s.maxUsd) s.maxUsd = v; }
     } else s.unconv += g.n;
     if (!s.firstDate || g.first_date < s.firstDate) s.firstDate = g.first_date;
     if (!s.lastDate || g.last_date > s.lastDate) s.lastDate = g.last_date;
@@ -318,12 +362,17 @@ export async function itemHistory(env, it, opts = {}) {
       share: sumQty ? s.qty / sumQty * 100 : 0, mshare: sumM ? s.qtyM / sumM * 100 : 0,
       firstDate: s.firstDate, lastDate: s.lastDate,
       avgUnit: s.qtyForAvg ? s.adj / s.qtyForAvg : null, minUnit: s.minUnit, maxUnit: s.maxUnit,
+      /* قیمت روز (دلار) و ارزشِ خرید: به قیمت روز (val) و به تعدیلِ مرکز آمار (adjVal)؛ early = خریدهای پیش از اولین نرخ */
+      avgUsd: ub && s.qtyForAvg ? s.usd / s.qtyForAvg : null, minUsd: s.minUsd, maxUsd: s.maxUsd,
+      val: ub ? s.usdAll : s.adjAll, adjVal: s.adjAll, early: s.early,
       unconverted: s.unconv, contact: c,
     };
   });
   rankBy(suppliers, "n", "rankN", gradeKey);
   rankBy(suppliers, "qty", "rankQty", gradeKey);
   rankBy(suppliers, "qtyM", "rankM", gradeKey);
+  rankBy(suppliers, "val", "rankV", gradeKey);
+  finalRank(suppliers, rk.weights);
   suppliers.sort((a, b) => a.rankM - b.rankM || b.qtyM - a.qtyM || String(a.name).localeCompare(String(b.name), "fa"));
 
   /* نرخ‌های به‌کاررفته، به تفکیک واحد — «متغیر» یعنی اقلامِ مختلفِ همین نوع نرخ ویژهٔ خودشان را داشتند
@@ -355,7 +404,8 @@ export async function itemHistory(env, it, opts = {}) {
     excluded: [...excluded.values()],
     unconverted, lowConf, unitDropped, fixedDyn,
     item: { unit: hd.ref, units: [...units.keys()].join("، "), mixedUnits: false, refUnit: hd.ref },
-    totals: { n: list.reduce((a, s) => a + s.n, 0), qty: sumQty, qtyM: sumM, suppliers: suppliers.length },
+    totals: { n: list.reduce((a, s) => a + s.n, 0), qty: sumQty, qtyM: sumM, suppliers: suppliers.length,
+      val: suppliers.reduce((a, x) => a + (x.val || 0), 0), adjVal: suppliers.reduce((a, x) => a + (x.adjVal || 0), 0), early: suppliers.reduce((a, x) => a + (x.early || 0), 0) },
     suppliers,
   };
 }
@@ -399,10 +449,17 @@ export async function supplierBuys(env, it, supplier, opts = {}) {
   /* هر ردیف با قیمت روزِ خودش و قیمتِ به مبلغِ زمستان ۱۴۰۴ (تصمیم مدیر، مهر ۱۴۰۵): قیمت واحد و مبلغ کل
      هر دو در همان ضریب تعدیلِ ردیف ضرب می‌شوند — ضریبی که هنگام بارگذاری از شاخصِ طبقهٔ اصنافِ قلم
      و فصلِ خرید ساخته شده (amount_adj ÷ amount)، پس قیمت واحدِ تعدیل‌شده به همان واحدِ ثبت‌شده است. */
+  /* قیمت روز (فاز ۲ طرح «خرید هوشمند»): هر ردیف × نرخ دلارِ امروز ÷ نرخ دلارِ روزِ همان خرید */
+  const ut = await usdTable(env);
   const buys = rows.sort((a, b) => (a.order_date < b.order_date ? 1 : -1)).slice(0, 300).map((r) => {
     const rt = rateFor(sc.hd, byCode.get(r.item_code) || null, r.unit, sc.override);
     const qref = rt && r.qty != null ? r.qty * rt.rate : null;
+    const ud = ut ? ut.rateOn(r.order_date) : null;
+    const uf = ud && ud.rate > 0 ? ut.latest.rate / ud.rate : null;
     return {
+      usd_rate: ud ? ud.rate : null, usd_factor: uf, usd_early: !!(ud && ud.early),
+      amount_usd: uf != null && r.amount != null ? r.amount * uf : null,
+      unit_price_usd: uf != null && r.qty ? r.amount * uf / r.qty : null,
       order_date: r.order_date, title: r.title, item_code: r.item_code, qty: r.qty, unit: r.unit,
       amount: r.amount, amount_adj: r.amount_adj,
       unit_price: r.qty ? r.amount / r.qty : null,
@@ -412,7 +469,7 @@ export async function supplierBuys(env, it, supplier, opts = {}) {
       unit_adj: qref ? r.amount_adj / qref : null,
     };
   });
-  return { buys, unit: sc.hd.ref };
+  return { buys, unit: sc.hd.ref, usd: ut ? { latest: ut.latest.rate, latestDay: ut.latest.jday, firstDay: ut.first } : null };
 }
 
 /**

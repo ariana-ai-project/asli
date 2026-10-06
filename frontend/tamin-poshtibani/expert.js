@@ -37,7 +37,8 @@
     d: null,               // جزئیات ارجاع باز: {assignment, request, items, quotes, proformas, pendingDecisions}
     itemIdx: 0, tab: "history",
     q: { id: "", date: "", party: "", item: "" },
-    hsort: "m",                           // ستون مرتب‌سازی جدول سوابق: m (گشتاور) | qty | n
+    hsort: "f",                           // ستون مرتب‌سازی جدول سوابق: f (رتبهٔ نهایی، پیش‌فرض) | v (ارزش خرید) | m (گشتاور) | qty | n
+    priceIdx: false,                      // قیمت‌ها با تعدیلِ مرکز آمار (زمستان ۱۴۰۴) به‌جای قیمت روز با نرخ دلار — فقط نمایش، رتبه همیشه دلاری
     mom: 5,                               // ضریب اهمیت گشتاور (۱ تا ۱۰) — از localStorage پر می‌شود
     prof: null,                           // کلید تأمین‌کننده‌ای که کارتش باز است
     smBy: {},                              // قیدهای جستجوی هوشمند، برای هر قلم: {markets, brand, specs, notes}
@@ -430,13 +431,19 @@
      ۱۴۰۴) فقط در ریز خریدها و کارت تأمین‌کننده‌اند. گروه «خرید قلم در پروژه» تا رسیدن
      ستون پروژه به فایل مرجع خاموش است. */
   /* حالت جستجو یادداشت نمی‌شود: هر بار صفحه با «نوع قلم» باز می‌شود (تصمیم مدیر، مهر ۱۴۰۵) */
-  const MOM_KEY = "tp.mom", NORM_KEY = "tp.norm";
+  const MOM_KEY = "tp.mom", NORM_KEY = "tp.norm", PIDX_KEY = "tp.pidx";
   try {
     S.mom = Math.min(10, Math.max(1, +(localStorage.getItem(MOM_KEY) || 5)));
     S.normOn = localStorage.getItem(NORM_KEY) === "1";
+    S.priceIdx = localStorage.getItem(PIDX_KEY) === "1";
   } catch (_) { /* حالت خصوصی */ }
   const RQ = (x) => Math.round((Number(x) || 0) * 100) / 100;   /* مقدار بدون زبالهٔ اعشار شناور */
-  const HSORT = { m: "rankM", qty: "rankQty", n: "rankN" };
+  const HSORT = { m: "rankM", qty: "rankQty", n: "rankN", v: "rankV", f: "rankF" };
+  /* «قیمت روز» (فاز ۲ طرح «خرید هوشمند»): پیش‌فرض با نرخ دلار (مبلغ × نرخِ امروز ÷ نرخِ روزِ خرید)؛ تیکِ «مرکز آمار» همان تعدیلِ
+     فصلیِ زمستان ۱۴۰۴. رتبهٔ ارزش خرید و رتبهٔ نهایی همیشه دلاری‌اند (سرور: worker/history.js) */
+  const usdOn = (d) => !!(d && d.usd) && !S.priceIdx;
+  const priceLab = (d) => (usdOn(d) ? "قیمت روز" : (d && d.base && d.base.priceLabel) || "زمستان ۱۴۰۴");
+  const bigRial = (v) => { if (v == null) return "—"; const a = Math.abs(v); return a >= 1e9 ? `${(v / 1e9).toLocaleString("en-US", { maximumFractionDigits: 1 })} میلیارد` : a >= 1e6 ? `${(v / 1e6).toLocaleString("en-US", { maximumFractionDigits: 1 })} میلیون` : M(Math.round(v)); };
   const HMODE_FA = { exact: "عین قلم", head: "نوع قلم", pick: "قلم انتخابی" };
   /* چرا یک نام در سهم و رتبه نیامده (worker/history.js:excludedWhy) */
   const EXCL_WHY = {
@@ -560,8 +567,11 @@
         ${f("جمع مقدار", `${M(RQ(p.qty))}${unit} (رتبه ${M(p.rankQty)})`, "num")}
         ${f("امتیاز گشتاوری", `${M(RQ(p.qtyM))}${unit} (رتبه ${M(p.rankM)})`, "num")}
         ${f("نخستین خرید", p.firstDate, "num")}${f("آخرین خرید", p.lastDate, "num")}
-        ${f(`قیمت واحد میانگین (${d.base.priceLabel || "زمستان ۱۴۰۴"}${per})`, p.avgUnit == null ? null : M(Math.round(p.avgUnit)) + " ریال", "num")}
-        ${f(`کمینه / بیشینه قیمت واحد (${d.base.priceLabel || "زمستان ۱۴۰۴"})`, p.minUnit == null ? null : `${M(Math.round(p.minUnit))} تا ${M(Math.round(p.maxUnit))}`, "num")}
+        ${(() => { const u = usdOn(d), av = u ? p.avgUsd : p.avgUnit, mn = u ? p.minUsd : p.minUnit, mx = u ? p.maxUsd : p.maxUnit;
+          return f(`قیمت واحد میانگین (${priceLab(d)}${per})`, av == null ? null : M(Math.round(av)) + " ریال", "num")
+            + f(`کمینه / بیشینه قیمت واحد (${priceLab(d)})`, mn == null ? null : `${M(Math.round(mn))} تا ${M(Math.round(mx))}`, "num")
+            + f(`ارزش خرید (${priceLab(d)})`, `${bigRial(u ? p.val : p.adjVal)} ریال (رتبه ${M(p.rankV)})`, "num")
+            + f("رتبهٔ نهایی", `${M(p.rankF)} — امتیاز ${p.score}`, "num"); })()}
         ${f("شهر", c.city)}${f("تلفن همراه", c.phone, "num")}${f("تلفن ثابت", c.tel2, "num")}${f("ایمیل", c.email)}${f("وب‌سایت", c.site)}</div>
       ${c.note ? `<div class="desc"><b>توضیحات مدیر:</b> ${esc(c.note)}</div>` : ""}
       <div class="dim" style="font-size:.82rem;margin-top:8px">${p.contact ? "راه‌های تماس از دفترچهٔ تأمین‌کنندگان خوانده شده‌اند."
@@ -810,7 +820,8 @@
           <button class="tp-btn sm ${S.hmode === "head" ? "primary" : ""}" data-hmode="head" title="همهٔ اقلام همین نوع — مثلاً هر پیچی که تا حالا خریده‌ایم (پیش‌فرض)">نوع قلم</button>
           <button class="tp-btn sm ${S.hmode === "pick" ? "primary" : ""}" data-hmode="pick" title="همین نوع قلم، و فقط لایه‌ها و واحدهای خریدی که در کادر نرمال‌سازی تیک می‌زنید">قلم انتخابی</button>
           <button class="tp-btn sm ${S.hmode === "exact" ? "primary" : ""}" data-hmode="exact" title="همان نوع قلم با دقیقاً همان لایه‌های ویژگی">عین قلم</button></span>
-        ${S.hmode === "pick" ? `<span class="dim" style="font-size:.85rem">لایه‌ها و واحدهایی را که می‌خواهید در کادرِ نرمال‌سازی تیک بزنید، بعد «بررسی سوابق».</span>` : ""}</div>`;
+        ${S.hmode === "pick" ? `<span class="dim" style="font-size:.85rem">لایه‌ها و واحدهایی را که می‌خواهید در کادرِ نرمال‌سازی تیک بزنید، بعد «بررسی سوابق».</span>` : ""}
+        <label class="chkline" style="margin-inline-start:auto" title="قیمت‌ها پیش‌فرض «قیمت روز»ند: مبلغ × نرخ دلارِ امروز ÷ نرخ دلارِ روزِ خرید. با این تیک همان تعدیلِ شاخصِ مرکز آمار (مبلغ به زمستان ۱۴۰۴) دیده می‌شود؛ رتبه‌ها همیشه با دلارند."><input type="checkbox" data-pidx ${S.priceIdx ? "checked" : ""}> تعدیل مرکز آمار (زمستان ۱۴۰۴)</label></div>`;
     /* کادر نرمال‌سازی: تا سوابق خوانده نشده زیر همین نوار است؛ بعد از «بررسی سوابق» زیر فهرست تأمین‌کنندگان (تصمیم مدیر، مهر ۱۴۰۵).
        «قلم انتخابی» بی آن معنا ندارد، پس در آن حالت همیشه باز است. */
     /* نرمال‌سازی اجباری: تا ساختارِ قلم تأیید نشده، کادرش باز است */
@@ -856,7 +867,10 @@
       ${(d.titles || []).length ? `<details class="histitems"><summary>اقلامِ شمرده‌شده (${M(d.titles.length)}${mt.codes > d.titles.length ? "+" : ""})</summary>
         ${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${showLayer(v)}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)} خرید</span></span>`).join("")}</details>` : ""}
       <div class="tp-scroll" data-keep-scroll style="max-height:54vh"><table class="tp-table grid"><thead><tr>
-        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="کد تأمین‌کننده در فایل سوابق (یا دفترچهٔ تأمین‌کنندگان)">کد</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}<th>خریدها</th></tr></thead><tbody>
+        <th>انتخاب</th><th class="rt">تأمین‌کننده</th><th title="کد تأمین‌کننده در فایل سوابق (یا دفترچهٔ تأمین‌کنندگان)">کد</th><th title="ردهٔ تأمین‌کننده؛ در امتیاز برابر، ردهٔ بالاتر جلوتر است">رده</th><th>دفعات خرید</th>${rk("n")}<th>مقدار${unit ? ` (${unit.trim()})` : ""}</th>${rk("qty")}<th>سهم</th><th>امتیاز گشتاوری</th>${rk("m")}
+        <th title="قیمت واحدِ میانگین به ازای واحد مرجع — ${usdOn(d) ? "به قیمت روز با نرخ دلار" : "با تعدیلِ مرکز آمار (زمستان ۱۴۰۴)"}">قیمت واحد (${esc(priceLab(d))})</th>
+        <th title="جمعِ مبلغِ خریدها — ${usdOn(d) ? "هر خرید × نرخ دلارِ امروز ÷ نرخ دلارِ روزِ همان خرید" : "با تعدیلِ مرکز آمار (زمستان ۱۴۰۴)؛ رتبه همیشه با دلار است"}">ارزش خرید (${esc(priceLab(d))})</th>${rk("v")}
+        <th title="میانگینِ وزنیِ رتبه‌های نسبیِ دفعات، مقدار، گشتاور و ارزش خرید، و رده — وزن‌ها در پنل پشتیبانی؛ ترتیبِ دعوتِ کارشناس هوشمند همین است">امتیاز نهایی</th>${rk("f")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
           : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
@@ -867,13 +881,17 @@
         <td class="num">${M(RQ(s.qty))}</td>${rc("qty", s.rankQty)}
         <td class="num">${s.share.toFixed(1)}٪</td>
         <td class="num" style="font-weight:700">${M(RQ(s.qtyM))}</td>${rc("m", s.rankM)}
+        ${(() => { const u = usdOn(d), av = u ? s.avgUsd : s.avgUnit, vv = u ? s.val : s.adjVal; return `<td class="num">${av == null ? "—" : M(Math.round(av))}</td>
+        <td class="num" title="${vv == null ? "" : `${M(Math.round(vv))} ریال`}${s.early ? ` — ${M(s.early)} خرید پیش از اولین نرخ دلار (۱۳۹۸/۰۳/۲۷) با نرخِ همان روز` : ""}">${bigRial(vv)}${s.early && u ? " *" : ""}</td>`; })()}${rc("v", s.rankV)}
+        <td class="num" style="font-weight:700">${s.score == null ? "—" : s.score}</td>${rc("f", s.rankF)}
         <td><button class="tp-btn xs" data-buys="${esc(s.key)}">${M(s.n)}</button></td></tr>`).join("")}
       </tbody></table></div>
       ${norm}
-      <div class="tp-note">رتبه‌بندی فقط بر مبنای <b>دفعات خرید</b>، <b>مقدار</b> و <b>امتیاز گشتاوری</b> است و قیمت در آن اثری ندارد؛ <b>در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، بعد B، بعد C) جلوتر است</b>. قیمت‌ها (به ${esc(d.base.priceLabel || "زمستان ۱۴۰۴")}) را در «خریدها» و کارت تأمین‌کننده ببینید.
+      <div class="tp-note"><b>رتبهٔ نهایی</b> (پیش‌فرضِ مرتب‌سازی و ترتیبِ دعوتِ کارشناس هوشمند) میانگینِ وزنیِ چهار رتبه — <b>دفعات خرید</b>، <b>مقدار</b>، <b>امتیاز گشتاوری</b> و <b>ارزش خرید به قیمت روز</b> — و <b>رده</b> (A صد، B شصت‌وشش، C سی‌وسه درصد) است${d.weights ? ` با وزن‌های پنل پشتیبانی (دفعات ${d.weights.n}، مقدار ${d.weights.qty}، گشتاور ${d.weights.qtyM}، ارزش ${d.weights.val}، رده ${d.weights.grade})` : ""}؛ <b>در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، بعد B، بعد C) جلوتر است</b>.
+        ${d.usd ? `<b>قیمت روز</b>: مبلغِ هر خرید × نرخ دلارِ امروز (${M(d.usd.latest)} ریال، ${esc(d.usd.latestDay)}) ÷ نرخ دلارِ روزِ همان خرید؛ خریدِ پیش از ${esc(d.usd.firstDay)} (اولین نرخِ کانال) با نرخِ همان روز (*). تیکِ «تعدیل مرکز آمار» قیمت‌ها را به زمستان ۱۴۰۴ نشان می‌دهد؛ رتبه‌ها همیشه دلاری‌اند.` : "نرخ دلار هنوز بارگذاری نشده؛ ارزش خرید با تعدیلِ مرکز آمار (زمستان ۱۴۰۴) است."}
         <b>مقدارها به واحد مرجعِ نوع قلم («${esc(st.refUnit || "")}») برده شده‌اند</b> تا خریدهای با واحدهای مختلف قابل جمع باشند.
         <b>امتیاز گشتاوری عدد است، نه درصد</b>: جمعِ مقدارِ هر خرید ضرب در ضریب تازگی‌اش. ضریب برای خرید در ${esc(d.base.label)} یک است و با هر ماه فاصله کم می‌شود — با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ — و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد.
-        عددهای برابر (با ردهٔ برابر) رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ گشتاوری است.</div></div>`;
+        عددهای برابر (با ردهٔ برابر) رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ نهایی است.</div></div>`;
   }
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
@@ -937,19 +955,20 @@
     const it = item(), s = supOf(key); if (!s) return;
     try {
       const r = await TP.api(`/suppliers/history/buys?${histQuery(it)}&supplier=${encodeURIComponent(s.name)}`);
-      const d = S.hist[it.id] || {}, pl = (d.base && d.base.priceLabel) || "زمستان ۱۴۰۴";
+      const d = S.hist[it.id] || {}, u = !!r.usd && !S.priceIdx, pl = u ? "قیمت روز" : (d.base && d.base.priceLabel) || "زمستان ۱۴۰۴";
       const rial = (v) => (v == null ? "—" : M(Math.round(v)));
       /* هشت ستون (تصمیم مدیر، مهر ۱۴۰۵): دو ستونِ آخر همان قیمت واحد و مبلغ کل‌اند ضرب در ضریبِ
          تعدیلِ همین ردیف (شاخصِ طبقهٔ اصنافِ قلم در فصلِ خرید، به مبنای زمستان ۱۴۰۴) */
       TP.modal(`سوابق خرید — ${esc(s.name)}`, r.buys.length
         ? `<div class="tp-scroll" style="max-height:56vh"><table class="tp-mx" style="width:100%"><thead><tr>
             <th>تاریخ</th><th>عنوان قلم</th><th>مقدار خرید</th><th>واحد</th><th>قیمت واحد (ریال)</th><th>مبلغ کل (ریال)</th>
-            <th>قیمت واحد به مبلغ ${esc(pl)}</th><th>مبلغ کل به مبلغ ${esc(pl)}</th></tr></thead><tbody>
+            <th>قیمت واحد به ${u ? "" : "مبلغ "}${esc(pl)}</th><th>مبلغ کل به ${u ? "" : "مبلغ "}${esc(pl)}</th></tr></thead><tbody>
           ${r.buys.map((x) => `<tr><td class="num">${esc(x.order_date)}</td><td class="rt" style="white-space:normal">${esc(x.title)}</td>
             <td class="num">${x.qty == null ? "—" : M(RQ(x.qty))}</td><td>${esc(x.unit || "—")}</td>
             <td class="num">${rial(x.unit_price)}</td><td class="num">${rial(x.amount)}</td>
-            <td class="num" title="${x.adj_factor != null ? `ضریب تعدیل این ردیف: ${fmtRate(x.adj_factor)}` : ""}">${rial(x.unit_price_adj)}</td>
-            <td class="num">${rial(x.amount_adj)}</td></tr>`).join("")}
+            ${u ? `<td class="num" title="نرخ دلارِ روزِ خرید: ${x.usd_rate ? M(x.usd_rate) : "—"} ریال${x.usd_early ? " (پیش از اولین نرخِ کانال؛ نرخِ همان روز)" : ""} — ضریب ${x.usd_factor != null ? fmtRate(x.usd_factor) : "—"}">${rial(x.unit_price_usd)}${x.usd_early ? " *" : ""}</td>
+            <td class="num">${rial(x.amount_usd)}</td>` : `<td class="num" title="${x.adj_factor != null ? `ضریب تعدیل این ردیف: ${fmtRate(x.adj_factor)}` : ""}">${rial(x.unit_price_adj)}</td>
+            <td class="num">${rial(x.amount_adj)}</td>`}</tr>`).join("")}
           </tbody></table></div>` : "ردیفی پیدا نشد.", null, "بستن", "");
     } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
   }
@@ -1923,6 +1942,7 @@
       mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
     }
     const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
+    const pix = G("[data-pidx]"); if (pix) pix.onchange = (e) => { S.priceIdx = e.target.checked; try { localStorage.setItem(PIDX_KEY, S.priceIdx ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };
     /* نرمال‌سازی اقلام و حالت جستجو */
     const nOn = G("[data-norm-on]");
     if (nOn) nOn.onchange = (e) => {

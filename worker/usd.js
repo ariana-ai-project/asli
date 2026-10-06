@@ -320,7 +320,7 @@ export async function putRates(env, rows, { src = "excel", ref = null, now = Dat
   /* D1: هر batch در یک تراکنش؛ فایل‌های بزرگ چند batch می‌شوند ولی درون‌یابی همیشه در آخرین */
   const all = [...stmts, ...it];
   for (let i = 0; i < all.length; i += 400) await env.DB.batch(all.slice(i, i + 400));
-  usdCache = null;
+  resetUsdCache();
   return { written: clean.length, interp: it.length - 1, bad: bad.length, from: clean[0].jday, to: clean[clean.length - 1].jday };
 }
 
@@ -332,7 +332,8 @@ let usdCache = null;
  */
 export async function usdTable(env, now = Date.now()) {
   if (usdCache && now - usdCache.at < 5 * 60000) return usdCache.t;
-  const { results } = await env.DB.prepare("SELECT jday, rate FROM usd_rates ORDER BY jday").all();
+  /* جدول هنوز ساخته نشده (دیتابیسِ تازه پیش از ensureSchema) همان «بی نرخ» است */
+  const { results } = (await env.DB.prepare("SELECT jday, rate FROM usd_rates ORDER BY jday").all().catch(() => null)) || {};
   const rows = results || [];
   let t = null;
   if (rows.length) {
@@ -354,7 +355,20 @@ export async function usdTable(env, now = Date.now()) {
   usdCache = { at: now, t };
   return t;
 }
-export function resetUsdCache() { usdCache = null; }
+export function resetUsdCache() { usdCache = null; boundsCache = null; }
+
+/* نرخِ امروز و اولین نرخ — «قیمت روز»ِ سوابق در خودِ SQL (history.js) حساب می‌شود و این دو عدد را لازم دارد */
+let boundsCache = null;
+/** {latestDay, latest, firstDay, first} — ۵ دقیقه در حافظهٔ isolate؛ جدولِ خالی → null */
+export async function usdBounds(env, now = Date.now()) {
+  if (boundsCache && now - boundsCache.at < 5 * 60000) return boundsCache.b;
+  const r = await env.DB.prepare(`SELECT (SELECT jday FROM usd_rates ORDER BY jday DESC LIMIT 1) AS ld, (SELECT rate FROM usd_rates ORDER BY jday DESC LIMIT 1) AS lr,
+      (SELECT jday FROM usd_rates ORDER BY jday LIMIT 1) AS fd, (SELECT rate FROM usd_rates ORDER BY jday LIMIT 1) AS fr`).first().catch(() => null);
+  const day = /^\d{4}\/\d{2}\/\d{2}$/;
+  const b = r && day.test(r.ld || "") && day.test(r.fd || "") && r.lr > 0 && r.fr > 0 ? { latestDay: r.ld, latest: Math.round(r.lr), firstDay: r.fd, first: Math.round(r.fr) } : null;
+  boundsCache = { at: now, b };
+  return b;
+}
 
 /* ------------------------------------------------------------------ */
 /* ربات روزانه                                                           */
@@ -459,7 +473,7 @@ export async function usdDaily(env, { now = Date.now(), force = false, fetcher =
   if (found.length) stmts.push(...await interpStmts(env, found[0].jday, found[found.length - 1].jday, found, now));
   stmts.push(stateStmt(env, next, now));
   await env.DB.batch(stmts);
-  if (found.length) usdCache = null;
+  if (found.length) resetUsdCache();
   return { usd: { found: run.found, none: noTrade, failed, requests, error: error || undefined } };
 }
 

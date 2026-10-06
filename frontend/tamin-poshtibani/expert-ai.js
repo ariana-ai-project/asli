@@ -113,7 +113,7 @@
           ${p.mobile ? `<button class="tp-btn xs" data-ai-addfound="${esc(p.phone)}" data-name="${esc(c.name)}" title="این شماره را برای این تأمین‌کننده ثبت و تیکِ پنل بزن">➕ ثبت با تیکِ پنل</button>` : `<span class="dim">(ثابت)</span>`}</span>`),
       `<button class="tp-btn xs" data-ai-addphone="${esc(c.name)}" ${c.sid ? `data-sid="${c.sid}"` : ""}>➕ شماره</button>`,
     ].join("");
-    const cands = d.candidates.map((c) => `<tr><td class="rt"><b>${esc(c.name)}</b>${c.invited ? ` <span class="chip ok">دعوت شد</span>` : ""}</td><td>${esc(c.src_fa)}${c.src === "history" && c.rank < 999 ? ` (رتبهٔ ${M(c.rank)})` : ""}</td>
+    const cands = d.candidates.map((c) => `<tr><td class="rt"><b>${esc(c.name)}</b>${c.invited ? ` <span class="chip ok">دعوت شد</span>` : ""}</td><td>${esc(c.src_fa)}${c.src === "history" && c.rank < 999 ? ` (نوبتِ ${M(c.rank)}${c.tier === "grade" ? " — ردهٔ برگزیدهٔ عین قلم" : c.tier === "exact" ? " — عین قلم" : c.tier === "type" ? " — نوع قلم" : ""})` : ""}</td>
         <td class="rt" style="white-space:normal">${phoneCell(c)}</td></tr>`).join("");
     const ths = d.threads.map((t) => `<tr><td class="rt">${esc(t.supplier)}</td><td dir="ltr">${esc(t.phone || "—")}</td><td>${esc(t.source_fa)}</td><td>${esc(TH_FA[t.state] || t.state)}</td>
         <td class="num">${M(t.turns)}</td><td class="num">${M(t.replies)}</td><td>${esc((t.bundles || []).join("، ") || "—")}</td>

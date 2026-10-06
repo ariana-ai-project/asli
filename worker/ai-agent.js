@@ -45,6 +45,7 @@ import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
 import { queueStmt } from "./queue.js";
 import { NORM_OK_SQL, changeStmt } from "./structure.js";
+import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -284,12 +285,24 @@ async function stepPrep(env, run, { ex, rec }) {
       di.struct = `پیشنهادِ مدل: ${p.head}`;
     } else di.struct = p && p.error ? `ناموفق: ${p.error}` : p && p.head ? `از فهرست اقلام: ${p.head}` : "ساختاری پیدا نشد";
   } else di.struct = `تأییدشده: ${normOf(it).head}`;
-  const h = await itemHistory(env, it, { mode: "head", k: 5 }).catch((e) => ({ available: false, message: e.message }));
+  /* فاز ۲ طرح «خرید هوشمند»: سوابقِ «نوع قلم» و «عین قلم»، هر دو با رتبهٔ نهایی (وزن‌ها و ضریب گشتاورِ پنل پشتیبانی) — ترتیبِ دعوت
+     را «قاعدهٔ دعوت» از این دو می‌سازد (buildCandidates). قیمت‌ها به قیمت روز با نرخ دلار، اگر نرخ هست. */
+  const rk = await getRanking(env);
+  const [h, hx] = await Promise.all([
+    itemHistory(env, it, { mode: "head", k: rk.weights.k }).catch((e) => ({ available: false, message: e.message })),
+    itemHistory(env, it, { mode: "exact", k: rk.weights.k, brief: true }).catch(() => ({ suppliers: [] })),
+  ]);
   const sups = h.suppliers || [];
+  const usd = !!h.usd;
+  const shape = (s) => ({ key: s.key, name: s.name, rank: s.rankF, rankF: s.rankF, score: s.score, grade: s.grade || null, n: s.n, val: s.val,
+    avg: usd ? s.avgUsd : s.avgUnit, min: usd ? s.minUsd : s.minUnit, max: usd ? s.maxUsd : s.maxUnit, last: s.lastDate,
+    phones: [s.contact && s.contact.phone, s.contact && s.contact.tel2].filter(Boolean) });
+  const byF = (a, b) => a.rankF - b.rankF || (b.qtyM || 0) - (a.qtyM || 0);
   di.hist = {
     ok: !!h.available && !h.message, msg: h.message || null, n: sups.length, ref: (h.item && h.item.refUnit) || (h.struct && h.struct.refUnit) || null,
-    top: sups.slice(0, 15).map((s) => ({ name: s.name, rank: s.rankM, grade: s.grade || null, n: s.n, avg: s.avgUnit, min: s.minUnit, max: s.maxUnit, last: s.lastDate,
-      phones: [s.contact && s.contact.phone, s.contact && s.contact.tel2].filter(Boolean) })),
+    basis: usd ? "usd" : "index",
+    top: [...sups].sort(byF).slice(0, 15).map(shape),
+    exact: [...(hx.suppliers || [])].sort(byF).slice(0, 15).map(shape),
   };
   di.prep = 1;
   const t = now();
@@ -351,18 +364,23 @@ async function stepSearch(env, run, { ex, cfg, rec }) {
  */
 async function buildCandidates(env, run) {
   const d = run.data, by = new Map();
-  const add = (name, itemId, src, rank, phones) => {
+  const add = (name, itemId, src, rank, phones, tier) => {
     const key = C.nkey(name);
     if (!key) return;
-    const c = by.get(key) || { key, name: C.nrm(name), items: [], src, rank: rank == null ? 999 : rank, found: [] };
+    const c = by.get(key) || { key, name: C.nrm(name), items: [], src, rank: rank == null ? 999 : rank, found: [], tier: tier || null };
     if (!c.items.includes(itemId)) c.items.push(itemId);
     for (const p of phones || []) { const n = C.normPhone(p); if (n && !c.found.includes(n)) c.found.push(n); }
-    if (src === "history" && c.src !== "history") { c.src = "history"; c.rank = rank; }
+    if (src === "history" && c.src !== "history") { c.src = "history"; c.rank = rank; c.tier = tier || null; }
     by.set(key, c);
   };
+  /* فاز ۲ طرح «خرید هوشمند»: ترتیبِ دعوت از سوابق با «قاعدهٔ دعوت»ِ پنل پشتیبانی (worker/ranking.js) — پیش‌فرض ردهٔ A عین قلم تا ۵ نفر،
+     بعد نوع قلم به ترتیبِ رتبهٔ نهایی. چند قلم: نوبتی — نفرِ اولِ هر قلم، بعد نفرِ دوم …؛ rank همان جایگاه در این ترتیب است */
+  const rk = await getRanking(env);
+  const lists = d.items.filter((di) => !di.skip).map((di) => ({ di, order: dispatchOrder({ exact: (di.hist && di.hist.exact) || [], type: (di.hist && di.hist.top) || [] }, rk.dispatch) }));
+  let pos = 0;
+  for (let i = 0; lists.some((l) => i < l.order.length); i++) for (const l of lists) { const s = l.order[i]; if (s) add(s.name, l.di.id, "history", ++pos, s.phones, s.tier); }
   for (const di of d.items) {
     if (di.skip) continue;
-    for (const s of (di.hist && di.hist.top) || []) add(s.name, di.id, "history", s.rank, s.phones);
     if (di.smart && di.smart.sid) {
       const row = await env.DB.prepare("SELECT result_json FROM smart_searches WHERE id=?").bind(di.smart.sid).first();
       ((parse(row && row.result_json, {}) || {}).suppliers || []).forEach((s) => add(s.name, di.id, "smart", null, phonesOfResult(s)));
@@ -738,7 +756,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
     const o = others.find((x) => x.item_id === l.item_id);
     return {
       no: l.no, title: l.title,
-      hist: avgs.length ? { avg: avgs.reduce((a, b) => a + b, 0) / avgs.length, min: Math.min(...top.map((s) => s.min).filter((x) => x > 0)), max: Math.max(...top.map((s) => s.max).filter((x) => x > 0)), n: top.reduce((a, s) => a + (s.n || 0), 0), ref: di.hist.ref } : null,
+      hist: avgs.length ? { avg: avgs.reduce((a, b) => a + b, 0) / avgs.length, min: Math.min(...top.map((s) => s.min).filter((x) => x > 0)), max: Math.max(...top.map((s) => s.max).filter((x) => x > 0)), n: top.reduce((a, s) => a + (s.n || 0), 0), ref: di.hist.ref, basis: di.hist.basis || "index" } : null,
       others: o ? { n: o.n, min: o.min } : null,
     };
   });
@@ -763,7 +781,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   const rel = lineOut.map((l) => {
     const di = run.data.items.find((x) => x.id === l.item_id);
     const top = (di && di.hist && di.hist.top) || [];
-    const me = top.find((s) => C.nkey(s.name) === sk);
+    const me = top.find((s) => C.nkey(s.name) === sk) || ((di && di.hist && di.hist.exact) || []).find((s) => C.nkey(s.name) === sk);
     return { no: l.no, title: l.title, n: me ? me.n || 0 : 0, last: me ? me.last || null : null, total: top.reduce((a, s) => a + (s.n || 0), 0), sups: top.length };
   });
   const supplierSrc = SOURCE_FA[st.source] || st.source || "—";
@@ -1015,7 +1033,7 @@ async function candidatesView(env, run) {
   const out = cands.map((c) => {
     const sid = (rows.find((r) => r.name_n === c.key) || {}).sid || null;
     const phones = phonesBy((r) => r.name_n === c.key);
-    return { key: c.key, name: c.name, src: c.src, src_fa: SOURCE_FA[c.src] || c.src, rank: c.rank, items: c.items, sid, invited: !!(sid && invited.has(sid)), phones,
+    return { key: c.key, name: c.name, src: c.src, src_fa: SOURCE_FA[c.src] || c.src, rank: c.rank, tier: c.tier || null, items: c.items, sid, invited: !!(sid && invited.has(sid)), phones,
       found: c.found.filter((p) => !phones.some((x) => x.phone === p)).map((p) => ({ phone: p, mobile: isMobile(p) })) };
   });
   for (const m of man) {
@@ -1186,6 +1204,12 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     /* کارهای در حالِ مذاکره همین حالا با قواعدِ تازه دوباره بسنجند */
     await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE state='work' AND finished_at IS NULL AND next_at>?").bind(now(), now()).run();
     return json({ ok: true, rules });
+  }
+  /* فاز ۲ طرح «خرید هوشمند»: وزن‌های رتبهٔ نهایی و «قاعدهٔ دعوت» (worker/ranking.js) */
+  if (sub === "/ranking" && m === "GET") return json({ ...(await getRanking(env)), fa: RANK_FA, then_fa: THEN_FA });
+  if (sub === "/ranking" && m === "PUT") {
+    const r = await saveRanking(env, await readJson(request), "support");
+    return json({ ok: true, ...r });
   }
   if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
   let dm;
