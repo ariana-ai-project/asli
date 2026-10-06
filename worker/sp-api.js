@@ -132,7 +132,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const th = await C.threadFor(env, mm[1], who);
     const r = await C.postMsg(env, th, who.side, (await readJson(request)).text);
     await later(ctx, () => P.pushMsgs(env, th, r.msgs));
-    /* گفت‌وگوی کارشناس هوشمند: پیامِ تأمین‌کننده گامِ مذاکره را همان لحظه می‌زند (worker/ai-agent.js) */
+    /* گفت‌وگوی کارشناس هوشمند: پیامِ تأمین‌کننده گامِ مذاکره را همان لحظه می‌زند (worker/ai-agent.js)؛ پاسخِ کارشناس به «🚨 پرسش از کارشناس»
+       اجرا را همان لحظه سررسید می‌کند (askAnswered) و Cronِ دقیقهٔ بعد ادامه می‌دهد */
     if (who.side === "s") aiKick(env, ctx, th.id);
     return json({ ok: true, msgs: r.msgs });
   }

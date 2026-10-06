@@ -359,12 +359,15 @@
      از تأمین‌کنندگان رسیده یا نه؛ هر گفت‌وگو یک اعلانِ شیشه‌ای به سبک iOS در گوشهٔ بالا-چپ می‌شود (پیام‌های بعدیِ همان
      گفت‌وگو همان اعلان را تازه می‌کنند) و کلیکش همان گفت‌وگو را باز می‌کند. فقط پیام‌هایی که بعد از باز شدنِ صفحه
      می‌رسند؛ نخوانده‌های قبلی یک اعلانِ خلاصه، یک بار در هر تب. پیامِ گفت‌وگویی که همین حالا باز است اعلان نمی‌شود.
-     TP.inbox.start({ api, active, current, open, onNew, summary }) */
+     «🚨 پرسش از کارشناس» (فاز ۲ پنل پشتیبانی) هم از همین نظرسنجی می‌آید: هر سؤالِ تازهٔ کارشناس هوشمند یک اعلان، و شمارش به
+     onAsks(n, list) برای نشانِ کنارِ «مکاتبات».
+     TP.inbox.start({ api, active, current, open, onNew, onAsks, summary }) */
   TP.inbox = (() => {
     const FAD = "۰۱۲۳۴۵۶۷۸۹", faD = (s) => String(s).replace(/\d/g, (d) => FAD[+d]);
     const LIFE = 9000, MAX = 4;
     let on = false, opt = {}, since = 0, timer = null, busy = false, box = null, ticker = null, baseTitle = "";
-    const seen = new Set();
+    const seen = new Set(), askSeen = new Set();
+    let askInit = false;
     const ss = { get(k) { try { return sessionStorage.getItem(k) || ""; } catch (_) { return ""; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (_) { /* حالت خصوصی */ } } };
     /** پیش‌فرض (پنل کارشناس): صفحهٔ مکاتبات روی همان گفت‌وگو — correspond.js گفت‌وگوی بازِ تب را از sessionStorage برمی‌دارد */
     const openDefault = (m) => { if (m && m.thread_id) { ss.set("sp.th.e", String(m.thread_id)); ss.set("sp.aid", String(m.assignment_id || "")); } location.href = "correspond.html"; };
@@ -429,7 +432,29 @@
         }
         if (fresh.length && opt.onNew) opt.onNew(fresh);
       }
+      asksIn(r, open);
       setTitle(r.unread);
+    }
+    /* سؤالِ کارشناس هوشمند که جوابش در پروندهٔ درخواست نیست: گفت‌وگو تا پاسخِ کارشناس برایش باز است. اولِ کار یک اعلانِ خلاصه
+       (یک بار در هر تب)، بعد هر سؤالِ تازه یک اعلان؛ کلیک همان گفت‌وگو را باز می‌کند. */
+    function asksIn(r, open) {
+      const list = r.ask_list || [], keyOf = (k) => `${k.thread_id}:${k.at}`;
+      const fresh = list.filter((k) => !askSeen.has(keyOf(k)));
+      list.forEach((k) => askSeen.add(keyOf(k)));
+      const head = "🚨 پرسش از کارشناس", sub = (k) => `درخواست ${k.request_id || ""} · ${k.supplier || ""}`;
+      if (!askInit) {
+        askInit = true;
+        const key = list.map(keyOf).join(",");
+        if (opt.summary !== false && list.length && ss.get("tp.inbox.ask") !== key) {
+          ss.set("tp.inbox.ask", key);
+          toast("ask", list.length === 1 ? { title: head, sub: sub(list[0]), body: list[0].q || "", onClick: () => open(list[0]) }
+            : { title: head, sub: "", body: `کارشناس هوشمند ${faD(list.length)} سؤال از شما دارد — پاسخ را در همان گفت‌وگو بنویسید`, onClick: () => open(null) });
+        }
+      } else {
+        const cur = opt.current ? opt.current() : null;
+        for (const k of fresh) if (k.thread_id !== cur) toast(`a${k.thread_id}`, { title: head, sub: sub(k), body: k.q || "", onClick: () => open(k) });
+      }
+      if (opt.onAsks) opt.onAsks(r.asks || list.length, list);
     }
     function schedule(ms) { clearTimeout(timer); timer = setTimeout(poll, ms); }
     async function poll() {

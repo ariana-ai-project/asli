@@ -48,7 +48,8 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin } from "./ai-agent.js";
+import { aiOwned, aiQuote, aiQuoteNames, aiAsks, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
@@ -266,6 +267,8 @@ const COLUMN_MIGRATIONS = [
   ["items", "norm_at", "INTEGER"],
   /* (مهر ۱۴۰۵) پنل تأمین‌کننده: کد افزایشیِ قلم، پذیرش‌های جدول تطابق، پیامکِ منتظرِ اتصالِ بات مکاتبات (sp-core.js) */
   ...SP_COLUMNS,
+  /* (فاز ۲ پنل پشتیبانی) «پرسش از کارشناس»: سؤالِ کارشناس هوشمند، زمانش و پاسخِ کارشناس (ai-lock.js) */
+  ["ai_threads", "ask_json", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -446,6 +449,19 @@ async function putSettings(env, patch) {
 function ev(env, actor, kind, request_id, item_id, payload) {
   return env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)")
     .bind(now(), actor, kind, request_id || null, item_id || null, payload ? JSON.stringify(payload) : null);
+}
+
+/**
+ * قفلِ «کارشناس هوشمند» (فاز ۲ پنل پشتیبانی، ai-lock.js): ارجاعی که دستِ اوست، برای کارشناس — نه مدیر و نه پشتیبانی — قفل
+ * است؛ بررسی سوابق، جستجوی هوشمند، ساختار قلم، جدول کمیسیون و نامه را خودش انجام می‌دهد. who: {expert} یا {role: "expert"}.
+ */
+async function aiGuard(env, who, assignmentId) {
+  if (!who || !(who.expert || who.role === "expert") || !assignmentId) return;
+  if (await aiOwned(env, assignmentId)) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
+}
+/** خطِ استعلامی که کارشناس هوشمند ساخته (یا از گفت‌وگوی او آمده) — برای کارشناس دست‌نخوردنی */
+async function aiQuoteGuard(env, q) {
+  if (await aiQuote(env, q)) throw new HttpError(AI_QUOTE_MSG, 423, { ai_locked: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1040,6 +1056,11 @@ async function settingsFor(env, expertId, settings) {
   return thr ? { ...s, thresholds: thr } : s;
 }
 
+/* ارجاعِ دستِ کارشناس هوشمند در یک ستون (همان قاعدهٔ ai-lock.js:aiOwned) — a: assignments؛ کارتابل نشانِ 🤖 می‌زند */
+const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0
+    WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN 1 ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
+    WHEN a.dispatched_at>=COALESCE(g.on_at,0) AND a.closed_at IS NULL THEN 1 ELSE 0 END FROM ai_agents g WHERE g.expert_id=a.expert_id)`;
+
 async function tray(env, ex, url) {
   /* full=1: کارتابل، وضعیت تلگرام و «من» در یک درخواست — پنل کارشناس قبلاً سه‌چهار درخواست
      موازی می‌فرستاد و هر کدام رفت‌وبرگشت شبکه و احراز هویتِ خودش را داشت */
@@ -1051,7 +1072,8 @@ async function tray(env, ex, url) {
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.smart_done_at IS NOT NULL) AS smart_count,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.commission_ok=1) AS ok_count,
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quote_count,
-      (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count
+      (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count,
+      ${AI_OWNED_SQL} AS ai
     FROM assignments a JOIN requests r ON r.id=a.request_id
     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
@@ -1060,9 +1082,9 @@ async function tray(env, ex, url) {
   if (!full) return out;
   const tg = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(ex.id).first();
   const team = ex.senior ? (await env.DB.prepare("SELECT id,name,label FROM experts WHERE senior_id=? AND active=1 ORDER BY name").bind(ex.id).all()).results || [] : [];
-  /* کارشناس هوشمند (worker/ai-agent.js): پنل تبِ «🤖 کارشناس هوشمند» را فقط برای همین‌ها نشان می‌دهد */
+  /* تیکِ «هوشمند / دستی» این کارشناس (پنل پشتیبانی) و «پرسش از کارشناس»های بی‌پاسخش — نشانِ 🚨 کنارِ «مکاتبات» */
   const ai = await env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null);
-  return { ...out, me: { role: "expert", expert: { ...meOut(ex), ai: ai ? ai.mode : null }, team },
+  return { ...out, asks: await aiAsks(env, ex.id), me: { role: "expert", expert: { ...meOut(ex), ai: ai ? ai.mode : null }, team },
     tg: { connected: !!(tg && tg.telegram_chat), botConfigured: !!env.TG_BOT_TOKEN, bot: env.TG_BOT_USERNAME || null,
       teamBotConfigured: !!env.TG_TEAM_BOT_TOKEN, teamBot: env.TG_TEAM_BOT_USERNAME || null } };
 }
@@ -1080,7 +1102,19 @@ async function assignmentDetail(env, aid, who) {
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
   const decisions = (await env.DB.prepare("SELECT * FROM decisions WHERE assignment_id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(aid).all()).results || [];
-  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id) };
+  /* فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستِ دستِ کارشناس هوشمند (قفلِ سوابق، جستجو، ساختار، کمیسیون و نامه)، خط‌های استعلامِ
+     او (q.ai — دست‌نخوردنی) و «پرسش از کارشناس»های بی‌پاسخِ همین درخواست */
+  const owned = await aiOwned(env, aid);
+  const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state } : null, asks: 0 };
+  const names = await aiQuoteNames(env, aid);
+  const aiMode = !!owned || names.size > 0 || !!(await env.DB.prepare("SELECT 1 AS x FROM ai_agents WHERE expert_id=? AND mode='on'").bind(a.expert_id).first());
+  for (const q of quotes) q.ai = aiMode && (q.source === "ai" || names.has(q.supplier_name)) ? 1 : 0;
+  if (aiMode) {
+    const k = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id WHERE t.assignment_id=? AND ${AI_ASK_SQL}`).bind(aid).first();
+    ai.asks = k ? k.n : 0;
+  }
+  ai.mode = aiMode;
+  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
 }
 
 /* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
@@ -1095,8 +1129,9 @@ async function ownItem(env, who, itemId) {
 }
 
 async function markProgress(env, ex, itemId, stage) {
-  const it = await env.DB.prepare("SELECT i.id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(itemId, ex.id).first();
+  const it = await env.DB.prepare("SELECT i.id, i.assignment_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(itemId, ex.id).first();
   if (!it) throw new HttpError("قلم متعلق به شما نیست.", 403);
+  await aiGuard(env, { expert: ex }, it.assignment_id);
   const col = stage === "hist" ? "hist_done_at" : stage === "smart" ? "smart_done_at" : null;
   if (!col) throw new HttpError("stage باید hist یا smart باشد.");
   await env.DB.prepare(`UPDATE items SET ${col}=COALESCE(${col},?) WHERE id=?`).bind(now(), itemId).run();
@@ -1147,6 +1182,7 @@ const MANUAL_LOCKED = QUOTE_FIELDS.filter((f) => f !== "final");
 async function quoteUpdate(env, ex, id, body) {
   const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
   if (!q) throw new HttpError("استعلام پیدا نشد.", 404);
+  await aiQuoteGuard(env, q);
   const locked = MANUAL_LOCKED.filter((f) => f in (body || {}));
   if (locked.length) throw new HttpError("ورود و ویرایش دستیِ خط استعلام بسته است؛ مقدارها از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آیند.", 403, { locked });
   /* قالبِ فیلدها (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد، اعتبار عدد — وگرنه خطا */
@@ -1182,12 +1218,16 @@ async function quoteUpdate(env, ex, id, body) {
 }
 /* حذف: از تب و بات کامل بیرون می‌رود، نسخه‌اش در quotes_deleted می‌ماند (records.js) */
 async function quoteDelete(env, ex, id) {
+  const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
+  if (q) await aiQuoteGuard(env, q);
   return { ok: true, deleted: await deleteQuotes(env, { ids: [id], expertId: ex.id, channel: "panel" }) };
 }
 
 /* جدول کمیسیون: نگهبان حداقل استعلام برای هر قلم + حداقل یک تأیید نهایی */
 async function commission(env, ex, aid) {
   await ownAssignment(env, ex, aid);
+  /* درخواستِ دستِ کارشناس هوشمند: جدول کمیسیون را خودش در پایانِ کار می‌سازد */
+  await aiGuard(env, { expert: ex }, aid);
   /* همان نگهبانی که بات هم دارد (bundle.js) */
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
@@ -1264,6 +1304,20 @@ async function letterOf(env, aid, id) {
 }
 /* خطای letter.js/extract.js پیام فارسیِ آمادهٔ نمایش دارد؛ بدون این، پنل «خطای داخلی» می‌بیند */
 const asHttp = (e) => (e instanceof ExtractError ? new HttpError(e.message, e.status || 502) : e);
+
+/** فایل Wordِ آخرین نامهٔ یک ارجاع — پنل کارشناس، مدیر و پشتیبانی (دسترسی را مسیر پیش از این سنجیده) */
+async function letterFileOut(env, aid) {
+  const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? AND docx_key IS NOT NULL ORDER BY id DESC LIMIT 1").bind(aid).first();
+  const store = storage(env);
+  if (!L || !store) throw new HttpError("نامه‌ای برای این ارجاع ساخته نشده است.", 404);
+  const f = await store.get(L.docx_key);
+  if (!f) throw new HttpError("فایل نامه در انبار نیست.", 404);
+  return new Response(f.body, { headers: {
+    "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent("نامه.docx")}`,
+    "cache-control": "private, no-store",
+  } });
+}
 
 /** برگهٔ درخواست خرید یا جدول کمیسیونِ یک ارجاع — پنل کارشناس، مدیر و پشتیبانی (دسترسی را مسیر پیش از این سنجیده) */
 async function sheetOut(env, aid, kind, url) {
@@ -1548,6 +1602,9 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/threads\/(\d+)$/.exec(path)) && m === "GET") return json(await supportThread(env, int(mm[1])));
       if ((mm = /^\/support\/assignments\/(\d+)$/.exec(path)) && m === "GET") return json(await assignmentDetail(env, int(mm[1]), { role: "manager" }));
       if ((mm = /^\/support\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") return sheetOut(env, int(mm[1]), mm[2], url);
+      if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));
+      /* کارشناس هوشمند (فاز ۲): تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارهایش (worker/ai-agent.js:aiAdmin) */
+      if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson });
       if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
       if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
@@ -1670,6 +1727,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/proformas\/(\d+)\/extract$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
       const p = await proformaOf(env, int(mm[1]), ex);
+      /* پیش‌فاکتورِ تأمین‌کننده‌ای که کارشناس هوشمند با او مذاکره می‌کند را خودش می‌خواند (ai-lock.js) */
+      await aiQuoteGuard(env, p);
       const store = storage(env);
       if (!store || !p.storage_key) return NOT_CONNECTED("انبار فایل");
       if (!store.signedUrl) throw new HttpError("انبار فعلی لینک امضاشده نمی‌سازد؛ استخراج فقط با Supabase کار می‌کند.", 503);
@@ -1680,6 +1739,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/proformas\/(\d+)\/apply$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
       const p = await proformaOf(env, int(mm[1]), ex);
+      await aiQuoteGuard(env, p);
       return json(await applyExtraction(env, p, await readJson(request)));
     }
 
@@ -1696,6 +1756,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)\/letter$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      /* نامهٔ درخواستِ دستِ کارشناس هوشمند را خودش در پایانِ کار می‌نویسد (ai-lock.js) */
+      await aiGuard(env, { expert: ex }, aid);
       const t = now();
       await env.DB.prepare("UPDATE letters SET state='canceled', updated_at=? WHERE assignment_id=? AND state IN ('need_voice','transcribed','failed')").bind(t, aid).run();
       const L = await env.DB.prepare(
@@ -1716,6 +1778,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)\/letter\/voice$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      /* نامهٔ درخواستِ دستِ کارشناس هوشمند را خودش در پایانِ کار می‌نویسد (ai-lock.js) */
+      await aiGuard(env, { expert: ex }, aid);
       const L = await letterOf(env, aid, int(url.searchParams.get("letter_id")));
       if (!LETTER_OPEN.includes(L.state)) throw new HttpError("این نامه دیگر منتظر متن نیست.", 409);
       const store = storage(env);
@@ -1748,6 +1812,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)\/letter\/transcript$/.exec(path)) && m === "PUT") {
       const ex = await requireExpert(request, env);
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      /* نامهٔ درخواستِ دستِ کارشناس هوشمند را خودش در پایانِ کار می‌نویسد (ai-lock.js) */
+      await aiGuard(env, { expert: ex }, aid);
       const b = await readJson(request);
       const L = await letterOf(env, aid, int(b.letter_id));
       if (!LETTER_OPEN.includes(L.state)) throw new HttpError("این نامه دیگر منتظر متن نیست.", 409);
@@ -1761,6 +1827,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)\/letter\/write$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
+      /* نامهٔ درخواستِ دستِ کارشناس هوشمند را خودش در پایانِ کار می‌نویسد (ai-lock.js) */
+      await aiGuard(env, { expert: ex }, aid);
       const b = await readJson(request);
       const L = await letterOf(env, aid, int(b.letter_id));
       /* failed: نگارشِ قبلی شکست خورده (کلید مدل، سقف نرخ) ولی متن سالم است — تلاش دوباره همین است */
@@ -1805,16 +1873,7 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const aid = int(mm[1]);
       if (who.expert) await ownAssignment(env, who.expert, aid);
-      const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? AND docx_key IS NOT NULL ORDER BY id DESC LIMIT 1").bind(aid).first();
-      const store = storage(env);
-      if (!L || !store) throw new HttpError("نامه‌ای برای این ارجاع ساخته نشده است.", 404);
-      const f = await store.get(L.docx_key);
-      if (!f) throw new HttpError("فایل نامه در انبار نیست.", 404);
-      return new Response(f.body, { headers: {
-        "content-type": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent("نامه.docx")}`,
-        "cache-control": "private, no-store",
-      } });
+      return letterFileOut(env, aid);
     }
 
     /* بستهٔ برگه‌ها — همان فایل‌هایی که بات می‌فرستد، برای دانلود از پنل.
@@ -1856,6 +1915,8 @@ async function route(request, env, ctx) {
       const filename = T(url.searchParams.get("filename")) || "proforma";
       if (!aid || !supplier) throw new HttpError("assignment_id و supplier_name لازم است.");
       await ownAssignment(env, ex, aid);
+      /* خطِ دستیِ خودِ کارشناس آزاد است؛ تأمین‌کنندهٔ کارشناس هوشمند نه (ai-lock.js) */
+      await aiQuoteGuard(env, { assignment_id: aid, supplier_name: supplier });
       const store = storage(env);
       if (!store) return NOT_CONNECTED("انبار فایل");
       const size = int(request.headers.get("content-length"), 0);
@@ -1923,6 +1984,8 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const b = await readJson(request);
       const it = await ownItem(env, who, int(b.item_id));
+      /* درخواستِ دستِ کارشناس هوشمند: جستجوی هوشمند را خودش می‌کند (ai-lock.js) */
+      await aiGuard(env, who, it.aid);
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
       /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
          یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را
@@ -1974,6 +2037,8 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
+      /* ساختارِ قلمِ درخواستِ دستِ کارشناس هوشمند را خودش می‌سازد (ai-lock.js) */
+      await aiGuard(env, who, it.aid);
       const b = await readJson(request);
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
@@ -1984,6 +2049,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/norm$/.exec(path)) && (m === "PUT" || m === "DELETE")) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
+      await aiGuard(env, who, it.aid);
       /* قلمی که برای تأمین‌کننده رفته قفل است: برداشتنِ ذخیره نه، و ذخیره فقط با همان نوع قلم و لایه‌ها (نرخ‌ها آزاد) */
       const lock = (await itemLocks(env, [it.id])).get(it.id);
       if (m === "DELETE") {
@@ -2002,6 +2068,7 @@ async function route(request, env, ctx) {
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
+      await aiGuard(env, who, it.aid);
       if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
       const r = await revertEdit(env, it);
       if (r.removed !== false) await ev(env, who.expert ? `expert:${who.expert.id}` : "manager", "norm_revert", it.request_id, it.id, { assignment_id: it.aid }).run();
@@ -2026,17 +2093,21 @@ async function route(request, env, ctx) {
     if (path === "/suppliers/history" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      /* درخواستِ دستِ کارشناس هوشمند: بررسی سوابق را خودش می‌کند (ai-lock.js) */
+      await aiGuard(env, who, it.aid);
       return json(await itemHistory(env, it, histOpts()));
     }
     if (path === "/suppliers/history/buys" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      await aiGuard(env, who, it.aid);
       return json(await supplierBuys(env, it, url.searchParams.get("supplier"), histOpts()));
     }
     /* نقاط نمودار روند خرید قلم (تاریخ × مقدار به واحد مرجع، به تفکیک تأمین‌کننده) */
     if (path === "/suppliers/history/series" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
+      await aiGuard(env, who, it.aid);
       return json(await itemSeries(env, it, histOpts()));
     }
     if (path === "/reviews") { await requireAny(request, env); return NOT_CONNECTED("خلاصهٔ نظرات خریداران"); }

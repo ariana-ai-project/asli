@@ -18,6 +18,7 @@ import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMone
   termsOf, termsMissing, TERM_FIELDS, TERM_FA, clearedUpTo } from "./sp-core.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { storage } from "./storage.js";
+import { aiThread } from "./ai-lock.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -355,7 +356,10 @@ export async function pushMsgs(env, thIn, msgs) {
   const th = thIn && thIn.supplier_name !== undefined && thIn.expert_id !== undefined ? thIn : await threadRow(env, thIn.id || thIn.thread_id || thIn);
   if (!th) return { sent: 0 };
   let sent = 0;
+  /* گفت‌وگوی بستهٔ کارشناس هوشمند به تلگرامِ کارشناس نمی‌رود — فقط وقتی «پرسش از کارشناس» بازش کرده (ai-lock.js) */
+  const shutE = (await aiThread(env, th.id, th.expert_id)).locked;
   for (const side of ["e", "s"]) {
+    if (side === "e" && shutE) continue;
     const mine = msgs.filter((m) => m.who !== side && m.kind !== "note");
     if (!mine.length) continue;
     for (const row of await rowsFor(env, th, side)) {

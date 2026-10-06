@@ -102,11 +102,11 @@
   /* ساعت کاری مانده تا مهلت — منفی یعنی مهلت گذشته */
   const trayLeft = (a) => TP.budget(a.dispatched_at, a.days || 1) - TP.wh(a.dispatched_at, S.now);
   /* نوار تب‌های صفحهٔ کارشناس: کارتابل، (ارشد: تیم کارشناسی و تنظیم اعلانات)، و «حساب من» برای همه */
-  const LIST_TABS = ["team", "alerts", "account", "ai"];
-  /* کارشناس هوشمند (worker/ai-agent.js): تبِ تنظیمات و جریانِ کارِ مدل — expert-ai.js */
-  const isAi = () => !!(S.expert && S.expert.ai && window.TP_AI);
+  const LIST_TABS = ["team", "alerts", "account"];
+  /* تیکِ «🤖 هوشمند / ✋ دستی» این کارشناس در پنل پشتیبانی (worker/ai-agent.js، aiAdmin) — داشبوردش هم همان‌جاست */
+  const aiOn = () => !!(S.expert && S.expert.ai === "on");
   function vSeniorTabs() {
-    const T = [["tray", "کارتابل من"], ...(isAi() ? [["ai", "🤖 کارشناس هوشمند"]] : []), ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
+    const T = [["tray", "کارتابل من"], ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
     return `<div class="tp-tabs" style="padding-top:12px">${T.map(([k, l]) => `<button class="tp-tab ${(S.tab === k || (k === "tray" && !LIST_TABS.includes(S.tab))) ? "on" : ""}" data-stab="${k}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div>`;
   }
   /* باکس‌های تب تیم با آستانه‌های تیم (ارشد اگر گذاشته، وگرنه مدیر) — جدا از آستانه‌های کارتابل خودش */
@@ -148,12 +148,11 @@
     if (isSenior() && S.tab === "team") return vSeniorTabs() + vTeam();
     if (isSenior() && S.tab === "alerts") return vSeniorTabs() + vSeniorAlerts();
     if (S.tab === "account") return vSeniorTabs() + vAccount();
-    if (S.tab === "ai" && isAi()) return vSeniorTabs() + window.TP_AI.view(S);
     const rows = trayRows();
     /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
     if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
     const teamCol = isSenior() && (S.team ? S.team.team : []).length;
-    return `${vSeniorTabs()}<div class="tp-wrap" style="padding-bottom:20px"><div class="tp-card">
+    return `${vSeniorTabs()}<div class="tp-wrap" style="padding-bottom:20px">${aiOn() ? `<div class="tp-note" style="max-width:none;margin:0 0 10px">🤖 تیکِ شما در «پنل پشتیبانی» روی <b>هوشمند</b> است: هر ارجاعِ تازه (نشانِ 🤖) را کارشناس هوشمند پیش می‌برد و بررسی سوابق، جستجوی هوشمند، جدول و نامه‌اش برای شما قفل است. اگر سؤالی از شما داشته باشد، کنارِ «💬 مکاتبات» 🚨 می‌آید و در تلگرام هم خبر می‌دهد.</div>` : ""}<div class="tp-card">
       <div class="tp-filters" style="border-top:0;border-radius:16px 16px 0 0">
         <span class="lab">شماره درخواست</span><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" style="width:120px">
         <span class="lab">تاریخ</span><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="انتخاب تاریخ" readonly style="width:170px">
@@ -165,7 +164,7 @@
         <th><button class="sortbtn ${S.traySort ? "on" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th>${teamCol ? `<th>ارجاع به تیم</th>` : ""}</tr></thead><tbody>
         ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
           const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
+          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
             <td class="num">${a.open_count} از ${a.item_count}</td><td class="num">${a.days} روز</td>
             <td class="num" style="${lf <= 0 ? "color:#fca5a5;font-weight:700" : ""}">${lf <= 0 ? "تمام شد" : lf.toFixed(1) + " ساعت کاری"}</td>
             <td>${boxes(a, done, true, true)}</td><td class="num">${a.quote_count}</td>${teamCol ? `<td data-stop><button class="tp-btn xs" data-delegate="${a.id}" title="این درخواست به یکی از کارشناسان تیم داده شود">ارجاع به تیم</button></td>` : ""}</tr>`; }).join("")}
@@ -306,6 +305,24 @@
   }
 
   /* ---------- جزئیات ---------- */
+  /* ---------- کارشناس هوشمند (فاز ۲ پنل پشتیبانی) ----------
+     تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس در پنل پشتیبانی است. درخواستی که دستِ کارشناس هوشمند است: بررسی سوابق، جستجوی
+     هوشمند، ساختار قلم، جدول کمیسیون و نامه را خودش انجام می‌دهد و برای کارشناس قفل است؛ خط‌های استعلامِ او (🤖) دست‌نخوردنی‌اند
+     و کارشناس فقط خطِ دستیِ خودش (✋) را می‌افزاید — پیش‌فاکتورش را بارگذاری و استخراج می‌کند. سرور هم همین را می‌سنجد (ai-lock.js). */
+  const aiOwned = () => !!(S.d && S.d.ai && S.d.ai.owned);
+  const aiMode = () => !!(S.d && S.d.ai && S.d.ai.mode);
+  function vAiBar() {
+    if (!aiOwned()) return "";
+    const k = S.d.ai.asks || 0;
+    return `<div class="tp-note" style="margin:10px 0">🤖 <b>این درخواست دستِ کارشناس هوشمند است.</b> بررسی سوابق، جستجوی هوشمند، مذاکره با تأمین‌کنندگان، جدول کمیسیون و نامه را خودش انجام می‌دهد
+      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.
+      ${k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : ""}</div>`;
+  }
+  function vAiLocked(tab) {
+    const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
+    return `<div class="pad"><div class="empty"><b>🔒 ${what} دستِ کارشناس هوشمند است.</b>تا وقتی تیکِ این کارشناس در پنل پشتیبانی «🤖 هوشمند» است، این کار را خودش انجام می‌دهد
+      و نتیجه در جدول‌ها و گزارش‌ها می‌آید. برای کارِ دستی، پشتیبانی باید تیکِ شما را «✋ دستی» کند.</div></div>`;
+  }
   function vEndBar() {
     const a = A(), its = items(), n = its.length, k = its.filter((i) => i.commission_ok).length, o = openItems().length;
     const pend = S.d.pendingDecisions.length;
@@ -340,13 +357,14 @@
         <span class="t" data-item="${i}" title="${esc(x.title)}">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
         ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" style="margin-top:6px" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ تأیید کمیسیون</span>`
           : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}</div>`).join("")}</div>
+      ${vAiBar()}
       <div class="tabs">
-        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">بررسی سوابق</button>
-        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">جستجوی هوشمند</button>
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiOwned() ? "🔒 " : ""}بررسی سوابق</button>
+        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiOwned() ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
-        <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+        <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiOwned() && ["history", "smart", "letter"].includes(S.tab) ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
@@ -1284,17 +1302,17 @@
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr>
-          <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""}></td>
-          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : ""}</td>
+          <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""} ${q.ai ? "disabled title=\"خطِ کارشناس هوشمند — تأیید نهایی‌اش با خودِ اوست\"" : ""}></td>
+          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : ""}${q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ تغییرش ممکن نیست">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
           <td class="ro item">${esc(itemTitle(q.item_id))}</td>
           ${QF.map(([k, , w, ty, opt]) => roCell(q[k], !opt, { w, num: ty === "num", money: k === "price" || k === "qty" })).join("")}
           ${roCell(q.invoice, true)}${roCell(q.pay, true)}${roCell(q.vat, true)}${roCell(q.deal, false)}
           ${roCell(q.place === "سایر" && q.place_other ? `سایر: ${q.place_other}` : q.place, false)}
           <td class="num" data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
-          <td>${pfCell(q)}</td>
-          <td>${exCell(q)}</td>
-          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
-          <td><button class="tp-btn xs danger" data-del="${q.id}">حذف</button></td></tr>`).join("")}
+          <td>${q.ai ? `<span class="dim">🤖</span>` : pfCell(q)}</td>
+          <td>${q.ai ? `<span class="dim">🤖</span>` : exCell(q)}</td>
+          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
+          <td>${q.ai ? "" : `<button class="tp-btn xs danger" data-del="${q.id}">حذف</button>`}</td></tr>`).join("")}
         </tbody></table></div>
         ${vFormHead(r)}${vGuard()}`
         : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید؛ در تب‌های «بررسی سوابق» و «جستجوی هوشمند» هم دکمهٔ «افزودن» کنار هر تأمین‌کننده او را به همین‌جا می‌آورد.</div>`}
@@ -1314,6 +1332,7 @@
   }
   function vGuard() {
     const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
+    if (aiOwned()) return `<div class="tp-note" style="margin-top:14px">🤖 جدول کمیسیونِ این درخواست را کارشناس هوشمند در پایانِ کار می‌سازد (با خط‌های تأییدنهایی‌شده، از جمله خط‌های دستیِ شما).</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
       ${g.miss.length ? `<div style="color:#fca5a5">مدیر حداقل <b>${g.need}</b> استعلام برای هر قلم باز را الزامی کرده. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${g.need})`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز حداقل ${g.need} استعلام دارند.</div>`}</div></div>`;
@@ -1738,7 +1757,7 @@
     try {
       /* یک درخواست به‌جای سه: کارتابل، وضعیت تلگرام و «من» (سرعت — هر درخواست رفت‌وبرگشت شبکهٔ خودش را دارد) */
       const t = await TP.api("/tray?full=1"), me = t.me;
-      S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = t.tg || null;
+      S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = t.tg || null; S.asks = t.asks || 0;
       /* ارشد بودن، زیرمجموعه‌ها و تیک اعلان‌ها را مدیر هر لحظه ممکن است عوض کند؛ از سرور تازه می‌شود */
       if (me && me.expert) { S.expert = { ...S.expert, ...me.expert, team: me.team || [] }; TP.session.set(S.expert); }
       if (isSenior() && !S.team) loadTeam(true);
@@ -1750,7 +1769,7 @@
     try { const d = await TP.api(`/assignments/${aid}`);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
-      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
+      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
       /* نامه را بات تلگرام هم جلو می‌برد، پس ↻ باید وضعیتش را از نو بگیرد؛
          تب نامه خودش تنبلانه دوباره می‌خواند. */
       S.letter = null;
@@ -1777,7 +1796,7 @@
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
     app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<a class="tp-btn sm" href="correspond.html" title="مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی">💬 مکاتبات</a><button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
+      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<a class="tp-btn sm ${S.asks ? "warn" : ""}" href="correspond.html" data-corr title="${S.asks ? "کارشناس هوشمند از شما سؤال دارد — پاسخ را در همان گفت‌وگو بنویسید" : "مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی"}">💬 مکاتبات${S.asks ? ` <span class="cnt" data-asks>🚨 ${S.asks}</span>` : ""}</a><button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
       ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
     wire();
@@ -1806,8 +1825,6 @@
       catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); }
     });
     Q("[data-team-link]").forEach((b) => b.onclick = teamLink);
-    /* تب کارشناس هوشمند */
-    if (S.screen === "list" && S.tab === "ai" && isAi()) window.TP_AI.wire(a, S, render);
     /* حساب من */
     const acs = G("[data-acc-save]"); if (acs) acs.onclick = saveCode;
     Q("#acc-cur, #acc-new, #acc-rep").forEach((i) => i.onkeydown = (e) => { if (e.key === "Enter") saveCode(); });
@@ -2052,7 +2069,7 @@
   window.addEventListener("tp-theme", render);
   /* اعلانِ پیامِ تازهٔ تأمین‌کننده در گوشهٔ صفحه (مهر ۱۴۰۵) — فقط یک لایهٔ شناور است و صفحه را دوباره نمی‌سازد؛
      کلیکش صفحهٔ مکاتبات را روی همان گفت‌وگو باز می‌کند (shared.js: TP.inbox) */
-  TP.inbox.start({ active: () => !!S.expert });
+  TP.inbox.start({ active: () => !!S.expert, onAsks: (k) => { if (k !== (S.asks || 0)) { S.asks = k; if (S.screen !== "login") render(); } } });
   /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه با دکمهٔ ↻ یا با کار
      خود کارشناس تازه می‌شود، تا وسط پر کردن استعلام چیزی جابه‌جا نشود. */
 })();

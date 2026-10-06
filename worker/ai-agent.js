@@ -36,6 +36,7 @@ import { fmtFa } from "./time.js";
 import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
+import { AI_ASK_SQL } from "./ai-lock.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -413,7 +414,8 @@ async function inviteOne(env, run, ex, inv) {
 /** گفت‌وگویی که کاری برایش هست: پیامِ تازهٔ تأمین‌کننده بعد از آخرین دورِ مدل، یا دوباره‌سازیِ دورِ ناموفق */
 async function pickThread(env, run, cfg) {
   const t = now();
-  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state<>'closed' AND x.turns<? AND (x.lock_until IS NULL OR x.lock_until<?)
+  /* «پرسش از کارشناس» (state='ask'): تا پاسخِ کارشناس، گفت‌وگو دستِ اوست و کارشناس هوشمند منتظر می‌ماند */
+  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','ask') AND x.turns<? AND (x.lock_until IS NULL OR x.lock_until<?)
       AND (EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s' AND m.id>x.seen_msg) OR (x.retry_at IS NOT NULL AND x.retry_at<=?))
     ORDER BY x.updated_at LIMIT 1`).bind(run.id, cfg.maxTurns, t, t).first();
 }
@@ -538,7 +540,7 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
           r = await C.decide(env, ex, b.id, a.type, { comment: a.type === "return" ? comment || "لطفاً مشخصات رو اصلاح کنید و دوباره «ارسال» رو بزنید." : comment, ai: true });
         } else if (a.type === "accept_rows" || a.type === "final") {
           const ok = validKeys(b, a.rows);
-          if (ok.length) await C.acceptRows(env, ex, b.id, { keys: ok });
+          if (ok.length) await C.acceptRows(env, ex, b.id, { keys: ok, byAi: true });
           if (a.type === "final") r = await C.decide(env, ex, b.id, "final", { comment, ai: true });
           if ((a.rows || []).length > ok.length) errors.push(`کلیدهای نامعتبرِ جدول تطابق کنار گذاشته شد: ${(a.rows || []).filter((x) => !ok.includes(x)).join("، ")}`);
         }
@@ -548,19 +550,32 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     if (T(res.reply)) out.push(...(await C.postMsg(env, th, "e", T(res.reply).slice(0, 2900), { ai: true })).msgs);
     const notes = [];
     if (T(res.note) || errors.length) notes.push(...(await C.postMsg(env, th, "e", `🤖 ${T(res.note) || "—"}${errors.length ? `\n⚠️ ${errors.join("\n⚠️ ")}` : ""}`.slice(0, 2900), { ai: true, ev: "ai-note" }, "note")).msgs);
+    /* «پرسش از کارشناس» (فاز ۲ پنل پشتیبانی): جوابِ سؤالِ تأمین‌کننده در پروندهٔ درخواست نیست — یادداشتِ درونی با خودِ سؤال
+       (تأمین‌کننده نمی‌بیند)، گفت‌وگو تا پاسخِ کارشناس برایش باز (ai-lock.js) و پیامِ تلگرام به او */
+    const ask = T(res.ask_expert).slice(0, 600);
+    let askNote = null;
+    if (ask) {
+      askNote = ((await C.postMsg(env, th, "e", `🚨 پرسش از کارشناس: ${ask}`, { ai: true, ev: "ask", q: ask }, "note")).msgs || [])[0] || null;
+      notes.push(...(askNote ? [askNote] : []));
+    }
     await P.pushMsgs(env, th, out).catch((e) => console.error("ai push", e && e.message));
     /* وضعیتِ گفت‌وگو: همهٔ اقلام بسته شد (نهایی یا رد) ← final/declined؛ وگرنه آنچه مدل گفت */
     const ls = (await env.DB.prepare("SELECT state FROM sp_lines WHERE thread_id=?").bind(threadId).all()).results || [];
     const closed = ls.length && ls.every((l) => ["final", "rejected"].includes(l.state));
-    const state = closed ? (ls.some((l) => l.state === "final") ? "final" : "declined") : res.thread_status === "declined" ? "declined" : "active";
+    const state = ask ? "ask" : closed ? (ls.some((l) => l.state === "final") ? "final" : "declined") : res.thread_status === "declined" ? "declined" : "active";
     await env.DB.batch([
-      env.DB.prepare(`UPDATE ai_threads SET seen_msg=?, memo=?, errors_json=?, turns=turns+1, state=?, last_ai_at=?, lock_until=NULL, retry_at=NULL, fails=0, updated_at=? WHERE thread_id=?`)
-        .bind(Math.max(maxId || 0, st.seen_msg || 0), clip(T(res.memo), 2000), errors.length ? JSON.stringify(errors.slice(0, 6)) : null, state, now(), now(), threadId),
+      env.DB.prepare(`UPDATE ai_threads SET seen_msg=?, memo=?, errors_json=?, turns=turns+1, state=?, last_ai_at=?, lock_until=NULL, retry_at=NULL, fails=0, updated_at=?${ask ? ", ask_json=?" : ""} WHERE thread_id=?`)
+        .bind(Math.max(maxId || 0, st.seen_msg || 0), clip(T(res.memo), 2000), errors.length ? JSON.stringify(errors.slice(0, 6)) : null, state, now(), now(),
+          ...(ask ? [JSON.stringify({ q: ask, at: now(), note: askNote ? askNote.id : null })] : []), threadId),
       logStmt(env, run.id, threadId, "turn", `دورِ ${faN((st.turns || 0) + 1)} با «${th.supplier_name}»: ${(res.actions || []).map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ") || "بی تصمیم"}${T(res.reply) ? " · پاسخ رفت" : ""}${errors.length ? ` · ${faN(errors.length)} خطا` : ""}${T(res.note) ? ` — ${T(res.note)}` : ""}`,
         { actions: res.actions, status: res.thread_status, errors, ms: now() - t0, fast }),
+      ...(ask ? [logStmt(env, run.id, threadId, "ask", `🚨 پرسش از کارشناس: ${ask} — گفت‌وگو تا پاسخِ او برایش باز است و کارشناس هوشمند منتظر می‌ماند.`),
+        env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), `expert:${ex.id}`, "ai_ask", th.request_id,
+          JSON.stringify({ assignment_id: run.assignment_id, thread_id: threadId, supplier: th.supplier_name, q: ask, channel: "ai" }))] : []),
     ]);
+    if (ask) await askAlarm(env, ex, th, ask).catch((e) => console.error("ai ask alarm", e && e.message));
     await saveMd(env, run, ex).catch((e) => console.error("ai md", e && e.message));
-    return { turn: true, actions: (res.actions || []).length, notes: notes.length };
+    return { turn: true, actions: (res.actions || []).length, notes: notes.length, ask: !!ask };
   } catch (e) {
     const fails = (st.fails || 0) + 1;
     await env.DB.prepare("UPDATE ai_threads SET lock_until=NULL, fails=?, retry_at=?, updated_at=? WHERE thread_id=?")
@@ -568,6 +583,29 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     await log(env, run.id, threadId, "error", `دورِ مذاکره نشد${fast ? " (فوری)" : ""}: ${String((e && e.message) || e).slice(0, 300)}${fails < 4 ? " — دوباره امتحان می‌شود." : " — بعد از چهار شکست متوقف شد؛ از تب «تلاش دوباره» را بزنید."}`);
     return { error: e.message };
   }
+}
+
+/**
+ * «پرسش از کارشناس» در تلگرامِ کارشناس — همان لحظه، نه با صف: بات کارشناسان (دکمهٔ مینی‌اپِ صفحهٔ مکاتبات)، و اگر بات
+ * مکاتبات را وصل کرده، همان‌جا هم با دکمهٔ رفتن به همین گفت‌وگو (جوابش را همان‌جا هم می‌تواند بنویسد).
+ */
+async function askAlarm(env, ex, th, q) {
+  const text = `🚨 <b>کارشناس هوشمند از شما سؤال دارد</b>\n\nتأمین‌کنندهٔ «${esc(th.supplier_name)}» در درخواست <b>${esc(th.request_id)}</b> چیزی پرسیده که جوابش در پروندهٔ درخواست نیست:\n`
+    + `«${esc(q)}»\n\nاین گفت‌وگو تا پاسخِ شما برایتان باز است؛ جواب را فقط در همان گفت‌وگو بنویسید (صفحهٔ مکاتبات یا بات مکاتبات) — مستقیم برای تأمین‌کننده می‌رود. `
+    + "بعد از پاسخ، گفت‌وگو دوباره دستِ کارشناس هوشمند است.";
+  let sent = 0;
+  if (ex.telegram_chat && env.TG_BOT_TOKEN) {
+    await telegram(env).call("sendMessage", { chat_id: ex.telegram_chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
+      reply_markup: { inline_keyboard: [[{ text: "💬 باز کردنِ مکاتبات", web_app: { url: P.appUrl(env, "e") } }]] } }).then(() => sent++).catch((e) => console.error("ask tg", e && e.message));
+  }
+  if (env.TG_SP_BOT_TOKEN) {
+    const rows = (await env.DB.prepare("SELECT chat FROM sp_tg WHERE expert_id=? AND role='e' LIMIT 3").bind(ex.id).all()).results || [];
+    for (const r of rows) {
+      await P.spApi(env).call("sendMessage", { chat_id: r.chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
+        reply_markup: { inline_keyboard: [[{ text: "💬 رفتن به همین گفت‌وگو", callback_data: `go:${th.id}:e` }]] } }).then(() => sent++).catch(() => {});
+    }
+  }
+  return sent;
 }
 
 /** دورِ فوری کنار می‌رود: همین گفت‌وگو در Cronِ بعدی (هر دقیقه؛ kickNow اجرا را سررسید کرده) با عمقِ فکرِ تب */
@@ -616,8 +654,11 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   /* حقیقت‌های واقعیِ مذاکره: تاریخِ نیازِ هر قلم (فایلِ درخواست) و سابقهٔ خریدِ شرکت از همین تأمین‌کننده (بررسی سوابق) —
      مدل فقط به همین‌ها تکیه می‌کند و عدد یا سابقه‌ای نمی‌سازد (ai-prompts.js) */
   const ids = [...new Set(lineOut.map((l) => l.item_id))];
-  const needOf = new Map(ids.length ? ((await env.DB.prepare(`SELECT id, need_date FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || [])
-    .map((r) => [r.id, T(r.need_date) || null]) : []);
+  /* تاریخِ نیاز و «توضیحاتِ خودِ درخواست» (مشخصات، توضیح و مصرف‌کنندهٔ فایلِ درخواست) — هر سؤالی که جوابش این‌جا و در
+     لایه‌ها نیست، «پرسش از کارشناس» می‌شود (ai-prompts.js) */
+  const rowsOf = ids.length ? ((await env.DB.prepare(`SELECT id, need_date, spec, note, consumer FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || []) : [];
+  const needOf = new Map(rowsOf.map((r) => [r.id, T(r.need_date) || null]));
+  const descOf = new Map(rowsOf.map((r) => [r.id, [T(r.spec), T(r.note), T(r.consumer) ? `مصرف‌کننده: ${T(r.consumer)}` : ""].filter(Boolean).join(" · ") || null]));
   const sk = C.nkey(th.supplier_name);
   const rel = lineOut.map((l) => {
     const di = run.data.items.find((x) => x.id === l.item_id);
@@ -631,8 +672,8 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   return negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
-    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
-    bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), transcript: threadSection(tInfo, msgs, { forModel: true }),
+    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
+    bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), ask: parse(st.ask_json, null), transcript: threadSection(tInfo, msgs, { forModel: true }),
   });
 }
 
@@ -824,7 +865,7 @@ export function aiKick(env, ctx, threadId) {
 }
 async function kickNow(env, threadId) {
   const row = await env.DB.prepare(`SELECT r.*, g.mode, g.config_json FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id
-    WHERE x.thread_id=? AND x.state<>'closed'`).bind(threadId).first().catch(() => null);
+    WHERE x.thread_id=? AND x.state NOT IN ('closed','ask')`).bind(threadId).first().catch(() => null);
   if (!row || row.mode !== "on" || row.finished_at || row.state !== "work") return { skip: true };
   /* اجرا همین حالا سررسید می‌شود: اگر گامِ فوری فقط پیش‌فاکتور را خواند یا نرسید، Cronِ بعدی همین گفت‌وگو را برمی‌دارد */
   await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(now(), row.id, now()).run().catch(() => {});
@@ -898,49 +939,89 @@ async function runDetail(env, ex, id) {
       covered: (cover.find((c) => c.id === i.id) || {}).n || 0 })),
     candidates: await candidatesView(env, run),
     threads: (th.results || []).map((x) => ({ thread_id: x.thread_id, supplier: x.supplier, phone: x.phone, label: x.label, source: x.source, source_fa: SOURCE_FA[x.source] || x.source, state: x.state,
-      turns: x.turns, replies: x.replies, bundles: x.bundles ? x.bundles.split(",") : [], memo: x.memo, fails: x.fails, retry_at: x.retry_at, last_ai_at: x.last_ai_at })),
+      turns: x.turns, replies: x.replies, bundles: x.bundles ? x.bundles.split(",") : [], memo: x.memo, fails: x.fails, retry_at: x.retry_at, last_ai_at: x.last_ai_at,
+      ask: parse(x.ask_json, null) })),
     log: lg.results || [], calls: (cs.results || [])[0] || { n: 0, cost: 0 },
   };
 }
 
-async function requireAgent(env, ex) {
-  const ag = await agentOf(env, ex.id);
-  if (!ag) throw new HttpError("این کارشناس، کارشناسِ هوشمند نیست.", 403);
-  return ag;
-}
-
+/* ------------------------------------------------------------------ */
+/* اداره از پنل پشتیبانی (فاز ۲) — /support/ai/*                          */
+/* ------------------------------------------------------------------ */
 /**
- * مسیرهای /ai/*؛ اگر مسیر مالِ این‌جا نیست null. deps: {requireExpert, readJson, json}. همه با کدِ همان کارشناسِ هوشمند
- * (پنل کارشناس «test») — تنظیمات، روشن/خاموش، کارها، فراخوانی‌های مدل، پیامک‌ها و دفترچهٔ شماره‌ها.
+ * تبِ قدیمیِ «🤖 کارشناس هوشمند» پنل کارشناس (/ai/*): از فاز ۲ پنل پشتیبانی، کارشناس هوشمند فقط از «پنل پشتیبانی» اداره
+ * می‌شود (درخواست مالک، مهر ۱۴۰۵) — کارشناس خودش آن را روشن، خاموش یا تنظیم نمی‌کند.
  */
 export async function aiRoute(request, env, ctx, path, m, url, deps) {
   if (!path.startsWith("/ai/")) return null;
+  await deps.requireExpert(request, env);
+  throw new HttpError("کارشناس هوشمند حالا از «پنل پشتیبانی» اداره می‌شود: تیکِ «هوشمند / دستی» هر کارشناس، کارها، فراخوانی‌ها و تنظیماتش همان‌جاست.", 403);
+}
+
+/** صفحهٔ اولِ تبِ پشتیبانی: کارشناسانِ فعال با تیکِ «هوشمند / دستی»، کارهای زنده، و «پرسش از کارشناس»های بی‌پاسخ */
+async function aiExperts(env) {
+  const [ex, asks] = await env.DB.batch([
+    env.DB.prepare(`SELECT e.id, e.name, e.label, e.senior, (e.telegram_chat IS NOT NULL) AS tg, g.mode, g.on_at, g.updated_at, g.updated_by,
+        (SELECT COUNT(*) FROM ai_runs r WHERE r.expert_id=e.id AND r.finished_at IS NULL) AS live,
+        (SELECT COUNT(*) FROM ai_runs r WHERE r.expert_id=e.id) AS runs,
+        (SELECT COUNT(*) FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=e.id AND ${AI_ASK_SQL}) AS asks,
+        (SELECT COALESCE(SUM(c.cost_usd),0) FROM ai_calls c WHERE c.expert_id=e.id) AS cost
+      FROM experts e LEFT JOIN ai_agents g ON g.expert_id=e.id WHERE e.active=1 ORDER BY (g.mode='on') DESC, e.senior DESC, e.name`),
+    env.DB.prepare(`SELECT x.thread_id, x.ask_json, x.updated_at, r.expert_id, r.id AS run_id, t.request_id, s.name AS supplier
+      FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers s ON s.id=t.supplier_id
+      WHERE ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 50`),
+  ]);
+  return {
+    experts: (ex.results || []).map((e) => ({ ...e, tg: !!e.tg, on: e.mode === "on", senior: e.senior ? 1 : 0 })),
+    asks: (asks.results || []).map((a) => { const k = parse(a.ask_json, {}) || {}; return { thread_id: a.thread_id, run_id: a.run_id, expert_id: a.expert_id, request_id: a.request_id, supplier: a.supplier, q: k.q || "", at: k.at || a.updated_at }; }),
+    sms: smsReady(env),
+  };
+}
+
+/**
+ * /support/ai/*؛ sub بقیهٔ مسیر بعد از /support/ai. «/experts» فهرستِ بالاست؛ «/<کارشناس>/…» همان داشبوردِ تبِ قدیمی برای
+ * همان کارشناس: state، mode (تیکِ هوشمند/دستی)، config، runs، calls، sms، phones. deps: {readJson, json}.
+ * ردیفِ ai_agents با اولین تیک یا تنظیم ساخته می‌شود؛ updated_by «support».
+ */
+export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   const { json, readJson } = deps;
-  const ex = await deps.requireExpert(request, env);
-  const ag = await requireAgent(env, ex);
+  if (sub === "/experts" && m === "GET") return json(await aiExperts(env));
+  const top = /^\/(\d+)(\/.*)$/.exec(sub);
+  if (!top) throw new HttpError("مسیر پیدا نشد.", 404);
+  const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(int(top[1])).first();
+  if (!ex) throw new HttpError("کارشناس پیدا نشد.", 404);
+  const path = top[2];
+  const ag = await agentOf(env, ex.id);
+  const by = "support";
   let mm;
 
-  if (path === "/ai/state" && m === "GET") {
+  if (path === "/state" && m === "GET") {
     const open = (await env.DB.prepare(`SELECT a.id, a.request_id, r.party, a.dispatched_at, (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS items
         FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL
           AND NOT EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) ORDER BY a.dispatched_at DESC LIMIT 20`).bind(ex.id).all()).results || [];
     const tot = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM ai_calls WHERE expert_id=?").bind(ex.id).first();
     const cfg = cfgOf(ag);
-    return json({ agent: { mode: ag.mode, on: ag.mode === "on", on_at: ag.on_at, cfg, updated_at: ag.updated_at }, defaults: AI_DEFAULTS,
-      markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env),
+    return json({ expert: { id: ex.id, name: ex.name, label: ex.label, active: !!ex.active, tg: !!ex.telegram_chat },
+      agent: { mode: ag ? ag.mode : "off", on: !!ag && ag.mode === "on", on_at: ag ? ag.on_at : null, cfg, updated_at: ag ? ag.updated_at : null, updated_by: ag ? ag.updated_by : null },
+      defaults: AI_DEFAULTS, markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env),
       models: Object.entries(AGENT_MODELS).map(([id, x]) => ({ id, fa: x.fa, price: x.price, effort: x.effort })), efforts: EFFORTS,
       runs: await runsOf(env, ex.id), open: open.filter((a) => a.items > 0), totals: tot || { n: 0, cost: 0 }, purposes: PURPOSE_FA });
   }
-  /* روشن/خاموشِ خودکار: خاموش همهٔ کارها را همان لحظه نگه می‌دارد؛ روشن فقط ارجاع‌های بعد از همین لحظه را خودکار برمی‌دارد */
-  if (path === "/ai/mode" && m === "PUT") {
+  /* تیکِ «🤖 هوشمند / ✋ دستی»: هوشمند ارجاع‌های از همین لحظه را خودکار برمی‌دارد و کارهای کارشناس را قفل می‌کند (ai-lock.js)؛
+     دستی همهٔ کارهای کارشناس هوشمند را همان لحظه نگه می‌دارد و قفل‌ها را برمی‌دارد */
+  if (path === "/mode" && m === "PUT") {
     const b = await readJson(request);
     const on = b.on === true;
     const t = now();
-    await env.DB.prepare("UPDATE ai_agents SET mode=?, on_at=CASE WHEN ?=1 THEN ? ELSE on_at END, updated_at=?, updated_by=? WHERE expert_id=?")
-      .bind(on ? "on" : "off", on ? 1 : 0, t, t, `expert:${ex.id}`, ex.id).run();
+    await env.DB.batch([
+      env.DB.prepare(`INSERT INTO ai_agents (expert_id,mode,on_at,config_json,updated_at,updated_by) VALUES (?,?,?,NULL,?,?)
+        ON CONFLICT(expert_id) DO UPDATE SET mode=excluded.mode, on_at=CASE WHEN excluded.mode='on' THEN excluded.on_at ELSE ai_agents.on_at END,
+          updated_at=excluded.updated_at, updated_by=excluded.updated_by`).bind(ex.id, on ? "on" : "off", on ? t : null, t, by),
+      env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, "support", on ? "ai_on" : "ai_off", JSON.stringify({ expert_id: ex.id })),
+    ]);
     return json({ ok: true, on });
   }
-  if (path === "/ai/config" && m === "PUT") {
+  if (path === "/config" && m === "PUT") {
     const b = await readJson(request);
     const cur = cfgOf(ag), nx = { ...cur };
     for (const k of Object.keys(LIMITS)) if (b[k] !== undefined) nx[k] = Number(b[k]);
@@ -948,40 +1029,42 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
     if (b.model !== undefined) { if (!modelOk(b.model)) throw new HttpError("این مدل در فهرست نیست."); nx.model = b.model; }
     if (b.effort !== undefined) { if (!EFFORTS.includes(b.effort)) throw new HttpError("عمقِ فکرِ نامعتبر."); nx.effort = b.effort; }
     const c = cfgOf({ config_json: JSON.stringify(nx) });
-    await env.DB.prepare("UPDATE ai_agents SET config_json=?, updated_at=?, updated_by=? WHERE expert_id=?").bind(JSON.stringify(c), now(), `expert:${ex.id}`, ex.id).run();
+    await env.DB.prepare(`INSERT INTO ai_agents (expert_id,mode,config_json,updated_at,updated_by) VALUES (?,'off',?,?,?)
+      ON CONFLICT(expert_id) DO UPDATE SET config_json=excluded.config_json, updated_at=excluded.updated_at, updated_by=excluded.updated_by`).bind(ex.id, JSON.stringify(c), now(), by).run();
     return json({ ok: true, cfg: c });
   }
-  if (path === "/ai/runs" && m === "POST") {
+  if (path === "/runs" && m === "POST") {
+    if (!ag || ag.mode !== "on") throw new HttpError("اول تیکِ «هوشمند»ِ این کارشناس را بزنید.", 409);
     const b = await readJson(request);
     const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
-    if (!a || a.expert_id !== ex.id) throw new HttpError("این ارجاع متعلق به شما نیست.", 403);
+    if (!a || a.expert_id !== ex.id) throw new HttpError("این ارجاع مالِ این کارشناس نیست.", 403);
     if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
     return json({ ok: true, run_id: await createRun(env, a, "manual") });
   }
-  if ((mm = /^\/ai\/runs\/(\d+)$/.exec(path)) && m === "GET") return json(await runDetail(env, ex, mm[1]));
-  if ((mm = /^\/ai\/runs\/(\d+)\/act$/.exec(path)) && m === "POST") {
+  if ((mm = /^\/runs\/(\d+)$/.exec(path)) && m === "GET") return json(await runDetail(env, ex, mm[1]));
+  if ((mm = /^\/runs\/(\d+)\/act$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
     const r = await env.DB.prepare("SELECT * FROM ai_runs WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!r) throw new HttpError("این کار پیدا نشد.", 404);
     const t = now();
-    /* تب فقط ستون‌های خودش را می‌نویسد (paused_from، finish_at، manual_json) — data_json مالِ گام‌های Cron است */
+    /* این‌جا فقط ستون‌های خودش را می‌نویسد (paused_from، finish_at، manual_json) — data_json مالِ گام‌های Cron است */
     if (b.action === "pause") {
       if (r.finished_at || r.state === "paused") throw new HttpError(r.finished_at ? "این کار تمام شده است." : "این کار از قبل متوقف است.", 409);
-      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET state='paused', paused_from=?, updated_at=? WHERE id=? AND state<>'paused'").bind(r.state, t, r.id), logStmt(env, r.id, null, "run", "متوقف شد (از تب).")]);
+      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET state='paused', paused_from=?, updated_at=? WHERE id=? AND state<>'paused'").bind(r.state, t, r.id), logStmt(env, r.id, null, "run", "متوقف شد (پنل پشتیبانی).")]);
     } else if (b.action === "resume") {
       if (r.state !== "paused") throw new HttpError("این کار متوقف نیست.", 409);
-      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET state=?, next_at=?, updated_at=? WHERE id=?").bind(r.paused_from || "work", t, t, r.id), logStmt(env, r.id, null, "run", "ادامه (از تب).")]);
+      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET state=?, next_at=?, updated_at=? WHERE id=?").bind(r.paused_from || "work", t, t, r.id), logStmt(env, r.id, null, "run", "ادامه (پنل پشتیبانی).")]);
     } else if (b.action === "finish") {
       if (r.state !== "work") throw new HttpError("«پایان مذاکره» فقط در مرحلهٔ دعوت و مذاکره.", 409);
-      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET finish_at=?, next_at=?, updated_at=? WHERE id=?").bind(t, t, t, r.id), logStmt(env, r.id, null, "run", "«پایان مذاکره» خواسته شد (از تب).")]);
+      await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET finish_at=?, next_at=?, updated_at=? WHERE id=?").bind(t, t, t, r.id), logStmt(env, r.id, null, "run", "«پایان مذاکره» خواسته شد (پنل پشتیبانی).")]);
     } else if (b.action === "retry") {
       await env.DB.batch([env.DB.prepare("UPDATE ai_threads SET fails=0, retry_at=?, lock_until=NULL WHERE run_id=? AND fails>0").bind(t, r.id),
-        env.DB.prepare("UPDATE ai_runs SET next_at=?, error=NULL, lock_until=NULL, updated_at=? WHERE id=?").bind(t, t, r.id), logStmt(env, r.id, null, "run", "تلاشِ دوباره (از تب).")]);
+        env.DB.prepare("UPDATE ai_runs SET next_at=?, error=NULL, lock_until=NULL, updated_at=? WHERE id=?").bind(t, t, r.id), logStmt(env, r.id, null, "run", "تلاشِ دوباره (پنل پشتیبانی).")]);
     } else throw new HttpError("کارِ نامعتبر.");
     return json({ ok: true });
   }
-  /* تأمین‌کنندهٔ دستی برای همین درخواست: نام + شماره (+ تیکِ پنل) — مثل شمارهٔ آزمایشیِ خودِ کارشناس */
-  if ((mm = /^\/ai\/runs\/(\d+)\/supplier$/.exec(path)) && m === "POST") {
+  /* تأمین‌کنندهٔ دستی برای همین درخواست: نام + شماره (+ تیکِ پنل) */
+  if ((mm = /^\/runs\/(\d+)\/supplier$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
     const r = await env.DB.prepare("SELECT * FROM ai_runs WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!r) throw new HttpError("این کار پیدا نشد.", 404);
@@ -989,30 +1072,30 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
     const s = await C.savePhone(env, ex.id, { supplier_id: b.supplier_id, supplier_name: b.supplier_name, phone: b.phone, label: b.label, panel: b.panel !== false });
     const man = manualOf(r).filter((x) => x.sid !== s.supplier.id).concat([{ sid: s.supplier.id, name: s.supplier.name }]);
     await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET manual_json=?, next_at=?, updated_at=? WHERE id=?").bind(JSON.stringify(man), now(), now(), r.id),
-      logStmt(env, r.id, null, "step", `کارشناس «${s.supplier.name}» را با شمارهٔ ${C.maskPhone(s.phone.phone)} ${s.phone.panel ? "(پنل ✅)" : "(بی تیکِ پنل)"} به این درخواست افزود.`)]);
+      logStmt(env, r.id, null, "step", `پشتیبانی «${s.supplier.name}» را با شمارهٔ ${C.maskPhone(s.phone.phone)} ${s.phone.panel ? "(پنل ✅)" : "(بی تیکِ پنل)"} به این درخواست افزود.`)]);
     return json({ ok: true, ...s });
   }
-  if ((mm = /^\/ai\/runs\/(\d+)\/md$/.exec(path)) && m === "GET") {
+  if ((mm = /^\/runs\/(\d+)\/md$/.exec(path)) && m === "GET") {
     const r = await env.DB.prepare("SELECT * FROM ai_runs WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!r) throw new HttpError("این کار پیدا نشد.", 404);
     const md = await mdOf(env, { ...r, data: parse(r.data_json, {}) }, ex);
     return new Response(md, { headers: { "content-type": "text/markdown; charset=utf-8", "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`پرونده-مذاکره-${r.request_id}.md`)}`, "cache-control": "private, no-store" } });
   }
   /* فراخوانی‌های مدل: فهرست (بی متن) و یکی با درخواست و پاسخِ کامل */
-  if (path === "/ai/calls" && m === "GET") {
+  if (path === "/calls" && m === "GET") {
     const run = int(url.searchParams.get("run")), before = int(url.searchParams.get("before"));
     const rows = (await env.DB.prepare(`SELECT id, run_id, thread_id, purpose, model, effort, in_tok, out_tok, cache_read, cache_write, cost_usd, ms, status, error, at FROM ai_calls
         WHERE expert_id=?${run ? " AND run_id=?" : ""}${before ? " AND id<?" : ""} ORDER BY id DESC LIMIT 60`).bind(ex.id, ...(run ? [run] : []), ...(before ? [before] : [])).all()).results || [];
     return json({ calls: rows.map((c) => ({ ...c, purpose_fa: PURPOSE_FA[c.purpose] || c.purpose })) });
   }
-  if ((mm = /^\/ai\/calls\/(\d+)$/.exec(path)) && m === "GET") {
+  if ((mm = /^\/calls\/(\d+)$/.exec(path)) && m === "GET") {
     const c = await env.DB.prepare("SELECT * FROM ai_calls WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!c) throw new HttpError("این فراخوانی پیدا نشد.", 404);
     return json({ call: { ...c, purpose_fa: PURPOSE_FA[c.purpose] || c.purpose } });
   }
   /* «مقایسهٔ مدل»: همان درخواستِ ضبط‌شدهٔ یک دورِ مذاکره یا شرحِ پایانی با مدل یا عمقِ فکرِ دیگر — فقط خروجی، بی اجرا؛
      خودش هم با هزینه‌اش در فهرستِ فراخوانی‌ها می‌نشیند (purpose: compare) */
-  if ((mm = /^\/ai\/calls\/(\d+)\/replay$/.exec(path)) && m === "POST") {
+  if ((mm = /^\/calls\/(\d+)\/replay$/.exec(path)) && m === "POST") {
     const b = await readJson(request);
     const c = await env.DB.prepare("SELECT * FROM ai_calls WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
     if (!c) throw new HttpError("این فراخوانی پیدا نشد.", 404);
@@ -1032,30 +1115,30 @@ export async function aiRoute(request, env, ctx, path, m, url, deps) {
     return json({ ok: true, out: out.out, model: out.model, call: last, ms: now() - t0 });
   }
   /* پیامک‌ها: هر پیامکِ گفت‌وگوهای همین کارشناس — رفت یا نه، از چه راهی، چرا (متن با رمزِ پوشیده) */
-  if (path === "/ai/sms" && m === "GET") {
+  if (path === "/sms" && m === "GET") {
     const rows = (await env.DB.prepare(`SELECT m.id, m.kind, m.body, m.at, m.via, m.status, m.error, m.ref, p.phone, p.label, p.panel, s.name AS supplier, t.request_id
         FROM sp_sms m JOIN sp_phones p ON p.id=m.phone_id JOIN sp_suppliers s ON s.id=p.supplier_id LEFT JOIN sp_threads t ON t.id=m.thread_id
         WHERE m.expert_id=? ORDER BY m.id DESC LIMIT 80`).bind(ex.id).all()).results || [];
     return json({ sms: rows.map((r) => ({ ...r, panel: !!r.panel })), ready: smsReady(env) });
   }
-  /* دفترچهٔ شماره‌ها: جستجو، شمارهٔ تازه، تیکِ «پنل» */
-  if (path === "/ai/phones" && m === "GET") {
+  /* دفترچهٔ شماره‌ها: جستجو، شمارهٔ تازه، تیکِ «پنل» — مشترک بین همهٔ کارشناس‌ها */
+  if (path === "/phones" && m === "GET") {
     const q = C.nkey(url.searchParams.get("q"));
     const rows = (await env.DB.prepare(`SELECT s.id AS sid, s.name, p.id AS pid, p.phone, p.label, p.panel, p.panel_at FROM sp_suppliers s LEFT JOIN sp_phones p ON p.supplier_id=s.id
         WHERE s.demo=0${q ? " AND (s.name_n LIKE ? OR p.phone LIKE ?)" : ""} ORDER BY s.id DESC, p.id LIMIT 200`).bind(...(q ? [`%${q}%`, `%${C.latin(q)}%`] : [])).all()).results || [];
-    const by = new Map();
+    const byS = new Map();
     for (const r of rows) {
-      if (!by.has(r.sid)) by.set(r.sid, { id: r.sid, name: r.name, phones: [] });
-      if (r.pid) by.get(r.sid).phones.push({ id: r.pid, phone: r.phone, label: r.label, panel: !!r.panel, panel_at: r.panel_at, mobile: isMobile(r.phone) });
+      if (!byS.has(r.sid)) byS.set(r.sid, { id: r.sid, name: r.name, phones: [] });
+      if (r.pid) byS.get(r.sid).phones.push({ id: r.pid, phone: r.phone, label: r.label, panel: !!r.panel, panel_at: r.panel_at, mobile: isMobile(r.phone) });
     }
-    return json({ suppliers: [...by.values()].slice(0, 60) });
+    return json({ suppliers: [...byS.values()].slice(0, 60) });
   }
-  if (path === "/ai/phones" && m === "POST") return json({ ok: true, ...(await C.savePhone(env, ex.id, await readJson(request))) });
-  if ((mm = /^\/ai\/phones\/(\d+)$/.exec(path)) && m === "PUT") {
+  if (path === "/phones" && m === "POST") return json({ ok: true, ...(await C.savePhone(env, ex.id, await readJson(request))) });
+  if ((mm = /^\/phones\/(\d+)$/.exec(path)) && m === "PUT") {
     const b = await readJson(request);
     const ph = await env.DB.prepare("SELECT p.id, s.demo FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id WHERE p.id=?").bind(int(mm[1])).first();
     if (!ph || ph.demo) throw new HttpError("این شماره پیدا نشد.", 404);
-    if (b.panel !== undefined) await C.setPanel(env, ph.id, !!b.panel, ex.id);
+    if (b.panel !== undefined) await C.setPanel(env, ph.id, !!b.panel, null);
     if (T(b.label)) await env.DB.prepare("UPDATE sp_phones SET label=? WHERE id=?").bind(C.nrm(b.label).slice(0, 30), ph.id).run();
     /* تیکِ تازه: کارهای در حالِ مذاکره همین حالا دوباره نگاه کنند */
     if (b.panel === true) await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE expert_id=? AND state='work' AND finished_at IS NULL").bind(now(), ex.id).run();

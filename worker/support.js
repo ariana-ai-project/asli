@@ -205,9 +205,9 @@ export async function supportExpert(env, id) {
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -219,6 +219,7 @@ const EV_FA = {
   decision_requested: "درخواست تأیید از مدیر", decision_approved: "تأیید مدیر", decision_rejected: "رد مدیر",
   norm_clear: "برداشتن نرمال‌سازی قلم", norm_revert: "برگرداندن قلم به فهرست اقلام",
   commission_ok: "تأیید کمیسیون", commission_off: "برداشتن تأیید کمیسیون", support_login: "ورود به پنل پشتیبانی", support_pass: "رمز پشتیبانی",
+  ai_on: "کارشناس «🤖 هوشمند» شد", ai_off: "کارشناس «✋ دستی» شد", ai_ask: "🚨 پرسش از کارشناس", ai_answer: "پاسخِ کارشناس به پرسشِ کارشناس هوشمند",
 };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
 const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
@@ -237,6 +238,7 @@ function evText(r, p) {
   if (p.supplier) bits.push(`«${short(p.supplier, 40)}»`);
   if (p.commission_no) bits.push(`کد TSA-PS-FO-${faN(p.commission_no)}`);
   if (r.kind === "close") bits.push(`${faN(p.closed || 0)} قلم${p.fully_closed ? " — درخواست کامل بسته شد" : ""}`);
+  if (r.kind === "ai_ask" && p.q) bits.push(`«${short(p.q, 160)}»`);
   if (r.kind === "import") bits.push(p.closeCandidates ? `${faN(p.closeCandidates)} نامزدِ بستن` : "");
   if (r.kind === "delete") bits.push(p.all ? "همهٔ میز" : `${faN(p.requests || 0)} درخواست`);
   if (r.kind === "dispatch" && p.days) bits.push(`مهلت ${faN(p.days)} روز کاری`);
@@ -330,7 +332,7 @@ function feedRow(src, r) {
     case "ev": {
       const p = parse(r.p, {}) || {};
       const who = actorOf(r.actor, p);
-      return { ...base, ...who, expert_id: who.expert_id || r.aex || p.expert_id || null, kind: r.kind, text: evText(r, p), assignment_id: p.assignment_id || null };
+      return { ...base, ...who, expert_id: who.expert_id || r.aex || p.expert_id || null, kind: r.kind, text: evText(r, p), assignment_id: p.assignment_id || null, thread_id: p.thread_id || null };
     }
     case "alog":
       return { ...base, by: r.actor === "manager" || !r.actor ? "manager" : actorOf(r.actor).by, kind: r.action, assignment_id: r.assignment_id,

@@ -161,6 +161,13 @@
 .sp-item .t { display: flex; gap: 6px; align-items: center; font-weight: 700; font-size: .9rem; }
 .sp-item .t span:first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-item .m { color: var(--tp-muted); font-size: .78rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* کارشناس هوشمند (فاز ۲ پنل پشتیبانی): گفت‌وگوی 🔒 بسته و «🚨 پرسش از کارشناس» */
+.sp-item.sp-ai-lock { opacity: .62; cursor: help; }
+.sp-item.sp-ask { box-shadow: inset -3px 0 0 var(--tp-warn); background: rgba(242,194,48,.08); }
+.sp-item.sp-ask.on { background: rgba(242,194,48,.16); }
+.sp-item.sp-ask .m { color: #fcd34d; }
+.sp-badge.ask { background: rgba(242,194,48,.2); color: #fcd34d; box-shadow: inset 0 0 0 1px rgba(242,194,48,.5); }
+:root[data-theme="light"] .sp-item.sp-ask .m, :root[data-theme="light"] .sp-badge.ask { color: #8a6100; }
 .sp-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 10px 14px; }
 .sp-head h3 { margin: 0; font-size: 1rem; }
 .sp-back { display: none; }
@@ -355,7 +362,12 @@
 .ph-sys .t { opacity: .8; margin-inline-start: .3em; }
 .ph-sys i { font-style: normal; opacity: .85; }
 .ph-sys.note { color: #ffd97a; background: rgba(242, 194, 48, 0.12); box-shadow: inset 0 0 0 .5px rgba(242, 194, 48, 0.4); }
+.ph-ask { align-self: stretch; margin: 1em .4em .2em; padding: .7em .95em; border-radius: 1.1em; font-size: .84em; line-height: 1.8; white-space: pre-line;
+  color: var(--ph-fg); background: rgba(242, 194, 48, 0.14); box-shadow: inset 0 0 0 1px rgba(242, 194, 48, 0.55); }
+.ph-ask b { display: block; color: #ffd97a; margin-bottom: .2em; }
+.ph-ask i { display: block; font-style: normal; color: var(--ph-muted); font-size: .9em; margin-top: .35em; }
 :root[data-theme="light"] .ph-sys.note { color: #7a5800; background: rgba(242, 194, 48, 0.2); }
+:root[data-theme="light"] .ph-ask b { color: #7a5800; }
 .ph-sys[data-goto-b] { cursor: pointer; }
 
 /* --- لایهٔ کارکردیِ شناور: شیشهٔ مایع --- */

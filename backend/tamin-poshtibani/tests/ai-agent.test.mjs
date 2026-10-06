@@ -88,6 +88,9 @@ async function call(path, { method, body, headers, raw } = {}) {
   let data; try { data = JSON.parse(text); } catch (_) { data = text; }
   return { status: res.status, data, type: res.headers.get("content-type") };
 }
+/* پنل پشتیبانی (فاز ۲): رمزِ اول را همین آزمون می‌گذارد؛ نشانه‌اش برای /support/ai/* */
+let SUP = {};
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
 const since = (n) => calls.slice(n);
 const smsTo = (n) => since(n).filter((c) => c.bot === "sms");
 const usage = { input_tokens: 6000, output_tokens: 700, cache_read_input_tokens: 3000, cache_creation_input_tokens: 0 };
@@ -117,19 +120,19 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
 
   /* ۲. بی تیکِ «پنل» هیچ دعوت و پیامکی نمی‌رود — حتی شمارهٔ ثبت‌شدهٔ نامزد */
   let n = calls.length;
-  const add = await call("/ai/phones", { headers: EX, body: { supplier_name: "روانکاران نمونه", phone: "09120000001", label: "فروش" } });
+  const add = await call("/support/ai/1/phones", { headers: SUP, body: { supplier_name: "روانکاران نمونه", phone: "09120000001", label: "فروش" } });
   assert.equal(add.status, 200, JSON.stringify(add.data));
   assert.equal(add.data.phone.panel, false);
   DB.raw.prepare("UPDATE ai_runs SET next_at=0").run();
   await aiTick(env);
   assert.equal(smsTo(n).length, 0, "شمارهٔ بی تیک پیامک نمی‌گیرد");
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_threads").get().n, 0, "دعوتی نرفت");
-  const det0 = (await call(`/ai/runs/${S.run}`, { headers: EX })).data;
+  const det0 = (await call(`/support/ai/1/runs/${S.run}`, { headers: SUP })).data;
   const cand = det0.candidates.find((c) => c.name === "روانکاران نمونه");
   assert.deepEqual(cand.phones.map((p) => [p.phone, p.panel]), [["09120000001", false]], "تب شمارهٔ نامزد را بی تیک نشان می‌دهد");
 
   /* ۳. شمارهٔ آزمایشیِ خودِ کارشناس، با تیک ← دعوت و پیامکِ واقعی فقط به همان */
-  const mine = await call(`/ai/runs/${S.run}/supplier`, { headers: EX, body: { supplier_name: "تأمین‌کنندهٔ آزمایشی", phone: "۰۹۱۲ ۱۱۱ ۲۲۲۲", label: "شمارهٔ من" } });
+  const mine = await call(`/support/ai/1/runs/${S.run}/supplier`, { headers: SUP, body: { supplier_name: "تأمین‌کنندهٔ آزمایشی", phone: "۰۹۱۲ ۱۱۱ ۲۲۲۲", label: "شمارهٔ من" } });
   assert.equal(mine.status, 200, JSON.stringify(mine.data));
   assert.equal(mine.data.phone.panel, true);
   n = calls.length;
@@ -272,7 +275,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.equal(DB.raw.prepare("SELECT state FROM ai_threads WHERE thread_id=?").get(S.th).state, "final");
 
   /* ۷. «پایان مذاکره» ← شرح و معیارها ← نامه ← جدول کمیسیون و تحویل ← پیامِ پایانی */
-  const fin = await call(`/ai/runs/${S.run}/act`, { headers: EX, body: { action: "finish" } });
+  const fin = await call(`/support/ai/1/runs/${S.run}/act`, { headers: SUP, body: { action: "finish" } });
   assert.equal(fin.status, 200);
   model = (b) => {
     if (kind(b) === "closing") return jsonOut({ narrative: "استعلام از تأمین‌کنندهٔ آزمایشی گرفته شد و پیش‌فاکتورِ رسمی رسید.", criteria: ["انطباق کامل با لایهٔ جنس"],
@@ -300,18 +303,18 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.ok(DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(S.th).body.includes("کمیسیون معاملات"), "خداحافظی با تأمین‌کننده");
 
   /* ۸. تب: فراخوانی‌ها با پرامپت و هزینه، پیامک‌ها، پروندهٔ md */
-  const st = (await call("/ai/state", { headers: EX })).data;
+  const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.equal(st.agent.on, true);
   assert.equal(st.runs[0].state, "done");
   assert.ok(st.totals.cost > 0);
-  const list = (await call("/ai/calls", { headers: EX })).data.calls;
+  const list = (await call("/support/ai/1/calls", { headers: SUP })).data.calls;
   assert.deepEqual([...new Set(list.map((c) => c.purpose))].sort(), ["closing", "letter", "negotiate", "proforma"]);
-  const one = (await call(`/ai/calls/${list.find((c) => c.purpose === "closing").id}`, { headers: EX })).data.call;
+  const one = (await call(`/support/ai/1/calls/${list.find((c) => c.purpose === "closing").id}`, { headers: SUP })).data.call;
   assert.match(one.request_json, /مذاکره‌های یک درخواست خرید تمام شده/);
   assert.match(one.response_json, /narrative/);
-  const smsLog = (await call("/ai/sms", { headers: EX })).data.sms;
+  const smsLog = (await call("/support/ai/1/sms", { headers: SUP })).data.sms;
   assert.ok(smsLog.some((s) => s.phone === "09121112222" && s.via === "textbee" && /رمز ورود: •{6}/.test(s.body) && !/رمز ورود: \d{6}/.test(s.body)), "پیامک ثبت شد، رمز پوشیده");
-  const md = await call(`/ai/runs/${S.run}/md`, { headers: EX });
+  const md = await call(`/support/ai/1/runs/${S.run}/md`, { headers: SUP });
   assert.match(md.type, /markdown/);
   assert.match(md.data, /# پروندهٔ مذاکره — درخواست R-AI/);
   assert.match(md.data, /- زمان: .* \(\d{4}-\d\d-\d\dT/);
@@ -319,12 +322,14 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.match(md.data, /- تأمین‌کننده: تأمین‌کنندهٔ آزمایشی · 09121112222 \(شمارهٔ من\)/);
   assert.match(md.data, /کارشناس هوشمند → تأمین‌کننده/);
 
-  /* ۹. کارشناسِ دیگر به تب دسترسی ندارد */
+  /* ۹. تبِ قدیمیِ پنل کارشناس بسته است (فاز ۲): کارشناس هوشمند فقط از پنل پشتیبانی اداره می‌شود */
+  assert.equal((await call("/ai/state", { headers: EX })).status, 403);
   assert.equal((await call("/ai/state", { headers: { "X-Expert-Code": "7002" } })).status, 403);
+  assert.equal((await call("/support/ai/1/state")).status, 401, "بی نشانهٔ پشتیبانی نه");
 });
 
 test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کردنِ دوباره ارجاع‌های قدیمی را خودکار برنمی‌دارد", { skip: SKIP }, async () => {
-  const off = await call("/ai/mode", { method: "PUT", headers: EX, body: { on: false } });
+  const off = await call("/support/ai/1/mode", { method: "PUT", headers: SUP, body: { on: false } });
   assert.equal(off.status, 200);
   const t = Date.now();
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-AI2','1405/07/13','پروژهٔ دو')").run();
@@ -332,23 +337,23 @@ test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کر
   DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id) VALUES (32,'R-AI2','a',1,'پیچ',10,'عدد','open',2)").run();
   assert.deepEqual(await aiTick(env), { ai: 0 }, "خاموش");
   await new Promise((res) => setTimeout(res, 5));
-  await call("/ai/mode", { method: "PUT", headers: EX, body: { on: true } });
+  await call("/support/ai/1/mode", { method: "PUT", headers: SUP, body: { on: true } });
   await aiTick(env);
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE assignment_id=2").get().n, 0, "ارجاعِ پیش از روشن شدن فقط با «▶️ شروع»");
-  const st = (await call("/ai/state", { headers: EX })).data;
+  const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.deepEqual(st.open.map((a) => a.request_id), ["R-AI2"]);
-  const go = await call("/ai/runs", { headers: EX, body: { assignment_id: 2 } });
+  const go = await call("/support/ai/1/runs", { headers: SUP, body: { assignment_id: 2 } });
   assert.equal(go.status, 200, JSON.stringify(go.data));
   assert.equal(DB.raw.prepare("SELECT state FROM ai_runs WHERE assignment_id=2").get().state, "prep");
 });
 
 test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku بی effort و fallbacks؛ «مقایسهٔ مدل» همان پرامپت را بی اجرا تکرار می‌کند", { skip: SKIP }, async () => {
-  const bad = await call("/ai/config", { method: "PUT", headers: EX, body: { model: "gpt-x" } });
+  const bad = await call("/support/ai/1/config", { method: "PUT", headers: SUP, body: { model: "gpt-x" } });
   assert.equal(bad.status, 400, "مدلِ بیرون از فهرست نه");
-  const ok = await call("/ai/config", { method: "PUT", headers: EX, body: { model: "claude-sonnet-5-5", effort: "high" } });
+  const ok = await call("/support/ai/1/config", { method: "PUT", headers: SUP, body: { model: "claude-sonnet-5-5", effort: "high" } });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.deepEqual([ok.data.cfg.model, ok.data.cfg.effort], ["claude-sonnet-5-5", "high"]);
-  const st = (await call("/ai/state", { headers: EX })).data;
+  const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.equal(st.model, "claude-sonnet-5-5");
   assert.deepEqual(st.models.map((m) => m.id), ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5"]);
 
@@ -358,7 +363,7 @@ test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku �
   let seen = null, hdr = null;
   model = (b) => { seen = b; return jsonOut({ reply: "پاسخِ مدلِ دیگر", actions: [], thread_status: "active", memo: "m", note: "n" }); };
   const n = calls.length;
-  const rp = await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "claude-haiku-4-5", effort: "high" } });
+  const rp = await call(`/support/ai/1/calls/${neg.id}/replay`, { headers: SUP, body: { model: "claude-haiku-4-5", effort: "high" } });
   assert.equal(rp.status, 200, JSON.stringify(rp.data));
   hdr = since(n).find((c) => c.bot === "ai").headers;
   assert.equal(seen.model, "claude-haiku-4-5");
@@ -375,24 +380,24 @@ test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku �
   assert.ok(cmp.cost_usd > 0);
   /* با Sonnet: effort همان انتخاب و fallbacks */
   model = (b) => { seen = b; return jsonOut({ reply: "", actions: [], thread_status: "active", memo: "", note: "" }); };
-  await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "claude-sonnet-5-5", effort: "low" } });
+  await call(`/support/ai/1/calls/${neg.id}/replay`, { headers: SUP, body: { model: "claude-sonnet-5-5", effort: "low" } });
   assert.deepEqual([seen.model, seen.output_config.effort, seen.fallbacks], ["claude-sonnet-5-5", "low", "default"]);
   /* پیامِ ورودیِ نادرست */
-  const nope = await call(`/ai/calls/${neg.id}/replay`, { headers: EX, body: { model: "x" } });
+  const nope = await call(`/support/ai/1/calls/${neg.id}/replay`, { headers: SUP, body: { model: "x" } });
   assert.equal(nope.status, 400);
   const prf = DB.raw.prepare("SELECT id FROM ai_calls WHERE purpose='proforma' LIMIT 1").get();
-  assert.equal((await call(`/ai/calls/${prf.id}/replay`, { headers: EX, body: { model: "claude-sonnet-5-5" } })).status, 422, "خوانشِ پیش‌فاکتور مقایسه نمی‌شود");
+  assert.equal((await call(`/support/ai/1/calls/${prf.id}/replay`, { headers: SUP, body: { model: "claude-sonnet-5-5" } })).status, 422, "خوانشِ پیش‌فاکتور مقایسه نمی‌شود");
 });
 
 test("دفترچهٔ شماره‌ها: شمارهٔ کپی‌شده با جهت‌نماهای نامرئی و +98 پذیرفته می‌شود", { skip: SKIP }, async () => {
-  const r = await call("/ai/phones", { headers: EX, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "‪+98 922 002 2560‬", label: "همراه", panel: true } });
+  const r = await call("/support/ai/1/phones", { headers: SUP, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "‪+98 922 002 2560‬", label: "همراه", panel: true } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.phone.phone, "09220022560");
   assert.equal(r.data.phone.panel, true);
-  const again = await call("/ai/phones", { headers: EX, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "+989220022560" } });
+  const again = await call("/support/ai/1/phones", { headers: SUP, body: { supplier_name: "شمارهٔ کپی‌شده", phone: "+989220022560" } });
   assert.equal(again.status, 200, "همان شماره، بی برچسبِ تازه");
   assert.equal(again.data.phone.id, r.data.phone.id);
-  const list = (await call("/ai/phones?q=کپی", { headers: EX })).data.suppliers;
+  const list = (await call("/support/ai/1/phones?q=کپی", { headers: SUP })).data.suppliers;
   assert.deepEqual(list.find((s) => s.name === "شمارهٔ کپی‌شده").phones.map((p) => [p.phone, p.mobile]), [["09220022560", true]]);
 });
 

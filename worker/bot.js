@@ -52,6 +52,7 @@ import { pushMsgs as spPush } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
 import { aiTick } from "./ai-agent.js";
+import { aiOwned, aiQuote, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus } from "./tg-nav.js";
 export { dispatchText, seenKb } from "./assign.js";
 
@@ -166,6 +167,15 @@ const firstStepsKb = (aid, team) => [
 const KARTABL_BTN = { text: "📋 کارتابل", callback_data: "kt:n" };
 const reqBtn = (aid) => ({ text: "📄 درخواست", callback_data: `rq:${aid}:m` });
 const navRow = (aid) => [KARTABL_BTN, reqBtn(aid)];
+/**
+ * فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستی که دستِ کارشناس هوشمند است برای کارشناس قفل است — بررسی سوابق، جستجوی
+ * هوشمند، جدول کمیسیون و نامه را خودش انجام می‌دهد. پیامِ کوتاه و true، تا تابع همان‌جا برگردد.
+ */
+async function aiBlocked(env, api, chat, aid, mid) {
+  if (!aid || !(await aiOwned(env, aid))) return false;
+  await show(api, chat, mid || null, esc(AI_LOCK_MSG), [navRow(aid)]);
+  return true;
+}
 /** زیر یادآوری‌ها: مستقیم به مسیر همان درخواست */
 const reqKb = (aid) => [[{ text: "📄 باز کردن درخواست", callback_data: `rq:${aid}:m` }]];
 
@@ -953,6 +963,8 @@ const lineInserts = (env, aid, supplier, ids, t, origin = "proforma") => ids.map
 async function attachProforma(env, api, chat, ex, { aid, up, supplier, itemIds, out, mid }) {
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست دیگر فعال نیست.").catch(() => {}); return { ok: true }; }
+  /* پیش‌فاکتورِ تأمین‌کننده‌ای که کارشناس هوشمند با او مذاکره می‌کند را خودش می‌خواند؛ خطِ دستیِ کارشناس آزاد است (ai-lock.js) */
+  if (await aiQuote(env, { assignment_id: aid, supplier_name: supplier })) { await show(api, chat, mid, esc(AI_QUOTE_MSG), [navRow(aid)]); return { ok: true }; }
   const ids = idList(itemIds);
   const t = now();
   const stmts = [
@@ -1247,6 +1259,7 @@ async function saveSupplier(env, api, chat, ex, q, messageId) {
  * است که در بخش «توضیحات تدارکات و پشتیبانی» جدول چاپ می‌شود.
  */
 async function tableSelect(env, api, chat, ex, aid, messageId, head) {
+  if (await aiBlocked(env, api, chat, aid, messageId)) return { ok: true };
   const own = await env.DB.prepare("SELECT id, request_id, notes FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!own) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
   const top = `${head ? head + "\n\n" : ""}📊 <b>جدول کمیسیون — درخواست ${esc(own.request_id)}</b>\n\n`;
@@ -1294,6 +1307,7 @@ async function notesAsk(env, api, chat, ex, aid) {
  * یادآوری‌های مرحله بی‌معنی شده‌اند.
  */
 async function makeTable(env, api, chat, ex, aid, messageId) {
+  if (await aiBlocked(env, api, chat, aid, messageId)) return { ok: true };
   const settings = await getSettings(env);
   const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
   if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
@@ -1499,6 +1513,7 @@ async function deliverWaiting(env, ex, aid) {
 
 /** `skip` اگر باشد، نامه وسط «تحویل» خواسته شده و لغوش تحویل را بی‌نامه ادامه می‌دهد */
 async function startLetter(env, api, chat, ex, aid, { skip } = {}) {
+  if (await aiBlocked(env, api, chat, aid, null)) return { ok: true };
   const a = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!a) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
   const t = now();
@@ -1730,6 +1745,7 @@ const mOf = (c) => (c === "e" ? "exact" : "head");
 const otherMode = (m) => (m === "exact" ? "head" : "exact");
 
 async function histStart(env, api, chat, ex, aid, mid) {
+  if (await aiBlocked(env, api, chat, aid, mid)) return { ok: true };
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
@@ -2102,6 +2118,9 @@ async function qtabDeleteConfirm(env, api, chat, f, d, mid) {
 
 /* حذف: از تب استعلامات و همهٔ گزینه‌های بات کامل بیرون می‌رود؛ نسخه‌اش در quotes_deleted می‌ماند */
 async function qtabDelete(env, api, chat, ex, f, d, asg, mid) {
+  for (const q of (await qtabRows(env, f.assignment_id)).filter((x) => (d.sel || []).includes(x.id))) {
+    if (await aiQuote(env, { ...q, assignment_id: f.assignment_id })) { await show(api, chat, mid, esc(AI_QUOTE_MSG), [navRow(f.assignment_id)]); return { ok: true }; }
+  }
   const ids = (await qtabRows(env, f.assignment_id)).filter((q) => (d.sel || []).includes(q.id)).map((q) => q.id);
   if (!ids.length) return qtabRender(env, api, chat, f, { sel: [] }, asg, mid);
   const n = await deleteQuotes(env, { ids, expertId: ex.id, assignmentId: f.assignment_id, channel: "telegram" });
@@ -2220,6 +2239,7 @@ async function smartItemOf(env, exId, itemId) {
 }
 
 async function smartPickItem(env, api, chat, ex, aid) {
+  if (await aiBlocked(env, api, chat, aid, null)) return { ok: true };
   const asg = await ownOpenAssignment(env, ex.id, aid);
   if (!asg) { await api.sendMessage(chat, "این درخواست متعلق به شما نیست یا بسته شده.").catch(() => {}); return { ok: true }; }
   const its = await itemsOf(env, aid);
@@ -2234,6 +2254,8 @@ async function smartPickItem(env, api, chat, ex, aid) {
 async function smartPrefsCard(env, api, chat, ex, itemId) {
   const it = await smartItemOf(env, ex.id, itemId);
   if (!it) { await api.sendMessage(chat, "این قلم متعلق به شما نیست.").catch(() => {}); return { ok: true }; }
+  const own = await env.DB.prepare("SELECT assignment_id FROM items WHERE id=?").bind(itemId).first();
+  if (await aiBlocked(env, api, chat, own && own.assignment_id, null)) return { ok: true };
   await closeInputs(env, ex.id);
   const t = now();
   /* جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پیش از خرج کردنِ جستجوی تازه */
@@ -3471,6 +3493,7 @@ async function onCallback(env, cq, apiIn) {
     const [, qidRaw, field, valRaw] = T(cq.data).split(":");
     const q = await ownQuote(env, ex.id, parseInt(qidRaw, 10));
     if (!q) { await ack("این خط استعلام پیدا نشد.", true); return { ok: true }; }
+    if (action !== "qc" && await aiQuote(env, q)) { await ack(AI_QUOTE_MSG.slice(0, 190), true); return { ok: true }; }
     const mid = cq.message && cq.message.message_id;
     if (action === "qc") { await ack(); return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid); }
     if (action === "qe") { await ack(); return editMenu(env, api, chat, q, mid); }
@@ -3493,6 +3516,7 @@ async function onCallback(env, cq, apiIn) {
   /* جدول کمیسیون: ct:<aid>:t:<quote> · all · none · nt (درج توضیحات) · go (تولید) · start */
   if (action === "ct") {
     const aid = num(1), step = parts[2];
+    if (await aiOwned(env, aid)) { await ack(AI_LOCK_MSG.slice(0, 190), true); return { ok: true }; }
     if (step === "t") {
       await env.DB.prepare(
         `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, final_at=CASE WHEN final=1 THEN NULL ELSE ? END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1

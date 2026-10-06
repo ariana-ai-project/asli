@@ -22,6 +22,7 @@ import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
+import { aiThread, askAnswered, AI_THREAD_MSG, AI_ASK_SQL } from "./ai-lock.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -559,6 +560,13 @@ export async function threadFor(env, id, who) {
   if (!th) throw new HttpError("این گفت‌وگو پیدا نشد.", 404);
   if (who.expert && th.expert_id !== who.expert.id) throw new HttpError("این گفت‌وگو متعلق به شما نیست.", 403);
   if (who.supplier && th.supplier_id !== who.supplier.supplier_id) throw new HttpError("این استعلام متعلق به شما نیست.", 403);
+  /* گفت‌وگوی کارشناس هوشمند برای کارشناسِ «هوشمند» بسته است، مگر «پرسش از کارشناس» (ai-lock.js). خودِ کارشناس هوشمند
+     (who.ai) از این‌جا رد می‌شود — تصمیم‌هایش با همین توابع است */
+  if (who.expert && !who.ai) {
+    const L = await aiThread(env, th.id, th.expert_id);
+    if (L.locked) throw new HttpError(AI_THREAD_MSG, 423, { ai_locked: true });
+    th.ai = L;
+  }
   return th;
 }
 
@@ -573,7 +581,8 @@ export function threadOut(th, side) {
   return {
     id: th.id, request_id: th.request_id, supplier: th.supplier_name, demo: !!th.demo, expert: th.expert_label || th.expert_name,
     phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
-    ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party } : {}),
+    ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
+      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null } : null } : {}),
   };
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */
@@ -656,7 +665,8 @@ export async function supplierThreads(env, sup) {
  * با شمار پیام‌های نخوانده و بسته‌های منتظر تصمیم.
  */
 export async function expertThreads(env, ex) {
-  const [th, asg] = await Promise.all([
+  /* گفت‌وگوهای کارشناس هوشمند: «locked» (بسته)، «ask» (پرسش از کارشناس — باز تا پاسخ) یا «open» (کارشناس «دستی» است) */
+  const [th, asg, air, mode] = await Promise.all([
     env.DB.prepare(`SELECT t.id, t.assignment_id, t.request_id, t.supplier_id, s.name AS supplier, s.demo, p.phone, p.label AS phone_label, t.last_at, r.party,
         (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=t.id AND m.who='s' AND m.id>t.e_seen) AS unread,
         (SELECT COUNT(*) FROM sp_bundles b WHERE b.thread_id=t.id AND b.state IN ('pending','proforma')) AS waiting,
@@ -668,17 +678,34 @@ export async function expertThreads(env, ex) {
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_items
       FROM assignments a JOIN requests r ON r.id=a.request_id
       WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL ORDER BY a.dispatched_at DESC LIMIT 80`).bind(ex.id).all(),
+    env.DB.prepare(`SELECT x.thread_id, x.state, x.ask_json, r.expert_id AS run_expert FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id
+      JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=?`).bind(ex.id).all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null),
   ]);
+  const aiOn = !!(mode && mode.mode === "on");
+  const aiBy = new Map((air.results || []).map((x) => [x.thread_id, x]));
+  const aiOf = (id) => {
+    const x = aiBy.get(id);
+    if (!x) return { ai: null, ask: null };
+    if (!aiOn || x.run_expert !== ex.id) return { ai: "open", ask: null };
+    return x.state === "ask" ? { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "" } : { ai: "locked", ask: null };
+  };
   const byA = new Map();
   for (const a of asg.results || []) byA.set(a.id, { assignment_id: a.id, request_id: a.request_id, party: a.party, open_items: a.open_items, threads: [], unread: 0, waiting: 0, last_at: 0 });
   for (const t of th.results || []) {
     if (!byA.has(t.assignment_id)) byA.set(t.assignment_id, { assignment_id: t.assignment_id, request_id: t.request_id, party: t.party, open_items: 0, threads: [], unread: 0, waiting: 0, last_at: 0 });
     const g = byA.get(t.assignment_id);
-    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: t.phone, phone_label: t.phone_label, unread: t.unread, waiting: t.waiting, lines: t.lines, last_at: t.last_at });
-    g.unread += t.unread; g.waiting += t.waiting; g.last_at = Math.max(g.last_at, t.last_at);
+    const A = aiOf(t.id);
+    /* گفت‌وگوی بسته: نخوانده و منتظرِ تصمیمش به حسابِ کارشناس نمی‌آید */
+    const shut = A.ai === "locked";
+    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: shut ? null : t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
+      waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask });
+    if (!shut) { g.unread += t.unread; g.waiting += t.waiting; }
+    if (A.ai === "ask") g.asks = (g.asks || 0) + 1;
+    g.last_at = Math.max(g.last_at, t.last_at);
   }
-  const requests = [...byA.values()].sort((a, b) => (b.threads.length ? 1 : 0) - (a.threads.length ? 1 : 0) || b.last_at - a.last_at);
-  return { requests, unread: requests.reduce((s, g) => s + g.unread, 0), waiting: requests.reduce((s, g) => s + g.waiting, 0) };
+  const requests = [...byA.values()].sort((a, b) => (b.asks || 0) - (a.asks || 0) || (b.threads.length ? 1 : 0) - (a.threads.length ? 1 : 0) || b.last_at - a.last_at);
+  return { requests, unread: requests.reduce((s, g) => s + g.unread, 0), waiting: requests.reduce((s, g) => s + g.waiting, 0), asks: requests.reduce((s, g) => s + (g.asks || 0), 0), ai: aiOn };
 }
 
 /**
@@ -688,20 +715,28 @@ export async function expertThreads(env, ex) {
  */
 export async function expertInbox(env, ex, since) {
   const s = Math.max(0, int(since) || 0);
-  const [top, unread, rows] = await Promise.all([
+  const [top, unread, rows, asks] = await Promise.all([
     env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM sp_msgs").first(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id
-      WHERE a.expert_id=? AND m.who='s' AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0)`).bind(ex.id).first(),
+      WHERE a.expert_id=? AND m.who='s' AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) AND ${AI_SHUT_SQL}`).bind(ex.id).first(),
     s ? env.DB.prepare(`SELECT m.id, m.thread_id, m.kind, m.body, m.at, t.assignment_id, t.request_id, sup.name AS supplier, sup.demo
         FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id
-        WHERE a.expert_id=? AND m.who='s' AND m.id>? AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) ORDER BY m.id DESC LIMIT 6`).bind(ex.id, s).all() : null,
+        WHERE a.expert_id=? AND m.who='s' AND m.id>? AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) AND ${AI_SHUT_SQL} ORDER BY m.id DESC LIMIT 6`).bind(ex.id, s).all() : null,
+    /* «پرسش از کارشناس»های بی‌پاسخ — نشانِ 🚨 کنارِ «مکاتبات» و اعلانِ گوشهٔ پنل */
+    env.DB.prepare(`SELECT x.thread_id, x.ask_json, t.assignment_id, t.request_id, sup.name AS supplier FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id
+        JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id WHERE a.expert_id=? AND ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 20`)
+      .bind(ex.id).all().catch(() => ({ results: [] })),
   ]);
   const msgs = ((rows && rows.results) || []).reverse().map((m) => ({
     id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier, demo: !!m.demo,
     kind: m.kind, body: m.kind === "voice" ? `🎤 ${T(m.body) || "پیام صوتی"}`.slice(0, 300) : T(m.body).slice(0, 300), at: m.at,
   }));
-  return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs };
+  const askList = (asks.results || []).map((x) => { const k = parse(x.ask_json, {}) || {}; return { thread_id: x.thread_id, assignment_id: x.assignment_id, request_id: x.request_id, supplier: x.supplier, q: k.q || "", at: k.at || 0 }; });
+  return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs, asks: askList.length, ask_list: askList };
 }
+/* گفت‌وگوی بستهٔ کارشناس هوشمند (ai-lock.js) برای کارشناس اعلان و شمرده نمی‌شود — t: sp_threads، a: assignments */
+const AI_SHUT_SQL = `NOT EXISTS (SELECT 1 FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id AND g.mode='on'
+  WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask')`;
 
 /** اقلام باز یک ارجاعِ همین کارشناس — برای پنجرهٔ «ارسال استعلام» صفحهٔ مکاتبات */
 export async function sendableItems(env, ex, aid) {
@@ -724,6 +759,8 @@ export async function postMsg(env, th, side, text, meta = null, kind = "text") {
   const k = kind === "note" && side === "e" ? "note" : "text";
   const t = now();
   const [r] = await env.DB.batch([msgStmt(env, th.id, side, k, body, meta, t), touchStmt(env, th.id, t, false)]);
+  /* پاسخِ کارشناسِ انسانی به «پرسش از کارشناس»: گفت‌وگو دوباره دستِ کارشناس هوشمند می‌رود (ai-lock.js) */
+  if (side === "e" && k === "text" && !(meta && meta.ai)) await askAnswered(env, th.id, r.meta.last_row_id).catch((e) => console.error("ask answered", e && e.message));
   return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, k, body, meta, t)] };
 }
 
@@ -740,6 +777,7 @@ export async function postVoice(env, th, side, v) {
     stt: v.error ? { ok: false, error: T(v.error).slice(0, 200) } : { ok: true, lang: v.lang || null },
   };
   const [r] = await env.DB.batch([msgStmt(env, th.id, side, "voice", body, meta, t), touchStmt(env, th.id, t, false)]);
+  if (side === "e") await askAnswered(env, th.id, r.meta.last_row_id).catch((e) => console.error("ask answered", e && e.message));
   return { ok: true, msgs: [msgObj(r.meta.last_row_id, th.id, side, "voice", body, meta, t)] };
 }
 /** صدای یک پیامِ صوتی با سنجشِ دسترسی به گفت‌وگو */
@@ -921,6 +959,10 @@ export async function fileFor(env, who, fileId) {
   return f;
 }
 
+/* «🚨 پرسش از کارشناس» (ai-lock.js): گفت‌وگو فقط برای پاسخِ کارشناس باز است — تصمیم دربارهٔ بسته‌ها و پیش‌فاکتورها با کارشناس هوشمند */
+function askOnly(th, byAi) {
+  if (!byAi && th.ai && th.ai.ask) throw new HttpError("🚨 این گفت‌وگو فقط برای پاسخ به «پرسش از کارشناس» باز است؛ تصمیم دربارهٔ بسته‌ها و پیش‌فاکتورها با کارشناس هوشمند است.", 423, { ai_locked: true });
+}
 async function bundleFor(env, who, bundleId) {
   const b = int(bundleId) ? await env.DB.prepare("SELECT * FROM sp_bundles WHERE id=?").bind(int(bundleId)).first() : null;
   if (!b) throw new HttpError("این بسته پیدا نشد.", 404);
@@ -969,7 +1011,8 @@ const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? a
  * فیلدِ اجباری‌ای که با پذیرشِ «نیامده» خالی می‌ماند (gaps)، خط استعلام را از «ثبت موقت» و تیک «تأیید نهایی» بازمی‌دارد.
  */
 export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
-  const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
+  const { b, th } = await bundleFor(env, { expert: ex, ai: !!ai }, bundleId);
+  askOnly(th, ai);
   const lines = await bundleLines(env, b.id);
   const note = T(comment).slice(0, 1000);
   const t = now();
@@ -1072,8 +1115,9 @@ function matchRows(ai) {
  * تیکِ ردیف‌های جدول تطابق: کارشناس قبول می‌کند که پیش‌فاکتور به‌جای درخواست ملاک باشد — هر ردیفِ غیرسبز (⚠️ ⚪ ❌).
  * مقدار همیشه از سند است؛ اگر سند چیزی نگفته، خالی می‌ماند و چیزی از بستهٔ تأمین‌کننده جایش نمی‌نشیند. `all`: همه.
  */
-export async function acceptRows(env, ex, bundleId, { keys, on = true, all = false } = {}) {
-  const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
+export async function acceptRows(env, ex, bundleId, { keys, on = true, all = false, byAi = false } = {}) {
+  const { b, th } = await bundleFor(env, { expert: ex, ai: !!byAi }, bundleId);
+  askOnly(th, byAi);
   if (b.state !== "proforma") throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
   const ai = aiOf(b);
   if (!ai) throw new HttpError("اول «خوانش هوشمند» را بزنید تا جدول تطابق ساخته شود.", 409);
@@ -1096,6 +1140,7 @@ export async function acceptRows(env, ex, bundleId, { keys, on = true, all = fal
 /** نتیجهٔ «بررسی هوشمند» روی بسته ذخیره می‌شود (sp-ai.js مدل را صدا می‌زند) */
 export async function aiTarget(env, ex, bundleId) {
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
+  askOnly(th, false);
   if (b.state !== "proforma" || !b.pf_key) throw new HttpError("خوانش هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);
   return { b, th, lines: await bundleLines(env, b.id), terms: termsOf(b) };
 }

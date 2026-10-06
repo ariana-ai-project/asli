@@ -50,7 +50,7 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["log", "گزارش رخدادها"], ["cm", "تأیید کمیسیون"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["ai", "🤖 کارشناس هوشمند"], ["chat", "مکاتبات"], ["log", "گزارش رخدادها"], ["cm", "تأیید کمیسیون"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
@@ -61,6 +61,8 @@
     th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null,
     log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null,
     cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1,
+    /* کارشناس هوشمند (فاز ۲): فهرستِ کارشناسان با تیکِ هوشمند/دستی، و داشبوردِ یک کارشناس (expert-ai.js) */
+    ai: null, aiErr: "", aiLoading: false, aiEx: null,
   };
   const thr = () => (S.settings && S.settings.thresholds) || (CFG.defaults && CFG.defaults.thresholds) || [10, 30, 50, 70, 90, 100];
   const exName = (id) => { const e = S.experts.find((x) => x.id === Number(id)); return e ? e.label || e.name : id ? `کارشناس ${id}` : "—"; };
@@ -119,6 +121,7 @@
     S.view = "app"; render();
     try { await loadExperts(); } catch (_) { return; /* ۴۰۱ → صفحهٔ ورود */ }
     loadTab();
+    if (S.tab !== "ai") aiPulse();
   }
   function changePass() {
     const d = TP.modal("تغییر رمز پشتیبانی", `<div style="display:flex;flex-direction:column;gap:8px">
@@ -141,6 +144,7 @@
     else if (S.tab === "chat" && (force || !S.th)) loadThreads();
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
+    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); }
     render();
   }
   function setTab(k) {
@@ -151,7 +155,6 @@
 
   /* ---------- سرآیند ---------- */
   function vTop() {
-    const wait = S.experts.reduce((a, e) => a + (e.cm_wait || 0), 0);
     return `<header class="tp-top">
       <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل پشتیبانی تدارکات</h1><div class="sub">نظارت بر کار کارشناسان و تأیید کمیسیون · ${esc(CFG.company || "")}</div></div></div>
       <span class="spacer"></span>
@@ -161,7 +164,11 @@
       <a class="tp-back" href="index.html">تدارکات</a>
       <button class="tp-btn xs" data-logout title="خروج">خروج</button>
     </header>
-    <div class="tp-tabs">${TABS.map(([k, l]) => `<button class="tp-tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}${k === "cm" && wait ? `<span class="cnt" title="قلم‌هایی که جدول کمیسیونشان ساخته شده و منتظر تأیید پشتیبانی‌اند">${wait}</span>` : ""}</button>`).join("")}</div>`;
+    ${vTabs()}`;
+  }
+  function vTabs() {
+    const wait = S.experts.reduce((a, e) => a + (e.cm_wait || 0), 0);
+    return `<div class="tp-tabs">${TABS.map(([k, l]) => `<button class="tp-tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}${k === "cm" && wait ? `<span class="cnt" title="قلم‌هایی که جدول کمیسیونشان ساخته شده و منتظر تأیید پشتیبانی‌اند">${wait}</span>` : ""}${k === "ai" && S.ai && S.ai.asks.length ? `<span class="cnt" title="پرسش‌های بی‌پاسخِ کارشناس هوشمند از کارشناسان">🚨 ${S.ai.asks.length}</span>` : ""}</button>`).join("")}</div>`;
   }
 
   /* ---------- مراحل (همان شش باکس میز مدیر) ---------- */
@@ -534,8 +541,76 @@
     }, ok ? "تأیید" : "برداشتن تأیید");
   }
 
+  /* ---------- تب «🤖 کارشناس هوشمند» (فاز ۲) ----------
+     تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس (هوشمند: کارهای تازه‌اش را کارشناس هوشمند انجام می‌دهد و همان کارها برایش قفل
+     است)، «🚨 پرسش از کارشناس»های بی‌پاسخ، و داشبوردِ هر کارشناس — همان تبِ قدیمیِ پنل کارشناس (expert-ai.js) با مسیرهای
+     /support/ai/<کارشناس>/… */
+  async function loadAi() {
+    S.aiLoading = true; S.aiErr = ""; render();
+    try { S.ai = await api("/ai/experts"); } catch (e) { S.aiErr = e.message; }
+    S.aiLoading = false; render();
+  }
+  if (window.TP_AI) {
+    window.TP_AI.configure({
+      api: (p, o) => api(`/ai/${S.aiEx}${p.slice(3)}`, o),
+      download: (path, name) => download(path.startsWith("/ai/") ? `/ai/${S.aiEx}${path.slice(3)}` : path, name),
+      active: () => S.view === "app" && S.tab === "ai" && !!S.aiEx,
+      chat: (r) => `<button class="tp-btn sm" data-goto="chat" data-rid="${esc(r.request_id)}">💬 مکاتباتِ این درخواست</button>`,
+    });
+  }
+  function vAi() {
+    if (S.aiEx && window.TP_AI) {
+      return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
+        <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
+    }
+    let h = `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: هر ارجاعِ تازهٔ این کارشناس را کارشناس هوشمند پیش می‌برد — بررسی سوابق، جستجوی هوشمند، دعوت و مذاکره، جدول کمیسیون و نامه —
+      و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
+      («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
+      <b>✋ دستی</b> همه‌چیز را به خودِ کارشناس برمی‌گرداند.</div>`;
+    if (S.aiErr) h += `<div class="tp-note warn">${esc(S.aiErr)}</div>`;
+    if (!S.ai) return h + (S.aiLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    const A = S.ai;
+    if (A.asks.length) {
+      h += `<h3 class="sup-h">🚨 پرسش‌های بی‌پاسخ از کارشناسان (${A.asks.length})</h3>
+        <div class="tp-scroll" style="margin-bottom:14px"><table class="tp-table"><thead><tr><th>زمان</th><th>کارشناس</th><th>درخواست</th><th class="rt">تأمین‌کننده</th><th class="rt">پرسش</th><th></th></tr></thead><tbody>
+        ${A.asks.map((x) => `<tr><td class="num" style="font-size:.8rem">${fmtShort(x.at)}</td><td>${esc(exName(x.expert_id))}</td><td class="num">${esc(x.request_id)}</td>
+          <td class="rt">${esc(x.supplier)}</td><td class="rt" style="white-space:normal;max-width:460px">${esc(x.q)}</td><td><button class="tp-btn xs" data-th-open="${x.thread_id}">گفت‌وگو</button></td></tr>`).join("")}</tbody></table></div>`;
+    }
+    h += `<div class="tp-scroll"><table class="tp-table" data-stick><thead><tr><th class="rt">کارشناس</th><th>حالت</th><th>کارِ زنده</th><th>همهٔ کارها</th><th>🚨 پرسش</th><th>هزینهٔ مدل</th><th>از کِی</th><th></th></tr></thead><tbody>
+      ${A.experts.map((e) => `<tr><td class="rt"><b>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</b>${e.tg ? "" : ` <span class="dim" title="تلگرامِ کارشناس وصل نیست؛ پرسش‌ها فقط در پنلش دیده می‌شوند">(بی تلگرام)</span>`}</td>
+        <td><button class="tp-btn xs ${e.on ? "primary" : ""}" data-aitoggle="${e.id}" data-on="${e.on ? 0 : 1}" title="${e.on ? "کلیک: دستی شود" : "کلیک: هوشمند شود"}">${e.on ? "🤖 هوشمند" : "✋ دستی"}</button></td>
+        <td class="num">${e.live || 0}</td><td class="num">${e.runs || 0}</td><td class="num">${e.asks ? `<span class="chip warn">🚨 ${e.asks}</span>` : "—"}</td>
+        <td class="num" dir="ltr">${e.cost ? `$${Number(e.cost).toFixed(e.cost < 1 ? 4 : 2)}` : "—"}</td>
+        <td class="num" style="font-size:.8rem">${e.on && e.on_at ? fmtShort(e.on_at) : "—"}</td>
+        <td><button class="tp-btn xs" data-aiex="${e.id}">داشبورد</button></td></tr>`).join("")}</tbody></table></div>
+      <p class="dim" style="font-size:.82rem;margin-top:8px">«از کِی»: ارجاع‌هایی که بعد از این لحظه برسند خودکار برداشته می‌شوند؛ قدیمی‌ترها از داشبوردِ همان کارشناس با «▶️ شروع». پیامک فقط به شماره‌هایی می‌رود که تیکِ «پنل» دارند (داشبورد ← دفترچهٔ شماره‌ها). ${A.sms ? "" : "درگاه پیامک (TextBee) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند."}</p>`;
+    return h;
+  }
+  /* «🚨 پرسش از کارشناس»ِ تازه بی ↻ هم دیده شود: هر ۴۵ ثانیه و با برگشتن به صفحه (پنجرهٔ دیده‌شده، بی پنجرهٔ باز) فهرست بی‌صدا تازه می‌شود؛ روی همین
+     تب جدول از نو رسم می‌شود (مگر وسطِ تایپ)، وگرنه فقط نوارِ تب‌ها و نشانِ 🚨 */
+  async function aiPulse() {
+    if (S.view !== "app" || document.hidden || document.querySelector(".tp-modal-bg")) return;
+    let r; try { r = await api("/ai/experts"); } catch (_) { return; }
+    S.ai = r;
+    const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
+    if (S.tab === "ai" && !S.aiEx) { if (!typing) render(); return; }
+    const bar = app.querySelector(".tp-tabs"); if (bar) bar.outerHTML = vTabs();
+  }
+  setInterval(aiPulse, 45000);
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) aiPulse(); });
+  function aiToggle(id, on) {
+    TP.modal(on ? "🤖 هوشمند" : "✋ دستی", on
+      ? `از این لحظه هر ارجاعِ تازهٔ <b>${esc(exName(id))}</b> را کارشناس هوشمند پیش می‌برد و همین کارها (سوابق، جستجو، ساختار، کمیسیون، نامه و گفت‌وگوهای او) برای خودِ کارشناس قفل می‌شود. هوشمند شود؟`
+      : `همهٔ کارهای کارشناس هوشمندِ <b>${esc(exName(id))}</b> همان لحظه نگه داشته می‌شود و قفل‌ها برداشته می‌شوند؛ از این پس خودِ کارشناس دستی کار می‌کند. دستی شود؟`,
+    async () => {
+      try { await api(`/ai/${id}/mode`, { method: "PUT", body: { on } }); await loadAi(); if (S.aiEx === id && window.TP_AI) window.TP_AI.load(); }
+      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, on ? "هوشمند شود" : "دستی شود");
+  }
+
   /* ---------- رسم ---------- */
   function vTab() {
+    if (S.tab === "ai") return vAi();
     if (S.tab === "req") return vReq();
     if (S.tab === "exp") return S.exId ? vExpert() : vExperts();
     if (S.tab === "chat") return vChat();
@@ -550,6 +625,8 @@
     else app.innerHTML = vTop() + `<div class="tp-wrap">${vTab()}</div>`;
     restore();
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
+    /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
+    if (S.view === "app" && S.tab === "ai" && S.aiEx && window.TP_AI) window.TP_AI.wire(app, S, render);
   }
 
   /* ---------- رفتارها (یک شنونده برای همه، تا با هر رسم دوباره بسته نشوند) ---------- */
@@ -586,10 +663,13 @@
     if (d.csel) { if (d.csel === "all") cmRows().forEach((i) => S.cmSel.add(i.id)); else S.cmSel.clear(); return render(); }
     if (d.cok !== undefined) { const ok = d.cok === "1"; const ids = cmRows().filter((i) => S.cmSel.has(i.id) && !!i.commission_ok !== ok).map((i) => i.id); return ids.length && cmSet(ids, ok); }
     if (d.cone) return cmSet([Number(d.cone)], d.ok === "1");
+    if (d.aiex) { if (window.TP_AI) window.TP_AI.reset(); S.aiEx = Number(d.aiex); return render(); }
+    if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
+    if (d.aitoggle) return aiToggle(Number(d.aitoggle), d.on === "1");
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

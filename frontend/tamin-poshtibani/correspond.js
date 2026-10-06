@@ -7,6 +7,8 @@
    هر گفت‌وگو = یک درخواست × یک تأمین‌کننده. «اقلام و تصمیم‌ها»: بسته‌هایی که تأمین‌کننده فرستاده و تصمیم روی
    آن‌ها؛ خوانش هوشمند پیش‌فاکتور با جدول تطابق (✅ ⚠️ ⚪ ❌) و تیکِ هر ردیفِ غیرسبز (پیش‌فاکتور ملاک)، و تأیید
    نهایی ← تب استعلامات. پیامِ هر بسته در گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود.
+   کارشناس «🤖 هوشمند» (تیکش در پنل پشتیبانی — فاز ۲): گفت‌وگوهای کارشناس هوشمند 🔒 و بسته‌اند؛ «🚨 پرسش از کارشناس» همان
+   گفت‌وگو را تا پاسخِ کارشناس باز می‌کند (فقط پاسخ در گفت‌وگو — تصمیمِ بسته‌ها با کارشناس هوشمند) و با پاسخ دوباره می‌بندد.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -60,7 +62,7 @@
   }
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
-  const S = { me: null, reqs: [], unread: 0, waiting: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
+  const S = { me: null, reqs: [], unread: 0, waiting: 0, asks: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
     lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {} };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
@@ -104,7 +106,7 @@
   /* ---------- بارگذاری ---------- */
   async function loadList() {
     const d = await api("/sp/x/threads");
-    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
+    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
   }
   async function boot() {
     const ses = TP.session.get();
@@ -119,7 +121,8 @@
       /* اعلانِ گوشهٔ صفحه برای پیامِ تأمین‌کنندهٔ دیگری جز گفت‌وگوی باز (shared.js: TP.inbox)؛ کلیکش همان گفت‌وگو را
          همین‌جا باز می‌کند و فهرست‌ها شمارِ نخوانده را همان لحظه می‌گیرند */
       TP.inbox.start({ api, summary: false, active: () => !!S.me, current: () => (S.d ? S.th : null),
-        open: (m) => { if (m) openThread(m.thread_id); }, onNew: () => refreshLists().catch(() => {}) });
+        open: (m) => { if (m) openThread(m.thread_id); }, onNew: () => refreshLists().catch(() => {}),
+        onAsks: (k) => { if (k !== S.asks) refreshLists().catch(() => {}); } });
     } catch (e) {
       if (e.status === 401 && !inTg) { TP.session.clear(); return renderLogin(e.message); }
       app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
@@ -130,7 +133,14 @@
   function openThread(id) {
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0;
-    loadThread().catch((e) => say(e.message));
+    loadThread().catch((e) => (e.status === 423 ? shut(e.message) : say(e.message)));
+  }
+  /** گفت‌وگوی بستهٔ کارشناس هوشمند (۴۲۳): از صفحه بیرون می‌رود و فهرست تازه می‌شود */
+  async function shut(msg, title) {
+    S.th = null; S.d = null; S.view = S.aid ? "sup" : "req"; ss.set("sp.th.e", "");
+    try { await loadList(); } catch (_) { /* فهرستِ قبلی می‌ماند */ }
+    render();
+    if (msg) say(msg, title || "🔒 گفت‌وگوی کارشناس هوشمند");
   }
   async function refreshLists() {
     await loadList();
@@ -152,7 +162,7 @@
   function reqList() {
     const withT = S.reqs.filter((g) => g.threads.length), rest = S.reqs.filter((g) => !g.threads.length);
     const item = (g) => `<button class="sp-item ${S.aid === g.assignment_id ? "on" : ""}" data-aid="${g.assignment_id}">
-      <div class="t"><span>${esc(g.request_id)}</span>${badge(g.unread)}${badge(g.waiting, "wait")}</div>
+      <div class="t"><span>${esc(g.request_id)}</span>${g.asks ? `<span class="sp-badge ask" title="کارشناس هوشمند در این درخواست از شما سؤال دارد">🚨 ${fa(g.asks)}</span>` : ""}${badge(g.unread)}${badge(g.waiting, "wait")}</div>
       <div class="m">${esc(g.party || "")}${g.threads.length ? ` · ${fa(g.threads.length)} تأمین‌کننده` : ` · ${fa(g.open_items)} قلم باز`}</div></button>`;
     return (withT.map(item).join("") || `<div class="sp-empty">هنوز گفت‌وگویی نیست.</div>`)
       + (rest.length ? `<div class="sp-muted" style="padding:8px 12px">درخواست‌های باز بدون گفت‌وگو</div>${rest.map(item).join("")}` : "");
@@ -161,9 +171,13 @@
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
     if (!g) return `<div class="sp-empty">یک درخواست را انتخاب کنید.</div>`;
     if (!g.threads.length) return `<div class="sp-empty">برای این درخواست هنوز به تأمین‌کننده‌ای استعلام نرفته است.</div>`;
-    return g.threads.map((t) => `<button class="sp-item ${S.th === t.id ? "on" : ""}" data-th="${t.id}">
-      <div class="t"><span>${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}${badge(t.unread)}${badge(t.waiting, "wait")}</div>
-      <div class="m">📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم</div></button>`).join("");
+    return g.threads.map((t) => t.ai === "locked"
+      ? `<button class="sp-item sp-ai-lock" data-th-lock="${t.id}" title="گفت‌وگوی کارشناس هوشمند — برای شما بسته است">
+      <div class="t"><span>🔒 ${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}</div>
+      <div class="m">🤖 دستِ کارشناس هوشمند · ${fa(t.lines)} قلم</div></button>`
+      : `<button class="sp-item ${S.th === t.id ? "on" : ""} ${t.ai === "ask" ? "sp-ask" : ""}" data-th="${t.id}">
+      <div class="t"><span>${t.ai === "ask" ? "🚨 " : ""}${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}${badge(t.unread)}${badge(t.waiting, "wait")}</div>
+      <div class="m">${t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`}</div></button>`).join("");
   }
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
@@ -175,7 +189,7 @@
       : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
     app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols ${phoneMode ? "ph-mode" : ""}" data-view="${S.view}">
-      <aside class="sp-col reqs"><h4>درخواست‌ها ${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
+      <aside class="sp-col reqs"><h4>درخواست‌ها ${S.asks ? `<span class="sp-badge ask" title="«پرسش از کارشناس»های بی‌پاسخ">🚨 ${fa(S.asks)}</span>` : ""}${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
       <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req" aria-label="بازگشت به درخواست‌ها">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
         <div class="scroll" data-sups>${supList()}</div>${g && g.open_items ? `<div class="sp-colfoot"><button class="tp-btn primary sm" data-send>➕ ارسال استعلام</button></div>` : ""}</aside>
       <section class="sp-main ${screenInMain ? "is-screen" : ""}">${main}</section>
@@ -210,6 +224,10 @@
   /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26 (ph-chat.js): پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ
      تأمین‌کننده سمت چپ و طوسیِ خیلی کمرنگ؛ پیامِ صوتیِ تأمین‌کننده با پخش و متنِ پیاده‌شده‌اش (فقط همین‌جا — تأمین‌کننده
      متن را نمی‌بیند)؛ رخدادِ بسته و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
+  /** «🚨 پرسش از کارشناس»: سؤال و راهنما در انتهای گفت‌وگو، درست بالای کادرِ پیام */
+  const askOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.ask) || null;
+  const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید؛ برای ${esc(S.d.thread.supplier)} هم فرستاده می‌شود و بعدش گفت‌وگو دوباره دستِ کارشناس هوشمند است.</i></div>` : ""; };
+  const feedHtml = () => msgsHtml() + askNote();
   const msgsHtml = () => PH.feed(S.d.msgs, {
     mine: (m) => m.who === "e",
     ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
@@ -228,7 +246,7 @@
     S.unseen = 0;
     const th = S.d.thread, waiting = waitingCount();
     return PH.screen({
-      framed, body: msgsHtml(), label: `گفت‌وگو با ${th.supplier}`,
+      framed, body: feedHtml(), label: `گفت‌وگو با ${th.supplier}`,
       nav: {
         start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
         title: th.supplier, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
@@ -236,7 +254,7 @@
         acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
           <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
-      composer: { placeholder: `پیام به ${th.supplier}`, draft: S.th },
+      composer: { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : `پیام به ${th.supplier}`, draft: S.th },
     });
   }
   const composerState = PH.grow;
@@ -335,6 +353,7 @@
   function bind() {
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; ss.set("sp.aid", String(S.aid)); render(); }; });
     $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
+    $$("[data-th-lock]").forEach((b) => { b.onclick = () => say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و تا وقتی تیکِ شما در «پنل پشتیبانی» روی «🤖 هوشمند» است برای شما بسته است.\nاگر سؤالی از شما داشته باشد همین‌جا با 🚨 باز می‌شود و در تلگرام هم خبر می‌دهد.", "🔒 گفت‌وگوی کارشناس هوشمند"); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
@@ -376,7 +395,8 @@
       const go = async () => {
         const text = inp.value.trim(); if (!text) return;
         send.disabled = true;
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); } catch (e) { say(e.message); }
+        if (askOf()) { send.disabled = false; return answerAsk(text); }
+        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); } catch (e) { if (e.status === 423) return shut(e.message); say(e.message); }
         composerState(inp); inp.focus();
       };
       send.onclick = go;
@@ -385,6 +405,16 @@
     }
   }
 
+  /** پاسخ به «🚨 پرسش از کارشناس»: برای تأمین‌کننده هم می‌رود؛ بعدش گفت‌وگو دوباره دستِ کارشناس هوشمند است */
+  function answerAsk(text) {
+    const th = S.d.thread, id = S.th;
+    dlg("🚨 پاسخ به کارشناس هوشمند", `<p>این پاسخ برای <b>${esc(th.supplier)}</b> هم فرستاده می‌شود و کارشناس هوشمند با آن مذاکره را ادامه می‌دهد؛ بعد از فرستادن، این گفت‌وگو دوباره برای شما بسته است.</p><div class="sp-sms">${esc(text)}</div><div class="sp-err" data-err></div>`,
+      [{ label: "بفرست", cls: "primary", fn: async () => {
+        await api(`/sp/thread/${id}/msg`, { body: { text } });
+        S.drafts[id] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
+        await shut("پاسخ شما رفت و کارشناس هوشمند مذاکره را ادامه می‌دهد. گزارشِ کارش در «پنل پشتیبانی» است.", "✅ پاسخ فرستاده شد");
+      } }, { label: "انصراف" }]);
+  }
   async function act(bid, action) {
     const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
     if (action === "approve") {
@@ -501,7 +531,7 @@
       /* گروه‌بندی و دُمِ حباب‌ها به پیامِ قبلی بسته است، پس فهرست از نو رسم می‌شود؛ اگر کاربر بالاتر را می‌خواند
          سرِ جایش می‌ماند، مگر پیامِ تازه از خودِ ما باشد */
       const atEnd = c.scrollHeight - c.scrollTop - c.clientHeight < 90;
-      c.innerHTML = msgsHtml();
+      c.innerHTML = feedHtml();
       if (atEnd || fresh.some((m) => m.who === "e")) c.scrollTop = c.scrollHeight;
       bind();
     } else {
@@ -529,7 +559,10 @@
       }
       const ck = $(".ph-clock"); if (ck) ck.textContent = clock();
       if (++tick % 4 === 0) await refreshLists();
-    } catch (e) { if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); } }
+    } catch (e) {
+      if (e.status === 401 && !inTg) { clearInterval(timer); TP.session.clear(); renderLogin("نشست شما تمام شده است؛ دوباره وارد شوید."); }
+      else if (e.status === 423 && S.th) await shut(e.message);
+    }
     S.busy = false;
   }
 

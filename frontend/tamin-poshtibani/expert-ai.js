@@ -1,10 +1,11 @@
 /* ============================================================
-   تب «🤖 کارشناس هوشمند» در پنل کارشناس (مهر ۱۴۰۵) — فقط برای کارشناسی که کارشناس هوشمند است.
+   داشبوردِ «🤖 کارشناس هوشمند» — از فاز ۲ در پنل پشتیبانی، برای هر کارشناس (پیش‌تر تبِ پنل کارشناسِ «test»).
 
    روشن/خاموشِ خودکار، تنظیمات، کارها (مرحله‌ها، نامزدها با شماره و تیکِ «پنل»، گفت‌وگوها، رخدادها)، فراخوانی‌های
    مدل با پرامپتِ دقیق و تخمین هزینه، پیامک‌ها (رفت یا نه و چرا) و دفترچهٔ شماره‌ها. کارشناس هوشمند فقط به شماره‌ای
    پیامک می‌دهد که این‌جا تیکِ «پنل» خورده باشد.
-   expert.js فقط TP_AI.view / wire / load را صدا می‌زند؛ وضعیتِ این تب همین‌جاست.
+   میزبان (support-panel.js) TP_AI.configure({api, download, active, chat}) را صدا می‌زند تا مسیرها به
+   /support/ai/<کارشناس>/… بروند؛ بعد view / wire / load. وضعیتِ این داشبورد همین‌جاست.
    ============================================================ */
 (function () {
   "use strict";
@@ -12,13 +13,20 @@
   const A = { st: null, run: null, runId: null, sub: "runs", calls: null, sms: null, phones: null, q: "", err: "", timer: 0, render: null, loading: false };
   const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️" };
   const ST_CHIP = { prep: "info", search: "info", work: "warn", closing: "info", done: "ok", paused: "bad", ended: "bad" };
-  const TH_FA = { invited: "دعوت شد", active: "در مذاکره", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };
+  const TH_FA = { invited: "دعوت شد", active: "در مذاکره", ask: "🚨 پرسش از کارشناس", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };
   const VIA_FA = { textbee: "✅ پیامک رفت", sim: "🧪 شبیه‌سازی", hold: "⛔ نرفت" };
   const p2 = (n) => String(n).padStart(2, "0");
   const when = (ms) => { if (!ms) return "—"; const d = new Date(ms); return `${TP.fmtD(ms)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
   const usd = (x) => (x == null ? "—" : `$${Number(x).toFixed(Number(x) < 1 ? 4 : 2)}`);
   const tok = (c) => (c.in_tok == null ? "—" : `${M(c.in_tok)} / ${M(c.out_tok)}${c.cache_read ? ` · کش ${M(c.cache_read)}` : ""}`);
-  const api = TP.api;
+  /* پیکربندیِ میزبان: api(path, opt) با مسیرهای /ai/…، download(path, name)، active(S) و chat(run) (دکمهٔ مکاتبات) */
+  const C = {
+    api: (p, o) => TP.api(p, o),
+    download: null,
+    active: (S) => S.screen === "list" && S.tab === "ai",
+    chat: () => `<a class="tp-btn sm" href="correspond.html">💬 صفحهٔ مکاتبات</a>`,
+  };
+  const api = (p, o) => C.api(p, o);
 
   /* ---------- بارگذاری ---------- */
   async function load() {
@@ -41,7 +49,7 @@
   function tick(S) {
     clearTimeout(A.timer);
     A.timer = setTimeout(async () => {
-      if (S.screen !== "list" || S.tab !== "ai") return;
+      if (!C.active(S)) return;
       const f = document.activeElement;
       if (!(f && /INPUT|TEXTAREA|SELECT/.test(f.tagName))) await load();
       tick(S);
@@ -52,13 +60,14 @@
   function vHead() {
     const g = A.st.agent;
     return `<div class="tp-card tp-pane"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
-        <h2 style="margin:0">🤖 کارشناس هوشمند</h2>
-        <span class="chip ${g.on ? "ok" : "bad"}">${g.on ? "خودکار روشن است" : "خودکار خاموش است"}</span>
-        <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "⏸ خاموش کردن خودکار" : "▶️ روشن کردن خودکار"}</button>
+        <h2 style="margin:0">🤖 کارشناس هوشمند${A.st.expert ? ` — ${esc(A.st.expert.label || A.st.expert.name)}` : ""}</h2>
+        <span class="chip ${g.on ? "ok" : ""}">${g.on ? "🤖 هوشمند" : "✋ دستی"}</span>
+        <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "✋ دستی کن" : "🤖 هوشمند کن"}</button>
         <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
-      <p class="lead" style="margin-top:10px">با روشن بودن، هر ارجاعی که از این لحظه به این کارشناس برسد خودکار پیش می‌رود: بررسی سوابق و جستجوی هوشمند، دعوت با قالب استاندارد،
-        مذاکره و تصمیم (تأیید، برگشت، رد، تأیید نهایی)، و در پایان جدول کمیسیون و نامه. <b>پیامک فقط به شماره‌ای می‌رود که این‌جا تیکِ «پنل» خورده باشد</b> — تیک را فقط شما می‌زنید.
-        خاموش کردن هر کاری را همان لحظه نگه می‌دارد.</p>
+      <p class="lead" style="margin-top:10px"><b>🤖 هوشمند:</b> هر ارجاعی که از این لحظه به این کارشناس برسد خودکار پیش می‌رود — بررسی سوابق و جستجوی هوشمند، دعوت با قالب استاندارد،
+        مذاکره و تصمیم (تأیید، برگشت، رد، تأیید نهایی)، و در پایان جدول کمیسیون و نامه — و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است
+        مگر وقتی «🚨 پرسش از کارشناس» دارد. کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید. <b>پیامک فقط به شماره‌ای می‌رود که تیکِ «پنل» خورده باشد</b> — تیک را فقط انسان می‌زند.
+        <b>✋ دستی:</b> همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شود و قفل‌ها برداشته می‌شوند.</p>
       <div class="kpi"><div class="k"><b>کارها</b><span>${M(A.st.runs.length)}</span></div><div class="k"><b>فراخوانیِ مدل</b><span>${M(A.st.totals.n)}</span></div>
         <div class="k"><b>تخمینِ کلِ هزینه</b><span dir="ltr">${usd(A.st.totals.cost)}</span></div>
         ${g.on_at ? `<div class="k"><b>روشن از</b><span style="font-size:.9rem">${when(g.on_at)}</span></div>` : ""}</div>
@@ -88,7 +97,7 @@
       r.state === "work" ? `<button class="tp-btn sm" data-ai-act="finish" title="اگر هر قلم دست‌کم یک پیشنهادِ تأییدنهایی‌شده دارد، جدول کمیسیون و نامه همین حالا آماده شود">🏁 پایان مذاکره و تحویل</button>` : "",
       !r.finished_at ? `<button class="tp-btn sm" data-ai-act="retry">🔁 تلاش دوباره</button>` : "",
       r.md ? `<button class="tp-btn sm" data-ai-dl="/ai/runs/${r.id}/md" data-name="پرونده-مذاکره-${esc(r.request_id)}.md">📄 پروندهٔ مذاکره (md)</button>` : "",
-      `<a class="tp-btn sm" href="correspond.html">💬 صفحهٔ مکاتبات</a>`,
+      C.chat(r),
       r.closing && r.closing.commission_no ? `<button class="tp-btn sm" data-ai-dl="/assignments/${r.assignment_id}/sheet/commission" data-name="کمیسیون-${esc(r.request_id)}.xlsx">📊 جدول کمیسیون</button>` : "",
       r.closing && r.closing.letter && r.closing.letter.file ? `<button class="tp-btn sm" data-ai-dl="/assignments/${r.assignment_id}/letter/file" data-name="نامه-${esc(r.request_id)}.docx">✉️ نامه</button>` : "",
     ].filter(Boolean).join(" ");
@@ -107,7 +116,7 @@
         <td class="rt" style="white-space:normal">${phoneCell(c)}</td></tr>`).join("");
     const ths = d.threads.map((t) => `<tr><td class="rt">${esc(t.supplier)}</td><td dir="ltr">${esc(t.phone || "—")}</td><td>${esc(t.source_fa)}</td><td>${esc(TH_FA[t.state] || t.state)}</td>
         <td class="num">${M(t.turns)}</td><td class="num">${M(t.replies)}</td><td>${esc((t.bundles || []).join("، ") || "—")}</td>
-        <td class="rt muted" style="white-space:normal;max-width:340px">${esc(t.memo || "")}${t.fails ? ` <span class="chip bad">${M(t.fails)} شکست</span>` : ""}</td></tr>`).join("");
+        <td class="rt muted" style="white-space:normal;max-width:340px">${t.state === "ask" && t.ask ? `<b style="color:#fcd34d">🚨 ${esc(t.ask.q || "")}</b><br>` : ""}${esc(t.memo || "")}${t.fails ? ` <span class="chip bad">${M(t.fails)} شکست</span>` : ""}</td></tr>`).join("");
     const log = d.log.map((l) => `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--tp-line)"><span class="muted num" style="min-width:110px">${when(l.at)}</span>
         <span>${KIND_ICON[l.kind] || "•"}</span><span style="white-space:pre-wrap">${esc(l.body)}</span></div>`).join("");
     const rep = r.closing && r.closing.report;
@@ -201,6 +210,7 @@
   const fail = (e) => TP.modal("نشد", esc(e.message), null, "باشد", "");
   async function act(fn) { try { await fn(); await load(); } catch (e) { fail(e); } }
   async function download(path, name) {
+    if (C.download) return C.download(path, name).catch(fail);
     try {
       const res = await fetch((window.TAMIN_POSHTIBANI_CONFIG.apiBase || "/tamin-poshtibani/api") + path, { headers: TP.authHeaders() });
       if (!res.ok) { let m = `خطای ${res.status}`; try { m = (await res.json()).error || m; } catch (_) { /* متن */ } throw new Error(m); }
@@ -256,10 +266,10 @@
     Q("[data-ai-sub]").forEach((b) => b.onclick = async () => { A.sub = b.dataset.aiSub; if (!b.dataset.aiRuncalls && A.sub !== "runs" && A.sub !== "calls") { /* هر زیرتب داده‌اش را دارد */ } await load(); });
     Q("[data-ai-mode]").forEach((b) => b.onclick = () => {
       const on = b.dataset.aiMode === "on";
-      TP.modal(on ? "روشن کردنِ خودکار" : "خاموش کردنِ خودکار", on
-        ? "از این لحظه هر ارجاعی که به این کارشناس برسد خودکار پیش می‌رود (سوابق، جستجوی هوشمند، دعوت، مذاکره و تصمیم). پیامک فقط به شماره‌های تیک‌خوردهٔ «پنل» می‌رود. روشن شود؟"
-        : "همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شوند تا دوباره روشن کنید. خاموش شود؟",
-      () => act(() => api("/ai/mode", { method: "PUT", body: { on } })), on ? "روشن شود" : "خاموش شود");
+      TP.modal(on ? "🤖 هوشمند" : "✋ دستی", on
+        ? "از این لحظه هر ارجاعی که به این کارشناس برسد خودکار پیش می‌رود (سوابق، جستجوی هوشمند، دعوت، مذاکره و تصمیم) و همین کارها برای خودِ کارشناس قفل می‌شود. پیامک فقط به شماره‌های تیک‌خوردهٔ «پنل» می‌رود. هوشمند شود؟"
+        : "همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شوند و قفل‌های کارشناس برداشته می‌شوند؛ از این پس خودش دستی کار می‌کند. دستی شود؟",
+      () => act(() => api("/ai/mode", { method: "PUT", body: { on } })), on ? "هوشمند شود" : "دستی شود");
     });
     Q("[data-ai-run]").forEach((x) => x.onclick = async () => { A.runId = +x.dataset.aiRun; A.run = null; await load(); });
     Q("[data-ai-start]").forEach((b) => b.onclick = () => TP.modal("شروعِ کارشناس هوشمند", "کار روی این ارجاع از سوابق و جستجوی هوشمند شروع می‌شود (جستجوی هوشمند هزینهٔ مدل دارد). شروع شود؟",
@@ -291,5 +301,5 @@
     };
   }
 
-  window.TP_AI = { view, wire, load, reset: () => { A.st = null; A.run = null; A.runId = null; } };
+  window.TP_AI = { view, wire, load, reset: () => { A.st = null; A.run = null; A.runId = null; A.calls = null; A.sms = null; A.phones = null; A.sub = "runs"; A.err = ""; }, configure: (o) => Object.assign(C, o) };
 })();
