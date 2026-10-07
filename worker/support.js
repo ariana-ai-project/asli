@@ -204,8 +204,8 @@ export async function supportExpert(env, id) {
  */
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
-  asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "item_terms"] },
+  asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual", "ai_sup", "ai_sup_item"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "item_terms", "ai_prop_ok", "ai_prop_no", "ai_sup_cfg"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
   support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes"] },
 };
@@ -232,7 +232,11 @@ const EV_FA = {
   ai_start: "🚀 شروعِ قلم با فهرستِ دعوتِ کارشناس — ساختار منجمد شد", ai_pick_more: "📨 دعوت از انتخاب‌های تازهٔ فهرستِ دعوت",
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ قلم (🔒/🔓) */
   item_terms: "📋 شرایط خریدِ قلم (🔒/🔓)",
+  /* فاز ۴ب گام ۴: «👁 حالت تأیید» — تیکِ مدیر، درخواستِ تأییدشدهٔ کارشناس، تنظیماتش و تصمیمش روی پیشنهادهای کارشناس هوشمند */
+  ai_sup: "تیکِ «👁 حالت تأیید»ِ ارجاع (مدیر)", ai_sup_item: "«👁 حالت تأیید»ِ اقلام با تأییدِ مدیر", ai_sup_cfg: "👁 تنظیماتِ «حالت تأیید»ِ کارشناس",
+  ai_prop_ok: "✅ تأییدِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "❌ ردِ پیشنهادِ کارشناس هوشمند",
 };
+const PROP_KIND_FA = { reply: "پاسخ", final: "تأیید نهایی", act: "تصمیمِ بسته" };
 const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
 const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
@@ -260,6 +264,10 @@ function evText(r, p) {
     if (Array.isArray(p.off_top) && p.off_top.length) bits.push(`برداشتنِ پنج نفر اول: ${p.off_top.map((x) => `${short(x.name, 40)}${x.why ? ` — ${short(x.why, 80)}` : ""}`).join("؛ ")}`);
   }
   if (r.kind === "ai_rules") bits.push(`${faN((p.unit || 0) + (p.total || 0) + (p.qty || 0))} بازه · مهلت ${faN(p.wait || 0)} ساعت`);
+  if (r.kind === "ai_sup") bits.push(p.on ? `روشن — ${faN(p.eligible || 0)} قلمِ مجاز` : "خاموش");
+  if (r.kind === "ai_sup_item" && Array.isArray(p.items)) bits.push(`${faN(p.items.length)} قلم${p.reason ? ` — علت: ${short(p.reason, 100)}` : ""}`);
+  if (r.kind === "ai_sup_cfg") bits.push(`پیامِ چت ${p.chat ? "با تأیید" : "خودکار"} · تصمیمِ بسته ${p.bundle ? "با تأیید" : "خودکار"}`);
+  if (["ai_prop_ok", "ai_prop_no"].includes(r.kind)) bits.push(`${PROP_KIND_FA[p.kind] || p.kind || ""}${p.reason ? ` — علت: ${short(p.reason, 120)}` : ""}`);
   if (r.kind === "import") bits.push(p.closeCandidates ? `${faN(p.closeCandidates)} نامزدِ بستن` : "");
   if (r.kind === "delete") bits.push(p.all ? "همهٔ میز" : `${faN(p.requests || 0)} درخواست`);
   if (r.kind === "dispatch" && p.days) bits.push(`مهلت ${faN(p.days)} روز کاری`);

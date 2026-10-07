@@ -29,7 +29,8 @@ import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { limitsOf, combineLocks, violations, violationError, LIMIT_FA } from "./terms-locks.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
-import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_ASK_SQL, AI_REJECTED_SQL } from "./ai-lock.js";
+import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
+import { manualBundles, propsOf } from "./ai-supervise.js";
 import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
 import { storage, storageKey } from "./storage.js";
@@ -660,7 +661,7 @@ export function threadOut(th, side) {
     id: th.id, request_id: th.request_id, supplier: th.supplier_name, demo: !!th.demo, expert: th.expert_label || th.expert_name,
     phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
-      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null } : null } : {}),
+      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch } : null } : {}),
   };
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */
@@ -727,6 +728,8 @@ export async function threadFull(env, th, side) {
     labels: FILE_LABELS,
     /* pf_read: «خوانش هوشمند پیش‌فاکتور» روشن است (مسیرِ پیشین) یا خاموش — پیش‌فاکتورِ تولیدی و تأیید نهاییِ مستقیم (فاز ۴) */
     pf_read: pfRead,
+    /* گام ۴: «👁 با تأیید» — پیشنهادهای کارشناس هوشمند (معطل و تصمیم‌های آخر) و بسته‌هایی که تصمیمشان با خودِ کارشناس است */
+    ...(side === "e" && th.ai && th.ai.watch ? { watch: { ...(await propsOf(env, th.id)), manual: [...(await manualBundles(env, th.id))] } } : {}),
   };
 }
 
@@ -735,7 +738,10 @@ export async function poll(env, th, side, since) {
   const from = Math.max(0, int(since) || 0, clearedUpTo(th, side));
   const rows = (await env.DB.prepare(`SELECT * FROM sp_msgs WHERE thread_id=? AND id>?${side === "s" ? " AND kind!='note'" : ""} ORDER BY id LIMIT 100`).bind(th.id, from).all()).results || [];
   if (rows.some((m) => m.who !== side)) await markSeen(env, th.id, side);
-  return { msgs: rows.map((m) => msgFor(msgOut(m), side)), rev: th.rev };
+  /* «👁 با تأیید» (گام ۴): نشانِ پیشنهادهای معطل — اگر عوض شد، صفحه گفت‌وگو را دوباره می‌خواند */
+  const pr = side === "e" && th.ai && th.ai.watch
+    ? await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS m, COUNT(*) AS n FROM ai_props WHERE thread_id=? AND state='pending'").bind(th.id).first().catch(() => null) : null;
+  return { msgs: rows.map((m) => msgFor(msgOut(m), side)), rev: th.rev, ...(pr ? { prop: `${pr.m}:${pr.n}` } : {}) };
 }
 
 /**
@@ -779,7 +785,9 @@ export async function expertThreads(env, ex) {
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_items
       FROM assignments a JOIN requests r ON r.id=a.request_id
       WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL ORDER BY a.dispatched_at DESC LIMIT 80`).bind(ex.id).all(),
-    env.DB.prepare(`SELECT x.thread_id, x.state, x.ask_json, r.expert_id AS run_expert, r.review_json FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id
+    env.DB.prepare(`SELECT x.thread_id, x.state, x.ask_json, r.expert_id AS run_expert, r.review_json, ${AI_SUP_SQL("x.thread_id")} AS sup,
+        (SELECT COUNT(*) FROM ai_props q WHERE q.thread_id=x.thread_id AND q.state='pending') AS props
+      FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id
       JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=?`).bind(ex.id).all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT mode FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null),
   ]);
@@ -789,7 +797,9 @@ export async function expertThreads(env, ex) {
     const x = aiBy.get(id);
     if (!x) return { ai: null, ask: null };
     if (!aiOn || x.run_expert !== ex.id || aiRejected(x.review_json)) return { ai: "open", ask: null };
-    return x.state === "ask" ? { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "" } : { ai: "locked", ask: null };
+    if (x.state === "ask") return { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "", props: x.sup ? x.props || 0 : 0 };
+    /* گام ۴: «👁 با تأیید» — باز و فقط‌خواندنی، با شمارِ پیشنهادهای منتظرِ کارشناس */
+    return x.sup ? { ai: "watch", ask: null, props: x.props || 0 } : { ai: "locked", ask: null };
   };
   const byA = new Map();
   for (const a of asg.results || []) byA.set(a.id, { assignment_id: a.id, request_id: a.request_id, party: a.party, open_items: a.open_items, threads: [], unread: 0, waiting: 0, last_at: 0 });
@@ -800,13 +810,15 @@ export async function expertThreads(env, ex) {
     /* گفت‌وگوی بسته: نخوانده و منتظرِ تصمیمش به حسابِ کارشناس نمی‌آید */
     const shut = A.ai === "locked";
     g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: shut ? null : t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
-      waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask });
+      waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask, props: A.props || 0 });
     if (!shut) { g.unread += t.unread; g.waiting += t.waiting; }
     if (A.ai === "ask") g.asks = (g.asks || 0) + 1;
+    if (A.props) g.props = (g.props || 0) + A.props;
     g.last_at = Math.max(g.last_at, t.last_at);
   }
-  const requests = [...byA.values()].sort((a, b) => (b.asks || 0) - (a.asks || 0) || (b.threads.length ? 1 : 0) - (a.threads.length ? 1 : 0) || b.last_at - a.last_at);
-  return { requests, unread: requests.reduce((s, g) => s + g.unread, 0), waiting: requests.reduce((s, g) => s + g.waiting, 0), asks: requests.reduce((s, g) => s + (g.asks || 0), 0), ai: aiOn };
+  const requests = [...byA.values()].sort((a, b) => (b.asks || 0) - (a.asks || 0) || (b.props || 0) - (a.props || 0) || (b.threads.length ? 1 : 0) - (a.threads.length ? 1 : 0) || b.last_at - a.last_at);
+  return { requests, unread: requests.reduce((s, g) => s + g.unread, 0), waiting: requests.reduce((s, g) => s + g.waiting, 0), asks: requests.reduce((s, g) => s + (g.asks || 0), 0),
+    props: requests.reduce((s, g) => s + (g.props || 0), 0), ai: aiOn };
 }
 
 /**
@@ -836,8 +848,9 @@ export async function expertInbox(env, ex, since) {
   return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs, asks: askList.length, ask_list: askList };
 }
 /* گفت‌وگوی بستهٔ کارشناس هوشمند (ai-lock.js) برای کارشناس اعلان و شمرده نمی‌شود — t: sp_threads، a: assignments */
+/* گام ۴: گفت‌وگوی «👁 با تأیید» باز است و اعلان و شمرده می‌شود */
 const AI_SHUT_SQL = `NOT EXISTS (SELECT 1 FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id AND g.mode='on'
-  WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask' AND NOT ${AI_REJECTED_SQL("r")})`;
+  WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask' AND NOT ${AI_REJECTED_SQL("r")} AND NOT ${AI_SUP_SQL("x.thread_id")})`;
 
 /** اقلام باز یک ارجاعِ همین کارشناس — برای پنجرهٔ «ارسال استعلام» صفحهٔ مکاتبات */
 export async function sendableItems(env, ex, aid) {
@@ -858,6 +871,7 @@ export async function postMsg(env, th, side, text, meta = null, kind = "text") {
   if (!body) throw new HttpError("پیام خالی است.");
   if (body.length > 3000) throw new HttpError("پیام خیلی بلند است (حداکثر ۳۰۰۰ نویسه).");
   const k = kind === "note" && side === "e" ? "note" : "text";
+  watchMsg(th, side, meta);
   const t = now();
   const [r] = await env.DB.batch([msgStmt(env, th.id, side, k, body, meta, t), touchStmt(env, th.id, t, false)]);
   /* پاسخِ کارشناسِ انسانی به «پرسش از کارشناس»: گفت‌وگو دوباره دستِ کارشناس هوشمند می‌رود (ai-lock.js) */
@@ -871,6 +885,7 @@ export async function postMsg(env, th, side, text, meta = null, kind = "text") {
  * (برای فرستادنِ همان صدا به کارشناس در تلگرام).
  */
 export async function postVoice(env, th, side, v) {
+  watchMsg(th, side, null);
   const t = now();
   const body = T(v.text).slice(0, 4000);
   const meta = {
@@ -1171,6 +1186,18 @@ export async function fileFor(env, who, fileId) {
   return f;
 }
 
+/**
+ * «👁 با تأیید» (فاز ۴ب گام ۴، ai-supervise.js): گفت‌وگو برای کارشناس فقط‌خواندنی است — پیامِ خودش با «❌ رد»ِ پیشنهاد می‌رود (meta.own)
+ * یا پاسخِ «🚨 پرسش از کارشناس» است؛ تصمیمِ بسته فقط برای بسته‌ای که پیشنهادِ کارشناس هوشمند را برایش رد کرده.
+ */
+function watchMsg(th, side, meta) {
+  if (side === "e" && th && th.ai && th.ai.watch && !th.ai.ask && !(meta && (meta.ai || meta.own))) throw new HttpError(AI_WATCH_MSG, 423, { ai_watch: true });
+}
+async function watchOnly(env, th, b, byAi) {
+  if (byAi || !th.ai || !th.ai.watch) return;
+  if ((await manualBundles(env, th.id)).has(b.id)) return;
+  throw new HttpError(AI_WATCH_MSG, 423, { ai_watch: true });
+}
 /* «🚨 پرسش از کارشناس» (ai-lock.js): گفت‌وگو فقط برای پاسخِ کارشناس باز است — تصمیم دربارهٔ بسته‌ها و پیش‌فاکتورها با کارشناس هوشمند */
 function askOnly(th, byAi) {
   if (!byAi && th.ai && th.ai.ask) throw new HttpError("🚨 این گفت‌وگو فقط برای پاسخ به «پرسش از کارشناس» باز است؛ تصمیم دربارهٔ بسته‌ها و پیش‌فاکتورها با کارشناس هوشمند است.", 423, { ai_locked: true });
@@ -1326,9 +1353,11 @@ const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? a
  * خوانش هوشمند خاموش (فاز ۴): approve همان final است و final از هر بستهٔ باز، با مقدارهای خودِ تأمین‌کننده (supplierRes) و
  * پیش‌فاکتورِ Word تولیدی در جدول پیش‌فاکتورها.
  */
-export async function decide(env, ex, bundleId, action0, { comment, ai } = {}) {
+export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex, ai: !!ai }, bundleId);
-  askOnly(th, ai);
+  /* sup: تصمیمِ خودِ کارشناس همراهِ «❌ رد»ِ پیشنهادِ «👁 حالت تأیید» (ai-agent.js:propDecide) */
+  askOnly(th, ai || sup);
+  await watchOnly(env, th, b, ai || sup);
   /* خوانش هوشمند خاموش (فاز ۴، تصمیم ۱۳): مرحلهٔ «تأیید و درخواست پیش‌فاکتور» نیست — «تأیید» همان تأیید نهایی است */
   const pfRead = await pfReadOn(env);
   const action = !pfRead && action0 === "approve" ? "final" : action0;
@@ -1468,6 +1497,7 @@ function matchRows(ai) {
 export async function acceptRows(env, ex, bundleId, { keys, on = true, all = false, byAi = false } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex, ai: !!byAi }, bundleId);
   askOnly(th, byAi);
+  await watchOnly(env, th, b, byAi);
   if (b.state !== "proforma") throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
   const ai = aiOf(b);
   if (!ai) throw new HttpError("اول «خوانش هوشمند» را بزنید تا جدول تطابق ساخته شود.", 409);
@@ -1492,6 +1522,7 @@ export async function aiTarget(env, ex, bundleId) {
   if (!(await pfReadOn(env))) throw new HttpError("«خوانش هوشمند پیش‌فاکتور» در پنل پشتیبانی خاموش است: پیش‌فاکتور را سامانه از فیلدهای تأمین‌کننده می‌سازد و تأیید نهایی با همان مقدارهاست.", 409);
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
   askOnly(th, false);
+  await watchOnly(env, th, b, false);
   if (b.state !== "proforma" || !b.pf_key) throw new HttpError("خوانش هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);
   return { b, th, lines: await bundleLines(env, b.id), terms: termsOf(b) };
 }

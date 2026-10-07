@@ -11,7 +11,7 @@
   "use strict";
   const TP = window.TP, esc = TP.esc, M = TP.M;
   const A = { st: null, run: null, runId: null, sub: "runs", calls: null, sms: null, phones: null, q: "", err: "", timer: 0, render: null, loading: false };
-  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️", ask: "🚨", handover: "⚠️", decide: "🏁" };
+  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️", ask: "🚨", handover: "⚠️", decide: "🏁", prop: "👁" };
   const REVIEW_FA = { new: "📥 تحویل شد — منتظرِ بررسیِ پشتیبانی", ok: "✓ کمیسیون تأیید شد", rejected: "✗ پشتیبانی رد کرد" };
   const ST_CHIP = { prep: "info", search: "info", work: "warn", closing: "info", done: "ok", paused: "bad", ended: "bad" };
   const TH_FA = { invited: "دعوت شد", active: "در مذاکره", ask: "🚨 پرسش از کارشناس", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };
@@ -118,7 +118,7 @@
         <td class="rt" style="white-space:normal">${phoneCell(c)}</td></tr>`).join("");
     const ths = d.threads.map((t) => `<tr><td class="rt">${esc(t.supplier)}</td><td dir="ltr">${esc(t.phone || "—")}</td><td>${esc(t.source_fa)}</td><td>${esc(TH_FA[t.state] || t.state)}</td>
         <td class="num">${M(t.turns)}</td><td class="num">${M(t.replies)}</td><td>${esc((t.bundles || []).join("، ") || "—")}</td>
-        <td class="rt muted" style="white-space:normal;max-width:340px">${t.state === "ask" && t.ask ? `<b style="color:#fcd34d">🚨 ${esc(t.ask.q || "")}</b><br>` : ""}${esc(t.memo || "")}${t.fails ? ` <span class="chip bad">${M(t.fails)} شکست</span>` : ""}</td></tr>`).join("");
+        <td class="rt muted" style="white-space:normal;max-width:340px">${t.state === "ask" && t.ask ? `<b style="color:#fcd34d">🚨 ${esc(t.ask.q || "")}</b><br>` : ""}${t.props ? `<span class="chip info" title="پیشنهادِ «👁 حالت تأیید» منتظرِ تأییدِ کارشناس">👁 ${M(t.props)} پیشنهاد منتظر</span> ` : ""}${esc(t.memo || "")}${t.fails ? ` <span class="chip bad">${M(t.fails)} شکست</span>` : ""}</td></tr>`).join("");
     const log = d.log.map((l) => `<div style="display:flex;gap:8px;padding:3px 0;border-bottom:1px solid var(--tp-line)"><span class="muted num" style="min-width:110px">${when(l.at)}</span>
         <span>${KIND_ICON[l.kind] || "•"}</span><span style="white-space:pre-wrap">${esc(l.body)}</span></div>`).join("");
     const rep = r.closing && r.closing.report;

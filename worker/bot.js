@@ -51,7 +51,7 @@ import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone 
 import { pushMsgs as spPush } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
-import { aiTick } from "./ai-agent.js";
+import { aiTick, propDecide } from "./ai-agent.js";
 import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus, expertAppUrl } from "./tg-nav.js";
@@ -591,6 +591,37 @@ async function onFlowText(env, api, chat, ex, f, text) {
   if (f.kind === "tpl") return onTemplateText(env, api, chat, ex, f, d, text);
   /* «📨 ارسال» به تأمین‌کننده: شمارهٔ تازه یا برچسبِ شماره */
   if (f.kind === "spsend") return onSpSendText(env, api, chat, ex, f, d, text);
+  /* «👁 حالت تأیید»: ردِ پیشنهادِ کارشناس هوشمند — علت، بعد پیامِ خودِ کارشناس یا «-» */
+  if (f.kind === "prop") return onPropText(env, api, chat, ex, f, d, text);
+  return { ok: true };
+}
+
+/**
+ * ردِ پیشنهادِ کارشناس هوشمند از کارتِ بات (فاز ۴ب گام ۴): علتِ اجباری (به کارشناس هوشمند می‌رسد)؛ در «🏁 تأیید نهایی» سرنوشتِ بسته
+ * با دکمه (pb:)؛ بعد پیامِ خودِ کارشناس برای تأمین‌کننده یا «-» برای هیچ — برای «↩️ برگشت» همان پیام اجباری است.
+ */
+async function onPropText(env, api, chat, ex, f, d, text) {
+  if (f.step === "need_reason") {
+    d.reason = text.slice(0, 1000);
+    if (d.kind === "final") {
+      await saveFlow(env, f.id, d, "need_bact");
+      await api.sendMessage(chat, "با همین بسته چه شود؟", [[{ text: "↩️ برگشت با پیامِ شما", callback_data: `pb:${f.id}:r` }],
+        [{ text: "❌ ردِ بسته", callback_data: `pb:${f.id}:x` }], [{ text: "⏸ فعلاً بماند (تصمیم با خودم)", callback_data: `pb:${f.id}:k` }]]);
+      return { ok: true };
+    }
+    await spAsk(env, ex, f, d, "need_own");
+    await api.sendMessage(chat, "پیامِ خودتان برای تأمین‌کننده را بنویسید — به‌جای پیشنهادِ کارشناس هوشمند می‌رود — یا «-» برای هیچ پیامی.");
+    return { ok: true };
+  }
+  if (f.step !== "need_own") return { ok: true };
+  const own = text.trim() === "-" ? "" : text.slice(0, 2900);
+  if (d.bundle === "return" && !own) { await api.sendMessage(chat, "برای «↩️ برگشت» پیامِ برگشت لازم است: بنویسید تأمین‌کننده چه چیزی را اصلاح کند."); return { ok: true }; }
+  await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+  try {
+    await propDecide(env, ex, d.prop, { action: "no", reason: d.reason, text: own, bundle: d.bundle });
+    const fate = d.kind !== "final" ? "" : { return: " بسته با پیامِ شما برای اصلاح برگشت.", reject: " بسته رد شد.", keep: " بسته فعلاً ماند؛ تصمیمش در مکاتبات با خودِ شماست." }[d.bundle] || "";
+    await api.sendMessage(chat, `❌ <b>پیشنهاد رد شد</b> و توضیحتان به کارشناس هوشمند رسید.${fate}${own && !(d.kind === "final" && d.bundle !== "keep") ? " پیامِ شما برای تأمین‌کننده رفت." : own ? "" : " هیچ پیامی نرفت."}`);
+  } catch (e) { await api.sendMessage(chat, `ردِ پیشنهاد ثبت نشد: ${esc(e.message)}`); }
   return { ok: true };
 }
 
@@ -2957,7 +2988,8 @@ const MODE_TTL = 24 * 3600000;
 const INPUT_STEPS = `((kind='field' AND step='need_value') OR (kind='notes' AND step='need_notes')
   OR (kind='manual' AND step='need_supplier') OR (kind='smart' AND step IN ('need_brand','need_specs','need_notes2'))
   OR (kind='tpl' AND step IN ('need_title','need_body','edit_title','edit_body'))
-  OR (kind='spsend' AND step IN ('need_phone','need_label')))`;
+  OR (kind='spsend' AND step IN ('need_phone','need_label'))
+  OR (kind='prop' AND step IN ('need_reason','need_own')))`;
 
 /** آخرین پرسشِ متنیِ باز همین کارشناس */
 async function inputFlow(env, expertId) {
@@ -3034,8 +3066,10 @@ async function onCallback(env, cq, apiIn) {
       try {
         const res = await approveDecision(env, did, "telegram");
         await ack("تأیید شد ✅");
-        if (cq.message) await api.editMessageText(chat, cq.message.message_id,
-          (cq.message.text ? esc(cq.message.text) : "") + `\n\n<b>✅ تأیید شد</b> — ${M(res.closed || 0)} قلم بسته شد${res.fullyClosed ? "؛ درخواست به‌کل بسته شد." : "."}`).catch(() => {});
+        /* «انجام دستی» و «👁 حالت تأیید» قلمی نمی‌بندند — همان اقلام را عوض می‌کنند */
+        const done = res.sup != null ? `${M(res.sup)} قلم «👁 با تأیید» شد.` : res.manual != null ? `${M(res.manual)} قلم دستی شد.`
+          : `${M(res.closed || 0)} قلم بسته شد${res.fullyClosed ? "؛ درخواست به‌کل بسته شد." : "."}`;
+        if (cq.message) await api.editMessageText(chat, cq.message.message_id, (cq.message.text ? esc(cq.message.text) : "") + `\n\n<b>✅ تأیید شد</b> — ${done}`).catch(() => {});
       } catch (e) { await ack(String(e.message || "نشد").slice(0, 180), true); }
       await drainOutbox(env, 10).catch(() => {});
       return { ok: true };
@@ -3065,6 +3099,47 @@ async function onCallback(env, cq, apiIn) {
   const parts = T(cq.data).split(":");
   const num = (i) => parseInt(parts[i], 10);
   const mid = cq.message && cq.message.message_id;
+
+  /* فاز ۴ب گام ۴ («👁 حالت تأیید»): کارتِ پیشنهادِ کارشناس هوشمند — prop:<id>:ok | prop:<id>:no */
+  if (action === "prop") {
+    const pid = num(1), card = (cq.message && cq.message.text ? esc(cq.message.text) : "👁 پیشنهادِ کارشناس هوشمند");
+    if (parts[2] === "ok") {
+      try {
+        await propDecide(env, ex, pid, { action: "ok" });
+        await ack("تأیید شد و رفت ✅");
+        if (mid) await api.editMessageText(chat, mid, `${card}\n\n<b>✅ تأیید شد و برای تأمین‌کننده رفت.</b>`).catch(() => {});
+      } catch (e) {
+        await ack(String(e.message || "نشد").slice(0, 180), true);
+        if (mid && e.status === 409) await api.editMessageText(chat, mid, `${card}\n\n<i>${esc(e.message)}</i>`).catch(() => {});
+      }
+      return { ok: true };
+    }
+    if (parts[2] === "no") {
+      const p = await env.DB.prepare(`SELECT p.id, p.kind, p.state FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id JOIN assignments a ON a.id=t.assignment_id
+          WHERE p.id=? AND a.expert_id=?`).bind(pid, ex.id).first().catch(() => null);
+      if (!p) { await ack("این پیشنهاد پیدا نشد.", true); return { ok: true }; }
+      if (p.state !== "pending") { await ack("این پیشنهاد دیگر منتظرِ شما نیست.", true); return { ok: true }; }
+      await closeInputs(env, ex.id);
+      await newFlow(env, ex, chat, "prop", "need_reason", null, { prop: pid, kind: p.kind });
+      await ack("علتِ رد را بنویسید");
+      await api.sendMessage(chat, "❌ <b>ردِ پیشنهاد</b>\n\nعلتِ رد را بنویسید — همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.");
+      return { ok: true };
+    }
+    await ack();
+    return { ok: true };
+  }
+  /* ردِ «🏁 تأیید نهایی»: بسته برگردد، رد شود یا بماند — pb:<flowId>:r|x|k */
+  if (action === "pb") {
+    const f = await ownFlow(env, ex, num(1), "prop");
+    if (!f || f.done_at || f.step !== "need_bact") { await ack("این گفت‌وگو تمام شده است.", true); return { ok: true }; }
+    const d = flowData(f);
+    d.bundle = { r: "return", x: "reject", k: "keep" }[parts[2]] || "keep";
+    await spAsk(env, ex, f, d, "need_own");
+    await ack();
+    await api.sendMessage(chat, d.bundle === "return" ? "↩️ پیامِ برگشت برای تأمین‌کننده را بنویسید (اجباری) — بسته با همین پیام برای اصلاح برمی‌گردد."
+      : `${d.bundle === "reject" ? "❌ بسته رد می‌شود." : "⏸ بسته فعلاً می‌ماند و تصمیمش با خودِ شماست (در مکاتبات)."}\n\nپیامِ خودتان برای تأمین‌کننده را بنویسید، یا «-» برای هیچ پیامی.`);
+    return { ok: true };
+  }
 
   if (action === "seen" && id) {
     /* مالکیت (INV-11): فقط ارجاع خودِ همین کارشناس */

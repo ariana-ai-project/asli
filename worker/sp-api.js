@@ -15,7 +15,7 @@ import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { ensureSpWebhook } from "./sp-bot.js";
 import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
-import { aiKick, autoDecide } from "./ai-agent.js";
+import { aiKick, autoDecide, propDecide } from "./ai-agent.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -315,5 +315,10 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     return json({ ok: true, ai });
   }
   if (path === "/sp/x/tglink" && m === "POST") return json(await C.expertLink(env, ex.id));
+  /* فاز ۴ب گام ۴ («👁 حالت تأیید»): تأیید یا ردِ پیشنهادِ کارشناس هوشمند — {action: ok|no, reason, text, bundle} */
+  if ((mm = /^\/sp\/x\/prop\/(\d+)$/.exec(path)) && m === "POST") {
+    const r = await propDecide(env, ex, mm[1], await readJson(request));
+    return json({ ok: true, state: r.state, thread_id: r.thread_id });
+  }
   throw new HttpError("مسیر پیدا نشد.", 404);
 }

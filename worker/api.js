@@ -58,6 +58,7 @@ import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
+import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -294,6 +295,13 @@ const COLUMN_MIGRATIONS = [
   ["items", "ai_start_by", "TEXT"],
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ هر قلم با 🔒/🔓 (worker/terms-locks.js) */
   ["items", "terms_json", "TEXT"],
+  /* فاز ۴ب گام ۴: «👁 حالت تأیید» — تیکِ مدیر روی ارجاع، حالتِ هر قلم و تنظیماتِ کارشناس (worker/ai-supervise.js) */
+  ["assignments", "sup_on", "INTEGER"],
+  ["assignments", "sup_set_at", "INTEGER"],
+  ["items", "sup_on", "INTEGER"],
+  ["items", "sup_at", "INTEGER"],
+  ["items", "sup_by", "TEXT"],
+  ["experts", "sup_json", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -668,6 +676,10 @@ async function importApply(env, body) {
    id     = جستجوی مستقیم یک شماره درخواست، خارج از بازه و فارغ از باز/بسته
    limit/offset = صفحه‌بندی برای بازه‌های بزرگ؛ total برای نمایش «n از m» برمی‌گردد
    scope  = open (پیش‌فرض: قلم باز دارد یا در ۳۰ روز اخیر ارسال شده) | all */
+const supHeadsOf = (rows) => {
+  const r = (rows || []).find((x) => x.key === "aiModes");
+  try { return Object.values(JSON.parse((r && r.value) || "{}").heads || {}).filter((h) => h && h.supervise === true).length; } catch (_) { return 0; }
+};
 async function desk(env, url) {
   const from = T(url.searchParams.get("from")), id = T(url.searchParams.get("id"));
   const scope = url.searchParams.get("scope") || "open";
@@ -712,6 +724,8 @@ async function desk(env, url) {
     experts: expertRows(expRes.results || []),
     settings: settingsFromRows(setRes.results || []),
     ai_experts: (aiRes.results || []).map((r) => r.expert_id),
+    /* فاز ۴ب گام ۴: نوع قلم‌هایی که پشتیبانی «مجازِ حالت تأیید» کرده — بی هیچ، تیکِ «👁» در میز مدیر نیست */
+    sup_heads: supHeadsOf(setRes.results),
     ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [] } : {}),
   };
   if (!reqs.length) return { requests: [], ...extra };
@@ -1024,6 +1038,52 @@ async function setAiTick(env, body) {
   return { ok: true, on, changed: true };
 }
 
+/**
+ * فاز ۴ب گام ۴: تیکِ «👁 حالت تأیید»ِ مدیر روی ارجاع — روشن یا خاموش، بی توضیح (پاسخ ۲۰). روشن فقط وقتی کارشناس هوشمندِ کارشناس روشن
+ * است، ارجاع «🤖 هوشمند» است و پشتیبانی دست‌کم یک نوع قلم را «مجازِ تأیید» کرده: قلمِ مجازِ سپرده‌شده همان لحظه حالت تأیید می‌گیرد و
+ * بقیه با «🚀 شروع» (ai-agent.js:startItem). خاموش، حالت تأییدِ همهٔ اقلامِ ارجاع را برمی‌دارد — درخواستِ تأییدشدهٔ کارشناس هم —،
+ * پیشنهادهای معطل کنار می‌روند و کارشناس هوشمند همان دورها را بی تأیید می‌زند.
+ */
+async function setSupTick(env, body) {
+  const aid = int(body.assignment_id); if (!aid) throw new HttpError("assignment_id لازم است.");
+  const on = body.on !== false;
+  const a = await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, a.sup_on, e.telegram_chat, g.mode
+      FROM assignments a JOIN experts e ON e.id=a.expert_id LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?`).bind(aid).first();
+  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
+  if (on) {
+    if (a.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ «حالت تأیید» معنا ندارد.", 409);
+    if (a.ai_on === 0) throw new HttpError("این ارجاع دستی است؛ اول تیکِ «🤖 هوشمند» را بزنید.", 409);
+    if (a.closed_at) throw new HttpError("این ارجاع بسته است.", 409);
+    if (!(await supHeads(env))) throw new HttpError("پشتیبانی هنوز هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است («🧭 حالت اقلام»ِ پنل پشتیبانی).", 409);
+  }
+  const its = (await env.DB.prepare("SELECT id, code, title, norm_json, ai_start_at, sup_on FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
+  const modes = await itemModes(env, its);
+  const ok = its.filter((i) => (modes.get(i.id) || {}).supervise);
+  const started = ok.filter((i) => i.ai_start_at && Number(i.sup_on) !== 1).map((i) => i.id);
+  const lit = its.filter((i) => Number(i.sup_on) === 1).length;
+  if ((Number(a.sup_on) === 1) === on && (on ? !started.length : !lit)) return { ok: true, on, changed: false, eligible: ok.length };
+  const t = now();
+  const stmts = [env.DB.prepare("UPDATE assignments SET sup_on=?, sup_set_at=? WHERE id=?").bind(on ? 1 : 0, t, aid)];
+  if (on) {
+    if (started.length) stmts.push(env.DB.prepare(`UPDATE items SET sup_on=1, sup_at=?, sup_by='manager' WHERE id IN (${started.map(() => "?").join(",")})`).bind(t, ...started));
+  } else {
+    stmts.push(env.DB.prepare("UPDATE items SET sup_on=0, sup_at=?, sup_by='manager' WHERE assignment_id=? AND sup_on=1").bind(t, aid),
+      /* گفت‌وگوهایی که پیشنهادِ معطل داشتند دوباره دورِ کارشناس هوشمند را می‌خورند — حالا بی تأیید؛ بعد پیشنهادها کنار می‌روند */
+      env.DB.prepare(`UPDATE ai_threads SET retry_at=? WHERE state NOT IN ('closed','ask') AND thread_id IN (SELECT p.thread_id FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id
+        WHERE t.assignment_id=? AND p.state='pending')`).bind(t, aid),
+      env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='manager' WHERE state='pending' AND thread_id IN (SELECT id FROM sp_threads WHERE assignment_id=?)").bind(t, aid),
+      env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE assignment_id=? AND finished_at IS NULL").bind(t, aid));
+  }
+  stmts.push(ev(env, "manager", "ai_sup", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, eligible: ok.length }));
+  if (a.dispatched_at && a.telegram_chat) {
+    stmts.push(queueStmt(env, `aisup:${aid}:${t}`, a.telegram_chat, on
+      ? `👁 <b>درخواست ${esc(a.request_id)} با «حالت تأیید» است</b>\n\nمدیر اجازه داد: در اقلامی که نوعشان مجاز است، کارشناس هوشمند هر کاری را که در «👁 حالت تأیید»ِ حسابتان «با تأیید» گذاشته‌اید، اول به شما پیشنهاد می‌کند — در مکاتبات و همین بات.`
+      : `🤖 <b>«حالت تأیید»ِ درخواست ${esc(a.request_id)} خاموش شد</b>\n\nمدیر «👁» را برداشت؛ کارشناس هوشمند از این پس بی تأیید پیش می‌رود و پیشنهادهای معطل کنار رفتند.`));
+  }
+  await env.DB.batch(stmts);
+  return { ok: true, on, changed: true, eligible: ok.length };
+}
+
 /* ارسال: ساعت‌شمار شروع می‌شود + رویداد اعلان برای هر کارشناس */
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
@@ -1208,9 +1268,12 @@ async function assignmentDetail(env, aid, who) {
   ai.handoff = { total: open.length, ok: open.filter((i) => normConfirmed(i)).length, frozen: open.filter((i) => i.frozen_at).length, pending: !!(owned && !owned.run_id) };
   /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر */
   ai.on = a.ai_on !== 0; ai.note = a.ai_note || null;
+  /* گام ۴: تیکِ «👁»ِ مدیر و تنظیماتِ «حالت تأیید»ِ کارشناس (worker/ai-supervise.js) */
+  if (aiMode) ai.sup = { on: Number(a.sup_on) === 1, cfg: await getSup(env, a.expert_id) };
   if (aiMode && open.length) {
     const modes = await itemModes(env, open);
-    const waiting = new Set(decisions.filter((d) => d.action === "manual").flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
+    const idsOf = (act) => new Set(decisions.filter((d) => d.action === act).flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
+    const waiting = idsOf("manual"), supWait = idsOf("supervise");
     const inRun = new Set();
     if (owned && owned.run_id) {
       const r = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(owned.run_id).first();
@@ -1222,7 +1285,7 @@ async function assignmentDetail(env, aid, who) {
       let pk = null;
       try { const p = i.pick_json ? JSON.parse(i.pick_json) : null; if (p) { const L = p.list || []; pk = { n: L.length, on: L.filter((e) => e.on).length, go: L.filter((e) => e.on && e.go).length }; } } catch (_) { /* بی فهرست */ }
       return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id),
-        started_at: i.ai_start_at || null, pick: pk };
+        started_at: i.ai_start_at || null, pick: pk, sup_on: Number(i.sup_on) === 1, sup_wait: supWait.has(i.id) };
     });
   }
   /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
@@ -1647,6 +1710,12 @@ async function route(request, env, ctx) {
       requireManager(request, env);
       return json(await addExpert(env, await readJson(request)));
     }
+    /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ کارشناس — کدام کارِ کارشناس هوشمند پیش از رفتن تأییدِ او را بخواهد (worker/ai-supervise.js) */
+    if (path === "/me/supervise" && (m === "GET" || m === "PUT")) {
+      const ex = await requireExpert(request, env);
+      if (m === "GET") return json({ cfg: await getSup(env, ex.id), fa: SUP_FA, heads: await supHeads(env) });
+      return json({ ok: true, cfg: await saveSup(env, ex.id, await readJson(request)) });
+    }
     /* کارشناس کد ورود خودش را عوض می‌کند (صفحهٔ «حساب من»): کد فعلی لازم است */
     if (path === "/me/code" && m === "PUT") {
       const ex = await requireExpert(request, env);
@@ -1792,6 +1861,7 @@ async function route(request, env, ctx) {
     if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/assign/ai" && m === "POST") { const r = await (requireManager(request, env), setAiTick(env, await readJson(request))); flush(env, ctx, 1); return json(r); }
+    if (path === "/assign/sup" && m === "POST") { const r = await (requireManager(request, env), setSupTick(env, await readJson(request))); flush(env, ctx, 1); return json(r); }
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
@@ -1813,7 +1883,7 @@ async function route(request, env, ctx) {
     /* طرح «خرید هوشمند» فاز ۱: ساختارِ همهٔ اقلام منجمد و کار به کارشناس هوشمند سپرده می‌شود (worker/ai-agent.js:aiHandoff) */
     if ((mm = /^\/assignments\/(\d+)\/handoff$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
-      const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
+      const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on, sup_on FROM assignments WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
       if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
       const b = await readJson(request).catch(() => ({}));
       return json(await aiHandoff(env, a, `expert:${ex.id}`, { include: Array.isArray(b && b.include) ? b.include.map((x) => int(x)).filter(Boolean) : [] }));

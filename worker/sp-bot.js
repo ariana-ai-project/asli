@@ -318,7 +318,12 @@ async function expertMessage(env, row, msg, text) {
   if (!row.focus) { await P.send(env, row, "اول یک گفت‌وگو را از «📋 لیست درخواست‌ها» یا «🏷 لیست تأمین‌کنندگان» باز کنید."); return { ok: true }; }
   const th = await C.threadFor(env, row.focus, { expert: ex }).catch(() => null);
   if (!th) { P.setFocus(row, null); await P.send(env, row, "این گفت‌وگو دیگر در دسترس شما نیست."); return { ok: true }; }
-  const r = await C.postMsg(env, th, "e", text);
+  /* «👁 با تأیید» (فاز ۴ب گام ۴): پیامِ خودِ کارشناس فقط با «❌ رد»ِ پیشنهاد — کارتِ پیشنهاد در بات کارشناسان است */
+  const r = await C.postMsg(env, th, "e", text).catch(async (e) => {
+    if (e && e.status === 423) { await P.send(env, row, `<i>${esc(e.message)}</i>`); return null; }
+    throw e;
+  });
+  if (!r) return { ok: true };
   await P.pushMsgs(env, th, r.msgs);
   return { ok: true };
 }

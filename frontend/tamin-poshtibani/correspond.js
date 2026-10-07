@@ -12,6 +12,9 @@
    فاز ۴ طرح «خرید هوشمند، کارشناس ناظر»: «خوانش هوشمند پیش‌فاکتور» (کلیدِ پنل پشتیبانی) پیش‌فرض خاموش است — بسته بعد از بررسی
    یکراست «🏁 تأیید نهایی» می‌شود (مقدارهای خودِ تأمین‌کننده و پیش‌فاکتورِ سامانه، با «👁 پیش‌فاکتور»، چاپ به PDF و Word) یا با
    توضیح برمی‌گردد؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است. عنوان و لایه‌های 🔓ِ پیشنهادیِ تأمین‌کننده کنارِ هر قلم.
+   فاز ۴ب گام ۴ («👁 حالت تأیید»): گفت‌وگوی «با تأیید» باز و فقط‌خواندنی است — پیشنهادهای کارشناس هوشمند (پاسخ، تأیید نهایی،
+   تصمیمِ بسته) بالای کادرِ پیام با «✅ تأیید» (بی توضیح) و «❌ رد» (توضیحِ اجباری، بعد پیامِ خودِ کارشناس یا هیچ) می‌آیند؛
+   پیامی که کارشناس در کادر می‌نویسد همان «پیامِ خودش» در ردِ پیشنهادِ معطل است. ?th=<گفت‌وگو> همان گفت‌وگو را باز می‌کند.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -65,8 +68,10 @@
   }
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
-  const S = { me: null, reqs: [], unread: 0, waiting: 0, asks: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {}, pfRead: false };
+  /* کارتِ پیشنهاد در بات کارشناسان (فاز ۴ب گام ۴) با ?th=<گفت‌وگو> همین‌جا را باز می‌کند */
+  const qTh = +new URLSearchParams(location.search).get("th") || null;
+  const S = { me: null, reqs: [], unread: 0, waiting: 0, asks: 0, props: 0, aid: +ss.get("sp.aid") || null, th: qTh || +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
+    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {}, pfRead: false, propSig: null };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -109,7 +114,7 @@
   /* ---------- بارگذاری ---------- */
   async function loadList() {
     const d = await api("/sp/x/threads");
-    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
+    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.props = d.props || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
     S.pfRead = d.pf_read === true;
   }
   async function boot() {
@@ -157,6 +162,8 @@
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
     if (typeof d.pf_read === "boolean") S.pfRead = d.pf_read;
+    const pend = (d.watch && d.watch.pending) || [];
+    S.propSig = d.watch ? `${pend.reduce((m, p) => Math.max(m, p.id), 0)}:${pend.length}` : null;
     const f = findThread(S.th); if (f) { S.unread -= f.t.unread; f.g.unread -= f.t.unread; f.t.unread = 0; S.aid = f.g.assignment_id; }
     ss.set("sp.th.e", String(S.th)); ss.set("sp.aid", String(S.aid || ""));
     render();
@@ -167,7 +174,7 @@
   function reqList() {
     const withT = S.reqs.filter((g) => g.threads.length), rest = S.reqs.filter((g) => !g.threads.length);
     const item = (g) => `<button class="sp-item ${S.aid === g.assignment_id ? "on" : ""}" data-aid="${g.assignment_id}">
-      <div class="t"><span>${esc(g.request_id)}</span>${g.asks ? `<span class="sp-badge ask" title="کارشناس هوشمند در این درخواست از شما سؤال دارد">🚨 ${fa(g.asks)}</span>` : ""}${badge(g.unread)}${badge(g.waiting, "wait")}</div>
+      <div class="t"><span>${esc(g.request_id)}</span>${g.asks ? `<span class="sp-badge ask" title="کارشناس هوشمند در این درخواست از شما سؤال دارد">🚨 ${fa(g.asks)}</span>` : ""}${propBadge(g.props)}${badge(g.unread)}${badge(g.waiting, "wait")}</div>
       <div class="m">${esc(g.party || "")}${g.threads.length ? ` · ${fa(g.threads.length)} تأمین‌کننده` : ` · ${fa(g.open_items)} قلم باز`}</div></button>`;
     return (withT.map(item).join("") || `<div class="sp-empty">هنوز گفت‌وگویی نیست.</div>`)
       + (rest.length ? `<div class="sp-muted" style="padding:8px 12px">درخواست‌های باز بدون گفت‌وگو</div>${rest.map(item).join("")}` : "");
@@ -180,10 +187,13 @@
       ? `<button class="sp-item sp-ai-lock" data-th-lock="${t.id}" title="گفت‌وگوی کارشناس هوشمند — برای شما بسته است">
       <div class="t"><span>🔒 ${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}</div>
       <div class="m">🤖 دستِ کارشناس هوشمند · ${fa(t.lines)} قلم</div></button>`
-      : `<button class="sp-item ${S.th === t.id ? "on" : ""} ${t.ai === "ask" ? "sp-ask" : ""}" data-th="${t.id}">
-      <div class="t"><span>${t.ai === "ask" ? "🚨 " : ""}${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}${badge(t.unread)}${badge(t.waiting, "wait")}</div>
-      <div class="m">${t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`}</div></button>`).join("");
+      : `<button class="sp-item ${S.th === t.id ? "on" : ""} ${t.ai === "ask" ? "sp-ask" : ""} ${t.ai === "watch" ? "sp-watch" : ""}" data-th="${t.id}">
+      <div class="t"><span>${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "👁 " : ""}${esc(t.supplier)}</span>${t.demo ? `<span class="sp-tag">فرضی</span>` : ""}${propBadge(t.props)}${badge(t.unread)}${badge(t.waiting, "wait")}</div>
+      <div class="m">${t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 کارشناس هوشمند، با تأییدِ شما · ${fa(t.lines)} قلم`
+        : `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`}</div></button>`).join("");
   }
+  /* «👁 حالت تأیید»: شمارِ پیشنهادهای کارشناس هوشمند که منتظرِ تأیید یا ردِ شمایند */
+  const propBadge = (n) => (n ? `<span class="sp-badge prop" title="پیشنهادِ کارشناس هوشمند منتظرِ تأیید یا ردِ شما">👁 ${fa(n)}</span>` : "");
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
     /* پیش‌نویسِ نیمه‌کارهٔ هر گفت‌وگو با رسمِ دوباره (تغییر پهنا، تصمیم روی بسته) پاک نمی‌شود */
@@ -194,7 +204,7 @@
       : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
     app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols ${phoneMode ? "ph-mode" : ""}" data-view="${S.view}">
-      <aside class="sp-col reqs"><h4>درخواست‌ها ${S.asks ? `<span class="sp-badge ask" title="«پرسش از کارشناس»های بی‌پاسخ">🚨 ${fa(S.asks)}</span>` : ""}${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
+      <aside class="sp-col reqs"><h4>درخواست‌ها ${S.asks ? `<span class="sp-badge ask" title="«پرسش از کارشناس»های بی‌پاسخ">🚨 ${fa(S.asks)}</span>` : ""}${propBadge(S.props)}${badge(S.unread)}${badge(S.waiting, "wait")}</h4><div class="scroll" data-reqs>${reqList()}</div></aside>
       <aside class="sp-col sups"><h4><button class="tp-btn xs sp-back" data-back="req" aria-label="بازگشت به درخواست‌ها">→</button>${g ? `تأمین‌کنندگانِ ${esc(g.request_id)}` : "تأمین‌کنندگان"}</h4>
         <div class="scroll" data-sups>${supList()}</div>${g && g.open_items ? `<div class="sp-colfoot"><button class="tp-btn primary sm" data-send>➕ ارسال استعلام</button></div>` : ""}</aside>
       <section class="sp-main ${screenInMain ? "is-screen" : ""}">${main}</section>
@@ -233,7 +243,30 @@
   /** «🚨 پرسش از کارشناس»: سؤال و راهنما در انتهای گفت‌وگو، درست بالای کادرِ پیام */
   const askOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.ask) || null;
   const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید؛ برای ${esc(S.d.thread.supplier)} هم فرستاده می‌شود و بعدش گفت‌وگو دوباره دستِ کارشناس هوشمند است.</i></div>` : ""; };
-  const feedHtml = () => msgsHtml() + askNote();
+  /* «👁 با تأیید» (فاز ۴ب گام ۴): پیشنهادهای معطلِ کارشناس هوشمند در انتهای گفت‌وگو، درست بالای کادرِ پیام */
+  const watchOf = () => (S.d && S.d.watch) || null;
+  const ACT_FA = { approve: "✅ تأییدِ مشخصات", return: "↩️ برگشت برای اصلاح", reject: "❌ رد", accept_rows: "☑️ پذیرشِ مغایرت", final: "🏁 تأیید نهایی" };
+  function bundleSum(bid) {
+    const b = S.d.bundles.find((x) => x.id === bid);
+    if (!b) return "";
+    const ls = b.line_ids.map((id) => S.d.lines.find((l) => l.id === id)).filter(Boolean);
+    return `${ls.map((l) => `• ${esc(l.title)} — ${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال`).join("\n")}\nجمع: <b>${money(ls.reduce((s, l) => s + (l.total || 0), 0))}</b> ریال`;
+  }
+  function propCard(p) {
+    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>👁 پیشنهادِ کارشناس هوشمند — ${esc(p.kind_fa)}${p.bundle_id ? ` بستهٔ ${fa(p.bundle_id)}` : ""}</b>
+      ${p.kind === "final" ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
+      ${p.kind === "act" ? `<div class="ph-prop-body">${(p.actions || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${fa(a.bundle_id)}${a.comment ? `: «${esc(a.comment)}»` : ""}`).join("\n")}</div>` : ""}
+      ${p.body ? `<div class="ph-prop-body">${esc(p.body)}</div>` : ""}
+      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ تأیید</button><button class="tp-btn danger sm" data-prop-no="${p.id}">❌ رد</button></div>
+      <i>تأیید توضیح نمی‌خواهد. «❌ رد» توضیح می‌خواهد و بعدش پیامِ خودتان می‌رود یا هیچ.</i></div>`;
+  }
+  const propsNote = () => {
+    const w = watchOf();
+    if (!w) return "";
+    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>👁 با تأییدِ شما</b>کارشناس هوشمند این گفت‌وگو را پیش می‌برد؛ هر پیشنهادش همین‌جا و در بات منتظرِ تأیید یا ردِ شما می‌آید.</div>`;
+    return w.pending.map(propCard).join("");
+  };
+  const feedHtml = () => msgsHtml() + askNote() + propsNote();
   const msgsHtml = () => PH.feed(S.d.msgs, {
     mine: (m) => m.who === "e",
     ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
@@ -260,7 +293,7 @@
         acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
           <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
-      composer: { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : `پیام به ${th.supplier}`, draft: S.th },
+      composer: { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "👁 پیامِ خودتان — با «❌ رد»ِ پیشنهاد می‌رود" : `پیام به ${th.supplier}`, draft: S.th },
     });
   }
   const composerState = PH.grow;
@@ -331,6 +364,8 @@
     if (!S.pfRead) return h + genActs(b) + `</div>`;
     if (b.pf) h += `<div class="sp-row" style="margin-top:6px">📄 پیش‌فاکتور: <b>${esc(b.pf.name || "")}</b><button class="tp-btn xs" data-pf="${b.id}">👁 دیدن</button></div>`;
     if (b.ai && b.state === "proforma") h += matchTable(b);
+    const wa = ["pending", "approved", "proforma"].includes(b.state) ? watchActs(b) : null;
+    if (wa != null) return h + wa + `</div>`;
     if (b.state === "pending") {
       h += `<div class="sp-actions"><button class="tp-btn primary" data-act="approve">✅ تأیید و درخواست پیش‌فاکتور</button><button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>`;
     } else if (b.state === "approved") {
@@ -354,10 +389,24 @@
     let h = `<div class="sp-row" style="margin-top:6px"><button class="tp-btn xs" data-gen="${b.id}">👁 پیش‌فاکتور</button><button class="tp-btn xs" data-gen-word="${b.id}">⬇️ Word</button>
       ${b.pf ? `<span class="sp-muted">📎 پیوستِ تأمین‌کننده: ${esc(b.pf.name || "")}</span><button class="tp-btn xs" data-pf="${b.id}">دیدنِ پیوست</button>` : ""}</div>`;
     if (!open) return h;
+    const wa = watchActs(b);
+    if (wa != null) return h + wa;
     h += b.ready ? `<div class="sp-ok">✅ همهٔ فیلدهای اجباری و شرایط پر است — «🏁 تأیید نهایی» پیشنهاد را با همین مقدارها به تب استعلامات می‌برد و از تأمین‌کننده تشکر می‌کند.</div>`
       : `<div class="sp-err">⛔ هنوز کامل نیست — برگردانید تا تأمین‌کننده پر کند:\n${(b.problems || []).map((p) => `• ${esc(p)}`).join("\n")}</div>`;
     return h + `<div class="sp-actions"><button class="tp-btn ${b.ready ? "primary" : ""}" data-act="final" ${b.ready ? "" : "disabled"}>🏁 تأیید نهایی</button>
       <button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>`;
+  }
+  /**
+   * «👁 با تأیید»: تصمیمِ بسته با پیشنهادِ کارشناس هوشمند و تأییدِ شماست — مگر بسته‌ای که پیشنهادش را رد کرده‌اید (manual)؛ null یعنی
+   * دکمه‌های همیشگیِ تصمیم.
+   */
+  function watchActs(b) {
+    const w = watchOf();
+    if (!w || (w.manual || []).includes(b.id)) return null;
+    const p = (w.pending || []).find((x) => x.bundle_id === b.id || (x.actions || []).some((a) => +a.bundle_id === b.id));
+    return p ? `<div class="sp-watch-box">👁 پیشنهادِ کارشناس هوشمند: <b>${esc(p.kind_fa)}</b> — منتظرِ تأیید یا ردِ شما
+        <div class="sp-actions"><button class="tp-btn primary" data-prop-ok="${p.id}">✅ تأیید</button><button class="tp-btn danger" data-prop-no="${p.id}">❌ رد</button></div></div>`
+      : `<div class="sp-muted" style="margin-top:6px">👁 تصمیمِ این بسته با پیشنهادِ کارشناس هوشمند و تأییدِ شماست.</div>`;
   }
   function countOpen(b) {
     let n = 0;
@@ -383,6 +432,12 @@
       ${l.note ? `<div class="sp-muted">📝 توضیح تأمین‌کننده: ${esc(l.note)}</div>` : ""}${fileLinks(l.id) ? `<div style="margin-top:6px">${fileLinks(l.id)}</div>` : ""}
       ${l.quote_id ? `<div class="sp-ok">✓ ${S.pfRead ? "با مقدارهای پیش‌فاکتور" : "با مقدارهای تأمین‌کننده و پیش‌فاکتورِ سامانه"} در تب استعلامات است.</div>` : ""}</div>`).join("");
     if (done.length) h += `<h3 class="sp-h3">تصمیم‌های قبلی</h3>${done.map((b) => bundleCard(b, byId)).join("")}`;
+    /* «👁 با تأیید»: ده تصمیمِ آخرِ شما روی پیشنهادهای کارشناس هوشمند */
+    const w = watchOf();
+    if (w && (w.done || []).length) {
+      h += `<h3 class="sp-h3">👁 پیشنهادهای اخیرِ کارشناس هوشمند</h3><div class="sp-card sp-props-done">${w.done.map((p) => `<div>${esc(p.state_fa)} — ${esc(p.kind_fa)}${p.bundle_id ? ` بستهٔ ${fa(p.bundle_id)}` : ""}
+        <span class="sp-muted">${when(p.decided_at || p.created_at)}</span>${p.reason ? `<div class="r">علت: ${esc(p.reason)}</div>` : ""}${p.own ? `<div class="r">پیامِ شما: ${esc(p.own)}</div>` : ""}</div>`).join("")}</div>`;
+    }
     return h;
   }
 
@@ -400,6 +455,8 @@
     $$("[data-gen]").forEach((b) => { b.onclick = () => pfDialog(+b.dataset.gen); });
     $$("[data-gen-word]").forEach((b) => { b.onclick = () => downloadDocx(+b.dataset.genWord).catch((e) => say(e.message)); });
     $$("[data-act]").forEach((b) => { b.onclick = () => act(+b.closest("[data-b]").dataset.b, b.dataset.act); });
+    $$("[data-prop-ok]").forEach((b) => { b.onclick = () => propOk(+b.dataset.propOk, b); });
+    $$("[data-prop-no]").forEach((b) => { b.onclick = () => propNo(+b.dataset.propNo); });
     $$("[data-acc]").forEach((c) => {
       c.onchange = async () => {
         const bid = +c.closest("[data-b]").dataset.b;
@@ -435,7 +492,14 @@
         const text = inp.value.trim(); if (!text) return;
         send.disabled = true;
         if (askOf()) { send.disabled = false; return answerAsk(text); }
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); } catch (e) { if (e.status === 423) return shut(e.message); say(e.message); }
+        /* «👁 با تأیید»: پیامِ خودِ کارشناس همان «پیامِ جایگزین»ِ ردِ آخرین پیشنهادِ معطل است */
+        if (watchOf()) {
+          send.disabled = false;
+          const p = (watchOf().pending || []).slice().reverse().find((x) => x.kind !== "final") || (watchOf().pending || []).slice(-1)[0];
+          return p ? propNo(p.id, text) : say("این گفت‌وگو را کارشناس هوشمند با تأییدِ شما پیش می‌برد و الان پیشنهادی منتظرِ شما نیست؛ پیامِ خودتان را با «❌ رد»ِ پیشنهادِ بعدی بفرستید.", "👁 با تأییدِ شما");
+        }
+        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); }
+        catch (e) { if (e.status === 423 && !(e.data && e.data.ai_watch)) return shut(e.message); say(e.message); if (e.data && e.data.ai_watch) await loadThread().catch(() => {}); }
         composerState(inp); inp.focus();
       };
       send.onclick = go;
@@ -453,6 +517,39 @@
         S.drafts[id] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
         await shut("پاسخ شما رفت و کارشناس هوشمند مذاکره را ادامه می‌دهد. گزارشِ کارش در «پنل پشتیبانی» است.", "✅ پاسخ فرستاده شد");
       } }, { label: "انصراف" }]);
+  }
+  /* --- «👁 حالت تأیید»: تأیید (بی توضیح) و رد (توضیحِ اجباری، بعد پیامِ خودِ کارشناس یا هیچ) --- */
+  const propOf = (id) => ((watchOf() || {}).pending || []).find((p) => p.id === id) || null;
+  async function propOk(id, btn) {
+    const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
+    if (btn) btn.disabled = true;
+    try { await api(`/sp/x/prop/${id}`, { body: { action: "ok" } }); await afterDecide(); }
+    catch (e) { if (btn) btn.disabled = false; say(e.message, e.status === 409 ? "پیشنهاد کنار رفت" : "نشد"); if (e.status === 409) await afterDecide().catch(() => {}); }
+  }
+  function propNo(id, prefill) {
+    const p = propOf(id);
+    if (!p) return say("این پیشنهاد دیگر منتظرِ شما نیست؛ صفحه تازه شد.", "👁 پیشنهاد");
+    const fin = p.kind === "final", th = S.d.thread, tid = S.th;
+    const d = dlg("❌ ردِ پیشنهادِ کارشناس هوشمند", `<p>چرا؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد (تأمین‌کننده نمی‌بیند).</p>
+      <textarea class="tp-input tp-textarea" data-r style="min-height:70px" placeholder="علتِ رد (اجباری)"></textarea>
+      ${fin ? `<b style="display:block;margin-top:10px">با بستهٔ ${fa(p.bundle_id)} چه شود؟</b>
+        <label class="sp-check"><input type="radio" name="bact" value="return" checked> ↩️ برگشت برای اصلاح، با پیامِ شما</label>
+        <label class="sp-check"><input type="radio" name="bact" value="reject"> ❌ ردِ بسته</label>
+        <label class="sp-check"><input type="radio" name="bact" value="keep"> ⏸ فعلاً بماند — تصمیمش با خودم</label>` : ""}
+      <b style="display:block;margin-top:10px">پیامِ خودتان برای ${esc(th.supplier)} ${fin ? "(برای «برگشت» اجباری)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
+      <textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea><div class="sp-err" data-err></div>`,
+    [{ label: "❌ رد", cls: "danger", fn: async (dd) => {
+      const reason = $("[data-r]", dd).value.trim();
+      if (!reason) throw new Error("علتِ رد را بنویسید.");
+      const text = $("[data-t]", dd).value.trim();
+      const bundle = fin ? ($('input[name="bact"]:checked', dd) || {}).value : undefined;
+      if (bundle === "return" && !text) throw new Error("برای «برگشت» پیامِ برگشت را بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.");
+      await api(`/sp/x/prop/${p.id}`, { body: { action: "no", reason, text, ...(bundle ? { bundle } : {}) } });
+      S.drafts[tid] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
+      await afterDecide();
+    } }, { label: "انصراف" }]);
+    if (prefill) $("[data-t]", d).value = prefill;
+    setTimeout(() => { const r = $("[data-r]", d); if (r) r.focus(); }, 30);
   }
   async function act(bid, action) {
     const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
@@ -617,7 +714,8 @@
         const r = await api(`/sp/poll?t=${S.th}&since=${S.lastMsg}`);
         addMsgs(r.msgs);
         const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
-        if (r.rev !== S.rev && !typing) {
+        /* «👁 با تأیید»: پیشنهادِ تازه یا کنار رفته هم گفت‌وگو را دوباره می‌خواند */
+        if ((r.rev !== S.rev || (r.prop != null && r.prop !== S.propSig)) && !typing) {
           const m = $(".sp-main"), c = $("#chat"); S.mainScroll = m ? m.scrollTop : 0;
           S.chatPos = c && c.scrollHeight - c.scrollTop - c.clientHeight > 90 ? c.scrollTop : null;
           const keep = S.unseen; await loadThread(); S.unseen = phoneMode || S.tab === "chat" ? 0 : keep;

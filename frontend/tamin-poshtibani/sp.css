@@ -189,6 +189,14 @@
 .sp-item.sp-ask .m { color: #fcd34d; }
 .sp-badge.ask { background: rgba(242,194,48,.2); color: #fcd34d; box-shadow: inset 0 0 0 1px rgba(242,194,48,.5); }
 :root[data-theme="light"] .sp-item.sp-ask .m, :root[data-theme="light"] .sp-badge.ask { color: #8a6100; }
+/* فاز ۴ب گام ۴: گفت‌وگوی «👁 با تأیید» و شمارِ پیشنهادهای منتظرِ کارشناس */
+.sp-item.sp-watch { box-shadow: inset -3px 0 0 var(--tp-accent); }
+.sp-item.sp-watch .m { color: var(--tp-accent); }
+.sp-badge.prop { background: rgba(79,140,255,.2); color: #9cc0ff; box-shadow: inset 0 0 0 1px rgba(79,140,255,.55); }
+:root[data-theme="light"] .sp-badge.prop { color: #1f5fd6; }
+.sp-watch-box { margin-top: 8px; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--tp-accent); background: rgba(79,140,255,.08); font-size: .88rem; }
+.sp-props-done { font-size: .82rem; line-height: 1.9; }
+.sp-props-done .r { color: var(--tp-muted, #94a3b8); }
 .sp-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; background: var(--tp-surface); border: 1px solid var(--tp-line); border-radius: var(--tp-radius); padding: 10px 14px; }
 .sp-head h3 { margin: 0; font-size: 1rem; }
 .sp-back { display: none; }
@@ -390,6 +398,14 @@
 .ph-ask i { display: block; font-style: normal; color: var(--ph-muted); font-size: .9em; margin-top: .35em; }
 :root[data-theme="light"] .ph-sys.note { color: #7a5800; background: rgba(242, 194, 48, 0.2); }
 :root[data-theme="light"] .ph-ask b { color: #7a5800; }
+/* پیشنهادِ کارشناس هوشمند در «👁 حالت تأیید»: کارتِ آبی با «✅ تأیید» و «❌ رد» درست بالای کادرِ پیام */
+.ph-ask.ph-prop { background: rgba(79, 140, 255, 0.13); box-shadow: inset 0 0 0 1px rgba(79, 140, 255, 0.55); white-space: normal; }
+.ph-ask.ph-prop b, .ph-ask.ph-watch b { color: #9cc0ff; }
+.ph-ask.ph-watch { background: rgba(79, 140, 255, 0.08); box-shadow: inset 0 0 0 .5px rgba(79, 140, 255, 0.45); }
+.ph-prop-body { white-space: pre-line; margin: .25em 0 .4em; padding: .45em .7em; border-radius: .8em; background: var(--ph-sys-bg); }
+.ph-prop-acts { display: flex; gap: .5em; flex-wrap: wrap; margin-top: .45em; }
+.ph-prop-acts .tp-btn { flex: 1 1 7em; }
+:root[data-theme="light"] .ph-ask.ph-prop b, :root[data-theme="light"] .ph-ask.ph-watch b { color: #1f5fd6; }
 .ph-sys[data-goto-b] { cursor: pointer; }
 
 /* --- لایهٔ کارکردیِ شناور: شیشهٔ مایع --- */

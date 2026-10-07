@@ -20,6 +20,8 @@
  *      پذیرش مغایرت، تأیید نهایی — با همان توابعِ صفحهٔ مکاتبات. پیش‌فاکتور اول با همان «خوانش هوشمند» خوانده می‌شود.
  *      فاز ۴ طرح: «خوانش هوشمند پیش‌فاکتور» پیش‌فرض خاموش است (worker/switches.js) — مدل بسته را با درخواست می‌سنجد و یکراست
  *      «تأیید نهایی» می‌کند (مقدارهای خودِ تأمین‌کننده، پیش‌فاکتورِ تولیدی) یا با توضیح برمی‌گرداند؛ سندی خوانده نمی‌شود.
+ *      فاز ۴ب گام ۴ («👁 حالت تأیید»، worker/ai-supervise.js): در گفت‌وگویی که قلمِ «با تأیید» دارد، پیام یا تصمیمی که کارشناس در
+ *      تنظیماتش «با تأیید» گذاشته پیشنهاد می‌شود (ai_props) و تا تأییدش به تأمین‌کننده نمی‌رسد (propose، propDecide).
  *   ۵. پایان (هر قلم به «حداقلِ استعلامِ» خودش رسیده — قواعدِ پنل پشتیبانی، ai-rules.js — و سکوتِ تأمین‌کنندگان یا «پایان»
  *      از پنل): شرحِ فرایند، چالش‌ها و معیار انتخاب ← نامه، و جدول کمیسیون — به تلگرام کارشناس، و «تحویل» در پنل پشتیبانی
  *      برای تأیید یا ردِ کمیسیون (فاز ۳). اگر در مهلتِ قواعد به حد نرسید، کار به کارشناس «واگذار» می‌شود (handOver).
@@ -59,6 +61,7 @@ import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./rank
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
 import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } from "./ai-modes.js";
 import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary } from "./ai-picks.js";
+import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -83,6 +86,8 @@ CREATE TABLE IF NOT EXISTS ai_calls (id INTEGER PRIMARY KEY, run_id INTEGER, thr
 CREATE INDEX IF NOT EXISTS ix_aicall_exp ON ai_calls(expert_id, id);
 CREATE TABLE IF NOT EXISTS ai_log (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, thread_id INTEGER, at INTEGER NOT NULL, kind TEXT NOT NULL, body TEXT NOT NULL, meta_json TEXT);
 CREATE INDEX IF NOT EXISTS ix_ailog_run ON ai_log(run_id, id);
+CREATE TABLE IF NOT EXISTS ai_props (id INTEGER PRIMARY KEY, run_id INTEGER NOT NULL, thread_id INTEGER NOT NULL, kind TEXT NOT NULL, body TEXT, bundle_id INTEGER, meta_json TEXT, seen_msg INTEGER NOT NULL DEFAULT 0, state TEXT NOT NULL DEFAULT 'pending', reason TEXT, own TEXT, created_at INTEGER NOT NULL, decided_at INTEGER, decided_by TEXT);
+CREATE INDEX IF NOT EXISTS ix_aiprop_th ON ai_props(thread_id, state);
 `;
 
 /* تنظیماتِ هر کارشناس هوشمند (تب کارشناس هوشمند). minInvites فقط هدف است: بی شمارهٔ پنل دعوتی نمی‌رود */
@@ -205,7 +210,10 @@ export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   const inRun = new Set((parse(run && run.data_json, {}).items || []).map((x) => x.id));
   const frozen = its.filter((i) => inRun.has(i.id));
   const t = now();
+  /* گام ۴: تیکِ «👁»ِ مدیر در ارجاع — قلمِ از نوعِ «مجازِ تأیید» با سپردن حالت تأیید می‌گیرد */
+  const supIds = Number(a.sup_on) === 1 ? frozen.filter((i) => (modes.get(i.id) || {}).supervise).map((i) => i.id) : [];
   await env.DB.batch([
+    ...(supIds.length ? [env.DB.prepare(`UPDATE items SET sup_on=1, sup_at=?, sup_by='manager' WHERE id IN (${supIds.map(() => "?").join(",")}) AND COALESCE(sup_on,0)<>1`).bind(t, ...supIds)] : []),
     ...frozen.map((i) => env.DB.prepare("UPDATE items SET frozen_at=?, frozen_by=? WHERE id=? AND frozen_at IS NULL").bind(t, actor, i.id)),
     ...frozen.map((i) => {
       const p = picks.get(i.id);
@@ -251,7 +259,7 @@ const RUN_BUSY = { closing: "کارشناس هوشمند در حالِ بستن�
 
 /** قلمِ کارشناس در درخواستِ هوشمند، با حالتِ نوعش و تنظیماتِ کارشناس هوشمند — همهٔ نگهبان‌های فهرست و شروع */
 async function pickCtx(env, ex, itemId) {
-  const it = await env.DB.prepare(`SELECT i.*, a.id AS aid, a.expert_id, a.dispatched_at, a.closed_at, a.ai_on FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`)
+  const it = await env.DB.prepare(`SELECT i.*, a.id AS aid, a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, a.sup_on AS a_sup FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`)
     .bind(int(itemId)).first();
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (it.expert_id !== ex.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
@@ -357,8 +365,12 @@ export async function startItem(env, ex, itemId) {
     ]);
     return { ok: true, more: true, released: go.length, run_id: run ? run.id : null, ...(await picksOut(env, { ...k, it: { ...it } }, pick)) };
   }
-  const r = await env.DB.prepare(`UPDATE items SET pick_json=?, ai_start_at=?, ai_start_by=?, frozen_at=COALESCE(frozen_at,?), frozen_by=COALESCE(frozen_by,?)
-      WHERE id=? AND ai_start_at IS NULL AND state='open'`).bind(JSON.stringify(pick), t, by, t, by, it.id).run();
+  /* گام ۴: تیکِ «👁»ِ مدیر در ارجاع — قلمِ از نوعِ «مجازِ تأیید» با «🚀 شروع» حالت تأیید می‌گیرد */
+  const supNow = Number(it.a_sup) === 1 && !!m.supervise && Number(it.sup_on) !== 1;
+  if (supNow || Number(it.sup_on) === 1) payload.sup = true;
+  const r = await env.DB.prepare(`UPDATE items SET pick_json=?, ai_start_at=?, ai_start_by=?, frozen_at=COALESCE(frozen_at,?), frozen_by=COALESCE(frozen_by,?),
+      sup_on=COALESCE(?, sup_on), sup_at=COALESCE(?, sup_at), sup_by=COALESCE(?, sup_by)
+      WHERE id=? AND ai_start_at IS NULL AND state='open'`).bind(JSON.stringify(pick), t, by, t, by, supNow ? 1 : null, supNow ? t : null, supNow ? "manager" : null, it.id).run();
   if (!r.meta.changes) throw new HttpError("این قلم همین حالا سپرده شد؛ صفحه را تازه کنید.", 409);
   await env.DB.batch([
     changeStmt(env, { id: it.id, request_id: it.request_id, aid: it.aid }, by, "freeze", parse(it.sugg_json, null), parse(it.norm_json, null), t),
@@ -449,6 +461,7 @@ async function endRun(env, run, why) {
   await env.DB.batch([
     env.DB.prepare("UPDATE ai_runs SET state='ended', finished_at=?, updated_at=? WHERE id=?").bind(t, t, run.id),
     env.DB.prepare("UPDATE ai_threads SET state='closed', updated_at=? WHERE run_id=?").bind(t, run.id),
+    env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='system' WHERE run_id=? AND state='pending'").bind(t, run.id),
     logStmt(env, run.id, null, "run", `کار بسته شد: ${why}`),
   ]);
 }
@@ -821,10 +834,15 @@ async function finishCheck(env, run, { cfg, asg, ex }) {
   const soon = !!(asg && asg.deadline_at && asg.deadline_at - now() < 2 * 3600000);
   const why = run.finish_at ? `دستورِ «پایان مذاکره» از پنل پشتیبانی${covered ? "" : "، با کمتر از حداقلِ استعلام"}` : quiet ? `${faN(cfg.quietMin)} دقیقه بی پیامِ تازه از تأمین‌کنندگان` : soon ? "نزدیکیِ مهلتِ ارجاع" : null;
   run.data.cover = cover.map((c) => ({ id: c.id, title: c.title, n: c.have, need: c.need, why: c.why }));
-  if ((covered && why) || (run.finish_at && some)) {
+  /* گام ۴: پیشنهادِ معطلِ «👁 حالت تأیید» یعنی کار هنوز منتظرِ کارشناس است — فقط «پایان»ِ پشتیبانی بی آن می‌بندد (و کنارشان می‌گذارد) */
+  const waitP = await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_props WHERE run_id=? AND state='pending'").bind(run.id).first().catch(() => null);
+  const props = (waitP && waitP.n) || 0;
+  if (((covered && why) || (run.finish_at && some)) && (!props || run.finish_at)) {
     const short = shortOf(cover);
     run.data.closing = { step: "report", why, ...(short.length ? { short } : {}) };
-    await env.DB.batch([saveData(env, run), next(env, run, 0, "closing"), logStmt(env, run.id, null, "step", short.length
+    await env.DB.batch([saveData(env, run), next(env, run, 0, "closing"),
+      env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='system' WHERE run_id=? AND state='pending'").bind(now(), run.id),
+      logStmt(env, run.id, null, "step", short.length
       ? `پایانِ مذاکره (${why}): این اقلام کمتر از حداقلِ استعلام دارند — ${short.map((c) => `«${c.title}» ${faN(c.have)} از ${faN(c.need)}`).join("، ")}. جدول کمیسیون و نامه آماده می‌شود و کمبود در آن‌ها گفته می‌شود.`
       : `پایانِ مذاکره (${why}): هر قلم به حداقلِ استعلامِ خودش رسید. جدول کمیسیون و نامه آماده می‌شود.`)]);
     return { step: "finish", short: short.length };
@@ -841,7 +859,7 @@ async function finishCheck(env, run, { cfg, asg, ex }) {
     return { step: "handover", short: shortOf(cover).length };
   }
   await env.DB.batch([saveData(env, run), next(env, run, 60000)]);
-  return { step: "wait", covered };
+  return { step: "wait", covered, ...(props ? { props } : {}) };
 }
 
 /**
@@ -907,6 +925,8 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     const pfRead = await pfReadOn(env);
     /* فاز ۴ب گام ۳: روالِ تازه — تصمیمِ بسته با سامانه؛ بسته‌ای که هنگامِ ارسال تأیید نهایی نشد (مثلاً خطای گذرا) همین‌جا، نه با مدل */
     const chat = chatOnlyRun(run, pfRead);
+    /* گام ۴: «👁 حالت تأیید» — آنچه کارشناس «با تأیید» گذاشته پیشنهاد می‌شود (worker/ai-supervise.js) */
+    const sup = await supOfThread(env, threadId);
     if (chat) {
       const a = await autoDecide(env, threadId).catch(() => null);
       if (a && a.msgs.length) await P.pushMsgs(env, th, a.msgs).catch((e) => console.error("ai push", e && e.message));
@@ -939,7 +959,17 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       if (due.length) return toCron(env, run, threadId, `بستهٔ ${due.map((b) => b.id).join("، ")} تصمیم می‌خواهد؛ دورِ فوری کنار رفت و Cron همین گفت‌وگو را با عمقِ فکرِ تب می‌زند.`);
     }
     const maxId = msgs.length ? msgs[msgs.length - 1].id : st.seen_msg;
-    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead, chat });
+    /* گام ۴: پیامِ تازهٔ تأمین‌کننده پیشنهادِ پاسخِ معطل را کنار می‌گذارد؛ پیشنهادِ معطلی که هنوز تازه است یعنی دورِ تازه‌ای لازم نیست */
+    if (sup.on) {
+      const lastS = msgs.reduce((m, x) => (x.who === "s" && x.id > m ? x.id : m), 0);
+      await env.DB.prepare("UPDATE ai_props SET state='stale', decided_at=? WHERE thread_id=? AND state='pending' AND kind IN ('reply','act') AND seen_msg<?").bind(now(), threadId, lastS).run();
+      const wait = await env.DB.prepare("SELECT id FROM ai_props WHERE thread_id=? AND state='pending' AND kind IN ('reply','act') LIMIT 1").bind(threadId).first();
+      if (wait) {
+        await env.DB.prepare("UPDATE ai_threads SET seen_msg=?, lock_until=NULL, retry_at=NULL, updated_at=? WHERE thread_id=?").bind(Math.max(maxId || 0, st.seen_msg || 0), now(), threadId).run();
+        return { wait: wait.id };
+      }
+    }
+    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead, chat, sup });
     rec.purpose = "negotiate";
     /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
     const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead, chat })).out;
@@ -949,25 +979,19 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     if (fast && Array.isArray(res.actions) && res.actions.length) {
       return toCron(env, run, threadId, `دورِ فوری تصمیم گرفت (${res.actions.map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ")})؛ اجرا نشد و Cron همین دور را با عمقِ فکرِ تب می‌زند.`);
     }
-    const out = [], errors = [];
-    for (const a of (Array.isArray(res.actions) ? res.actions : []).slice(0, 5)) {
-      const b = bundles.find((x) => x.id === int(a.bundle_id));
-      if (!b) { errors.push(`بستهٔ ${a.bundle_id} در این گفت‌وگو نیست.`); continue; }
-      try {
-        const comment = T(a.comment).slice(0, 1000);
-        let r = null;
-        if (a.type === "approve" || a.type === "return" || a.type === "reject") {
-          r = await C.decide(env, ex, b.id, a.type, { comment: a.type === "return" ? comment || "لطفاً مشخصات رو اصلاح کنید و دوباره «ارسال» رو بزنید." : comment, ai: true });
-        } else if (a.type === "accept_rows" || a.type === "final") {
-          const ok = validKeys(b, a.rows);
-          if (ok.length) await C.acceptRows(env, ex, b.id, { keys: ok, byAi: true });
-          if (a.type === "final") r = await C.decide(env, ex, b.id, "final", { comment, ai: true });
-          if ((a.rows || []).length > ok.length) errors.push(`کلیدهای نامعتبرِ جدول تطابق کنار گذاشته شد: ${(a.rows || []).filter((x) => !ok.includes(x)).join("، ")}`);
-        }
-        if (r && r.msgs) out.push(...r.msgs);
-      } catch (e) { errors.push(`${a.type} روی بستهٔ ${b.id} نشد: ${e.message}`); }
+    /* گام ۴: کاری که کارشناس «با تأیید» گذاشته پیشنهاد می‌شود و نمی‌رود — تصمیمِ بسته‌ها (با پاسخِ همان دور، که به آن‌ها گره خورده)
+       یا پاسخِ چت؛ یادداشتِ درونی و «🚨 پرسش از کارشناس» تأیید نمی‌خواهند */
+    const acts = (Array.isArray(res.actions) ? res.actions : []).slice(0, 5);
+    const holdActs = sup.on && sup.bundle && acts.length > 0;
+    const holdReply = sup.on && !!T(res.reply) && (sup.chat || holdActs);
+    let prop = null;
+    if (holdActs || holdReply) {
+      prop = await propose(env, { run, ex, th, kind: holdActs ? "act" : "reply", body: T(res.reply).slice(0, 2900) || null, seen: Math.max(maxId || 0, st.seen_msg || 0),
+        meta: holdActs ? { actions: acts, bundles: [...new Set(acts.map((a) => int(a.bundle_id)).filter(Boolean))] } : null });
     }
-    if (T(res.reply)) out.push(...(await C.postMsg(env, th, "e", T(res.reply).slice(0, 2900), { ai: true })).msgs);
+    const out = [], errors = [];
+    if (!holdActs) out.push(...(await runActions(env, ex, bundles, acts, errors)));
+    if (T(res.reply) && !holdReply) out.push(...(await C.postMsg(env, th, "e", T(res.reply).slice(0, 2900), { ai: true })).msgs);
     const notes = [];
     if (T(res.note) || errors.length) notes.push(...(await C.postMsg(env, th, "e", `🤖 ${T(res.note) || "—"}${errors.length ? `\n⚠️ ${errors.join("\n⚠️ ")}` : ""}`.slice(0, 2900), { ai: true, ev: "ai-note" }, "note")).msgs);
     /* «پرسش از کارشناس» (فاز ۲ پنل پشتیبانی): جوابِ سؤالِ تأمین‌کننده در پروندهٔ درخواست نیست — یادداشتِ درونی با خودِ سؤال
@@ -987,15 +1011,15 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       env.DB.prepare(`UPDATE ai_threads SET seen_msg=?, memo=?, errors_json=?, turns=turns+1, state=?, last_ai_at=?, lock_until=NULL, retry_at=NULL, fails=0, updated_at=?${ask ? ", ask_json=?" : ""} WHERE thread_id=?`)
         .bind(Math.max(maxId || 0, st.seen_msg || 0), clip(T(res.memo), 2000), errors.length ? JSON.stringify(errors.slice(0, 6)) : null, state, now(), now(),
           ...(ask ? [JSON.stringify({ q: ask, at: now(), note: askNote ? askNote.id : null })] : []), threadId),
-      logStmt(env, run.id, threadId, "turn", `دورِ ${faN((st.turns || 0) + 1)} با «${th.supplier_name}»: ${(res.actions || []).map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ") || "بی تصمیم"}${T(res.reply) ? " · پاسخ رفت" : ""}${errors.length ? ` · ${faN(errors.length)} خطا` : ""}${T(res.note) ? ` — ${T(res.note)}` : ""}`,
-        { actions: res.actions, status: res.thread_status, errors, ms: now() - t0, fast }),
+      logStmt(env, run.id, threadId, "turn", `دورِ ${faN((st.turns || 0) + 1)} با «${th.supplier_name}»: ${(res.actions || []).map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ") || "بی تصمیم"}${holdActs ? " (👁 پیشنهاد — اجرا نشد)" : ""}${T(res.reply) ? (holdReply ? " · 👁 پاسخ به تأییدِ کارشناس رفت" : " · پاسخ رفت") : ""}${errors.length ? ` · ${faN(errors.length)} خطا` : ""}${T(res.note) ? ` — ${T(res.note)}` : ""}`,
+        { actions: res.actions, status: res.thread_status, errors, ms: now() - t0, fast, ...(prop ? { prop } : {}) }),
       ...(ask ? [logStmt(env, run.id, threadId, "ask", `🚨 پرسش از کارشناس: ${ask} — گفت‌وگو تا پاسخِ او برایش باز است و کارشناس هوشمند منتظر می‌ماند.`),
         env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), `expert:${ex.id}`, "ai_ask", th.request_id,
           JSON.stringify({ assignment_id: run.assignment_id, thread_id: threadId, supplier: th.supplier_name, q: ask, channel: "ai" }))] : []),
     ]);
     if (ask) await askAlarm(env, ex, th, ask).catch((e) => console.error("ai ask alarm", e && e.message));
     await saveMd(env, run, ex).catch((e) => console.error("ai md", e && e.message));
-    return { turn: true, actions: (res.actions || []).length, notes: notes.length, ask: !!ask };
+    return { turn: true, actions: (res.actions || []).length, notes: notes.length, ask: !!ask, ...(prop ? { prop } : {}) };
   } catch (e) {
     const fails = (st.fails || 0) + 1;
     await env.DB.prepare("UPDATE ai_threads SET lock_until=NULL, fails=?, retry_at=?, updated_at=? WHERE thread_id=?")
@@ -1048,8 +1072,31 @@ function validKeys(b, rows) {
   return [...new Set((Array.isArray(rows) ? rows : []).map((x) => T(x).replace(/^\[|\]$/g, "")))].filter((k) => all.has(k) && acceptable(all.get(k)));
 }
 
+/** کارهای مدل روی بسته‌ها (مسیرِ خوانش هوشمند) با همان توابعِ صفحهٔ مکاتبات — دورِ مذاکره و تأییدِ پیشنهادِ «🧾 تصمیمِ بسته» */
+async function runActions(env, ex, bundles, actions, errors) {
+  const out = [];
+  for (const a of actions || []) {
+    const b = bundles.find((x) => x.id === int(a.bundle_id));
+    if (!b) { errors.push(`بستهٔ ${a.bundle_id} در این گفت‌وگو نیست.`); continue; }
+    try {
+      const comment = T(a.comment).slice(0, 1000);
+      let r = null;
+      if (a.type === "approve" || a.type === "return" || a.type === "reject") {
+        r = await C.decide(env, ex, b.id, a.type, { comment: a.type === "return" ? comment || "لطفاً مشخصات رو اصلاح کنید و دوباره «ارسال» رو بزنید." : comment, ai: true });
+      } else if (a.type === "accept_rows" || a.type === "final") {
+        const ok = validKeys(b, a.rows);
+        if (ok.length) await C.acceptRows(env, ex, b.id, { keys: ok, byAi: true });
+        if (a.type === "final") r = await C.decide(env, ex, b.id, "final", { comment, ai: true });
+        if ((a.rows || []).length > ok.length) errors.push(`کلیدهای نامعتبرِ جدول تطابق کنار گذاشته شد: ${(a.rows || []).filter((x) => !ok.includes(x)).join("، ")}`);
+      }
+      if (r && r.msgs) out.push(...r.msgs);
+    } catch (e) { errors.push(`${a.type} روی بستهٔ ${b.id} نشد: ${e.message}`); }
+  }
+  return out;
+}
+
 /** پروندهٔ یک دور برای مدل (ai-prompts.js:negotiationContext) */
-async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead = true, chat = false }) {
+async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead = true, chat = false, sup = null }) {
   const lineOut = lines.map(C.lineOut);
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت برای هر قلم (🔒/🔓) — مدل شرطِ 🔒 را برای تأمین‌کننده روشن می‌گوید */
   const lim = await C.limitsOfLines(env, lines);
@@ -1097,13 +1144,17 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   const supplierSrc = SOURCE_FA[st.source] || st.source || "—";
   const tInfo = { thread_id: th.id, supplier: th.supplier_name, supplier_id: th.supplier_id, phone: th.phone, label: th.phone_label, request_id: th.request_id, party: th.party, lines: lineOut };
   const asg = await env.DB.prepare("SELECT deadline_at FROM assignments WHERE id=?").bind(run.assignment_id).first();
+  /* گام ۴: نظرِ کارشناس بر پیشنهادهای همین گفت‌وگو (تأیید، یا رد با توضیح و پیامِ خودش) — کارشناس هوشمند با همین درست‌تر می‌نویسد */
+  const props = sup && sup.on ? ((await env.DB.prepare("SELECT kind, body, bundle_id, state, reason, own, meta_json FROM ai_props WHERE thread_id=? AND state IN ('ok','no') ORDER BY id DESC LIMIT 6")
+    .bind(th.id).all()).results || []).reverse().map((p) => ({ kind: p.kind, body: p.body, bundle_id: p.bundle_id, state: p.state, reason: p.reason, own: p.own,
+    bundle_act: (parse(p.meta_json, {}) || {}).bundle_act || null })) : [];
   return negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
     lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null, limits: lim.get(l.item_id) || null })),
     terms: C.termsOf(th), rel,
     bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), ask: parse(st.ask_json, null), transcript: threadSection(tInfo, msgs, { forModel: true }),
-    pfRead, chat,
+    pfRead, chat, sup: sup && sup.on ? { chat: !!sup.chat, bundle: !!sup.bundle } : null, props,
   });
 }
 
@@ -1320,6 +1371,19 @@ export async function autoDecide(env, threadId) {
   if (!open.length) return null;
   const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(row.expert_id).first();
   if (!ex) return null;
+  /* گام ۴: «👁 حالت تأیید» با «تصمیمِ بسته» — تأیید نهایی پیشنهاد می‌شود و تا تأییدِ کارشناس نمی‌رود؛ بسته‌ای که پیشنهادش رد شده با
+     خودِ کارشناس است و دوباره پیشنهاد نمی‌شود */
+  const sup = await supOfThread(env, id);
+  if (sup.on && sup.bundle) {
+    const had = new Set(((await env.DB.prepare("SELECT bundle_id FROM ai_props WHERE thread_id=? AND kind='final' AND state IN ('pending','ok','no')").bind(id).all()).results || [])
+      .map((r) => r.bundle_id));
+    const fresh = open.filter((b) => !had.has(b.id));
+    if (!fresh.length) return null;
+    const th = await C.threadRow(env, id);
+    const props = [];
+    for (const b of fresh) props.push(await propose(env, { run: { id: row.run_id }, ex, th, kind: "final", bundle_id: b.id }));
+    return { ids: [], msgs: [], thread: th, props };
+  }
   const ids = [], msgs = [];
   let thread = null;
   for (const b of open) {
@@ -1333,6 +1397,122 @@ export async function autoDecide(env, threadId) {
   }
   if (ids.length) await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(now(), row.run_id, now()).run().catch(() => {});
   return ids.length ? { ids, msgs, thread } : null;
+}
+
+/* ------------------------------------------------------------------ */
+/* «👁 حالت تأیید»: پیشنهاد و تصمیمِ کارشناس — فاز ۴ب گام ۴              */
+/* ------------------------------------------------------------------ */
+const ACT_FA = { approve: "✅ تأییدِ مشخصات", return: "↩️ برگشت برای اصلاح", reject: "❌ رد", accept_rows: "☑️ پذیرشِ مغایرت", final: "🏁 تأیید نهایی" };
+const moneyFa = (n) => faN(C.fmtMoney(n)).replace(/,/g, "٬");
+
+/** خلاصهٔ یک بسته برای کارتِ پیشنهاد: اقلام با مقدار و قیمت واحد، و جمع */
+async function bundleBrief(env, bundleId) {
+  const ls = (await env.DB.prepare("SELECT title, qty, unit, price FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bundleId).all()).results || [];
+  const sum = ls.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0);
+  return ls.slice(0, 8).map((l) => `• ${esc(l.title)} — ${faN(l.qty == null ? "—" : l.qty)} ${esc(l.unit || "")} × ${moneyFa(l.price)} ریال`).join("\n")
+    + (ls.length > 8 ? "\n• …" : "") + `\nجمع: <b>${moneyFa(sum)}</b> ریال`;
+}
+function propCardText(th, p) {
+  return `👁 <b>پیشنهادِ کارشناس هوشمند — منتظرِ تأییدِ شما</b>\n\nدرخواست <b>${esc(th.request_id)}</b> · تأمین‌کنندهٔ «${esc(th.supplier_name)}»\n\n<b>${esc(p.what)}</b>`
+    + (p.brief ? `\n${p.brief}` : "")
+    + (p.kind === "act" ? `\n${((p.meta && p.meta.actions) || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${faN(a.bundle_id)}${T(a.comment) ? `: «${esc(clip(T(a.comment), 300))}»` : ""}`).join("\n")}` : "")
+    + (p.body ? `\n\n«${esc(clip(p.body, 1500))}»` : "")
+    + "\n\n<i>تأیید توضیح نمی‌خواهد. «❌ رد» توضیح می‌خواهد (به کارشناس هوشمند می‌رسد) و بعدش پیامِ خودتان می‌رود یا هیچ.</i>";
+}
+const propKb = (env, id, thId) => [[{ text: "✅ تأیید", callback_data: `prop:${id}:ok` }, { text: "❌ رد", callback_data: `prop:${id}:no` }],
+  [{ text: "💬 دیدن در مکاتبات", web_app: { url: `${P.appUrl(env, "e")}&th=${thId}` } }]];
+
+/**
+ * پیشنهادِ تازه: در ai_props می‌نشیند، در رخدادهای کار ثبت می‌شود و کارتش با «✅ تأیید» و «❌ رد» به بات کارشناسان می‌رود (صف، ساعتِ
+ * اداری). seen: آخرین پیامِ گفت‌وگو هنگامِ نوشتن — پیامِ تازه‌ترِ تأمین‌کننده پیشنهادِ پاسخ را کنار می‌گذارد.
+ */
+async function propose(env, { run, ex, th, kind, body = null, bundle_id = null, meta = null, seen = 0 }) {
+  const t = now();
+  const r = await env.DB.prepare("INSERT INTO ai_props (run_id,thread_id,kind,body,bundle_id,meta_json,seen_msg,state,created_at) VALUES (?,?,?,?,?,?,?,'pending',?)")
+    .bind(run.id, th.id, kind, body, bundle_id, meta ? JSON.stringify(meta) : null, seen || 0, t).run();
+  const id = r.meta.last_row_id;
+  const what = kind === "final" ? `🏁 تأیید نهاییِ بستهٔ ${faN(bundle_id)}`
+    : kind === "act" ? `🧾 تصمیمِ بسته${body ? " با پاسخ" : ""}` : "💬 پاسخ به تأمین‌کننده";
+  const stmts = [logStmt(env, run.id, th.id, "prop", `👁 پیشنهادِ ${what} برای «${th.supplier_name}» به تأییدِ کارشناس رفت${body ? `: «${clip(body, 300)}»` : ""}.`, { prop: id, kind })];
+  if (ex.telegram_chat) {
+    const brief = kind === "final" ? await bundleBrief(env, bundle_id).catch(() => "") : "";
+    stmts.push(queueStmt(env, `prop:${id}`, ex.telegram_chat, propCardText(th, { kind, body, meta, what, brief }), propKb(env, id, th.id)));
+  }
+  await env.DB.batch(stmts);
+  return id;
+}
+
+/**
+ * تصمیمِ کارشناس روی یک پیشنهاد — صفحهٔ مکاتبات (POST /sp/x/prop/:id) و بات کارشناسان (prop:<id>:ok|no).
+ * b: {action: "ok"|"no", reason, text, bundle: return|reject|keep}. تأیید: همان پیام یا تصمیم همان لحظه می‌رود، بی توضیح. رد: توضیح
+ * اجباری (به کارشناس هوشمند می‌رسد)؛ بعد پیامِ خودِ کارشناس (text) یا هیچ — در ردِ «🏁 تأیید نهایی»، بسته با همان پیام برمی‌گردد
+ * (return)، رد می‌شود (reject) یا فعلاً می‌ماند (keep) و تصمیمش از آن پس با کارشناس است. خروجی {ok, state, msgs}؛ پیام‌ها همین‌جا پخش.
+ */
+export async function propDecide(env, ex, propId, b = {}) {
+  const p = await env.DB.prepare(`SELECT p.*, a.expert_id, r.state AS run_state, r.finished_at, g.mode FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id
+      JOIN assignments a ON a.id=t.assignment_id JOIN ai_runs r ON r.id=p.run_id LEFT JOIN ai_agents g ON g.expert_id=r.expert_id WHERE p.id=?`).bind(int(propId) || 0).first();
+  if (!p) throw new HttpError("این پیشنهاد پیدا نشد.", 404);
+  if (p.expert_id !== ex.id) throw new HttpError("این پیشنهاد متعلق به شما نیست.", 403);
+  if (p.state !== "pending") throw new HttpError(`این پیشنهاد دیگر منتظرِ شما نیست (${PROP_STATE_FA[p.state] || p.state}).`, 409, { state: p.state });
+  const t = now(), by = `expert:${ex.id}`;
+  const shelve = (state, why = null) => env.DB.prepare("UPDATE ai_props SET state=?, reason=COALESCE(?, reason), decided_at=?, decided_by=? WHERE id=? AND state='pending'")
+    .bind(state, why, t, state === "off" ? "system" : by, p.id).run();
+  if (p.mode !== "on" || p.finished_at || !["prep", "search", "work"].includes(p.run_state)) {
+    await shelve("off");
+    throw new HttpError("کارِ کارشناس هوشمند روی این درخواست دیگر جاری نیست؛ پیشنهاد کنار رفت.", 409, { state: "off" });
+  }
+  /* پیامِ تازهٔ تأمین‌کننده بعد از نوشتنِ پیشنهاد: کنار می‌رود و کارشناس هوشمند پاسخِ تازه می‌نویسد */
+  if (p.kind !== "final") {
+    const s = await env.DB.prepare("SELECT MAX(id) AS id FROM sp_msgs WHERE thread_id=? AND who='s'").bind(p.thread_id).first();
+    if (s && s.id > p.seen_msg) {
+      await shelve("stale");
+      await env.DB.prepare("UPDATE ai_threads SET retry_at=? WHERE thread_id=? AND state NOT IN ('closed','ask')").bind(t, p.thread_id).run();
+      throw new HttpError("تأمین‌کننده بعد از این پیشنهاد پیامِ تازه‌ای فرستاده؛ پیشنهاد کنار رفت و کارشناس هوشمند پاسخِ تازه می‌نویسد.", 409, { state: "stale" });
+    }
+  }
+  const th = await C.threadRow(env, p.thread_id);
+  const meta = parse(p.meta_json, {}) || {};
+  const action = T(b.action);
+  let msgs = [], state, logBody, ev;
+  if (action === "ok") {
+    /* اول کار، بعد ثبت: اگر کار نشد (بسته دیگر باز نیست)، پیشنهاد معطل نمی‌ماند */
+    try {
+      if (p.kind === "reply") msgs = (await C.postMsg(env, th, "e", p.body, { ai: true, prop: p.id })).msgs;
+      else if (p.kind === "final") msgs = (await C.decide(env, ex, p.bundle_id, "final", { ai: true })).msgs;
+      else {
+        const bundles = (await env.DB.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id").bind(p.thread_id).all()).results || [];
+        const errors = [];
+        msgs = await runActions(env, ex, bundles, meta.actions || [], errors);
+        if (errors.length && !msgs.length) throw new HttpError(errors.join("\n"), 409);
+        if (p.body) msgs.push(...(await C.postMsg(env, th, "e", p.body, { ai: true, prop: p.id })).msgs);
+      }
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 409) { await shelve("stale", clip(e.message, 300)); throw new HttpError(`این پیشنهاد دیگر اجراشدنی نیست و کنار رفت: ${e.message}`, 409, { state: "stale" }); }
+      throw e;
+    }
+    await shelve("ok");
+    state = "ok"; ev = "ai_prop_ok";
+    logBody = `✅ کارشناس پیشنهادِ ${PROP_FA[p.kind] || p.kind}${p.bundle_id ? ` (بستهٔ ${faN(p.bundle_id)})` : ""} را تأیید کرد و رفت.`;
+  } else if (action === "no") {
+    const r = rejectBody(p, b);
+    if (p.kind === "final" && r.bundle !== "keep") msgs = (await C.decide(env, ex, p.bundle_id, r.bundle, { comment: r.text, sup: true })).msgs;
+    else if (r.text) msgs = (await C.postMsg(env, th, "e", r.text, { own: p.id })).msgs;
+    await env.DB.prepare("UPDATE ai_props SET state='no', reason=?, own=?, meta_json=?, decided_at=?, decided_by=? WHERE id=? AND state='pending'")
+      .bind(r.reason, r.text || null, JSON.stringify({ ...meta, ...(r.bundle ? { bundle_act: r.bundle } : {}) }), t, by, p.id).run();
+    state = "no"; ev = "ai_prop_no";
+    logBody = `❌ کارشناس پیشنهادِ ${PROP_FA[p.kind] || p.kind}${p.bundle_id ? ` (بستهٔ ${faN(p.bundle_id)})` : ""} را رد کرد — توضیح: «${clip(r.reason, 400)}»`
+      + (p.kind === "final" ? ({ return: "؛ بسته با پیامِ کارشناس برگشت", reject: "؛ بسته رد شد", keep: "؛ بسته فعلاً ماند و تصمیمش با کارشناس است" }[r.bundle] || "") : "")
+      + (r.text ? (p.kind === "final" && r.bundle !== "keep" ? "" : "؛ پیامِ خودِ کارشناس رفت") : "؛ هیچ پیامی نرفت") + ".";
+  } else throw new HttpError("تصمیم نامعتبر: «تأیید» یا «رد».");
+  await env.DB.batch([
+    logStmt(env, p.run_id, p.thread_id, "prop", logBody, { prop: p.id, state }),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, by, ev, th.request_id,
+      JSON.stringify({ assignment_id: th.assignment_id, thread_id: p.thread_id, supplier: th.supplier_name, prop: p.id, kind: p.kind, ...(state === "no" ? { reason: T(b.reason).slice(0, 300) } : {}) })),
+    /* کار همین حالا سررسید می‌شود: پایانِ مذاکره منتظرِ پیشنهادهای معطل بود */
+    env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND finished_at IS NULL AND next_at>?").bind(t, p.run_id, t),
+  ]);
+  await P.pushMsgs(env, th, msgs).catch((e) => console.error("prop push", e && e.message));
+  return { ok: true, state, msgs, thread_id: p.thread_id };
 }
 
 /* ------------------------------------------------------------------ */
@@ -1404,7 +1584,8 @@ async function runDetail(env, ex, id) {
   const run = { ...r, data: parse(r.data_json, {}) };
   const [th, lg, cs] = await env.DB.batch([
     env.DB.prepare(`SELECT x.*, s.name AS supplier, p.phone, p.label, (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s') AS replies,
-        (SELECT GROUP_CONCAT(b.state) FROM sp_bundles b WHERE b.thread_id=x.thread_id) AS bundles
+        (SELECT GROUP_CONCAT(b.state) FROM sp_bundles b WHERE b.thread_id=x.thread_id) AS bundles,
+        (SELECT COUNT(*) FROM ai_props q WHERE q.thread_id=x.thread_id AND q.state='pending') AS props_wait
       FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id WHERE x.run_id=? ORDER BY x.created_at`).bind(run.id),
     env.DB.prepare("SELECT id, thread_id, at, kind, body FROM ai_log WHERE run_id=? ORDER BY id DESC LIMIT 200").bind(run.id),
     env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM ai_calls WHERE run_id=?").bind(run.id),
@@ -1431,7 +1612,7 @@ async function runDetail(env, ex, id) {
     candidates: await candidatesView(env, run),
     threads: (th.results || []).map((x) => ({ thread_id: x.thread_id, supplier: x.supplier, phone: x.phone, label: x.label, source: x.source, source_fa: SOURCE_FA[x.source] || x.source, state: x.state,
       turns: x.turns, replies: x.replies, bundles: x.bundles ? x.bundles.split(",") : [], memo: x.memo, fails: x.fails, retry_at: x.retry_at, last_ai_at: x.last_ai_at,
-      ask: parse(x.ask_json, null) })),
+      ask: parse(x.ask_json, null), props: x.props_wait || 0 })),
     log: lg.results || [], calls: (cs.results || [])[0] || { n: 0, cost: 0 },
   };
 }
@@ -1636,7 +1817,7 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   if (path === "/runs" && m === "POST") {
     if (!ag || ag.mode !== "on") throw new HttpError("اول تیکِ «هوشمند»ِ این کارشناس را بزنید.", 409);
     const b = await readJson(request);
-    const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
+    const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on, sup_on FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
     if (!a || a.expert_id !== ex.id) throw new HttpError("این ارجاع مالِ این کارشناس نیست.", 403);
     if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
     /* همان شرطِ سپردنِ کارشناس: ساختارِ همهٔ اقلام تأییدشده؛ منجمد می‌شود */

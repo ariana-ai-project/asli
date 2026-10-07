@@ -304,7 +304,7 @@
         if (u.a) {
           const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
           h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}</td>
-            <td style="white-space:nowrap"><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}>${aiTick(a)}</td>
+            <td style="white-space:nowrap"><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}>${aiTick(a)}${supTick(a)}</td>
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
             ${stageBoxes(r, a)}
@@ -670,12 +670,14 @@
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
   /* «انجام دستی» (فاز ۴ب): چند قلم و علتِ کارشناس — با رد، اقلام دستِ کارشناس هوشمند می‌مانند */
+  /* «👁 حالت تأیید» (فاز ۴ب گام ۴): چند قلم و توضیحِ کارشناس — با رد، کارشناس هوشمند بی تأیید پیش می‌رود */
   function decWhy(d) {
-    if (d.action !== "manual") return "";
+    if (!["manual", "supervise"].includes(d.action)) return "";
     let p = {}; try { p = JSON.parse(d.payload_json || "{}"); } catch (_) { /* بی بدنه */ }
-    return `<div class="dim" style="margin-top:4px">${M((p.item_ids || []).length)} قلم به‌جای کارشناس هوشمند با خودِ کارشناس${p.reason ? ` — علت: ${esc(p.reason)}` : ""}</div>`;
+    return `<div class="dim" style="margin-top:4px">${M((p.item_ids || []).length)} قلم ${d.action === "manual" ? "به‌جای کارشناس هوشمند با خودِ کارشناس" : "با «👁 حالت تأیید»: کارشناس هوشمند اول به کارشناس پیشنهاد می‌کند"}${p.reason ? ` — علت: ${esc(p.reason)}` : ""}</div>`;
   }
   const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس", ai_tick: "تیکِ هوشمند / دستی", ai_manual: "انجام دستیِ اقلام", ai_modes: "حالتِ اقلامِ کارشناس هوشمند", ai_start: "🚀 شروعِ قلم (کارشناس هوشمند)", ai_pick_more: "📨 دعوت از انتخاب‌های تازه", item_terms: "📋 شرایط خریدِ قلم",
+    ai_sup: "تیکِ «👁 حالت تأیید»", ai_sup_item: "«👁 حالت تأیید»ِ اقلام", ai_prop_ok: "✅ تأییدِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "❌ ردِ پیشنهادِ کارشناس هوشمند",
     decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
     manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
     commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک" };
@@ -691,7 +693,7 @@
   function vLog() {
     const D = S.decisions;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>تصمیم‌های در انتظار تأیید <span class="chip ${D.length ? "warn" : ""}">${D.length}</span></h2>
-      ${D.length ? D.map((d) => `<div class="conf"><div style="flex:1"><b>${esc(d.expert_name)}</b> برای درخواست <b class="num">${esc(d.request_id)}</b> درخواستِ <b>${({ hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی" })[d.action] || esc(d.action)}</b> داده — ${TP.fmt(d.requested_at)}${decWhy(d)}</div>
+      ${D.length ? D.map((d) => `<div class="conf"><div style="flex:1"><b>${esc(d.expert_name)}</b> برای درخواست <b class="num">${esc(d.request_id)}</b> درخواستِ <b>${({ hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی", supervise: "👁 حالت تأیید" })[d.action] || esc(d.action)}</b> داده — ${TP.fmt(d.requested_at)}${decWhy(d)}</div>
         <button class="tp-btn sm primary" data-dec="approve|${d.id}">تأیید</button><button class="tp-btn sm" data-dec="reject|${d.id}">رد</button></div>`).join("")
       : `<p class="lead">تصمیمی در انتظار نیست.${settings().approvalRequired ? "" : " (تأیید مدیر برای تصمیم کارشناس غیرفعال است.)"}</p>`}
       <div class="tp-sect"><h3>رویدادهای اخیر <span>${S.events.length}</span> <button class="tp-btn xs" data-load-events style="margin-inline-start:8px">بارگیری</button></h3>
@@ -1238,6 +1240,7 @@
     Q("[data-open]").forEach((b) => b.onclick = () => openDetail(+b.dataset.open));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
+    Q("[data-suptick]").forEach((b) => b.onclick = () => supTickSet(+b.dataset.suptick, b.dataset.on === "1"));
     /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ درصدهای نامعتبر فرستاده نمی‌شوند */
     const alertsPatch = () => {
       const thr = [...Q("[data-thr]")];
@@ -1361,6 +1364,20 @@
         if (!why) return TP.modal("علت لازم است", "برای برداشتنِ تیکِ «🤖 هوشمند» علت را بنویسید.", null, "باشد", "");
         await go(why);
       }, "دستی شود");
+  }
+  /* فاز ۴ب گام ۴: تیکِ «👁 حالت تأیید» کنارِ «🤖» — بی توضیح، روشن یا خاموش؛ فقط وقتی پشتیبانی دست‌کم یک نوع قلم را «مجازِ تأیید» کرده.
+     در اقلامِ نوعِ مجاز، کارشناس هوشمند کارهایی را که کارشناس «با تأیید» گذاشته اول به او پیشنهاد می‌کند. */
+  function supTick(a) {
+    if (!aiExpert(a) || a.ai_on === 0 || !(S.data.sup_heads > 0)) return "";
+    const on = a.sup_on === 1;
+    return ` <button class="tp-btn xs ${on ? "primary" : ""}" data-suptick="${a.id}" data-on="${on ? 0 : 1}" title="${on ? "👁 با تأیید کارشناس — برای خاموش کردن بزنید" : "👁 حالت تأیید خاموش — برای اجازه دادن بزنید (اقلامِ نوعِ مجاز)"}">👁</button>`;
+  }
+  async function supTickSet(aid, on) {
+    try {
+      const r = await TP.api("/assign/sup", { body: { assignment_id: aid, on } });
+      await refresh();
+      if (on && r.changed && !r.eligible) TP.modal("👁 حالت تأیید", "اجازه ثبت شد، ولی فعلاً هیچ قلمِ این درخواست از نوعی نیست که پشتیبانی «مجازِ حالت تأیید» کرده؛ اگر بعد از نرمال‌سازی نوعِ مجاز شد، با «🚀 شروع» با تأیید پیش می‌رود.", null, "باشد", "");
+    } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
   }
   function doDispatch() {
     const list = readyAssignments(); const by = {};

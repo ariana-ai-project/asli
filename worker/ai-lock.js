@@ -19,6 +19,8 @@
  * بیرون از کار یا از نوعِ «مستقیم» برای کارشناس آزاد است (ai-modes.js:aiItemFree؛ جدول و نامه همچنان برای کلِ درخواست).
  * گام ۲: در روالِ تازه (ai_runs.data_json.flow=2، و هر کارِ هنوز ساخته‌نشده) بررسی سوابق، جستجوی هوشمند و ساختارِ قلمِ
  * سپرده‌نشده کارِ خودِ کارشناس است (ai-picks.js)؛ قلمِ سپرده‌شده را انجماد نگه می‌دارد.
+ * گام ۴: گفت‌وگوی «👁 با تأیید» (قلمی از آن items.sup_on=1 دارد — worker/ai-supervise.js) برای کارشناس باز و فقط‌خواندنی است:
+ * پیشنهادهای کارشناس هوشمند را تأیید یا رد می‌کند و پیام یا تصمیمِ خودش فقط با «❌ رد»ِ پیشنهاد می‌رود (sp-core.js:watchOnly).
  * بی ایمپورت از ماژول‌های دیگر، تا sp-core.js، sp-push.js، api.js و bot.js بی حلقهٔ ایمپورت بپرسند.
  */
 const now = () => Date.now();
@@ -32,6 +34,9 @@ export const aiRejected = (reviewJson) => (parse(reviewJson, {}) || {}).state ==
 export const AI_REJECTED_SQL = (r) => `COALESCE(json_extract(${r}.review_json,'$.state'),'')='rejected'`;
 
 export const AI_THREAD_MSG = "🤖 این گفت‌وگو دستِ کارشناس هوشمند است و تا وقتی از شما سؤالی نپرسیده بسته است. تیکِ «هوشمند / دستی» در پنل پشتیبانی است.";
+export const AI_WATCH_MSG = "👁 این گفت‌وگو را کارشناس هوشمند با تأییدِ شما پیش می‌برد: پیشنهادهایش را تأیید یا رد کنید؛ پیام یا تصمیمِ خودتان با «❌ رد»ِ همان پیشنهاد می‌رود.";
+/** گفت‌وگوی «👁 با تأیید» (گام ۴): دست‌کم یک قلمش حالت تأیید دارد — tid عبارتِ SQLِ شناسهٔ گفت‌وگو */
+export const AI_SUP_SQL = (tid) => `EXISTS (SELECT 1 FROM sp_lines sl JOIN items si ON si.id=sl.item_id WHERE sl.thread_id=${tid} AND si.sup_on=1)`;
 
 /** کارشناس «هوشمند» است؟ */
 export async function aiModeOn(env, expertId) {
@@ -66,17 +71,18 @@ export async function aiOwned(env, assignmentId) {
 export const aiResearchLocked = (owned) => !!owned && !!owned.run_id && owned.flow !== 2 && !owned.handover;
 
 /**
- * گفت‌وگوی کارشناس هوشمند برای کارشناسِ فعلیِ آن: {ai, locked, ask}. ai: کارشناس هوشمند بازش کرده؛ locked: کارشناس «هوشمند»
- * است و سؤالی منتظرِ او نیست؛ ask: {q, at} وقتی کارشناس هوشمند از او پرسیده.
+ * گفت‌وگوی کارشناس هوشمند برای کارشناسِ فعلیِ آن: {ai, locked, ask, watch}. ai: کارشناس هوشمند بازش کرده؛ locked: کارشناس «هوشمند»
+ * است و سؤالی منتظرِ او نیست؛ ask: {q, at} وقتی کارشناس هوشمند از او پرسیده؛ watch: «👁 با تأیید» — باز ولی فقط‌خواندنی (گام ۴).
  */
 export async function aiThread(env, threadId, expertId) {
-  const r = await env.DB.prepare(`SELECT x.state, x.ask_json, x.run_id, run.expert_id AS run_expert, run.review_json, g.mode FROM ai_threads x JOIN ai_runs run ON run.id=x.run_id
-      LEFT JOIN ai_agents g ON g.expert_id=? WHERE x.thread_id=?`).bind(expertId || 0, threadId).first().catch(() => null);
-  if (!r) return { ai: false, locked: false, ask: null };
+  const r = await env.DB.prepare(`SELECT x.state, x.ask_json, x.run_id, run.expert_id AS run_expert, run.review_json, g.mode, ${AI_SUP_SQL("x.thread_id")} AS sup
+      FROM ai_threads x JOIN ai_runs run ON run.id=x.run_id LEFT JOIN ai_agents g ON g.expert_id=? WHERE x.thread_id=?`).bind(expertId || 0, threadId).first().catch(() => null);
+  if (!r) return { ai: false, locked: false, ask: null, watch: false };
   /* ارجاع به کارشناسِ دیگری رفته (کارِ کارشناس هوشمند بسته شد)، کارشناس «دستی» است، یا پشتیبانی تحویل را رد کرد: باز */
-  if (r.mode !== "on" || r.run_expert !== expertId || aiRejected(r.review_json)) return { ai: true, locked: false, ask: null };
+  if (r.mode !== "on" || r.run_expert !== expertId || aiRejected(r.review_json)) return { ai: true, locked: false, ask: null, watch: false };
   const ask = r.state === "ask" ? parse(r.ask_json, {}) : null;
-  return { ai: true, locked: !ask, ask };
+  const watch = !!r.sup;
+  return { ai: true, locked: !ask && !watch, ask, watch };
 }
 
 /** نام تأمین‌کنندگانی که خط‌هایشان در این ارجاع مالِ کارشناس هوشمند است (دعوت یا گفت‌وگوی او) — فقط وقتی کارشناس «هوشمند» است */

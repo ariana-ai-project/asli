@@ -129,7 +129,35 @@
           <div class="tp-field"><b>کد تازه</b><input class="tp-input" id="acc-new" type="password" inputmode="numeric" autocomplete="new-password"></div>
           <div class="tp-field"><b>تکرار کد تازه</b><input class="tp-input" id="acc-rep" type="password" inputmode="numeric" autocomplete="new-password"></div>
           <div style="padding-bottom:2px"><button class="tp-btn primary" data-acc-save>تغییر کد</button></div></div>
-        <div id="acc-msg" style="min-height:22px;font-size:.9rem"></div></div></div></div>`;
+        <div id="acc-msg" style="min-height:22px;font-size:.9rem"></div></div>${aiOn() ? vSupCfg() : ""}</div></div>`;
+  }
+  /**
+   * فاز ۴ب گام ۴: «👁 حالت تأیید» — در اقلامِ «با تأیید» (اجازهٔ مدیر یا درخواستِ تأییدشدهٔ شما) کدام کارِ کارشناس هوشمند پیش از رفتن
+   * تأییدِ شما را بخواهد (worker/ai-supervise.js). کاری که تیک نخورده خودکار است.
+   */
+  function vSupCfg() {
+    const s = S.sup;
+    if (!s || s === "loading") { if (!s) loadSup(); return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead">در حال خواندن…</p></div>`; }
+    if (s.err) return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead" style="color:#fca5a5">${esc(s.err)}</p></div>`;
+    const c = s.cfg || {}, fa = s.fa || {};
+    return `<div class="tp-sect"><h3>👁 حالت تأیید</h3>
+      <p class="lead">در اقلامی که «👁 با تأیید» اند — مدیر اجازه داده یا درخواستِ شما را پذیرفته — کارشناس هوشمند هر کاری را که این‌جا تیک بزنید، اول به شما پیشنهاد می‌کند (در «💬 مکاتبات» و بات):
+        تأیید توضیح نمی‌خواهد؛ رد با توضیح است و بعدش پیامِ خودتان می‌رود یا هیچ. کاری که تیک نخورده خودکار است.${s.heads ? "" : " <b>فعلاً پشتیبانی هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است.</b>"}</p>
+      <label class="chkline"><input type="checkbox" data-sup="chat" ${c.chat ? "checked" : ""}> ${esc(fa.chat || "پیامِ چت")} — با تأیید</label>
+      <label class="chkline"><input type="checkbox" data-sup="bundle" ${c.bundle ? "checked" : ""}> ${esc(fa.bundle || "تصمیمِ بسته")} — با تأیید</label>
+      <div id="sup-msg" style="min-height:22px;font-size:.9rem"></div></div>`;
+  }
+  async function loadSup() {
+    if (S.sup === "loading") return;
+    S.sup = "loading";
+    try { S.sup = await TP.api("/me/supervise"); } catch (e) { S.sup = { err: e.message }; }
+    render();
+  }
+  async function saveSupCfg() {
+    const v = {}; document.querySelectorAll("[data-sup]").forEach((c) => { v[c.dataset.sup] = c.checked; });
+    const msg = document.querySelector("#sup-msg");
+    try { const r = await TP.api("/me/supervise", { method: "PUT", body: v }); S.sup = { ...S.sup, cfg: r.cfg }; if (msg) { msg.textContent = "ذخیره شد ✓"; msg.style.color = "#6ee7b7"; } }
+    catch (e) { if (msg) { msg.textContent = e.message; msg.style.color = "#fca5a5"; } }
   }
   async function saveCode() {
     const G = (s) => document.querySelector(s), msg = G("#acc-msg");
@@ -341,7 +369,15 @@
   const itemFree = (it) => { const st = iState(it); return st === "manual" || st === "free" || (st === "direct" && !S.pickOpen[it.id]); };
   const PILL = { select: ["warn", "🎯 منتظرِ شروع", "فهرستِ دعوتِ این قلم را ببینید و «🚀 شروع» را بزنید"], direct: ["", "✋ مستقیم", "از نوعِ «مستقیم»: خودتان مکاتبه کنید یا به انتخابِ خودتان بسپارید"],
     manual: ["", "✋ دستی", "«انجام دستی»ِ تأییدشدهٔ مدیر"], waiting: ["warn", "⏳ مدیر", "درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر"] };
-  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return p ? ` <span class="chip ${p[0]}" style="margin-top:6px" title="${p[2]}">${p[1]}</span>` : ""; };
+  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return (p ? ` <span class="chip ${p[0]}" style="margin-top:6px" title="${p[2]}">${p[1]}</span>` : "") + pillSup(x); };
+  /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ قلم — روشن، یا درخواستش منتظرِ مدیر */
+  const supTip = () => { const c = (S.d && S.d.ai && S.d.ai.sup && S.d.ai.sup.cfg) || {}; return `پیامِ چت: ${c.chat ? "با تأیید" : "خودکار"} · تصمیمِ بسته: ${c.bundle ? "با تأیید" : "خودکار"} (تنظیمش در «حساب من»)`; };
+  const pillSup = (x) => {
+    const m = x.state === "open" && aiOwned() ? aiItem(x) : null;
+    if (!m) return "";
+    if (m.sup_on) return ` <span class="chip info" style="margin-top:6px" title="${esc(supTip())}">👁 با تأیید</span>`;
+    return m.sup_wait ? ` <span class="chip warn" style="margin-top:6px" title="درخواستِ «👁 حالت تأیید» در انتظارِ تصمیمِ مدیر">⏳ حالت تأیید</span>` : "";
+  };
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
     const free = items().filter((i) => i.state === "open" && aiItem(i) && itemFree(i));
@@ -548,6 +584,13 @@
         <td>${e.st !== "off" && (started || e.go || e.st === "human") ? `<span class="chip ${cls}">${lab}</span>` : `<span class="dim">${e.on ? "تیک‌خورده" : "—"}</span>`}</td></tr>`;
     };
     const fresh = P.fresh || 0;
+    /* فاز ۴ب گام ۴: «👁 حالت تأیید» — نوعِ مجاز (پنل پشتیبانی): با تیکِ مدیر از «شروع» روشن است؛ وگرنه درخواست با توضیح پیش از «شروع» */
+    const mi = aiItem(it) || {}, supA = !!(S.d.ai && S.d.ai.sup && S.d.ai.sup.on);
+    const supBit = mi.sup_on ? `<span class="chip info" title="${esc(supTip())}">👁 با تأیید</span>`
+      : mi.sup_wait ? `<span class="chip warn" title="منتظرِ تصمیمِ مدیر">⏳ حالت تأیید — منتظرِ مدیر</span>`
+        : !mi.supervise || started ? ""
+          : supA ? `<span class="chip info" title="${esc(supTip())}">👁 با «شروع»، با تأیید (اجازهٔ مدیر)</span>`
+            : `<button class="tp-btn sm" data-pksup title="کارشناس هوشمند کارهایی را که در «حساب من» «با تأیید» گذاشته‌اید اول به شما پیشنهاد کند — با توضیح و تأییدِ مدیر">👁 درخواست حالت تأیید</button>`;
     const startBtn = !started
       ? `<button class="tp-btn primary" data-pkstart ${on.length ? "" : "disabled"} title="${on.length ? "ساختارِ همین قلم منجمد و قلم به کارشناس هوشمند سپرده می‌شود" : "دست‌کم یک تأمین‌کننده را تیک بزنید"}">${A_ ? "🤖 سپردن" : "🚀 شروع"}</button>`
       : fresh ? `<button class="tp-btn primary" data-pkstart title="انتخاب‌های تازه به کارشناس هوشمند سپرده می‌شوند">📨 دعوت از انتخاب‌های تازه (${M(fresh)})</button>` : "";
@@ -555,7 +598,7 @@
       <div class="toolrow"><b style="font-size:1.02rem">🎯 فهرست دعوتِ کارشناس هوشمند</b>
         <span class="chip ${A_ ? "info" : ""}" title="حالتِ نوع قلمِ «${esc(P.head || "—")}» در پنل پشتیبانی">${esc(P.mode_fa || "")}</span>
         ${started ? `<span class="chip ok" title="${TP.fmt(P.started_at)}">🚀 سپرده شد</span>` : ""}
-        <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
+        <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>${supBit}
         <span style="margin-inline-start:auto"></span>
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
@@ -657,6 +700,22 @@
     }, "به فهرست بیفزا", "انصراف");
   }
 
+  /** «👁 درخواست حالت تأیید» (فاز ۴ب گام ۴): پیش از «🚀 شروع»، با توضیح — همیشه با تأییدِ مدیر (decisions.js: supervise) */
+  function supReqUI(it) {
+    const can = openItems().filter((x) => { const m = aiItem(x); return m && m.supervise && !m.sup_on && !m.sup_wait && !m.manual && !m.started_at; });
+    if (!can.length) return TP.modal("قلمی نیست", "«حالت تأیید» فقط پیش از «🚀 شروع» و برای نوع قلمی است که پشتیبانی مجاز کرده.", null, "باشد", "");
+    const d = TP.modal("👁 درخواست حالت تأیید", `<p>در این اقلام، کارشناس هوشمند هر کاری را که در «حساب من» «با تأیید» گذاشته‌اید (${esc(supTip().replace(/ \(.*\)$/, ""))}) اول به شما پیشنهاد می‌کند. مدیر با توضیحِ شما تصمیم می‌گیرد.</p>
+      <div style="display:flex;flex-direction:column;gap:4px;margin:8px 0">${can.map((x) => `<label class="chkline"><input type="checkbox" data-sitem="${x.id}" ${x.id === it.id ? "checked" : ""}> ${esc(x.title)}</label>`).join("")}</div>
+      <div class="tp-field"><b>توضیح (اجباری)</b><textarea class="tp-input" id="sup-why" rows="3" style="width:100%;margin-top:6px" placeholder="مثلاً خریدِ حساس با تأمین‌کنندهٔ تازه"></textarea></div>`, async () => {
+      const ids = [...d.querySelectorAll("[data-sitem]")].filter((c) => c.checked).map((c) => +c.dataset.sitem);
+      const why = ((d.querySelector("#sup-why") || {}).value || "").trim();
+      if (!ids.length) return TP.modal("قلمی انتخاب نشد", "دست‌کم یک قلم را تیک بزنید.", null, "باشد", "");
+      if (!why) return TP.modal("توضیح لازم است", "برای «حالت تأیید» توضیح بنویسید تا مدیر تصمیم بگیرد.", null, "باشد", "");
+      try { await TP.api(`/assignments/${A().id}/decision`, { body: { action: "supervise", item_ids: ids, reason: why } }); await reload();
+        TP.modal("فرستاده شد", "درخواستِ «👁 حالت تأیید» برای مدیر رفت؛ نتیجه را در تلگرام و همین‌جا می‌بینید. از لحظهٔ تأییدِ مدیر، کارهای کارشناس هوشمند در این اقلام با تأییدِ شماست.", null, "باشد", ""); }
+      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "برای مدیر بفرست", "انصراف");
+  }
   /** only: شناسهٔ قلمی که از «🎯 فهرست دعوت»ِ همان قلم آمده — فقط همان از پیش تیک می‌خورد */
   function manualUI(only) {
     const can = openItems().filter((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct" && !m.in_run && !m.started_at; });
@@ -2176,6 +2235,7 @@
     Q("[data-team-link]").forEach((b) => b.onclick = teamLink);
     /* حساب من */
     const acs = G("[data-acc-save]"); if (acs) acs.onclick = saveCode;
+    Q("[data-sup]").forEach((c) => c.onchange = saveSupCfg);
     Q("#acc-cur, #acc-new, #acc-rep").forEach((i) => i.onkeydown = (e) => { if (e.key === "Enter") saveCode(); });
     /* آستانه‌های تیم (کارشناس ارشد) */
     Q("[data-sthr]").forEach((i) => i.oninput = (e) => {
@@ -2298,6 +2358,7 @@
     const pks = G("[data-pkstart]"); if (pks) pks.onclick = () => pkStartUI(item());
     const pkr = G("[data-pkrebuild]"); if (pkr) pkr.onclick = () => pkRebuildUI(item());
     const pkb = G("[data-pkback]"); if (pkb) pkb.onclick = () => manualUI(item().id);
+    const pksu = G("[data-pksup]"); if (pksu) pksu.onclick = () => supReqUI(item());
     const pko = G("[data-pkopen]"); if (pko) pko.onclick = () => { const it = item(); S.pickOpen[it.id] = !S.pickOpen[it.id]; render(); };
     const pkl = G("[data-pkreload]"); if (pkl) pkl.onclick = () => loadPicks(item(), true);
     const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
