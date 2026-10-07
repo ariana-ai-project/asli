@@ -344,7 +344,7 @@ test("پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست
   assert.deepEqual([...new Set(DB.raw.prepare("SELECT final FROM quotes WHERE assignment_id=1 AND supplier_name='فولاد ب'").all().map((x) => x.final))], [1]);
 });
 
-test("کارشناس هوشمند بی خوانش پیش‌فاکتور: دعوتِ تازه، و بستهٔ pending یکراست تأیید نهایی با پیش‌فاکتورِ تولیدی", { skip: SKIP }, async () => {
+test("کارشناس هوشمند بی خوانش پیش‌فاکتور: دعوتِ تازه، و بستهٔ ارسالی همان لحظه تأیید نهایی با پیش‌فاکتورِ تولیدی — بی مدل (فاز ۴ب گام ۳)", { skip: SKIP }, async () => {
   const ho = await call("/assignments/2/handoff", { headers: EXAI, body: {} });
   assert.equal(ho.status, 200, JSON.stringify(ho.data));
   const run = DB.raw.prepare("SELECT id FROM ai_runs WHERE assignment_id=2").get().id;
@@ -367,34 +367,39 @@ test("کارشناس هوشمند بی خوانش پیش‌فاکتور: دعو�
   const saved = await call(`/sp/line/${line.id}`, { method: "PUT", headers: H, body: { qty: 150, price: 1250000, note: "بقیه تا دو هفته بعد" } });
   assert.equal(saved.status, 200, "مقدارِ 🔓: کمتر از درخواست");
   await call(`/sp/line/${line.id}/ready`, { headers: H, body: { on: true } });
-  n = calls.length;
-  const sub = await call(`/sp/thread/${thId}/submit`, { headers: H, body: {} });
-  assert.equal(sub.status, 200, JSON.stringify(sub.data));
-  assert.equal(since(n).filter((c) => c.bot === "ai").length, 0, "گامِ فوری تصمیمِ بسته را به Cron می‌سپارد");
+  /* گامِ فوریِ بعد از ارسال فقط گفت‌وگوست (گام ۳): مدل کاری روی بسته می‌نویسد ولی اجرا نمی‌شود */
   let seen = null;
   model = (b) => {
     seen = b;
-    const bid = Number(/بستهٔ (\d+) — وضعیت: pending/.exec(b.messages[0].content[0].text)[1]);
-    return jsonOut({ reply: "", actions: [{ type: "final", bundle_id: bid, comment: "", rows: [] }], thread_status: "done", memo: "تمام.", note: "کامل و منطبق؛ مقدارِ کمتر پذیرفتنی است.", ask_expert: "" });
+    return jsonOut({ reply: "ممنون از پیشنهادتون 🌷 اگه با تسویهٔ نقدی تخفیفی ممکنه، خبرم کنید.", actions: [{ type: "reject", bundle_id: 1, comment: "", rows: [] }], thread_status: "active",
+      memo: "یک بار تخفیف خواستم.", note: "کامل و منطبق؛ مقدارِ کمتر پذیرفتنی است.", ask_expert: "" });
   };
-  const t = await aiTick(env);
-  assert.equal(t.step, "turn", JSON.stringify(t));
-  assert.match(seen.system[0].text, /پیش‌فاکتورِ جدا خواسته یا خوانده نمی‌شود/, "پرامپتِ مسیرِ خاموش");
+  n = calls.length;
+  const sub = await call(`/sp/thread/${thId}/submit`, { headers: H, body: {} });
+  assert.equal(sub.status, 200, JSON.stringify(sub.data));
+  assert.equal(sub.data.state, "final", "در کارِ کارشناس هوشمند بستهٔ ارسالی همان لحظه تأیید نهایی می‌شود");
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(sub.data.bundle_id).state, "final");
+  assert.ok(seen, "گامِ فوری فقط برای گفت‌وگو مدل را صدا زد");
+  assert.match(seen.system[0].text, /تصمیم دربارهٔ بسته‌ها با تو نیست/, "پرامپتِ «فقط گفت‌وگو»");
+  assert.match(seen.system[0].text, /اصلاحِ پیشنهاد/);
+  assert.doesNotMatch(seen.system[0].text, /• comment در return/);
   const ctxText = seen.messages[0].content[0].text;
   assert.match(ctxText, /عنوان: 🔒/);
   assert.match(ctxText, /لایه‌ها: 🔒 جنس = نسوز/);
   assert.match(ctxText, /\(مقدار 🔓: کمتر هم پذیرفتنی است\)/);
   assert.match(ctxText, /توضیحِ تأمین‌کننده زیرِ همین قلم: بقیه تا دو هفته بعد/);
-  assert.match(ctxText, /تأیید نهایی ممکن است؟ بله/);
-  assert.match(ctxText, /کارهای ممکن: final، return، reject/);
-  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(sub.data.bundle_id).state, "final");
+  assert.match(ctxText, /کارهای ممکن: هیچ — تصمیمِ بسته با سامانه است/);
+  assert.match(ctxText, /جوابِ این دور را بنویس\./);
+  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM sp_msgs WHERE thread_id=? AND who='e' AND body LIKE '%با تسویهٔ نقدی تخفیفی%'").get(thId), "پاسخِ گفت‌وگو رفت");
+  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM ai_log WHERE run_id=? AND kind='decide'").get(run), "تصمیمِ سامانه در رخدادهای کار");
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(sub.data.bundle_id).state, "final", "کارِ مدل روی بسته اجرا نشد");
   const q = DB.raw.prepare("SELECT * FROM quotes WHERE assignment_id=2 AND supplier_name='روانکار ج'").get();
   assert.deepEqual([q.qty, q.price, q.saved, q.final], [150, 1250000, 1, 1]);
   assert.match(q.spec, /توضیح تأمین‌کننده: بقیه تا دو هفته بعد/);
   assert.equal(DB.raw.prepare("SELECT source FROM proformas WHERE assignment_id=2 AND supplier_name='روانکار ج'").get().source, "generated");
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_calls WHERE purpose='proforma'").get().n, 0, "هیچ سندی خوانده نشد");
   assert.equal(DB.raw.prepare("SELECT state FROM ai_threads WHERE thread_id=?").get(thId).state, "final");
-  assert.match(lastEvent(thId).body, /^🏁 تأیید نهایی شد — ممنون از همکاری‌تان/);
+  assert.match(DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND kind='event' AND who='e' ORDER BY id DESC LIMIT 1").get(thId).body, /^🏁 تأیید نهایی شد — ممنون از همکاری‌تان/);
 });
 
 test("کلیدِ «خوانش هوشمند پیش‌فاکتور» در پنل پشتیبانی: پیش‌فرض خاموش، روشن و خاموش با رخداد", { skip: SKIP }, async () => {

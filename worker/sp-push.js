@@ -20,6 +20,7 @@ import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { storage } from "./storage.js";
 import { aiThread } from "./ai-lock.js";
 import { pfReadOn } from "./switches.js";
+import { limitsTxt } from "./terms-locks.js";
 import { proformaData, termRows } from "./pfdoc.js";
 
 const now = () => Date.now();
@@ -289,7 +290,8 @@ export function itemsCard(env, th, lines, bundles) {
  * نوع قلم و لایه‌های ویژگیِ قفل (و لایه‌های افزوده). «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش»
  * (برگشت به پیش‌نویس) یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر مانده).
  */
-export function lineCard(l, files, others, terms) {
+/** opt (فاز ۴ب گام ۳): limits — «📋 شرایط خرید»ِ شرکت برای همین قلم؛ revise — پیشنهادِ تأییدنهایی‌شده اصلاح‌پذیر است */
+export function lineCard(l, files, others, terms, opt = {}) {
   const extra = parse(l.extra_json, []);
   const editable = ["new", "draft", "returned"].includes(l.state);
   const tm = terms || {};
@@ -302,6 +304,7 @@ export function lineCard(l, files, others, terms) {
   text += `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}${lk.legacy ? ` <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>` : ""}`
     + `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
   text += `\n🧾 <b>شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i>\n${termsBlock(tm)}\n`;
+  if (opt.limits) text += `<i>📋 شرطِ شرکت: ${esc(limitsTxt(opt.limits))} — 🔒 را پنل بیرونش نمی‌پذیرد.</i>\n`;
   text += `\n🔒 <b>نوع قلم و لایه‌های ویژگی</b>${lk.legacy ? "" : " <i>(🔒 ثابت · 🔓 قابل تغییر)</i>"}\n${l.head ? `نوع قلم: ${esc(l.head)}\n` : ""}`
     + `${layers.length ? layers.map((x) => `${lk.layers[x.k] === false ? "🔓" : "•"} ${esc(x.k)}: ${esc(x.v)}${x.req != null ? ` <i>(درخواست: ${esc(x.req)})</i>` : ""}`).join("\n") : "—"}`
     + `\n➕ لایه‌های افزودهٔ شما: ${extra.length ? extra.map((x) => esc(layerTxt(x))).join("، ") : "—"}\n`;
@@ -329,6 +332,10 @@ export function lineCard(l, files, others, terms) {
     kb.push([{ text: "➕ لایهٔ تازه", callback_data: `sv:${l.id}:l` }, { text: "📝 توضیح", callback_data: `sv:${l.id}:n` }, { text: "📎 پیوست", callback_data: `sa:${l.id}` }]);
     extra.slice(0, 8).forEach((x, i) => { if (i % 2 === 0) kb.push([]); kb[kb.length - 1].push({ text: `🗑 ${short(x.k, 14)}`, callback_data: `sl:${l.id}:${i}` }); });
     kb.push([{ text: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
+  }
+  if (l.state === "final" && opt.revise) {
+    text += "\n\n🏁 <b>تأیید نهایی شد.</b> اگر قیمت یا شرایطِ بهتری دارید، «✏️ اصلاحِ پیشنهاد» را بزنید و دوباره بفرستید؛ پیشنهادِ تازه جای قبلی را می‌گیرد.";
+    kb.push([{ text: "✏️ اصلاحِ پیشنهاد", callback_data: `rv:${l.id}` }]);
   }
   kb.push([{ text: "📦 فهرست اقلام", callback_data: `ic:${l.thread_id}` }]);
   return { text, kb };

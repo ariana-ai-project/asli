@@ -26,6 +26,7 @@ import { telegram } from "./telegram.js";
 import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
+import { limitsOf, combineLocks, violations, violationError, LIMIT_FA } from "./terms-locks.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_ASK_SQL, AI_REJECTED_SQL } from "./ai-lock.js";
@@ -128,6 +129,24 @@ export const TERM_FA = { dtime: "زمان تحویل", pay: "شرایط تسوی
 export const TERM_ENUMS = { pay: ENUMS.pay, invoice: ENUMS.invoice, vat: ENUMS.vat };
 export const termsOf = (row) => { const t = parse(row && row.terms_json, null); return t && typeof t === "object" ? t : {}; };
 export const termsMissing = (t) => TERM_REQUIRED.filter((f) => !T(t && t[f])).map((f) => TERM_FA[f]);
+/**
+ * فاز ۴ب گام ۳: «📋 شرایط خرید»ِ قلمِ چند خط (worker/terms-locks.js) — Map(item_id → قیدها). شرایطِ قلم مثلِ ساختارش با اولین
+ * ارسالِ واقعی ثابت می‌شود (api.js: /items/:id/terms)، پس خواندنِ زندهٔ items همان بستهٔ قفل‌شده است.
+ */
+export async function limitsOfLines(env, lines) {
+  const ids = [...new Set((lines || []).map((l) => l.item_id).filter(Boolean))];
+  const out = new Map();
+  for (let i = 0; i < ids.length; i += 80) {
+    const part = ids.slice(i, i + 80);
+    for (const r of (await env.DB.prepare(`SELECT id, terms_json FROM items WHERE id IN (${part.map(() => "?").join(",")})`).bind(...part).all()).results || []) {
+      const L = limitsOf(r);
+      if (L) out.set(r.id, L);
+    }
+  }
+  return out;
+}
+/** قیدِ 🔒ِ مشترکِ چند خط: {lock, conflict} (terms-locks.js:combineLocks) */
+export const lockOfLines = (lines, lim) => combineLocks((lines || []).map((l) => lim.get(l.item_id)).filter(Boolean));
 
 /* ------------------------------------------------------------------ */
 /* ابزارها                                                              */
@@ -693,9 +712,15 @@ export async function threadFull(env, th, side) {
   ]);
   await markSeen(env, th.id, side);
   const pfRead = await pfReadOn(env);
+  /* فاز ۴ب گام ۳: شرایطِ 🔒/🔓ِ هر قلم و قیدِ مشترکِ اقلامِ قابلِ ویرایش (فرمِ شرایط فقط همین‌ها را می‌پذیرد)؛ revise: پیشنهادِ
+     تأییدنهایی‌شده در کارِ زندهٔ کارشناس هوشمند اصلاح‌پذیر است */
+  const ls = lines.results || [];
+  const lim = await limitsOfLines(env, ls);
   return {
     thread: threadOut(th, side),
-    lines: (lines.results || []).map(lineOut),
+    lines: ls.map((l) => ({ ...lineOut(l), limits: lim.get(l.item_id) || null })),
+    terms_lock: lockOfLines(ls.filter((l) => LINE_EDITABLE.includes(l.state)), lim),
+    revise: side === "s" && ls.some((l) => l.state === "final") ? await revisable(env, th.id) : false,
     bundles: (bundles.results || []).map((b) => bundleOut(b, side, { pfRead, lines: lines.results || [] })),
     msgs: (msgs.results || []).map((m) => msgFor(msgOut(m), side)),
     files: files.results || [],
@@ -1004,6 +1029,15 @@ export async function termsSave(env, sup, thId, b) {
       t[f] = v;
     }
   }
+  /* فاز ۴ب گام ۳: قفلِ شرایطِ شرکت — فیلدهایی که همین حالا آمده‌اند، با قیدِ مشترکِ اقلامِ قابلِ ویرایشِ همین گفت‌وگو. فیلدی که
+     اقلامش با هم نمی‌خوانند این‌جا آزاد است و هنگامِ «ارسال» برای همان اقلامِ ارسالی سنجیده می‌شود */
+  const ls = ((await env.DB.prepare("SELECT item_id, state FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).filter((l) => LINE_EDITABLE.includes(l.state));
+  if (ls.length) {
+    const { lock, conflict } = lockOfLines(ls, await limitsOfLines(env, ls));
+    const sent = Object.fromEntries(TERM_FIELDS.filter((f) => f in (b || {}) && t[f] != null).map((f) => [f, t[f]]));
+    const v = violations(sent, Object.fromEntries(Object.entries(lock).filter(([f]) => !conflict.includes(f))));
+    if (v.length) throw violationError(v);
+  }
   await env.DB.batch([env.DB.prepare("UPDATE sp_threads SET terms_json=? WHERE id=?").bind(JSON.stringify(t), th.id), touchStmt(env, th.id, now())]);
   return { ok: true, terms: t, missing: termsMissing(t) };
 }
@@ -1016,6 +1050,9 @@ export async function lineReady(env, sup, lineId, on) {
     const th = await env.DB.prepare("SELECT terms_json FROM sp_threads WHERE id=?").bind(l.thread_id).first();
     const miss = [...lineMissing(l), ...termsMissing(termsOf(th))];
     if (miss.length) throw new HttpError(`برای «آمادهٔ ارسال» این‌ها را پر کنید: ${miss.join("، ")}`, 422, { missing: miss });
+    /* فاز ۴ب گام ۳: شرایطِ اعلامی با قفلِ شرایطِ همین قلم */
+    const v = violations(termsOf(th), lockOfLines([l], await limitsOfLines(env, [l])).lock);
+    if (v.length) throw violationError(v, `شرایطِ «${l.title}»`);
   }
   const state = on ? "ready" : (l.state === "ready" ? "draft" : l.state);
   const t = now();
@@ -1041,6 +1078,13 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
   const terms = termsOf(th);
   const tmiss = termsMissing(terms);
   if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
+  /* فاز ۴ب گام ۳: شرایطِ بسته با قفلِ همهٔ اقلامِ همین بسته؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
+  const { lock, conflict } = lockOfLines(lines, await limitsOfLines(env, lines));
+  if (conflict.length) {
+    throw new HttpError(`این اقلام شرایطِ قفلِ ناسازگار دارند (${conflict.map((f) => LIMIT_FA[f]).join("، ")})؛ هر بار فقط اقلامی را بفرستید که شرایطشان با هم می‌خواند.`, 422, { conflict });
+  }
+  const tv = violations(terms, lock);
+  if (tv.length) throw violationError(tv);
   const t = now();
   const state = pf && pfRead ? "proforma" : "pending";
   const r = await env.DB.prepare(`INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,pf_key,pf_name,pf_mime,pf_size,pf_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
@@ -1062,6 +1106,29 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
     touchStmt(env, th.id, t),
   ]);
   return { ok: true, bundle_id: bid, state, msgs: [msgObj(res[1].meta.last_row_id, th.id, "s", "event", body, meta, t)], thread: th };
+}
+
+/**
+ * فاز ۴ب گام ۳ (تصمیم ۲۵): در کارِ زندهٔ کارشناس هوشمند (روالِ تازه، خوانش هوشمند خاموش) پیشنهادِ تأییدنهایی‌شده اصلاح‌پذیر است —
+ * مثلاً بعد از چانه‌زنیِ قیمت: خط به پیش‌نویس برمی‌گردد، تأمین‌کننده دوباره «ارسال» می‌زند و بستهٔ تازه همان لحظه تأیید نهایی می‌شود
+ * و جای خطِ استعلامِ قبلی را می‌گیرد (quoteStmts). خطِ استعلامِ قبلی تا آن موقع سرِ جایش است.
+ */
+export async function revisable(env, thId) {
+  if (await pfReadOn(env)) return false;
+  const r = await env.DB.prepare(`SELECT r.state, r.finished_at, json_extract(r.data_json,'$.flow') AS flow, g.mode FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id
+      JOIN ai_agents g ON g.expert_id=r.expert_id WHERE x.thread_id=?`).bind(int(thId)).first().catch(() => null);
+  return !!(r && r.mode === "on" && !r.finished_at && Number(r.flow) === 2 && ["prep", "search", "work"].includes(r.state));
+}
+export async function lineRevise(env, sup, lineId) {
+  const l = await ownLine(env, sup, lineId);
+  if (l.state !== "final") throw new HttpError("فقط پیشنهادِ تأییدنهایی‌شده «✏️ اصلاح» می‌شود؛ این قلم خودش قابل ویرایش است یا بسته شده.", 409);
+  if (!(await revisable(env, l.thread_id))) throw new HttpError("این پیشنهاد دیگر اصلاح نمی‌شود؛ کارِ این استعلام به کمیسیون رسیده است.", 409);
+  const t = now();
+  const body = `✏️ اصلاحِ پیشنهاد: ${codeTxt(l.no)}«${l.title}» دوباره باز شد؛ پیشنهادِ قبلی تا «ارسال»ِ تازه سرِ جایش است.`;
+  const meta = { ev: "revise", line: l.id };
+  const res = await env.DB.batch([env.DB.prepare("UPDATE sp_lines SET state='draft', updated_at=? WHERE id=? AND state='final'").bind(t, l.id),
+    msgStmt(env, l.thread_id, "s", "event", body, meta, t), touchStmt(env, l.thread_id, t)]);
+  return { ok: true, state: "draft", thread_id: l.thread_id, msgs: [msgObj(res[1].meta.last_row_id, l.thread_id, "s", "event", body, meta, t)] };
 }
 
 /* ------------------------------------------------------------------ */

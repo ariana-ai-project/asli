@@ -19,7 +19,8 @@ import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { deliverPass } from "./sp-sms.js";
-import { aiKick } from "./ai-agent.js";
+import { aiKick, autoDecide } from "./ai-agent.js";
+import { rangeTxt } from "./terms-locks.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -505,15 +506,19 @@ const TERM_OPTS = { p: ENUMS.pay, i: ENUMS.invoice, v: ENUMS.vat };
 async function askTerm(env, row, l, k, head) {
   const f = P.TERM_KEY[k];
   const top = `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n`;
+  /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت برای همین قلم — فقط گزینه‌های مجاز، و بازهٔ تحویل در پرسش (سرور هم همین را می‌سنجد) */
+  const lk = C.lockOfLines([l], await C.limitsOfLines(env, [l])).lock;
   if (TERM_OPTS[k]) {
     P.setFlow(row, null);
-    const kb = TERM_OPTS[k].map((v, i) => [{ text: v, callback_data: `tv:${l.id}:${k}:${i}` }]);
+    const allow = lk[f] && lk[f].length ? lk[f] : null;
+    const kb = TERM_OPTS[k].map((v, i) => ({ v, i })).filter((x) => !allow || allow.includes(x.v)).map(({ v, i }) => [{ text: v, callback_data: `tv:${l.id}:${k}:${i}` }]);
     kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
-    await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:`, kb);
+    await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${allow ? `\n<i>🔒 شرطِ شرکت: فقط ${esc(allow.join(" یا "))}</i>` : ""}`, kb);
     return { ok: true };
   }
   P.setFlow(row, { step: "term", line: l.id, k });
-  await P.send(env, row, `${top}${TERM_PROMPT[k]}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [[{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+  const dl = f === "dtime" && lk.dtime && (lk.dtime.from || lk.dtime.to) ? `\n<i>🔒 شرطِ شرکت: زمان تحویل ${esc(rangeTxt(lk.dtime))}</i>` : "";
+  await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [[{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
   return { ok: true };
 }
 /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده — مقدار، قیمت یا شرطِ فاکتور — همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
@@ -571,8 +576,11 @@ async function supplierMessage(env, row, msg, text) {
       try { r = await C.submitLines(env, sup, th.id, null, { skey: key, filename: file.name, mime: file.mime, size: file.size }); }
       catch (e) { await storage(env).remove(key).catch(() => {}); throw e; }
       P.setFlow(row, null);
-      await P.pushMsgs(env, r.thread, r.msgs);
+      /* فاز ۴ب گام ۳: در کارِ کارشناس هوشمند بستهٔ ارسالی همان لحظه تأیید نهایی می‌شود — بی مدل */
+      const auto = await autoDecide(env, r.thread.id).catch(() => null);
+      await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
       aiKick(env, row._ctx, r.thread.id);
+      if (auto && auto.ids.includes(r.bundle_id)) return itemsCardSend(env, row, sup, th.id, null, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)})؛ پیش‌فاکتورِ خودتان هم پیوستش شد. ممنون از همکاری‌تان 🙏`);
       const head = r.state === "proforma" ? `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}).`
         : `✅ پیشنهاد با پیش‌فاکتورِ سامانه برای کارشناس فرستاده شد و پیش‌فاکتورِ خودتان هم پیوستش شد (بستهٔ ${fa(r.bundle_id)}).`;
       return itemsCardSend(env, row, sup, th.id, null, `${head} نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
@@ -674,7 +682,10 @@ async function lineCardSend(env, row, sup, lineId, mid, head) {
     env.DB.prepare("SELECT label FROM sp_files WHERE line_id=? ORDER BY id").bind(l.id).all(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM sp_lines WHERE thread_id=? AND id!=? AND state IN ('new','draft','returned')").bind(l.thread_id, l.id).first(),
   ]);
-  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l));
+  /* فاز ۴ب گام ۳: شرطِ شرکت برای همین قلم، و «✏️ اصلاحِ پیشنهاد» برای تأییدنهاییِ کارِ کارشناس هوشمند */
+  const lim = (await C.limitsOfLines(env, [l])).get(l.item_id) || null;
+  const revise = l.state === "final" ? await C.revisable(env, l.thread_id) : false;
+  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l), { limits: lim, revise });
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }
@@ -820,6 +831,16 @@ async function onCallback(env, cq, ctx) {
       await ack();
       return await askTerm(env, row, l, parts[2]);
     }
+    /* فاز ۴ب گام ۳: «✏️ اصلاحِ پیشنهاد» — تأییدنهاییِ کارِ کارشناس هوشمند دوباره قابل ویرایش؛ بستهٔ تازه جای قبلی را می‌گیرد */
+    if (a === "rv") {
+      try {
+        const r = await C.lineRevise(env, sup, n(1));
+        await ack("باز شد");
+        const th = await C.threadRow(env, r.thread_id);
+        if (th) await P.pushMsgs(env, th, r.msgs).catch(() => {});
+      } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+      return await lineCardSend(env, row, sup, n(1), mid, "✏️ پیشنهاد دوباره باز شد: عوضش کنید و دوباره «✅ آمادهٔ ارسال» و «📤 ارسال» را بزنید؛ پیشنهادِ قبلی تا ارسالِ تازه سرِ جایش است.");
+    }
     if (a === "tv") {
       const k = parts[2], v = TERM_OPTS[k] && TERM_OPTS[k][n(3)];
       const l = await env.DB.prepare("SELECT l.thread_id, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
@@ -899,8 +920,10 @@ async function onCallback(env, cq, ctx) {
       try {
         const r = await C.submitLines(env, sup, n(1));
         await ack("فرستاده شد");
-        await P.pushMsgs(env, r.thread, r.msgs);
+        const auto = await autoDecide(env, r.thread.id).catch(() => null);
+        await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
         aiKick(env, row._ctx, r.thread.id);
+        if (auto && auto.ids.includes(r.bundle_id)) return await itemsCardSend(env, row, sup, n(1), mid, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)}). ممنون از همکاری‌تان 🙏`);
         return await itemsCardSend(env, row, sup, n(1), mid, `✅ ${gen ? "پیشنهاد با پیش‌فاکتورِ سامانه" : ""}${gen ? " " : ""}برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
       } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
     }

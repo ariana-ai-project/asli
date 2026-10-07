@@ -15,7 +15,7 @@ import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { ensureSpWebhook } from "./sp-bot.js";
 import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
-import { aiKick } from "./ai-agent.js";
+import { aiKick, autoDecide } from "./ai-agent.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -219,9 +219,18 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if ((mm = /^\/sp\/thread\/(\d+)\/terms$/.exec(path)) && (m === "POST" || m === "PUT")) return json(await C.termsSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/thread\/(\d+)\/submit$/.exec(path)) && m === "POST") {
       const r = await C.submitLines(env, sup, mm[1], (await readJson(request)).line_ids);
-      await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      /* فاز ۴ب گام ۳: در کارِ کارشناس هوشمند بستهٔ ارسالی (در چارچوبِ قفل‌ها) همان لحظه تأیید نهایی می‌شود — بی مدل */
+      const auto = await autoDecide(env, r.thread.id).catch((e) => { console.error("ai auto", e && e.message); return null; });
+      await later(ctx, () => P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]));
       aiKick(env, ctx, r.thread.id);
-      return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
+      return json({ ok: true, bundle_id: r.bundle_id, state: auto && auto.ids.includes(r.bundle_id) ? "final" : r.state });
+    }
+    /* فاز ۴ب گام ۳ (تصمیم ۲۵): «✏️ اصلاحِ پیشنهاد» — پیشنهادِ تأییدنهایی‌شده در کارِ زندهٔ کارشناس هوشمند دوباره قابل ویرایش می‌شود */
+    if ((mm = /^\/sp\/line\/(\d+)\/revise$/.exec(path)) && m === "POST") {
+      const r = await C.lineRevise(env, sup, mm[1]);
+      const th = await C.threadRow(env, r.thread_id);
+      if (th) await later(ctx, () => P.pushMsgs(env, th, r.msgs));
+      return json({ ok: true, state: r.state });
     }
     /* ارسالِ مشخصات همراه با پیش‌فاکتور، یک‌جا: بدنه خودِ فایل است، اقلام در ids (۱,۲,…) */
     if ((mm = /^\/sp\/thread\/(\d+)\/submit-pf$/.exec(path)) && m === "POST") {
@@ -231,9 +240,10 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       let r;
       try { r = await C.submitLines(env, sup, th.id, ids, f); }
       catch (e) { const store = storage(env); if (store) await later(ctx, () => store.remove(f.skey)); throw e; }
-      await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
+      const auto = await autoDecide(env, r.thread.id).catch((e) => { console.error("ai auto", e && e.message); return null; });
+      await later(ctx, () => P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]));
       aiKick(env, ctx, r.thread.id);
-      return json({ ok: true, bundle_id: r.bundle_id, state: r.state });
+      return json({ ok: true, bundle_id: r.bundle_id, state: auto && auto.ids.includes(r.bundle_id) ? "final" : r.state });
     }
     if ((mm = /^\/sp\/line\/(\d+)\/file$/.exec(path)) && m === "POST") {
       const target = await C.fileTarget(env, sup, mm[1], url.searchParams.get("label"));

@@ -57,6 +57,7 @@ import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
+import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -291,6 +292,8 @@ const COLUMN_MIGRATIONS = [
   ["items", "pick_json", "TEXT"],
   ["items", "ai_start_at", "INTEGER"],
   ["items", "ai_start_by", "TEXT"],
+  /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ هر قلم با 🔒/🔓 (worker/terms-locks.js) */
+  ["items", "terms_json", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -2200,6 +2203,24 @@ async function route(request, env, ctx) {
       await changeStmt(env, it, actorOf(who), "norm", before, r.norm).run();
       if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
+    }
+    /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ قلم — گزینه‌های تسویه، نوع فاکتور و ارزش افزوده و بازهٔ تحویل، هر کدام 🔒/🔓 (worker/terms-locks.js).
+       مثلِ ساختار: قلمِ منجمد یا فرستاده‌شده به تأمین‌کنندهٔ واقعی ثابت است تا همهٔ تأمین‌کنندگان عینِ همان بسته را بگیرند */
+    if ((mm = /^\/items\/(\d+)\/terms$/.exec(path)) && m === "PUT") {
+      const ex = await requireExpert(request, env);
+      const who = { role: "expert", expert: ex };
+      const it = await ownItem(env, who, int(mm[1]));
+      await frozenGuard(env, it);
+      await aiGuard(env, who, it.aid, "norm", it);
+      if ((await itemLocks(env, [it.id])).has(it.id)) {
+        throw new HttpError("این قلم برای تأمین‌کننده فرستاده شده و شرایطش هم مثلِ ساختارش ثابت است تا همهٔ تأمین‌کنندگان عینِ همان بسته را بگیرند.", 409, { locked: true });
+      }
+      const terms = cleanLimits(await readJson(request));
+      await env.DB.batch([
+        env.DB.prepare("UPDATE items SET terms_json=? WHERE id=?").bind(terms ? JSON.stringify(terms) : null, it.id),
+        ev(env, `expert:${ex.id}`, "item_terms", it.request_id, it.id, { assignment_id: it.aid, terms }),
+      ]);
+      return json({ ok: true, terms, text: limitsTxt(terms) });
     }
     /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {

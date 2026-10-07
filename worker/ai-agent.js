@@ -904,6 +904,13 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       await env.DB.prepare("UPDATE ai_threads SET state='closed', lock_until=NULL, updated_at=? WHERE thread_id=?").bind(now(), threadId).run();
       return { closed: true };
     }
+    const pfRead = await pfReadOn(env);
+    /* فاز ۴ب گام ۳: روالِ تازه — تصمیمِ بسته با سامانه؛ بسته‌ای که هنگامِ ارسال تأیید نهایی نشد (مثلاً خطای گذرا) همین‌جا، نه با مدل */
+    const chat = chatOnlyRun(run, pfRead);
+    if (chat) {
+      const a = await autoDecide(env, threadId).catch(() => null);
+      if (a && a.msgs.length) await P.pushMsgs(env, th, a.msgs).catch((e) => console.error("ai push", e && e.message));
+    }
     const [lr, br, mr] = await env.DB.batch([
       env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? ORDER BY id").bind(threadId),
       env.DB.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id").bind(threadId),
@@ -911,7 +918,6 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     ]);
     const lines = lr.results || [], bundles = br.results || [], msgs = (mr.results || []).map(C.msgOut);
     /* پیش‌فاکتورِ تازه: اول خوانش هوشمند (همان پرامپتِ sp-ai.js) — فقط وقتی کلیدش در پنل پشتیبانی روشن است (فاز ۴) */
-    const pfRead = await pfReadOn(env);
     const need = pfRead && bundles.find((b) => b.state === "proforma" && b.pf_key && !aiUsable(parse(b.ai_json, null)));
     if (need) {
       const store = storage(env);
@@ -928,15 +934,17 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       ]);
       return { read: need.id };
     }
-    if (fast) {
+    if (fast && !chat) {
       const due = bundles.filter((b) => b.state === "pending" || (!pfRead && ["approved", "proforma"].includes(b.state)) || (b.state === "proforma" && aiUsable(parse(b.ai_json, null))));
       if (due.length) return toCron(env, run, threadId, `بستهٔ ${due.map((b) => b.id).join("، ")} تصمیم می‌خواهد؛ دورِ فوری کنار رفت و Cron همین گفت‌وگو را با عمقِ فکرِ تب می‌زند.`);
     }
     const maxId = msgs.length ? msgs[msgs.length - 1].id : st.seen_msg;
-    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead });
+    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead, chat });
     rec.purpose = "negotiate";
     /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
-    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead })).out;
+    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead, chat })).out;
+    /* گام ۳: کاری که مدل روی بسته نوشته اجرا نمی‌شود — تصمیمِ بسته با سامانه است */
+    if (chat) res.actions = [];
     /* دورِ کم‌عمق تصمیمی روی بسته گرفت (مثلاً ردِ بسته پس از پیامِ تأمین‌کننده): نه تصمیم اجرا می‌شود نه پاسخ می‌رود */
     if (fast && Array.isArray(res.actions) && res.actions.length) {
       return toCron(env, run, threadId, `دورِ فوری تصمیم گرفت (${res.actions.map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ")})؛ اجرا نشد و Cron همین دور را با عمقِ فکرِ تب می‌زند.`);
@@ -1041,8 +1049,10 @@ function validKeys(b, rows) {
 }
 
 /** پروندهٔ یک دور برای مدل (ai-prompts.js:negotiationContext) */
-async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead = true }) {
+async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead = true, chat = false }) {
   const lineOut = lines.map(C.lineOut);
+  /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت برای هر قلم (🔒/🔓) — مدل شرطِ 🔒 را برای تأمین‌کننده روشن می‌گوید */
+  const lim = await C.limitsOfLines(env, lines);
   /* محکِ قیمت: سوابقِ همین قلم (از آماده‌سازی) و پیشنهادهای دیگرِ همین ارجاع — بی نام */
   const others = (await env.DB.prepare(`SELECT l.item_id, COUNT(*) AS n, MIN(l.price) AS min FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
       WHERE t.assignment_id=? AND l.thread_id<>? AND l.price>0 AND l.state IN ('submitted','approved','proforma','final') GROUP BY l.item_id`).bind(run.assignment_id, th.id).all()).results || [];
@@ -1090,9 +1100,10 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   return negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
-    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
+    lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null, limits: lim.get(l.item_id) || null })),
+    terms: C.termsOf(th), rel,
     bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), ask: parse(st.ask_json, null), transcript: threadSection(tInfo, msgs, { forModel: true }),
-    pfRead,
+    pfRead, chat,
   });
 }
 
@@ -1285,6 +1296,43 @@ async function closingContext(env, run) {
     "", "<دعوت‌ها_و_گفت‌وگوها>", ths || "دعوتی نرفت.", "</دعوت‌ها_و_گفت‌وگوها>",
     "", "شرح، معیارها، چالش‌ها و پیشنهاد هر قلم را بنویس.",
   ].join("\n");
+}
+
+/* ------------------------------------------------------------------ */
+/* تصمیمِ بسته بی مدل — فاز ۴ب گام ۳                                      */
+/* ------------------------------------------------------------------ */
+/** روالِ تازه با «خوانش هوشمند پیش‌فاکتور» خاموش (پیش‌فرض): مدل فقط گفت‌وگو می‌کند و تصمیمِ بسته با سامانه است */
+const chatOnlyRun = (run, pfRead) => !!run && !!run.data && run.data.flow === 2 && !pfRead;
+
+/**
+ * بسته‌ای که ارسال شده در چارچوبِ قفل‌های ساختار و شرایط است (sp-core.js: lineSave، lineReady و submitLines سنجیده‌اند) و در کارِ
+ * کارشناس هوشمند همان لحظه «تأیید نهایی» می‌شود — خطِ استعلام با مقدارهای خودِ تأمین‌کننده و پیش‌فاکتورِ تولیدی؛ بستهٔ تازهٔ همان
+ * تأمین‌کننده (بعد از «✏️ اصلاحِ پیشنهاد») جای خطِ قبلی را می‌گیرد (تصمیم ۲۵). کارِ متوقف یا در حالِ بستن دست نمی‌خورد.
+ * خروجی: {ids, msgs, thread} یا null؛ پیام‌ها را صدازننده پخش می‌کند (پنل، بات، و Cron در threadTurn برای بستهٔ مانده).
+ */
+export async function autoDecide(env, threadId) {
+  const id = int(threadId);
+  if (!id || await pfReadOn(env)) return null;
+  const row = await env.DB.prepare(`SELECT r.id AS run_id, r.expert_id, r.state, r.finished_at, json_extract(r.data_json,'$.flow') AS flow, g.mode
+      FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id WHERE x.thread_id=?`).bind(id).first().catch(() => null);
+  if (!row || row.mode !== "on" || row.finished_at || Number(row.flow) !== 2 || !["prep", "search", "work"].includes(row.state)) return null;
+  const open = (await env.DB.prepare("SELECT id FROM sp_bundles WHERE thread_id=? AND state IN ('pending','approved','proforma') ORDER BY id").bind(id).all()).results || [];
+  if (!open.length) return null;
+  const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(row.expert_id).first();
+  if (!ex) return null;
+  const ids = [], msgs = [];
+  let thread = null;
+  for (const b of open) {
+    try {
+      const r = await C.decide(env, ex, b.id, "final", { ai: true });
+      ids.push(b.id); msgs.push(...(r.msgs || [])); thread = r.thread;
+      await log(env, row.run_id, id, "decide", `🏁 بستهٔ ${faN(b.id)} در چارچوبِ قفل‌های ساختار و شرایط بود و سامانه همان لحظه تأیید نهایی‌اش کرد (بی مدل)${r.gen ? "؛ پیش‌فاکتورِ سامانه ساخته شد" : ""}.`);
+    } catch (e) {
+      await log(env, row.run_id, id, "error", `تأیید نهاییِ خودکارِ بستهٔ ${faN(b.id)} نشد: ${String((e && e.message) || e).slice(0, 300)}`);
+    }
+  }
+  if (ids.length) await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(now(), row.run_id, now()).run().catch(() => {});
+  return ids.length ? { ids, msgs, thread } : null;
 }
 
 /* ------------------------------------------------------------------ */

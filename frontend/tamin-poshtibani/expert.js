@@ -50,6 +50,7 @@
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     picks: {}, pickOpen: {},           // فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (/items/:id/picks) و قلمِ «مستقیم»ی که کارشناس می‌خواهد بسپارد
+    termsOpen: {}, termsEd: {},        // فاز ۴ب گام ۳: ویرایشگرِ «📋 شرایط خرید»ِ هر قلم و پیش‌نویسش
     norm: {},                          // نرمال‌سازی هر قلم: {loading, error, data, draft}
     normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
     hmode: "head",                     // «نوع قلم» (head، پیش‌فرض — تصمیم مدیر) یا «عین قلم» (exact)
@@ -419,6 +420,61 @@
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
       ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
+  }
+
+  /* ---------- «📋 شرایط خرید»ِ هر قلم (طرح «خرید هوشمند» فاز ۴ب گام ۳؛ worker/terms-locks.js) ----------
+     کنارِ نوع قلم و لایه‌ها: گزینه‌های تسویه، نوع فاکتور و ارزش افزوده و بازهٔ زمانِ تحویل، هر کدام 🔒 یا 🔓. 🔒 را پنل و بات
+     تأمین‌کننده بیرونش نمی‌پذیرند و سرور هم می‌سنجد؛ 🔓 فقط خواستهٔ شرکت است. با اولین ارسال به تأمین‌کننده یا «🚀 شروع» ثابت
+     می‌شود. در کارِ کارشناس هوشمند، بسته‌ای که در چارچوبِ همین‌ها باشد همان لحظه تأیید نهایی می‌شود. */
+  const TERM_ENUM = { pay: PAYS, invoice: INVT, vat: VATS };
+  const TERM_LAB = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل" };
+  const termsOfItem = (it) => { try { const x = it && it.terms_json ? JSON.parse(it.terms_json) : null; return x && Object.keys(x).length ? x : null; } catch (_) { return null; } };
+  const termsDraftOf = (it) => S.termsEd[it.id] || (S.termsEd[it.id] = JSON.parse(JSON.stringify(termsOfItem(it) || {})));
+  const termsFixed = (it) => !!(it.sp_lock || frozen(it));
+  const jRange = (d) => (d.from && d.to ? `بین ${d.from} و ${d.to}` : d.to ? `حداکثر تا ${d.to}` : d.from ? `از ${d.from} به بعد` : "");
+  function termsSummary(L) {
+    if (!L) return "";
+    return [...["pay", "invoice", "vat"].filter((f) => L[f]).map((f) => `${TERM_LAB[f]} ${L[f].lock ? "🔒" : "🔓"} ${L[f].opts.join(" / ")}`),
+      ...(L.dtime && (L.dtime.from || L.dtime.to) ? [`${TERM_LAB.dtime} ${L.dtime.lock ? "🔒" : "🔓"} ${jRange(L.dtime)}`] : [])].join(" · ");
+  }
+  function vTerms(it) {
+    if (!it || it.state !== "open") return "";
+    const L = termsOfItem(it), ro = termsFixed(it), open = !!S.termsOpen[it.id] && !ro;
+    const sum = termsSummary(L);
+    const head = `<div class="toolrow" style="margin:0"><b>📋 شرایط خرید</b>
+      ${sum ? `<span class="chip info" title="🔒 را پنل و بات تأمین‌کننده بیرونش نمی‌پذیرند؛ 🔓 فقط خواستهٔ شرکت است">${esc(sum)}</span>` : `<span class="dim" style="font-size:.85rem">بی قید — تأمین‌کننده هر گزینه‌ای را می‌تواند ثبت کند</span>`}
+      <span style="margin-inline-start:auto"></span>
+      ${ro ? `<span class="chip" title="${it.sp_lock ? "قلم برای تأمین‌کننده رفته؛ شرایطش مثلِ ساختارش ثابت است" : "قلم سپرده شده و منجمد است"}">🔒 ثابت</span>`
+        : `<button class="tp-btn sm" data-terms-open>${open ? "بستن" : "✏️ تعیینِ شرایط"}</button>`}</div>`;
+    if (!open) return `<div class="terms-box">${head}</div>`;
+    const D = termsDraftOf(it);
+    const enumRow = (f) => {
+      const x = D[f] || { opts: [], lock: false };
+      return `<tr><td class="rt"><b>${TERM_LAB[f]}</b></td>
+        <td class="rt">${TERM_ENUM[f].map((o) => `<label class="chkline" style="margin-inline-end:10px"><input type="checkbox" data-tm-opt="${f}" value="${esc(o)}" ${(x.opts || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("")}</td>
+        <td><button class="tp-btn xs ${x.lock ? "primary" : ""}" data-tm-lock="${f}" title="🔒: تأمین‌کننده فقط همین‌ها را می‌تواند بزند · 🔓: فقط خواستهٔ شرکت">${x.lock ? "🔒" : "🔓"}</button></td></tr>`;
+    };
+    const d = D.dtime || { lock: false };
+    return `<div class="terms-box">${head}
+      <div class="tp-scroll"><table class="tp-table" style="width:auto;margin-top:8px"><tbody>
+        ${["pay", "invoice", "vat"].map(enumRow).join("")}
+        <tr><td class="rt"><b>${TERM_LAB.dtime}</b></td><td class="rt">از <input class="tp-input num" data-tm-dt="from" value="${esc(d.from || "")}" placeholder="اختیاری" style="width:120px" readonly>
+          تا <input class="tp-input num" data-tm-dt="to" value="${esc(d.to || "")}" placeholder="۱۴۰۵/۰۸/۲۰" style="width:120px" readonly>
+          <button class="tp-btn xs" data-tm-dtclr title="بازهٔ تحویل پاک شود">پاک</button></td>
+          <td><button class="tp-btn xs ${d.lock ? "primary" : ""}" data-tm-lock="dtime" title="🔒: تحویلِ بیرون از بازه پذیرفته نیست · 🔓: فقط خواستهٔ شرکت">${d.lock ? "🔒" : "🔓"}</button></td></tr>
+      </tbody></table></div>
+      <div class="dim" style="font-size:.82rem;margin:6px 0">گزینه‌ای تیک نخورد یعنی بی قید. 🔒: تأمین‌کننده بیرون از این‌ها ثبت نمی‌کند (پنل، بات و سرور). 🔓: فقط خواستهٔ شرکت است و در پنلِ او دیده می‌شود.
+        با اولین ارسال به تأمین‌کننده یا «🚀 شروع» ثابت می‌شود؛ در کارِ کارشناس هوشمند، بسته‌ای که در چارچوبِ همین‌ها باشد همان لحظه تأیید نهایی می‌شود.</div>
+      <div class="toolrow" style="margin:0"><button class="tp-btn primary sm" data-terms-save>ذخیرهٔ شرایط</button><button class="tp-btn sm" data-terms-reset>برگرداندن</button></div></div>`;
+  }
+  async function saveTermsUI(it) {
+    const D = termsDraftOf(it);
+    try {
+      const r = await TP.api(`/items/${it.id}/terms`, { method: "PUT", body: D });
+      it.terms_json = r.terms ? JSON.stringify(r.terms) : null;
+      delete S.termsEd[it.id]; S.termsOpen[it.id] = false;
+      render();
+    } catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
   }
 
   /* ---------- «🎯 فهرست دعوت»ِ هر قلم و «🚀 شروع» (طرح «خرید هوشمند» فاز ۴ب گام ۲؛ worker/ai-picks.js) ----------
@@ -1027,10 +1083,10 @@
     /* نرمال‌سازی اجباری: تا ساختارِ قلم تأیید نشده، کادرش باز است */
     const norm = S.normOn || S.hmode === "pick" || !normOk(it) ? vNorm(it) : "";
 
-    if (!d) return `<div class="pad">${head}${norm}${vPicks(it)}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
+    if (!d) return `<div class="pad">${head}${norm}${vTerms(it)}${vPicks(it)}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
       حالت «نوع قلم»، «قلم انتخابی» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید؛ ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان).
       رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
-    if (d.available === false) return `<div class="pad">${head}${vPicks(it)}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
+    if (d.available === false) return `<div class="pad">${head}${vTerms(it)}${vPicks(it)}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
     const st = d.struct || {}, mt = d.match || {};
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
     const picked = new Set(mt.picked || []);
@@ -1047,7 +1103,7 @@
         ${d.lowConf ? `<span class="chip warn" title="نرخ تبدیلِ این خریدها اطمینان «پایین» دارد و می‌تواند جمع را جابه‌جا کند">${M(d.lowConf)} خرید با نرخ کم‌اطمینان</span>` : ""}</div>` : "";
     const exc = d.excluded || [];
     const rows = histRows(d);
-    if (!rows.length) return `<div class="pad">${head}${structChips}${vPicks(it)}<div class="tp-note warn">${exc.length
+    if (!rows.length) return `<div class="pad">${head}${structChips}${vTerms(it)}${vPicks(it)}<div class="tp-note warn">${exc.length
       ? `هرچه از این قلم ثبت شده زیر «${esc(exc[0].name)}» است (${M(exc[0].n)} خرید) — ${exc[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"} — و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
       : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div>${norm}</div>`;
 
@@ -1059,7 +1115,7 @@
       ${vProfile(it)}
       ${head}
       ${structChips}
-      ${vPicks(it)}
+      ${vTerms(it)}${vPicks(it)}
       <div class="toolrow">
         <span class="chip ok">خرید قلم — فعال</span>
         <span class="chip mock" title="ستون پروژه هنوز در فایل مرجع نیست">خرید قلم در پروژه — در انتظار ساختار داده</span>
@@ -2245,6 +2301,26 @@
     const pko = G("[data-pkopen]"); if (pko) pko.onclick = () => { const it = item(); S.pickOpen[it.id] = !S.pickOpen[it.id]; render(); };
     const pkl = G("[data-pkreload]"); if (pkl) pkl.onclick = () => loadPicks(item(), true);
     const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
+    /* فاز ۴ب گام ۳: «📋 شرایط خرید» — پیش‌نویس بی بازرندر (جز دکمه‌های 🔒/🔓 و تاریخ) */
+    const tmo = G("[data-terms-open]"); if (tmo) tmo.onclick = () => { const it = item(); S.termsOpen[it.id] = !S.termsOpen[it.id]; delete S.termsEd[it.id]; render(); };
+    Q("[data-tm-opt]").forEach((c) => c.onchange = () => {
+      const it = item(), D = termsDraftOf(it), f = c.dataset.tmOpt;
+      D[f] = D[f] || { opts: [], lock: false };
+      const set = new Set(D[f].opts || []); if (c.checked) set.add(c.value); else set.delete(c.value);
+      D[f].opts = TERM_ENUM[f].filter((o) => set.has(o));
+    });
+    Q("[data-tm-lock]").forEach((b) => b.onclick = () => {
+      const it = item(), D = termsDraftOf(it), f = b.dataset.tmLock;
+      D[f] = D[f] || (f === "dtime" ? {} : { opts: [] });
+      D[f].lock = !D[f].lock; render();
+    });
+    Q("[data-tm-dt]").forEach((x) => x.onclick = () => TP.openDatePicker(x, (v) => {
+      const it = item(), D = termsDraftOf(it);
+      D.dtime = { ...(D.dtime || {}), [x.dataset.tmDt]: String(v || "").split("،")[0].trim() }; render();
+    }, { single: true }));
+    const tmc = G("[data-tm-dtclr]"); if (tmc) tmc.onclick = () => { const D = termsDraftOf(item()); D.dtime = { lock: !!(D.dtime && D.dtime.lock) }; render(); };
+    const tms = G("[data-terms-save]"); if (tms) tms.onclick = () => saveTermsUI(item());
+    const tmr = G("[data-terms-reset]"); if (tmr) tmr.onclick = () => { delete S.termsEd[item().id]; render(); };
     /* هر فراخوانی مدل با کادرِ تأیید */
     const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
     const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);

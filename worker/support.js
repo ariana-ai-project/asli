@@ -205,7 +205,7 @@ export async function supportExpert(env, id) {
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "item_terms"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
   support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes"] },
 };
@@ -230,6 +230,8 @@ const EV_FA = {
   ai_modes: "🧭 حالتِ اقلامِ کارشناس هوشمند عوض شد",
   /* فاز ۴ب گام ۲: «🚀 شروع»ِ هر قلم با «🎯 فهرست دعوت»ِ کارشناس، و دعوت از انتخاب‌های تازه */
   ai_start: "🚀 شروعِ قلم با فهرستِ دعوتِ کارشناس — ساختار منجمد شد", ai_pick_more: "📨 دعوت از انتخاب‌های تازهٔ فهرستِ دعوت",
+  /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ قلم (🔒/🔓) */
+  item_terms: "📋 شرایط خریدِ قلم (🔒/🔓)",
 };
 const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };

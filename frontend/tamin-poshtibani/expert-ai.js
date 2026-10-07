@@ -11,7 +11,7 @@
   "use strict";
   const TP = window.TP, esc = TP.esc, M = TP.M;
   const A = { st: null, run: null, runId: null, sub: "runs", calls: null, sms: null, phones: null, q: "", err: "", timer: 0, render: null, loading: false };
-  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️", ask: "🚨", handover: "⚠️" };
+  const KIND_ICON = { run: "▶️", step: "⚙️", invite: "📨", turn: "💬", proforma: "📄", close: "📊", error: "⚠️", ask: "🚨", handover: "⚠️", decide: "🏁" };
   const REVIEW_FA = { new: "📥 تحویل شد — منتظرِ بررسیِ پشتیبانی", ok: "✓ کمیسیون تأیید شد", rejected: "✗ پشتیبانی رد کرد" };
   const ST_CHIP = { prep: "info", search: "info", work: "warn", closing: "info", done: "ok", paused: "bad", ended: "bad" };
   const TH_FA = { invited: "دعوت شد", active: "در مذاکره", ask: "🚨 پرسش از کارشناس", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };

@@ -402,6 +402,10 @@
       for (let i = 0; i < ex.length; i += 2) kb.push(ex.slice(i, i + 2));
       kb.push([{ t: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
     }
+    if (l.state === "final" && S.d.revise) {
+      h += `<div class="ph-bot-t">🏁 اگر قیمت یا شرایطِ بهتری دارید، «✏️ اصلاحِ پیشنهاد» را بزنید و دوباره بفرستید؛ پیشنهادِ تازه جای قبلی را می‌گیرد.</div>`;
+      kb.push([{ t: "✏️ اصلاحِ پیشنهاد", d: `rv:${l.id}` }]);
+    }
     kb.push([{ t: "📦 فهرست اقلام", d: "ic" }]);
     return card(h, kb, replace);
   }
@@ -435,12 +439,14 @@
     const top = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b></div>`;
     if (TERM_OPTS[k]) {
       S.flow = null;
-      const kb = (S.enums[TERM_OPTS[k]] || []).map((v, i) => [{ t: v, d: `tv:${l.id}:${k}:${i}` }]);
+      /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت — فقط گزینه‌های مجاز (شمارهٔ گزینه همان شمارهٔ فهرستِ کامل می‌ماند) */
+      const allow = allowOf(f);
+      const kb = (S.enums[TERM_OPTS[k]] || []).map((v, i) => ({ v, i })).filter((x) => !allow || allow.includes(x.v)).map(({ v, i }) => [{ t: v, d: `tv:${l.id}:${k}:${i}` }]);
       kb.push([{ t: "✖️ انصراف", d: `si:${l.id}` }]);
-      return card(`${top}<div class="ph-bot-t">🧾 <b>${esc(termFa(f))}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:</div>`, kb);
+      return card(`${top}<div class="ph-bot-t">🧾 <b>${esc(termFa(f))}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${limHint(f, l) ? `<br>${limHint(f, l)}` : ""}</div>`, kb);
     }
     S.flow = { step: "term", line: l.id, k, hint: `${TERM_PROMPT[k].replace(/<[^>]+>/g, "")}`, ph: k === "d" ? "۱۰ روز کاری یا ۱۴۰۵/۰۸/۰۱" : "شمار روز…" };
-    card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
+    card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}${f === "dtime" && limHint(f, l) ? `<br>${limHint(f, l)}` : ""}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
     focusComposer();
   }
   const focusComposer = () => { const i = $("#msgIn"); if (i && phoneMode) i.focus(); };
@@ -497,6 +503,12 @@
       if (a === "pv") return bundlePfDialog(n(1));
       if (a === "pw") return previewDialog(S.d.lines.filter((l) => l.state === "ready").map((l) => l.id), false);
       if (a === "tk") { const l = lineOf(n(1)); return l ? askTerm(l, p[2]) : null; }
+      if (a === "rv") {
+        await api(`/sp/line/${n(1)}/revise`, { json: {} });
+        await loadThread(true); refreshSide();
+        const l = lineOf(n(1));
+        return l ? lineCard(l, "✏️ پیشنهاد دوباره باز شد: عوضش کنید و دوباره «✅ آمادهٔ ارسال» و «📤 ارسال» را بزنید؛ پیشنهادِ قبلی تا ارسالِ تازه سرِ جایش است.") : null;
+      }
       if (a === "tv") {
         const v = (S.enums[TERM_OPTS[p[2]]] || [])[n(3)]; if (!v) return;
         const r = await api(`/sp/thread/${S.th}/terms`, { json: { [TERM_KEY[p[2]]]: v } });
@@ -708,6 +720,28 @@
     return S.termsDraft || {};
   }
   const setTerm = (f, v) => { S.termsDraft = { ...(S.termsDraft || {}), [f]: v }; S.termsDirty = true; };
+  /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت — قیدِ 🔒ِ مشترکِ اقلامِ قابلِ ویرایش (sp-core.js:threadFull) و خواستهٔ 🔓ِ هر قلم.
+     🔒 بیرون از قید پذیرفته نیست (سرور هم می‌سنجد)؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
+  const TL = () => (S.d && S.d.terms_lock) || { lock: {}, conflict: [] };
+  const allowOf = (f) => { const t = TL(); return t.conflict.includes(f) ? null : t.lock[f] && t.lock[f].length ? t.lock[f] : null; };
+  const rangeFa = (d) => (d.from && d.to ? `بین ${fa(d.from)} و ${fa(d.to)}` : d.to ? `حداکثر تا ${fa(d.to)}` : `از ${fa(d.from)} به بعد`);
+  function limHint(f, l) {
+    const t = TL(), L = l && l.limits && l.limits[f];
+    if (t.conflict.includes(f)) return `<i class="sp-lim warn">⚠️ اقلامِ این استعلام شرطِ متفاوت دارند؛ هر بار اقلامِ هم‌شرط را با هم بفرستید</i>`;
+    if (f === "dtime") {
+      const d = t.lock.dtime;
+      if (d && (d.from || d.to)) return `<i class="sp-lim">🔒 ${esc(rangeFa(d))}</i>`;
+      return L && (L.from || L.to) ? `<i class="sp-lim open">🔓 خواستهٔ شرکت: ${esc(rangeFa(L))}</i>` : "";
+    }
+    const a = allowOf(f);
+    if (a) return `<i class="sp-lim">🔒 فقط ${esc(a.join(" یا "))}</i>`;
+    return L && L.opts ? `<i class="sp-lim open">🔓 خواستهٔ شرکت: ${esc(L.opts.join(" یا "))}</i>` : "";
+  }
+  /** «✏️ اصلاحِ پیشنهاد» (تصمیم ۲۵): پیشنهادِ تأییدنهایی‌شده در کارِ کارشناس هوشمند دوباره باز می‌شود؛ ارسالِ تازه جای قبلی را می‌گیرد */
+  function reviseLine(id) {
+    modal("✏️ اصلاحِ پیشنهاد", "<p>این پیشنهاد تأیید نهایی شده است. اگر قیمت یا شرایطِ بهتری دارید، دوباره باز می‌شود: عوضش کنید و «ارسال» را بزنید — پیشنهادِ تازه همان لحظه جای قبلی را می‌گیرد و تا آن موقع پیشنهادِ قبلی سرِ جایش است.</p>",
+      async () => { try { await api(`/sp/line/${id}/revise`, { json: {} }); await loadThread(); } catch (e) { say(e.message); } }, "باز شود", "انصراف");
+  }
   /* زمان تحویل (فاز ۴): «شمار روز» یا «تاریخ از تقویم» — مقدار همان رشته‌ای است که سرور می‌پذیرد: «10»، «10 روز کاری» یا «1405/08/01» */
   const J_RE = /^(\d{4})\/(\d{1,2})\/(\d{1,2})$/;
   function dtimeBox(v, ed) {
@@ -742,15 +776,15 @@
   }
   function termsBox(l, ed) {
     const t = termsFor(l);
-    const opt = (f) => `<option value="">—</option>${(S.enums[f] || []).map((v) => `<option ${t[f] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
+    const opt = (f) => `<option value="">—</option>${(S.enums[f] || []).filter((v) => !allowOf(f) || allowOf(f).includes(v)).map((v) => `<option ${t[f] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
     const ro = ed ? "" : "disabled";
     const req = (f) => (TERM_REQUIRED.includes(f) ? " <i class=\"sp-req\">*</i>" : "");
     return `<div class="sp-box3 terms"><b class="sp-bt">🧾 شرایط فاکتور <span class="sp-muted">(برای همهٔ اقلامِ این استعلام یکی است)</span></b>
       <div class="sp-grid5">
-        <div class="sp-field sp-dtl">${termFa("dtime")}${req("dtime")}${dtimeBox(t.dtime, ed)}</div>
-        <label>${termFa("pay")}${req("pay")}<select class="tp-select" data-t="pay" ${ro}>${opt("pay")}</select></label>
-        <label>${termFa("invoice")}${req("invoice")}<select class="tp-select" data-t="invoice" ${ro}>${opt("invoice")}</select></label>
-        <label>${termFa("vat")}${req("vat")}<select class="tp-select" data-t="vat" ${ro}>${opt("vat")}</select></label>
+        <div class="sp-field sp-dtl">${termFa("dtime")}${req("dtime")}${limHint("dtime", l)}${dtimeBox(t.dtime, ed)}</div>
+        <label>${termFa("pay")}${req("pay")}${limHint("pay", l)}<select class="tp-select" data-t="pay" ${ro}>${opt("pay")}</select></label>
+        <label>${termFa("invoice")}${req("invoice")}${limHint("invoice", l)}<select class="tp-select" data-t="invoice" ${ro}>${opt("invoice")}</select></label>
+        <label>${termFa("vat")}${req("vat")}${limHint("vat", l)}<select class="tp-select" data-t="vat" ${ro}>${opt("vat")}</select></label>
         <label>${termFa("valid_days")}${req("valid_days")}<input class="tp-input" data-t="valid_days" inputmode="numeric" placeholder="مثلاً ۷" value="${esc(t.valid_days ?? "")}" ${ed ? "" : "readonly"}></label>
       </div></div>`;
   }
@@ -802,7 +836,7 @@
       ${ed ? `<div class="sp-actions"><button class="tp-btn" data-save>ذخیره</button><button class="tp-btn primary" data-ready="1">✓ آمادهٔ ارسال</button></div>`
         : l.state === "ready" ? `<div class="sp-lockedmsg">${readyMsg}</div>
           <div class="sp-actions"><button class="tp-btn" data-ready="0">✏️ ویرایش</button><button class="tp-btn primary" data-send-ready>📤 ارسال</button></div>`
-        : `<div class="sp-lockedmsg">${esc(lockedMsg(l))}</div>`}
+        : `<div class="sp-lockedmsg">${esc(lockedMsg(l))}</div>${l.state === "final" && S.d.revise ? `<div class="sp-actions"><button class="tp-btn" data-revise="${l.id}" title="قیمت یا شرایطِ بهتری دارید؟ پیشنهاد دوباره باز می‌شود؛ ارسالِ تازه جای قبلی را می‌گیرد">✏️ اصلاحِ پیشنهاد</button></div>` : ""}`}
     </article>`;
   }
   /** کادرِ ارسال: هم در «مشخصات اقلام»، هم در «ارسال‌ها». خوانش هوشمند خاموش (فاز ۴): پیش‌نمایشِ پیش‌فاکتورِ سامانه و بعد ارسال */
@@ -933,6 +967,7 @@
     });
     Q("[data-rm-layer]").forEach((b) => { b.onclick = () => { const x = cardOf(b); S.extra[x.id].splice(+b.dataset.rmLayer, 1); S.dirty.add(x.id); rerenderCard(x.id); }; });
     Q("[data-save]").forEach((b) => { b.onclick = () => saveLine(cardOf(b).id).then(() => loadThread()).catch((e) => say(e.message)); });
+    Q("[data-revise]").forEach((b) => { b.onclick = () => reviseLine(+b.dataset.revise); });
     Q("[data-ready]").forEach((b) => {
       b.onclick = async () => {
         const id = cardOf(b).id;
