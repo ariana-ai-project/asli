@@ -675,7 +675,7 @@
     let p = {}; try { p = JSON.parse(d.payload_json || "{}"); } catch (_) { /* بی بدنه */ }
     return `<div class="dim" style="margin-top:4px">${M((p.item_ids || []).length)} قلم به‌جای کارشناس هوشمند با خودِ کارشناس${p.reason ? ` — علت: ${esc(p.reason)}` : ""}</div>`;
   }
-  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس", ai_tick: "تیکِ هوشمند / دستی", ai_manual: "انجام دستیِ اقلام", ai_modes: "حالتِ اقلامِ کارشناس هوشمند",
+  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس", ai_tick: "تیکِ هوشمند / دستی", ai_manual: "انجام دستیِ اقلام", ai_modes: "حالتِ اقلامِ کارشناس هوشمند", ai_start: "🚀 شروعِ قلم (کارشناس هوشمند)", ai_pick_more: "📨 دعوت از انتخاب‌های تازه",
     decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
     manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
     commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک" };

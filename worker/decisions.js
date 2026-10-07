@@ -103,11 +103,12 @@ async function manualRequest(env, ex, own, body) {
   if (!o) throw new HttpError("این درخواست در حالت هوشمند نیست؛ کارهایش همین حالا با خودِ شماست.", 409);
   const want = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : []).map((x) => int(x)).filter(Boolean))];
   if (!want.length) throw new HttpError("دست‌کم یک قلم را برای انجام دستی انتخاب کنید.");
-  const rows = (await env.DB.prepare(`SELECT id, frozen_at, ai_off FROM items WHERE assignment_id=? AND state='open' AND id IN (${want.map(() => "?").join(",")})`)
+  const rows = (await env.DB.prepare(`SELECT id, frozen_at, ai_off, ai_start_at FROM items WHERE assignment_id=? AND state='open' AND id IN (${want.map(() => "?").join(",")})`)
     .bind(own.id, ...want).all()).results || [];
   const waiting = new Set(((await env.DB.prepare("SELECT payload_json FROM decisions WHERE assignment_id=? AND action='manual' AND approved_at IS NULL AND rejected_at IS NULL")
     .bind(own.id).all()).results || []).flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
-  const itemIds = rows.filter((r) => !(o.run_id && r.frozen_at) && Number(r.ai_off) !== 1 && !waiting.has(r.id)).map((r) => r.id);
+  /* سپرده‌شده («🚀 شروع»ِ فاز ۴ب گام ۲، یا منجمد در کارِ زنده) دیگر برنمی‌گردد */
+  const itemIds = rows.filter((r) => !r.ai_start_at && !(o.run_id && r.frozen_at) && Number(r.ai_off) !== 1 && !waiting.has(r.id)).map((r) => r.id);
   if (!itemIds.length) throw new HttpError("این اقلام سپرده شده‌اند، از قبل دستی‌اند یا درخواستِ دیگری برایشان در انتظارِ مدیر است.", 409);
   const t = now();
   const payload = { item_ids: itemIds, reason };

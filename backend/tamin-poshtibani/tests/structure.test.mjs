@@ -132,7 +132,10 @@ test("کارشناسِ دستی: سوابقِ قلمِ تأییدنشده خوا
 
 let SUP = {};
 test("حالتِ هوشمند: نرمال‌سازی پیش از سپردن باز؛ سپردن فقط با همهٔ اقلامِ تأییدشده؛ انجماد، پیامِ تغییرات و شروعِ کار", { skip: SKIP }, async () => {
-  assert.equal((await call("/suppliers/history?item_id=41&mode=head&norm=1", { headers: AI })).status, 423, "بررسی سوابق کارِ کارشناس هوشمند است");
+  /* فاز ۴ب گام ۲: بررسی سوابق کارِ خودِ کارشناس است (فهرستِ دعوتِ هر قلم را او می‌چیند) — فقط اول ساختارِ قلم */
+  const h0 = await call("/suppliers/history?item_id=41&mode=head&norm=1", { headers: AI });
+  assert.notEqual(h0.status, 423, "بررسی سوابق کارِ خودِ کارشناس است");
+  assert.equal(h0.data.need_norm, true, "اول ساختارِ قلم");
   assert.equal((await call("/items/41/normalize", { headers: AI, body: {} })).status, 200, "نرمال‌سازی پیش از سپردن کارِ خودِ کارشناس است");
   assert.equal((await call("/items/42/normalize", { headers: AI, body: {} })).status, 200);
   const early = await call("/assignments/1/handoff", { headers: AI, body: {} });

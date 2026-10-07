@@ -48,7 +48,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute, aiAdmin, aiHandoff } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
 import { getRules, coverOf } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
@@ -287,6 +287,10 @@ const COLUMN_MIGRATIONS = [
   ["assignments", "ai_set_by", "TEXT"],
   ["items", "ai_off", "INTEGER"],
   ["items", "ai_off_at", "INTEGER"],
+  /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (worker/ai-picks.js) و «🚀 شروع»ش */
+  ["items", "pick_json", "TEXT"],
+  ["items", "ai_start_at", "INTEGER"],
+  ["items", "ai_start_by", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -482,7 +486,8 @@ async function aiGuard(env, who, assignmentId, kind, item) {
   if (o && item && (kind === "research" || kind === "norm") && await aiItemFree(env, o, item)) return;
   /* «norm» (طرح «خرید هوشمند» فاز ۱): ساختارِ قلم کارِ خودِ کارشناس است، پیش از سپردن (کارِ «pending») هم — فقط کارِ زندهٔ
      کارشناس هوشمند (پیش از واگذاری) قفلش می‌کند؛ قلمِ سپرده‌شده را انجماد (frozenGuard) هم نگه می‌دارد */
-  const locked = kind === "norm" ? !!o && !!o.run_id && !o.handover : kind === "research" ? aiResearchLocked(o) : !!o;
+  /* فاز ۴ب گام ۲: در روالِ تازه (flow 2) ساختار و سوابق و جستجو کارِ خودِ کارشناس است — قلمِ سپرده‌شده را frozenGuard نگه می‌دارد */
+  const locked = kind === "norm" ? !!o && !!o.run_id && o.flow !== 2 && !o.handover : kind === "research" ? aiResearchLocked(o) : !!o;
   if (locked) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
 }
 /** ساختارِ قلمِ سپرده‌شده به کارشناس هوشمند تا کار دستِ اوست منجمد است (worker/structure.js) */
@@ -719,7 +724,8 @@ async function desk(env, url) {
   }
   const res2 = await env.DB.batch(second);
   const byReq = new Map(reqs.map((r) => [r.id, { ...r, items: [], assignments: [] }]));
-  res2.forEach((r, k) => (r.results || []).forEach((x) => { const g = byReq.get(x.request_id); if (g) (k % 2 ? g.assignments : g.items).push(x); }));
+  /* فهرستِ دعوتِ هر قلم (فاز ۴ب گام ۲) کارِ میز مدیر نیست — پاسخ سبک بماند */
+  res2.forEach((r, k) => (r.results || []).forEach((x) => { const g = byReq.get(x.request_id); if (!g) return; if (!(k % 2)) delete x.pick_json; (k % 2 ? g.assignments : g.items).push(x); }));
   const out = [...byReq.values()];
   /* پروژهٔ هر درخواست و گروه اصناف هر قلم از همین‌جا می‌روند: ارجاع و مهلت هوشمند نباید
      پروژه را از روی نام طرف مقابل و گروه را از روی عنوان حدس بزنند (تصمیم مدیر، مهر ۱۴۰۵) */
@@ -911,7 +917,7 @@ async function teamDesk(env, ex) {
     if (!byReq.has(a.request_id)) byReq.set(a.request_id, { id: a.request_id, date: a.date, party: a.party, center: a.center, items: [], assignments: [] });
     byReq.get(a.request_id).assignments.push(a);
   }
-  for (const i of items) { const r = byReq.get(i.request_id); if (r) r.items.push(i); }
+  for (const i of items) { delete i.pick_json; const r = byReq.get(i.request_id); if (r) r.items.push(i); }
   /* باکس‌های تیم با آستانه‌های خودِ ارشد (اگر گذاشته) */
   const s = await getSettings(env);
   return { team, requests: [...byReq.values()], settings: ex.alert_thresholds ? { ...s, thresholds: ex.alert_thresholds } : s };
@@ -1179,7 +1185,7 @@ async function assignmentDetail(env, aid, who) {
   /* فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستِ دستِ کارشناس هوشمند (قفلِ سوابق، جستجو، ساختار، کمیسیون و نامه)، خط‌های استعلامِ
      او (q.ai — دست‌نخوردنی) و «پرسش از کارشناس»های بی‌پاسخِ همین درخواست */
   const owned = await aiOwned(env, aid);
-  const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state, handover: owned.handover || null } : null, asks: 0 };
+  const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state, handover: owned.handover || null, flow: owned.flow || 1 } : null, asks: 0 };
   const names = await aiQuoteNames(env, aid);
   const aiMode = !!owned || names.size > 0 || !!(await env.DB.prepare("SELECT 1 AS x FROM ai_agents WHERE expert_id=? AND mode='on'").bind(a.expert_id).first());
   /* فاز ۳: تحویلِ ردشده در پنل پشتیبانی درخواست را کامل به کارشناس برمی‌گرداند — خط‌های کارشناس هوشمند هم آزاد */
@@ -1209,9 +1215,15 @@ async function assignmentDetail(env, aid, who) {
     }
     ai.items = open.map((i) => {
       const m = modes.get(i.id) || {};
-      return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id) };
+      /* فاز ۴ب گام ۲: «🎯 فهرست دعوت» (ساخته شده؟ چند تیک، چند انتخابِ تازه) و «🚀 شروع»ِ همین قلم */
+      let pk = null;
+      try { const p = i.pick_json ? JSON.parse(i.pick_json) : null; if (p) { const L = p.list || []; pk = { n: L.length, on: L.filter((e) => e.on).length, go: L.filter((e) => e.on && e.go).length }; } } catch (_) { /* بی فهرست */ }
+      return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id),
+        started_at: i.ai_start_at || null, pick: pk };
     });
   }
+  /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
+  for (const i of items) delete i.pick_json;
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
 }
 
@@ -1802,6 +1814,11 @@ async function route(request, env, ctx) {
       if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
       const b = await readJson(request).catch(() => ({}));
       return json(await aiHandoff(env, a, `expert:${ex.id}`, { include: Array.isArray(b && b.include) ? b.include.map((x) => int(x)).filter(Boolean) : [] }));
+    }
+    /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (GET، PUT) و «🚀 شروع»ش (worker/ai-agent.js:picksRoute، ai-picks.js) */
+    if (/^\/items\/\d+\/(picks|ai-start)$/.test(path)) {
+      const r = await picksRoute(request, env, path, m, { requireExpert, json, readJson });
+      if (r) return r;
     }
     if ((mm = /^\/assignments\/(\d+)\/decision$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env); const r = await expertDecision(env, ex, int(mm[1]), await readJson(request));

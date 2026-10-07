@@ -104,7 +104,8 @@
     ].filter(Boolean).join(" ");
     const items = d.items.map((i) => `<tr><td class="rt">${esc(i.title)}</td><td class="num">${M(i.qty)} ${esc(i.unit || "")}</td><td class="rt muted">${esc(i.struct || "—")}</td>
         <td>${i.hist ? (i.hist.ok ? `${M(i.hist.n)} تأمین‌کننده` : `<span class="muted" title="${esc(i.hist.msg || "")}">بی سابقه</span>`) : "…"}</td>
-        <td>${i.smart ? (i.smart.err ? `<span class="chip bad" title="${esc(i.smart.err)}">نشد</span>` : `${M(i.smart.n || 0)}${i.smart.reused ? " <span class=\"muted\">(جستجوی اخیر)</span>" : ""}`) : "…"}</td>
+        <td>${r.flow === 2 ? (i.pick ? `<span title="${esc((i.pick.off || []).map((x) => `${x.name}${x.why ? ` — ${x.why}` : ""}`).join("\n"))}">${M(i.pick.go)} سپرده${i.pick.fresh ? ` · ${M(i.pick.fresh)} تازه` : ""}${(i.pick.off || []).length ? ` · ${M(i.pick.off.length)} برداشتهٔ پنج نفر اول` : ""}${i.pick.auto ? ` <span class="muted">(پیش‌فرض)</span>` : ""}</span>` : "…")
+          : i.smart ? (i.smart.err ? `<span class="chip bad" title="${esc(i.smart.err)}">نشد</span>` : `${M(i.smart.n || 0)}${i.smart.reused ? " <span class=\"muted\">(جستجوی اخیر)</span>" : ""}`) : "…"}</td>
         <td title="${esc(i.why || "")}">${i.covered >= (i.need || 1) ? `<span class="chip ok">✅ ${M(i.covered)} از ${M(i.need || 1)}</span>` : i.covered ? `<span class="chip warn">${M(i.covered)} از ${M(i.need || 1)}</span>` : `<span class="chip">۰ از ${M(i.need || 1)}</span>`}</td></tr>`).join("");
     const phoneCell = (c) => [
       ...c.phones.map((p) => `<label class="sp-check" style="display:inline-flex;gap:4px;margin-inline-end:10px" title="${p.panel ? "تیکِ پنل: کارشناس هوشمند به این شماره پیامک می‌دهد" : "بی تیک: پیامکی نمی‌رود"}">
@@ -127,14 +128,15 @@
         <span class="muted">${M(d.calls.n)} فراخوانی · <span dir="ltr">${usd(d.calls.cost)}</span></span>
         <button class="tp-btn xs" data-ai-sub="calls" data-ai-runcalls="1">فراخوانی‌های همین کار</button></div>
       ${r.error ? `<div class="tp-note warn">${esc(r.error)}</div>` : ""}
-      ${r.handover ? `<div class="tp-note warn">⚠️ ${when(r.handover.at)}: مهلتِ ${M(r.handover.hours)} ساعتهٔ حداقلِ استعلام گذشت و کار به کارشناس واگذار شد (سوابق و جستجو برایش باز) — ${(r.handover.items || []).map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
+      ${r.handover ? `<div class="tp-note warn">⚠️ ${when(r.handover.at)}: مهلتِ ${M(r.handover.hours)} ساعتهٔ حداقلِ استعلام گذشت و ${r.flow === 2 ? "کارشناس خبر گرفت تا تأمین‌کنندهٔ بیشتری تیک بزند" : "کار به کارشناس واگذار شد (سوابق و جستجو برایش باز)"} — ${(r.handover.items || []).map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
       ${r.review ? `<div class="tp-note ${r.review.state === "rejected" ? "warn" : ""}">${REVIEW_FA[r.review.state] || ""}${r.review.reason ? `: ${esc(r.review.reason)}` : ""} — تبِ «📥 تحویل‌های هوشمند»</div>` : ""}
       ${r.closing && r.closing.short && r.closing.short.length ? `<div class="tp-note warn">⚠️ با کمتر از حداقلِ استعلام بسته شد: ${r.closing.short.map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
       <div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap">${acts}</div>
-      <div class="tp-sect"><h3>اقلام</h3><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th class="rt">ساختار</th><th>سوابق</th><th>جستجو</th><th title="پیشنهادهای تأییدنهایی از تأمین‌کنندگانِ مختلف / حداقلِ استعلامِ قلم (قواعدِ پنل پشتیبانی)">پیشنهادِ نهایی / حداقل</th></tr></thead><tbody>${items}</tbody></table></div></div>
-      <div class="tp-sect"><h3>تأمین‌کنندگانِ نامزد <span>دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ دعوت: ${M(A.st.agent.cfg.maxInvites)}</span></h3>
+      <div class="tp-sect"><h3>اقلام</h3><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th class="rt">ساختار</th><th>سوابق</th><th title="${r.flow === 2 ? "«🎯 فهرست دعوت»ِ کارشناس: سپرده‌شده‌ها، انتخاب‌های تازه و برداشتنِ پنج نفر اول (با علت)" : ""}">${r.flow === 2 ? "فهرستِ دعوت" : "جستجو"}</th><th title="پیشنهادهای تأییدنهایی از تأمین‌کنندگانِ مختلف / حداقلِ استعلامِ قلم (قواعدِ پنل پشتیبانی)">پیشنهادِ نهایی / حداقل</th></tr></thead><tbody>${items}</tbody></table></div></div>
+      <div class="tp-sect"><h3>تأمین‌کنندگانِ نامزد <span>${r.flow === 2 ? `تیک‌خورده‌های سپرده‌شدهٔ «🎯 فهرست دعوت»ِ کارشناس — کارشناس هوشمند خودش جستجو نمی‌کند؛ دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ تیکِ هر قلم: ${M(A.st.agent.cfg.maxInvites)}`
+          : `دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ دعوت: ${M(A.st.agent.cfg.maxInvites)}`}</span></h3>
         <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">تأمین‌کننده</th><th>منبع</th><th class="rt">شماره‌ها (☑️ = پنل)</th></tr></thead>
-          <tbody>${cands || `<tr><td colspan="3"><div class="empty">هنوز نامزدی نیست (بعد از سوابق و جستجو).</div></td></tr>`}</tbody></table></div>
+          <tbody>${cands || `<tr><td colspan="3"><div class="empty">${r.flow === 2 ? "هنوز تیک‌خورده‌ای سپرده نشده (کارشناس در «🎯 فهرست دعوت»ِ هر قلم «🚀 شروع» می‌زند)." : "هنوز نامزدی نیست (بعد از سوابق و جستجو)."}</div></td></tr>`}</tbody></table></div>
         ${r.finished_at ? "" : `<div class="tp-fields3" style="margin-top:10px;align-items:end">
           <div class="tp-field"><b>تأمین‌کنندهٔ دیگر (مثلاً شمارهٔ آزمایشیِ خودتان)</b><input class="tp-input" id="ai-ms-name" placeholder="نام تأمین‌کننده"></div>
           <div class="tp-field"><b>شمارهٔ همراه</b><input class="tp-input" id="ai-ms-phone" dir="ltr" inputmode="tel" placeholder="09…"></div>
@@ -193,12 +195,12 @@
           برای سنجیدنِ تفاوتِ مدل‌ها روی گفت‌وگوهای خودتان: «فراخوانی‌های مدل» ← یک دورِ مذاکره ← «🔬 مقایسه با مدلِ دیگر».</p></div>
       <div class="tp-fields3">
         ${f("minInvites", "حداقلِ دعوت (هدف)", "بی شمارهٔ پنل دعوتی نمی‌رود؛ کمتر از این، چالش در نامه گفته می‌شود")}
-        ${f("maxInvites", "سقفِ دعوت در هر درخواست", "")}
+        ${f("maxInvites", "سقفِ تیکِ هر قلم در «🎯 فهرست دعوت»", "کارشناس برای هر قلم بیشتر از این تیک نمی‌زند (روالِ پیشین: سقفِ دعوتِ هر درخواست)")}
         ${f("quietMin", "پایانِ مذاکره بعد از سکوت (دقیقه)", "وقتی هر قلم پیشنهادِ نهایی دارد و این‌قدر پیامِ تازه‌ای نیامده")}
         ${f("maxTurns", "سقفِ دورِ مذاکره در هر گفت‌وگو", "")}
         ${f("maxItems", "سقفِ اقلامِ هر درخواست", "بیشتر از این، فقط همین تعداد اول")}
-        ${f("reuseDays", "جستجوی هوشمندِ تازه‌تر از (روز) دوباره خرج نشود", "۰ = همیشه جستجوی تازه")}</div>
-      <div class="tp-sect"><h3>بازارهای جستجوی هوشمند <span>حداکثر ${M(A.st.maxMarkets)}</span></h3>
+        ${f("reuseDays", "(روالِ پیشین) جستجوی هوشمندِ تازه‌تر از (روز) دوباره خرج نشود", "۰ = همیشه جستجوی تازه؛ در روالِ تازه کارشناس هوشمند خودش جستجو نمی‌کند")}</div>
+      <div class="tp-sect"><h3>بازارهای جستجوی هوشمند <span>حداکثر ${M(A.st.maxMarkets)} — فقط کارهای روالِ پیشین؛ از فاز ۴ب گام ۲ جستجو کارِ خودِ کارشناس است</span></h3>
         ${mk.map((m) => `<label class="sp-check" style="display:inline-flex;gap:4px;margin-inline-end:12px"><input type="checkbox" data-ai-mk="${m.key}" ${c.markets.includes(m.key) ? "checked" : ""}> ${esc(m.fa)}</label>`).join("")}</div>
       <div style="margin-top:12px"><button class="tp-btn primary" data-ai-savecfg>ذخیرهٔ تنظیمات</button> <span id="ai-cfg-msg" class="muted"></span></div></div>`;
   }

@@ -594,3 +594,12 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 @media (prefers-reduced-motion: reduce) { .tp-toast, .tp-toast.bump, .tp-toast.out { animation-duration: .01s; } }
 @media (prefers-reduced-transparency: reduce) { .tp-toast { -webkit-backdrop-filter: none; backdrop-filter: none; background: #18203c; } :root[data-theme="light"] .tp-toast { background: #fff; } }
 @media (prefers-contrast: more) { .tp-toast { border: 1px solid currentColor; } }
+/* فاز ۴ب گام ۲ طرح «خرید هوشمند»: «🎯 فهرست دعوت»ِ هر قلم در «بررسی سوابق» (expert.js:vPicks) */
+.picks { border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: rgba(79,140,255,.05); }
+.picks .toolrow { margin: 0; }
+.picks table tr.top td { background: rgba(79,140,255,.08); }
+.picks table tr.off td { opacity: .62; }
+.picks table tr.off td:first-child, .picks table tr.off td:last-child { opacity: 1; }
+.picks table tr.off.need td { opacity: 1; }
+:root[data-theme="light"] .picks { background: rgba(47,111,228,.04); }
+:root[data-theme="light"] .picks table tr.top td { background: rgba(47,111,228,.07); }

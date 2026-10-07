@@ -100,7 +100,9 @@ test("تیکِ «🤖 هوشمند»ِ مدیر: فقط برای کارشناس�
   const bare = await call("/assign/ai", { headers: MGR, body: { assignment_id: 1, on: false } });
   assert.equal(bare.status, 422);
   assert.equal(bare.data.need_reason, true, "برداشتنِ تیک توضیح می‌خواهد");
-  assert.equal((await hist(41)).status, 423, "پیش از برداشتن: دستِ کارشناس هوشمند");
+  /* گام ۲: بررسی سوابق کارِ خودِ کارشناس است؛ نشانهٔ «هوشمند» بودن، «🎯 فهرست دعوت»ِ قلم است */
+  assert.notEqual((await hist(41)).status, 423, "بررسی سوابق کارِ خودِ کارشناس است (گام ۲)");
+  assert.equal((await call("/items/41/picks", { headers: EX })).status, 200, "پیش از برداشتن: فهرستِ دعوتِ کارشناس هوشمند");
   const off = await call("/assign/ai", { headers: MGR, body: { assignment_id: 1, on: false, reason: "خریدِ فوری؛ کارشناس خودش تماس دارد." } });
   assert.equal(off.status, 200, JSON.stringify(off.data));
   assert.deepEqual(Object.values(DB.raw.prepare("SELECT ai_on, ai_note, ai_set_by FROM assignments WHERE id=1").get()), [0, "خریدِ فوری؛ کارشناس خودش تماس دارد.", "manager"]);
@@ -110,6 +112,7 @@ test("تیکِ «🤖 هوشمند»ِ مدیر: فقط برای کارشناس�
   assert.match(msg.text, /دستی شد[\s\S]*خریدِ فوری/, "خبر به کارشناس با توضیحِ مدیر");
   /* درخواستِ دستی: قفل ندارد، در کارتابل بی 🤖، سپرده نمی‌شود */
   assert.notEqual((await hist(41)).status, 423);
+  assert.equal((await call("/items/41/picks", { headers: EX })).status, 409, "درخواستِ دستی فهرستِ دعوت ندارد");
   const tray = (await call("/tray", { headers: EX })).data;
   assert.equal(tray.assignments.find((a) => a.id === 1).ai, 0);
   const ho = await call("/assignments/1/handoff", { headers: EX, body: {} });
@@ -121,12 +124,12 @@ test("تیکِ «🤖 هوشمند»ِ مدیر: فقط برای کارشناس�
   const on = await call("/assign/ai", { headers: MGR, body: { assignment_id: 1, on: true } });
   assert.equal(on.status, 200);
   assert.equal(DB.raw.prepare("SELECT ai_on FROM assignments WHERE id=1").get().ai_on, 1);
-  assert.equal((await hist(41)).status, 423);
+  assert.equal((await call("/items/41/picks", { headers: EX })).status, 200, "دوباره هوشمند");
 });
 
 test("قلمِ «مستقیم» دستِ خودِ کارشناس است؛ برداشتنِ تیک برای درخواستِ تمام‌مستقیم توضیح نمی‌خواهد", { skip: SKIP }, async () => {
   assert.notEqual((await hist(42)).status, 423, "دستکش: «مستقیم» — پیش از سپردن آزاد");
-  assert.equal((await hist(43)).status, 423, "مهره: «انتخاب کارشناس» — دستِ کارشناس هوشمند");
+  assert.notEqual((await hist(43)).status, 423, "مهره: «انتخاب کارشناس» — سوابقش کارِ خودِ کارشناس (گام ۲)");
   const det = (await call("/assignments/1", { headers: EX })).data;
   assert.deepEqual(det.ai.items.map((i) => [i.id, i.mode, i.supervise, i.manual]), [[41, "handoff", true, false], [42, "direct", false, false], [43, "pick", false, false]]);
   /* درخواستی که فقط اقلامِ «مستقیم» دارد */
@@ -174,7 +177,7 @@ test("سپردن فقط اقلامِ هوشمند: نه «انجام دستی»�
   const run = DB.raw.prepare("SELECT data_json FROM ai_runs WHERE assignment_id=1").get();
   assert.deepEqual(JSON.parse(run.data_json).items.map((x) => x.id), [41]);
   assert.deepEqual(DB.raw.prepare("SELECT id FROM items WHERE assignment_id=1 AND frozen_at IS NOT NULL").all().map((r) => r.id), [41], "فقط همان منجمد");
-  assert.equal((await hist(41)).status, 423);
+  assert.equal((await call("/items/41/norm", { method: "PUT", headers: EX, body: { head: "پیچ", layers: {} } })).status, 409, "ساختارِ سپرده‌شده منجمد");
   assert.notEqual((await hist(42)).status, 423, "بیرون از کار: آزاد");
   assert.notEqual((await hist(43)).status, 423);
   assert.equal((await call("/assignments/1/decision", { headers: EX, body: { action: "manual", item_ids: [41], reason: "دیر شد" } })).status, 409, "قلمِ سپرده‌شده «انجام دستی» نمی‌شود");

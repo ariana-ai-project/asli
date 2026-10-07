@@ -49,6 +49,7 @@
     marketsMeta: [{ key: "IR", fa: "ایران" }, { key: "TJ", fa: "تاجیکستان" }, { key: "TM", fa: "ترکمنستان" }, { key: "UZ", fa: "ازبکستان" }, { key: "KZ", fa: "قزاقستان" }, { key: "AM", fa: "ارمنستان" }, { key: "CN", fa: "چین" }, { key: "AE", fa: "امارات" }, { key: "TR", fa: "ترکیه" }],
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
+    picks: {}, pickOpen: {},           // فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (/items/:id/picks) و قلمِ «مستقیم»ی که کارشناس می‌خواهد بسپارد
     norm: {},                          // نرمال‌سازی هر قلم: {loading, error, data, draft}
     normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
     hmode: "head",                     // «نوع قلم» (head، پیش‌فرض — تصمیم مدیر) یا «عین قلم» (exact)
@@ -315,8 +316,10 @@
   const aiOwned = () => !!(S.d && S.d.ai && S.d.ai.owned);
   const aiMode = () => !!(S.d && S.d.ai && S.d.ai.mode);
   const aiHandover = () => !!(aiOwned() && S.d.ai.owned.handover);
-  /** بررسی سوابق و جستجوی هوشمند قفل است؟ — نه بعد از واگذاری */
-  const aiResearch = () => aiOwned() && !aiHandover();
+  /* فاز ۴ب گام ۲ — روالِ تازه (flow 2): بررسی سوابق و جستجوی هوشمند کارِ خودِ کارشناس است؛ قفلِ سوابق فقط برای کارِ زندهٔ روالِ پیشین */
+  const flow2 = () => aiOwned() && (!S.d.ai.owned.run_id || S.d.ai.owned.flow === 2);
+  /** بررسی سوابق و جستجوی هوشمند قفل است؟ — فقط روالِ پیشین، و نه بعد از واگذاری */
+  const aiResearch = () => aiOwned() && !aiHandover() && !flow2();
   /* طرح «خرید هوشمند، کارشناس ناظر» (فاز ۱): کارشناسِ 🤖 درخواست را اول خودش نرمال می‌کند و با «بررسی سوابق و سپردن به کارشناس
      هوشمند» می‌سپارد — تا آن موقع کار «pending» است (ai.owned بی run_id). نرمال‌سازی برای همه اجباری و اول از همه است: سوابقِ قلمِ
      تأییدنشده خوانده نمی‌شود. با سپردن، ساختار منجمد است (frozen_at) تا کار دستِ کارشناس هوشمند است (worker/structure.js). */
@@ -326,22 +329,40 @@
   /* طرح «خرید هوشمند» فاز ۴ب: هر قلم با حالتِ نوعِ خودش (worker/ai-modes.js) — «انجام دستی»ِ تأییدشدهٔ مدیر، قلمِ بیرون از کارِ کارشناس
      هوشمند، یا (هنوز نسپرده) قلمی از نوعِ «مستقیم» دستِ خودِ کارشناس است: بررسی سوابق و جستجویش باز است */
   const aiItem = (it) => (it && S.d && S.d.ai && S.d.ai.items ? S.d.ai.items.find((x) => x.id === it.id) : null) || null;
-  const itemFree = (it) => { const x = aiItem(it); if (!x || !aiOwned()) return false; return x.manual || (S.d.ai.owned.run_id ? !x.in_run : x.mode === "direct"); };
-  /* اقلامی که با «سپردن» به کار می‌روند: نه دستی، نه در انتظارِ مدیر، و «مستقیم» فقط با تیکِ خودِ کارشناس */
-  const handoffPick = new Set();
-  const toHandoff = () => openItems().filter((x) => { const m = aiItem(x); return !m || (!m.manual && !m.waiting && (m.mode !== "direct" || handoffPick.has(x.id))); });
+  /* وضعیتِ قلم در درخواستِ هوشمند — manual («انجام دستی»ِ تأییدشده) · waiting (در انتظارِ مدیر) · started (🚀 سپرده شد) · direct (از نوعِ
+     «مستقیم»، دستِ خودِ کارشناس) · select (منتظرِ «🎯 فهرست دعوت» و «🚀 شروع»)؛ روالِ پیشین: run (در کار) یا free (بیرون از کار) */
+  const iState = (it) => {
+    const m = aiItem(it); if (!m || !aiOwned()) return null;
+    if (m.manual) return "manual"; if (m.waiting) return "waiting";
+    if (!flow2()) return m.in_run ? "run" : "free";
+    return m.started_at ? "started" : m.mode === "direct" ? "direct" : "select";
+  };
+  const itemFree = (it) => { const st = iState(it); return st === "manual" || st === "free" || (st === "direct" && !S.pickOpen[it.id]); };
+  const PILL = { select: ["warn", "🎯 منتظرِ شروع", "فهرستِ دعوتِ این قلم را ببینید و «🚀 شروع» را بزنید"], direct: ["", "✋ مستقیم", "از نوعِ «مستقیم»: خودتان مکاتبه کنید یا به انتخابِ خودتان بسپارید"],
+    manual: ["", "✋ دستی", "«انجام دستی»ِ تأییدشدهٔ مدیر"], waiting: ["warn", "⏳ مدیر", "درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر"] };
+  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return p ? ` <span class="chip ${p[0]}" style="margin-top:6px" title="${p[2]}">${p[1]}</span>` : ""; };
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
-    const free = (ai.items || []).filter((x) => x.manual || (ai.owned && ai.owned.run_id ? !x.in_run : x.mode === "direct"));
-    const freeTxt = free.length ? `<br>✋ <b>دستِ خودِ شما:</b> ${free.map((x) => esc((items().find((i) => i.id === x.id) || {}).title || "")).join("، ")} — ${free.some((x) => x.manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم»؛ بررسی سوابق و جستجویشان برایتان باز است.` : "";
-    if (aiPending()) return `<div class="tp-note" style="margin:10px 0">🤖 <b>حالتِ هوشمند — هنوز سپرده نشده.</b> نرمال‌سازی اجباری و کارِ شماست: در تبِ «🤖 بررسی سوابق» ساختارِ هر قلم را ببینید، اصلاح یا تأیید کنید
-      و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 بگذارید؛ بعد «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید. از آن پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است.${freeTxt}</div>`;
+    const free = items().filter((i) => i.state === "open" && aiItem(i) && itemFree(i));
+    const freeTxt = free.length ? `<br>✋ <b>دستِ خودِ شما:</b> ${free.map((i) => esc(i.title)).join("، ")} — ${free.some((i) => (aiItem(i) || {}).manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم»${flow2()
+      ? "؛ «مستقیم» را هم اگر خواستید با «🤖 سپردن به کارشناس هوشمند» در «بررسی سوابق» می‌سپارید" : "؛ بررسی سوابق و جستجویشان برایتان باز است"}.` : "";
     if (!aiOwned()) return ai.review && ai.review.state === "rejected"
       ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>`
       : ai.on === false ? `<div class="tp-note" style="margin:10px 0">✋ <b>مدیر این درخواست را دستی ارجاع داده است</b>${ai.note ? `: ${esc(ai.note)}` : ""} — همهٔ کارهایش با خودِ شماست.</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
     const ask = k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : "";
     const need = cv.length ? `<br>حداقلِ استعلام (پنل پشتیبانی): ${cv.map((c) => `${esc(c.title)} <b>${c.have} از ${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join("، ")}` : "";
+    /* فاز ۴ب گام ۲ (روالِ تازه): هر قلم جدا — فهرستِ دعوت و «🚀 شروع» کارِ کارشناس، دعوت و مذاکره کارِ کارشناس هوشمند */
+    if (flow2()) {
+      const st = items().filter((i) => i.state === "open").map(iState);
+      const nGo = st.filter((s) => s === "started").length, nSel = st.filter((s) => s === "select").length;
+      const tally = `<br><b>${M(nGo)}</b> قلم سپرده شد${nSel ? ` · <b>${M(nSel)}</b> قلم منتظرِ «🚀 شروع»` : ""}.`;
+      const ho = aiHandover() ? `<br>⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید:</b> در «🎯 فهرست دعوت» نفرهای دیگری تیک بزنید یا از «جستجوی هوشمند» بیفزایید و «📨 دعوت از انتخاب‌های تازه» را بزنید — یا خطِ دستیِ ✋ بیفزایید.` : "";
+      return `<div class="tp-note ${aiHandover() ? "warn" : ""}" style="margin:10px 0">🤖 <b>حالتِ هوشمند — هر قلم جدا.</b> ساختارِ قلم را تأیید کنید (🔒/🔓)، «بررسی سوابق» را بزنید و در «🎯 فهرست دعوت» تیک‌ها را ببینید:
+        پنج نفر اول به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت» از پیش تیک خورده‌اند (در «انتخاب کارشناس» برداشتنِ هر کدام توضیح می‌خواهد)؛ بعد «🚀 شروع» را بزنید.
+        کارشناس هوشمند فقط تیک‌خورده‌هایی را دعوت می‌کند که شمارهٔ پنلِ تیک‌خورده دارند، و از «جستجوی هوشمند» فقط آن‌که خودتان با «🎯 به فهرست دعوت» بیفزایید. مذاکره، جدول کمیسیون و نامه با اوست؛
+        خطِ دستیِ خودتان (✋) را در «استعلامات» می‌افزایید.${tally}${ho}${need}${ask}${freeTxt}</div>`;
+    }
     if (aiHandover()) return `<div class="tp-note warn" style="margin:10px 0">⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید و کار به شما واگذار شد.</b>
       بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است: تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید («ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور).
       گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.${need}${ask}${freeTxt}</div>`;
@@ -388,65 +409,204 @@
         ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" style="margin-top:6px" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ تأیید کمیسیون</span>`
           : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}
         ${x.state === "open" ? (frozen(x) ? ` <span class="chip info" style="margin-top:6px" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد</span>` : normOk(x) ? ` <span class="chip ok" style="margin-top:6px" title="ساختارِ قلم (نوع، لایه‌ها، نرخ‌ها و قفل‌ها) تأیید شده">🧩 ✓</span>`
-          : ` <span class="chip warn" style="margin-top:6px" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}</div>`).join("")}</div>
+          : ` <span class="chip warn" style="margin-top:6px" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}${pillAi(x)}</div>`).join("")}</div>
       ${vAiBar()}
       <div class="tabs">
-        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${itemFree(it) ? "" : aiPending() ? "🤖 " : aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiResearch() && !itemFree(it) ? "🔒 " : ["select", "started"].includes(iState(it)) || (iState(it) === "direct" && S.pickOpen[it.id]) ? "🎯 " : ""}بررسی سوابق</button>
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() && !itemFree(it) ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiPending() && S.tab === "history" && !itemFree(it) ? vHandoff(it) : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
-  /* ---------- «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» (طرح «خرید هوشمند» فاز ۱؛ تصمیم ۱: یک دکمه برای کل درخواست) ----------
-     تا همهٔ اقلامِ باز نرمال نشده‌اند بسته است؛ زیرش ویرایشگرِ ساختارِ قلمِ برگزیده با 🔒/🔓ِ عنوان، مقدار و هر لایه. */
-  /** حالتِ قلم در جدولِ سپردن: «مستقیم» با تیکِ «بسپار»؛ دستی و در انتظارِ مدیر بی تیک */
-  function handoffCell(x) {
-    const m = aiItem(x);
-    if (!m) return `<span class="chip info">🤖</span>`;
-    const tag = `<span class="chip ${m.mode === "direct" ? "" : "info"}" title="حالتِ نوع قلمِ «${esc(m.head || "—")}» در پنل پشتیبانی">${esc(m.mode_fa || m.mode)}</span>${m.supervise ? ` <span class="chip" title="حالت تأیید برای این نوع قلم مجاز است">✋؟</span>` : ""}`;
-    if (m.manual) return `${tag} <span class="chip warn" title="مدیر «انجام دستی» را تأیید کرد">✋ دستیِ شما</span>`;
-    if (m.waiting) return `${tag} <span class="chip warn" title="درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر">⏳ در انتظارِ مدیر</span>`;
-    if (m.mode === "direct") return `${tag} <label class="chkline" title="قلمِ «مستقیم» دستِ خودِ شماست؛ با تیک به کارشناس هوشمند سپرده می‌شود"><input type="checkbox" data-hpick="${x.id}" ${handoffPick.has(x.id) ? "checked" : ""}> بسپار</label>`;
-    return `${tag} <span class="chip info">🤖 سپرده می‌شود</span>`;
+  /* ---------- «🎯 فهرست دعوت»ِ هر قلم و «🚀 شروع» (طرح «خرید هوشمند» فاز ۴ب گام ۲؛ worker/ai-picks.js) ----------
+     کارشناس هوشمند دیگر خودش تأمین‌کننده برنمی‌گزیند و جستجو نمی‌کند: برای هر قلم فهرستی به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت»
+     می‌آید و پنج نفر اول (★) از پیش تیک خورده‌اند. «انتخاب کارشناس»: تیک‌ها کم و زیاد، برداشتنِ پنج نفر اول با توضیح کنار همان نام؛
+     «سپردن یا برگشت»: همان فهرست — «🤖 سپردن» یا «↩️ برگرداندن به مدیر»؛ «مستقیم»: اگر خواستید بسپارید، آزاد و بی توضیح.
+     «🚀 شروع» ساختارِ همین قلم را منجمد و قلم را به کارشناس هوشمند می‌سپارد؛ او فقط تیک‌خورده‌هایی را دعوت می‌کند که شمارهٔ
+     پنلِ تیک‌خورده دارند. از «جستجوی هوشمند» فقط با «🎯 به فهرست دعوت»؛ انتخابِ تازه بعد از شروع با «📨 دعوت از انتخاب‌های تازه». */
+  const PK_ST = { sent: ["ok", "📨 دعوت شد"], human: ["", "💬 گفت‌وگوی خودِ شما"], queued: ["info", "⏳ در صفِ دعوت"], nophone: ["warn", "⏸ منتظرِ شمارهٔ پنل"], draft: ["", "🆕 هنوز سپرده نشده"], off: ["", "—"] };
+  const PK_THEN = { type: "بعد «نوع قلم» به ترتیبِ رتبهٔ نهایی", exact: "بعد باقیِ «عین قلم»، بعد «نوع قلم»", exactOnly: "فقط «عین قلم»" };
+  /* همان کلیدِ نامِ سرور (sp-core.js:nkey): ی و ک، نیم‌فاصله و فاصله‌های پیاپی، کوچک‌حرف */
+  const pkKey = (x) => String(x == null ? "" : x).trim().replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase();
+  /** فهرستِ دعوت برای این قلم معنا دارد؟ — منتظرِ شروع، سپرده‌شده، یا «مستقیم»ی که کارشناس می‌خواهد بسپارد */
+  const pkOn = (it) => { const st = iState(it); return st === "select" || st === "started" || (st === "direct" && !!S.pickOpen[it.id]); };
+  /** فهرست کم و زیاد می‌شود؟ («سپردن یا برگشت» نه) */
+  const pkEditable = (it) => { const P = it && S.picks[it.id]; return !!it && pkOn(it) && !!P && P !== "loading" && !P.err && !P.pending && P.mode !== "handoff"; };
+  const pkHas = (it, name) => { const P = S.picks[it.id]; return !!(P && P.list && P.list.some((e) => e.k === pkKey(name))); };
+  async function loadPicks(it, force) {
+    if (!it || (!force && S.picks[it.id] !== undefined)) return;
+    S.picks[it.id] = "loading";
+    try { S.picks[it.id] = await TP.api(`/items/${it.id}/picks`); }
+    catch (e) { S.picks[it.id] = { err: e.message, need_norm: !!(e.data && e.data.need_norm) }; }
+    render();
   }
-  function vHandoff(it) {
-    const op = openItems(), go = toHandoff(), ok = go.filter(normOk).length, all = go.length > 0 && ok === go.length;
-    const back = op.some((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct"; });
-    const rows = op.map((x) => { const i = items().indexOf(x); return `<tr class="${i === S.itemIdx ? "sel" : ""}" data-item="${i}" style="cursor:pointer" title="ساختارِ همین قلم را زیرِ همین جدول ببینید">
-      <td class="rt">${esc(x.title)}</td><td class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</td>
-      <td>${normOk(x) ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip warn">⏳ تأیید نشده</span>`}</td><td>${handoffCell(x)}</td></tr>`; }).join("");
-    return `<div class="pad"><div class="handoff">
-      <div class="toolrow"><b style="font-size:1.02rem">🤖 سپردن به کارشناس هوشمند</b><span class="chip ${all ? "ok" : "warn"}">${M(ok)} از ${M(go.length)} قلمِ سپردنی نرمال شده</span>
+  async function pkEdit(it, body) {
+    try { S.picks[it.id] = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body }); }
+    catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); return loadPicks(it, true); }
+    render();
+  }
+  /** توضیح‌هایی که در خانه‌ها نوشته شده ولی هنوز ذخیره نشده‌اند (پیش از «شروع») */
+  async function pkFlushWhy(it) {
+    const P = S.picks[it.id]; if (!P || !P.list) return;
+    const why = {};
+    document.querySelectorAll("[data-pkwhy]").forEach((x) => { const e = P.list.find((y) => y.k === x.dataset.pkwhy); if (e && (e.why || "") !== x.value.trim()) why[e.k] = x.value; });
+    if (Object.keys(why).length) S.picks[it.id] = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body: { why } });
+  }
+  function vPicks(it) {
+    if (!flow2() || !it || it.state !== "open" || !pkOn(it)) return "";
+    if (!normOk(it)) return `<div class="picks"><b>🎯 فهرست دعوت</b> <span class="dim">— بعد از تأییدِ ساختارِ همین قلم (نرمال‌سازی) از سوابق ساخته می‌شود؛ پنج نفر اول به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت» از پیش تیک می‌خورند.</span></div>`;
+    const P = S.picks[it.id];
+    if (P === undefined) loadPicks(it);
+    if (!P || P === "loading") return `<div class="picks"><b>🎯 فهرست دعوت</b> <span class="dim">— در حال ساختن از سوابق…</span></div>`;
+    if (P.err) return `<div class="picks"><b>🎯 فهرست دعوت</b> <span class="chip warn">${esc(P.err)}</span> <button class="tp-btn xs" data-pkreload>دوباره</button></div>`;
+    if (P.pending) return `<div class="picks"><b>🎯 فهرست دعوت</b> <span class="dim">— این قلم سپرده شده و فهرستش را کارشناس هوشمند همین حالا از سوابق می‌سازد؛ کمی بعد ↻ بزنید.</span></div>`;
+    const A_ = P.mode === "handoff", D_ = P.mode === "direct", started = !!P.started_at, L = P.list || [];
+    const on = L.filter((e) => e.on), ready = on.filter((e) => e.panel || e.st === "sent").length;
+    const miss = P.mode === "pick" && !started ? L.filter((e) => e.top && !e.on && !String(e.why || "").trim()) : [];
+    const r = P.rule || {};
+    const tiers = ["A", "B", "C"].filter((g) => r.tier && r.tier[g] > 0).map((g) => `ردهٔ ${g} «عین قلم» تا ${M(r.tier[g])} نفر`).join("، ");
+    const rule = `قاعدهٔ دعوت: ${tiers ? `${tiers}، ` : ""}${PK_THEN[r.then] || PK_THEN.type}`;
+    const help = A_ ? "«سپردن یا برگشت»: فهرست همان رتبه‌بندیِ کارشناس هوشمند است و عوض نمی‌شود — «🤖 سپردن» یا «↩️ برگرداندن به مدیر»."
+      : D_ ? "«مستقیم»: تیک‌ها آزادند و توضیح نمی‌خواهند."
+      : "«انتخاب کارشناس»: تیک‌ها را کم و زیاد کنید؛ برداشتنِ هر کدام از پنج نفر اول (★) یک توضیحِ کوتاه کنار همان نام می‌خواهد. افزودن توضیح نمی‌خواهد.";
+    const phCell = (e) => (e.panel
+      ? `<button class="tp-btn xs" data-pkph="${esc(e.k)}" title="${esc(e.phones.filter((p) => p.panel).map((p) => p.phone + (p.label ? ` (${p.label})` : "")).join("، "))}">☑️ ${M(e.panel)} شمارهٔ پنل</button>`
+      : `<button class="tp-btn xs ${e.on ? "warn" : ""}" data-pkph="${esc(e.k)}" title="کارشناس هوشمند فقط به شمارهٔ پنلِ تیک‌خورده پیامک می‌دهد">📱 ${e.phones.length ? "تیکِ پنل" : "شماره"}</button>`);
+    const row = (e) => {
+      const lock = A_ || !!e.go || e.st === "sent";
+      const [cls, lab] = PK_ST[e.st] || ["", ""];
+      const why = P.mode === "pick" && e.top && !e.on && !started;
+      return `<tr class="${e.top ? "top" : ""} ${e.on ? "" : "off"} ${why ? "need" : ""}">
+        <td><input type="checkbox" data-pk="${esc(e.k)}" ${e.on ? "checked" : ""} ${lock ? "disabled" : ""} title="${e.go ? "به کارشناس هوشمند سپرده شده" : A_ ? "در «سپردن یا برگشت» عوض نمی‌شود" : "دعوت شود؟"}"></td>
+        <td class="num">${e.pos ? M(e.pos) : "—"}${e.top ? " ★" : ""}</td>
+        <td class="rt"><b>${esc(e.name)}</b>${!e.pos && !e.go && !A_ ? ` <button class="tp-btn xs" data-pkdel="${esc(e.k)}" title="از فهرست برداشته شود">✕</button>` : ""}
+          ${why ? `<div style="margin-top:4px"><input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="علتِ برداشتن (اجباری)" style="width:100%;min-width:200px"></div>`
+            : e.why ? `<div class="dim" style="font-size:.8rem;margin-top:2px;white-space:normal">علت: ${esc(e.why)}</div>` : ""}</td>
+        <td><span class="chip">${esc(e.src_fa || "")}</span></td>
+        <td>${e.grade ? `<span class="chip grade g${esc(e.grade)}">${esc(e.grade)}</span>` : `<span class="dim">—</span>`}</td>
+        <td class="num">${e.rankF == null ? "—" : M(e.rankF)}</td>
+        <td>${phCell(e)}</td>
+        <td>${e.st !== "off" && (started || e.go || e.st === "human") ? `<span class="chip ${cls}">${lab}</span>` : `<span class="dim">${e.on ? "تیک‌خورده" : "—"}</span>`}</td></tr>`;
+    };
+    const fresh = P.fresh || 0;
+    const startBtn = !started
+      ? `<button class="tp-btn primary" data-pkstart ${on.length ? "" : "disabled"} title="${on.length ? "ساختارِ همین قلم منجمد و قلم به کارشناس هوشمند سپرده می‌شود" : "دست‌کم یک تأمین‌کننده را تیک بزنید"}">${A_ ? "🤖 سپردن" : "🚀 شروع"}</button>`
+      : fresh ? `<button class="tp-btn primary" data-pkstart title="انتخاب‌های تازه به کارشناس هوشمند سپرده می‌شوند">📨 دعوت از انتخاب‌های تازه (${M(fresh)})</button>` : "";
+    return `<div class="picks">
+      <div class="toolrow"><b style="font-size:1.02rem">🎯 فهرست دعوتِ کارشناس هوشمند</b>
+        <span class="chip ${A_ ? "info" : ""}" title="حالتِ نوع قلمِ «${esc(P.head || "—")}» در پنل پشتیبانی">${esc(P.mode_fa || "")}</span>
+        ${started ? `<span class="chip ok" title="${TP.fmt(P.started_at)}">🚀 سپرده شد</span>` : ""}
+        <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
-        ${back ? `<button class="tp-btn warn" data-manual title="اقلامی را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر (انجام دستی)</button>` : ""}
-        <button class="tp-btn primary" data-handoff ${all ? "" : "disabled"} title="${all ? "ساختارِ اقلامِ سپردنی منجمد می‌شود و کارشناس هوشمند بررسی سوابق را شروع می‌کند" : go.length ? "اول ساختارِ اقلامِ سپردنی را تأیید کنید" : "قلمی برای سپردن نیست"}">🤖 بررسی سوابق و سپردن به کارشناس هوشمند</button></div>
-      <div class="tp-note" style="margin:8px 0">نرمال‌سازی اجباری و کارِ شماست: برای هر قلم نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل را ببینید، اصلاح یا تأیید کنید و کنارِ <b>عنوان، مقدار و هر لایه</b> 🔒 یا 🔓 بگذارید —
-        🔒 یعنی تأمین‌کننده نمی‌تواند عوضش کند؛ مقدارِ 🔓 یعنی می‌تواند مقدارِ کمتری پیشنهاد دهد. با «سپردن» ساختار منجمد می‌شود و بررسی سوابق، جستجو، دعوت، مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است؛
-        هر تغییرِ شما نسبت به پیشنهادِ سامانه برای پشتیبانی ثبت می‌شود.</div>
-      <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th>ساختار</th><th>حالت (پنل پشتیبانی)</th></tr></thead><tbody>${rows}</tbody></table></div></div>
-      <div style="margin-top:12px"><div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}</div>${it.state === "open" ? vNorm(it) : `<div class="dim">این قلم باز نیست.</div>`}</div></div>`;
+        ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
+        ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
+        ${!started && !D_ ? `<button class="tp-btn sm warn" data-pkback title="این قلم را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر</button>` : ""}
+        ${startBtn}</div>
+      <div class="dim" style="font-size:.84rem;margin:4px 0 8px">${esc(rule)}${P.n ? ` · ${M(P.n)} تأمین‌کننده در سوابقِ «نوع قلم»` : ""} — ${help}
+        ${started ? " کارشناس هوشمند فقط تیک‌خورده‌های سپرده‌شده با شمارهٔ پنلِ تیک‌خورده را دعوت می‌کند؛ تیک‌خوردهٔ بی شماره منتظر می‌ماند تا شماره بخورد."
+          : " بعد از «شروع»، ساختارِ همین قلم منجمد می‌شود و کارشناس هوشمند فقط تیک‌خورده‌ها را دعوت می‌کند — آن‌که شمارهٔ پنلِ تیک‌خورده ندارد تا شماره بخورد منتظر می‌ماند."}</div>
+      ${P.msg && !L.length ? `<div class="tp-note warn">${esc(P.msg)}</div>` : ""}
+      ${L.length ? `<div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th>دعوت</th><th>#</th><th class="rt">تأمین‌کننده</th><th>از</th><th>رده</th><th>رتبهٔ نهایی</th><th>شمارهٔ پنل</th><th>وضعیت</th></tr></thead>
+        <tbody>${L.map(row).join("")}</tbody></table></div>`
+        : `<div class="empty">فهرستی از سوابق نیامد${A_ ? " — در «سپردن یا برگشت» فقط «↩️ برگرداندن به مدیر» می‌ماند" : " — از «➕ افزودن» یا «جستجوی هوشمند» تأمین‌کننده بیفزایید"}.</div>`}
+      ${miss.length ? `<div class="tp-note warn" style="margin-top:8px">برای «شروع»، علتِ برداشتنِ ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} را کنار همان نام بنویسید.</div>` : ""}</div>`;
   }
-  function handoffUI() {
-    const op = openItems(), go = toHandoff();
-    const dirty = go.find((x) => normDirty(x));
-    if (dirty) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(dirty.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
-    const rest = op.length - go.length;
-    return TP.modal("🤖 سپردن به کارشناس هوشمند", `ساختارِ ${M(go.length)} قلم منجمد می‌شود و از این پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است${rest ? `؛ ${M(rest)} قلم (دستی یا «مستقیم»ِ بی تیک) دستِ خودتان می‌ماند` : ""}.
-      شما در «استعلامات» خطِ دستیِ خودتان (✋) را می‌افزایید و به «🚨 پرسش»‌های کارشناس هوشمند جواب می‌دهید. سپرده شود؟`, async () => {
-      const b = TP.busy("سپردن به کارشناس هوشمند…", "");
-      try { await TP.api(`/assignments/${A().id}/handoff`, { method: "POST", body: { include: [...handoffPick] } }); handoffPick.clear(); b.close(); await reload(); }
-      catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
-    }, "بسپار", "انصراف");
+  function pkPhoneUI(it, k) {
+    const P = S.picks[it.id], e = P && P.list && P.list.find((x) => x.k === k); if (!e) return;
+    const done = async () => { delete S.spPh[e.name]; await loadPicks(it, true); };
+    const d = TP.modal(`📱 شمارهٔ پنل — ${esc(e.name)}`, `<p style="margin-top:0">کارشناس هوشمند فقط به شماره‌ای پیامک می‌دهد که تیکِ «پنل» دارد (پنلِ تأمین‌کننده به همین شماره وصل است).</p>
+      ${e.phones.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin:8px 0">${e.phones.map((p) => `<div class="toolrow" style="margin:0"><span class="num" dir="ltr">${esc(p.phone)}</span>${p.label ? ` <span class="dim">${esc(p.label)}</span>` : ""}
+        ${p.panel ? `<span class="chip ok">☑️ پنل</span>` : `<button class="tp-btn xs primary" data-pph-tick="${esc(p.phone)}">☑️ تیکِ پنل بزن</button>`}</div>`).join("")}</div>` : `<div class="dim">هنوز شماره‌ای برای این تأمین‌کننده ثبت نشده.</div>`}
+      <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px;margin-top:10px">
+        <label class="tp-field"><b>شمارهٔ تازه</b><input class="tp-input" id="pph-num" dir="ltr" inputmode="tel" value="${esc((e.found || [])[0] || "")}" placeholder="09…" style="width:150px"></label>
+        <label class="tp-field"><b>برچسب</b><input class="tp-input" id="pph-lab" value="${e.src === "smart" ? "جستجوی هوشمند" : ""}" placeholder="همراه، فروش…" style="width:150px"></label>
+        <label class="chkline"><input type="checkbox" id="pph-panel" checked> تیکِ پنل</label></div>
+      ${(e.found || []).length > 1 ? `<div class="dim" style="font-size:.82rem">شماره‌های پیداشده: ${e.found.map((p) => `<span dir="ltr">${esc(p)}</span>`).join("، ")}</div>` : ""}`,
+      async () => {
+        const num = (d.querySelector("#pph-num").value || "").trim(); if (!num) return;
+        try { await TP.api("/sp/x/phones", { body: { supplier_name: e.name, phone: num, label: d.querySelector("#pph-lab").value, panel: d.querySelector("#pph-panel").checked } }); await done(); }
+        catch (er) { TP.modal("ثبت نشد", esc(er.message), null, "باشد", ""); }
+      }, "ثبت شماره", "بستن");
+    d.querySelectorAll("[data-pph-tick]").forEach((b) => b.onclick = async () => {
+      try { await TP.api("/sp/x/phones", { body: { supplier_name: e.name, phone: b.dataset.pphTick, panel: true } }); d.remove(); await done(); }
+      catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); }
+    });
+  }
+  async function pkStartUI(it) {
+    if (!S.picks[it.id] || !S.picks[it.id].list) return;
+    if (normDirty(it)) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(it.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
+    try { await pkFlushWhy(it); } catch (e) { return TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
+    const P = S.picks[it.id], started = !!P.started_at;
+    const go = P.list.filter((e) => e.on && (!started || !e.go));
+    const miss = P.mode === "pick" && !started ? P.list.filter((e) => e.top && !e.on && !String(e.why || "").trim()) : [];
+    if (miss.length) { render(); return TP.modal("توضیح لازم است", `برداشتنِ تیکِ پنج نفر اول توضیح می‌خواهد: ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} — علت را کنار همان نام بنویسید.`, null, "باشد", ""); }
+    if (!go.length) return TP.modal("تیکی نیست", started ? "انتخابِ تازه‌ای برای دعوت نیست." : "دست‌کم یک تأمین‌کننده را تیک بزنید.", null, "باشد", "");
+    const noPh = go.filter((e) => !e.panel).length;
+    const title = started ? "📨 دعوت از انتخاب‌های تازه" : P.mode === "handoff" ? "🤖 سپردن به کارشناس هوشمند" : "🚀 شروع";
+    TP.modal(title, `${started ? "" : `ساختارِ «${esc(it.title)}» منجمد می‌شود و این قلم به کارشناس هوشمند می‌رود. `}کارشناس هوشمند از این ${M(go.length)} تأمین‌کننده دعوت می‌کند و مذاکره را پیش می‌برد:
+      <div style="margin:8px 0;max-height:34vh;overflow:auto">${go.map((e) => `• ${esc(e.name)}${e.panel ? "" : ` <span class="chip warn">بی شمارهٔ پنل — منتظر می‌ماند</span>`}`).join("<br>")}</div>
+      ${noPh ? `<div class="dim">${M(noPh)} نفر هنوز شمارهٔ پنلِ تیک‌خورده ندارند؛ هر وقت شماره‌شان را با تیکِ پنل بزنید، دعوت می‌شوند.</div>` : ""}`, async () => {
+      const b = TP.busy(title, esc(it.title));
+      try { const r = await TP.api(`/items/${it.id}/ai-start`, { body: {} }); b.close(); await reload(); S.picks[it.id] = r; render(); }
+      catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true); }
+    }, started ? "دعوت کن" : P.mode === "handoff" ? "بسپار" : "شروع", "انصراف");
+  }
+  function pkAddUI(it) {
+    const hist = (S.hist[it.id] && S.hist[it.id].suppliers) || [];
+    const d = TP.modal("➕ افزودن به فهرست دعوت", `<div class="tp-field"><b>نام تأمین‌کننده</b><input class="tp-input" id="pka-name" list="pka-list" style="width:100%" autofocus></div>
+      <datalist id="pka-list">${hist.filter((s) => !pkHas(it, s.name)).slice(0, 60).map((s) => `<option value="${esc(s.name)}">`).join("")}</datalist>
+      <div class="dim" style="font-size:.82rem;margin-top:6px">از سوابقِ همین قلم یا هر نامِ دیگر؛ توضیح نمی‌خواهد. برای دعوت، شمارهٔ پنلِ تیک‌خورده هم لازم است (📱 در همان ردیف).</div>`, async () => {
+      const name = (d.querySelector("#pka-name").value || "").trim(); if (!name) return;
+      await pkEdit(it, { add: [{ name, src: "manual" }] });
+    }, "بیفزا", "انصراف");
+  }
+  function pkRebuildUI(it) {
+    TP.modal("↻ بازسازیِ فهرست", "فهرست از سوابقِ امروز و «قاعدهٔ دعوت»ِ فعلی دوباره ساخته می‌شود: تیک‌ها و توضیح‌های سوابق به پیش‌فرض برمی‌گردند و افزوده‌های شما (جستجوی هوشمند و نام‌های دیگر) می‌مانند.",
+      () => pkEdit(it, { rebuild: true }), "بازسازی", "انصراف");
+  }
+  /** «🎯» در جدولِ سوابق: همان نام به فهرستِ دعوت */
+  const pkHistBtn = (it, name) => (!pkEditable(it) ? "" : pkHas(it, name) ? ` <span class="chip info" title="در «🎯 فهرست دعوت»">🎯</span>`
+    : ` <button class="tp-btn xs" data-pkadd-name="${esc(name)}" title="به «🎯 فهرست دعوت»ِ کارشناس هوشمند — تیک‌خورده">🎯</button>`);
+  /** «🎯 به فهرست دعوت» در نتایجِ جستجوی هوشمند — فقط با انتخابِ خودِ کارشناس (تصمیم ۱۸) */
+  const smPickBtn = (it, sid, i, s) => (!pkEditable(it) ? "" : pkHas(it, s.name) ? ` <span class="chip info" title="در «🎯 فهرست دعوت»">🎯 در فهرست</span>`
+    : ` <button class="tp-btn xs primary" data-sm-pick="${sid}|${i}" title="کارشناس هوشمند فقط تأمین‌کنندهٔ انتخاب‌شده با شمارهٔ پنلِ تیک‌خورده را دعوت می‌کند">🎯 به فهرست دعوت</button>`);
+  function smPickNote(it) {
+    if (!flow2() || !it || it.state !== "open" || !pkOn(it)) return "";
+    const P = S.picks[it.id];
+    if (P === undefined && normOk(it)) loadPicks(it);
+    if (P && P.mode === "handoff") return `<div class="tp-note" style="margin:8px 0">🎯 این قلم در حالت «سپردن یا برگشت» است: فهرستِ دعوت همان رتبه‌بندیِ سوابق است و از جستجوی هوشمند چیزی به آن افزوده نمی‌شود.</div>`;
+    const n = P && P.list ? P.list.filter((e) => e.src === "smart").length : 0;
+    return `<div class="tp-note" style="margin:8px 0">🎯 کارشناس هوشمند خودش جستجو نمی‌کند و از این نتایج فقط آن‌هایی را دعوت می‌کند که شما با «🎯 به فهرست دعوت» انتخاب کنید و شمارهٔ پنلِ تیک‌خورده دارند؛ نفرستادن توضیح نمی‌خواهد.
+      ${n ? `<b>${M(n)}</b> انتخاب از جستجو در فهرست است. ` : ""}${P && P.started_at ? (P.fresh ? "برای دعوت، «📨 دعوت از انتخاب‌های تازه» را در «بررسی سوابق» بزنید. " : "") : "بعد در «بررسی سوابق» «🚀 شروع» را بزنید. "}
+      <button class="tp-btn xs" data-pkgo>🎯 رفتن به فهرست دعوت</button></div>`;
+  }
+  async function smPickUI(sid, idx) {
+    const it = item(), s = supOfSearch(sid, idx); if (!it || !s) return;
+    const P = S.picks[it.id];
+    const mob = supPhones(s).map((p) => String(p).replace(/[^\d+]/g, "")).find((p) => /^(\+98|0098|98|0)?9\d{9}$/.test(p)) || "";
+    const d = TP.modal(`🎯 «${esc(s.name)}» به فهرست دعوت`, `<p style="margin-top:0">کارشناس هوشمند فقط به شمارهٔ پنلِ تیک‌خورده پیامک می‌دهد. شماره را ببینید یا وارد کنید و تیکِ پنل بزنید (اختیاری — بعد هم از «📱» در فهرست می‌شود).</p>
+      <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px">
+        <label class="tp-field"><b>شمارهٔ همراه</b><input class="tp-input" id="smp-num" dir="ltr" inputmode="tel" value="${esc(mob)}" placeholder="09…" style="width:150px"></label>
+        <label class="tp-field"><b>برچسب</b><input class="tp-input" id="smp-lab" value="جستجوی هوشمند" style="width:150px"></label>
+        <label class="chkline"><input type="checkbox" id="smp-panel" checked> تیکِ پنل</label></div>
+      <p class="dim" style="font-size:.84rem">${P && P.started_at ? "بعد از افزودن، در «بررسی سوابق» «📨 دعوت از انتخاب‌های تازه» را بزنید." : "بعد در «بررسی سوابق» «🚀 شروع» را بزنید."}</p>`, async () => {
+      const num = (d.querySelector("#smp-num").value || "").trim();
+      try {
+        if (num) await TP.api("/sp/x/phones", { body: { supplier_name: s.name, phone: num, label: d.querySelector("#smp-lab").value || "جستجوی هوشمند", panel: d.querySelector("#smp-panel").checked } });
+        await pkEdit(it, { add: [{ name: s.name, src: "smart", sid, ph: supPhones(s) }] });
+      } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "به فهرست بیفزا", "انصراف");
   }
 
-  function manualUI() {
-    const can = openItems().filter((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct" && !m.in_run; });
+  /** only: شناسهٔ قلمی که از «🎯 فهرست دعوت»ِ همان قلم آمده — فقط همان از پیش تیک می‌خورد */
+  function manualUI(only) {
+    const can = openItems().filter((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct" && !m.in_run && !m.started_at; });
     if (!can.length) return TP.modal("قلمی نیست", "همهٔ اقلام دستی‌اند، در انتظارِ مدیرند یا از نوعِ «مستقیم»؛ «مستقیم» را بی اجازه خودتان انجام دهید.", null, "باشد", "");
     const d = TP.modal("↩️ برگرداندن به مدیر — انجام دستی", `<p>این اقلام به‌جای کارشناس هوشمند با خودِ شما باشد؟ مدیر با علتِ شما تصمیم می‌گیرد؛ تا تصمیمش، سپرده نمی‌شوند.</p>
-      <div style="display:flex;flex-direction:column;gap:4px;margin:8px 0">${can.map((x) => `<label class="chkline"><input type="checkbox" data-mitem="${x.id}" checked> ${esc(x.title)}</label>`).join("")}</div>
+      <div style="display:flex;flex-direction:column;gap:4px;margin:8px 0">${can.map((x) => `<label class="chkline"><input type="checkbox" data-mitem="${x.id}" ${!only || x.id === only ? "checked" : ""}> ${esc(x.title)}</label>`).join("")}</div>
       <div class="tp-field"><b>علت (اجباری)</b><textarea class="tp-input" id="man-why" rows="3" style="width:100%;margin-top:6px" placeholder="مثلاً تأمین‌کنندهٔ این قلم فقط حضوری کار می‌کند"></textarea></div>`, async () => {
       const ids = [...d.querySelectorAll("[data-mitem]")].filter((c) => c.checked).map((c) => +c.dataset.mitem);
       const why = ((d.querySelector("#man-why") || {}).value || "").trim();
@@ -845,6 +1005,7 @@
     const head = `<div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
       ${it.sp_lock ? `<span class="chip warn" title="برای تأمین‌کننده فرستاده شده: عنوان، نوع قلم و لایه‌ها قفل‌اند و برای بقیهٔ تأمین‌کنندگان هم عیناً همین می‌رود">🔒 بستهٔ قفل‌شده</span>` : ""}
       ${it.hist_done_at ? `<span class="chip ok">بررسی شد — ${TP.fmt(it.hist_done_at)}</span>` : ""}
+      ${iState(it) === "direct" ? `<button class="tp-btn sm ${S.pickOpen[it.id] ? "" : "primary"}" data-pkopen title="${S.pickOpen[it.id] ? "فهرستِ دعوت بسته می‌شود؛ این قلم دستِ خودتان می‌ماند" : "این قلمِ «مستقیم» را با فهرستِ دعوتِ خودتان به کارشناس هوشمند بسپارید — بی توضیح"}">${S.pickOpen[it.id] ? "✋ خودم انجام می‌دهم" : "🤖 سپردن به کارشناس هوشمند"}</button>` : ""}
       <span style="margin-inline-start:auto"></span>
       <span style="display:flex;align-items:center;gap:8px;font-size:.9rem" title="۱ = گذشتهٔ دور تقریباً هم‌وزن امروز · ۱۰ = فقط خریدهای تازه وزن دارند">
         <b>ضریب اهمیت گشتاور</b>
@@ -866,10 +1027,10 @@
     /* نرمال‌سازی اجباری: تا ساختارِ قلم تأیید نشده، کادرش باز است */
     const norm = S.normOn || S.hmode === "pick" || !normOk(it) ? vNorm(it) : "";
 
-    if (!d) return `<div class="pad">${head}${norm}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
+    if (!d) return `<div class="pad">${head}${norm}${vPicks(it)}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
       حالت «نوع قلم»، «قلم انتخابی» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید؛ ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان).
       رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
-    if (d.available === false) return `<div class="pad">${head}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
+    if (d.available === false) return `<div class="pad">${head}${vPicks(it)}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
     const st = d.struct || {}, mt = d.match || {};
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
     const picked = new Set(mt.picked || []);
@@ -886,7 +1047,7 @@
         ${d.lowConf ? `<span class="chip warn" title="نرخ تبدیلِ این خریدها اطمینان «پایین» دارد و می‌تواند جمع را جابه‌جا کند">${M(d.lowConf)} خرید با نرخ کم‌اطمینان</span>` : ""}</div>` : "";
     const exc = d.excluded || [];
     const rows = histRows(d);
-    if (!rows.length) return `<div class="pad">${head}${structChips}<div class="tp-note warn">${exc.length
+    if (!rows.length) return `<div class="pad">${head}${structChips}${vPicks(it)}<div class="tp-note warn">${exc.length
       ? `هرچه از این قلم ثبت شده زیر «${esc(exc[0].name)}» است (${M(exc[0].n)} خرید) — ${exc[0].why === "employer" ? "مصالحِ تحویلیِ کارفرما" : "نام تجمیعی"} — و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
       : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div>${norm}</div>`;
 
@@ -898,6 +1059,7 @@
       ${vProfile(it)}
       ${head}
       ${structChips}
+      ${vPicks(it)}
       <div class="toolrow">
         <span class="chip ok">خرید قلم — فعال</span>
         <span class="chip mock" title="ستون پروژه هنوز در فایل مرجع نیست">خرید قلم در پروژه — در انتظار ساختار داده</span>
@@ -912,7 +1074,7 @@
         <th title="میانگینِ وزنیِ رتبه‌های نسبیِ دفعات، مقدار، گشتاور و ارزش خرید، و رده — وزن‌ها در پنل پشتیبانی؛ ترتیبِ دعوتِ کارشناس هوشمند همین است">امتیاز نهایی</th>${rk("f")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
-          : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}</td>
+          : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="فقط نام تأمین‌کننده به تب استعلامات می‌رود؛ قیمت با پیش‌فاکتور یا ورود دستی">افزودن</button>`}${pkHistBtn(it, s.name)}</td>
         <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل؛ در مقدار نیامده‌اند">${M(s.unconverted)}</span>` : ""}</td>
         <td class="num">${s.code ? esc(s.code) : `<span class="dim">—</span>`}</td>
         <td>${s.grade ? `<span class="chip grade g${esc(s.grade)}">${esc(s.grade)}</span>` : `<span class="dim">—</span>`}</td>
@@ -1261,7 +1423,7 @@
         <td>${siteBtn(s.website)}</td>
         <td class="rt">${esc(supPrice(s) || "—")}</td>
         <td style="white-space:nowrap">${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-sm-add="${sid}|${i}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">افزودن</button>`}
-          <button class="tp-btn xs" data-sm-msg="${sid}|${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button></td></tr>${checks}`;
+          <button class="tp-btn xs" data-sm-msg="${sid}|${i}" title="قالب پیام با فیلدهای همین تأمین‌کننده پر می‌شود">پیام</button>${smPickBtn(it, sid, i, s)}</td></tr>${checks}`;
     }).join("");
     return `<div class="tp-scroll" data-keep-scroll><table class="tp-table smres"><thead><tr>
         <th>#</th><th class="rt">تأمین‌کننده</th><th>نوع</th><th>بازار</th><th class="rt">شماره تماس</th><th class="rt">ایمیل</th><th>وب‌سایت</th><th class="rt">قیمت</th><th>عمل</th></tr></thead>
@@ -1308,7 +1470,7 @@
         <textarea class="tp-textarea" data-sm="notes" style="min-height:64px" placeholder="مثلاً: ترجیحاً تولیدکننده نه واسطه">${esc(sm.notes)}</textarea></div>
       <div class="grp dim" style="font-size:.78rem">نتیجه در پایگاه داده می‌ماند و با «افزودن»، تأمین‌کننده وارد تب استعلامات می‌شود؛ قیمت تازه‌اش از پیش‌فاکتور یا ورود دستی می‌آید.</div></div>`;
 
-    return `<div class="pad">${head}<div class="two"><div class="main">${main}</div>${side}</div></div>`;
+    return `<div class="pad">${head}${smPickNote(it)}<div class="two"><div class="main">${main}</div>${side}</div></div>`;
   }
 
   /* ---------- تب استعلامات (واقعی) ---------- */
@@ -1900,7 +2062,7 @@
     try { const d = await TP.api(`/assignments/${aid}`);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
-      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && d.ai.owned.run_id && !d.ai.owned.handover ? "quotes" : "history"; } if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
+      S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && d.ai.owned.run_id && !d.ai.owned.handover && d.ai.owned.flow !== 2 ? "quotes" : "history"; } S.picks = {}; if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
       /* نامه را بات تلگرام هم جلو می‌برد، پس ↻ باید وضعیتش را از نو بگیرد؛
          تب نامه خودش تنبلانه دوباره می‌خواند. */
       S.letter = null;
@@ -2069,9 +2231,20 @@
       if (k === "title") d.tl = !d.tl; else if (k === "qty") d.ql = !d.ql; else { const l = d.layers[+k.slice(2)]; if (l) l.lk = l.lk === false; }
       render();
     });
-    const hof = G("[data-handoff]"); if (hof) hof.onclick = handoffUI;
-    const man = G("[data-manual]"); if (man) man.onclick = manualUI;
-    Q("[data-hpick]").forEach((c) => { const lb = c.closest("label"); if (lb) lb.onclick = (e) => e.stopPropagation(); c.onclick = (e) => e.stopPropagation(); c.onchange = () => { const id = +c.dataset.hpick; if (c.checked) handoffPick.add(id); else handoffPick.delete(id); render(); }; });
+    const man = G("[data-manual]"); if (man) man.onclick = () => manualUI();
+    /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ همین قلم و «🚀 شروع» */
+    Q("[data-pk]").forEach((c) => c.onchange = () => pkEdit(item(), { on: { [c.dataset.pk]: c.checked } }));
+    Q("[data-pkwhy]").forEach((x) => x.onchange = () => pkEdit(item(), { why: { [x.dataset.pkwhy]: x.value } }));
+    Q("[data-pkdel]").forEach((b) => b.onclick = () => pkEdit(item(), { remove: [b.dataset.pkdel] }));
+    Q("[data-pkph]").forEach((b) => b.onclick = () => pkPhoneUI(item(), b.dataset.pkph));
+    Q("[data-pkadd-name]").forEach((b) => b.onclick = () => pkEdit(item(), { add: [{ name: b.dataset.pkaddName, src: "manual" }] }));
+    const pka = G("[data-pkadd]"); if (pka) pka.onclick = () => pkAddUI(item());
+    const pks = G("[data-pkstart]"); if (pks) pks.onclick = () => pkStartUI(item());
+    const pkr = G("[data-pkrebuild]"); if (pkr) pkr.onclick = () => pkRebuildUI(item());
+    const pkb = G("[data-pkback]"); if (pkb) pkb.onclick = () => manualUI(item().id);
+    const pko = G("[data-pkopen]"); if (pko) pko.onclick = () => { const it = item(); S.pickOpen[it.id] = !S.pickOpen[it.id]; render(); };
+    const pkl = G("[data-pkreload]"); if (pkl) pkl.onclick = () => loadPicks(item(), true);
+    const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
     /* هر فراخوانی مدل با کادرِ تأیید */
     const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
     const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);
@@ -2109,6 +2282,7 @@
     const pair = (v) => v.split("|").map(Number);
     Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(...pair(b.dataset.smAdd)));
     Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(...pair(b.dataset.smMsg)));
+    Q("[data-sm-pick]").forEach((b) => b.onclick = () => smPickUI(...pair(b.dataset.smPick)));
     /* باز/بسته کردن جستجوی قبلی نباید با بازرندرِ بعدی برگردد */
     Q("details.smblock").forEach((el) => el.ontoggle = () => { S.smOpen[el.dataset.sid] = el.open; });
     /* استعلامات */

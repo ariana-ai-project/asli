@@ -5,11 +5,17 @@
  *      ساختارِ هر قلم را تأیید و 🔒/🔓 کرده، و ساختار منجمد است — دیگر شروعِ خودکار با رسیدنِ ارجاع نیست. فاز ۴ب: فقط اقلامِ
  *      هوشمند به کار می‌روند — نه درخواستی که مدیر دستی کرده، نه «انجام دستی»ِ تأییدشده یا در انتظار، نه قلمِ «مستقیم»ی که کارشناس
  *      تیکش نزده (worker/ai-modes.js).
- *   ۱. آماده‌سازیِ هر قلم: «بررسی سوابق» بر همان ساختارِ منجمد — همان itemHistory پنل.
+ *      فاز ۴ب گام ۲ («روالِ تازه»، data.flow=2): کار قلم‌به‌قلم شروع می‌شود (startItem) — کارشناس در «🎯 فهرست دعوت»ِ هر قلم
+ *      (worker/ai-picks.js) تیک‌ها را می‌بیند و «🚀 شروع» را می‌زند؛ قلمِ تازه‌شروع‌شده را Cron به کارِ زنده می‌افزاید (syncItems).
+ *   ۱. آماده‌سازیِ هر قلم: «بررسی سوابق» بر همان ساختارِ منجمد — همان itemHistory پنل (عدد و سابقه برای مذاکره). قلمی که
+ *      فهرستِ دعوت ندارد (▶️ شروعِ پشتیبانی) فهرستِ پیش‌فرضِ قاعدهٔ دعوت را همین‌جا می‌گیرد.
  *   ۲. «جستجوی هوشمند» هر قلم — همان smartSearch پنل و بات (جستجوی تازهٔ همان قلم در چند روزِ اخیر دوباره خرج نمی‌شود).
+ *      روالِ تازه: کارشناس هوشمند خودش جستجو نمی‌کند (تصمیم ۱۸)؛ از جستجوی کارشناس فقط آن‌که او به فهرست افزوده.
  *   ۳. دعوت — فقط تأمین‌کنندگانی که دست‌کم یک «شمارهٔ پنل» تیک‌خورده دارند. تیک را فقط انسان می‌زند (تب کارشناس
  *      هوشمند): نامزدها از سوابق و جستجو، و هر تأمین‌کننده‌ای که کارشناس دستی به همان درخواست افزوده. قالبِ استاندارد +
  *      لینک پنل و بات (spSend)، و پیامک فقط به شماره‌های تیک‌خورده — پیش از هر پیامک تیک دوباره سنجیده می‌شود.
+ *      روالِ تازه: نامزدها فقط تیک‌خورده‌های سپرده‌شدهٔ فهرستِ دعوت (و افزودهٔ پشتیبانی)؛ تأمین‌کننده‌ای که برای قلمِ دیگری
+ *      دعوت شده، قلمِ تازه را در همان گفت‌وگو می‌گیرد.
  *   ۴. مذاکره در هر گفت‌وگو: مدل (ai-prompts.js) پرونده را می‌خواند، پاسخ می‌دهد و تصمیم می‌گیرد — تأیید، برگشت، رد،
  *      پذیرش مغایرت، تأیید نهایی — با همان توابعِ صفحهٔ مکاتبات. پیش‌فاکتور اول با همان «خوانش هوشمند» خوانده می‌شود.
  *      فاز ۴ طرح: «خوانش هوشمند پیش‌فاکتور» پیش‌فرض خاموش است (worker/switches.js) — مدل بسته را با درخواست می‌سنجد و یکراست
@@ -43,7 +49,7 @@ import { fmtFa } from "./time.js";
 import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
-import { AI_ASK_SQL } from "./ai-lock.js";
+import { AI_ASK_SQL, aiOwned } from "./ai-lock.js";
 import { getRules, saveRules, coverOf, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
@@ -52,6 +58,7 @@ import { NORM_OK_SQL, changeStmt } from "./structure.js";
 import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
 import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } from "./ai-modes.js";
+import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary } from "./ai-picks.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -164,7 +171,7 @@ export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   if (a.ai_on === 0) throw new HttpError("مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ کارشناس است.", 409);
   if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
   if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(a.id).first()) throw new HttpError("این درخواست از قبل به کارشناس هوشمند سپرده شده است.", 409);
-  const all = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.code, i.norm_json, i.sugg_json, i.ai_off, ${NORM_OK_SQL("i")} AS ok FROM items i
+  const all = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.code, i.norm_json, i.sugg_json, i.ai_off, i.pick_json, ${NORM_OK_SQL("i")} AS ok FROM items i
       WHERE i.assignment_id=? AND i.state='open' ORDER BY i.line_no`).bind(a.id).all()).results || [];
   if (!all.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
   /* فاز ۴ب (worker/ai-modes.js): «انجام دستی» — تأییدشده یا در انتظارِ مدیر — و قلمِ «مستقیم»ی که کارشناس انتخابش نکرده دستِ خودِ
@@ -179,6 +186,19 @@ export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   if (miss.length) {
     throw new HttpError(`نرمال‌سازی اجباری است: ساختارِ ${miss.length === its.length ? "هیچ قلمی" : `${faN(miss.length)} قلم از ${faN(its.length)}`} هنوز تأیید نشده — ${miss.slice(0, 4).map((i) => `«${i.title}»`).join("، ")}${miss.length > 4 ? "، …" : ""}.`, 409, { missing: miss.map((i) => i.id) });
   }
+  /* فاز ۴ب گام ۲: سپردنِ یکجا همان «شروع»ِ همهٔ همین اقلام است — هر قلم با «🎯 فهرست دعوت»ِ خودش اگر کارشناس دیده (در «انتخاب
+     کارشناس» برداشتنِ پنج نفر اول با توضیح؛ در «سپردن یا برگشت» همان رتبه‌بندی)، وگرنه فهرستِ پیش‌فرضِ قاعدهٔ دعوت که Cron در
+     آماده‌سازی می‌سازد. ▶️ شروعِ پشتیبانی فهرستِ کارشناس را همان‌طور که هست می‌برد */
+  const cfg = cfgOf(ag);
+  const picks = new Map();
+  for (const i of its) {
+    const p = pickOf(i);
+    if (!p) continue;
+    const md = (modes.get(i.id) || {}).mode;
+    if (md === "handoff") resetToDefault(p);
+    if (actor !== "support") startCheck(p, md, { cap: cfg.maxInvites, need: false });
+    picks.set(i.id, p);
+  }
   const runId = await createRun(env, a, actor === "support" ? "manual" : "handoff", its.map((i) => i.id));
   /* فقط اقلامی که در همین کارند (سقفِ maxItems) منجمد می‌شوند */
   const run = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(runId).first();
@@ -187,6 +207,11 @@ export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   const t = now();
   await env.DB.batch([
     ...frozen.map((i) => env.DB.prepare("UPDATE items SET frozen_at=?, frozen_by=? WHERE id=? AND frozen_at IS NULL").bind(t, actor, i.id)),
+    ...frozen.map((i) => {
+      const p = picks.get(i.id);
+      if (p) release(p, t);
+      return env.DB.prepare("UPDATE items SET ai_start_at=?, ai_start_by=?, pick_json=COALESCE(?, pick_json) WHERE id=? AND ai_start_at IS NULL").bind(t, actor, p ? JSON.stringify(p) : null, i.id);
+    }),
     ...frozen.map((i) => changeStmt(env, { id: i.id, request_id: i.request_id, aid: a.id }, actor, "freeze", parse(i.sugg_json, null), parse(i.norm_json, null), t)),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, actor, "ai_handoff", a.request_id,
       JSON.stringify({ assignment_id: a.id, run_id: runId, items: frozen.length })),
@@ -203,7 +228,8 @@ export async function createRun(env, a, how, itemIds = null) {
     .bind(a.id, ...(ids || []), cfg.maxItems).all()).results || [];
   if (!its.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
   const t = now();
-  const data = { items: its.map((i) => ({ id: i.id, title: i.title, qty: i.qty, unit: i.unit })), cands: [], how };
+  /* flow 2 (فاز ۴ب گام ۲): نامزدها از «🎯 فهرست دعوت»ِ هر قلم، بی جستجوی هوشمندِ خودِ کارشناس هوشمند؛ کارهای پیشین بی این کلید */
+  const data = { items: its.map((i) => ({ id: i.id, title: i.title, qty: i.qty, unit: i.unit })), cands: [], how, flow: 2 };
   const r = await env.DB.prepare(`INSERT INTO ai_runs (assignment_id,expert_id,request_id,state,data_json,next_at,created_at,updated_at) VALUES (?,?,?,'prep',?,?,?,?)
     ON CONFLICT(assignment_id) DO NOTHING`).bind(a.id, a.expert_id, a.request_id, JSON.stringify(data), t, t, t).run();
   if (!r.meta.changes) throw new HttpError("کارشناس هوشمند روی این ارجاع از قبل کار می‌کند.", 409);
@@ -213,9 +239,147 @@ export async function createRun(env, a, how, itemIds = null) {
     env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(t, a.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=0 AND fired_at IS NULL").bind(t, a.id),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${a.expert_id}`, "viewed", a.request_id, JSON.stringify({ assignment_id: a.id, channel: "ai" })),
-    logStmt(env, runId, null, "run", `شروعِ کار روی درخواست ${a.request_id} — ${faN(its.length)} قلم (${how === "manual" ? "«▶️ شروع»ِ پنل پشتیبانی" : how === "handoff" ? "سپردنِ کارشناس، بعد از نرمال‌سازی و انجمادِ ساختار" : "ارجاعِ تازه"})`),
+    logStmt(env, runId, null, "run", `شروعِ کار روی درخواست ${a.request_id} — ${faN(its.length)} قلم (${how === "manual" ? "«▶️ شروع»ِ پنل پشتیبانی" : how === "pick" ? "«🚀 شروع»ِ کارشناس با فهرستِ دعوتِ همین قلم" : how === "handoff" ? "سپردنِ کارشناس، بعد از نرمال‌سازی و انجمادِ ساختار" : "ارجاعِ تازه"})`),
   ]);
   return runId;
+}
+
+/* ------------------------------------------------------------------ */
+/* «🎯 فهرست دعوت» و «🚀 شروع»ِ هر قلم — فاز ۴ب گام ۲ (worker/ai-picks.js)  */
+/* ------------------------------------------------------------------ */
+const RUN_BUSY = { closing: "کارشناس هوشمند در حالِ بستنِ این درخواست است (جدول کمیسیون و نامه)", done: "کارِ کارشناس هوشمند روی این درخواست تمام شده است", ended: "کارِ کارشناس هوشمند روی این درخواست بسته شد" };
+
+/** قلمِ کارشناس در درخواستِ هوشمند، با حالتِ نوعش و تنظیماتِ کارشناس هوشمند — همهٔ نگهبان‌های فهرست و شروع */
+async function pickCtx(env, ex, itemId) {
+  const it = await env.DB.prepare(`SELECT i.*, a.id AS aid, a.expert_id, a.dispatched_at, a.closed_at, a.ai_on FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`)
+    .bind(int(itemId)).first();
+  if (!it) throw new HttpError("قلم پیدا نشد.", 404);
+  if (it.expert_id !== ex.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
+  const o = await aiOwned(env, it.aid);
+  if (!o) throw new HttpError(it.ai_on === 0 ? "مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ شماست." : "این درخواست در حالت هوشمند نیست؛ کارهایش با خودِ شماست.", 409);
+  if (o.run_id && o.flow !== 2) throw new HttpError("این درخواست با روالِ پیشینِ کارشناس هوشمند پیش می‌رود و «فهرست دعوت» ندارد.", 409);
+  if (it.state !== "open") throw new HttpError("این قلم باز نیست.", 409);
+  if (Number(it.ai_off) === 1) throw new HttpError("این قلم «انجام دستی» است و دستِ خودِ شماست.", 409);
+  const waiting = ((await env.DB.prepare("SELECT payload_json FROM decisions WHERE assignment_id=? AND action='manual' AND approved_at IS NULL AND rejected_at IS NULL")
+    .bind(it.aid).all()).results || []).some((d) => ((parse(d.payload_json, {}) || {}).item_ids || []).includes(it.id));
+  if (waiting) throw new HttpError("درخواستِ «انجام دستی»ِ این قلم در انتظارِ تصمیمِ مدیر است.", 409);
+  const m = (await itemModes(env, [it])).get(it.id) || { ...MODE_DEFAULT };
+  const cfg = cfgOf(await agentOf(env, ex.id));
+  return { it, o, m, cfg };
+}
+
+/** پاسخِ فهرست برای پنل کارشناس */
+async function picksOut(env, { it, o, m, cfg }, pick) {
+  const started = !!it.ai_start_at;
+  const list = await pickView(env, it, it.aid, pick);
+  return {
+    item_id: it.id, mode: m.mode, mode_fa: MODE_FA[m.mode] || m.mode, head: m.head || null, supervise: !!m.supervise,
+    started_at: it.ai_start_at || null, run_id: o.run_id || null, top: TOP, cap: cfg.maxInvites, built_at: pick ? pick.at : null,
+    rule: pick ? pick.rule || null : null, n: pick ? pick.n || 0 : 0, msg: pick ? pick.msg || null : null, pending: started && !pick,
+    list, fresh: list.filter((e) => e.on && !e.go).length,
+  };
+}
+
+/** /items/:id/picks (GET، PUT) و /items/:id/ai-start (POST) — از api.js، با requireExpert */
+export async function picksRoute(request, env, path, m, deps) {
+  let mm;
+  if ((mm = /^\/items\/(\d+)\/picks$/.exec(path)) && (m === "GET" || m === "PUT")) {
+    const ex = await deps.requireExpert(request, env);
+    const k = await pickCtx(env, ex, mm[1]);
+    const { it } = k;
+    /* فهرست بر ساختارِ تأییدشده ساخته می‌شود — همان نگهبانِ «بررسی سوابق» */
+    if (!normConfirmedRow(it)) throw new HttpError("نرمال‌سازی اجباری است: اول ساختارِ این قلم را ببینید و «تأیید» بزنید؛ بعد فهرستِ دعوت از سوابق ساخته می‌شود.", 409, { need_norm: true });
+    let pick = pickOf(it);
+    const by = `expert:${ex.id}`, t = now();
+    if (m === "GET") {
+      /* نخستین دیدن: فهرستِ پیش‌فرض ساخته و نگه داشته می‌شود — «پنج نفر اول» همان است که کارشناس دید */
+      if (!pick && !it.ai_start_at) {
+        pick = { ...(await buildDefault(env, it)), by };
+        await env.DB.prepare("UPDATE items SET pick_json=? WHERE id=? AND pick_json IS NULL").bind(JSON.stringify(pick), it.id).run();
+      }
+      return deps.json(await picksOut(env, k, pick));
+    }
+    const b = await deps.readJson(request);
+    if (b.rebuild) {
+      if (it.ai_start_at) throw new HttpError("این قلم سپرده شده؛ فهرستش دیگر از نو ساخته نمی‌شود.", 409);
+      if (k.m.mode === "handoff" && pick) throw new HttpError(A_MSG, 409);
+      pick = { ...mergeRebuilt(await buildDefault(env, it), pick), by };
+    } else {
+      if (!pick) throw new HttpError(it.ai_start_at ? "فهرستِ این قلم را کارشناس هوشمند همین حالا می‌سازد؛ کمی بعد دوباره ببینید." : "اول فهرست را باز کنید.", 409);
+      applyEdits(pick, b, { mode: k.m.mode, by, cap: k.cfg.maxInvites, at: t });
+    }
+    await env.DB.prepare("UPDATE items SET pick_json=? WHERE id=?").bind(JSON.stringify(pick), it.id).run();
+    return deps.json(await picksOut(env, k, pick));
+  }
+  if ((mm = /^\/items\/(\d+)\/ai-start$/.exec(path)) && m === "POST") {
+    const ex = await deps.requireExpert(request, env);
+    const r = await startItem(env, ex, mm[1]);
+    return deps.json(r);
+  }
+  return null;
+}
+const normConfirmedRow = (it) => { const n = parse(it && it.norm_json, null); return !!(n && T(n.head) && n.source !== "ai"); };
+
+/**
+ * «🚀 شروع»ِ یک قلم: ساختار منجمد، تیک‌خورده‌های فهرست به کارشناس هوشمند سپرده (go) و قلم به کارِ همین ارجاع — کار اگر
+ * نیست ساخته می‌شود؛ اگر هست، Cron قلم را در گامِ بعد برمی‌دارد (syncItems). قلمِ سپرده‌شده: فقط «دعوت از انتخاب‌های تازه».
+ */
+export async function startItem(env, ex, itemId) {
+  const k = await pickCtx(env, ex, itemId);
+  const { it, o, m, cfg } = k;
+  const by = `expert:${ex.id}`;
+  if (!it.dispatched_at || it.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
+  if (!normConfirmedRow(it)) throw new HttpError("نرمال‌سازی اجباری است: اول ساختارِ این قلم را تأیید کنید.", 409, { need_norm: true });
+  const run = await env.DB.prepare("SELECT id, state, finished_at, data_json FROM ai_runs WHERE assignment_id=?").bind(it.aid).first();
+  if (run && (run.finished_at || RUN_BUSY[run.state])) throw new HttpError(`${RUN_BUSY[run.state] || RUN_BUSY.ended}؛ قلمِ تازه به آن سپرده نمی‌شود.`, 409);
+  let pick = pickOf(it);
+  const more = !!it.ai_start_at;
+  if (!pick) {
+    if (more) throw new HttpError("فهرستِ این قلم را کارشناس هوشمند همین حالا می‌سازد؛ کمی بعد دوباره ببینید.", 409);
+    pick = { ...(await buildDefault(env, it)), by };
+  }
+  if (m.mode === "handoff" && !more) resetToDefault(pick);
+  const go = startCheck(pick, m.mode, { cap: cfg.maxInvites, more });
+  if (!more && run) {
+    const n = (parse(run.data_json, {}).items || []).length;
+    if (n >= cfg.maxItems) throw new HttpError(`کارِ این درخواست به سقفِ ${faN(cfg.maxItems)} قلم رسیده (پنل پشتیبانی).`, 409);
+  }
+  const t = now();
+  release(pick, t);
+  const offTop = pick.list.filter((e) => e.top && !e.on).map((e) => ({ name: e.name, why: e.why || null }));
+  const payload = { assignment_id: it.aid, item_id: it.id, mode: m.mode, n: go.length, names: go.map((e) => e.name).slice(0, 20), off_top: offTop };
+  if (more) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE items SET pick_json=? WHERE id=?").bind(JSON.stringify(pick), it.id),
+      env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)").bind(t, by, "ai_pick_more", it.request_id, it.id, JSON.stringify(payload)),
+      ...(run ? [env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(t, run.id, t),
+        logStmt(env, run.id, null, "step", `کارشناس ${faN(go.length)} انتخابِ تازه برای «${it.title}» سپرد: ${go.map((e) => `«${e.name}»`).join("، ")}.`)] : []),
+    ]);
+    return { ok: true, more: true, released: go.length, run_id: run ? run.id : null, ...(await picksOut(env, { ...k, it: { ...it } }, pick)) };
+  }
+  const r = await env.DB.prepare(`UPDATE items SET pick_json=?, ai_start_at=?, ai_start_by=?, frozen_at=COALESCE(frozen_at,?), frozen_by=COALESCE(frozen_by,?)
+      WHERE id=? AND ai_start_at IS NULL AND state='open'`).bind(JSON.stringify(pick), t, by, t, by, it.id).run();
+  if (!r.meta.changes) throw new HttpError("این قلم همین حالا سپرده شد؛ صفحه را تازه کنید.", 409);
+  await env.DB.batch([
+    changeStmt(env, { id: it.id, request_id: it.request_id, aid: it.aid }, by, "freeze", parse(it.sugg_json, null), parse(it.norm_json, null), t),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)").bind(t, by, "ai_start", it.request_id, it.id, JSON.stringify(payload)),
+  ]);
+  let runId = run ? run.id : null;
+  if (run) {
+    await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=?").bind(t, run.id),
+      logStmt(env, run.id, null, "step", `«🚀 شروع»ِ «${it.title}» (${MODE_FA[m.mode] || m.mode}) با ${faN(go.length)} تأمین‌کنندهٔ تیک‌خورده${offTop.length ? `؛ برداشتنِ پنج نفر اول: ${offTop.map((x) => `«${x.name}»${x.why ? ` (${x.why})` : ""}`).join("، ")}` : ""}.`)]);
+  } else {
+    const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=?").bind(it.aid).first();
+    /* شکستِ ساختنِ کار (مسابقهٔ دو شروعِ هم‌زمان): قلم سپرده شده و discover در Cronِ بعد کار را می‌سازد */
+    runId = await createRun(env, a, "pick", [it.id]).catch((e) => { if (e instanceof HttpError && e.status === 409) return null; throw e; });
+    if (!runId) {
+      const again = await env.DB.prepare("SELECT id FROM ai_runs WHERE assignment_id=?").bind(it.aid).first();
+      runId = again ? again.id : null;
+      if (runId) await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=?").bind(t, runId).run();
+    }
+  }
+  const fresh = await env.DB.prepare("SELECT i.*, a.id AS aid FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(it.id).first();
+  return { ok: true, started: true, released: go.length, run_id: runId, ...(await picksOut(env, { ...k, it: { ...it, ...fresh }, o: { ...o, run_id: runId } }, pick)) };
 }
 
 /** برداشتنِ اتمیِ یک اجرای سررسیده — فقط کارشناس‌های روشن؛ دو Cron هم‌زمان یک اجرا را دو بار نمی‌گیرند */
@@ -248,6 +412,7 @@ export async function aiTick(env) {
       return { ai: 1, ended: run.id };
     }
     const cfg = cfgOf(await agentOf(env, run.expert_id));
+    await syncItems(env, run);
     const out = await advance(env, run, { ex, cfg, rec, asg });
     return { ai: 1, run: run.id, ...out };
   } catch (e) {
@@ -259,6 +424,24 @@ export async function aiTick(env) {
     await flushCalls(env, run, run.expert_id, rec);
     await env.DB.prepare("UPDATE ai_runs SET lock_until=NULL WHERE id=?").bind(run.id).run().catch(() => {});
   }
+}
+
+/**
+ * روالِ تازه: قلمی که کارشناس بعد از ساخته شدنِ کار «🚀 شروع» زده، به همین کار می‌پیوندد — فقط این‌جا (Cron، زیرِ قفلِ اجرا)
+ * data_json نوشته می‌شود، پس با گام‌ها مسابقه ندارد. کارِ در حالِ مذاکره برای قلمِ تازه یک بار دیگر آماده‌سازی را می‌گذراند.
+ */
+async function syncItems(env, run) {
+  if (!run.data || run.data.flow !== 2 || !["prep", "search", "work"].includes(run.state)) return;
+  const rows = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' AND ai_start_at IS NOT NULL ORDER BY ai_start_at, line_no")
+    .bind(run.assignment_id).all()).results || [];
+  const have = new Set((run.data.items || []).map((x) => x.id));
+  const fresh = rows.filter((r) => !have.has(r.id));
+  if (!fresh.length) return;
+  for (const r of fresh) run.data.items.push({ id: r.id, title: r.title, qty: r.qty, unit: r.unit });
+  const back = run.state === "work";
+  if (back) run.state = "prep";
+  await env.DB.batch([saveData(env, run, back ? ", state='prep'" : ""),
+    logStmt(env, run.id, null, "step", `قلمِ تازه به این کار سپرده شد: ${fresh.map((x) => `«${x.title}»`).join("، ")} — آماده‌سازی و دعوت از تیک‌خورده‌هایش.`)]);
 }
 
 async function endRun(env, run, why) {
@@ -328,8 +511,17 @@ async function stepPrep(env, run, { ex, rec }) {
   };
   di.prep = 1;
   const t = now();
+  /* روالِ تازه: قلمی که بی «🎯 فهرست دعوت» سپرده شد (▶️ شروعِ پشتیبانی) فهرستِ پیش‌فرضِ قاعدهٔ دعوت را از همین سوابق می‌گیرد —
+     پنج نفر اول تیک‌خورده و سپرده (همان «سپردن یا برگشت») */
+  const auto = run.data.flow === 2 && !pickOf(it);
+  if (auto) {
+    const list = defaultFrom({ exact: di.hist.exact, type: di.hist.top }, rk.dispatch).map((e) => (e.on ? { ...e, go: t } : e));
+    di.picks = "auto";
+    it.pick_json = JSON.stringify({ v: 1, at: t, by: "ai", rule: rk.dispatch, n: di.hist.n, msg: di.hist.msg, list });
+  }
   await env.DB.batch([
     saveData(env, run),
+    ...(auto ? [env.DB.prepare("UPDATE items SET pick_json=? WHERE id=? AND pick_json IS NULL").bind(it.pick_json, it.id)] : []),
     env.DB.prepare("UPDATE items SET hist_done_at=COALESCE(hist_done_at,?) WHERE id=?").bind(t, it.id),
     env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=1 AND fired_at IS NULL").bind(t, run.assignment_id),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "hist", run.request_id, JSON.stringify({ assignment_id: run.assignment_id, item_ids: [it.id], channel: "ai" })),
@@ -345,7 +537,16 @@ async function stepPrep(env, run, { ex, rec }) {
 const phonesOfResult = (s) => (s.phones || []).map((p) => (p && typeof p === "object" ? p.e164 || p.verbatim : p)).filter(Boolean);
 
 async function stepSearch(env, run, { ex, cfg, rec }) {
-  const d = run.data, idx = d.items.findIndex((x) => !x.skip && !x.smart);
+  const d = run.data;
+  /* روالِ تازه (تصمیم ۱۸): کارشناس هوشمند خودش جستجو نمی‌کند — از جستجوی کارشناس فقط آن‌که خودش به فهرستِ دعوت افزوده */
+  if (d.flow === 2) {
+    for (const di of d.items) if (!di.smart) di.smart = { off: true };
+    await buildCandidates(env, run);
+    await env.DB.batch([saveData(env, run), next(env, run, 0, "work"),
+      logStmt(env, run.id, null, "step", `نامزدهای دعوت: ${faN(d.cands.length)} تأمین‌کنندهٔ تیک‌خوردهٔ فهرستِ دعوتِ کارشناس (بی جستجوی هوشمندِ کارشناس هوشمند). دعوت فقط برای شماره‌هایی که تیکِ «پنل» دارند.`)]);
+    return { step: "search-skip" };
+  }
+  const idx = d.items.findIndex((x) => !x.skip && !x.smart);
   if (idx < 0) {
     await buildCandidates(env, run);
     await env.DB.batch([saveData(env, run), next(env, run, 0, "work"),
@@ -384,8 +585,18 @@ async function stepSearch(env, run, { ex, cfg, rec }) {
  * نامزدهای دعوت: برای هر قلم، تأمین‌کنندگانِ سوابق (به ترتیبِ رتبه) و بعد جستجوی هوشمند؛ با شماره‌هایی که پیدا شده
  * (دعوت فقط با شمارهٔ پنلِ تیک‌خورده — این‌ها فقط پیشنهادِ شماره برای کارشناس‌اند).
  */
+/** روالِ تازه: ردیف‌های فهرستِ دعوتِ اقلامِ همین کار، به ترتیبِ اقلامِ کار */
+async function pickRows(env, run) {
+  const ids = (run.data.items || []).filter((x) => !x.skip).map((x) => x.id);
+  if (!ids.length) return [];
+  const rows = (await env.DB.prepare(`SELECT id, title, pick_json FROM items WHERE id IN (${ids.map(() => "?").join(",")}) AND state='open'`).bind(...ids).all()).results || [];
+  return ids.map((id) => rows.find((r) => r.id === id)).filter(Boolean);
+}
+
 async function buildCandidates(env, run) {
   const d = run.data, by = new Map();
+  /* روالِ تازه: نامزدها همان تیک‌خورده‌های سپرده‌شدهٔ فهرستِ دعوت — عکسی برای پرونده و پنل؛ دعوت هر بار از خودِ فهرست (invitable) */
+  if (d.flow === 2) { d.cands = pickCands(await pickRows(env, run)).slice(0, 80); return; }
   const add = (name, itemId, src, rank, phones, tier) => {
     const key = C.nkey(name);
     if (!key) return;
@@ -425,6 +636,7 @@ async function buildCandidates(env, run) {
 const manualOf = (run) => parse(run.manual_json, []);
 
 async function invitable(env, run) {
+  if (run.data.flow === 2) return invitable2(env, run);
   const d = run.data;
   const man = manualOf(run);
   const keys = (d.cands || []).map((c) => c.key);
@@ -448,6 +660,54 @@ async function invitable(env, run) {
 }
 
 /**
+ * روالِ تازه (فاز ۴ب گام ۲): هر بار از خودِ فهرستِ دعوت — تیک‌خورده‌های سپرده‌شده (go) با دست‌کم یک شمارهٔ پنلِ تیک‌خورده، و
+ * افزودهٔ پشتیبانی (manual_json). تأمین‌کننده‌ای که گفت‌وگوی کارشناس هوشمند را برای قلمِ دیگری دارد، قلمِ تازه را در همان
+ * گفت‌وگو می‌گیرد (thread_id)؛ گفت‌وگوی خودِ کارشناس (بی ai_threads) دست نمی‌خورد.
+ */
+async function invitable2(env, run) {
+  const d = run.data;
+  const man = manualOf(run);
+  const cands = pickCands(await pickRows(env, run));
+  const keys = cands.map((c) => c.key).slice(0, 80), mids = man.map((x) => x.sid).filter(Boolean);
+  if (!keys.length && !mids.length) return [];
+  const cond = [keys.length ? `s.name_n IN (${keys.map(() => "?").join(",")})` : null, mids.length ? `s.id IN (${mids.map(() => "?").join(",")})` : null].filter(Boolean).join(" OR ");
+  const [pr, tr] = await env.DB.batch([
+    env.DB.prepare(`SELECT s.id AS sid, s.name, s.name_n, p.id AS pid, p.phone, p.label FROM sp_suppliers s JOIN sp_phones p ON p.supplier_id=s.id
+      WHERE s.demo=0 AND p.panel=1 AND (${cond}) ORDER BY p.id`).bind(...keys, ...mids),
+    env.DB.prepare(`SELECT t.id, t.supplier_id, EXISTS (SELECT 1 FROM ai_threads x WHERE x.thread_id=t.id AND x.run_id=?) AS ai,
+        (SELECT GROUP_CONCAT(l.item_id) FROM sp_lines l WHERE l.thread_id=t.id) AS lines FROM sp_threads t WHERE t.assignment_id=?`).bind(run.id, run.assignment_id),
+  ]);
+  const threads = new Map((tr.results || []).map((t) => [t.supplier_id, { id: t.id, ai: !!t.ai, lines: new Set(String(t.lines || "").split(",").filter(Boolean).map(Number)) }]));
+  const live = new Set(d.items.filter((x) => !x.skip).map((x) => x.id));
+  const bySup = new Map();
+  for (const r of pr.results || []) {
+    if (!bySup.has(r.sid)) {
+      const manual = man.find((x) => x.sid === r.sid);
+      const cand = cands.find((c) => c.key === r.name_n);
+      const items = (manual ? [...live] : cand ? cand.items.filter((id) => live.has(id)) : []);
+      bySup.set(r.sid, { sid: r.sid, name: r.name, src: manual ? "manual" : cand ? cand.src : "manual", rank: cand ? cand.rank : 0, items, phones: [] });
+    }
+    bySup.get(r.sid).phones.push({ id: r.pid, phone: r.phone, label: r.label });
+  }
+  const out = [];
+  for (const inv of bySup.values()) {
+    const th = threads.get(inv.sid);
+    if (!th) { if (inv.items.length) out.push(inv); continue; }
+    if (!th.ai) continue;
+    const miss = inv.items.filter((id) => !th.lines.has(id));
+    if (miss.length) out.push({ ...inv, items: miss, thread_id: th.id });
+  }
+  return out.sort((a, b) => (a.src === "manual" ? -1 : 0) - (b.src === "manual" ? -1 : 0) || (a.thread_id ? 1 : 0) - (b.thread_id ? 1 : 0) || a.rank - b.rank);
+}
+
+/** قلمِ تازه در گفت‌وگوی موجود — همان لحن، کوتاه */
+function addOnText(env, sup, items) {
+  const list = items.map((i) => `• ${i.title} — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trim()).join("\n");
+  return `سلام دوباره 🌷\n${sup}، برای همین درخواست ${items.length === 1 ? "این قلم رو" : "این اقلام رو"} هم قیمت می‌خواستیم:\n${list}\n`
+    + "اگه لطف کنید مثل قبل همین‌جا توی پنل ثبت کنید و «ارسال» رو بزنید، ممنون می‌شم 🙏";
+}
+
+/**
  * قالبِ دعوت — اولین پیامِ گفت‌وگو، با همان لحنِ محاوره‌ایِ مذاکره (درخواست کاربر، مهر ۱۴۰۵)؛ پیامک کوتاه‌ترش را می‌برد.
  * یک جمله می‌گوید پیام‌ها را دستیارِ هوشمند جواب می‌دهد — مدل هم اگر صادقانه پرسیده شود انکار نمی‌کند (ai-prompts.js).
  */
@@ -468,13 +728,17 @@ async function inviteOne(env, run, ex, inv) {
   const items = run.data.items.filter((x) => inv.items.includes(x.id) && !x.skip);
   if (!items.length) return null;
   const [p0, ...more] = inv.phones;
+  /* روالِ تازه: قلمِ تازه در گفت‌وگوی موجودِ کارشناس هوشمند با همین تأمین‌کننده (inv.thread_id) — پیامِ کوتاه، یک پیامک */
+  const addOn = !!inv.thread_id;
   const r = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: p0.id,
-    text: inviteText(env, inv.name, items, await pfReadOn(env)), sms: smsIntro(env, items), ai: true });
+    text: addOn ? addOnText(env, inv.name, items) : inviteText(env, inv.name, items, await pfReadOn(env)), sms: smsIntro(env, items), ai: true });
   const t = now();
   const top = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS n FROM sp_msgs WHERE thread_id=?").bind(r.thread_id).first();
   await env.DB.batch([
     env.DB.prepare(`INSERT INTO ai_threads (thread_id,run_id,source,state,seen_msg,created_at,updated_at) VALUES (?,?,?,'invited',?,?,?) ON CONFLICT(thread_id) DO NOTHING`)
       .bind(r.thread_id, run.id, inv.src, top ? top.n : 0, t, t),
+    /* گفت‌وگویی که بسته یا «تأمین نمی‌کند» بود، برای قلمِ تازه دوباره باز است */
+    ...(addOn ? [env.DB.prepare("UPDATE ai_threads SET state=CASE WHEN state IN ('closed','declined') THEN 'invited' ELSE state END, updated_at=? WHERE thread_id=?").bind(t, r.thread_id)] : []),
     /* همان «انتخاب جهت استعلام» کارشناس: خطی بی قیمت در تب استعلامات، تا پیش‌فاکتور یا تأیید نهایی پرش کند */
     ...items.map((i) => env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,created_at,updated_at)
       SELECT ?,?,?,?,?,'رسمی','ai',?,?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=?)`)
@@ -491,13 +755,13 @@ async function inviteOne(env, run, ex, inv) {
     results.push({ phone: C.maskPhone(ph.phone), via: d.via, sent: d.sent, error: d.error || (!ok ? "تیکِ پنل برداشته شده بود" : null) });
   };
   await send(p0, r.sms);
-  for (const ph of more.slice(0, 2)) {
+  for (const ph of addOn ? [] : more.slice(0, 2)) {
     const r2 = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: ph.id, silent: true, sms: smsIntro(env, items), ai: true });
     await send(ph, r2.sms);
   }
   if (!run.data.invited_at) run.data.invited_at = t;
   await env.DB.batch([saveData(env, run), logStmt(env, run.id, r.thread_id, "invite",
-    `دعوت از «${r.supplier.name}» (${SOURCE_FA[inv.src] || inv.src}) برای ${items.map((i) => `«${i.title}»`).join("، ")} — پیامک: ${results.map((x) => `${x.phone} ${x.sent ? "✅ فرستاده شد" : x.via === "hold" ? `⛔ نرفت (${x.error || "بی تیکِ پنل"})` : x.error ? `⚠️ نرفت: ${x.error} — شبیه‌سازی شد` : "🧪 شبیه‌سازی (درگاه پیامک وصل نیست)"}`).join("؛ ")}`, { results })]);
+    `${addOn ? "افزودنِ قلم به گفت‌وگوی" : "دعوت از"} «${r.supplier.name}» (${SOURCE_FA[inv.src] || inv.src}) برای ${items.map((i) => `«${i.title}»`).join("، ")} — پیامک: ${results.map((x) => `${x.phone} ${x.sent ? "✅ فرستاده شد" : x.via === "hold" ? `⛔ نرفت (${x.error || "بی تیکِ پنل"})` : x.error ? `⚠️ نرفت: ${x.error} — شبیه‌سازی شد` : "🧪 شبیه‌سازی (درگاه پیامک وصل نیست)"}`).join("؛ ")}`, { results })]);
   return { thread: r.thread_id, results };
 }
 
@@ -514,7 +778,8 @@ async function stepWork(env, run, k) {
   const { ex, cfg } = k;
   /* دعوت‌های تازه (شماره‌ای که همین حالا تیک خورده هم) — سقفِ کلِ دعوت‌ها */
   const done = await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_threads WHERE run_id=?").bind(run.id).first();
-  const room = cfg.maxInvites - ((done && done.n) || 0);
+  /* روالِ تازه: سقف همان سقفِ تیکِ هر قلم در فهرستِ دعوت است (ai-picks.js) — دعوت دقیقاً همان تیک‌خورده‌ها */
+  const room = run.data.flow === 2 ? Infinity : cfg.maxInvites - ((done && done.n) || 0);
   if (room > 0) {
     const todo = (await invitable(env, run)).slice(0, Math.min(room, INVITES_PER_TICK));
     if (todo.length) {
@@ -593,7 +858,8 @@ async function handOver(env, run, ex, cover, rules) {
   await env.DB.batch([
     env.DB.prepare("UPDATE ai_runs SET data_json=?, handover_at=?, next_at=?, error=NULL, updated_at=? WHERE id=?").bind(JSON.stringify(run.data), t, t + 60000, t, run.id),
     logStmt(env, run.id, null, "handover", `⚠️ مهلتِ ${faN(rules.waitHours)} ساعته گذشت و این اقلام به حداقلِ استعلام نرسیدند: ${short.map((c) => `«${c.title}» ${faN(c.have)} از ${faN(c.need)}`).join("، ")}. `
-      + "کار به کارشناس واگذار شد: بررسی سوابق و جستجوی هوشمند برایش باز است؛ گفت‌وگوها ادامه دارند و جدول و نامه با کارشناس هوشمند است."),
+      + (run.data.flow === 2 ? "به کارشناس خبر رسید تا تأمین‌کنندهٔ بیشتری تیک بزند (فهرستِ دعوت یا جستجوی هوشمند) یا خطِ دستی بیفزاید؛ گفت‌وگوها ادامه دارند و جدول و نامه با کارشناس هوشمند است."
+        : "کار به کارشناس واگذار شد: بررسی سوابق و جستجوی هوشمند برایش باز است؛ گفت‌وگوها ادامه دارند و جدول و نامه با کارشناس هوشمند است.")),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_handover", run.request_id,
       JSON.stringify({ assignment_id: run.assignment_id, hours: rules.waitHours, items: short, channel: "ai" })),
   ]);
@@ -605,8 +871,11 @@ async function handoverAlarm(env, ex, run, short, hours) {
   const text = `⚠️ <b>کارشناس هوشمند به حداقلِ استعلامِ درخواست ${esc(run.request_id)} نرسید</b>\n\n`
     + `بعد از ${faN(hours)} ساعت، این اقلام هنوز کمتر از حدی که پنل پشتیبانی تعیین کرده پیشنهادِ تأییدنهایی دارند:\n`
     + short.map((c) => `• ${esc(c.title)} — ${faN(c.have)} از ${faN(c.need)}`).join("\n")
-    + "\n\n<b>لطفاً خودتان وارد شوید:</b> بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است. تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید "
-    + "(«ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور). گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.";
+    + (run.data.flow === 2
+      ? "\n\n<b>لطفاً تأمین‌کنندهٔ بیشتری انتخاب کنید:</b> در پنل کارشناس، «🎯 فهرست دعوت»ِ همین اقلام را باز کنید و نفرهای دیگری تیک بزنید، یا از «جستجوی هوشمند» با «🎯 به فهرست دعوت» بیفزایید "
+        + "و «📨 دعوت از انتخاب‌های تازه» را بزنید — یا خطِ دستیِ ✋ با پیش‌فاکتور بیفزایید. گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد."
+      : "\n\n<b>لطفاً خودتان وارد شوید:</b> بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است. تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید "
+        + "(«ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور). گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.");
   await telegram(env).call("sendMessage", { chat_id: ex.telegram_chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
     reply_markup: { inline_keyboard: [[{ text: "📋 باز کردنِ پنل کارشناس", web_app: { url: expertAppUrl(env) } }]] } });
   return 1;
@@ -994,7 +1263,9 @@ async function closingContext(env, run) {
     return `- ${i.title} (${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}): سوابق ${i.hist && i.hist.ok ? `${faN(i.hist.n)} تأمین‌کننده` : "بی سابقه"} · جستجو ${i.smart && i.smart.n != null ? `${faN(i.smart.n)} تأمین‌کننده` : "—"}\n`
       + (fin.length ? fin.map((q) => `    پیشنهادِ تأییدنهایی‌شده: ${q.supplier_name} — ${faN(q.qty)} ${q.unit || ""} × ${money(q.price)} ریال · تحویل ${q.dtime || "—"} · تسویه ${q.pay || "—"} · فاکتور ${q.invoice || "—"} · ارزش افزوده ${q.vat || "—"}`).join("\n") : "    پیشنهادِ تأییدنهایی‌شده‌ای نیست");
   }).join("\n");
-  const cands = d.cands || [];
+  /* روالِ تازه: نامزدها همان تیک‌خورده‌های سپرده‌شدهٔ فهرستِ دعوت، با برداشتنِ پنج نفر اول و علتش (ورودیِ شرحِ فرایند) */
+  const prow = d.flow === 2 ? await pickRows(env, run) : null;
+  const cands = prow ? pickCands(prow) : d.cands || [];
   const ths = threads.map((t) => `- ${t.supplier} (${SOURCE_FA[t.source] || t.source}) — ${faN(t.replies)} پیام از تأمین‌کننده، ${faN(t.turns)} دورِ مذاکره، وضعیت ${t.state}`
     + `${bundles.filter((b) => b.thread_id === t.thread_id && b.comment).map((b) => `\n    ${b.state === "returned" ? "برگشت" : b.state === "rejected" ? "رد" : b.state}: ${b.comment}`).join("")}`
     + `${t.memo ? `\n    یادداشتِ مذاکره: ${t.memo}` : ""}`).join("\n");
@@ -1008,7 +1279,9 @@ async function closingContext(env, run) {
     ho ? `مهلتِ ${faN(ho.hours)} ساعتهٔ رسیدن به حد گذشت و ${fmtFa(ho.at)} کار برای استعلامِ بیشتر به کارشناسِ خرید هم واگذار شد.` : "",
     "</حداقل_استعلام>",
     "", "<اقلام_و_پیشنهادها>", items, "</اقلام_و_پیشنهادها>",
-    "", `<نامزدها>\n${faN(cands.length)} تأمین‌کنندهٔ نامزد از سوابق خرید و جستجوی هوشمند پیدا شد؛ ${faN(noPanel)} نامزد شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`,
+    "", prow
+      ? `<نامزدها>\nفهرستِ دعوتِ هر قلم را کارشناسِ خرید چید — از سوابق به ترتیبِ رتبهٔ نهایی و قاعدهٔ دعوت، پنج نفر اول از پیش تیک‌خورده؛ کارشناس هوشمند خودش تأمین‌کننده‌ای نیفزود و جستجو نکرد:\n${pickSummary(prow, (id) => (d.items.find((x) => x.id === id) || {}).title)}\n${faN(noPanel)} تیک‌خورده شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`
+      : `<نامزدها>\n${faN(cands.length)} تأمین‌کنندهٔ نامزد از سوابق خرید و جستجوی هوشمند پیدا شد؛ ${faN(noPanel)} نامزد شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`,
     "", "<دعوت‌ها_و_گفت‌وگوها>", ths || "دعوتی نرفت.", "</دعوت‌ها_و_گفت‌وگوها>",
     "", "شرح، معیارها، چالش‌ها و پیشنهاد هر قلم را بنویس.",
   ].join("\n");
@@ -1054,7 +1327,8 @@ async function runsOf(env, exId) {
 
 /** نامزدهای یک اجرا با شماره‌هایشان: ثبت‌شده‌ها (با تیکِ پنل) و پیداشده‌ها (پیشنهاد) */
 async function candidatesView(env, run) {
-  const d = run.data, cands = d.cands || [], man = manualOf(run);
+  /* روالِ تازه: تیک‌خورده‌های سپرده‌شدهٔ فهرستِ دعوتِ هر قلم — همان که کارشناس هوشمند دعوت می‌کند */
+  const d = run.data, cands = d.flow === 2 ? pickCands(await pickRows(env, run)) : d.cands || [], man = manualOf(run);
   const keys = cands.map((c) => c.key), ids = man.map((m) => m.sid);
   const cond = [keys.length ? `s.name_n IN (${keys.map(() => "?").join(",")})` : null, ids.length ? `s.id IN (${ids.map(() => "?").join(",")})` : null].filter(Boolean).join(" OR ");
   const rows = cond ? ((await env.DB.prepare(`SELECT s.id AS sid, s.name, s.name_n, p.id AS pid, p.phone, p.label, p.panel FROM sp_suppliers s LEFT JOIN sp_phones p ON p.supplier_id=s.id
@@ -1089,13 +1363,23 @@ async function runDetail(env, ex, id) {
   ]);
   const cover = await coverNow(env, run.assignment_id);
   const L = run.data.closing && run.data.closing.letter_id ? await env.DB.prepare("SELECT id, state, docx_key FROM letters WHERE id=?").bind(run.data.closing.letter_id).first() : null;
+  /* روالِ تازه: خلاصهٔ فهرستِ دعوتِ هر قلم — سپرده‌شده‌ها و برداشتنِ پنج نفر اول با علت */
+  const prow = run.data.flow === 2 ? await pickRows(env, run) : [];
+  const pickOfItem = (id) => {
+    const p = pickOf(prow.find((r) => r.id === id));
+    if (!p) return null;
+    const PL = p.list || [];
+    return { n: PL.length, go: PL.filter((e) => e.on && e.go).length, fresh: PL.filter((e) => e.on && !e.go).length, auto: p.by === "ai",
+      off: PL.filter((e) => e.top && !e.on).map((e) => ({ name: e.name, why: e.why || null })) };
+  };
   return {
-    run: { id: run.id, assignment_id: run.assignment_id, request_id: run.request_id, state: run.state, state_fa: STATE_FA[run.state] || run.state, error: run.error, md: !!run.md_key,
+    run: { id: run.id, assignment_id: run.assignment_id, request_id: run.request_id, state: run.state, state_fa: STATE_FA[run.state] || run.state, error: run.error, md: !!run.md_key, flow: run.data.flow === 2 ? 2 : 1,
       created_at: run.created_at, finished_at: run.finished_at, finish: !!run.finish_at, closing: run.data.closing ? { step: run.data.closing.step, why: run.data.closing.why, report: run.data.closing.report || null,
         commission_no: run.data.closing.commission_no || null, letter: L ? { id: L.id, state: L.state, file: !!L.docx_key } : null, short: run.data.closing.short || [] } : null,
       handover: run.data.handover || null, review: parse(r.review_json, null) },
     items: (run.data.items || []).map((i) => ({ id: i.id, title: i.title, qty: i.qty, unit: i.unit, struct: i.struct || null, hist: i.hist ? { ok: i.hist.ok, msg: i.hist.msg, n: i.hist.n } : null, smart: i.smart || null,
-      covered: (cover.find((c) => c.id === i.id) || {}).have || 0, need: (cover.find((c) => c.id === i.id) || {}).need || 1, why: (cover.find((c) => c.id === i.id) || {}).why || null })),
+      covered: (cover.find((c) => c.id === i.id) || {}).have || 0, need: (cover.find((c) => c.id === i.id) || {}).need || 1, why: (cover.find((c) => c.id === i.id) || {}).why || null,
+      pick: pickOfItem(i.id) })),
     candidates: await candidatesView(env, run),
     threads: (th.results || []).map((x) => ({ thread_id: x.thread_id, supplier: x.supplier, phone: x.phone, label: x.label, source: x.source, source_fa: SOURCE_FA[x.source] || x.source, state: x.state,
       turns: x.turns, replies: x.replies, bundles: x.bundles ? x.bundles.split(",") : [], memo: x.memo, fails: x.fails, retry_at: x.retry_at, last_ai_at: x.last_ai_at,

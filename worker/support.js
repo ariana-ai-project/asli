@@ -205,7 +205,7 @@ export async function supportExpert(env, id) {
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
   support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes"] },
 };
@@ -228,7 +228,10 @@ const EV_FA = {
   /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر در ارجاع، «انجام دستی»ِ تأییدشده و حالتِ اقلام */
   ai_tick: "تیکِ «🤖 هوشمند / ✋ دستی»ِ ارجاع (مدیر)", ai_manual: "«انجام دستی»ِ اقلام با تأییدِ مدیر",
   ai_modes: "🧭 حالتِ اقلامِ کارشناس هوشمند عوض شد",
+  /* فاز ۴ب گام ۲: «🚀 شروع»ِ هر قلم با «🎯 فهرست دعوت»ِ کارشناس، و دعوت از انتخاب‌های تازه */
+  ai_start: "🚀 شروعِ قلم با فهرستِ دعوتِ کارشناس — ساختار منجمد شد", ai_pick_more: "📨 دعوت از انتخاب‌های تازهٔ فهرستِ دعوت",
 };
+const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
 const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
 const SRC_FA = { panel: "پنل", telegram: "تلگرام", ai: "کارشناس هوشمند", supplier: "پنل تأمین‌کننده", proforma: "خواندن پیش‌فاکتور" };
@@ -250,6 +253,10 @@ function evText(r, p) {
   if (r.kind === "ai_handover" && Array.isArray(p.items)) bits.push(`بعد از ${faN(p.hours || 0)} ساعت: ${p.items.map((x) => `${short(x.title, 40)} ${faN(x.have)} از ${faN(x.need)}`).join("، ")}`);
   if (r.kind === "ai_delivery" && p.short) bits.push(`⚠️ ${faN(p.short)} قلم کمتر از حداقلِ استعلام`);
   if (r.kind === "ai_reject" && p.reason) bits.push(`دلیل: ${short(p.reason, 120)}`);
+  if (["ai_start", "ai_pick_more"].includes(r.kind)) {
+    bits.push(`${faN(p.n || 0)} تأمین‌کننده${p.mode && PICK_MODE_FA[p.mode] ? ` (${PICK_MODE_FA[p.mode]})` : ""}`);
+    if (Array.isArray(p.off_top) && p.off_top.length) bits.push(`برداشتنِ پنج نفر اول: ${p.off_top.map((x) => `${short(x.name, 40)}${x.why ? ` — ${short(x.why, 80)}` : ""}`).join("؛ ")}`);
+  }
   if (r.kind === "ai_rules") bits.push(`${faN((p.unit || 0) + (p.total || 0) + (p.qty || 0))} بازه · مهلت ${faN(p.wait || 0)} ساعت`);
   if (r.kind === "import") bits.push(p.closeCandidates ? `${faN(p.closeCandidates)} نامزدِ بستن` : "");
   if (r.kind === "delete") bits.push(p.all ? "همهٔ میز" : `${faN(p.requests || 0)} درخواست`);
