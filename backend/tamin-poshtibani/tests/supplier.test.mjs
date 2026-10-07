@@ -33,6 +33,8 @@ const EXPERT_CHAT = 555, EXPERT2_CHAT = 556;
 
 if (DB) {
   await ensureSchema(env);
+  /* این فایل مسیرِ پیشین را می‌آزماید: «خوانش هوشمند پیش‌فاکتور» روشن (پنل پشتیبانی). فاز ۴ — خاموش، پیش‌فرض — در phase4.test.mjs */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('aiSwitches',?,?)").run(JSON.stringify({ pfRead: true, by: "test" }), Date.now());
   const t = Date.now();
   DB.raw.exec("DELETE FROM experts");
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'کارشناس یک','آقای یک','9001',1,1,?,?), (2,'کارشناس دو','آقای دو','9002',1,1,?,?)")
@@ -205,7 +207,8 @@ test("مشخصات: لایهٔ قفل تغییر نمی‌کند، لایهٔ ت
   assert.equal(saved.data.line.state, "draft");
   const notReady = await call(`/sp/line/${l2.id}/ready`, { headers: H, body: { on: true } });
   assert.equal(notReady.status, 422);
-  assert.deepEqual(notReady.data.missing, ["قیمت واحد", "زمان تحویل", "شرایط تسویه", "نوع فاکتور", "ارزش افزوده"], "شرایطِ اجباریِ فاکتور هم لازم است");
+  assert.deepEqual(notReady.data.missing, ["قیمت واحد", "زمان تحویل", "شرایط تسویه", "نوع فاکتور", "ارزش افزوده", "اعتبار پیش‌فاکتور (روز)"],
+    "شرایطِ اجباریِ فاکتور هم لازم است — فاز ۴: اعتبار پیش‌فاکتور هم");
   /* کادر دومِ کارت‌ها: شرایطِ فاکتور برای همهٔ اقلامِ این استعلام */
   assert.equal((await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "فوری" } })).status, 422, "زمان تحویل: تاریخ شمسی یا شمار روز");
   assert.equal((await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { pay: "چک" } })).status, 422, "فقط گزینه‌های تب استعلامات");
@@ -341,7 +344,7 @@ test("تأمین‌کنندهٔ واقعی: کد از ۱ در پنل خودش؛ 
   const th = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data;
   const id = th.lines[0].id;
   assert.equal(th.lines[0].no, 1, "شمارشِ کد مالِ هر تأمین‌کننده است");
-  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "1405/08/15", pay: "۵۰٪ پیش‌پرداخت", invoice: "رسمی", vat: "دارد" } });
+  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "1405/08/15", pay: "۵۰٪ پیش‌پرداخت", invoice: "رسمی", vat: "دارد", valid_days: 7 } });
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { qty: 100, price: 11000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
@@ -442,7 +445,7 @@ test("بات خالص، سراسر: پر کردن گام‌به‌گام، «آ�
 
   let n = calls.length;
   await cb(SC, `si:${line.id}`);
-  assert.match(lastTo(n, SC).body.text, /کد ۲ · مهره M8[\s\S]*📦 <b>مقدار، واحد و قیمت<\/b>[\s\S]*قیمت واحد \(ریال، بدون ارزش افزوده\)[\s\S]*🧾 <b>شرایط فاکتور<\/b>[\s\S]*🔒 <b>نوع قلم و لایه‌های ویژگی<\/b>\n• مشخصات فنی: گرید 8\.8/, "سه بخش: مقدار و قیمت، شرایط، نوع قلم و لایه‌ها");
+  assert.match(lastTo(n, SC).body.text, /کد ۲ · مهره M8[\s\S]*📦 <b>مقدار، واحد و قیمت<\/b>[\s\S]*قیمت واحد \(ریال، بدون ارزش افزوده\)[\s\S]*🧾 <b>شرایط فاکتور<\/b>[\s\S]*🔒 <b>نوع قلم و لایه‌های ویژگی<\/b>[^\n]*\n• مشخصات فنی: گرید 8\.8/, "سه بخش: مقدار و قیمت، شرایط، نوع قلم و لایه‌ها");
   /* «🔢 مقدار» ← دکمهٔ «همان مقدار درخواست» ← بات خودش قیمت را می‌پرسد */
   n = calls.length;
   await cb(SC, `sv:${line.id}:q`);
@@ -562,7 +565,7 @@ test("مذاکره: برگشت با توضیح ← اصلاح و ارسال دو
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت سوم", phone: "09120000003", label: "همراه" } });
   const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
   const id = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data.lines[0].id;
-  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "20", pay: "نقدی", invoice: "رسمی", vat: "ندارد" } });
+  await call(`/sp/thread/${r.data.thread_id}/terms`, { headers: H, body: { dtime: "20", pay: "نقدی", invoice: "رسمی", vat: "ندارد", valid_days: 7 } });
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { price: 99000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const b1 = (await call(`/sp/thread/${r.data.thread_id}/submit`, { headers: H, body: {} })).data.bundle_id;
@@ -778,7 +781,7 @@ test("«📄 پیش‌فاکتور +» در پنل وب: مشخصات و پیش�
   const th = r.data.thread_id;
   const id = (await call(`/sp/thread/${th}`, { headers: H })).data.lines[0].id;
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { qty: 50, price: 2900 } });
-  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "5", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "5", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 } });
   assert.equal((await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } })).status, 200);
   /* شرطی بعد از «آماده» پاک شد: ارسال نمی‌شود و فایلِ انبارشده برداشته می‌شود */
   await call(`/sp/thread/${th}/terms`, { headers: H, body: { vat: "" } });
@@ -813,7 +816,7 @@ test("تأیید نهایی با فیلدِ اجباریِ خالی (کارشن�
   const H = { "X-SP-Session": (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session };
   const th = r.data.thread_id;
   const id = (await call(`/sp/thread/${th}`, { headers: H })).data.lines[0].id;
-  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "7", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
+  await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "7", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 } });
   await call(`/sp/line/${id}`, { method: "PUT", headers: H, body: { price: 12000 } });
   await call(`/sp/line/${id}/ready`, { headers: H, body: { on: true } });
   const bid = (await call(`/sp/thread/${th}/submit-pf?ids=${id}&filename=pf7.pdf`, { headers: { ...H, "Content-Type": "application/pdf" }, raw: "PDF" })).data.bundle_id;
@@ -887,6 +890,13 @@ test("بات تأمین‌کننده: شرایط فاکتور گام‌به‌گ
   await cb(`tv:${line}:i:0`);
   await cb(`tv:${line}:v:0`);
   assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد" });
+  /* فاز ۴: «اعتبار پیش‌فاکتور» هم اجباری است — بات همان را می‌پرسد */
+  assert.match(lastTo(n).body.text, /اعتبار پیش‌فاکتور<\/b> را به روز بنویسید/);
+  n = calls.length;
+  await txt("۰");
+  assert.match(lastTo(n).body.text, /دست‌کم ۱/, "اعتبارِ صفر روز نه");
+  n = calls.length;
+  await txt("۷");
   assert.match(lastTo(n).body.text, /همه‌چیز پر است/);
   await cb(`sr:${line}:1`);
   await cb(`ss:${th}`);

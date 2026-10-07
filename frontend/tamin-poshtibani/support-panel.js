@@ -73,6 +73,8 @@
     usd: null, usdErr: "", usdLoading: false,
     /* فاز ۲: وزن‌های رتبهٔ نهایی و «قاعدهٔ دعوت» (worker/ranking.js) */
     rank: null, rankDraft: null, rankErr: "", rankBusy: false,
+    /* فاز ۴: «🎛 کلیدها» — خوانش هوشمند پیش‌فاکتور (worker/switches.js، پیش‌فرض خاموش) */
+    sw: null, swErr: "", swBusy: false,
     /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
     chg: null, chgErr: "", chgLoading: false, chgF: { expert: "", rid: "", changed: "1", frozen: "" }, chgMore: false, chgNext: null,
   };
@@ -157,7 +159,7 @@
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
-    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); }
+    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); if (S.aiView === "sw" && (force || !S.sw)) loadSw(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
   }
@@ -577,10 +579,11 @@
       return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
         <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
     }
-    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
+    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"], ["sw", "🎛 کلیدها"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
     if (S.aiView === "rules") return sub + vRules();
     if (S.aiView === "usd") return sub + vUsd();
     if (S.aiView === "rank") return sub + vRank();
+    if (S.aiView === "sw") return sub + vSw();
     let h = sub + `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: هر ارجاعِ تازهٔ این کارشناس را کارشناس هوشمند پیش می‌برد — بررسی سوابق، جستجوی هوشمند، دعوت و مذاکره، جدول کمیسیون و نامه —
       و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
       («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
@@ -753,6 +756,40 @@
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-rksave ${S.rankBusy ? "disabled" : ""}>ذخیرهٔ وزن‌ها و قاعده</button>
         <button class="tp-btn" data-rkreset>برگرداندنِ تغییرها</button>
         <span class="dim">${S.rank.updated_at ? `آخرین تغییر: ${fmtShort(S.rank.updated_at)}` : "هنوز ذخیره نشده — پیش‌فرض: دفعات ۱، مقدار ۰، گشتاور ۱، ارزش ۱، رده ۱، ضریب گشتاور ۵؛ ردهٔ A عین قلم تا ۵ نفر، بعد نوع قلم"}</span></div>`;
+    return h;
+  }
+
+  /* ---------- «🎛 کلیدها» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴) ----------
+     خوانش هوشمند پیش‌فاکتور (worker/switches.js): خاموش (پیش‌فرض) — پیش‌فاکتور را سامانه از فیلدهای تأمین‌کننده می‌سازد و بسته بعد از
+     بررسی یکراست «تأیید نهایی» می‌شود؛ روشن — همان مسیرِ پیشین: تأیید مشخصات، بارگذاری پیش‌فاکتور، خوانش هوشمند و جدول تطابق. */
+  async function loadSw() {
+    S.swErr = ""; render();
+    try { S.sw = await api("/ai/switches"); } catch (e) { S.swErr = e.message; }
+    render();
+  }
+  function swToggle(on) {
+    const go = async () => {
+      S.swBusy = true; S.swErr = ""; render();
+      try { const r = await api("/ai/switches", { method: "PUT", body: { pfRead: on } }); S.sw = { ...S.sw, ...r }; } catch (e) { S.swErr = e.message; }
+      S.swBusy = false; render();
+    };
+    TP.modal(on ? "روشن کردنِ خوانش هوشمند پیش‌فاکتور" : "خاموش کردنِ خوانش هوشمند پیش‌فاکتور", on
+      ? "از این پس تأمین‌کننده بعد از «تأیید مشخصات» پیش‌فاکتورِ خودش را بارگذاری می‌کند، مدل آن را می‌خواند و جدول تطابق می‌سازد و «تأیید نهایی» با مقدارهای همان سند است (مسیرِ پیشین). بسته‌های فرستاده‌شده همان‌جا که هستند می‌مانند."
+      : "از این پس پیش‌فاکتور را سامانه از همان فیلدهای تأمین‌کننده می‌سازد (Word و پیش‌نمایش)، «تأیید» همان «تأیید نهایی» است و هیچ سندی خوانده نمی‌شود. بسته‌های در راه (تأییدشده یا با پیش‌فاکتور) هم مستقیم تأیید نهایی می‌شوند.",
+      go, on ? "روشن شود" : "خاموش شود", "انصراف");
+  }
+  function vSw() {
+    let h = `<div class="tp-note">کلیدهای سراسریِ مسیرِ خرید — برای همهٔ کارشناسان، کارشناس هوشمند، پنل تأمین‌کننده و بات‌ها، همان لحظه (تا یک دقیقه).</div>`;
+    if (S.swErr) h += `<div class="tp-note warn">${esc(S.swErr)}</div>`;
+    if (!S.sw) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    const on = !!S.sw.pfRead;
+    h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">📄 خوانش هوشمند پیش‌فاکتور
+        <span class="chip ${on ? "info" : "ok"}" style="margin-inline-start:8px">${on ? "روشن" : "خاموش (پیش‌فرض)"}</span></h3>
+      <p style="margin:0 0 8px;line-height:1.9">${esc((S.sw.fa && S.sw.fa.pfRead) || "")}</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="tp-btn ${on ? "" : "primary"}" data-swtoggle data-on="0" ${!on || S.swBusy ? "disabled" : ""}>⏹ خاموش — پیش‌فاکتورِ سامانه</button>
+        <button class="tp-btn ${on ? "primary" : ""}" data-swtoggle data-on="1" ${on || S.swBusy ? "disabled" : ""}>▶️ روشن — خوانش پیش‌فاکتورِ تأمین‌کننده</button>
+        <span class="dim">${S.sw.updated_at ? `آخرین تغییر: ${fmtShort(S.sw.updated_at)}` : "هنوز عوض نشده — پیش‌فرض خاموش"}</span></div></div>`;
     return h;
   }
 
@@ -1048,7 +1085,8 @@
     if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
     if (d.aitoggle) return aiToggle(Number(d.aitoggle), d.on === "1");
     /* فاز ۳: قواعدِ حداقلِ استعلام و تحویل‌ها */
-    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); if (S.aiView === "rank" && !S.rank) return loadRank(); return render(); }
+    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); if (S.aiView === "rank" && !S.rank) return loadRank(); if (S.aiView === "sw" && !S.sw) return loadSw(); return render(); }
+    if (d.swtoggle !== undefined) return swToggle(d.on === "1");
     if (d.rksave !== undefined) return saveRankUi();
     if (d.rkreset !== undefined) { S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } }; S.rankErr = ""; return render(); }
     if (d.usdfetch !== undefined) return usdFetch();
@@ -1070,7 +1108,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

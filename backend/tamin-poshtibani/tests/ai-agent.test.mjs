@@ -29,6 +29,8 @@ const EX = { "X-Expert-Code": "7001" };
 
 if (DB) {
   await ensureSchema(env);
+  /* این فایل مسیرِ پیشین را می‌آزماید: «خوانش هوشمند پیش‌فاکتور» روشن (پنل پشتیبانی). فاز ۴ — خاموش، پیش‌فرض — در phase4.test.mjs */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('aiSwitches',?,?)").run(JSON.stringify({ pfRead: true, by: "test" }), Date.now());
   const t = Date.now();
   DB.raw.exec("DELETE FROM experts");
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'test','test','7001',1,1,?,?), (2,'انسانی','انسانی','7002',1,1,NULL,?)")
@@ -174,7 +176,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   const H = { "X-SP-Session": sess };
   const th = (await call(`/sp/thread/${S.th}`, { headers: H })).data;
   const line = th.lines[0];
-  await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "1405/08/20", pay: "نقدی", invoice: "رسمی", vat: "دارد" } });
+  await call(`/sp/thread/${S.th}/terms`, { headers: H, body: { dtime: "1405/08/20", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 } });
   await call(`/sp/line/${line.id}`, { method: "PUT", headers: H, body: { qty: 200, price: 1250000 } });
   await call(`/sp/line/${line.id}/ready`, { headers: H, body: { on: true } });
   n = calls.length;

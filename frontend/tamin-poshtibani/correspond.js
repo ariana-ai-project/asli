@@ -9,6 +9,9 @@
    نهایی ← تب استعلامات. پیامِ هر بسته در گفت‌وگو کارتی است که کلیکش به همان بسته می‌رود.
    کارشناس «🤖 هوشمند» (تیکش در پنل پشتیبانی — فاز ۲): گفت‌وگوهای کارشناس هوشمند 🔒 و بسته‌اند؛ «🚨 پرسش از کارشناس» همان
    گفت‌وگو را تا پاسخِ کارشناس باز می‌کند (فقط پاسخ در گفت‌وگو — تصمیمِ بسته‌ها با کارشناس هوشمند) و با پاسخ دوباره می‌بندد.
+   فاز ۴ طرح «خرید هوشمند، کارشناس ناظر»: «خوانش هوشمند پیش‌فاکتور» (کلیدِ پنل پشتیبانی) پیش‌فرض خاموش است — بسته بعد از بررسی
+   یکراست «🏁 تأیید نهایی» می‌شود (مقدارهای خودِ تأمین‌کننده و پیش‌فاکتورِ سامانه، با «👁 پیش‌فاکتور»، چاپ به PDF و Word) یا با
+   توضیح برمی‌گردد؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است. عنوان و لایه‌های 🔓ِ پیشنهادیِ تأمین‌کننده کنارِ هر قلم.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -63,7 +66,7 @@
   const api = (path, opt) => TP.api(path, { ...(opt || {}), headers: { ...((opt && opt.headers) || {}), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
 
   const S = { me: null, reqs: [], unread: 0, waiting: 0, asks: 0, aid: +ss.get("sp.aid") || null, th: +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {} };
+    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {}, pfRead: false };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -107,6 +110,7 @@
   async function loadList() {
     const d = await api("/sp/x/threads");
     S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
+    S.pfRead = d.pf_read === true;
   }
   async function boot() {
     const ses = TP.session.get();
@@ -152,6 +156,7 @@
   async function loadThread() {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
+    if (typeof d.pf_read === "boolean") S.pfRead = d.pf_read;
     const f = findThread(S.th); if (f) { S.unread -= f.t.unread; f.g.unread -= f.t.unread; f.t.unread = 0; S.aid = f.g.assignment_id; }
     ss.set("sp.th.e", String(S.th)); ss.set("sp.aid", String(S.aid || ""));
     render();
@@ -211,7 +216,8 @@
     el.classList.add("sp-flash");
     setTimeout(() => el.classList.remove("sp-flash"), 1600);
   }
-  const waitingCount = () => S.d.bundles.filter((b) => ["pending", "proforma"].includes(b.state)).length;
+  /* خوانش هوشمند خاموش: بستهٔ «تأییدشده» (راهِ پیشین) هم تصمیمِ تأیید نهایی می‌خواهد */
+  const waitingCount = () => S.d.bundles.filter((b) => ["pending", "proforma", ...(S.pfRead ? [] : ["approved"])].includes(b.state)).length;
   /** اقلام و تصمیم‌ها: در چیدمانِ گوشی ستونِ وسط؛ در صفحهٔ باریک جای گفت‌وگو با دکمهٔ برگشت به آن */
   function convo() {
     const th = S.d.thread;
@@ -301,16 +307,28 @@
   /* --- اقلام و تصمیم‌ها --- */
   const fileLinks = (lineId) => S.d.files.filter((f) => f.line_id === lineId)
     .map((f) => `<button class="tp-btn xs" data-file="${f.id}" title="${esc(f.note || "")}">📎 ${esc(f.label)}</button>`).join(" ");
+  /** آنچه تأمین‌کننده روی 🔓ها پیشنهاد داده (فاز ۴)، لایه‌های افزوده با واحد، مقدارِ کمتر و توضیحِ زیرِ قلم */
+  const extraTxt = (x) => `${esc(x.k)}: ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}`;
+  function lineMore(l) {
+    const out = [];
+    if (l.s_title) out.push(`🔓 عنوانِ پیشنهادی: <b>${esc(l.s_title)}</b>`);
+    for (const x of l.layers || []) if (x.s) out.push(`🔓 ${esc(x.k)}: <b>${esc(x.s)}</b> (درخواست: ${esc(x.v)})`);
+    if (l.extra.length) out.push(`➕ ${l.extra.map(extraTxt).join("، ")}`);
+    if (l.locks && !l.locks.legacy && l.req_qty != null && l.qty != null && Number(l.qty) < Number(l.req_qty)) out.push(`🔓 مقدار کمتر از درخواست (${qty(l.req_qty)} ${esc(l.req_unit || "")})`);
+    if (l.note) out.push(`📝 ${esc(l.note)}`);
+    return out.length ? `<div class="sp-muted">${out.join("<br>")}</div>` : "";
+  }
   function bundleCard(b, byId) {
     const ls = b.line_ids.map((id) => byId.get(id)).filter(Boolean);
     const sum = ls.reduce((s, l) => s + (l.total || 0), 0);
     let h = `<div class="sp-bundle" data-b="${b.id}"><header><b>بستهٔ ${fa(b.id)}</b><span class="sp-st ${b.state}">${esc(b.state_fa)}</span><span class="sp-muted">${when(b.created_at)}</span></header>
       <div class="sp-scroll"><table class="sp-table"><thead><tr><th class="t">قلم</th><th>مقدار</th><th>قیمت واحد (ریال)</th><th>قیمت کل (ریال)</th></tr></thead><tbody>
-      ${ls.map((l) => `<tr><td class="t">${code(l)}${esc(l.title)}${l.extra.length ? `<div class="sp-muted">➕ ${l.extra.map((x) => `${esc(x.k)}: ${esc(x.v)}`).join("، ")}</div>` : ""}${fileLinks(l.id) ? `<div>${fileLinks(l.id)}</div>` : ""}</td>
-        <td>${qty(l.qty)} ${esc(l.unit || "")}</td><td>${money(l.price)}</td><td>${money(l.total)}</td></tr>`).join("")}
+      ${ls.map((l) => `<tr><td class="t">${code(l)}${esc(l.title)}${lineMore(l)}${fileLinks(l.id) ? `<div>${fileLinks(l.id)}</div>` : ""}</td>
+        <td>${qty(l.qty)} ${esc(l.unit || "")}</td><td><b>${money(l.price)}</b></td><td><b>${money(l.total)}</b></td></tr>`).join("")}
       </tbody><tfoot><tr><td class="t">جمع</td><td></td><td></td><td>${money(sum)}</td></tr></tfoot></table></div>`;
     if (termsLine(b.terms)) h += `<div class="sp-muted" style="margin-top:4px">🧾 شرایط اعلامی: ${esc(termsLine(b.terms))}</div>`;
     if (b.comment) h += `<div class="sp-comment">${esc(b.comment)}</div>`;
+    if (!S.pfRead) return h + genActs(b) + `</div>`;
     if (b.pf) h += `<div class="sp-row" style="margin-top:6px">📄 پیش‌فاکتور: <b>${esc(b.pf.name || "")}</b><button class="tp-btn xs" data-pf="${b.id}">👁 دیدن</button></div>`;
     if (b.ai && b.state === "proforma") h += matchTable(b);
     if (b.state === "pending") {
@@ -327,6 +345,20 @@
     }
     return h + `</div>`;
   }
+  /**
+   * خوانش هوشمند خاموش (فاز ۴، تصمیم ۱۳): بسته از هر وضعیتِ باز یکراست «🏁 تأیید نهایی» می‌شود — با مقدارهای خودِ تأمین‌کننده و
+   * پیش‌فاکتورِ سامانه — یا با توضیح برمی‌گردد یا رد می‌شود. پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است.
+   */
+  function genActs(b) {
+    const open = ["pending", "approved", "proforma"].includes(b.state);
+    let h = `<div class="sp-row" style="margin-top:6px"><button class="tp-btn xs" data-gen="${b.id}">👁 پیش‌فاکتور</button><button class="tp-btn xs" data-gen-word="${b.id}">⬇️ Word</button>
+      ${b.pf ? `<span class="sp-muted">📎 پیوستِ تأمین‌کننده: ${esc(b.pf.name || "")}</span><button class="tp-btn xs" data-pf="${b.id}">دیدنِ پیوست</button>` : ""}</div>`;
+    if (!open) return h;
+    h += b.ready ? `<div class="sp-ok">✅ همهٔ فیلدهای اجباری و شرایط پر است — «🏁 تأیید نهایی» پیشنهاد را با همین مقدارها به تب استعلامات می‌برد و از تأمین‌کننده تشکر می‌کند.</div>`
+      : `<div class="sp-err">⛔ هنوز کامل نیست — برگردانید تا تأمین‌کننده پر کند:\n${(b.problems || []).map((p) => `• ${esc(p)}`).join("\n")}</div>`;
+    return h + `<div class="sp-actions"><button class="tp-btn ${b.ready ? "primary" : ""}" data-act="final" ${b.ready ? "" : "disabled"}>🏁 تأیید نهایی</button>
+      <button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>`;
+  }
   function countOpen(b) {
     let n = 0;
     for (const ln of b.ai.lines || []) for (const row of ln.rows || []) if (acceptable(row) && !(b.accept || {})[`${ln.line_id}|${row.key}`]) n++;
@@ -340,11 +372,16 @@
     let h = open.length ? `<h3 class="sp-h3">منتظر تصمیم شما</h3>${open.map((b) => bundleCard(b, byId)).join("")}` : `<div class="tp-note">بسته‌ای منتظر تصمیم نیست.</div>`;
     h += `<h3 class="sp-h3">همهٔ اقلام این گفت‌وگو</h3>`;
     if (termsLine(d.thread.terms)) h += `<div class="sp-muted" style="margin-bottom:8px">🧾 شرایطِ فاکتورِ اعلامیِ تأمین‌کننده: ${esc(termsLine(d.thread.terms))}</div>`;
+    /* 🔒 ثابت · 🔓 قابل تغییر (فاز ۴): پیشنهادِ تأمین‌کننده روی 🔓ها کنارِ مقدارِ درخواست */
+    const chip = (x) => (x.lock === false ? `<span class="sp-chip ${x.s ? "add" : "lock"}">🔓 <i>${esc(x.k)}:</i> ${x.s ? `<b>${esc(x.s)}</b> <span class="sp-muted">(درخواست: ${esc(x.v)})</span>` : esc(x.v)}</span>`
+      : `<span class="sp-chip lock">🔒 <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`);
+    const qLock = (l) => (!l.locks || l.locks.legacy ? "" : l.locks.qty ? " 🔒" : " 🔓");
     h += d.lines.slice().sort((a, b) => b.id - a.id).map((l) => `<div class="sp-card" data-no="${l.no || ""}"><header><h3>${code(l)}${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
-      <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map((x) => `<span class="sp-chip lock">🔒 <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("")}${l.extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`).join("")}</div>
-      <div class="sp-row" style="margin-top:8px">${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال = <b>${money(l.total)}</b> ریال <span class="sp-muted">(خواسته: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
-      ${l.note ? `<div class="sp-muted">توضیح تأمین‌کننده: ${esc(l.note)}</div>` : ""}${fileLinks(l.id) ? `<div style="margin-top:6px">${fileLinks(l.id)}</div>` : ""}
-      ${l.quote_id ? `<div class="sp-ok">✓ با مقدارهای پیش‌فاکتور در تب استعلامات است.</div>` : ""}</div>`).join("");
+      ${l.s_title ? `<div class="sp-muted" style="margin-bottom:6px">🔓 عنوانِ پیشنهادیِ تأمین‌کننده: <b>${esc(l.s_title)}</b></div>` : ""}
+      <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map(chip).join("")}${l.extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`).join("")}</div>
+      <div class="sp-row" style="margin-top:8px">${qty(l.qty)} ${esc(l.unit || "")} × <b>${money(l.price)}</b> ریال = <b>${money(l.total)}</b> ریال <span class="sp-muted">(خواسته${qLock(l)}: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
+      ${l.note ? `<div class="sp-muted">📝 توضیح تأمین‌کننده: ${esc(l.note)}</div>` : ""}${fileLinks(l.id) ? `<div style="margin-top:6px">${fileLinks(l.id)}</div>` : ""}
+      ${l.quote_id ? `<div class="sp-ok">✓ ${S.pfRead ? "با مقدارهای پیش‌فاکتور" : "با مقدارهای تأمین‌کننده و پیش‌فاکتورِ سامانه"} در تب استعلامات است.</div>` : ""}</div>`).join("");
     if (done.length) h += `<h3 class="sp-h3">تصمیم‌های قبلی</h3>${done.map((b) => bundleCard(b, byId)).join("")}`;
     return h;
   }
@@ -360,6 +397,8 @@
     const snd = $("[data-send]"); if (snd) snd.onclick = () => sendDialog().catch((e) => say(e.message));
     $$("[data-file]").forEach((b) => { b.onclick = () => openUrl(`/sp/file/${b.dataset.file}/url`); });
     $$("[data-pf]").forEach((b) => { b.onclick = () => openUrl(`/sp/bundle/${b.dataset.pf}/pf-url`); });
+    $$("[data-gen]").forEach((b) => { b.onclick = () => pfDialog(+b.dataset.gen); });
+    $$("[data-gen-word]").forEach((b) => { b.onclick = () => downloadDocx(+b.dataset.genWord).catch((e) => say(e.message)); });
     $$("[data-act]").forEach((b) => { b.onclick = () => act(+b.closest("[data-b]").dataset.b, b.dataset.act); });
     $$("[data-acc]").forEach((c) => {
       c.onchange = async () => {
@@ -440,6 +479,16 @@
       return dlg("تیکِ همهٔ غیرسبزها", "<p>برای همهٔ ردیف‌های ⚠️ ⚪ ❌ <b>پیش‌فاکتور به‌جای درخواست ملاک</b> شود؟ مقدار همیشه از سند است؛ آنچه سند نگفته خالی می‌ماند.</p><div class=\"sp-err\" data-err></div>",
         [{ label: "بله، پیش‌فاکتور ملاک", cls: "primary", fn: async () => { await api(`/sp/x/bundle/${bid}/accept`, { body: { all: true } }); await loadThread(); } }, { label: "انصراف" }]);
     }
+    if (action === "final" && !S.pfRead) {
+      /* فاز ۴: بی خوانش سند — مقدارهای خودِ تأمین‌کننده به تب استعلامات، Word تولیدی به پیش‌فاکتورها و پیامِ تشکر */
+      return dlg("🏁 تأیید نهایی", `<p>پیشنهادِ این بسته با همان مقدارهایی که تأمین‌کننده ثبت کرده به تب استعلامات می‌رود، پیش‌فاکتورِ Word را سامانه می‌سازد و برای تأمین‌کننده پیامِ تأیید و تشکر می‌رود.</p>
+        <textarea class="tp-input tp-textarea" data-c placeholder="توضیح برای تأمین‌کننده (اختیاری)" style="min-height:60px"></textarea><div class="sp-err" data-err></div>`,
+      [{ label: "🏁 تأیید نهایی", cls: "primary", fn: async (d) => {
+        const r = await api(`/sp/x/bundle/${bid}/decide`, { body: { action: "final", comment: $("[data-c]", d).value } });
+        await afterDecide();
+        say(`تأیید نهایی شد و ${fa(r.quote_ids.length)} قلم با مقدارهای تأمین‌کننده به تب استعلامات همین درخواست رفت (ثبت موقت و تیک «تأیید نهایی»)${r.gen ? "؛ پیش‌فاکتورِ Word سامانه هم در پیش‌فاکتورهای همان تب است" : "؛ پیش‌فاکتوری که خودتان برای این تأمین‌کننده گذاشته‌اید سرِ جایش ماند (یا انبار فایل وصل نیست)"}.`, "🏁 تأیید نهایی");
+      } }, { label: "انصراف" }]);
+    }
     if (action === "final") {
       const b = S.d.bundles.find((x) => x.id === bid) || {};
       const go = async () => {
@@ -470,6 +519,23 @@
     } catch (e) { if (w) w.close(); say(e.message); }
   }
 
+  /* --- پیش‌فاکتورِ سامانه (فاز ۴؛ worker/pfdoc.js): دیدن، چاپ به PDF و Word --- */
+  async function pfDialog(bid) {
+    let r;
+    try { r = await api(`/sp/bundle/${bid}/proforma`); } catch (e) { return say(e.message); }
+    const d = dlg(`📄 ${esc(r.name)}`, `<style>${r.css}</style><div class="sp-pfview">${r.html}</div><div class="sp-err" data-err></div>`, [
+      { label: "🖨 چاپ یا ذخیرهٔ PDF", fn: () => { PH.printDoc(r.name, r.css, r.html, () => say("چاپ در این مرورگر باز نشد؛ فایل Word را بگیرید.")); return false; } },
+      { label: "⬇️ Word", fn: async () => { await downloadDocx(bid, r.name); return false; } },
+      { label: "بستن", cls: "primary" }]);
+    d.classList.add("sp-pfmodal");
+  }
+  async function downloadDocx(bid, name) {
+    const base = (window.TAMIN_POSHTIBANI_CONFIG || {}).apiBase || "/tamin-poshtibani/api";
+    const res = await fetch(`${base}/sp/bundle/${bid}/proforma?format=docx`, { headers: { ...TP.authHeaders(), ...(inTg ? { "X-TG-Init": tgData } : {}) } });
+    if (!res.ok) { let m = `خطای سرور ${res.status}`; try { m = (await res.json()).error || m; } catch (_) { /* بی بدنه */ } throw new Error(m); }
+    PH.saveBlob(await res.blob(), `${name || `پیش‌فاکتور — بستهٔ ${bid}`}.docx`);
+  }
+
   async function connectTg() {
     if (!S.bot) return say("بات مکاتبات هنوز روی سامانه فعال نشده است.");
     const w = window.open("", "_blank");
@@ -491,7 +557,7 @@
       <div class="sp-upl" data-real style="opacity:.5"><input class="tp-input" data-n placeholder="نام تأمین‌کننده"><input class="tp-input" data-p placeholder="شماره (09…)" inputmode="tel">
         <input class="tp-input full" data-l placeholder="برچسب شماره (همراه، دفتر، فروش…)"></div>
       <b style="display:block;margin-top:10px">متن پیام (اولِ پیامک و اولین پیامِ گفت‌وگو)</b>
-      <textarea class="tp-input tp-textarea" data-t style="min-height:90px">سلام، از شرکت تونل سد آریانا.\nبرای اقلامی که در پنل می‌بینید استعلام قیمت داریم؛ لطفاً مشخصات، قیمت و پیش‌فاکتور را از لینک زیر ثبت کنید.\n${esc((S.me && (S.me.label || S.me.name)) || "")}</textarea>
+      <textarea class="tp-input tp-textarea" data-t style="min-height:90px">سلام، از شرکت تونل سد آریانا.\nبرای اقلامی که در پنل می‌بینید استعلام قیمت داریم؛ ${S.pfRead ? "لطفاً مشخصات، قیمت و پیش‌فاکتور را از لینک زیر ثبت کنید." : "لطفاً قیمت و شرایط را از لینک زیر ثبت کنید؛ پیش‌فاکتور را خودِ سامانه از همان‌ها می‌سازد."}\n${esc((S.me && (S.me.label || S.me.name)) || "")}</textarea>
       <div class="sp-err" data-err></div>`;
     const d = dlg("📨 ارسال استعلام", body, [{ label: "ارسال", cls: "primary", fn: async (dd) => {
       const ids = $$("[data-it]", dd).filter((x) => x.checked).map((x) => +x.dataset.it);

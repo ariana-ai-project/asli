@@ -56,12 +56,14 @@
     const note = /💬 ([\s\S]+)$/.exec(m.body || "");
     const tl = (o.termsLine && meta.terms && o.termsLine(meta.terms)) || "";
     const blocks = items.map((x) => {
-      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}`).join(" · ");
+      const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}${y.u ? ` ${esc(y.u)}` : ""}`).join(" · ");
       const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
       return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}" role="button" tabindex="0"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
         ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
     }).join("");
-    const foot = [meta.pf && meta.ev === "submit" ? `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»` : "", meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "",
+    /* gen (فاز ۴): پیش‌فاکتور را سامانه ساخته؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است */
+    const foot = [meta.pf && meta.ev === "submit" ? (meta.gen ? `📎 پیوست: پیش‌فاکتورِ خودِ تأمین‌کننده «${esc(meta.pf)}»` : `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»`) : "",
+      meta.gen && meta.ev === "submit" ? "📄 پیش‌فاکتورِ سامانه همراهش است" : "", meta.sum != null && meta.ev === "submit" ? `جمع: <b>${money(meta.sum)}</b> ریال` : "",
       tl ? `🧾 ${esc(tl)}` : ""].filter(Boolean).join("<br>");
     const acts = o.actions ? o.actions(m) : "";
     return `<div class="ph-card ${o.mine ? "me" : "them"}" ${goto ? `${goto} role="button" tabindex="0"` : ""} title="${hm(m.at)}${goto ? ` — ${o.goLabel || "رفتن به همین بسته"}` : ""}">
@@ -260,5 +262,27 @@
     });
   }
 
-  window.PH = { fa, esc, money, qty, hm, stamp, dayKey, durTxt, I, EV_HEAD, evItems, evCard, feed, screen, frame, grow, bindComposer, bindVoices, clock };
+  /* --- پیش‌فاکتورِ سامانه (فاز ۴ طرح «خرید هوشمند»؛ worker/pfdoc.js) در هر دو صفحه: چاپ در iframeِ جدا — «ذخیره به PDF» هم
+     از همان پنجرهٔ چاپ مرورگر — و ذخیرهٔ فایل Word --- */
+  function printDoc(title, css, html, onFail) {
+    const f = document.createElement("iframe");
+    f.style.cssText = "position:fixed;width:0;height:0;border:0;left:-9999px;top:0";
+    document.body.appendChild(f);
+    const w = f.contentWindow, doc = w.document;
+    doc.open();
+    doc.write(`<!doctype html><html lang="fa" dir="rtl"><head><meta charset="utf-8"><title>${esc(title)}</title>`
+      + `<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;700&display=swap" rel="stylesheet">`
+      + `<style>@page{size:A4;margin:12mm}body{margin:0;background:#fff}${css}</style></head><body>${html}</body></html>`);
+    doc.close();
+    /* فرصتِ بارِ قلم پیش از پنجرهٔ چاپ */
+    setTimeout(() => { try { w.focus(); w.print(); } catch (e) { if (onFail) onFail(e); } setTimeout(() => f.remove(), 60000); }, 700);
+  }
+  function saveBlob(blob, name) {
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click();
+    setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
+  }
+
+  window.PH = { fa, esc, money, qty, hm, stamp, dayKey, durTxt, I, EV_HEAD, evItems, evCard, feed, screen, frame, grow, bindComposer, bindVoices, clock, printDoc, saveBlob };
 })();

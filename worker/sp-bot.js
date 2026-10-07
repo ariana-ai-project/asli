@@ -24,6 +24,8 @@ import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
 import * as V from "./sp-voicemode.js";
+import { pfReadOn } from "./switches.js";
+import { renderProformaDoc } from "./pfdoc.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -325,28 +327,47 @@ async function bundleCardSend(env, row, ex, bid, mid, head) {
   if (!b) return { ok: true };
   const th = await C.threadFor(env, b.thread_id, { expert: ex });
   const L = (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
-  const c = P.bundleCard(th, b, L);
+  const c = P.bundleCard(th, b, L, { pfRead: await pfReadOn(env) });
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }
 
 async function decideAndShow(env, row, ex, bid, action, opts, mid) {
+  const pfRead = await pfReadOn(env);
   try {
     const r = await C.decide(env, ex, bid, action, opts);
     await P.pushMsgs(env, r.thread, r.msgs);
-    const extra = action === "final" ? `\n\n✅ ${fa(r.quote_ids.length)} قلم با مقدارهای پیش‌فاکتور به تب استعلامات رفت (ثبت موقت و تیک «تأیید نهایی»).` : "";
+    const extra = r.state === "final" ? (pfRead ? `\n\n✅ ${fa(r.quote_ids.length)} قلم با مقدارهای پیش‌فاکتور به تب استعلامات رفت (ثبت موقت و تیک «تأیید نهایی»).`
+      : `\n\n✅ ${fa(r.quote_ids.length)} قلم با مقدارهای خودِ تأمین‌کننده به تب استعلامات رفت (ثبت موقت و تیک «تأیید نهایی») و پیش‌فاکتورِ Word سامانه هم برای همین تأمین‌کننده ثبت شد.`) : "";
     return bundleCardSend(env, row, ex, bid, mid, `<i>${esc(r.msgs[0] ? r.msgs[0].body : "")}</i>${extra}`);
   } catch (e) {
-    const kb = action === "final"
-      ? [[{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${bid}:rt` }], [{ text: "📦 کارت بسته و جدول تطابق", callback_data: `xd:${bid}:card` }]]
+    const fin = action === "final" || (action === "approve" && !pfRead);
+    const kb = fin
+      ? [[{ text: "↩️ برگرداندن با توضیح", callback_data: `xd:${bid}:rt` }], [{ text: pfRead ? "📦 کارت بسته و جدول تطابق" : "📦 کارت بسته", callback_data: `xd:${bid}:card` }]]
       : null;
-    await P.send(env, row, `⚠️ ${esc(e.message)}${action === "final" ? "\n\n<i>اگر چیزی در پیش‌فاکتور نیامده، بسته را با توضیح برگردانید تا تأمین‌کننده پیش‌فاکتور کامل بفرستد. مغایرت‌ها را می‌شود پذیرفت (پیش‌فاکتور ملاک).</i>" : ""}`, kb);
+    const hint = !fin ? "" : pfRead ? "\n\n<i>اگر چیزی در پیش‌فاکتور نیامده، بسته را با توضیح برگردانید تا تأمین‌کننده پیش‌فاکتور کامل بفرستد. مغایرت‌ها را می‌شود پذیرفت (پیش‌فاکتور ملاک).</i>"
+      : "\n\n<i>اگر چیزی ناقص است، بسته را با توضیح برگردانید تا تأمین‌کننده کاملش کند.</i>";
+    await P.send(env, row, `⚠️ ${esc(e.message)}${hint}`, kb);
     return { ok: true };
   }
 }
 
+/** Word پیش‌فاکتورِ تولیدیِ یک بسته در همین گفت‌وگوی تلگرام (کارشناس یا تأمین‌کننده) */
+async function sendProformaDoc(env, row, who, bid) {
+  const { b, th, lines, terms } = await C.bundleProforma(env, who, bid);
+  const blob = await renderProformaDoc(C.proformaInput(env, th, lines, terms, { no: b.id, at: b.created_at }));
+  const r = await P.spApi(env).sendDocument(row.chat, `پیش‌فاکتور ${th.supplier_name} — درخواست ${th.request_id}.docx`, blob,
+    `📄 <b>پیش‌فاکتورِ بستهٔ ${fa(b.id)}</b> — ساختهٔ سامانه از همان فیلدهایی که تأمین‌کننده ثبت کرده.`);
+  P.track(row, r && r.message_id);
+}
+
 async function bundleAction(env, row, ex, bid, act, mid, ack) {
   if (act === "ok") { await ack(); return decideAndShow(env, row, ex, bid, "approve", {}, mid); }
+  if (act === "pg") {
+    await ack("در حال ساختن پیش‌فاکتور…");
+    try { await sendProformaDoc(env, row, { expert: ex }, bid); } catch (e) { await P.send(env, row, `⚠️ پیش‌فاکتور ساخته نشد: ${esc(e.message)}`); }
+    return { ok: true };
+  }
   if (act === "rt" || act === "rj") {
     await ack();
     P.setFlow(row, { step: "comment", bundle: bid, action: act === "rt" ? "return" : "reject" });
@@ -366,6 +387,10 @@ async function bundleAction(env, row, ex, bid, act, mid, ack) {
     if (!store || !store.signedUrl) { await ack("انبار فایل وصل نیست.", true); return { ok: true }; }
     await ack();
     await P.send(env, row, `📄 پیش‌فاکتور «${esc(b.pf_name || "")}» — لینک ۱۵ دقیقه معتبر است.`, [[{ text: "📄 باز کردن پیش‌فاکتور", url: await store.signedUrl(b.pf_key, 900) }]]);
+    return { ok: true };
+  }
+  if ((act === "ai" || act === "ai2") && !(await pfReadOn(env))) {
+    await ack("خوانش هوشمند پیش‌فاکتور در پنل پشتیبانی خاموش است؛ تأیید نهایی با مقدارهای خودِ تأمین‌کننده است.", true);
     return { ok: true };
   }
   if (act === "ai") {
@@ -441,15 +466,34 @@ async function storeTgFile(env, aid, file) {
 
 const VAL_PROMPT = {
   q: "🔢 مقدار را بنویسید (فقط عدد):", u: "📏 واحد را بنویسید (مثلاً عدد، کیلوگرم، متر):", p: "💰 قیمت واحد را به <b>ریال و بدون ارزش افزوده</b> بنویسید:",
-  n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):", l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»",
+  n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):",
+  l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه». لایهٔ کمّی را با عدد و واحد بنویسید، مثلاً «وزن: ۵ کیلوگرم».",
+  t: "🔓 عنوانِ پیشنهادیِ خودتان را بنویسید (یا «-» برای همان عنوانِ درخواست):",
 };
-/** پرسیدنِ یک مقدار؛ برای «مقدار» دکمهٔ «همان مقدارِ درخواست» هم هست */
-async function askValue(env, row, l, f, head) {
-  P.setFlow(row, { step: "val", line: l.id, f });
+/** «وزن: ۵ کیلوگرم» ← لایهٔ کمّی با واحد؛ «برند: 3M» و «اندازه: M8» کیفی می‌مانند (عدد باید با فاصله از واحد جدا باشد) */
+export function extraOf(name, value) {
+  const k = T(name), v = T(value);
+  const m = /^([0-9۰-۹٠-٩][0-9۰-۹٠-٩.,٫٬]*)(?:\s+(\S.{0,19}))?$/.exec(v);
+  if (m && Number.isFinite(C.toNum(m[1]))) return { k, v: String(C.toNum(m[1])), t: "num", ...(m[2] ? { u: T(m[2]) } : {}) };
+  return { k, v };
+}
+/** پرسیدنِ یک مقدار؛ برای «مقدار» دکمهٔ «همان مقدارِ درخواست» هم هست. f «y»: لایهٔ 🔓ِ شمارهٔ yi */
+async function askValue(env, row, l, f, head, yi) {
+  P.setFlow(row, { step: "val", line: l.id, f, ...(f === "y" ? { i: yi } : {}) });
   const kb = [];
   if (f === "q" && l.req_qty != null) kb.push([{ text: `✔️ همان مقدار درخواست (${P.qty(l.req_qty)} ${l.req_unit || ""})`, callback_data: `sv:${l.id}:qd` }]);
   kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
-  await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${VAL_PROMPT[f]}`, kb);
+  let prompt = VAL_PROMPT[f];
+  if (f === "q") {
+    const lk = C.locksOfLine(l);
+    if (!lk.legacy && !lk.qty && l.req_qty != null) prompt = `🔢 مقدار را بنویسید (فقط عدد) — 🔓 کمتر هم می‌شود، حداکثر ${P.qty(l.req_qty)} ${esc(l.req_unit || "")}:`;
+  }
+  if (f === "y") {
+    const x = JSON.parse(l.layers_json || "[]")[yi];
+    if (!x) return lineCardSend(env, row, { supplier_id: l.supplier_id }, l.id, null, "این لایه دیگر نیست.");
+    prompt = `🔓 <b>${esc(x.k)}</b> — مقدارِ پیشنهادیِ خودتان را بنویسید (یا «-» برای همان مقدارِ درخواست: ${esc(x.v)}):`;
+  }
+  await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${prompt}`, kb);
   return { ok: true };
 }
 /* شرایطِ فاکتور (برای همهٔ اقلامِ استعلام): فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
@@ -480,7 +524,7 @@ async function afterSave(env, row, sup, lineId, head) {
   if (l && C.LINE_EDITABLE.includes(l.state) && l.state !== "ready") {
     if (miss.includes("مقدار")) return askValue(env, row, l, "q", head);
     if (miss.includes("قیمت واحد")) return askValue(env, row, l, "p", head);
-    for (const k of ["d", "p", "i", "v"]) if (!String(tm[P.TERM_KEY[k]] ?? "").trim()) return askTerm(env, row, l, k, head);
+    for (const k of ["d", "p", "i", "v", "x"]) if (!String(tm[P.TERM_KEY[k]] ?? "").trim()) return askTerm(env, row, l, k, head);
   }
   const all = [...miss, ...C.termsMissing(tm)];
   return lineCardSend(env, row, sup, lineId, null, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
@@ -529,7 +573,9 @@ async function supplierMessage(env, row, msg, text) {
       P.setFlow(row, null);
       await P.pushMsgs(env, r.thread, r.msgs);
       aiKick(env, row._ctx, r.thread.id);
-      return itemsCardSend(env, row, sup, th.id, null, `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
+      const head = r.state === "proforma" ? `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}).`
+        : `✅ پیشنهاد با پیش‌فاکتورِ سامانه برای کارشناس فرستاده شد و پیش‌فاکتورِ خودتان هم پیوستش شد (بستهٔ ${fa(r.bundle_id)}).`;
+      return itemsCardSend(env, row, sup, th.id, null, `${head} نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
   if (f && f.step === "term" && text) {
@@ -574,13 +620,19 @@ async function supplierMessage(env, row, msg, text) {
   }
   if (f && f.step === "val" && text) {
     try {
-      const body = f.f === "q" ? { qty: text } : f.f === "p" ? { price: text } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: text === "-" ? "" : text } : null;
+      const body = f.f === "q" ? { qty: text } : f.f === "p" ? { price: text } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: text === "-" ? "" : text }
+        : f.f === "t" ? { title: text === "-" ? "" : text } : null;
       if (f.f === "l") {
         const m = /^(.{1,40}?)\s*[:：=]\s*(.+)$/.exec(text);
-        if (!m) { await P.send(env, row, "به این شکل بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه»"); return { ok: true }; }
+        if (!m) { await P.send(env, row, "به این شکل بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه» یا «وزن: ۵ کیلوگرم»"); return { ok: true }; }
         const l = await env.DB.prepare("SELECT extra_json FROM sp_lines WHERE id=?").bind(f.line).first();
         const extra = JSON.parse((l && l.extra_json) || "[]").filter((x) => x.k !== m[1].trim());
-        await C.lineSave(env, sup, f.line, { extra: [...extra, { k: m[1], v: m[2] }] });
+        await C.lineSave(env, sup, f.line, { extra: [...extra, extraOf(m[1], m[2])] });
+      } else if (f.f === "y") {
+        const l = await env.DB.prepare("SELECT layers_json FROM sp_lines WHERE id=?").bind(f.line).first();
+        const x = JSON.parse((l && l.layers_json) || "[]")[f.i];
+        if (!x) throw new Error("این لایه دیگر نیست.");
+        await C.lineSave(env, sup, f.line, { layers: { [x.k]: text === "-" ? "" : text } });
       } else if (body) await C.lineSave(env, sup, f.line, body);
       P.setFlow(row, null);
       return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
@@ -744,6 +796,24 @@ async function onCallback(env, cq, ctx) {
       await ack();
       return await askValue(env, row, l, f);
     }
+    /* sy:<خط>:<شمارهٔ لایه> — مقدارِ پیشنهادیِ تأمین‌کننده برای لایهٔ 🔓 (فاز ۴) */
+    if (a === "sy") {
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
+      await ack();
+      return await askValue(env, row, l, "y", null, n(2));
+    }
+    /* sg:<استعلام> — Word پیش‌نمایشِ پیش‌فاکتوری که سامانه از اقلامِ آمادهٔ ارسال می‌سازد */
+    if (a === "sg") {
+      await ack("در حال ساختن پیش‌فاکتور…");
+      try {
+        const { th, lines, terms } = await C.previewTarget(env, sup, n(1), null);
+        const blob = await renderProformaDoc(C.proformaInput(env, th, lines, terms));
+        const r = await P.spApi(env).sendDocument(row.chat, `پیش‌نمایش پیش‌فاکتور — استعلام ${th.request_id}.docx`, blob, "📄 <b>پیش‌نمایش پیش‌فاکتور</b> — همین را سامانه با «📤 ارسال» برای کارشناس می‌فرستد.");
+        P.track(row, r && r.message_id);
+      } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); }
+      return { ok: true };
+    }
     if (a === "tk") {
       const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
       if (!l || l.supplier_id !== sup.supplier_id || !P.TERM_KEY[parts[2]]) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
@@ -800,17 +870,29 @@ async function onCallback(env, cq, ctx) {
       const cnt = (await env.DB.prepare("SELECT COUNT(*) AS c FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th.id).first() || {}).c || 0;
       if (!cnt) { await ack("هیچ قلمِ «آمادهٔ ارسال»ی نیست.", true); return { ok: true }; }
       await ack();
+      /* فاز ۴: «👁 پیش‌نمایش پیش‌فاکتور» و بعد «ارسال» — پیش‌فاکتورِ خودِ تأمین‌کننده اختیاری و فقط پیوست */
+      if (!(await pfReadOn(env))) {
+        const { lines, terms, missing } = await C.previewTarget(env, sup, th.id, null);
+        await P.send(env, row, P.previewText(env, th, lines, terms, missing), [
+          ...(missing.length ? [] : [[{ text: `📤 ارسال برای کارشناس (${fa(lines.length)} قلم)`, callback_data: `sq:${th.id}:go` }]]),
+          [{ text: "📄 پیش‌نمایش Word", callback_data: `sg:${th.id}` }],
+          [{ text: "📎 ارسال همراه با پیش‌فاکتورِ خودم (اختیاری)", callback_data: `sq:${th.id}:pf` }],
+          [{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+        return { ok: true };
+      }
       await P.send(env, row, `📤 <b>ارسالِ ${fa(cnt)} قلمِ آماده برای کارشناس</b>\nپیش‌فاکتورِ همین اقلام را هم دارید؟ اگر همراهش بفرستید، مرحلهٔ «تأیید مشخصات و درخواست پیش‌فاکتور» لازم نیست.`,
         [[{ text: "📄 بله، همراه با پیش‌فاکتور", callback_data: `sq:${th.id}:pf` }], [{ text: "📤 نه، فقط مشخصات", callback_data: `sq:${th.id}:go` }], [{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
       return { ok: true };
     }
     if (a === "sq") {
+      const gen = !(await pfReadOn(env));
       if (parts[2] === "pf") {
         const th = await C.threadFor(env, n(1), { supplier: sup }).catch(() => null);
         if (!th) { await ack("این استعلام پیدا نشد.", true); return { ok: true }; }
         await ack();
         P.setFlow(row, { step: "subpf", th: th.id });
-        await P.send(env, row, "📄 فایل پیش‌فاکتور را بفرستید (PDF یا عکس). لایه‌ها، مقدار، واحد، قیمت واحد و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) باید صریح در آن آمده باشد.",
+        await P.send(env, row, gen ? "📎 فایل پیش‌فاکتورِ خودتان را بفرستید (PDF یا عکس) — فقط پیوستِ همین ارسال می‌شود؛ پیش‌فاکتورِ اصلی را سامانه از فیلدهای شما می‌سازد."
+          : "📄 فایل پیش‌فاکتور را بفرستید (PDF یا عکس). لایه‌ها، مقدار، واحد، قیمت واحد و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) باید صریح در آن آمده باشد.",
           [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
         return { ok: true };
       }
@@ -819,7 +901,7 @@ async function onCallback(env, cq, ctx) {
         await ack("فرستاده شد");
         await P.pushMsgs(env, r.thread, r.msgs);
         aiKick(env, row._ctx, r.thread.id);
-        return await itemsCardSend(env, row, sup, n(1), mid, `✅ برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
+        return await itemsCardSend(env, row, sup, n(1), mid, `✅ ${gen ? "پیشنهاد با پیش‌فاکتورِ سامانه" : ""}${gen ? " " : ""}برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
       } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
     }
     if (a === "sp") {

@@ -1277,6 +1277,8 @@
      باید دوباره بارگذاری شوند، چون استخراج بدون خودِ فایل کاری نمی‌تواند بکند. */
   function pfCell(q) {
     const p = pfOf(q);
+    /* فاز ۴ طرح «خرید هوشمند»: Word که سامانه از فیلدهای خودِ تأمین‌کننده در پنل ساخته — فایلِ خودتان جایش می‌نشیند */
+    if (p && p.storage_key && p.source === "generated") return `<span class="chip ok" title="${esc(p.filename || "")} — سامانه از فیلدهای خودِ تأمین‌کننده در پنل ساخت">پیش‌فاکتورِ سامانه</span> <button class="tp-btn xs" data-pf="${esc(q.supplier_name)}" title="جایگزینی با فایلِ خودتان">↻</button>`;
     if (p && p.storage_key) return `<span class="chip ok" title="${esc(p.filename || "")}">ثبت شد</span> <button class="tp-btn xs" data-pf="${esc(q.supplier_name)}" title="جایگزینی فایل">\u21bb</button>`;
     if (p) return `<span class="chip warn" title="فقط نامش ثبت شده بود">بی فایل</span> <button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`;
     return `<button class="tp-btn xs" data-pf="${esc(q.supplier_name)}">بارگذاری</button>`;
@@ -1285,6 +1287,7 @@
   function exCell(q) {
     const p = pfOf(q);
     if (!p || !p.storage_key) return `<span class="chip">—</span>`;
+    if (p.source === "generated") return `<span class="chip" title="مقدارها همان است که تأمین‌کننده در پنل ثبت کرده؛ خواندنِ سند لازم نیست">از پنل</span>`;
     const read = p.extract_state === "ok" && p.extracted_json;
     return `<button class="tp-btn xs ${read ? "" : "primary"}" data-extract="${p.id}">${read ? "دیدن خوانده‌شده" : "استخراج"}</button>`
       + (p.extract_state === "refused" ? `<div><span class="chip warn">خوانا نبود</span></div>` : "")

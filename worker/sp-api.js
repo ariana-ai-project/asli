@@ -19,6 +19,8 @@ import { aiKick } from "./ai-agent.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
+import { proformaHtml, renderProformaDoc, PROFORMA_CSS } from "./pfdoc.js";
+import { pfReadOn } from "./switches.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -158,6 +160,18 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const b = await C.proformaOfBundle(env, who, mm[1]);
     return json({ url: await signed(env, b.pf_key), name: b.pf_name });
   }
+  /* پیش‌فاکتورِ تولیدیِ یک بسته (فاز ۴؛ worker/pfdoc.js): format=docx فایل Word، وگرنه HTMLِ همان برای دیدن و چاپ به PDF */
+  if ((mm = /^\/sp\/bundle\/(\d+)\/proforma$/.exec(path)) && m === "GET") {
+    const { b, th, lines, terms } = await C.bundleProforma(env, who, mm[1]);
+    const d = C.proformaInput(env, th, lines, terms, { no: b.id, at: b.created_at });
+    const name = `پیش‌فاکتور ${th.supplier_name} — درخواست ${th.request_id}`;
+    if (url.searchParams.get("format") === "docx") {
+      return new Response(await renderProformaDoc(d), { headers: {
+        "content-type": C.DOCX_MIME, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`${name}.docx`)}`, "cache-control": "private, no-store",
+      } });
+    }
+    return json({ html: proformaHtml(d), css: PROFORMA_CSS, name });
+  }
 
   /* --- تأمین‌کننده --- */
   if (who.side === "s") {
@@ -165,7 +179,21 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if (path === "/sp/me" && m === "GET") {
       const bot = await C.spBotUser(env);
       return json({ me: meOut(sup), threads: await C.supplierThreads(env, sup), labels: C.FILE_LABELS, company: C.COMPANY(env),
-        bot, botLogin: C.botLink(bot, "s" + sup.k), via: who.tg ? "telegram" : "web", term_enums: C.TERM_ENUMS, term_fa: C.TERM_FA });
+        bot, botLogin: C.botLink(bot, "s" + sup.k), via: who.tg ? "telegram" : "web", term_enums: C.TERM_ENUMS, term_fa: C.TERM_FA,
+        term_required: C.TERM_REQUIRED, pf_read: await pfReadOn(env) });
+    }
+    /* «👁 پیش‌نمایش پیش‌فاکتور» (فاز ۴): همان پیش‌فاکتوری که سامانه از فیلدهای ذخیره‌شده می‌سازد؛ خانه‌های لازمِ خالی قرمز */
+    if ((mm = /^\/sp\/thread\/(\d+)\/preview$/.exec(path)) && m === "POST") {
+      const b = await readJson(request);
+      const { th, lines, terms, missing } = await C.previewTarget(env, sup, mm[1], b.line_ids);
+      /* format=docx: همان پیش‌نمایش به‌شکل Word (پیش از ارسال؛ بات: sg:) */
+      if (url.searchParams.get("format") === "docx") {
+        return new Response(await renderProformaDoc(C.proformaInput(env, th, lines, terms)), { headers: {
+          "content-type": C.DOCX_MIME, "content-disposition": `attachment; filename*=UTF-8''${encodeURIComponent(`پیش‌نمایش پیش‌فاکتور — درخواست ${th.request_id}.docx`)}`,
+          "cache-control": "private, no-store" } });
+      }
+      const html = proformaHtml(C.proformaInput(env, th, lines, terms), { missing });
+      return json({ ok: true, html, css: PROFORMA_CSS, missing, ready: !missing.length, line_ids: lines.map((l) => l.id) });
     }
     if (path === "/sp/logout" && m === "POST") {
       await C.logout(env, sup.phone_id, who.session);
@@ -239,7 +267,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   const ex = who.expert;
   if (path === "/sp/x/threads" && m === "GET") {
     return json({ ...(await C.expertThreads(env, ex)), me: { name: ex.name, label: ex.label }, bot: await C.spBotUser(env), via: who.tg ? "telegram" : "web",
-      labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA });
+      labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA, pf_read: await pfReadOn(env) });
   }
   /* اعلانِ گوشهٔ پنل کارشناس: پیام‌های تازهٔ تأمین‌کنندگان (هر چند ثانیه، از همهٔ صفحه‌های پنل) */
   if (path === "/sp/x/inbox" && m === "GET") return json(await C.expertInbox(env, ex, url.searchParams.get("since")));
@@ -260,7 +288,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const b = await readJson(request);
     const r = await C.decide(env, ex, mm[1], T(b.action), { comment: b.comment });
     await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
-    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, gaps: r.gaps, demo: r.demo });
+    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, gaps: r.gaps, demo: r.demo, gen: r.gen });
   }
   /* جدول تطابق: پذیرفتنِ مغایرت (پیش‌فاکتور ملاک) — keys یا all */
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/accept$/.exec(path)) && m === "POST") {

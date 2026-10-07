@@ -14,6 +14,12 @@
  * اجباری در پیش‌فاکتور (با «بررسی هوشمند» یا تأیید خودِ کارشناس).
  *
  * این لایه به تلگرام چیزی نمی‌فرستد؛ پیام‌هایی که هر کار می‌سازد برمی‌گردند و sp-push.js پخششان می‌کند.
+ *
+ * فاز ۴ طرح «خرید هوشمند، کارشناس ناظر» (مهر ۱۴۰۵): هر خط قفل‌های همان قلم را دارد (locks_json — 🔒/🔓ِ عنوان، مقدار و هر
+ * لایه از نرمال‌سازی): 🔒 فقط‌خواندنی، 🔓 قابل تغییر (s_json)؛ مقدارِ 🔒 یعنی کلِ مقدار و 🔓 یعنی کمتر هم می‌شود؛ واحد همان
+ * واحدِ درخواست. وقتی «خوانش هوشمند پیش‌فاکتور» خاموش است (پیش‌فرض، worker/switches.js)، پیش‌فاکتور را سامانه از همین فیلدها
+ * می‌سازد (worker/pfdoc.js) و بسته بعد از بررسی یکراست «تأیید نهایی» می‌شود (با مقدارهای خودِ تأمین‌کننده) یا با توضیح
+ * برمی‌گردد: new → draft → ready → submitted → final؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوستِ بسته است.
  */
 import { HttpError } from "./http.js";
 import { telegram } from "./telegram.js";
@@ -23,6 +29,10 @@ import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_ASK_SQL, AI_REJECTED_SQL } from "./ai-lock.js";
+import { pfReadOn } from "./switches.js";
+import { renderProformaDoc } from "./pfdoc.js";
+import { storage, storageKey } from "./storage.js";
+import { jStr, jValid, jNorm } from "./time.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -71,7 +81,9 @@ export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept
   ["sp_sms", "via", "TEXT"], ["sp_sms", "status", "TEXT"], ["sp_sms", "ref", "TEXT"], ["sp_sms", "error", "TEXT"],
   /* تیکِ «شمارهٔ پنل»: این شماره واقعاً مال همین تأمین‌کننده است و پنلش به آن وابسته است (چند شماره هم ممکن است).
      کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد — تیک را فقط انسان می‌زند (worker/ai-agent.js) */
-  ["sp_phones", "panel", "INTEGER"], ["sp_phones", "panel_by", "INTEGER"], ["sp_phones", "panel_at", "INTEGER"]];
+  ["sp_phones", "panel", "INTEGER"], ["sp_phones", "panel_by", "INTEGER"], ["sp_phones", "panel_at", "INTEGER"],
+  /* فاز ۴ طرح «خرید هوشمند»: قفل‌های قلم در لحظهٔ ارسال (🔒/🔓ِ عنوان، مقدار و هر لایه) و تغییرهای تأمین‌کننده روی 🔓ها */
+  ["sp_lines", "locks_json", "TEXT"], ["sp_lines", "s_json", "TEXT"]];
 
 /** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
 export async function spBackfill(env) {
@@ -110,7 +122,8 @@ export const CORR_PATH = "/tamin-poshtibani/correspond.html";
  * و در هر کارت نشان داده می‌شوند. هر بسته در لحظهٔ ارسال عکسِ خودش را دارد تا جدول تطابق با همان سنجیده شود.
  */
 export const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
-export const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat"];
+/* فاز ۴: پیش‌فاکتورِ تولیدی بی اعتبار نیست — «اعتبار پیش‌فاکتور (روز)» هم اجباری است */
+export const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat", "valid_days"];
 export const TERM_FA = { dtime: "زمان تحویل", pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", valid_days: "اعتبار پیش‌فاکتور (روز)" };
 export const TERM_ENUMS = { pay: ENUMS.pay, invoice: ENUMS.invoice, vat: ENUMS.vat };
 export const termsOf = (row) => { const t = parse(row && row.terms_json, null); return t && typeof t === "object" ? t : {}; };
@@ -197,23 +210,35 @@ const moneyTxt = (n) => faN(fmtMoney(n));
 const codeTxt = (no) => (no ? `کد ${faN(no)} — ` : "");
 /** فهرست اقلامِ یک رخداد، هر قلم با کد و نامش — تا هر پیامِ گفت‌وگو بگوید دقیقاً کدام قلم */
 const itemsTxt = (lines) => lines.map((l) => `• ${codeTxt(l.no)}${l.title}`).join("\n");
-/** مشخصات اصلیِ یک قلم برای پیام‌ها: لایه‌های قفل و افزوده */
-const layersOf = (l) => [...(Array.isArray(l.layers) ? l.layers : parse(l.layers_json, [])), ...(Array.isArray(l.extra) ? l.extra : parse(l.extra_json, []))];
-const specTxt = (l) => layersOf(l).map((x) => `${x.k}: ${x.v}`).join(" · ");
+/** «قطر: ۱۲ میلی‌متر» — لایهٔ کمّیِ افزودهٔ تأمین‌کننده واحد هم دارد (فاز ۴) */
+export const layerTxt = (x) => `${x.k}: ${x.v}${x.u ? ` ${x.u}` : ""}`;
+const sOf = (l) => { const s = parse(l && l.s_json, null); return s && typeof s === "object" ? s : {}; };
+/** عنوانِ پیشنهادیِ تأمین‌کننده وقتی عنوانِ قلم 🔓 است؛ وگرنه همان عنوانِ درخواست */
+export const lineTitle = (l) => T(sOf(l).title) || l.title;
+/** لایه‌های بسته با مقدارِ تأمین‌کننده روی 🔓ها؛ req مقدارِ درخواست است وقتی عوض شده */
+export function lineLayers(l) {
+  if (Array.isArray(l.layers)) return l.layers;
+  const ch = sOf(l).layers || {};
+  return parse(l.layers_json, []).map((x) => (T(ch[x.k]) && T(ch[x.k]) !== x.v ? { k: x.k, v: T(ch[x.k]), req: x.v } : { k: x.k, v: x.v }));
+}
+const extraOf = (l) => (Array.isArray(l.extra) ? l.extra : parse(l.extra_json, []));
+/** مشخصات اصلیِ یک قلم برای پیام‌ها: لایه‌های بسته (با تغییرِ 🔓ها) و افزوده */
+const layersOf = (l) => [...lineLayers(l), ...extraOf(l)];
+const specTxt = (l) => layersOf(l).map(layerTxt).join(" · ");
 /**
  * عکسِ قلم‌های یک رخداد در meta پیام — صفحه‌ها کارتِ مرتبِ پیام را از همین می‌سازند (کد و عنوان، بعد قیمت و
  * مشخصات) و کلیک روی آن به بخشِ اقدام و تصمیمِ همان بسته یا قلم می‌رود. عکس است تا ویرایشِ بعدی تاریخچه را عوض نکند.
  */
 const itemSnap = (l, withPrice) => ({
-  no: l.no || null, title: l.title, head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
-  ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: Array.isArray(l.layers) ? l.layers : parse(l.layers_json, []),
-  extra: Array.isArray(l.extra) ? l.extra : parse(l.extra_json, []),
+  no: l.no || null, title: lineTitle(l), head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
+  ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: lineLayers(l), extra: extraOf(l),
+  ...(withPrice && T(l.note) ? { note: T(l.note).slice(0, 300) } : {}),
 });
 /** یک قلم در متنِ پیام: سطرِ اول کد و عنوان، زیرش مقدار (و قیمت) و مشخصات اصلی */
 const itemBlock = (l, withPrice) => {
   const amount = withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
   const spec = specTxt(l);
-  return `▫️ ${codeTxt(l.no)}${l.title}\n    ${amount}${spec ? `\n    ${spec}` : ""}`;
+  return `▫️ ${codeTxt(l.no)}${lineTitle(l)}\n    ${amount}${spec ? `\n    ${spec}` : ""}${withPrice && T(l.note) ? `\n    📝 ${T(l.note).slice(0, 300)}` : ""}`;
 };
 const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${faN(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -354,15 +379,44 @@ export async function itemLocks(env, itemIds) {
   const out = new Map();
   for (let i = 0; i < ids.length; i += 80) {
     const part = ids.slice(i, i + 80);
-    const rows = (await env.DB.prepare(`SELECT l.item_id, l.title, l.head, l.layers_json, l.req_qty, l.req_unit, l.created_at FROM sp_lines l
+    const rows = (await env.DB.prepare(`SELECT l.item_id, l.title, l.head, l.layers_json, l.req_qty, l.req_unit, l.locks_json, l.created_at FROM sp_lines l
         JOIN sp_threads t ON t.id=l.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id
         WHERE s.demo=0 AND l.item_id IN (${part.map(() => "?").join(",")}) ORDER BY l.id`).bind(...part).all()).results || [];
     for (const r of rows) {
-      if (!out.has(r.item_id)) out.set(r.item_id, { title: r.title, head: r.head, layers: parse(r.layers_json, []), qty: r.req_qty, unit: r.req_unit, at: r.created_at });
+      if (!out.has(r.item_id)) {
+        out.set(r.item_id, { title: r.title, head: r.head, layers: parse(r.layers_json, []), qty: r.req_qty, unit: r.req_unit, at: r.created_at, locks: parse(r.locks_json, null) });
+      }
     }
   }
   return out;
 }
+
+/**
+ * قفل‌های قلم برای خطِ تأمین‌کننده (فاز ۴) — 🔒/🔓ِ نرمال‌سازی (items.norm_json.locks، فاز ۱) روی لایه‌های همین بسته؛ پیش‌فرض
+ * همه 🔒 (تصمیم ۲). title: عنوان · qty: 🔒 یعنی کلِ مقدار، 🔓 یعنی کمتر هم می‌شود · layers: {نام لایه: 🔒؟}.
+ */
+export function lineLocks(it, layers) {
+  const raw = (normOf(it) || {}).locks || {};
+  const rl = raw.layers && typeof raw.layers === "object" ? raw.layers : {};
+  const byKey = new Map(Object.entries(rl).map(([k, v]) => [nkey(k), v]));
+  const out = { title: raw.title !== false, qty: raw.qty !== false, layers: {} };
+  for (const x of layers || []) out.layers[x.k] = byKey.get(nkey(x.k)) !== false;
+  return out;
+}
+/**
+ * قفل‌های یک خطِ ذخیره‌شده. unit: واحد همان واحدِ درخواست است. خطِ پیش از فاز ۴ (بی locks_json): عنوان و لایه‌ها 🔒، مقدار
+ * و واحد آزاد — همان رفتارِ پیشین (legacy).
+ */
+export function locksOfLine(l) {
+  const lk = parse(l && l.locks_json, null);
+  const layers = parse(l && l.layers_json, []);
+  if (!lk || typeof lk !== "object") return { legacy: true, title: true, qty: false, unit: false, layers: Object.fromEntries(layers.map((x) => [x.k, true])) };
+  const ly = {};
+  for (const x of layers) ly[x.k] = !(lk.layers && lk.layers[x.k] === false);
+  return { legacy: false, title: lk.title !== false, qty: lk.qty !== false, unit: !!T(l.req_unit), layers: ly };
+}
+/* راهنمای بالای فرم (طرح فاز ۴): «لایه‌های 🔒 ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید و ارسال کنید.» */
+const LOCKED_LAYER = (k) => `«${k}» لایهٔ قفل‌شدهٔ کارشناس (🔒) است و تغییر نمی‌کند؛ اگر توضیحی دارید زیر همان قلم بنویسید.`;
 export const LOCK_MSG = "این قلم برای تأمین‌کننده فرستاده شده و قفل است: عنوان، نوع قلم و لایه‌های ویژگی‌اش عوض نمی‌شود تا همهٔ تأمین‌کنندگان عینِ همان بسته را بگیرند. نرخ‌های تبدیل را هنوز می‌شود ذخیره کرد.";
 /** ساختارِ تازه همان بستهٔ قفل‌شده است؟ — ذخیرهٔ قلمِ قفل فقط وقتی پذیرفته است که فقط نرخ‌ها عوض شده باشند */
 export function sameAsLock(lock, head, layers, spec) {
@@ -494,17 +548,22 @@ export async function spSend(env, ex, b) {
   const old = new Map(oldRows.map((x) => [x.item_id, x.no]));
   const oldById = new Map(oldRows.map((x) => [x.item_id, x]));
   const fresh = its.filter((i) => !old.has(i.id));
-  /* بستهٔ قفل‌شده: قلمی که قبلاً برای تأمین‌کنندهٔ واقعیِ دیگری رفته، با همان عنوان، لایه‌ها، مقدار و واحد می‌رود */
+  /* بستهٔ قفل‌شده: قلمی که قبلاً برای تأمین‌کنندهٔ واقعیِ دیگری رفته، با همان عنوان، لایه‌ها، مقدار و واحد — و همان 🔒/🔓ها — می‌رود */
   const locks = await itemLocks(env, fresh.map((i) => i.id));
-  const pack = await Promise.all(fresh.map(async (i) => locks.get(i.id) || { title: nrm(i.title), qty: i.qty, unit: T(i.unit) || null, ...(await lockedLayers(env, i)) }));
+  const pack = await Promise.all(fresh.map(async (i) => {
+    const lock = locks.get(i.id);
+    if (lock) return { ...lock, locks: lock.locks || lineLocks(i, lock.layers) };
+    const p = { title: nrm(i.title), qty: i.qty, unit: T(i.unit) || null, ...(await lockedLayers(env, i)) };
+    return { ...p, locks: lineLocks(i, p.layers) };
+  }));
   /* کدِ قلم در پنل همین تأمین‌کننده: شمارش افزایشی، جدا از کد راهکاران (که مال خود شرکت است) */
   const top = await env.DB.prepare("SELECT COALESCE(MAX(l.no),0) AS n FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE t.supplier_id=?").bind(sup.id).first();
   const nos = new Map([...old].map(([id, no]) => [id, no]));
   fresh.forEach((i, n) => nos.set(i.id, (top ? top.n : 0) + n + 1));
 
   const stmts = fresh.map((i, n) => env.DB.prepare(
-    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,'new',?,?,?)",
-  ).bind(th.id, i.id, pack[n].title, pack[n].head, JSON.stringify(pack[n].layers), pack[n].qty, pack[n].unit, pack[n].qty, pack[n].unit, nos.get(i.id), t, t));
+    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,locks_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'new',?,?,?)",
+  ).bind(th.id, i.id, pack[n].title, pack[n].head, JSON.stringify(pack[n].layers), JSON.stringify(pack[n].locks), pack[n].qty, pack[n].unit, pack[n].qty, pack[n].unit, nos.get(i.id), t, t));
   const { pass, stmts: passStmts } = await newPassword(env, ph.id);
   const silent = !!b.silent && oldRows.length > 0 && !fresh.length;
   stmts.push(...passStmts, silent ? env.DB.prepare("UPDATE sp_threads SET last_at=? WHERE id=?").bind(t, th.id)
@@ -587,23 +646,37 @@ export function threadOut(th, side) {
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */
 export const clearedUpTo = (th, side) => Number((side === "e" ? th.e_clear : th.s_clear) || 0);
+/**
+ * خط برای صفحه‌ها. layers: لایه‌های بسته، هر کدام با lock (🔒؟) و s (مقدارِ تأمین‌کننده روی 🔓، اگر عوضش کرده)؛ s_title:
+ * عنوانِ پیشنهادیِ او وقتی عنوان 🔓 است؛ locks: {title, qty, unit, legacy} — qty 🔒 یعنی کلِ مقدار، unit یعنی واحدِ درخواست ثابت است.
+ */
 export function lineOut(l) {
   const qty = l.qty == null ? null : Number(l.qty), price = l.price == null ? null : Number(l.price);
+  const lk = locksOfLine(l), s = sOf(l), ch = s.layers || {};
   return {
-    id: l.id, no: l.no || null, item_id: l.item_id, title: l.title, head: l.head, layers: parse(l.layers_json, []), extra: parse(l.extra_json, []),
+    id: l.id, no: l.no || null, item_id: l.item_id, title: l.title, s_title: T(s.title) || null, head: l.head,
+    layers: parse(l.layers_json, []).map((x) => ({ ...x, lock: lk.layers[x.k] !== false, ...(T(ch[x.k]) && T(ch[x.k]) !== x.v ? { s: T(ch[x.k]) } : {}) })),
+    extra: parse(l.extra_json, []), locks: { title: lk.title, qty: lk.qty, unit: lk.unit, legacy: lk.legacy },
     req_qty: l.req_qty, req_unit: l.req_unit, qty, unit: l.unit, price, total: qty != null && price != null ? qty * price : null,
     note: l.note, state: l.state, state_fa: LINE_FA[l.state] || l.state, bundle_id: l.bundle_id, quote_id: l.quote_id, missing: lineMissing(l),
   };
 }
 /** بسته برای نمایش؛ کارشناس جدول تطابق، پذیرش‌هایش و این‌که تأیید نهایی ممکن است یا چه مانعی مانده را هم می‌بیند */
-export function bundleOut(b, side) {
+/**
+ * opt.pfRead === false (فاز ۴): «آماده برای تأیید نهایی» از خودِ خط‌ها و شرایطِ بسته (supplierRes)، نه از جدول تطابق —
+ * opt.lines خط‌های همان گفت‌وگو. own: پیش‌فاکتورِ خودِ تأمین‌کننده (پیوست)؛ gen: پیش‌فاکتورِ سامانه دیدنی است.
+ */
+export function bundleOut(b, side, opt = {}) {
   const ai0 = side === "e" ? parse(b.ai_json, null) : null;
   const ai = aiUsable(ai0) ? ai0 : null;
   const accept = side === "e" ? parse(b.accept_json, {}) : null;
-  const match = ai ? resolve(ai, accept) : null;
+  const ids = parse(b.line_ids, []);
+  const match = opt.pfRead === false && side === "e" && opt.lines
+    ? supplierRes(ids.map((id) => opt.lines.find((l) => l.id === id)).filter(Boolean), termsOf(b))
+    : ai ? resolve(ai, accept) : null;
   return {
-    id: b.id, line_ids: parse(b.line_ids, []), state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment, terms: termsOf(b),
-    pf: b.pf_key ? { name: b.pf_name, mime: b.pf_mime, size: b.pf_size, at: b.pf_at } : null,
+    id: b.id, line_ids: ids, state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment, terms: termsOf(b),
+    pf: b.pf_key ? { name: b.pf_name, mime: b.pf_mime, size: b.pf_size, at: b.pf_at } : null, gen: true,
     ...(side === "e" ? { ai, accept, ready: !!(match && match.ready), problems: match ? match.problems : [], gaps: match ? match.gaps : [] } : {}),
     created_at: b.created_at, decided_at: b.decided_at,
   };
@@ -619,13 +692,16 @@ export async function threadFull(env, th, side) {
     env.DB.prepare("SELECT id, line_id, label, note, filename, mime, size, at FROM sp_files WHERE thread_id=? ORDER BY id").bind(th.id).all(),
   ]);
   await markSeen(env, th.id, side);
+  const pfRead = await pfReadOn(env);
   return {
     thread: threadOut(th, side),
     lines: (lines.results || []).map(lineOut),
-    bundles: (bundles.results || []).map((b) => bundleOut(b, side)),
+    bundles: (bundles.results || []).map((b) => bundleOut(b, side, { pfRead, lines: lines.results || [] })),
     msgs: (msgs.results || []).map((m) => msgFor(msgOut(m), side)),
     files: files.results || [],
     labels: FILE_LABELS,
+    /* pf_read: «خوانش هوشمند پیش‌فاکتور» روشن است (مسیرِ پیشین) یا خاموش — پیش‌فاکتورِ تولیدی و تأیید نهاییِ مستقیم (فاز ۴) */
+    pf_read: pfRead,
   };
 }
 
@@ -800,38 +876,97 @@ async function ownLine(env, sup, lineId) {
 }
 const notEditable = (l) => new HttpError(`این قلم «${LINE_FA[l.state] || l.state}» است و فعلاً قابل ویرایش نیست.`, 409);
 
-function cleanExtra(list, locked) {
-  const lockedK = new Set((locked || []).map((x) => nkey(x.k)));
+/**
+ * لایه‌های افزودهٔ تأمین‌کننده: {k نام، v مقدار، t نوع، u واحد} — فاز ۴: نوعِ «کمّی» (t: "num") عدد است و واحد دارد، «کیفی» متن.
+ * نامِ لایه‌های همین بسته پذیرفته نیست: 🔒ها عوض نمی‌شوند و 🔓ها سرِ جای خودشان (lineSave، layers) عوض می‌شوند.
+ */
+function cleanExtra(list, layers, lk) {
+  const pk = new Map((layers || []).map((x) => [nkey(x.k), x.k]));
   const out = [], seen = new Set();
   for (const x of Array.isArray(list) ? list : []) {
-    const k = nrm(x && x.k).slice(0, 40), v = nrm(x && x.v).slice(0, 160);
+    const k = nrm(x && x.k).slice(0, 40);
+    let v = nrm(x && x.v).slice(0, 160);
     if (!k || !v) continue;
-    if (lockedK.has(nkey(k))) throw new HttpError(`«${k}» لایهٔ قفل‌شدهٔ کارشناس است و تغییر نمی‌کند؛ اگر حرفی درباره‌اش دارید در گفت‌وگو بنویسید.`, 422);
+    if (pk.has(nkey(k))) {
+      const name = pk.get(nkey(k));
+      if (!lk || lk.layers[name] !== false) throw new HttpError(LOCKED_LAYER(k), 422);
+      throw new HttpError(`«${k}» از لایه‌های همین قلم است و 🔓 است؛ مقدارش را سرِ جای خودش عوض کنید، نه به‌شکل لایهٔ تازه.`, 422);
+    }
+    const num = x.t === "num";
+    if (num) {
+      const n = toNum(v);
+      if (n == null || Number.isNaN(n)) throw new HttpError(`لایهٔ «${k}» کمّی است و مقدارش باید عدد باشد.`, 422);
+      v = String(n);
+    }
     if (seen.has(nkey(k))) continue;
-    seen.add(nkey(k)); out.push({ k, v });
+    seen.add(nkey(k));
+    const u = num ? nrm(x.u).slice(0, 20) : "";
+    out.push({ k, v, ...(num ? { t: "num" } : {}), ...(u ? { u } : {}) });
   }
   if (out.length > 20) throw new HttpError("حداکثر ۲۰ لایهٔ افزوده.");
   return out;
 }
 
-/** ذخیرهٔ مقدار، واحد، قیمت واحد، توضیح و لایه‌های افزوده — قیمت کل همیشه حاصل‌ضرب است و ذخیره نمی‌شود */
+/* مقدار با سه رقمِ اعشار مقایسه می‌شود (۱۰۰ و ۱۰۰٫۰۰۰۱ یکی‌اند) */
+const sameQty = (a, b) => Math.abs(Number(a) - Number(b)) <= 0.0005 * Math.max(1, Math.abs(Number(b)));
+
+/**
+ * ذخیرهٔ مقدار، واحد، قیمت واحد، توضیح، لایه‌های افزوده و (فاز ۴) عنوان و لایه‌های 🔓 — قیمت کل همیشه حاصل‌ضرب است و ذخیره
+ * نمی‌شود. قفل‌ها (locksOfLine): مقدارِ 🔒 همان مقدارِ درخواست است و مقدارِ 🔓 بیشتر از صفر و حداکثر همان؛ واحد همان واحدِ
+ * درخواست؛ عنوان و لایهٔ 🔒 عوض نمی‌شوند. b.layers: {نام لایه: مقدار} — خالی یا همان مقدارِ درخواست یعنی برگشت به درخواست.
+ */
 export async function lineSave(env, sup, lineId, b) {
   const l = await ownLine(env, sup, lineId);
   if (!LINE_EDITABLE.includes(l.state)) throw notEditable(l);
+  const lk = locksOfLine(l);
+  const req = Number(l.req_qty) > 0 ? Number(l.req_qty) : null;
+  const reqTxt = () => `${qtyTxt(req)}${T(l.req_unit) ? ` ${T(l.req_unit)}` : ""}`;
   const sets = [], args = [];
   for (const f of ["qty", "price"]) {
     if (!(f in b)) continue;
     const n = toNum(b[f]);
     if (Number.isNaN(n)) throw new HttpError(f === "qty" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد (ریال).");
+    if (f === "qty" && n != null && !lk.legacy && req != null) {
+      if (lk.qty && !sameQty(n, req)) throw new HttpError(`مقدارِ این قلم 🔒 است: همان ${reqTxt()}ِ درخواست. اگر کمتر دارید، زیر همین قلم بنویسید.`, 422, { field: "qty" });
+      if (!lk.qty && (n <= 0 || (n > req && !sameQty(n, req)))) throw new HttpError(`مقدار باید بیشتر از صفر و حداکثر ${reqTxt()} (مقدارِ درخواست) باشد.`, 422, { field: "qty" });
+    }
     sets.push(`${f}=?`); args.push(n);
   }
-  if ("unit" in b) { sets.push("unit=?"); args.push(nrm(b.unit).slice(0, 30) || null); }
+  if ("unit" in b) {
+    const u = nrm(b.unit).slice(0, 30) || null;
+    if (lk.unit && u && nkey(u) !== nkey(l.req_unit)) throw new HttpError(`واحدِ این قلم «${T(l.req_unit)}» است و عوض نمی‌شود؛ قیمت واحد را به همین واحد بنویسید.`, 422, { field: "unit" });
+    sets.push("unit=?"); args.push(lk.unit ? T(l.req_unit) : u);
+  }
   if ("note" in b) {
     const s = T(b.note);
     if (s.length > 1000) throw new HttpError("توضیح خیلی بلند است (حداکثر ۱۰۰۰ نویسه).");
     sets.push("note=?"); args.push(s || null);
   }
-  if ("extra" in b) { sets.push("extra_json=?"); args.push(JSON.stringify(cleanExtra(b.extra, parse(l.layers_json, [])))); }
+  let s = null;
+  if ("title" in b) {
+    const tt = nrm(b.title).slice(0, 200);
+    if (lk.title) {
+      if (tt && tt !== l.title) throw new HttpError("عنوانِ این قلم 🔒 است و عوض نمی‌شود؛ اگر نامِ دیگری دارد، زیر همین قلم بنویسید.", 422, { field: "title" });
+    } else {
+      s = { ...sOf(l) };
+      if (tt && tt !== l.title) s.title = tt; else delete s.title;
+    }
+  }
+  if (b.layers && typeof b.layers === "object") {
+    const pack = parse(l.layers_json, []);
+    s = s || { ...sOf(l) };
+    const ch = { ...(s.layers || {}) };
+    for (const [k0, v0] of Object.entries(b.layers)) {
+      const x = pack.find((y) => nkey(y.k) === nkey(k0));
+      if (!x) throw new HttpError(`«${nrm(k0)}» از لایه‌های این قلم نیست؛ لایهٔ تازه را با «➕ لایهٔ تازه» بیفزایید.`, 422);
+      const v = nrm(v0).slice(0, 160);
+      if (lk.layers[x.k] !== false) { if (v && v !== x.v) throw new HttpError(LOCKED_LAYER(x.k), 422); continue; }
+      if (v && v !== x.v) ch[x.k] = v; else delete ch[x.k];
+    }
+    if (Object.keys(ch).length) s.layers = ch; else delete s.layers;
+  }
+  if (s) { sets.push("s_json=?"); args.push(Object.keys(s).length ? JSON.stringify(s) : null); }
+  if ("extra" in b) { sets.push("extra_json=?"); args.push(JSON.stringify(cleanExtra(b.extra, parse(l.layers_json, []), lk))); }
   if (!sets.length) return { ok: true };
   if (l.state === "new") sets.push("state='draft'");
   const t = now();
@@ -854,10 +989,15 @@ export async function termsSave(env, sup, thId, b) {
     if (!v) { delete t[f]; continue; }
     if (f === "dtime") {
       if (!validDtime(v)) throw new HttpError("زمان تحویل باید تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری) باشد.", 422, { field: f });
-      t[f] = normalizeDtime(v);
+      const d = normalizeDtime(v);
+      /* «تاریخ از تقویم» (فاز ۴): روزِ واقعاً موجود و یکدست با دو رقم (۱۴۰۵/۸/۱ ← 1405/08/01) */
+      if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(d)) {
+        if (!jValid(d)) throw new HttpError("این تاریخ در تقویم نیست.", 422, { field: f });
+        t[f] = jNorm(d);
+      } else t[f] = d;
     } else if (f === "valid_days") {
       const n = toNum(v);
-      if (n == null || Number.isNaN(n)) throw new HttpError("اعتبار پیش‌فاکتور باید شمار روز باشد.", 422, { field: f });
+      if (n == null || Number.isNaN(n) || Math.round(n) < 1) throw new HttpError("اعتبار پیش‌فاکتور باید شمار روز باشد (دست‌کم ۱).", 422, { field: f });
       t[f] = Math.round(n);
     } else {
       if (!TERM_ENUMS[f].includes(v)) throw new HttpError(`«${TERM_FA[f]}» یکی از این‌ها باشد: ${TERM_ENUMS[f].join("، ")}`, 422, { field: f });
@@ -886,9 +1026,11 @@ export async function lineReady(env, sup, lineId, on) {
 /**
  * چند قلمِ «آمادهٔ ارسال» با هم: یک بسته برای تصمیم کارشناس، با عکسِ شرایطِ اعلامیِ همین لحظه.
  * pf (اختیاری): پیش‌فاکتوری که تأمین‌کننده همان اول کنار مشخصات می‌فرستد ({skey, filename, mime, size}، فایل را لایهٔ
- * API در انبار گذاشته) — بسته یک‌راست «پیش‌فاکتور رسید» می‌شود و مرحلهٔ «تأیید و درخواست پیش‌فاکتور» لازم نیست.
+ * API در انبار گذاشته). خوانش هوشمند روشن: بسته یک‌راست «پیش‌فاکتور رسید» می‌شود و مرحلهٔ «تأیید و درخواست پیش‌فاکتور» لازم
+ * نیست. خاموش (پیش‌فرض، فاز ۴): پیش‌فاکتور را سامانه از همین فیلدها می‌سازد و فایلِ خودِ تأمین‌کننده فقط پیوستِ بسته است.
  */
 export async function submitLines(env, sup, thId, lineIds, pf) {
+  const pfRead = await pfReadOn(env);
   const th = await threadFor(env, thId, { supplier: sup });
   const want = Array.isArray(lineIds) && lineIds.length ? new Set(lineIds.map(int)) : null;
   const lines = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND state='ready' ORDER BY id").bind(th.id).all()).results || [])
@@ -900,19 +1042,22 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
   const tmiss = termsMissing(terms);
   if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
   const t = now();
-  const state = pf ? "proforma" : "pending";
+  const state = pf && pfRead ? "proforma" : "pending";
   const r = await env.DB.prepare(`INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,pf_key,pf_name,pf_mime,pf_size,pf_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
     .bind(th.id, JSON.stringify(lines.map((l) => l.id)), state, JSON.stringify(terms), pf ? pf.skey : null, pf ? T(pf.filename).slice(0, 120) || "proforma" : null,
       pf ? pf.mime || null : null, pf ? pf.size || null : null, pf ? t : null, t).run();
   const bid = r.meta.last_row_id;
   const sum = lines.reduce((s, l) => s + Number(l.qty) * Number(l.price), 0);
   const pfName = pf ? T(pf.filename) || "پیش‌فاکتور" : null;
-  const body = `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد${pf ? ` همراه با پیش‌فاکتور «${pfName}»` : ""}:\n`
+  const body = (pfRead
+    ? `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد${pf ? ` همراه با پیش‌فاکتور «${pfName}»` : ""}:\n`
+    : `📤 پیشنهادِ ${faN(lines.length)} قلم با پیش‌فاکتورِ سامانه برای بررسی فرستاده شد${pf ? ` (پیوست: پیش‌فاکتورِ خودِ تأمین‌کننده «${pfName}»)` : ""}:\n`)
     + lines.map((l) => itemBlock(l, true)).join("\n")
     + `\nجمع: ${moneyTxt(sum)} ریال\nشرایط: ${termsLine(terms)}`;
-  const meta = { ev: "submit", bundle: bid, pf: pfName, items: lines.map((l) => itemSnap(l, true)), terms, sum };
+  /* gen: پیش‌فاکتورِ این بسته را سامانه می‌سازد (/sp/bundle/:id/proforma) — صفحه‌ها دکمهٔ «👁 پیش‌فاکتور» را از همین می‌گذارند */
+  const meta = { ev: "submit", bundle: bid, pf: pfName, items: lines.map((l) => itemSnap(l, true)), terms, sum, ...(pfRead ? {} : { gen: true }) };
   const res = await env.DB.batch([
-    env.DB.prepare(`UPDATE sp_lines SET state=?, bundle_id=?, updated_at=? WHERE id IN (${lines.map(() => "?").join(",")})`).bind(pf ? "proforma" : "submitted", bid, t, ...lines.map((l) => l.id)),
+    env.DB.prepare(`UPDATE sp_lines SET state=?, bundle_id=?, updated_at=? WHERE id IN (${lines.map(() => "?").join(",")})`).bind(pf && pfRead ? "proforma" : "submitted", bid, t, ...lines.map((l) => l.id)),
     msgStmt(env, th.id, "s", "event", body, meta, t),
     touchStmt(env, th.id, t),
   ]);
@@ -971,16 +1116,37 @@ async function bundleFor(env, who, bundleId) {
 }
 const bundleLines = async (env, bid) => (await env.DB.prepare("SELECT * FROM sp_lines WHERE bundle_id=? ORDER BY id").bind(bid).all()).results || [];
 
+/**
+ * بارگذاریِ پیش‌فاکتورِ خودِ تأمین‌کننده روی یک بسته. خوانش هوشمند روشن: فقط وقتی خواسته شده (approved) یا عوض کردنش.
+ * خاموش (فاز ۴): پیوستِ اختیاری روی هر بستهٔ باز — بسته را جلو نمی‌برد.
+ */
 export async function proformaTarget(env, sup, bundleId) {
   const { b, th } = await bundleFor(env, { supplier: sup }, bundleId);
-  if (!["approved", "proforma"].includes(b.state)) throw new HttpError("برای این بسته پیش‌فاکتور خواسته نشده است.", 409);
-  return { b, th };
+  const pfRead = await pfReadOn(env);
+  if (!(pfRead ? ["approved", "proforma"] : ["pending", "approved", "proforma"]).includes(b.state)) {
+    throw new HttpError(pfRead ? "برای این بسته پیش‌فاکتور خواسته نشده است." : `این بسته «${BUNDLE_FA[b.state] || b.state}» است و پیوستش عوض نمی‌شود.`, 409);
+  }
+  return { b, th, pfRead };
 }
-/** پیش‌فاکتور رسید (یا عوض شد): بررسی و پذیرش‌های قبلی باطل می‌شوند — سند تازه، بررسی تازه */
+/**
+ * پیش‌فاکتور رسید (یا عوض شد): بررسی و پذیرش‌های قبلی باطل می‌شوند — سند تازه، بررسی تازه.
+ * خوانش هوشمند خاموش: فقط پیوستِ بسته عوض می‌شود؛ وضعیت و تصمیم همان است.
+ */
 export async function setProforma(env, target, f) {
   const { b, th } = target;
   const t = now();
   const lines = await bundleLines(env, b.id);
+  if (target.pfRead === false) {
+    const body = `📎 پیش‌فاکتورِ خودِ تأمین‌کننده «${T(f.filename) || "پیش‌فاکتور"}» ${b.pf_key ? "عوض شد" : "پیوست شد"} برای:\n${itemsTxt(lines)}`;
+    const meta = { ev: "pfatt", bundle: b.id };
+    const res = await env.DB.batch([
+      env.DB.prepare("UPDATE sp_bundles SET pf_key=?, pf_name=?, pf_mime=?, pf_size=?, pf_at=? WHERE id=?")
+        .bind(f.skey, T(f.filename).slice(0, 120) || "proforma", f.mime || null, f.size || null, t, b.id),
+      msgStmt(env, th.id, "s", "event", body, meta, t),
+      touchStmt(env, th.id, t),
+    ]);
+    return { ok: true, old: b.pf_key && b.pf_key !== f.skey ? b.pf_key : null, msgs: [msgObj(res[1].meta.last_row_id, th.id, "s", "event", body, meta, t)], thread: th };
+  }
   const body = `📄 پیش‌فاکتور «${T(f.filename) || "پیش‌فاکتور"}» ${b.state === "proforma" ? "عوض شد" : "رسید"} برای:\n${itemsTxt(lines)}`;
   const meta = { ev: "pf", bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })) };
   const res = await env.DB.batch([
@@ -1000,6 +1166,87 @@ export async function proformaOfBundle(env, who, bundleId) {
 }
 
 /* ------------------------------------------------------------------ */
+/* پیش‌فاکتورِ تولیدی (فاز ۴؛ worker/pfdoc.js)                            */
+/* ------------------------------------------------------------------ */
+export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+/** ورودیِ pfdoc.js از خط‌ها و شرایط: عنوان و لایه‌ها همان که تأمین‌کننده پیشنهاد داده (🔓ها با مقدارِ او) */
+export function proformaInput(env, th, lines, terms, { no = null, at = now() } = {}) {
+  return {
+    company: COMPANY(env), supplier: th.supplier_name, request: { id: th.request_id, party: th.party || "" }, date: jStr(at), no,
+    lines: lines.map((l) => ({ no: l.no, title: lineTitle(l), layers: lineLayers(l).map(({ k, v }) => ({ k, v })), extras: extraOf(l),
+      qty: l.qty, unit: l.unit, price: l.price, note: l.note })),
+    terms: terms || {},
+  };
+}
+/** خانه‌های لازمِ خالی برای پیش‌نمایش: qty:<کد>، price:<کد> و کلیدِ شرایط */
+export function proformaMissing(lines, terms) {
+  const out = [];
+  for (const l of lines) {
+    if (!(Number(l.qty) > 0)) out.push(`qty:${l.no}`);
+    if (!(Number(l.price) > 0)) out.push(`price:${l.no}`);
+  }
+  for (const f of TERM_REQUIRED) if (!T(terms && terms[f])) out.push(f);
+  return out;
+}
+/**
+ * «👁 پیش‌نمایش پیش‌فاکتور» پیش از ارسال: اقلامِ انتخاب‌شده، وگرنه «آمادهٔ ارسال»ها، وگرنه همهٔ قابل‌ویرایش‌ها — با شرایطِ جاری.
+ * missing: آنچه هنوز خالی است (پیش‌نمایش با خانهٔ قرمز نشانش می‌دهد).
+ */
+export async function previewTarget(env, sup, thId, lineIds) {
+  const th = await threadFor(env, thId, { supplier: sup });
+  const all = (await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? ORDER BY id").bind(th.id).all()).results || [];
+  const want = Array.isArray(lineIds) && lineIds.length ? new Set(lineIds.map(int)) : null;
+  let lines = want ? all.filter((l) => want.has(l.id)) : all.filter((l) => l.state === "ready");
+  if (!lines.length) lines = all.filter((l) => LINE_EDITABLE.includes(l.state));
+  if (!lines.length) throw new HttpError("قلمی برای پیش‌نمایش نیست.", 422);
+  const terms = termsOf(th);
+  return { th, lines, terms, missing: proformaMissing(lines, terms) };
+}
+/** پیش‌فاکتورِ یک بستهٔ فرستاده‌شده — همان خط‌ها و عکسِ شرایطِ همان بسته؛ کارشناسِ گفت‌وگو یا خودِ تأمین‌کننده */
+export async function bundleProforma(env, who, bundleId) {
+  const { b, th } = await bundleFor(env, who, bundleId);
+  return { b, th, lines: await bundleLines(env, b.id), terms: termsOf(b) };
+}
+/**
+ * Word پیش‌فاکتورِ تولیدیِ یک تأمین‌کننده در این درخواست، برای تب استعلامات و کمیسیون: همهٔ اقلامِ تأییدنهایی‌شدهٔ همین گفت‌وگو
+ * به‌اضافهٔ همین بسته، با شرایطِ همین بسته. بی انبار ← null (خط استعلام بی پیش‌فاکتور می‌ماند و کار نمی‌خوابد).
+ */
+async function genProforma(env, th, b, lines) {
+  const store = storage(env);
+  if (!store) return null;
+  const done = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND state='final' ORDER BY id").bind(th.id).all()).results || [])
+    .filter((l) => !lines.some((x) => x.id === l.id));
+  const all = [...done, ...lines].sort((x, y) => (x.no || 0) - (y.no || 0) || x.id - y.id);
+  const blob = await renderProformaDoc(proformaInput(env, th, all, termsOf(b), { no: b.id, at: b.created_at || now() }));
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  const key = storageKey(th.assignment_id, `sp-gen-${b.id}.docx`);
+  await store.put(key, bytes, { contentType: DOCX_MIME, size: bytes.length });
+  return { name: `پیش‌فاکتور ${nrm(th.supplier_name).slice(0, 60)} — درخواست ${th.request_id}.docx`, key, mime: DOCX_MIME, size: bytes.length, source: "generated",
+    item_ids: all.map((l) => l.item_id) };
+}
+
+/**
+ * تأیید نهایی بی خوانش هوشمند (فاز ۴): مقدارها همان که تأمین‌کننده ثبت کرده — عنوان و لایه‌ها (🔓ها با مقدارِ او)، لایه‌های
+ * افزوده، مقدار، واحد، قیمت واحد و عکسِ شرایطِ بسته. همان شکلِ خروجیِ sp-ai.js:resolve تا quoteStmts یکی بماند.
+ */
+function supplierRes(lines, terms) {
+  const problems = [];
+  const out = lines.map((l) => {
+    const miss = lineMissing(l);
+    if (miss.length) problems.push(`${codeTxt(l.no)}«${l.title}»: ${miss.join("، ")}`);
+    const spec = [
+      ...(lineTitle(l) !== l.title ? [{ k: "عنوان پیشنهادی", v: lineTitle(l) }] : []),
+      ...layersOf(l).map((x) => ({ k: x.k, v: `${x.v}${x.u ? ` ${x.u}` : ""}` })),
+      ...(T(l.note) ? [{ k: "توضیح تأمین‌کننده", v: T(l.note).slice(0, 200) }] : []),
+    ];
+    return { line_id: l.id, item_id: l.item_id, values: { spec, qty: l.qty == null ? null : Number(l.qty), unit: T(l.unit) || null, price: l.price == null ? null : Number(l.price) } };
+  });
+  const tm = termsMissing(terms);
+  if (tm.length) problems.push(`شرایط فاکتور: ${tm.join("، ")}`);
+  return { ready: !problems.length, problems, gaps: [], lines: out, terms: { ...(terms || {}) } };
+}
+
+/* ------------------------------------------------------------------ */
 /* تصمیم کارشناس                                                         */
 /* ------------------------------------------------------------------ */
 const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? ai : null; };
@@ -1009,15 +1256,20 @@ const aiOf = (b) => { const ai = parse(b.ai_json, null); return aiUsable(ai) ? a
  * می‌شود) · reject (رد) · final (تأیید نهایی ← اقلام با مقدارهای پیش‌فاکتور به تب استعلامات).
  * تأیید نهایی فقط وقتی که هر ردیفِ دروازه‌ایِ جدول تطابق ✅ است یا کارشناس تیکش زده (پیش‌فاکتور ملاک؛ sp-ai.js:resolve).
  * فیلدِ اجباری‌ای که با پذیرشِ «نیامده» خالی می‌ماند (gaps)، خط استعلام را از «ثبت موقت» و تیک «تأیید نهایی» بازمی‌دارد.
+ * خوانش هوشمند خاموش (فاز ۴): approve همان final است و final از هر بستهٔ باز، با مقدارهای خودِ تأمین‌کننده (supplierRes) و
+ * پیش‌فاکتورِ Word تولیدی در جدول پیش‌فاکتورها.
  */
-export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
+export async function decide(env, ex, bundleId, action0, { comment, ai } = {}) {
   const { b, th } = await bundleFor(env, { expert: ex, ai: !!ai }, bundleId);
   askOnly(th, ai);
+  /* خوانش هوشمند خاموش (فاز ۴، تصمیم ۱۳): مرحلهٔ «تأیید و درخواست پیش‌فاکتور» نیست — «تأیید» همان تأیید نهایی است */
+  const pfRead = await pfReadOn(env);
+  const action = !pfRead && action0 === "approve" ? "final" : action0;
   const lines = await bundleLines(env, b.id);
   const note = T(comment).slice(0, 1000);
   const t = now();
   const stmts = [];
-  let body, quoteIds = [], gaps = [];
+  let body, quoteIds = [], gaps = [], pfFile = null, cur = null;
   const open = ["pending", "approved", "proforma"];
   const list = itemsTxt(lines);
   if (action === "approve") {
@@ -1037,18 +1289,37 @@ export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
       env.DB.prepare("UPDATE sp_lines SET state='rejected', updated_at=? WHERE bundle_id=?").bind(t, b.id));
     body = `❌ رد شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else if (action === "final") {
-    if (b.state !== "proforma") throw new HttpError(b.state === "approved" ? "پیش‌فاکتور هنوز نرسیده است." : `این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
-    const res = resolve(aiOf(b), parse(b.accept_json, {}));
+    let res;
+    if (pfRead) {
+      if (b.state !== "proforma") throw new HttpError(b.state === "approved" ? "پیش‌فاکتور هنوز نرسیده است." : `این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
+      res = resolve(aiOf(b), parse(b.accept_json, {}));
+    } else {
+      /* مقدارهای خودِ تأمین‌کننده؛ پیش‌فاکتورِ Word را سامانه می‌سازد (بسته‌های در راهِ مسیرِ پیشین — approved/proforma — هم همین‌طور) */
+      if (!open.includes(b.state)) throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
+      res = supplierRes(lines, termsOf(b));
+    }
     if (!res.ready) throw new HttpError(`تأیید نهایی هنوز ممکن نیست:\n• ${res.problems.join("\n• ")}`, 422, { problems: res.problems });
     gaps = res.gaps;
-    stmts.push(...await quoteStmts(env, th, b, lines, res, t),
+    if (!pfRead) {
+      /* پیش‌فاکتوری که کارشناس خودش برای همین تأمین‌کننده بارگذاری کرده دست نمی‌خورد؛ وگرنه Word تولیدی جایش می‌نشیند */
+      cur = await env.DB.prepare("SELECT source, storage_key FROM proformas WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).first().catch(() => null);
+      if (!cur || cur.source == null || ["generated", "supplier"].includes(cur.source)) {
+        pfFile = await genProforma(env, th, b, lines).catch((e) => { console.error("sp proforma gen", e && e.message); return null; });
+      }
+    }
+    stmts.push(...await quoteStmts(env, th, b, lines, res, t, pfFile, pfRead),
       env.DB.prepare("UPDATE sp_bundles SET state='final', decided_at=? WHERE id=?").bind(t, b.id),
       env.DB.prepare("UPDATE sp_lines SET state='final', updated_at=? WHERE bundle_id=?").bind(t, b.id));
-    body = `🏁 تأیید نهایی شد:\n${list}${note ? `\n💬 ${note}` : ""}`;
+    body = pfRead ? `🏁 تأیید نهایی شد:\n${list}${note ? `\n💬 ${note}` : ""}`
+      : `🏁 تأیید نهایی شد — ممنون از همکاری‌تان؛ پیشنهادتان ثبت شد و برای مقایسه به کمیسیون خرید می‌رود:\n${list}${note ? `\n💬 ${note}` : ""}`;
   } else throw new HttpError("تصمیم نامعتبر.");
   const meta = { ev: action, bundle: b.id, items: lines.map((l) => ({ no: l.no || null, title: l.title })), ...(ai ? { ai: true } : {}) };
   stmts.push(msgStmt(env, th.id, "e", "event", body, meta, t), touchStmt(env, th.id, t));
-  const out = await env.DB.batch(stmts);
+  let out;
+  try { out = await env.DB.batch(stmts); }
+  catch (e) { if (pfFile) await storage(env).remove(pfFile.key).catch(() => {}); throw e; }
+  /* پیش‌فاکتورِ تولیدیِ قبلیِ همین تأمین‌کننده جایش را به تازه داد — فایلِ کهنه از انبار پاک می‌شود */
+  if (pfFile && cur && cur.source === "generated" && cur.storage_key && cur.storage_key !== pfFile.key) await storage(env).remove(cur.storage_key).catch(() => {});
   const mid = out[out.length - 2].meta.last_row_id;
   /* خط‌های استعلام — شناسه‌شان بعد از اجرای دسته معلوم است */
   if (action === "final") {
@@ -1059,7 +1330,8 @@ export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
     if (link.length) await env.DB.batch(link);
     quoteIds = lines.map((l) => byItem.get(l.item_id)).filter(Boolean);
   }
-  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, demo: !!th.demo,
+  /* gen: Word تولیدی در پیش‌فاکتورها نشست (فاز ۴) — بی انبار یا با پیش‌فاکتورِ خودِ کارشناس نه */
+  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, demo: !!th.demo, gen: !!pfFile,
     msgs: [msgObj(mid, th.id, "e", "event", body, meta, t)], thread: th };
 }
 
@@ -1069,8 +1341,10 @@ export async function decide(env, ex, bundleId, action, { comment, ai } = {}) {
  * به‌روز می‌شود. اگر همهٔ اجباری‌ها پر باشد، خط «ثبت موقت» است و تیک «تأیید نهایی» می‌خورد تا به جدول کمیسیون
  * برسد؛ وگرنه (کارشناس «نیامده» را پذیرفته) همان خط با جاهای خالی می‌ماند و به کمیسیون نمی‌رود. پیش‌فاکتور هم برای
  * همین تأمین‌کننده ثبت می‌شود تا تب استعلامات و کمیسیون همان سند را ببینند.
+ * gen: Word تولیدی (فاز ۴). ownPf: پیش‌فاکتورِ خودِ تأمین‌کننده سندِ کار است (خوانش هوشمند روشن)؛ خاموش، فقط پیوستِ بسته است و
+ * جای هیچ پیش‌فاکتوری نمی‌نشیند — نه پیش‌فاکتوری که کارشناس خودش گذاشته، نه وقتی Word تولیدی ساخته نشد.
  */
-async function quoteStmts(env, th, b, lines, res, t) {
+async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
   const have = new Map(((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
     .map((r) => [r.item_id, r.id]));
   const byLine = new Map(res.lines.map((x) => [x.line_id, x.values]));
@@ -1093,7 +1367,16 @@ async function quoteStmts(env, th, b, lines, res, t) {
         .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, t, t));
     }
   }
-  if (b.pf_key) {
+  if (gen) {
+    /* پیش‌فاکتورِ تولیدی (فاز ۴) جای پیش‌فاکتورِ سامانه‌ایِ قبلی را می‌گیرد، نه پیش‌فاکتوری که کارشناس خودش بارگذاری کرده */
+    stmts.push(env.DB.prepare(`INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at,item_ids)
+      VALUES (?,?,?,?,?,?,'generated',?,?)
+      ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key, mime=excluded.mime,
+        size_bytes=excluded.size_bytes, source='generated', uploaded_at=excluded.uploaded_at, item_ids=excluded.item_ids,
+        extracted_json=NULL, extract_state=NULL, extract_at=NULL
+      WHERE proformas.source IS NULL OR proformas.source IN ('generated','supplier')`)
+      .bind(th.assignment_id, th.supplier_name, gen.name, gen.key, gen.mime, gen.size, t, JSON.stringify(gen.item_ids || lines.map((l) => l.item_id))));
+  } else if (ownPf && b.pf_key) {
     stmts.push(env.DB.prepare(`INSERT INTO proformas (assignment_id,supplier_name,filename,storage_key,mime,size_bytes,source,uploaded_at,item_ids)
       VALUES (?,?,?,?,?,?,'supplier',?,?)
       ON CONFLICT(assignment_id,supplier_name) DO UPDATE SET filename=excluded.filename, storage_key=excluded.storage_key, mime=excluded.mime,
@@ -1139,6 +1422,7 @@ export async function acceptRows(env, ex, bundleId, { keys, on = true, all = fal
 
 /** نتیجهٔ «بررسی هوشمند» روی بسته ذخیره می‌شود (sp-ai.js مدل را صدا می‌زند) */
 export async function aiTarget(env, ex, bundleId) {
+  if (!(await pfReadOn(env))) throw new HttpError("«خوانش هوشمند پیش‌فاکتور» در پنل پشتیبانی خاموش است: پیش‌فاکتور را سامانه از فیلدهای تأمین‌کننده می‌سازد و تأیید نهایی با همان مقدارهاست.", 409);
   const { b, th } = await bundleFor(env, { expert: ex }, bundleId);
   askOnly(th, false);
   if (b.state !== "proforma" || !b.pf_key) throw new HttpError("خوانش هوشمند فقط بعد از رسیدن پیش‌فاکتور.", 409);

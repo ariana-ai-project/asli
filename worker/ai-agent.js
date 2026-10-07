@@ -10,6 +10,8 @@
  *      لینک پنل و بات (spSend)، و پیامک فقط به شماره‌های تیک‌خورده — پیش از هر پیامک تیک دوباره سنجیده می‌شود.
  *   ۴. مذاکره در هر گفت‌وگو: مدل (ai-prompts.js) پرونده را می‌خواند، پاسخ می‌دهد و تصمیم می‌گیرد — تأیید، برگشت، رد،
  *      پذیرش مغایرت، تأیید نهایی — با همان توابعِ صفحهٔ مکاتبات. پیش‌فاکتور اول با همان «خوانش هوشمند» خوانده می‌شود.
+ *      فاز ۴ طرح: «خوانش هوشمند پیش‌فاکتور» پیش‌فرض خاموش است (worker/switches.js) — مدل بسته را با درخواست می‌سنجد و یکراست
+ *      «تأیید نهایی» می‌کند (مقدارهای خودِ تأمین‌کننده، پیش‌فاکتورِ تولیدی) یا با توضیح برمی‌گرداند؛ سندی خوانده نمی‌شود.
  *   ۵. پایان (هر قلم به «حداقلِ استعلامِ» خودش رسیده — قواعدِ پنل پشتیبانی، ai-rules.js — و سکوتِ تأمین‌کنندگان یا «پایان»
  *      از پنل): شرحِ فرایند، چالش‌ها و معیار انتخاب ← نامه، و جدول کمیسیون — به تلگرام کارشناس، و «تحویل» در پنل پشتیبانی
  *      برای تأیید یا ردِ کمیسیون (فاز ۳). اگر در مهلتِ قواعد به حد نرسید، کار به کارشناس «واگذار» می‌شود (handOver).
@@ -46,6 +48,7 @@ import { setCommission } from "./support.js";
 import { queueStmt } from "./queue.js";
 import { NORM_OK_SQL, changeStmt } from "./structure.js";
 import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
+import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -429,10 +432,15 @@ async function invitable(env, run) {
  * قالبِ دعوت — اولین پیامِ گفت‌وگو، با همان لحنِ محاوره‌ایِ مذاکره (درخواست کاربر، مهر ۱۴۰۵)؛ پیامک کوتاه‌ترش را می‌برد.
  * یک جمله می‌گوید پیام‌ها را دستیارِ هوشمند جواب می‌دهد — مدل هم اگر صادقانه پرسیده شود انکار نمی‌کند (ai-prompts.js).
  */
-function inviteText(env, sup, items) {
+function inviteText(env, sup, items, pfRead = true) {
   const list = items.map((i) => `• ${i.title} — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trim()).join("\n");
+  /* فاز ۴: پیش‌فاکتور را خودِ سامانه از همین فیلدها می‌سازد — تأمین‌کننده فقط پر می‌کند، پیش‌نمایش را می‌بیند و «ارسال» می‌زند */
+  const ask = pfRead
+    ? "اگه لطف کنید مقدار، قیمت واحد (بدون ارزش افزوده)، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده رو همین‌جا توی پنل ثبت کنید و «ارسال» رو بزنید، ممنون می‌شم. اگه پیش‌فاکتور هم دارید، همین‌جا بارگذاری کنید.\n"
+    : "اگه لطف کنید قیمت واحد (بدون ارزش افزوده)، اعتبار پیش‌فاکتور، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده رو همین‌جا توی پنل ثبت کنید، "
+      + "پیش‌نمایش پیش‌فاکتور رو ببینید و «ارسال» رو بزنید، ممنون می‌شم؛ پیش‌فاکتور رو خودِ سامانه از همین‌ها می‌سازه. اگه توضیحی دارید، زیر همون قلم بنویسید.\n";
   return `سلام، وقتتون بخیر 🌷\n${sup}، از واحد تدارکات شرکت ${COMPANY(env)} مزاحمتون می‌شم؛ برای ${items.length === 1 ? "این قلم" : "این اقلام"} قیمت می‌خواستیم:\n${list}\n`
-    + "اگه لطف کنید مقدار، قیمت واحد (بدون ارزش افزوده)، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده رو همین‌جا توی پنل ثبت کنید و «ارسال» رو بزنید، ممنون می‌شم. اگه پیش‌فاکتور هم دارید، همین‌جا بارگذاری کنید.\n"
+    + ask
     + "پیام‌هاتون رو دستیارِ هوشمندِ خریدِ ما همین‌جا جواب می‌ده؛ تصمیمِ نهایی هم با کمیسیون معاملات شرکته.\nممنون از همکاری‌تون 🙏";
 }
 const smsIntro = (env, items) => `استعلام قیمت شرکت ${COMPANY(env)}: ${items.length === 1 ? `${items[0].title} (${faN(items[0].qty == null ? "—" : items[0].qty)} ${items[0].unit || ""})`.trim() : `${faN(items.length)} قلم`}. ثبت قیمت و گفت‌وگو با کارشناس خرید:`;
@@ -442,7 +450,7 @@ async function inviteOne(env, run, ex, inv) {
   if (!items.length) return null;
   const [p0, ...more] = inv.phones;
   const r = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: p0.id,
-    text: inviteText(env, inv.name, items), sms: smsIntro(env, items), ai: true });
+    text: inviteText(env, inv.name, items, await pfReadOn(env)), sms: smsIntro(env, items), ai: true });
   const t = now();
   const top = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS n FROM sp_msgs WHERE thread_id=?").bind(r.thread_id).first();
   await env.DB.batch([
@@ -614,8 +622,9 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       env.DB.prepare("SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id").bind(threadId),
     ]);
     const lines = lr.results || [], bundles = br.results || [], msgs = (mr.results || []).map(C.msgOut);
-    /* پیش‌فاکتورِ تازه: اول خوانش هوشمند (همان پرامپتِ sp-ai.js) */
-    const need = bundles.find((b) => b.state === "proforma" && b.pf_key && !aiUsable(parse(b.ai_json, null)));
+    /* پیش‌فاکتورِ تازه: اول خوانش هوشمند (همان پرامپتِ sp-ai.js) — فقط وقتی کلیدش در پنل پشتیبانی روشن است (فاز ۴) */
+    const pfRead = await pfReadOn(env);
+    const need = pfRead && bundles.find((b) => b.state === "proforma" && b.pf_key && !aiUsable(parse(b.ai_json, null)));
     if (need) {
       const store = storage(env);
       if (!store || !store.signedUrl) throw new Error("انبار فایل لینک امضاشده نمی‌دهد؛ پیش‌فاکتور خوانده نشد.");
@@ -632,14 +641,14 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       return { read: need.id };
     }
     if (fast) {
-      const due = bundles.filter((b) => b.state === "pending" || (b.state === "proforma" && aiUsable(parse(b.ai_json, null))));
+      const due = bundles.filter((b) => b.state === "pending" || (!pfRead && ["approved", "proforma"].includes(b.state)) || (b.state === "proforma" && aiUsable(parse(b.ai_json, null))));
       if (due.length) return toCron(env, run, threadId, `بستهٔ ${due.map((b) => b.id).join("، ")} تصمیم می‌خواهد؛ دورِ فوری کنار رفت و Cron همین گفت‌وگو را با عمقِ فکرِ تب می‌زند.`);
     }
     const maxId = msgs.length ? msgs[msgs.length - 1].id : st.seen_msg;
-    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs });
+    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead });
     rec.purpose = "negotiate";
     /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
-    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined })).out;
+    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead })).out;
     /* دورِ کم‌عمق تصمیمی روی بسته گرفت (مثلاً ردِ بسته پس از پیامِ تأمین‌کننده): نه تصمیم اجرا می‌شود نه پاسخ می‌رود */
     if (fast && Array.isArray(res.actions) && res.actions.length) {
       return toCron(env, run, threadId, `دورِ فوری تصمیم گرفت (${res.actions.map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ")})؛ اجرا نشد و Cron همین دور را با عمقِ فکرِ تب می‌زند.`);
@@ -744,7 +753,7 @@ function validKeys(b, rows) {
 }
 
 /** پروندهٔ یک دور برای مدل (ai-prompts.js:negotiationContext) */
-async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
+async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead = true }) {
   const lineOut = lines.map(C.lineOut);
   /* محکِ قیمت: سوابقِ همین قلم (از آماده‌سازی) و پیشنهادهای دیگرِ همین ارجاع — بی نام */
   const others = (await env.DB.prepare(`SELECT l.item_id, COUNT(*) AS n, MIN(l.price) AS min FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
@@ -762,9 +771,12 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
   });
   const bOut = bundles.map((b) => {
     const ai = parse(b.ai_json, null), acc = parse(b.accept_json, {});
-    const usable = aiUsable(ai) ? ai : null;
+    const usable = pfRead && aiUsable(ai) ? ai : null;
+    /* خوانش هوشمند خاموش (فاز ۴): آمادگیِ تأیید نهایی از خودِ بسته — فیلدهای اجباری و شرایط */
+    const own = pfRead ? null : C.bundleOut(b, "e", { pfRead: false, lines });
     return { id: b.id, state: b.state, comment: b.comment, terms: C.termsOf(b), pf: b.pf_key ? b.pf_name || "پیش‌فاکتور" : null,
-      items: bundleItems(b, lines).map((l) => ({ no: l.no, title: l.title })), ai: usable, accept: acc, match: usable ? resolve(usable, acc) : null };
+      items: bundleItems(b, lines).map((l) => ({ no: l.no, title: l.title })), ai: usable, accept: acc,
+      match: usable ? resolve(usable, acc) : own ? { ready: own.ready, problems: own.problems, gaps: [] } : null };
   });
   /* حقیقت‌های واقعیِ مذاکره: تاریخِ نیازِ هر قلم (فایلِ درخواست) و سابقهٔ خریدِ شرکت از همین تأمین‌کننده (بررسی سوابق) —
      مدل فقط به همین‌ها تکیه می‌کند و عدد یا سابقه‌ای نمی‌سازد (ai-prompts.js) */
@@ -792,6 +804,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs }) {
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
     lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null })), terms: C.termsOf(th), rel,
     bundles: bOut, bench, memo: T(st.memo), errors: parse(st.errors_json, []), ask: parse(st.ask_json, null), transcript: threadSection(tInfo, msgs, { forModel: true }),
+    pfRead,
   });
 }
 
@@ -1211,6 +1224,9 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     const r = await saveRanking(env, await readJson(request), "support");
     return json({ ok: true, ...r });
   }
+  /* فاز ۴: «🎛 کلیدها» — خوانش هوشمند پیش‌فاکتور (پیش‌فرض خاموش؛ worker/switches.js) */
+  if (sub === "/switches" && m === "GET") return json({ ...(await getSwitches(env)), fa: SWITCH_FA });
+  if (sub === "/switches" && m === "PUT") return json({ ok: true, ...(await saveSwitches(env, await readJson(request), "support")) });
   if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
   let dm;
   if ((dm = /^\/deliveries\/(\d+)$/.exec(sub)) && m === "GET") return json(await delivery(env, int(dm[1])));
