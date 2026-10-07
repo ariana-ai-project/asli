@@ -12,6 +12,10 @@
  * اگر مدیر گزینهٔ «منوط به تأیید من» را زده باشد، تصمیم می‌نشیند در صف و در
  * تلگرامِ مدیر با دو دکمهٔ تأیید/رد می‌آید؛ ردْ دلیل می‌خواهد و همان دلیل به
  * کارشناس برمی‌گردد.
+ *
+ * «انجام دستی» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب): در درخواستی که دستِ کارشناس هوشمند است، کارشناس اقلامی را با علت به مدیر
+ * برمی‌گرداند تا خودش انجامشان دهد — همیشه منوط به تأییدِ مدیر، چه «منوط به تأیید من» روشن باشد چه نه. تأیید: همان اقلام دستی
+ * (items.ai_off) و بیرون از کارِ کارشناس هوشمند؛ رد: با پاسخِ مدیر، اقلام هوشمند می‌مانند.
  */
 import { HttpError } from "./http.js";
 import { getSettings } from "./settings.js";
@@ -19,12 +23,14 @@ import { queueStmt } from "./queue.js";
 import { notifyClosed, managerCard } from "./manager.js";
 import { esc } from "./telegram.js";
 import { closureStmt } from "./records.js";
+import { aiOwned } from "./ai-lock.js";
 
 const now = () => Date.now();
 const int = (v, d = null) => { const n = parseInt(v, 10); return isNaN(n) ? d : n; };
 const FA = "۰۱۲۳۴۵۶۷۸۹";
 const M = (n) => String(n == null ? "" : n).replace(/\d/g, (d) => FA[+d]);
-const ACTION_FA = { hold: "تعلیق", stop: "توقف", end: "خاتمه" };
+const ACTION_FA = { hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی" };
+const T = (v) => String(v == null ? "" : v).trim();
 
 const ev = (env, actor, kind, requestId, payload) =>
   env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)")
@@ -53,9 +59,10 @@ async function context(env, aid) {
  */
 export async function expertDecision(env, ex, aid, body) {
   const action = body.action;
-  if (!["hold", "stop", "end"].includes(action)) throw new HttpError("action نامعتبر است.");
+  if (!["hold", "stop", "end", "manual"].includes(action)) throw new HttpError("action نامعتبر است.");
   const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!own) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
+  if (action === "manual") return manualRequest(env, ex, own, body);
 
   let itemIds = Array.isArray(body.item_ids) ? body.item_ids.map((x) => int(x)).filter(Boolean) : null;
   if (action === "end") {
@@ -85,20 +92,52 @@ export async function expertDecision(env, ex, aid, body) {
   return { ok: true, pending: false, ...res };
 }
 
+/**
+ * «انجام دستی»: اقلامِ بازی که هنوز به کارشناس هوشمند سپرده نشده‌اند (نه در کارِ زندهٔ او، نه «دستی»ِ قبلی، نه در انتظارِ
+ * درخواستِ دیگر)، با علتِ اجباری — تا تصمیمِ مدیر در صف می‌ماند و در تلگرامِ مدیر با دکمهٔ تأیید و رد می‌آید.
+ */
+async function manualRequest(env, ex, own, body) {
+  const reason = T(body.reason).slice(0, 1000);
+  if (!reason) throw new HttpError("برای «انجام دستی» علت را بنویسید تا مدیر تصمیم بگیرد.");
+  const o = await aiOwned(env, own.id);
+  if (!o) throw new HttpError("این درخواست در حالت هوشمند نیست؛ کارهایش همین حالا با خودِ شماست.", 409);
+  const want = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : []).map((x) => int(x)).filter(Boolean))];
+  if (!want.length) throw new HttpError("دست‌کم یک قلم را برای انجام دستی انتخاب کنید.");
+  const rows = (await env.DB.prepare(`SELECT id, frozen_at, ai_off FROM items WHERE assignment_id=? AND state='open' AND id IN (${want.map(() => "?").join(",")})`)
+    .bind(own.id, ...want).all()).results || [];
+  const waiting = new Set(((await env.DB.prepare("SELECT payload_json FROM decisions WHERE assignment_id=? AND action='manual' AND approved_at IS NULL AND rejected_at IS NULL")
+    .bind(own.id).all()).results || []).flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
+  const itemIds = rows.filter((r) => !(o.run_id && r.frozen_at) && Number(r.ai_off) !== 1 && !waiting.has(r.id)).map((r) => r.id);
+  if (!itemIds.length) throw new HttpError("این اقلام سپرده شده‌اند، از قبل دستی‌اند یا درخواستِ دیگری برایشان در انتظارِ مدیر است.", 409);
+  const t = now();
+  const payload = { item_ids: itemIds, reason };
+  const r = await env.DB.prepare("INSERT INTO decisions (assignment_id,expert_id,action,payload_json,requested_at) VALUES (?,?,?,?,?)")
+    .bind(own.id, ex.id, "manual", JSON.stringify(payload), t).run();
+  const id = r.meta.last_row_id;
+  const stmts = [ev(env, `expert:${ex.id}`, "decision_requested", own.request_id, { decision_id: id, action: "manual", items: itemIds, reason })];
+  const mgr = await settingValue(env, "managerChat");
+  if (mgr) stmts.push(await decisionRequestStmt(env, mgr, id, own.id, "manual", itemIds, t, reason));
+  await env.DB.batch(stmts);
+  return { ok: true, pending: true, decision_id: id, items: itemIds.length };
+}
+
 /** پیام «در انتظار تأیید» برای مدیر، با دو دکمه. `at` لحظهٔ ثبتِ تصمیم است و در کلید یکتایی صف می‌آید */
-async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemIds, at) {
+async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemIds, at, reason = null) {
   const c = await context(env, aid);
   const its = (await env.DB.prepare("SELECT id, title, qty, unit, state FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
   const chosen = new Set(itemIds || []);
-  const list = its.filter((i) => action !== "end" || chosen.has(i.id)).slice(0, 12)
+  const list = its.filter((i) => !["end", "manual"].includes(action) || chosen.has(i.id)).slice(0, 12)
     .map((i, k) => `${M(k + 1)}. ${esc(i.title)}${i.qty != null ? ` — <b>${M(i.qty)}</b> ${esc(i.unit || "")}` : ""}`).join("\n");
   const text = `🟠 <b>درخواست تأیید: ${ACTION_FA[action]}</b>\n\n`
     + `درخواست <b>${esc(c.request_id)}</b>\n${esc(c.party || "")}\n\n`
     + `👤 کارشناس: <b>${esc(c.expert_label || c.expert_name)}</b>\n\n`
     + (action === "end"
       ? `کارشناس می‌خواهد <b>${M(chosen.size)} قلم از ${M(c.item_count)}</b> را با تأیید کمیسیون خاتمه دهد:\n${list}`
-      : `کارشناس می‌خواهد این درخواست را <b>${ACTION_FA[action]}</b> کند.`)
-    + `\n\n<i>چون «تصمیم کارشناس منوط به تأیید من» فعال است، تا شما تأیید نکنید اعمال نمی‌شود.</i>`;
+      : action === "manual"
+        ? `کارشناس می‌خواهد این <b>${M(chosen.size)} قلم</b> را به‌جای کارشناس هوشمند خودش انجام دهد:\n${list}${reason ? `\n\n<b>علت:</b>\n${esc(reason)}` : ""}`
+        : `کارشناس می‌خواهد این درخواست را <b>${ACTION_FA[action]}</b> کند.`)
+    + (action === "manual" ? "\n\n<i>«انجام دستی» همیشه با تأیید شماست؛ با رد، اقلام دستِ کارشناس هوشمند می‌مانند.</i>"
+      : `\n\n<i>چون «تصمیم کارشناس منوط به تأیید من» فعال است، تا شما تأیید نکنید اعمال نمی‌شود.</i>`);
   /* کلید یکتایی زمان را هم دارد: شناسهٔ تصمیم بعد از حذف درخواست‌ها دوباره استفاده می‌شود و ردیفِ
      قدیمیِ «dec:5:ask» پیامِ تصمیمِ تازه را بی‌صدا می‌خورد (ON CONFLICT DO NOTHING) — همان باگِ dispatch */
   return queueStmt(env, `dec:${decisionId}:${at}:ask`, mgrChat, text, [
@@ -112,6 +151,7 @@ async function decisionRequestStmt(env, mgrChat, decisionId, aid, action, itemId
  */
 export async function applyDecision(env, actor, aid, action, payload, decisionId) {
   const t = now();
+  if (action === "manual") return applyManual(env, actor, aid, payload, t);
   let closed = 0;
   /* اقلامی که همین تصمیم تغییرشان می‌دهد — پیش از UPDATE خوانده می‌شوند تا در closures بمانند */
   const ids = Array.isArray(payload && payload.item_ids) ? payload.item_ids.map((x) => int(x)).filter(Boolean) : [];
@@ -157,6 +197,17 @@ export async function applyDecision(env, actor, aid, action, payload, decisionId
   return { closed, fullyClosed };
 }
 
+/** «انجام دستی»ِ تأییدشده: همان اقلامِ باز دستی می‌شوند — وضعیتشان عوض نمی‌شود */
+async function applyManual(env, actor, aid, payload, t) {
+  const ids = Array.isArray(payload && payload.item_ids) ? payload.item_ids.map((x) => int(x)).filter(Boolean) : [];
+  if (!ids.length) return { manual: 0, closed: 0, fullyClosed: false };
+  const r = await env.DB.prepare(`UPDATE items SET ai_off=1, ai_off_at=? WHERE assignment_id=? AND state='open' AND COALESCE(ai_off,0)<>1 AND id IN (${ids.map(() => "?").join(",")})`)
+    .bind(t, aid, ...ids).run();
+  const c = await context(env, aid);
+  await env.DB.batch([ev(env, actor, "ai_manual", c && c.request_id, { assignment_id: aid, items: ids, reason: (payload && payload.reason) || null })]);
+  return { manual: (r.meta && r.meta.changes) || 0, closed: 0, fullyClosed: false };
+}
+
 /** مدیر تأیید کرد */
 export async function approveDecision(env, decisionId, via) {
   const d = await env.DB.prepare("SELECT * FROM decisions WHERE id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(decisionId).first();
@@ -189,8 +240,9 @@ async function tellExpert(env, d, ok, reason, res) {
   const text = ok
     ? `✅ <b>مدیر ${act} را تأیید کرد</b>\n\nدرخواست <b>${esc(c.request_id)}</b>`
       + (d.action === "end" && res ? `\n${M(res.closed)} قلم بسته شد${res.fullyClosed ? " و درخواست از کارتابل شما خارج شد." : "؛ باقی اقلام در کارتابل می‌ماند."}` : "")
+      + (d.action === "manual" && res ? `\n${M(res.manual)} قلم دستِ خودِ شماست: بررسی سوابق، جستجو و مکاتبه‌اش را خودتان انجام دهید.` : "")
     : `❌ <b>مدیر ${act} را رد کرد</b>\n\nدرخواست <b>${esc(c.request_id)}</b>`
       + (reason ? `\n\n<b>علت:</b>\n${esc(reason)}` : "\n\n<i>دلیلی نوشته نشد.</i>")
-      + `\n\nدرخواست همچنان در کارتابل شماست.`;
+      + (d.action === "manual" ? "\n\nاین اقلام با کارشناس هوشمند می‌مانند؛ بعد از نرمال‌سازی «سپردن» را بزنید." : `\n\nدرخواست همچنان در کارتابل شماست.`);
   await env.DB.batch([queueStmt(env, `dec:${d.id}:${d.requested_at}:${ok ? "ok" : "no"}`, c.telegram_chat, text)]);
 }

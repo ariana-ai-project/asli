@@ -204,10 +204,10 @@ export async function supportExpert(env, id) {
  */
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
-  asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected"] },
+  asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual"] },
   work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -225,6 +225,9 @@ const EV_FA = {
   ai_handoff: "🤖 بررسی سوابق و سپردن به کارشناس هوشمند — ساختارِ اقلام منجمد شد",
   ai_ranking: "وزن‌های رتبهٔ نهایی و قاعدهٔ دعوت عوض شد",
   ai_switches: "🎛 کلیدهای کارشناس هوشمند عوض شد (خوانش هوشمند پیش‌فاکتور)",
+  /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر در ارجاع، «انجام دستی»ِ تأییدشده و حالتِ اقلام */
+  ai_tick: "تیکِ «🤖 هوشمند / ✋ دستی»ِ ارجاع (مدیر)", ai_manual: "«انجام دستی»ِ اقلام با تأییدِ مدیر",
+  ai_modes: "🧭 حالتِ اقلامِ کارشناس هوشمند عوض شد",
 };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
 const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };

@@ -17,7 +17,7 @@
  */
 
 import { alertSchedule, jNorm, jValid, jStr, fmtFa } from "./time.js";
-import { telegram } from "./telegram.js";
+import { telegram, esc } from "./telegram.js";
 import { storage, storageInfo, storageKey, MAX_BYTES } from "./storage.js";
 import { extractProforma, toRial, ExtractError } from "./extract.js";
 import { transcribe, writeLetter } from "./letter.js";
@@ -56,6 +56,7 @@ import { supportStatus, supportSetup, supportLogin, supportReset, supportChangeP
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
+import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -278,6 +279,14 @@ const COLUMN_MIGRATIONS = [
   ["ai_runs", "review_json", "TEXT"],        /* فاز ۳: تحویلِ کارشناس هوشمند در پنل پشتیبانی — {state: new|ok|rejected, …} */
   /* طرح «خرید هوشمند، کارشناس ناظر» فاز ۱: پیشنهادِ سامانه، انجمادِ ساختار با سپردن به کارشناس هوشمند (worker/structure.js) */
   ...STRUCT_COLUMNS,
+  /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر روی ارجاع (NULL: پیش از فاز ۴ب، یعنی روشن) با توضیحِ برداشتنش، و قلمِ «انجام دستی» که مدیر
+     تأیید کرده (worker/ai-modes.js، decisions.js) */
+  ["assignments", "ai_on", "INTEGER"],
+  ["assignments", "ai_note", "TEXT"],
+  ["assignments", "ai_set_at", "INTEGER"],
+  ["assignments", "ai_set_by", "TEXT"],
+  ["items", "ai_off", "INTEGER"],
+  ["items", "ai_off_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -466,9 +475,11 @@ function ev(env, actor, kind, request_id, item_id, payload) {
  * kind «research» (سوابق، جستجو، ساختار): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) برای کارشناس باز است؛ جدول و
  * نامه تا پایانِ کارِ کارشناس هوشمند قفل می‌مانند.
  */
-async function aiGuard(env, who, assignmentId, kind) {
+async function aiGuard(env, who, assignmentId, kind, item) {
   if (!who || !(who.expert || who.role === "expert") || !assignmentId) return;
   const o = await aiOwned(env, assignmentId);
+  /* فاز ۴ب: قلمِ دستیِ کارشناس — «انجام دستی»ِ تأییدشده، بیرون از کارِ کارشناس هوشمند، یا از نوعِ «مستقیم» (ai-modes.js) */
+  if (o && item && (kind === "research" || kind === "norm") && await aiItemFree(env, o, item)) return;
   /* «norm» (طرح «خرید هوشمند» فاز ۱): ساختارِ قلم کارِ خودِ کارشناس است، پیش از سپردن (کارِ «pending») هم — فقط کارِ زندهٔ
      کارشناس هوشمند (پیش از واگذاری) قفلش می‌کند؛ قلمِ سپرده‌شده را انجماد (frozenGuard) هم نگه می‌دارد */
   const locked = kind === "norm" ? !!o && !!o.run_id && !o.handover : kind === "research" ? aiResearchLocked(o) : !!o;
@@ -678,18 +689,21 @@ async function desk(env, url) {
     env.DB.prepare(`SELECT r.*, im.imported_at AS imported_at FROM requests r LEFT JOIN imports im ON im.id=r.first_import_id WHERE ${where} ORDER BY r.date DESC, r.id DESC LIMIT ? OFFSET ?`).bind(...args, limit, offset),
     listExpertsStmt(env),
     env.DB.prepare("SELECT key,value FROM settings"),
+    /* فاز ۴ب: کارشناس‌هایی که کارشناس هوشمندشان روشن است — فقط برای آن‌ها تیکِ «🤖 هوشمند» در ارجاع هست (تصمیم ۱۵) */
+    env.DB.prepare("SELECT expert_id FROM ai_agents WHERE mode='on'"),
     ...(withAll ? [
       env.DB.prepare("SELECT * FROM expert_scores"), env.DB.prepare("SELECT * FROM weights"),
       env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at"),
     ] : []),
   ];
-  const [cnt, allCnt, reqRes, expRes, setRes, scRes, wRes, decRes] = await env.DB.batch(first);
+  const [cnt, allCnt, reqRes, expRes, setRes, aiRes, scRes, wRes, decRes] = await env.DB.batch(first);
   const total = (cnt.results[0] || {}).n || 0, all_total = (allCnt.results[0] || {}).n || total;
   const reqs = reqRes.results || [];
   const extra = {
     limit, offset, total, all_total,
     experts: expertRows(expRes.results || []),
     settings: settingsFromRows(setRes.results || []),
+    ai_experts: (aiRes.results || []).map((r) => r.expert_id),
     ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [] } : {}),
   };
   if (!reqs.length) return { requests: [], ...extra };
@@ -964,6 +978,43 @@ async function setDays(env, body) {
   return { ok: true };
 }
 
+/**
+ * تیکِ «🤖 هوشمند»ِ مدیر روی یک ارجاع (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب): پیش‌فرض روشن. فقط برای کارشناسی که کارشناس
+ * هوشمندش در پنل پشتیبانی روشن است (تصمیم ۱۵) و تا وقتی کار هنوز سپرده نشده — بعد از آن «✋ دستی»ِ پنل پشتیبانی. برداشتنِ تیک
+ * توضیح می‌خواهد، مگر همهٔ اقلامِ بازِ ارجاع از نوعِ «مستقیم» باشند؛ زدنش هرگز. ارجاعِ ارسال‌شده: خبر به کارشناس در تلگرام.
+ */
+async function setAiTick(env, body) {
+  const aid = int(body.assignment_id); if (!aid) throw new HttpError("assignment_id لازم است.");
+  const on = body.on !== false;
+  const a = await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.dispatched_at, a.ai_on, e.telegram_chat, g.mode
+      FROM assignments a JOIN experts e ON e.id=a.expert_id LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?`).bind(aid).first();
+  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
+  if (a.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ درخواست دستی است.", 409);
+  if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(aid).first()) {
+    throw new HttpError("کار به کارشناس هوشمند سپرده شده است؛ از این‌جا عوض نمی‌شود — «✋ دستی»ِ پنل پشتیبانی.", 409);
+  }
+  const note = T(body.reason).slice(0, 1000);
+  if (!on) {
+    const its = (await env.DB.prepare("SELECT id, code, title, norm_json FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
+    const modes = await itemModes(env, its);
+    const allDirect = its.length > 0 && its.every((i) => (modes.get(i.id) || {}).mode === "direct");
+    if (!allDirect && !note) throw new HttpError("برای برداشتنِ تیکِ «🤖 هوشمند» علت را بنویسید.", 422, { need_reason: true });
+  }
+  if ((a.ai_on !== 0) === on) return { ok: true, on, changed: false };
+  const t = now();
+  const stmts = [
+    env.DB.prepare("UPDATE assignments SET ai_on=?, ai_note=?, ai_set_at=?, ai_set_by='manager' WHERE id=?").bind(on ? 1 : 0, on ? null : note || null, t, aid),
+    ev(env, "manager", "ai_tick", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, reason: on ? null : note || null }),
+  ];
+  if (a.dispatched_at && a.telegram_chat) {
+    stmts.push(queueStmt(env, `aitick:${aid}:${t}`, a.telegram_chat, on
+      ? `🤖 <b>درخواست ${esc(a.request_id)} در حالت هوشمند است</b>\n\nمدیر تیکِ «هوشمند» را زد: بعد از نرمال‌سازی، اقلام را به کارشناس هوشمند بسپارید.`
+      : `✋ <b>درخواست ${esc(a.request_id)} دستی شد</b>\n\nمدیر تیکِ «هوشمند» را برداشت؛ همهٔ کارهایش با خودِ شماست.${note ? `\n\n<b>توضیحِ مدیر:</b>\n${esc(note)}` : ""}`));
+  }
+  await env.DB.batch(stmts);
+  return { ok: true, on, changed: true };
+}
+
 /* ارسال: ساعت‌شمار شروع می‌شود + رویداد اعلان برای هر کارشناس */
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
@@ -1077,7 +1128,7 @@ async function settingsFor(env, expertId, settings) {
 }
 
 /* ارجاعِ دستِ کارشناس هوشمند در یک ستون (همان قاعدهٔ ai-lock.js:aiOwned) — a: assignments؛ کارتابل نشانِ 🤖 می‌زند */
-const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0
+const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0 WHEN a.ai_on=0 THEN 0
     WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN (CASE WHEN x.handover_at IS NULL THEN 1 ELSE 2 END) ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
     WHEN a.dispatched_at>=COALESCE(g.on_at,0) AND a.closed_at IS NULL THEN 1 ELSE 0 END FROM ai_agents g WHERE g.expert_id=a.expert_id)`;
 
@@ -1146,6 +1197,21 @@ async function assignmentDetail(env, aid, who) {
   /* طرح «خرید هوشمند» فاز ۱: «بررسی سوابق و سپردن به کارشناس هوشمند» — کارِ «pending» (هنوز سپرده نشده) و شمارِ اقلامِ نرمال‌شده */
   const open = items.filter((i) => i.state === "open");
   ai.handoff = { total: open.length, ok: open.filter((i) => normConfirmed(i)).length, frozen: open.filter((i) => i.frozen_at).length, pending: !!(owned && !owned.run_id) };
+  /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر */
+  ai.on = a.ai_on !== 0; ai.note = a.ai_note || null;
+  if (aiMode && open.length) {
+    const modes = await itemModes(env, open);
+    const waiting = new Set(decisions.filter((d) => d.action === "manual").flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
+    const inRun = new Set();
+    if (owned && owned.run_id) {
+      const r = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(owned.run_id).first();
+      try { for (const x of JSON.parse((r && r.data_json) || "{}").items || []) inRun.add(x.id); } catch (_) { /* بی کار */ }
+    }
+    ai.items = open.map((i) => {
+      const m = modes.get(i.id) || {};
+      return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id) };
+    });
+  }
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
 }
 
@@ -1153,7 +1219,7 @@ async function assignmentDetail(env, aid, who) {
    مدیر هر قلمی را می‌بیند (پنل فقط‌خواندنی‌اش همین را لازم دارد). */
 async function ownItem(env, who, itemId) {
   if (!itemId) throw new HttpError("item_id لازم است.");
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.norm_json, i.sugg_json, i.frozen_at, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.norm_json, i.sugg_json, i.frozen_at, i.ai_off, i.qty, i.unit, i.spec, a.expert_id, a.id AS aid, a.request_id
     FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?`).bind(itemId).first();
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (who.role === "expert" && it.expert_id !== who.expert.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
@@ -1161,9 +1227,9 @@ async function ownItem(env, who, itemId) {
 }
 
 async function markProgress(env, ex, itemId, stage) {
-  const it = await env.DB.prepare("SELECT i.id, i.assignment_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(itemId, ex.id).first();
+  const it = await env.DB.prepare("SELECT i.id, i.assignment_id, i.ai_off, i.norm_json, i.code, i.title FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(itemId, ex.id).first();
   if (!it) throw new HttpError("قلم متعلق به شما نیست.", 403);
-  await aiGuard(env, { expert: ex }, it.assignment_id, "research");
+  await aiGuard(env, { expert: ex }, it.assignment_id, "research", it);
   const col = stage === "hist" ? "hist_done_at" : stage === "smart" ? "smart_done_at" : null;
   if (!col) throw new HttpError("stage باید hist یا smart باشد.");
   await env.DB.prepare(`UPDATE items SET ${col}=COALESCE(${col},?) WHERE id=?`).bind(now(), itemId).run();
@@ -1710,6 +1776,7 @@ async function route(request, env, ctx) {
     if (path === "/workload" && m === "GET") { requireManager(request, env); return json(await workload(env)); }
     if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
+    if (path === "/assign/ai" && m === "POST") { const r = await (requireManager(request, env), setAiTick(env, await readJson(request))); flush(env, ctx, 1); return json(r); }
     if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
@@ -1731,9 +1798,10 @@ async function route(request, env, ctx) {
     /* طرح «خرید هوشمند» فاز ۱: ساختارِ همهٔ اقلام منجمد و کار به کارشناس هوشمند سپرده می‌شود (worker/ai-agent.js:aiHandoff) */
     if ((mm = /^\/assignments\/(\d+)\/handoff$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);
-      const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at FROM assignments WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
+      const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=? AND expert_id=?").bind(int(mm[1]), ex.id).first();
       if (!a) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
-      return json(await aiHandoff(env, a, `expert:${ex.id}`));
+      const b = await readJson(request).catch(() => ({}));
+      return json(await aiHandoff(env, a, `expert:${ex.id}`, { include: Array.isArray(b && b.include) ? b.include.map((x) => int(x)).filter(Boolean) : [] }));
     }
     if ((mm = /^\/assignments\/(\d+)\/decision$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env); const r = await expertDecision(env, ex, int(mm[1]), await readJson(request));
@@ -2029,7 +2097,7 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       const it = await ownItem(env, who, int(b.item_id));
       /* درخواستِ دستِ کارشناس هوشمند: جستجوی هوشمند را خودش می‌کند (ai-lock.js) */
-      await aiGuard(env, who, it.aid, "research");
+      await aiGuard(env, who, it.aid, "research", it);
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
       /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
          یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را
@@ -2082,7 +2150,7 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(mm[1]));
       /* نرمال‌سازی کارِ خودِ کارشناس است، پیش از سپردن به کارشناس هوشمند هم (طرح «خرید هوشمند» فاز ۱) */
-      await aiGuard(env, who, it.aid, "norm");
+      await aiGuard(env, who, it.aid, "norm", it);
       const b = await readJson(request);
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
@@ -2098,7 +2166,7 @@ async function route(request, env, ctx) {
       const it = await ownItem(env, who, int(mm[1]));
       /* منجمد (سپرده‌شده) پیامِ روشن‌تری از قفلِ کارشناس هوشمند دارد */
       await frozenGuard(env, it);
-      await aiGuard(env, who, it.aid, "norm");
+      await aiGuard(env, who, it.aid, "norm", it);
       /* قلمی که برای تأمین‌کننده رفته قفل است: برداشتنِ ذخیره نه، و ذخیره فقط با همان نوع قلم و لایه‌ها (نرخ‌ها آزاد) */
       const lock = (await itemLocks(env, [it.id])).get(it.id);
       const before = normConfirmed(it) ? JSON.parse(it.norm_json) : it.sugg_json ? JSON.parse(it.sugg_json) : null;
@@ -2122,7 +2190,7 @@ async function route(request, env, ctx) {
       const it = await ownItem(env, who, int(mm[1]));
       /* منجمد (سپرده‌شده) پیامِ روشن‌تری از قفلِ کارشناس هوشمند دارد */
       await frozenGuard(env, it);
-      await aiGuard(env, who, it.aid, "norm");
+      await aiGuard(env, who, it.aid, "norm", it);
       if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409);
       const r = await revertEdit(env, it);
       if (r.removed !== false) await env.DB.batch([ev(env, actorOf(who), "norm_revert", it.request_id, it.id, { assignment_id: it.aid }),
@@ -2149,7 +2217,7 @@ async function route(request, env, ctx) {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
       /* درخواستِ دستِ کارشناس هوشمند: بررسی سوابق را خودش می‌کند (ai-lock.js) */
-      await aiGuard(env, who, it.aid, "research");
+      await aiGuard(env, who, it.aid, "research", it);
       /* نرمال‌سازی اجباری و اول از همه (طرح «خرید هوشمند» فاز ۱): سوابقِ قلمِ تأییدنشده خوانده نمی‌شود */
       if (who.role === "expert" && !normConfirmed(it)) return json({ available: false, need_norm: true, message: NEED_NORM_MSG });
       return json(await itemHistory(env, it, histOpts()));
@@ -2157,7 +2225,7 @@ async function route(request, env, ctx) {
     if (path === "/suppliers/history/buys" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      await aiGuard(env, who, it.aid, "research");
+      await aiGuard(env, who, it.aid, "research", it);
       if (who.role === "expert" && !normConfirmed(it)) throw new HttpError(NEED_NORM_MSG, 409, { need_norm: true });
       return json(await supplierBuys(env, it, url.searchParams.get("supplier"), histOpts()));
     }
@@ -2165,7 +2233,7 @@ async function route(request, env, ctx) {
     if (path === "/suppliers/history/series" && m === "GET") {
       const who = await requireAny(request, env);
       const it = await ownItem(env, who, int(url.searchParams.get("item_id")));
-      await aiGuard(env, who, it.aid, "research");
+      await aiGuard(env, who, it.aid, "research", it);
       if (who.role === "expert" && !normConfirmed(it)) throw new HttpError(NEED_NORM_MSG, 409, { need_norm: true });
       return json(await itemSeries(env, it, histOpts()));
     }

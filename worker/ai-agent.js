@@ -2,7 +2,9 @@
  * کارشناس هوشمند (مهر ۱۴۰۵، کارشناس «test») — کارشناسی که ردیفِ ai_agents دارد و «خودکار»ش روشن است، کارِ هر ارجاعِ
  * تازه‌اش را خودِ سامانه انجام می‌دهد:
  *   ۰. (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۱) کار فقط با «بررسی سوابق و سپردن به کارشناس هوشمند» شروع می‌شود (aiHandoff): کارشناس
- *      ساختارِ هر قلم را تأیید و 🔒/🔓 کرده، و ساختار منجمد است — دیگر شروعِ خودکار با رسیدنِ ارجاع نیست.
+ *      ساختارِ هر قلم را تأیید و 🔒/🔓 کرده، و ساختار منجمد است — دیگر شروعِ خودکار با رسیدنِ ارجاع نیست. فاز ۴ب: فقط اقلامِ
+ *      هوشمند به کار می‌روند — نه درخواستی که مدیر دستی کرده، نه «انجام دستی»ِ تأییدشده یا در انتظار، نه قلمِ «مستقیم»ی که کارشناس
+ *      تیکش نزده (worker/ai-modes.js).
  *   ۱. آماده‌سازیِ هر قلم: «بررسی سوابق» بر همان ساختارِ منجمد — همان itemHistory پنل.
  *   ۲. «جستجوی هوشمند» هر قلم — همان smartSearch پنل و بات (جستجوی تازهٔ همان قلم در چند روزِ اخیر دوباره خرج نمی‌شود).
  *   ۳. دعوت — فقط تأمین‌کنندگانی که دست‌کم یک «شمارهٔ پنل» تیک‌خورده دارند. تیک را فقط انسان می‌زند (تب کارشناس
@@ -49,6 +51,7 @@ import { queueStmt } from "./queue.js";
 import { NORM_OK_SQL, changeStmt } from "./structure.js";
 import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
+import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } from "./ai-modes.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -138,10 +141,13 @@ async function flushCalls(env, run, expertId, rec) {
  */
 async function discover(env) {
   const rows = (await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id FROM ai_agents g JOIN assignments a ON a.expert_id=g.expert_id
-      WHERE g.mode='on' AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL
+      WHERE g.mode='on' AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL AND COALESCE(a.ai_on,1)=1
         AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.assignment_id=a.id)
         AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open' AND i.frozen_at IS NOT NULL) ORDER BY a.id LIMIT 2`).all()).results || [];
-  for (const a of rows) await createRun(env, a, "handoff").catch((e) => console.error("ai run", e && e.message));
+  for (const a of rows) {
+    const ids = ((await env.DB.prepare("SELECT id FROM items WHERE assignment_id=? AND state='open' AND frozen_at IS NOT NULL").bind(a.id).all()).results || []).map((r) => r.id);
+    await createRun(env, a, "handoff", ids).catch((e) => console.error("ai run", e && e.message));
+  }
   return rows.length;
 }
 
@@ -151,19 +157,29 @@ async function discover(env) {
  * پیشنهادِ سامانه با ساختارِ منجمد) در item_changes می‌نشیند و کار شروع می‌شود. نرمال‌سازی اجباری است: قلمِ تأییدنشده ← ۴۰۹.
  * actor: expert:<id> (دکمهٔ کارشناس) | support («▶️ شروع»ِ پنل پشتیبانی، با همان شرط).
  */
-export async function aiHandoff(env, a, actor) {
+export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   const ag = await agentOf(env, a.expert_id);
   if (!ag || ag.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس روشن نیست؛ «بررسی سوابق» هر قلم را خودِ کارشناس می‌زند.", 409);
+  /* فاز ۴ب: مدیر در ارجاع تیکِ «🤖 هوشمند» را برداشته — درخواست دستِ خودِ کارشناس است */
+  if (a.ai_on === 0) throw new HttpError("مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ کارشناس است.", 409);
   if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
   if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(a.id).first()) throw new HttpError("این درخواست از قبل به کارشناس هوشمند سپرده شده است.", 409);
-  const its = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.norm_json, i.sugg_json, ${NORM_OK_SQL("i")} AS ok FROM items i
+  const all = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.code, i.norm_json, i.sugg_json, i.ai_off, ${NORM_OK_SQL("i")} AS ok FROM items i
       WHERE i.assignment_id=? AND i.state='open' ORDER BY i.line_no`).bind(a.id).all()).results || [];
-  if (!its.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
+  if (!all.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
+  /* فاز ۴ب (worker/ai-modes.js): «انجام دستی» — تأییدشده یا در انتظارِ مدیر — و قلمِ «مستقیم»ی که کارشناس انتخابش نکرده دستِ خودِ
+     کارشناس می‌ماند؛ نرمال‌سازی فقط برای همین اقلامِ سپردنی اجباری است */
+  const waiting = new Set(((await env.DB.prepare("SELECT payload_json FROM decisions WHERE assignment_id=? AND action='manual' AND approved_at IS NULL AND rejected_at IS NULL")
+    .bind(a.id).all()).results || []).flatMap((d) => (parse(d.payload_json, {}) || {}).item_ids || []));
+  const modes = await itemModes(env, all);
+  const pick = new Set((include || []).map(Number));
+  const its = all.filter((i) => Number(i.ai_off) !== 1 && !waiting.has(i.id) && ((modes.get(i.id) || {}).mode !== "direct" || pick.has(i.id)));
+  if (!its.length) throw new HttpError("قلمی برای سپردن نمانده: اقلامِ این درخواست دستی‌اند، در انتظارِ تصمیمِ مدیرند یا از نوعِ «مستقیم»؛ قلمِ «مستقیم» را با تیکِ خودش می‌شود سپرد.", 409);
   const miss = its.filter((i) => !i.ok);
   if (miss.length) {
     throw new HttpError(`نرمال‌سازی اجباری است: ساختارِ ${miss.length === its.length ? "هیچ قلمی" : `${faN(miss.length)} قلم از ${faN(its.length)}`} هنوز تأیید نشده — ${miss.slice(0, 4).map((i) => `«${i.title}»`).join("، ")}${miss.length > 4 ? "، …" : ""}.`, 409, { missing: miss.map((i) => i.id) });
   }
-  const runId = await createRun(env, a, actor === "support" ? "manual" : "handoff");
+  const runId = await createRun(env, a, actor === "support" ? "manual" : "handoff", its.map((i) => i.id));
   /* فقط اقلامی که در همین کارند (سقفِ maxItems) منجمد می‌شوند */
   const run = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(runId).first();
   const inRun = new Set((parse(run && run.data_json, {}).items || []).map((x) => x.id));
@@ -175,13 +191,16 @@ export async function aiHandoff(env, a, actor) {
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, actor, "ai_handoff", a.request_id,
       JSON.stringify({ assignment_id: a.id, run_id: runId, items: frozen.length })),
   ]);
-  return { ok: true, run_id: runId, items: frozen.length, left: its.length - frozen.length };
+  return { ok: true, run_id: runId, items: frozen.length, left: its.length - frozen.length, manual: all.length - its.length };
 }
 
-export async function createRun(env, a, how) {
+/** itemIds (فاز ۴ب): اقلامی که به کار سپرده شده‌اند — قلمِ دستیِ کارشناس در کار نیست */
+export async function createRun(env, a, how, itemIds = null) {
   const ag = await agentOf(env, a.expert_id);
   const cfg = cfgOf(ag);
-  const its = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no LIMIT ?").bind(a.id, cfg.maxItems).all()).results || [];
+  const ids = Array.isArray(itemIds) ? itemIds.map(Number).filter(Boolean).slice(0, 80) : null;
+  const its = (await env.DB.prepare(`SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open'${ids ? ` AND id IN (${ids.map(() => "?").join(",") || "NULL"})` : ""} ORDER BY line_no LIMIT ?`)
+    .bind(a.id, ...(ids || []), cfg.maxItems).all()).results || [];
   if (!its.length) throw new HttpError("این ارجاع قلمِ بازی ندارد.", 409);
   const t = now();
   const data = { items: its.map((i) => ({ id: i.id, title: i.title, qty: i.qty, unit: i.unit })), cands: [], how };
@@ -1226,6 +1245,10 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   }
   /* فاز ۴: «🎛 کلیدها» — خوانش هوشمند پیش‌فاکتور (پیش‌فرض خاموش؛ worker/switches.js) */
   if (sub === "/switches" && m === "GET") return json({ ...(await getSwitches(env)), fa: SWITCH_FA });
+  /* فاز ۴ب: حالتِ هر نوع قلم (worker/ai-modes.js) — سپردن یا برگشت / انتخاب کارشناس / مستقیم، و «حالت تأیید مجاز» */
+  if (sub === "/modes" && m === "GET") { const g = await getModes(env); return json({ heads: g.heads, updated_at: g.updated_at, by: g.by, fa: MODE_FA, default: MODE_DEFAULT }); }
+  if (sub === "/modes" && m === "PUT") { const r = await saveModes(env, await readJson(request), "support"); return json({ ok: true, ...r, fa: MODE_FA, default: MODE_DEFAULT }); }
+  if (sub === "/heads" && m === "GET") return json({ heads: await searchHeads(env, url.searchParams.get("q")) });
   if (sub === "/switches" && m === "PUT") return json({ ok: true, ...(await saveSwitches(env, await readJson(request), "support")) });
   if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
   let dm;
@@ -1281,7 +1304,7 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   if (path === "/runs" && m === "POST") {
     if (!ag || ag.mode !== "on") throw new HttpError("اول تیکِ «هوشمند»ِ این کارشناس را بزنید.", 409);
     const b = await readJson(request);
-    const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
+    const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=?").bind(int(b.assignment_id)).first();
     if (!a || a.expert_id !== ex.id) throw new HttpError("این ارجاع مالِ این کارشناس نیست.", 403);
     if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
     /* همان شرطِ سپردنِ کارشناس: ساختارِ همهٔ اقلام تأییدشده؛ منجمد می‌شود */

@@ -323,20 +323,30 @@
   const aiPending = () => aiOwned() && !S.d.ai.owned.run_id;
   const normOk = (it) => { try { const x = it && it.norm_json ? JSON.parse(it.norm_json) : null; return !!(x && x.head && x.source !== "ai"); } catch (_) { return false; } };
   const frozen = (it) => !!(it && it.frozen_at && aiOwned());
+  /* طرح «خرید هوشمند» فاز ۴ب: هر قلم با حالتِ نوعِ خودش (worker/ai-modes.js) — «انجام دستی»ِ تأییدشدهٔ مدیر، قلمِ بیرون از کارِ کارشناس
+     هوشمند، یا (هنوز نسپرده) قلمی از نوعِ «مستقیم» دستِ خودِ کارشناس است: بررسی سوابق و جستجویش باز است */
+  const aiItem = (it) => (it && S.d && S.d.ai && S.d.ai.items ? S.d.ai.items.find((x) => x.id === it.id) : null) || null;
+  const itemFree = (it) => { const x = aiItem(it); if (!x || !aiOwned()) return false; return x.manual || (S.d.ai.owned.run_id ? !x.in_run : x.mode === "direct"); };
+  /* اقلامی که با «سپردن» به کار می‌روند: نه دستی، نه در انتظارِ مدیر، و «مستقیم» فقط با تیکِ خودِ کارشناس */
+  const handoffPick = new Set();
+  const toHandoff = () => openItems().filter((x) => { const m = aiItem(x); return !m || (!m.manual && !m.waiting && (m.mode !== "direct" || handoffPick.has(x.id))); });
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
+    const free = (ai.items || []).filter((x) => x.manual || (ai.owned && ai.owned.run_id ? !x.in_run : x.mode === "direct"));
+    const freeTxt = free.length ? `<br>✋ <b>دستِ خودِ شما:</b> ${free.map((x) => esc((items().find((i) => i.id === x.id) || {}).title || "")).join("، ")} — ${free.some((x) => x.manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم»؛ بررسی سوابق و جستجویشان برایتان باز است.` : "";
     if (aiPending()) return `<div class="tp-note" style="margin:10px 0">🤖 <b>حالتِ هوشمند — هنوز سپرده نشده.</b> نرمال‌سازی اجباری و کارِ شماست: در تبِ «🤖 بررسی سوابق» ساختارِ هر قلم را ببینید، اصلاح یا تأیید کنید
-      و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 بگذارید؛ بعد «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید. از آن پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است.</div>`;
+      و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 بگذارید؛ بعد «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید. از آن پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است.${freeTxt}</div>`;
     if (!aiOwned()) return ai.review && ai.review.state === "rejected"
-      ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>` : "";
+      ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>`
+      : ai.on === false ? `<div class="tp-note" style="margin:10px 0">✋ <b>مدیر این درخواست را دستی ارجاع داده است</b>${ai.note ? `: ${esc(ai.note)}` : ""} — همهٔ کارهایش با خودِ شماست.</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
     const ask = k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : "";
     const need = cv.length ? `<br>حداقلِ استعلام (پنل پشتیبانی): ${cv.map((c) => `${esc(c.title)} <b>${c.have} از ${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join("، ")}` : "";
     if (aiHandover()) return `<div class="tp-note warn" style="margin:10px 0">⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید و کار به شما واگذار شد.</b>
       بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است: تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید («ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور).
-      گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.${need}${ask}</div>`;
+      گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.${need}${ask}${freeTxt}</div>`;
     return `<div class="tp-note" style="margin:10px 0">🤖 <b>این درخواست دستِ کارشناس هوشمند است.</b> بررسی سوابق، جستجوی هوشمند، مذاکره با تأمین‌کنندگان، جدول کمیسیون و نامه را خودش انجام می‌دهد
-      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.${need}${ask}</div>`;
+      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.${need}${ask}${freeTxt}</div>`;
   }
   function vAiLocked(tab) {
     const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
@@ -381,42 +391,71 @@
           : ` <span class="chip warn" style="margin-top:6px" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}</div>`).join("")}</div>
       ${vAiBar()}
       <div class="tabs">
-        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiPending() ? "🤖 " : aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
-        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() ? "🔒 " : ""}جستجوی هوشمند</button>
+        <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${itemFree(it) ? "" : aiPending() ? "🤖 " : aiResearch() ? "🔒 " : ""}بررسی سوابق</button>
+        <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() && !itemFree(it) ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiPending() && S.tab === "history" ? vHandoff(it) : (aiResearch() && ["history", "smart"].includes(S.tab)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : aiPending() && S.tab === "history" && !itemFree(it) ? vHandoff(it) : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
   /* ---------- «🤖 بررسی سوابق و سپردن به کارشناس هوشمند» (طرح «خرید هوشمند» فاز ۱؛ تصمیم ۱: یک دکمه برای کل درخواست) ----------
      تا همهٔ اقلامِ باز نرمال نشده‌اند بسته است؛ زیرش ویرایشگرِ ساختارِ قلمِ برگزیده با 🔒/🔓ِ عنوان، مقدار و هر لایه. */
+  /** حالتِ قلم در جدولِ سپردن: «مستقیم» با تیکِ «بسپار»؛ دستی و در انتظارِ مدیر بی تیک */
+  function handoffCell(x) {
+    const m = aiItem(x);
+    if (!m) return `<span class="chip info">🤖</span>`;
+    const tag = `<span class="chip ${m.mode === "direct" ? "" : "info"}" title="حالتِ نوع قلمِ «${esc(m.head || "—")}» در پنل پشتیبانی">${esc(m.mode_fa || m.mode)}</span>${m.supervise ? ` <span class="chip" title="حالت تأیید برای این نوع قلم مجاز است">✋؟</span>` : ""}`;
+    if (m.manual) return `${tag} <span class="chip warn" title="مدیر «انجام دستی» را تأیید کرد">✋ دستیِ شما</span>`;
+    if (m.waiting) return `${tag} <span class="chip warn" title="درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر">⏳ در انتظارِ مدیر</span>`;
+    if (m.mode === "direct") return `${tag} <label class="chkline" title="قلمِ «مستقیم» دستِ خودِ شماست؛ با تیک به کارشناس هوشمند سپرده می‌شود"><input type="checkbox" data-hpick="${x.id}" ${handoffPick.has(x.id) ? "checked" : ""}> بسپار</label>`;
+    return `${tag} <span class="chip info">🤖 سپرده می‌شود</span>`;
+  }
   function vHandoff(it) {
-    const op = openItems(), ok = op.filter(normOk).length, all = op.length > 0 && ok === op.length;
+    const op = openItems(), go = toHandoff(), ok = go.filter(normOk).length, all = go.length > 0 && ok === go.length;
+    const back = op.some((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct"; });
     const rows = op.map((x) => { const i = items().indexOf(x); return `<tr class="${i === S.itemIdx ? "sel" : ""}" data-item="${i}" style="cursor:pointer" title="ساختارِ همین قلم را زیرِ همین جدول ببینید">
       <td class="rt">${esc(x.title)}</td><td class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</td>
-      <td>${normOk(x) ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip warn">⏳ تأیید نشده</span>`}</td></tr>`; }).join("");
+      <td>${normOk(x) ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip warn">⏳ تأیید نشده</span>`}</td><td>${handoffCell(x)}</td></tr>`; }).join("");
     return `<div class="pad"><div class="handoff">
-      <div class="toolrow"><b style="font-size:1.02rem">🤖 سپردن به کارشناس هوشمند</b><span class="chip ${all ? "ok" : "warn"}">${M(ok)} از ${M(op.length)} قلم نرمال شده</span>
+      <div class="toolrow"><b style="font-size:1.02rem">🤖 سپردن به کارشناس هوشمند</b><span class="chip ${all ? "ok" : "warn"}">${M(ok)} از ${M(go.length)} قلمِ سپردنی نرمال شده</span>
         <span style="margin-inline-start:auto"></span>
-        <button class="tp-btn primary" data-handoff ${all ? "" : "disabled"} title="${all ? "ساختارِ همهٔ اقلام منجمد می‌شود و کارشناس هوشمند بررسی سوابق را شروع می‌کند" : "اول ساختارِ همهٔ اقلام را تأیید کنید"}">🤖 بررسی سوابق و سپردن به کارشناس هوشمند</button></div>
+        ${back ? `<button class="tp-btn warn" data-manual title="اقلامی را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر (انجام دستی)</button>` : ""}
+        <button class="tp-btn primary" data-handoff ${all ? "" : "disabled"} title="${all ? "ساختارِ اقلامِ سپردنی منجمد می‌شود و کارشناس هوشمند بررسی سوابق را شروع می‌کند" : go.length ? "اول ساختارِ اقلامِ سپردنی را تأیید کنید" : "قلمی برای سپردن نیست"}">🤖 بررسی سوابق و سپردن به کارشناس هوشمند</button></div>
       <div class="tp-note" style="margin:8px 0">نرمال‌سازی اجباری و کارِ شماست: برای هر قلم نوع قلم، لایه‌های ویژگی و نرخ‌های تبدیل را ببینید، اصلاح یا تأیید کنید و کنارِ <b>عنوان، مقدار و هر لایه</b> 🔒 یا 🔓 بگذارید —
         🔒 یعنی تأمین‌کننده نمی‌تواند عوضش کند؛ مقدارِ 🔓 یعنی می‌تواند مقدارِ کمتری پیشنهاد دهد. با «سپردن» ساختار منجمد می‌شود و بررسی سوابق، جستجو، دعوت، مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است؛
         هر تغییرِ شما نسبت به پیشنهادِ سامانه برای پشتیبانی ثبت می‌شود.</div>
-      <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th>ساختار</th></tr></thead><tbody>${rows}</tbody></table></div></div>
+      <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th>ساختار</th><th>حالت (پنل پشتیبانی)</th></tr></thead><tbody>${rows}</tbody></table></div></div>
       <div style="margin-top:12px"><div class="toolrow"><b style="font-size:1.02rem">${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}</div>${it.state === "open" ? vNorm(it) : `<div class="dim">این قلم باز نیست.</div>`}</div></div>`;
   }
   function handoffUI() {
-    const op = openItems();
-    const dirty = op.find((x) => normDirty(x));
+    const op = openItems(), go = toHandoff();
+    const dirty = go.find((x) => normDirty(x));
     if (dirty) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(dirty.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
-    return TP.modal("🤖 سپردن به کارشناس هوشمند", `ساختارِ ${M(op.length)} قلم منجمد می‌شود و از این پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است؛
+    const rest = op.length - go.length;
+    return TP.modal("🤖 سپردن به کارشناس هوشمند", `ساختارِ ${M(go.length)} قلم منجمد می‌شود و از این پس بررسی سوابق، جستجو، دعوت و مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند است${rest ? `؛ ${M(rest)} قلم (دستی یا «مستقیم»ِ بی تیک) دستِ خودتان می‌ماند` : ""}.
       شما در «استعلامات» خطِ دستیِ خودتان (✋) را می‌افزایید و به «🚨 پرسش»‌های کارشناس هوشمند جواب می‌دهید. سپرده شود؟`, async () => {
       const b = TP.busy("سپردن به کارشناس هوشمند…", "");
-      try { await TP.api(`/assignments/${A().id}/handoff`, { method: "POST", body: {} }); b.close(); await reload(); }
+      try { await TP.api(`/assignments/${A().id}/handoff`, { method: "POST", body: { include: [...handoffPick] } }); handoffPick.clear(); b.close(); await reload(); }
       catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     }, "بسپار", "انصراف");
+  }
+
+  function manualUI() {
+    const can = openItems().filter((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct" && !m.in_run; });
+    if (!can.length) return TP.modal("قلمی نیست", "همهٔ اقلام دستی‌اند، در انتظارِ مدیرند یا از نوعِ «مستقیم»؛ «مستقیم» را بی اجازه خودتان انجام دهید.", null, "باشد", "");
+    const d = TP.modal("↩️ برگرداندن به مدیر — انجام دستی", `<p>این اقلام به‌جای کارشناس هوشمند با خودِ شما باشد؟ مدیر با علتِ شما تصمیم می‌گیرد؛ تا تصمیمش، سپرده نمی‌شوند.</p>
+      <div style="display:flex;flex-direction:column;gap:4px;margin:8px 0">${can.map((x) => `<label class="chkline"><input type="checkbox" data-mitem="${x.id}" checked> ${esc(x.title)}</label>`).join("")}</div>
+      <div class="tp-field"><b>علت (اجباری)</b><textarea class="tp-input" id="man-why" rows="3" style="width:100%;margin-top:6px" placeholder="مثلاً تأمین‌کنندهٔ این قلم فقط حضوری کار می‌کند"></textarea></div>`, async () => {
+      const ids = [...d.querySelectorAll("[data-mitem]")].filter((c) => c.checked).map((c) => +c.dataset.mitem);
+      const why = ((d.querySelector("#man-why") || {}).value || "").trim();
+      if (!ids.length) return TP.modal("قلمی انتخاب نشد", "دست‌کم یک قلم را تیک بزنید.", null, "باشد", "");
+      if (!why) return TP.modal("علت لازم است", "برای «انجام دستی» علت را بنویسید تا مدیر تصمیم بگیرد.", null, "باشد", "");
+      try { await TP.api(`/assignments/${A().id}/decision`, { body: { action: "manual", item_ids: ids, reason: why } }); await reload();
+        TP.modal("فرستاده شد", "درخواستِ «انجام دستی» برای مدیر رفت؛ نتیجه را در تلگرام و همین‌جا می‌بینید.", null, "باشد", ""); }
+      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "برای مدیر بفرست", "انصراف");
   }
 
   /* ---------- تب بررسی سوابق ----------
@@ -2031,6 +2070,8 @@
       render();
     });
     const hof = G("[data-handoff]"); if (hof) hof.onclick = handoffUI;
+    const man = G("[data-manual]"); if (man) man.onclick = manualUI;
+    Q("[data-hpick]").forEach((c) => { const lb = c.closest("label"); if (lb) lb.onclick = (e) => e.stopPropagation(); c.onclick = (e) => e.stopPropagation(); c.onchange = () => { const id = +c.dataset.hpick; if (c.checked) handoffPick.add(id); else handoffPick.delete(id); render(); }; });
     /* هر فراخوانی مدل با کادرِ تأیید */
     const nrd = G("[data-norm-redo]"); if (nrd) nrd.onclick = () => askModel(item(), true);
     const nmd = G("[data-norm-model]"); if (nmd) nmd.onclick = () => askModel(item(), false);

@@ -75,6 +75,8 @@
     rank: null, rankDraft: null, rankErr: "", rankBusy: false,
     /* فاز ۴: «🎛 کلیدها» — خوانش هوشمند پیش‌فاکتور (worker/switches.js، پیش‌فرض خاموش) */
     sw: null, swErr: "", swBusy: false,
+    /* فاز ۴ب: «🧭 حالت اقلام» — حالتِ هر نوع قلم برای کارشناس هوشمند (worker/ai-modes.js) */
+    md: null, mdDraft: null, mdErr: "", mdBusy: false, mdQ: "", mdHits: [],
     /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
     chg: null, chgErr: "", chgLoading: false, chgF: { expert: "", rid: "", changed: "1", frozen: "" }, chgMore: false, chgNext: null,
   };
@@ -159,7 +161,7 @@
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
-    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); if (S.aiView === "sw" && (force || !S.sw)) loadSw(); }
+    else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); if (S.aiView === "sw" && (force || !S.sw)) loadSw(); if (S.aiView === "md" && (force || !S.md)) loadMd(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
   }
@@ -579,11 +581,12 @@
       return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
         <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
     }
-    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"], ["sw", "🎛 کلیدها"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
+    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"], ["md", "🧭 حالت اقلام"], ["sw", "🎛 کلیدها"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
     if (S.aiView === "rules") return sub + vRules();
     if (S.aiView === "usd") return sub + vUsd();
     if (S.aiView === "rank") return sub + vRank();
     if (S.aiView === "sw") return sub + vSw();
+    if (S.aiView === "md") return sub + vMd();
     let h = sub + `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: هر ارجاعِ تازهٔ این کارشناس را کارشناس هوشمند پیش می‌برد — بررسی سوابق، جستجوی هوشمند، دعوت و مذاکره، جدول کمیسیون و نامه —
       و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
       («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
@@ -790,6 +793,68 @@
         <button class="tp-btn ${on ? "" : "primary"}" data-swtoggle data-on="0" ${!on || S.swBusy ? "disabled" : ""}>⏹ خاموش — پیش‌فاکتورِ سامانه</button>
         <button class="tp-btn ${on ? "primary" : ""}" data-swtoggle data-on="1" ${on || S.swBusy ? "disabled" : ""}>▶️ روشن — خوانش پیش‌فاکتورِ تأمین‌کننده</button>
         <span class="dim">${S.sw.updated_at ? `آخرین تغییر: ${fmtShort(S.sw.updated_at)}` : "هنوز عوض نشده — پیش‌فرض خاموش"}</span></div></div>`;
+    return h;
+  }
+
+  /* ---------- «🧭 حالت اقلام» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب) ----------
+     حالتِ هر نوع قلم برای کارشناس هوشمند — سپردن یا برگشت / انتخاب کارشناس / مستقیم — و «حالت تأیید مجاز»؛ نوع قلمِ نام‌نبرده «انتخاب
+     کارشناس» است. هر قلمِ درخواست با حالتِ نوعِ خودش جلو می‌رود (worker/ai-modes.js). */
+  const MD_HELP = {
+    handoff: "بعد از بررسی سوابق، کارشناس فقط به کارشناس هوشمند می‌سپارد، یا با توضیح به مدیر برمی‌گرداند تا دستی شود.",
+    pick: "کارشناس تأمین‌کنندگان را کم و زیاد می‌کند (برداشتنِ پنج نفر اول با توضیح) و «شروع» را می‌زند؛ مکاتبهٔ مستقیم ندارد.",
+    direct: "کارشناس خودش مکاتبه می‌کند، یا به انتخابِ خودش می‌سپارد — بی توضیح و بی اجازه؛ مدیر هم بی توضیح دستی‌اش می‌کند.",
+  };
+  const mdDraftOf = (heads) => Object.entries(heads || {}).map(([head, v]) => ({ head, mode: v.mode, supervise: !!v.supervise }));
+  async function loadMd() {
+    S.mdErr = ""; render();
+    try { S.md = await api("/ai/modes"); S.mdDraft = mdDraftOf(S.md.heads); } catch (e) { S.mdErr = e.message; }
+    render();
+  }
+  async function saveMdUi() {
+    S.mdBusy = true; S.mdErr = ""; render();
+    try {
+      const heads = {}; for (const x of S.mdDraft) heads[x.head] = { mode: x.mode, supervise: x.supervise };
+      const r = await api("/ai/modes", { method: "PUT", body: { heads } });
+      S.md = { ...S.md, ...r }; S.mdDraft = mdDraftOf(r.heads);
+      TP.modal("ذخیره شد", "حالتِ اقلام ذخیره شد؛ از همین حالا (تا یک دقیقه) در ارجاع‌ها و سپردن‌های تازه به کار می‌رود. کارِ سپرده‌شده عوض نمی‌شود.", null, "باشد", "");
+    } catch (e) { S.mdErr = e.message; }
+    S.mdBusy = false; render();
+  }
+  let mdTimer = null;
+  function mdSearch(q) {
+    S.mdQ = q;
+    clearTimeout(mdTimer);
+    mdTimer = setTimeout(async () => {
+      if (!q.trim()) { S.mdHits = []; return render(); }
+      try { S.mdHits = (await api(`/ai/heads?q=${encodeURIComponent(q.trim())}`)).heads || []; } catch (_) { S.mdHits = []; }
+      const inp = document.querySelector("[data-mdq]"); const pos = inp ? inp.selectionStart : null;
+      render();
+      const again = document.querySelector("[data-mdq]"); if (again) { again.focus(); if (pos != null) again.setSelectionRange(pos, pos); }
+    }, 250);
+  }
+  function vMd() {
+    let h = `<div class="tp-note">هر قلمِ درخواست با حالتِ <b>نوع قلمِ</b> خودش جلو می‌رود و کارشناس کارتِ هر قلم را جدا پیش می‌برد. نوع قلمی که این‌جا نیامده
+      «<b>انتخاب کارشناس</b>» است و حالت تأیید ندارد. «حالت تأیید مجاز» یعنی مدیر می‌تواند به کارشناس اجازه دهد پیام‌ها و تصمیم‌های کارشناس هوشمند پیش از رفتن به تأییدش برسد
+      (یا کارشناس پیش از شروع با توضیح بخواهد).</div>`;
+    if (S.mdErr) h += `<div class="tp-note warn">${esc(S.mdErr)}</div>`;
+    if (!S.md || !S.mdDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    const fa = S.md.fa || {};
+    h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">حالت‌ها</h3>
+      <table class="sup-tbl" style="width:auto"><tbody>${Object.keys(MD_HELP).map((k) => `<tr><td><b>${esc(fa[k] || k)}</b></td><td class="dim" style="white-space:normal">${esc(MD_HELP[k])}</td></tr>`).join("")}</tbody></table></div>`;
+    const have = new Set(S.mdDraft.map((x) => x.head));
+    h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">افزودنِ نوع قلم</h3>
+      <input class="tp-input" data-mdq value="${esc(S.mdQ)}" placeholder="بخشی از نامِ نوع قلم، مثلاً دستکش" style="width:min(360px,100%)">
+      ${S.mdHits.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${S.mdHits.map((x) => `<button class="tp-btn xs" data-mdadd="${esc(x)}" ${have.has(x) ? "disabled" : ""}>${have.has(x) ? "✓ " : "➕ "}${esc(x)}</button>`).join("")}</div>`
+        : S.mdQ.trim() ? `<div class="dim" style="margin-top:6px">نوع قلمی با این نام در فهرست اقلام نیست.</div>` : ""}</div>`;
+    h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">نوع قلم‌های تعیین‌شده (${M(S.mdDraft.length)})</h3>`;
+    h += S.mdDraft.length ? `<div class="tp-scroll"><table class="tp-table"><thead><tr><th class="rt">نوع قلم</th><th>حالت</th><th>حالت تأیید مجاز</th><th></th></tr></thead><tbody>
+      ${S.mdDraft.map((x, i) => `<tr><td class="rt">${esc(x.head)}</td>
+        <td><select class="tp-select" data-mdmode="${i}">${Object.keys(MD_HELP).map((k) => `<option value="${k}" ${x.mode === k ? "selected" : ""}>${esc(fa[k] || k)}</option>`).join("")}</select></td>
+        <td><label class="chkline"><input type="checkbox" data-mdsup="${i}" ${x.supervise ? "checked" : ""}> مجاز</label></td>
+        <td><button class="tp-btn xs danger" data-mddel="${i}" title="برداشتن — همان پیش‌فرض">✕</button></td></tr>`).join("")}</tbody></table></div>`
+      : `<div class="dim">هنوز نوع قلمی تعیین نشده — همه «انتخاب کارشناس»اند.</div>`;
+    h += `</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-mdsave ${S.mdBusy ? "disabled" : ""}>ذخیرهٔ حالتِ اقلام</button>
+      <button class="tp-btn" data-mdreset>برگرداندنِ تغییرها</button><span class="dim">${S.md.updated_at ? `آخرین تغییر: ${fmtShort(S.md.updated_at)}` : "هنوز ذخیره نشده"}</span></div>`;
     return h;
   }
 
@@ -1085,7 +1150,11 @@
     if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
     if (d.aitoggle) return aiToggle(Number(d.aitoggle), d.on === "1");
     /* فاز ۳: قواعدِ حداقلِ استعلام و تحویل‌ها */
-    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); if (S.aiView === "rank" && !S.rank) return loadRank(); if (S.aiView === "sw" && !S.sw) return loadSw(); return render(); }
+    if (d.aiview) { S.aiView = d.aiview; if (S.aiView === "rules" && !S.rules) return loadRules(); if (S.aiView === "usd" && !S.usd) return loadUsd(); if (S.aiView === "rank" && !S.rank) return loadRank(); if (S.aiView === "sw" && !S.sw) return loadSw(); if (S.aiView === "md" && !S.md) return loadMd(); return render(); }
+    if (d.mdsave !== undefined) return saveMdUi();
+    if (d.mdreset !== undefined) { S.mdDraft = mdDraftOf(S.md.heads); S.mdErr = ""; return render(); }
+    if (d.mdadd) { if (!S.mdDraft.some((x) => x.head === d.mdadd)) S.mdDraft.unshift({ head: d.mdadd, mode: "direct", supervise: false }); return render(); }
+    if (d.mddel !== undefined) { S.mdDraft.splice(Number(d.mddel), 1); return render(); }
     if (d.swtoggle !== undefined) return swToggle(d.on === "1");
     if (d.rksave !== undefined) return saveRankUi();
     if (d.rkreset !== undefined) { S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } }; S.rankErr = ""; return render(); }
@@ -1108,7 +1177,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
@@ -1124,6 +1193,8 @@
     if (d.dlf) { S.dlF[d.dlf] = t.value; return loadDls(); }
     if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
     if (d.rthen && S.rankDraft) { S.rankDraft.dispatch.then = d.rthen; return null; }
+    if (d.mdmode !== undefined && S.mdDraft) { S.mdDraft[Number(d.mdmode)].mode = t.value; return null; }
+    if (d.mdsup !== undefined && S.mdDraft) { S.mdDraft[Number(d.mdsup)].supervise = t.checked; return null; }
     if (d.chgf) { S.chgF[d.chgf] = t.type === "checkbox" ? (t.checked ? "1" : "") : t.value.trim(); S.chg = null; return loadChg(); }
     return null;
   });
@@ -1136,6 +1207,7 @@
     /* وزن‌ها و سقفِ رده‌ها (فاز ۲): همان پیش‌نویس، بی رسمِ دوباره */
     if (t.dataset.rw && S.rankDraft) { S.rankDraft.weights[t.dataset.rw] = t.value; return; }
     if (t.dataset.rt && S.rankDraft) { S.rankDraft.dispatch.tier[t.dataset.rt] = t.value; return; }
+    if (t.dataset.mdq !== undefined) return mdSearch(t.value);
     if (!k) return;
     if (k === "req") S.rf.q = t.value; else if (k === "th") S.thF.q = t.value; else if (k === "cm") S.cmF.q = t.value;
     TP.keepFocus(t, "fq", render);

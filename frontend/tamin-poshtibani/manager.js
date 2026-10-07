@@ -304,7 +304,7 @@
         if (u.a) {
           const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
           h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}</td>
-            <td><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}></td>
+            <td style="white-space:nowrap"><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}>${aiTick(a)}</td>
             <td class="num">${its.length}</td>
             <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
             ${stageBoxes(r, a)}
@@ -669,7 +669,13 @@
   }
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
-  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس",
+  /* «انجام دستی» (فاز ۴ب): چند قلم و علتِ کارشناس — با رد، اقلام دستِ کارشناس هوشمند می‌مانند */
+  function decWhy(d) {
+    if (d.action !== "manual") return "";
+    let p = {}; try { p = JSON.parse(d.payload_json || "{}"); } catch (_) { /* بی بدنه */ }
+    return `<div class="dim" style="margin-top:4px">${M((p.item_ids || []).length)} قلم به‌جای کارشناس هوشمند با خودِ کارشناس${p.reason ? ` — علت: ${esc(p.reason)}` : ""}</div>`;
+  }
+  const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس", ai_tick: "تیکِ هوشمند / دستی", ai_manual: "انجام دستیِ اقلام", ai_modes: "حالتِ اقلامِ کارشناس هوشمند",
     decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
     manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
     commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک" };
@@ -685,7 +691,7 @@
   function vLog() {
     const D = S.decisions;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>تصمیم‌های در انتظار تأیید <span class="chip ${D.length ? "warn" : ""}">${D.length}</span></h2>
-      ${D.length ? D.map((d) => `<div class="conf"><div style="flex:1"><b>${esc(d.expert_name)}</b> برای درخواست <b class="num">${esc(d.request_id)}</b> درخواستِ <b>${({ hold: "تعلیق", stop: "توقف", end: "خاتمه" })[d.action]}</b> داده — ${TP.fmt(d.requested_at)}</div>
+      ${D.length ? D.map((d) => `<div class="conf"><div style="flex:1"><b>${esc(d.expert_name)}</b> برای درخواست <b class="num">${esc(d.request_id)}</b> درخواستِ <b>${({ hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی" })[d.action] || esc(d.action)}</b> داده — ${TP.fmt(d.requested_at)}${decWhy(d)}</div>
         <button class="tp-btn sm primary" data-dec="approve|${d.id}">تأیید</button><button class="tp-btn sm" data-dec="reject|${d.id}">رد</button></div>`).join("")
       : `<p class="lead">تصمیمی در انتظار نیست.${settings().approvalRequired ? "" : " (تأیید مدیر برای تصمیم کارشناس غیرفعال است.)"}</p>`}
       <div class="tp-sect"><h3>رویدادهای اخیر <span>${S.events.length}</span> <button class="tp-btn xs" data-load-events style="margin-inline-start:8px">بارگیری</button></h3>
@@ -1231,6 +1237,7 @@
     Q("[data-act]").forEach((b) => b.onclick = () => { const [st, aid] = b.dataset.act.split("|"); doAct(st, +aid); });
     Q("[data-open]").forEach((b) => b.onclick = () => openDetail(+b.dataset.open));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
+    Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
     /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ درصدهای نامعتبر فرستاده نمی‌شوند */
     const alertsPatch = () => {
       const thr = [...Q("[data-thr]")];
@@ -1329,10 +1336,37 @@
     b.close(); await refresh(); S.tab = "desk"; render();
     TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاعِ بی‌مهلت مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها. مهلت‌هایی که خودتان گذاشته بودید دست نخورد.`, null, "باشد", "");
   }
+  /* طرح «خرید هوشمند، کارشناس ناظر» فاز ۴ب: تیکِ «🤖 هوشمند»ِ هر ارجاع، پیش‌فرض روشن — برداشتنش توضیح می‌خواهد (مگر همهٔ اقلامش از
+     نوعِ «مستقیم» باشند)؛ تا کار به کارشناس هوشمند سپرده نشده عوض‌شدنی است. فقط برای کارشناسی که کارشناس هوشمندش روشن است. */
+  const aiExpert = (a) => (S.data.ai_experts || []).includes(a.expert_id);
+  function aiTick(a) {
+    if (!aiExpert(a)) return "";
+    const on = a.ai_on !== 0;
+    return ` <button class="tp-btn xs ${on ? "" : "warn"}" data-aitick="${a.id}" data-on="${on ? 0 : 1}" title="${on ? "🤖 هوشمند — برای دستی کردن بزنید (با توضیح)" : `✋ دستی${a.ai_note ? ` — ${esc(a.ai_note)}` : ""} — برای هوشمند کردن بزنید`}">${on ? "🤖" : "✋"}</button>`;
+  }
+  async function aiTickSet(aid, on) {
+    const go = async (reason) => {
+      try { await TP.api("/assign/ai", { body: { assignment_id: aid, on, ...(reason ? { reason } : {}) } }); await refresh(); return true; }
+      catch (e) {
+        if (e.status === 422 && e.data && e.data.need_reason) return "reason";
+        TP.modal("نشد", esc(e.message), null, "باشد", ""); return true;
+      }
+    };
+    if (on) return go(null);
+    if ((await go(null)) !== "reason") return;
+    const d = TP.modal("✋ دستی کردنِ این ارجاع", `<p>کارشناس هوشمند روی این درخواست کار نمی‌کند و همهٔ کارهایش با خودِ کارشناس است.</p>
+      <div class="tp-field"><b>علت (اجباری)</b><textarea class="tp-input" id="ai-why" rows="3" style="width:100%;margin-top:6px" placeholder="مثلاً خریدِ فوری با تأمین‌کنندهٔ ثابت"></textarea></div>`,
+      async () => {
+        const why = ((d.querySelector("#ai-why") || {}).value || "").trim();
+        if (!why) return TP.modal("علت لازم است", "برای برداشتنِ تیکِ «🤖 هوشمند» علت را بنویسید.", null, "باشد", "");
+        await go(why);
+      }, "دستی شود");
+  }
   function doDispatch() {
     const list = readyAssignments(); const by = {};
     list.forEach((a) => by[a.expert_label || a.expert_name] = (by[a.expert_label || a.expert_name] || 0) + 1);
-    TP.modal(`ارسال ${list.length} ارجاع`, `ساعت‌شمار مهلت شروع می‌شود و برای این کارشناسان اعلان می‌رود:<br><br>${Object.entries(by).map(([e, c]) => `${esc(e)} — ${c} درخواست`).join("<br>")}<br><br><span class="chip info">اعلان تلگرام — اگر تلگرام کارشناس وصل باشد</span>`,
+    const aiN = list.filter((a) => aiExpert(a) && a.ai_on !== 0).length, manN = list.filter((a) => aiExpert(a) && a.ai_on === 0).length;
+    TP.modal(`ارسال ${list.length} ارجاع`, `ساعت‌شمار مهلت شروع می‌شود و برای این کارشناسان اعلان می‌رود:<br><br>${Object.entries(by).map(([e, c]) => `${esc(e)} — ${c} درخواست`).join("<br>")}<br><br><span class="chip info">اعلان تلگرام — اگر تلگرام کارشناس وصل باشد</span>${aiN || manN ? ` <span class="chip">🤖 ${M(aiN)} هوشمند · ✋ ${M(manN)} دستی</span>` : ""}`,
       async () => { try { await TP.api("/dispatch", { body: { assignment_ids: list.map((a) => a.id) } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تأیید و ارسال");
   }
   const ACT = {

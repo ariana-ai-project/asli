@@ -15,6 +15,8 @@
  * کارشناس هوشمند است. «رد»ِ تحویل در پنل پشتیبانی (review_json.state='rejected') درخواست را کامل به کارشناس برمی‌گرداند:
  * گفت‌وگوها و خط‌های کارشناس هوشمندِ همان درخواست هم آزاد می‌شوند.
  *
+ * فاز ۴ب طرح «خرید هوشمند»: تیکِ «🤖 هوشمند»ِ مدیر در ارجاع (assignments.ai_on=0 یعنی دستی) و قفلِ قلم‌به‌قلم — قلمِ «انجام دستی»،
+ * بیرون از کار یا از نوعِ «مستقیم» برای کارشناس آزاد است (ai-modes.js:aiItemFree؛ جدول و نامه همچنان برای کلِ درخواست).
  * بی ایمپورت از ماژول‌های دیگر، تا sp-core.js، sp-push.js، api.js و bot.js بی حلقهٔ ایمپورت بپرسند.
  */
 const now = () => Date.now();
@@ -43,10 +45,12 @@ export async function aiModeOn(env, expertId) {
  */
 export async function aiOwned(env, assignmentId) {
   if (!assignmentId) return null;
-  const r = await env.DB.prepare(`SELECT a.expert_id, a.dispatched_at, a.closed_at, g.mode, g.on_at, x.id AS run_id, x.expert_id AS run_expert, x.state, x.finished_at, x.handover_at
+  const r = await env.DB.prepare(`SELECT a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, g.mode, g.on_at, x.id AS run_id, x.expert_id AS run_expert, x.state, x.finished_at, x.handover_at
       FROM assignments a JOIN ai_agents g ON g.expert_id=a.expert_id LEFT JOIN ai_runs x ON x.assignment_id=a.id WHERE a.id=?`)
     .bind(assignmentId).first().catch(() => null);
   if (!r || r.mode !== "on") return null;
+  /* فاز ۴ب: مدیر در ارجاع تیکِ «🤖 هوشمند» را برداشته — درخواست کاملاً دستِ خودِ کارشناس است */
+  if (r.ai_on === 0) return null;
   /* کارِ همین ارجاع پیش‌تر مالِ کارشناسِ دیگری بود (تغییر کارشناس): کارشناس هوشمند دوباره برش نمی‌دارد، پس قفل هم نیست */
   if (r.run_id) return r.finished_at || r.run_expert !== r.expert_id ? null : { run_id: r.run_id, state: r.state, handover: r.handover_at || null };
   return r.dispatched_at && r.dispatched_at >= (r.on_at || 0) && !r.closed_at ? { run_id: null, state: "pending", handover: null } : null;
