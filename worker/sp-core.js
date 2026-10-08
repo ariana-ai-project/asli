@@ -777,7 +777,8 @@ export async function expertThreads(env, ex) {
     env.DB.prepare(`SELECT t.id, t.assignment_id, t.request_id, t.supplier_id, s.name AS supplier, s.demo, p.phone, p.label AS phone_label, t.last_at, r.party,
         (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=t.id AND m.who='s' AND m.id>t.e_seen) AS unread,
         (SELECT COUNT(*) FROM sp_bundles b WHERE b.thread_id=t.id AND b.state IN ('pending','proforma')) AS waiting,
-        (SELECT COUNT(*) FROM sp_lines l WHERE l.thread_id=t.id) AS lines
+        (SELECT COUNT(*) FROM sp_lines l WHERE l.thread_id=t.id) AS lines,
+        (SELECT m.who||'|'||m.kind||'|'||substr(replace(replace(m.body,char(10),' '),char(13),' '),1,120) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_msg
       FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id JOIN requests r ON r.id=a.request_id
       JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id
       WHERE a.expert_id=? ORDER BY t.last_at DESC LIMIT 300`).bind(ex.id).all(),
@@ -810,7 +811,9 @@ export async function expertThreads(env, ex) {
     /* گفت‌وگوی بسته: نخوانده و منتظرِ تصمیمش به حسابِ کارشناس نمی‌آید */
     const shut = A.ai === "locked";
     g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: shut ? null : t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
-      waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask, props: A.props || 0 });
+      waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask, props: A.props || 0,
+      /* پیش‌نمایشِ آخرین پیام برای فهرستِ تلگرام‌مانندِ مکاتبات («که|نوع|متن»)؛ گفت‌وگوی بسته پیش‌نمایش ندارد */
+      last_msg: shut ? null : t.last_msg || null });
     if (!shut) { g.unread += t.unread; g.waiting += t.waiting; }
     if (A.ai === "ask") g.asks = (g.asks || 0) + 1;
     if (A.props) g.props = (g.props || 0) + A.props;

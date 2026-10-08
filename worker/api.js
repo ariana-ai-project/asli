@@ -937,6 +937,9 @@ async function teamDesk(env, ex) {
   for (const i of items) { delete i.pick_json; const r = byReq.get(i.request_id); if (r) r.items.push(i); }
   /* باکس‌های تیم با آستانه‌های خودِ ارشد (اگر گذاشته) */
   const s = await getSettings(env);
+  /* نام پروژهٔ هر درخواست برای کارت‌های تب تیم — همان projectOf کارتابل */
+  const projects = reportProjects(s);
+  for (const r of byReq.values()) { const p = projectOf(projects, r.party, r.center); r.project = p ? p.name : null; }
   return { team, requests: [...byReq.values()], settings: ex.alert_thresholds ? { ...s, thresholds: ex.alert_thresholds } : s };
 }
 

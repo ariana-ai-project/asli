@@ -126,7 +126,8 @@
     return S.data.requests.filter((r) => {
       if (!TP.hit(r.id, S.q.id)) return false;
       const L = dateList(); if (L.length && !L.includes(r.date)) return false;
-      if (!TP.hit(r.party, S.q.party)) return false;
+      /* کادر «پروژه یا طرف مقابل»: هر دو (کارت پروژه را نشان می‌دهد) */
+      if (S.q.party && !TP.hit(r.party, S.q.party) && !TP.hit(r.project || "", S.q.party)) return false;
       if (S.q.item && !r.items.some((i) => TP.hit(i.title, S.q.item) || TP.hit(i.code, S.q.item))) return false;
       /* کارشناس: تیک‌ها یا متنِ نوشته‌شده (هرکدام که هست) */
       if (S.filter.experts.length && !r.assignments.some((a) => S.filter.experts.includes(a.expert_id))) return false;
@@ -205,19 +206,27 @@
     const nE = S.filter.experts.length, txt = S.filter.expertText;
     const expLabel = nE || txt ? `${nE ? `${M(nE)} کارشناس` : ""}${nE && txt ? " · " : ""}${txt ? `«${esc(txt)}»` : ""}` : "همه";
     const sel = statusSel(), stLabel = sel.length === STATUS_ALL.length ? "همه" : sel.length === STATUS_DEFAULT.length && STATUS_DEFAULT.every((s) => sel.includes(s)) ? "بازها (پیش‌فرض)" : sel.join("، ");
+    const anyF = Object.values(S.q).some((v) => String(v || "").trim()) || nE || txt || S.filter.statuses || S.filter.state;
+    /* ابزارهای میز در یک منو: ارجاع و مهلتِ هوشمند روی همه، و «پاک کردن میز» دور از دکمه‌های روزمره */
+    const tools = TP.ui.menu({ btn: `<button class="tp-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" title="ارجاع و مهلت هوشمند روی همهٔ ارسال‌نشده‌ها">${TP.ui.ICON.settings}خودکار ▾</button>`,
+      items: [{ label: "ارجاع هوشمند روی همهٔ ارسال‌نشده‌ها", icon: "users", attrs: `data-auto="asg"` }, { label: "مهلت هوشمند روی ارسال‌نشده‌های کارشناس‌دار", icon: "clock", attrs: `data-auto="dl"` },
+        ...(S.page.total ? ["-", { label: "پاک کردن میز (همهٔ درخواست‌ها)", icon: "x", attrs: "data-purge", cls: "danger" }] : [])] });
     return `<div class="tp-filters">
+      <input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" placeholder="شماره درخواست" aria-label="شماره درخواست" style="width:130px">
+      <input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" aria-label="تاریخ" readonly style="width:140px">
+      <input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" placeholder="پروژه یا طرف مقابل" aria-label="پروژه یا طرف مقابل" style="width:180px">
+      <input class="tp-input ${S.q.item ? "on" : ""}" data-q="item" value="${esc(S.q.item)}" placeholder="عنوان یا کد قلم" aria-label="عنوان یا کد قلم" style="width:160px">
       <span class="lab">کارشناس</span><span class="fwrap"><button class="tp-btn sm ${nE || txt ? "primary" : ""}" data-fopen="expert">${expLabel} ▾</button>${vPop("expert")}</span>
       <span class="lab">وضعیت</span><span class="fwrap"><button class="tp-btn sm ${sel.length !== STATUS_DEFAULT.length || !STATUS_DEFAULT.every((s) => sel.includes(s)) ? "primary" : ""}" data-fopen="status" title="${esc(sel.join("، "))}">${stLabel.length > 40 ? stLabel.slice(0, 38) + "…" : stLabel} ▾</button>${vPop("status")}</span>
-      <span class="lab">مرحله</span><select class="tp-select" data-f="state"><option value="">همه</option>
+      <span class="lab">مرحله</span><select class="tp-select" data-f="state" aria-label="مرحله"><option value="">همه</option>
         <option value="pending" ${S.filter.state === "pending" ? "selected" : ""}>ارسال‌نشده</option><option value="ready" ${S.filter.state === "ready" ? "selected" : ""}>آماده ارسال</option>
         <option value="sent" ${S.filter.state === "sent" ? "selected" : ""}>ارسال‌شده</option><option value="closed" ${S.filter.state === "closed" ? "selected" : ""}>بسته/متوقف</option></select>
-      <span class="lab">بازه</span><select class="tp-select" data-f="window">${WINDOWS.map(([k, l]) => `<option value="${k}" ${S.filter.window === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <button class="tp-btn sm" data-clear>پاک کردن فیلترها</button>
-      ${S.page.total ? `<button class="tp-btn sm danger" data-purge title="همهٔ درخواست‌ها را از سامانه پاک می‌کند">پاک کردن میز</button>` : ""}
+      <span class="lab">بازه</span><select class="tp-select" data-f="window" aria-label="بازه">${WINDOWS.map(([k, l]) => `<option value="${k}" ${S.filter.window === k ? "selected" : ""}>${l}</option>`).join("")}</select>
+      ${anyF ? `<button class="tp-btn sm" data-clear>پاک کردن فیلترها</button>` : ""}
+      ${tools}
       <span class="end">${visible().length} از ${S.data.requests.length} درخواست${S.page.total > S.page.limit ? ` · صفحهٔ ${Math.floor(S.page.offset / S.page.limit) + 1} از ${Math.ceil(S.page.total / S.page.limit)}
         <button class="tp-btn xs" data-page="-1" ${S.page.offset ? "" : "disabled"}>قبلی</button><button class="tp-btn xs" data-page="1" ${S.page.offset + S.page.limit < S.page.total ? "" : "disabled"}>بعدی</button>` : ""}</span></div>`;
   }
-
   /* وضعیت به تفکیک قلم — درخواست یک وضعیت ندارد، هر قلمش دارد.
      تا شش قلم ردیف‌به‌ردیف، بیشتر از آن شمارشِ هر وضعیت؛ فهرست کامل در کشو. */
   function itemStates(its) {
@@ -245,13 +254,83 @@
     const s = e && e.senior_id ? E.find((x) => x.id === e.senior_id && x.senior && x.active) : null;
     return (s && s.alert_thresholds) || settings().thresholds;
   }
-  function stageBoxes(r, a) {
-    const A = { dispatchedAt: a.dispatched_at, days: a.days, done: doneFlags(r, a), active: isActive(r, a) };
-    const thr = thrFor(a.expert_id);
-    return TP.STAGES.map((s, i) => {
-      let lab = ""; if (i === 3 && a.quote_count) lab = `<span class="cnt">${a.quote_count}</span>`; if (i === 4 && a.proforma_count) lab = `<span class="cnt">${a.proforma_count}</span>`;
-      return `<td class="console"><div class="box b-${TP.stageColor(A, i, thr, S.now)}" title="${s}">${lab}</div></td>`;
-    }).join("");
+  /* ---------- میز ارجاع به شکل کارت (مهر ۱۴۰۵): یک کارت برای هر درخواست، یک ردیف برای هر ارجاع ---------- */
+  /* بدترین رنگِ شش مرحلهٔ یک ارجاع (همان TP.stageColor باکس‌های پایش) → رنگِ کلِ کارت: زرد، نارنجی، قرمز */
+  const LVL = { warn: 1, late: 2, over: 3 };
+  function unitLevel(r, a) {
+    if (!isActive(r, a)) return "";
+    const A = { dispatchedAt: a.dispatched_at, days: a.days, done: doneFlags(r, a), active: true }, thr = thrFor(a.expert_id);
+    let worst = "";
+    TP.STAGES.forEach((_, i) => { const c = TP.stageColor(A, i, thr, S.now); if ((LVL[c] || 0) > (LVL[worst] || 0)) worst = c; });
+    return worst;
+  }
+  const jd = (ms) => { const [y, m, d] = TP.todayJ(ms); return `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`; };
+  /* نوارِ مهلت و نوارِ شش مرحلهٔ یک ارجاع — همان دو نوارِ کارتابلِ کارشناس؛ رنگ هر مرحله از TP.stageColor با آستانه‌های همان کارشناس */
+  function unitBars(r, a) {
+    const A = { dispatchedAt: a.dispatched_at, days: a.days, done: doneFlags(r, a), active: isActive(r, a) }, thr = thrFor(a.expert_id);
+    const segs = TP.STAGES.map((s, i) => ({ label: TP.ui.STAGE_SHORT[i], title: s, cls: `c-${TP.stageColor(A, i, thr, S.now)}`, done: A.done[i],
+      cnt: i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : "" }));
+    if (!a.dispatched_at) return TP.ui.bar.progress(segs);
+    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, el / b * 100) : 0;
+    const lvl = el >= b ? "over" : pct >= 85 ? "late" : pct >= 60 ? "warn" : "";
+    return TP.ui.bar.deadline(pct, lvl, "مهلت", `${a.days || "—"} روز`) + TP.ui.bar.progress(segs);
+  }
+  /* چیپِ «ارسال»: تاریخِ ارسال، یا «ارسال‌نشده» که اگر از مهلتِ ارسالِ تنظیمات گذشته باشد زرد می‌شود (همان TP.dispatchColor) */
+  function sendChip(r, a) {
+    if (a && a.dispatched_at) return `<span class="tp-sendchip ok" title="ارسال شد ${esc(TP.fmt(a.dispatched_at))}">✓ ارسال ${esc(jd(a.dispatched_at))}</span>`;
+    const c = TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, null, S.now);
+    return `<span class="tp-sendchip ${c === "idle" || c === "empty" ? "" : "warn"}" title="هنوز به کارشناس ارسال نشده">ارسال‌نشده</span>`;
+  }
+  /* یک ردیفِ ارجاع داخلِ کارت: انتخاب کارشناس و مهلت (تا پیش از ارسال)، تیک‌های 🤖/👁، نوارها، وضعیت و منوی ⋯ */
+  function deskUnit(r, a, STL) {
+    const lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a), live = isActive(r, a);
+    const who = a.dispatched_at
+      ? `<span class="uname" title="${esc(a.expert_name || "")}">${TP.ui.ICON.user}${esc(a.expert_label || a.expert_name || "—")}</span>${fileExpert(its, a.expert_name)}`
+      : `<select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock} aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}`;
+    const days = a.dispatched_at ? `<span title="مهلت (روز کاری)">${TP.ui.ICON.clock}${a.days ? `${esc(a.days)} روز` : "—"}</span>`
+      : `<span title="مهلت (روز کاری)">${TP.ui.ICON.clock}</span><input class="tp-input num ${a.days ? "" : "unset"}" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" placeholder="روز" aria-label="مهلت به روز کاری" ${lock}>`;
+    const acts = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="اقدام‌های این ارجاع" title="اقدام‌ها">${TP.ui.ICON.more}</button>`,
+      items: [
+        { label: "مشاهدهٔ پنل کارشناس", icon: "search", attrs: `data-open="${a.id}"` },
+        ...(a.dispatched_at ? [{ label: "تغییر کارشناس", icon: "users", attrs: `data-move="${a.id}"` }] : []),
+        "-",
+        { label: "تعلیق", icon: "clock", attrs: `data-act="hold|${a.id}"` },
+        ...(its.some((i) => i.state === "hold") ? [{ label: "بازگشت از تعلیق", icon: "refresh", attrs: `data-act="open|${a.id}"` }] : []),
+        { label: "توقف", icon: "x", attrs: `data-act="stop|${a.id}"`, cls: "danger" },
+        { label: "خاتمه", icon: "check", attrs: `data-act="closed|${a.id}"` },
+      ] });
+    return TP.ui.unitRow({ who, days, ticks: (aiTick(a) + supTick(a)).trim(), bars: unitBars(r, a),
+      status: `<span><span class="st ${STL.cls}">${live ? "در جریان" : STL.label}</span> <span class="dim">${its.length} قلم</span></span>${sendChip(r, a)}${itemStates(its)}`, acts });
+  }
+  /* اقلامِ بی‌کارشناس: یک ردیف با انتخابِ خالی — با انتخاب، ارجاعِ تازه فقط برای همین اقلام ساخته می‌شود */
+  function unassignedUnit(r, un, STL) {
+    const who = `<select class="tp-select unset" data-assign="${esc(r.id)}" data-un="${un.map((i) => i.id).join(",")}" aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(un.some((i) => i.src_expert) ? un : r.items, null)}`;
+    return TP.ui.unitRow({ who, days: `<span title="مهلت پس از انتخاب کارشناس">${TP.ui.ICON.clock}—</span>`,
+      bars: TP.ui.bar.progress(TP.STAGES.map((s, i) => ({ label: TP.ui.STAGE_SHORT[i], title: s, cls: "c-idle" }))),
+      status: `<span><span class="st ${STL.cls}">${STL.label}</span> <span class="dim">${un.length} قلم</span></span><span class="chip warn" style="font-size:.72rem">بدون کارشناس</span>${sendChip(r, null)}`, acts: "" });
+  }
+  function itemsDrawer(r) {
+    return `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
+      ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="dim">${esc(i.note || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td class="num">${esc(i.need_date || "")}</td><td class="num">${esc(i.quote_deadline || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
+        <td><span class="st ${TP.SRC_CLS[i.src_status] || "st-reg"}">${esc(i.src_status || "")}</span></td><td class="dim">${esc(i.src_expert || "—")}</td><td><span class="st ${TP.STATES[i.state].cls}">${TP.STATES[i.state].label}</span></td>
+        <td>${a ? esc(a.expert_label || a.expert_name) : (i.state === "open" ? `<span class="chip warn">بدون کارشناس</span>` : "—")}</td></tr>`; }).join("")}
+      </tbody></table>`;
+  }
+  /** کارتِ هر درخواست روی میز: شماره، تاریخ، نیاز، پروژه/طرف مقابل، اقلام، و یک ردیف برای هر ارجاع؛ رنگ کارت از بدترین ارجاعش */
+  function deskCard(r, i) {
+    const un = unassignedOpen(r), st = reqState(r), STL = TP.STATES[st];
+    /* وضعیتِ مؤثر (بسته/در جریان/ثبت شده…) — همان که فیلتر وضعیت روی آن کار می‌کند */
+    const chips = [...new Set(r.items.map((x) => statusOf(r, x)))].map((s) => `<span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span>`).join(" ");
+    const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
+    const units = r.assignments.map((a) => deskUnit(r, a, STL));
+    if (un.length) units.push(unassignedUnit(r, un, STL));
+    if (!units.length) units.push(`<div class="tp-unit none">قلم بازی ندارد</div>`);
+    let lvl = ""; r.assignments.forEach((a) => { const c = unitLevel(r, a); if ((LVL[c] || 0) > (LVL[lvl] || 0)) lvl = c; });
+    const menu = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
+      items: [{ label: S.open[r.id] ? "بستن فهرست اقلام" : "فهرست اقلام", icon: "box", attrs: `data-toggle="${esc(r.id)}"` }, "-", { label: "حذف از سامانه", icon: "x", attrs: `data-del="${esc(r.id)}"`, cls: "danger" }] });
+    return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center, chips, menu,
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-toggle="${esc(r.id)}" aria-expanded="${S.open[r.id] ? "true" : "false"}"`,
+      drawerOpen: !!S.open[r.id], drawerHtml: itemsDrawer(r), units });
   }
 
   function vDesk() {
@@ -262,74 +341,10 @@
     }
     if (!S.data.requests.length) return `<div class="empty"><b>هنوز فایلی بارگذاری نشده است.</b>با دکمه «بارگذاری درخواست‌های روزانه» فایل خروجی راهکاران (.xlsx) را انتخاب کنید — یا فایل را همین‌جا روی صفحه رها کنید.</div>`;
     const rows = visible();
-    /* نتیجهٔ خالیِ فیلتر هم سرآیند و ردیف فیلترها را نگه می‌دارد؛ وگرنه کادرهای جستجو
-       ناپدید می‌شدند و راهی جز «پاک کردن فیلترها» برای برگشتن نمی‌ماند. */
-    const noRows = rows.length ? "" : `<tr><td colspan="19"><div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
-      ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div></td></tr>`;
-    let h = `<div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 300px)"><table class="tp-table"><thead>
-      <tr class="group"><th colspan="7">داده فایل ورودی</th><th colspan="3" class="sep">تصمیم مدیر</th><th colspan="7" class="console sep">پایش مراحل</th><th colspan="2" class="sep">اقدام</th></tr>
-      <tr><th class="stick"></th><th>شماره<br>درخواست</th><th>تاریخ</th><th>تاریخ نیاز</th><th class="rt">طرف مقابل</th><th>اقلام</th><th>وضعیت</th>
-        <th class="sep">کارشناس خرید<br><button class="tp-btn xs" data-auto="asg" title="ارجاع هوشمند روی همه درخواست‌های ارسال‌نشده">خودکار</button></th>
-        <th>مهلت (روز کاری)<br><button class="tp-btn xs" data-auto="dl" title="مهلت هوشمند روی همه ارسال‌نشده‌های کارشناس‌دار">خودکار</button></th><th>قلم</th>
-        <th class="console sep">ارسال</th>${TP.STAGES.map((s) => `<th class="console">${s.replace(" ", "<br>")}</th>`).join("")}
-        <th class="sep">وضعیت و اقدام</th><th>پنل</th></tr>
-      <tr class="flt"><th class="stick"></th><th><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" placeholder="جستجو"></th>
-        <th><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" readonly></th><th></th>
-        <th><input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" placeholder="جستجو"></th>
-        <th><input class="tp-input ${S.q.item ? "on" : ""}" data-q="item" value="${esc(S.q.item)}" placeholder="عنوان یا کد قلم"></th>
-        <th></th><th class="sep"></th><th></th><th></th><th class="console sep"></th>${TP.STAGES.map(() => `<th class="console"></th>`).join("")}<th class="sep"></th><th></th></tr>
-      </thead><tbody>`;
-    for (const r of rows) {
-      const un = unassignedOpen(r);
-      const units = [...r.assignments.map((a) => ({ a })), ...(un.length ? [{ un }] : [])];
-      if (!units.length) units.push({ none: true });
-      const n = units.length, rs = ` rowspan="${n}"`;
-      const st = reqState(r), STL = TP.STATES[st];
-      /* وضعیتِ مؤثر (بسته/در جریان/ثبت شده…) — همان که فیلتر وضعیت روی آن کار می‌کند */
-      const srcChips = [...new Set(r.items.map((i) => statusOf(r, i)))].map((s) => `<span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span>`).join(" ");
-      const need = r.items.map((i) => i.need_date).filter(Boolean).sort()[0] || "";
-      units.forEach((u, k) => {
-        h += `<tr>`;
-        if (k === 0) {
-          h += `<td class="stick"${rs}><button class="tp-btn xs" data-toggle="${esc(r.id)}" title="اقلام">${S.open[r.id] ? "▾" : "◂"} ${r.items.length}</button>
-              <button class="tp-btn xs danger" data-del="${esc(r.id)}" title="حذف این درخواست از سامانه">✕</button></td>
-            <td class="id num"${rs}>${esc(r.id)}</td><td class="num"${rs}>${esc(r.date)}</td><td class="num"${rs} title="نزدیک‌ترین تاریخ نیاز اقلام">${esc(need)}</td>
-            <td class="party"${rs}>${esc(r.party)}${r.center ? `<div class="dim" style="font-size:.75rem">${esc(r.center)}</div>` : ""}</td>
-            <td class="item"${rs}><div style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.items.map((i) => i.title).join(" · "))}">${esc(r.items[0] ? r.items[0].title : "")}</div>${r.items.length > 1 ? `<div class="dim" style="font-size:.75rem">و ${r.items.length - 1} قلم دیگر</div>` : ""}</td>
-            <td${rs}>${srcChips}</td>`;
-        }
-        if (u.a) {
-          const a = u.a, lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a);
-          h += `<td class="sep expcell"><select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock}><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}</td>
-            <td style="white-space:nowrap"><input class="tp-input num ${a.days ? "" : "unset"}" style="width:64px;text-align:center" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" ${lock}>${aiTick(a)}${supTick(a)}</td>
-            <td class="num">${its.length}</td>
-            <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, a.dispatched_at, S.now)}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>
-            ${stageBoxes(r, a)}
-            <td class="sep" style="white-space:nowrap"><span class="st ${STL.cls}">${isActive(r, a) ? "در جریان" : STL.label}</span>${itemStates(its)}<br>
-              <button class="tp-btn xs warn" data-act="hold|${a.id}">تعلیق</button><button class="tp-btn xs danger" data-act="stop|${a.id}">توقف</button><button class="tp-btn xs" data-act="closed|${a.id}">خاتمه</button>
-              ${its.some((i) => i.state === "hold") ? `<button class="tp-btn xs" data-act="open|${a.id}">بازگشت</button>` : ""}</td>
-            <td><button class="tp-btn xs" data-open="${a.id}">مشاهده</button> <button class="tp-btn xs" data-move="${a.id}" ${a.dispatched_at ? "" : "disabled"}>تغییر</button></td>`;
-        } else if (u.un) {
-          h += `<td class="sep expcell"><select class="tp-select unset" data-assign="${esc(r.id)}" data-un="${u.un.map((i) => i.id).join(",")}"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(u.un.some((i) => i.src_expert) ? u.un : r.items, null)}</td>
-            <td><input class="tp-input num unset" style="width:64px;text-align:center" disabled placeholder="—"></td><td class="num">${u.un.length}</td>
-            <td class="console sep"><div class="box b-${TP.dispatchColor(r.imported_at || S.now, settings().dispatchDays, null, S.now)}"></div></td>
-            ${TP.STAGES.map(() => `<td class="console"><div class="box b-idle"></div></td>`).join("")}
-            <td class="sep"><span class="st ${STL.cls}">${STL.label}</span><br><span class="dim" style="font-size:.75rem">بدون کارشناس</span></td><td></td>`;
-        } else {
-          h += `<td class="sep" colspan="3"><span class="dim">قلم بازی ندارد</span></td><td class="console sep"><div class="box b-muted"></div></td>${TP.STAGES.map(() => `<td class="console"><div class="box b-muted"></div></td>`).join("")}
-            <td class="sep"><span class="st ${STL.cls}">${STL.label}</span></td><td></td>`;
-        }
-        h += `</tr>`;
-      });
-      if (S.open[r.id]) {
-        h += `<tr class="drawer"><td colspan="19"><div class="drawer-in"><table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
-          ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="dim">${esc(i.note || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td class="num">${esc(i.need_date || "")}</td><td class="num">${esc(i.quote_deadline || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
-            <td><span class="st ${TP.SRC_CLS[i.src_status] || "st-reg"}">${esc(i.src_status || "")}</span></td><td class="dim">${esc(i.src_expert || "—")}</td><td><span class="st ${TP.STATES[i.state].cls}">${TP.STATES[i.state].label}</span></td>
-            <td>${a ? esc(a.expert_label || a.expert_name) : (i.state === "open" ? `<span class="chip warn">بدون کارشناس</span>` : "—")}</td></tr>`; }).join("")}
-          </tbody></table></div></td></tr>`;
-      }
-    }
-    return h + noRows + `</tbody></table></div>`;
+    /* نتیجهٔ خالیِ فیلتر هم نوار جستجو را نگه می‌دارد (vFilters)؛ وگرنه راهی جز «پاک کردن فیلترها» برای برگشتن نمی‌ماند. */
+    if (!rows.length) return `<div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
+      ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div>`;
+    return `<div class="tp-cards wide">${rows.map(deskCard).join("")}</div>`;
   }
 
   /* ---------- کارشناسان ----------

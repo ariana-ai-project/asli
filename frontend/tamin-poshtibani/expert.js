@@ -236,46 +236,57 @@
     if (S.teamCard === "all") return R;
     return R.map((r) => ({ ...r, assignments: r.assignments.filter((a) => a.expert_id === +S.teamCard) })).filter((r) => r.assignments.length);
   };
-  function teamStageBoxes(r, a) {
-    const its = r.items.filter((i) => i.assignment_id === a.id);
-    const A = { dispatchedAt: a.dispatched_at, days: a.days, active: !!a.dispatched_at && its.some((i) => i.state === "open"),
+  const teamItems = (r, a) => r.items.filter((i) => i.assignment_id === a.id);
+  function teamState(r, a) {
+    const its = teamItems(r, a);
+    return { dispatchedAt: a.dispatched_at, days: a.days, active: !!a.dispatched_at && its.some((i) => i.state === "open"),
       done: [!!a.viewed_at, its.some((i) => i.hist_done_at), its.some((i) => i.smart_done_at), a.quote_count > 0, a.proforma_count > 0, !!a.commission_at] };
-    return TP.STAGES.map((s, i) => `<td class="console"><div class="box b-${TP.stageColor(A, i, teamThr(), S.now)}" title="${s}">${i === 3 && a.quote_count ? `<span class="cnt">${a.quote_count}</span>` : i === 4 && a.proforma_count ? `<span class="cnt">${a.proforma_count}</span>` : ""}</div></td>`).join("");
   }
+  function teamLevel(r, a) {
+    const A = teamState(r, a); if (!A.active) return "";
+    let worst = "";
+    TP.STAGES.forEach((_, i) => { const c = TP.stageColor(A, i, teamThr(), S.now); if ((LVL[c] || 0) > (LVL[worst] || 0)) worst = c; });
+    return worst;
+  }
+  /* یک ردیفِ ارجاع داخل کارتِ تیم: کارشناس، مهلت، نوار مهلت و نوار شش مرحله، وضعیت و منوی ⋯ (مشاهده / تغییر کارشناس) — همان کارتِ میز مدیر */
+  function teamUnit(r, a) {
+    const its = teamItems(r, a), A = teamState(r, a), live = its.some((i) => i.state === "open");
+    const st = live ? (a.dispatched_at ? "در جریان" : "ارسال‌نشده") : (its.some((i) => i.state === "hold") ? "معلق" : its.some((i) => i.state === "stop") ? "متوقف" : "بسته شده");
+    const segs = TP.STAGES.map((s, i) => ({ label: TP.ui.STAGE_SHORT[i], title: s, cls: `c-${TP.stageColor(A, i, teamThr(), S.now)}`, done: A.done[i],
+      cnt: i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : "" }));
+    let bars = TP.ui.bar.progress(segs);
+    if (a.dispatched_at) {
+      const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, el / b * 100) : 0;
+      bars = TP.ui.bar.deadline(pct, el >= b ? "over" : pct >= 85 ? "late" : pct >= 60 ? "warn" : "", "مهلت", `${a.days || "—"} روز`) + bars;
+    }
+    const acts = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="اقدام‌های این ارجاع" title="اقدام‌ها">${TP.ui.ICON.more}</button>`,
+      items: [{ label: "مشاهدهٔ درخواست", icon: "search", attrs: `data-req="${a.id}"` }, { label: "تغییر کارشناس", icon: "users", attrs: `data-delegate="${a.id}" data-from="${a.expert_id}"` }] });
+    const sent = a.dispatched_at ? `<span class="tp-sendchip ok" title="ارسال شد ${esc(TP.fmt(a.dispatched_at))}">✓ ارسال ${esc(TP.fmt(a.dispatched_at).split(" — ")[0].replace(/^\S+\s/, ""))}</span>` : `<span class="tp-sendchip">ارسال‌نشده</span>`;
+    return TP.ui.unitRow({ who: `<span class="uname">${TP.ui.ICON.user}${esc(a.expert_label || a.expert_name)}</span>`, days: `<span title="مهلت (روز کاری)">${TP.ui.ICON.clock}${a.days ? `${esc(a.days)} روز` : "—"}</span>`, bars,
+      status: `<span><span class="st ${live ? (a.dispatched_at ? "st-run" : "st-reg") : "st-cls"}">${st}</span> <span class="dim">${its.length} قلم</span></span>${sent}`, acts });
+  }
+  function teamCard(r, i) {
+    const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
+    let lvl = ""; r.assignments.forEach((a) => { const c = teamLevel(r, a); if ((LVL[c] || 0) > (LVL[lvl] || 0)) lvl = c; });
+    const menu = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
+      items: [{ label: S.teamOpen[r.id] ? "بستن فهرست اقلام" : "فهرست اقلام", icon: "box", attrs: `data-ttoggle="${esc(r.id)}"` }] });
+    const drawer = `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>وضعیت</th><th>توضیحات</th></tr></thead><tbody>
+      ${r.items.map((x) => `<tr><td class="num">${x.line_no}</td><td class="num">${esc(x.code || "")}</td><td>${esc(x.title)}</td><td class="dim">${esc(x.spec || "")}</td><td class="num">${x.qty == null ? "" : M(x.qty)}</td><td>${esc(x.unit || "")}</td><td class="num">${esc(x.need_date || "")}</td><td><span class="st ${TP.STATES[x.state].cls}">${TP.STATES[x.state].label}</span></td><td class="dim">${esc(x.note || "")}</td></tr>`).join("")}</tbody></table>`;
+    return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center, menu,
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-ttoggle="${esc(r.id)}" aria-expanded="${S.teamOpen[r.id] ? "true" : "false"}"`,
+      drawerOpen: !!S.teamOpen[r.id], drawerHtml: drawer, units: r.assignments.map((a) => teamUnit(r, a)) });
+  }
+  /* تب «تیم کارشناسی»: کپسولِ کارشناسان (با شمار) بالا و کارت‌های درخواست زیرش — همان کارت‌های میز مدیر (مهر ۱۴۰۵) */
   function vTeam() {
     if (!S.team) { loadTeam(); return `<div class="tp-wrap"><div class="empty">در حال خواندن تیم…</div></div>`; }
     const team = S.team.team || [], R = S.team.requests || [];
     if (!team.length) return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تیم کارشناسی</h2><p class="lead">هنوز کارشناسی زیر نظر شما نیست. مدیر در تب «کارشناسان» پنل خودش، کارشناسان تیم شما را تیک می‌زند.</p></div></div>`;
     const cnt = (eid) => R.reduce((n, r) => n + r.assignments.filter((a) => eid === "all" || a.expert_id === eid).length, 0);
-    const cards = [["all", "همه"], ...team.map((e) => [e.id, e.label || e.name])].map(([k, l]) =>
-      `<div class="pill ${String(S.teamCard) === String(k) ? "sel" : ""}" style="min-width:150px"><span class="t" data-tcard="${k}">${esc(l)}</span><span class="m num">${M(cnt(k === "all" ? "all" : +k))} درخواست</span></div>`).join("");
+    const seg = [["all", "همه"], ...team.map((e) => [e.id, e.label || e.name])].map(([k, l]) => { const on = String(S.teamCard) === String(k);
+      return `<button type="button" class="${on ? "on" : ""}" data-tcard="${k}" role="tab" aria-selected="${on ? "true" : "false"}">${esc(l)}<span class="cnt">${M(cnt(k === "all" ? "all" : +k))}</span></button>`; }).join("");
     const rows = teamRows();
-    let h = `<div class="tp-wrap" style="padding-bottom:20px"><div class="tp-card">
-      <div class="strip">${cards}</div>
-      <div class="tp-scroll" data-keep-scroll style="border:0;border-radius:0 0 16px 16px;max-height:calc(100vh - 300px)"><table class="tp-table"><thead>
-        <tr class="group"><th colspan="6">داده فایل ورودی</th><th colspan="2" class="sep">ارجاع</th><th colspan="7" class="console sep">پایش مراحل</th><th colspan="2" class="sep">اقدام</th></tr>
-        <tr><th class="stick"></th><th>شماره<br>درخواست</th><th>تاریخ</th><th>تاریخ نیاز</th><th class="rt">طرف مقابل</th><th>اقلام</th>
-          <th class="sep">کارشناس</th><th>مهلت</th><th class="console sep">ارسال</th>${TP.STAGES.map((s) => `<th class="console">${s.replace(" ", "<br>")}</th>`).join("")}
-          <th class="sep">وضعیت</th><th>پنل</th></tr></thead><tbody>`;
-    for (const r of rows) {
-      const need = r.items.map((i) => i.need_date).filter(Boolean).sort()[0] || "";
-      r.assignments.forEach((a, k) => {
-        const its = r.items.filter((i) => i.assignment_id === a.id), rs = k === 0 ? ` rowspan="${r.assignments.length}"` : "";
-        const live = its.some((i) => i.state === "open"), st = live ? (a.dispatched_at ? "در جریان" : "ارسال‌نشده") : (its.some((i) => i.state === "hold") ? "معلق" : its.some((i) => i.state === "stop") ? "متوقف" : "بسته شده");
-        h += `<tr>${k === 0 ? `<td class="stick"${rs}><button class="tp-btn xs" data-ttoggle="${esc(r.id)}">${S.teamOpen[r.id] ? "▾" : "◂"} ${r.items.length}</button></td>
-            <td class="id num"${rs}>${esc(r.id)}</td><td class="num"${rs}>${esc(r.date)}</td><td class="num"${rs}>${esc(need)}</td>
-            <td class="party"${rs}>${esc(r.party)}${r.center ? `<div class="dim" style="font-size:.75rem">${esc(r.center)}</div>` : ""}</td>
-            <td class="item"${rs}><div style="max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${esc(r.items.map((i) => i.title).join(" · "))}">${esc(r.items[0] ? r.items[0].title : "")}</div>${r.items.length > 1 ? `<div class="dim" style="font-size:.75rem">و ${r.items.length - 1} قلم دیگر</div>` : ""}</td>` : ""}
-          <td class="sep"><b>${esc(a.expert_label || a.expert_name)}</b></td><td class="num">${a.days ? a.days + " روز" : "—"}</td>
-          <td class="console sep"><div class="box b-${a.dispatched_at ? "done" : "idle"}" title="${a.dispatched_at ? "ارسال شد " + TP.fmt(a.dispatched_at) : "ارسال‌نشده"}"></div></td>${teamStageBoxes(r, a)}
-          <td class="sep"><span class="st ${live ? (a.dispatched_at ? "st-run" : "st-reg") : "st-cls"}">${st}</span></td>
-          <td style="white-space:nowrap"><button class="tp-btn xs" data-req="${a.id}">مشاهده</button> <button class="tp-btn xs" data-delegate="${a.id}" data-from="${a.expert_id}">تغییر کارشناس</button></td></tr>`;
-      });
-      if (S.teamOpen[r.id]) h += `<tr class="drawer"><td colspan="17"><div class="drawer-in"><table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>وضعیت</th><th>توضیحات</th></tr></thead><tbody>
-        ${r.items.map((i) => `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code || "")}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit || "")}</td><td class="num">${esc(i.need_date || "")}</td><td><span class="st ${TP.STATES[i.state].cls}">${TP.STATES[i.state].label}</span></td><td class="dim">${esc(i.note || "")}</td></tr>`).join("")}</tbody></table></div></td></tr>`;
-    }
-    if (!rows.length) h += `<tr><td colspan="17"><div class="empty">درخواستی برای این کارشناس نیست.</div></td></tr>`;
-    return h + `</tbody></table></div></div></div>`;
+    return `<div class="tp-subbar" style="padding-top:12px"><div class="tp-seg" role="tablist" aria-label="کارشناسان تیم">${seg}</div><span class="spacer"></span><span class="dim" style="font-size:.85rem">${rows.length} درخواست</span>${TP.ui.info("expert.team", "راهنمای تیم")}</div>
+      ${rows.length ? `<div class="tp-cards wide">${rows.map(teamCard).join("")}</div>` : `<div class="tp-wrap"><div class="tp-card"><div class="empty">درخواستی برای این کارشناس نیست.</div></div></div>`}`;
   }
 
   /* «ارجاع به تیم» / «تغییر کارشناس»: فهرست زیرمجموعه‌ها (و خودِ ارشد) و «ارسال» */

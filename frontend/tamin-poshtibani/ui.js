@@ -308,5 +308,34 @@
     return { start, stop, now: tick };
   }
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh };
+  /* ---------- کارتِ درخواست برای میز مدیر و تیمِ ارشد (یک درخواست، چند ارجاع) ----------
+     o: { attrs, lvl ("" | warn | late | over), rid, date, need, project, party, center, chips (html)، menu (html)،
+          items: { first, total }, drawerOpen, drawerHtml (html اقلام)، toggleAttrs (دکمهٔ باز/بسته)، units: [html هر ارجاع]، foot (html) } */
+  function reqCard(o) {
+    const proj = o.project || o.party || "—";
+    return `<article class="tp-rcard mgr ${o.lvl ? `lvl-${o.lvl}` : ""}" ${o.attrs || ""} style="--i:${Math.min(o.i || 0, 12)}">
+      <header><span class="rid">${esc(o.rid)}</span>${o.date ? `<span class="rdate">${esc(o.date)}</span>` : ""}${o.need ? `<span class="chip" title="نزدیک‌ترین تاریخ نیاز اقلام">نیاز ${esc(o.need)}</span>` : ""}<span class="chips">${o.chips || ""}</span>${o.menu ? `<span class="more" data-stop>${o.menu}</span>` : ""}</header>
+      <div class="rproj" title="${esc(proj)}">${ICON.project}<span>${esc(proj)}</span>${o.project && o.party && o.project !== o.party ? `<span class="dim">(${esc(o.party)})</span>` : ""}${o.center ? `<span class="dim">· ${esc(o.center)}</span>` : ""}</div>
+      ${o.items ? `<div class="rmeta ritems"><button type="button" class="tp-btn xs" ${o.toggleAttrs || ""} title="اقلام" data-stop>${o.drawerOpen ? "▾" : "◂"} ${esc(o.items.total)} قلم</button><span class="rfirst" title="${esc(o.items.first || "")}">${esc(o.items.first || "")}</span>${o.items.total > 1 ? `<span class="dim">و ${esc(o.items.total - 1)} قلم دیگر</span>` : ""}</div>` : ""}
+      ${(o.units || []).length ? `<div class="tp-units">${o.units.join("")}</div>` : ""}
+      ${o.drawerOpen && o.drawerHtml ? `<div class="tp-drawer">${o.drawerHtml}</div>` : ""}
+      ${o.foot || ""}</article>`;
+  }
+  /** یک ارجاع داخلِ کارت: o: { who (html کارشناس)، days (html)، ticks (html)، status (html)، bars (html)، acts (html منو) } */
+  const unitRow = (o) => `<div class="tp-unit"><div class="u-who">${o.who || ""}${o.ticks ? `<span class="u-ticks">${o.ticks}</span>` : ""}</div><div class="u-days">${o.days || ""}</div><div class="u-bars">${o.bars || ""}</div><div class="u-st">${o.status || ""}</div><div class="u-acts">${o.acts || ""}</div></div>`;
+
+  /* ---------- ردیفِ فهرستِ گفت‌وگو به سبک تلگرام (مکاتبات) ----------
+     o: { attrs, cls, on, av: { text | img, color }, title (html), sub (html پیش‌نمایش)، time, badges (html)، lock } */
+  const AV_COLORS = ["#e17076", "#eda86c", "#a695e7", "#7bc862", "#6ec9cb", "#65aadd", "#ee7aae", "#5f8ad6"];
+  const avColor = (s) => { let h = 0; for (const c of String(s || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0; return AV_COLORS[h % AV_COLORS.length]; };
+  const avInitial = (s) => (String(s || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه|آقای|خانم|مهندس)\s+/, "").trim()[0] || "؟");
+  function chatRow(o) {
+    const av = o.av || {};
+    return `<button type="button" class="tp-chat ${o.on ? "on" : ""} ${o.cls || ""}" ${o.attrs || ""}>
+      <span class="av ${av.img ? "img" : ""}" style="--av:${av.color || avColor(o.title)}">${av.img ? `<img src="${esc(av.img)}" alt="">` : esc(av.text || avInitial(o.title))}${o.lock ? `<i class="lk">${ICON.key.replace("<svg", '<svg style="width:10px;height:10px"')}</i>` : ""}</span>
+      <span class="body"><span class="l1"><span class="nm">${o.title}</span>${o.time ? `<span class="tm">${esc(o.time)}</span>` : ""}</span>
+        <span class="l2"><span class="pv">${o.sub || ""}</span><span class="bd">${o.badges || ""}</span></span></span></button>`;
+  }
+
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial };
 })();
