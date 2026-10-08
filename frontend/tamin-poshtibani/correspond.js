@@ -105,7 +105,7 @@
   function renderLogin(msg) {
     app.classList.remove("sp-app");
     TP.ui.mountBg("fog");
-    app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 8, error: msg, back: { href: "expert.html", label: "← پنل کارشناس" } });
+    app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 4, error: msg, back: { href: "expert.html", label: "← پنل کارشناس" } });
     TP.ui.help.set("login.expert");
     TP.ui.bindLogin(app, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); boot(); } });
   }

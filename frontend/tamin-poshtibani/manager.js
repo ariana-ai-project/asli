@@ -166,7 +166,7 @@
   /* ---------- ورود مدیر ---------- */
   /* کارتِ ورود با خانه‌های کد (ui.js، مهر ۱۴۰۵) */
   function vLogin() {
-    return TP.ui.login({ title: "ورود مدیر تدارکات", sub: "کد مدیر را رقم‌به‌رقم بنویسید", len: 4, max: 8, secret: true, error: S.error, back: { href: "index.html" }, company: CFG.company });
+    return TP.ui.login({ title: "ورود مدیر تدارکات", sub: "کد مدیر را رقم‌به‌رقم بنویسید", len: 4, max: 4, secret: true, error: S.error, back: { href: "index.html" }, company: CFG.company });
   }
 
   /* ---------- سرآیند و بخش‌ها ----------
@@ -344,7 +344,7 @@
     /* نتیجهٔ خالیِ فیلتر هم نوار جستجو را نگه می‌دارد (vFilters)؛ وگرنه راهی جز «پاک کردن فیلترها» برای برگشتن نمی‌ماند. */
     if (!rows.length) return `<div class="empty">با این فیلترها درخواستی در این بازه نیست.${S.q.id.trim().length >= 4
       ? `<br><br><button class="tp-btn" data-lookup="${esc(S.q.id.trim())}">جستجوی شماره «${esc(S.q.id.trim())}» در کل سامانه (خارج از بازه)</button>` : ""}</div>`;
-    return `<div class="tp-cards wide">${rows.map(deskCard).join("")}</div>`;
+    return `<div class="tp-cards wide ${TP.ui.once("mgr.desk")}">${rows.map(deskCard).join("")}</div>`;
   }
 
   /* ---------- کارشناسان ----------
@@ -354,10 +354,10 @@
   /* چینش ثابت از راست: «اعلان به مدیر» (تیک، کم‌عرض) · ✕ · ★ · نام — این چهار ستون عرض و جای ثابت
      دارند و با افزودن ارشد تکان نمی‌خورند؛ ستون ارشدها از پنجم به بعد، و «کد ورود» و «بار باز» ته جدول.
      table-layout:fixed + colgroup: عرض هر ستون از خودِ colgroup می‌آید نه از محتوایش. */
-  const EX_W = { notify: 58, del: 40, star: 40, name: 230, senior: 120, code: 84, load: 66 };
+  const EX_W = { notify: 58, del: 40, star: 40, name: 230, senior: 120, load: 66 };
   function vExperts() {
     const E = expertsSorted(), seniors = E.filter((e) => e.senior), W = EX_W;
-    const total = W.notify + W.del + W.star + W.name + seniors.length * W.senior + W.code + W.load;
+    const total = W.notify + W.del + W.star + W.name + seniors.length * W.senior + W.load;
     const nameCell = (e) => S.editName === e.id
       ? `<input class="tp-input" data-ename="${e.id}" value="${esc(e.label || e.name)}" style="width:100%" autofocus>`
       : `<span class="ename" data-ename-edit="${e.id}" title="برای ویرایش نام کلیک کنید">${esc(e.label || e.name)}</span>`;
@@ -368,24 +368,21 @@
       return `<input type="checkbox" data-enotify="${e.id}" ${!hasSenior || e.notify_to !== "senior" ? "checked" : ""} ${hasSenior ? "" : "disabled"} title="${tip}">`;
     };
     return `<div class="tp-card tp-pane" style="max-width:none"><h2>کارشناسان</h2>
-      <p class="lead">روی نام هر کارشناس کلیک کنید و عوضش کنید. <b>★</b> او را کارشناس ارشد می‌کند و نامش ستونی می‌شود که زیرِ آن، کارشناسان تیمش را تیک می‌زنید (هر کارشناس فقط زیر نظر یک ارشد). <b>✕</b> کارشناس را از فهرست برمی‌دارد. تیکِ «اعلان به مدیر» یعنی اعلان‌های پایش آن کارشناس برای شما هم بیاید؛ بی‌تیک، فقط برای کارشناس ارشدش می‌رود.</p>
       <div class="tp-scroll" data-keep-scroll style="max-height:60vh"><table class="tp-mx ex-mx" style="width:${total}px"><colgroup>
           <col style="width:${W.notify}px"><col style="width:${W.del}px"><col style="width:${W.star}px"><col style="width:${W.name}px">
-          ${seniors.map(() => `<col style="width:${W.senior}px">`).join("")}<col style="width:${W.code}px"><col style="width:${W.load}px"></colgroup>
+          ${seniors.map(() => `<col style="width:${W.senior}px">`).join("")}<col style="width:${W.load}px"></colgroup>
         <thead><tr><th title="اعلان‌های پایش این کارشناس برای مدیر هم بیاید">اعلان به<br>مدیر</th><th title="حذف از فهرست">✕</th><th title="کارشناس ارشد">★</th><th class="rt">کارشناس</th>
-          ${seniors.map((s) => `<th class="sen" title="${esc(s.label || s.name)}">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}<th>کد ورود</th><th>بار باز</th></tr></thead><tbody>
+          ${seniors.map((s) => `<th class="sen" title="${esc(s.label || s.name)}">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}<th>بار باز</th></tr></thead><tbody>
         ${E.map((e) => `<tr>
           <td>${notifyCell(e)}</td>
           <td><button class="tp-btn xs danger" data-edel="${e.id}" title="حذف از فهرست">✕</button></td>
           <td><button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button></td>
           <td class="rt nm">${nameCell(e)}</td>
           ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}
-          <td class="num">${S.editCode === e.id
-            ? `<input class="tp-input num" data-ecode="${e.id}" value="${esc(e.code)}" inputmode="numeric" maxlength="8" style="width:100%;text-align:center" title="۴ تا ۸ رقم؛ Enter برای ذخیره">`
-            : `<span class="ename" data-ecode-edit="${e.id}" title="کد ورود (رمز پنل) — برای تغییر کلیک کنید">${esc(e.code)}</span>`}</td><td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
+          <td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
         <tr><td colspan="3"></td><td class="rt" colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
       </tbody></table></div>
-      <div class="tp-note">این چینش همه‌جا اثر می‌کند: فهرست انتخاب کارشناس در میز ارجاع (ارشدها اول)، تب «تیم کارشناسی» و «ارجاع به تیم» در پنل کارشناس ارشد، و مقصد اعلان‌های تلگرام. گروه‌های «گزارش سه ماهه» جدا ذخیره می‌شوند و این جدول فقط پیش‌فرضِ کارشناسی است که هنوز در آن‌ها جا داده نشده.</div></div>`;
+    </div>`;
   }
   async function expertPatch(id, body) {
     try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); }
@@ -394,9 +391,9 @@
   function addExpertDialog() {
     const d = TP.modal("کارشناس جدید", `<div class="tp-field"><b>نام و نام خانوادگی</b><input class="tp-input" id="ne-name" style="width:100%"></div>
       <div class="tp-field" style="margin-top:8px"><b>نام کوتاه (مثلاً «آقای بهمنی») — اختیاری</b><input class="tp-input" id="ne-label" style="width:100%"></div>
-      <div class="tp-field" style="margin-top:8px"><b>کد ورود (فقط رقم)</b><input class="tp-input" id="ne-code" inputmode="numeric" style="width:160px"></div>`,
+      <p class="dim" style="margin:10px 0 0;font-size:.85rem">کد ورودِ چهاررقمی را سامانه می‌سازد؛ در پنل پشتیبانی (کارشناسان ← کدهای ورود) دیده و عوض می‌شود.</p>`,
       async () => {
-        try { await TP.api("/experts", { body: { name: d.querySelector("#ne-name").value, label: d.querySelector("#ne-label").value, code: d.querySelector("#ne-code").value } }); S.data.experts = (await TP.api("/experts")).experts; render(); }
+        try { await TP.api("/experts", { body: { name: d.querySelector("#ne-name").value, label: d.querySelector("#ne-label").value } }); S.data.experts = (await TP.api("/experts")).experts; render(); }
         catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
       }, "افزودن");
   }
@@ -418,7 +415,6 @@
     const fs = (c && c.file) || {};
     const files = c && c.files ? Object.values(c.files).map((n) => `<span class="chip">${esc(n)}</span>`).join(" ") : "";
     return `<div class="tp-card tp-pane" style="max-width:1000px"><h2>سوابق تأمین</h2>
-      <p class="lead">سوابق خرید شرکت به‌همراه فهرست نرمال‌شدهٔ اقلام. کارشناس در تب «بررسی سوابق» تأمین‌کنندگان هر قلم را در دو حالت می‌بیند — <b>عین قلم</b> (همان نوع قلم با همان لایه‌های ویژگی) و <b>نوع قلم</b> (همهٔ اقلام همان نوع) — با مقدار به واحد مرجع و قیمت به زمستان ۱۴۰۴؛ بدون مدل زبانی و با کوئری ثابت.</p>
       ${!h ? `<div class="empty">در حال بارگیری وضعیت…</div>`
         : c && v2 ? `<div class="kpi">${k("بارگذاری", TP.fmt(c.finished_at || c.imported_at))}${k("ردیف خرید", M(c.rows))}${k("تأمین‌کننده", M(c.suppliers))}
             ${k("با کد و رده", M(fs.graded || 0))}${k("کد قلم", M(c.codes))}${k("بازه", `${ymFa(c.minYm)} تا ${ymFa(c.maxYm)}`)}
@@ -430,15 +426,8 @@
         : c ? `<div class="tp-note warn"><b>سوابق فعلی با قالب قدیمی است</b> (شاخص تعدیل درون هر ردیف، ${M(c.rows)} ردیف از «${esc(c.filename || "—")}»). تا چهار فایل تازه بارگذاری نشود، تب «بررسی سوابق» کارشناس پیام «قالب قدیمی» می‌دهد.</div>`
         : `<div class="empty"><b>هنوز سوابقی بارگذاری نشده است.</b>تا آن زمان تب «بررسی سوابق» کارشناس پیام «بارگذاری نشده» می‌دهد.</div>`}
       ${h && h.loading && h.loading.fp ? `<div class="tp-note warn">یک بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)} هست — احتمالاً سهمیهٔ روزانهٔ دیتابیس تمام شده بود. همان چهار فایل را دوباره بارگذاری کنید تا از همان‌جا ادامه یابد؛ ردیف‌های نوشته‌شده دوباره نوشته نمی‌شوند. تا پایانش، سوابق قبلی سر جایش است.</div>` : ""}
-      <div class="tp-row"><button class="tp-btn primary" data-hist-import>بارگذاری چهار فایل مرجع (.xlsx)</button>
-        <span class="dim" style="font-size:.85rem">هر چهار فایل را با هم انتخاب کنید، یا وقتی روی همین تب هستید روی صفحه رها کنید.</span></div>
-      <div class="tp-note">چهار فایل، که از روی کاربرگ‌هایشان شناخته می‌شوند نه از نامشان:
-        <b>اقلام</b> (کاربرگ‌های items و item_attributes — نوع قلم و لایه‌های ویژگی هر کد) ·
-        <b>شاخص تعدیل</b> (class_index و index_quarterly — شاخص هر طبقهٔ اصناف در هر فصل) ·
-        <b>نرخ تبدیل واحد</b> (head_rates، cluster_rates و item_rates) ·
-        <b>سوابق خرید</b> (خروجی راهکاران با ستون‌های «کد» و «رده»ی تأمین‌کننده).
-        <br>بارگذاری فقط آنچه عوض شده را می‌نویسد: فایل سوابقِ تازه‌تر یعنی فقط ردیف‌های تازه؛ اگر فهرست اقلام یا شاخص‌ها عوض شده باشد، ردیف‌های خرید هم از نو ساخته می‌شوند.
-        سقف روزانهٔ دیتابیس در پلن رایگان ${M(DAILY_WRITES)} ردیف نوشتن است؛ اگر وسط کار تمام شود، فردا همان فایل‌ها را دوباره بارگذاری کنید.</div></div>`;
+      <div class="tp-row"><button class="tp-btn primary" data-hist-import>بارگذاری چهار فایل مرجع (.xlsx)</button></div>
+    </div>`;
   }
 
   /* یکسان‌سازی فهرست اقلام (catalog-rules.mjs): لایهٔ کمّی عدد + واحدِ استاندارد، و جنسِ گفته‌نشده با عرفِ نوع قلم */
@@ -557,7 +546,6 @@
   function vAlerts() {
     const s = settings(), ticks = Array.isArray(s.mgrStages) && s.mgrStages.length === 6 ? s.mgrStages : [true, false, false, false, true, true];
     return `<div class="tp-card tp-pane"><h2>تنظیم اعلانات</h2>
-      <p class="lead">تیکِ بالای هر مرحله یعنی تغییر وضعیت آن مرحله در تلگرام شما اعلام شود. هر درصد یعنی چند درصد از مهلت کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود. خالی = هشدار آن مرحله خاموش.</p>
       <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label title="اعلان این مرحله در تلگرام مدیر"><input type="checkbox" data-mstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
       <div id="thrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
       <div class="tp-fields3">
@@ -565,8 +553,7 @@
         <div class="tp-field"><b>حداقل تأمین‌کننده به ازای هر قلم</b><input class="tp-input" id="minsup" value="${s.minSuppliers}" inputmode="numeric"></div>
         <div class="tp-field"><b>ظرفیت درخواست باز هر کارشناس (بار کاری)</b><input class="tp-input" id="capacity" value="${s.capacity}" inputmode="numeric"></div>
         <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
-      <div class="tp-note">«جدول کمیسیون» روی ۱۰۰ هرگز زرد نمی‌شود و مستقیم قرمز می‌شود. برای هشدار زودتر عددی کمتر بگذارید.</div>
-      <div class="tp-note">کارشناس تا وقتی هر قلم به تعداد «حداقل تأمین‌کننده» استعلامِ ثبت‌شده نداشته باشد، نمی‌تواند جدول کمیسیون بسازد.</div></div>`;
+    </div>`;
   }
 
   /* ---------- ارجاع هوشمند ---------- */
@@ -606,9 +593,8 @@
     return `<div class="tp-card tp-pane" style="max-width:none">
       <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
         <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی درخواست‌های بی‌کارشناس (${pend.length})</button>
-        <span class="dim" style="font-size:.85rem">کارشناسی که خودتان انتخاب کرده‌اید دست نمی‌خورد و در بارِ فعلی حساب شده است.</span>
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>ارجاع هوشمند</h2><p class="lead">پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس <b>با هم</b> ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های اصناف، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه. پیشنهاد الزام‌آور نیست و مدیر هرکدام را می‌تواند عوض کند.</p>
+      <h2>ارجاع هوشمند</h2>
       <div class="tp-formula"><span class="eq">امتیاز =</span>
         <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه اصناف</b></span>${opSel("op1", A.op1)}
         <span class="term"><input class="tp-input" data-asg="b" value="${A.b}">٪ <b>سابقه در این پروژه</b></span>${opSel("op2", A.op2)}
@@ -617,10 +603,6 @@
         <div class="tp-field"><b>حداکثر درخواست باز هر کارشناس</b><input class="tp-input" data-asg="maxReq" value="${esc(A.maxReq == null ? PL().DEFAULT_LIMITS.maxReq : A.maxReq)}" inputmode="numeric"></div>
         <div class="tp-field"><b>حداکثر قلم باز هر کارشناس</b><input class="tp-input" data-asg="maxItems" value="${esc(A.maxItems == null ? PL().DEFAULT_LIMITS.maxItems : A.maxItems)}" inputmode="numeric"></div>
         <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
-      <div class="tp-note"><b>سقف بار</b> از امتیاز جلوتر است: کارشناسی که به یکی از دو سقف رسیده، هرچند امتیازش ۵ باشد، درخواست تازه نمی‌گیرد. اگر همه پر باشند، درخواست به کم‌بارترین می‌رود و با ⚠ نشان داده می‌شود.
-        <b>زحمت هر درخواست</b> = ضریب پروژه × (۱ واحد سربار + جمع ضریب گروه اصناف اقلامش) — ضریب‌ها همان جدول‌های تب «مهلت هوشمند»اند.
-        <b>ظرفیت هر کارشناس</b> = ظرفیت تنظیمات (${M(settings().capacity)} درخواست) × زحمت یک درخواست میانگین ÷ ضریب سرعت او؛ <b>جریمهٔ بار</b> با مجذور درصد اشغال بزرگ می‌شود، پس توزیع خودبه‌خود متوازن می‌شود.
-        امتیاز ۱ تا ۵ ماتریس‌ها را خودتان می‌دهید؛ پیش‌فرض ۳. هر دو ماتریس از همان اول کامل‌اند و یک بار پر می‌شوند — با درخواست تازه ستون تازه‌ای اضافه نمی‌شود.</div>
       ${preview}
       <div class="tp-sect"><h3>۱. ماتریس کارشناس / گروه اصناف <span>امتیاز ۱ تا ۵ — ${M(GROUPS().length)} گروه فهرست اصناف</span></h3>
         ${scoreMatrix(E, "guild", guildKeys(), "g", "فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در تب «سوابق تأمین» بارگذاری کنید.")}</div>
@@ -648,7 +630,7 @@
         <button class="tp-btn primary" data-apply-dl ${list.length && WL && AX ? "" : "disabled"}>اعمال روی ارجاع‌های ارسال‌نشدهٔ بی‌مهلت (${list.length})</button>
         ${x0 ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: فرمول ${x0.base.toFixed(2)} × √اقلام ${x0.size.toFixed(2)} × اشغال ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></span>` : ""}
         <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>مهلت هوشمند</h2><p class="lead">مهلت هر ارجاع با فرض تأیید همهٔ ارجاع‌ها حساب می‌شود: فرمول زیر (پایه، سرعت کارشناس، ضریب پروژه، و میانگین ضریب گروه اصناف اقلام — گروهی که بک‌اند برای هر قلم از فهرست اقلام درمی‌آورد) × ریشهٔ دوم تعداد اقلام × ضریب اشغال کارشناس. اشغال، بار همهٔ ارجاع‌های باز اوست بر ظرفیتش؛ تا ظرفیت، ضریبش ۱ است و بالاتر از آن مهلت به همان نسبت بلندتر می‌شود. نتیجه گرد و حداقل ۱ روز است.</p>
+      <h2>مهلت هوشمند</h2>
       <div class="tp-formula"><span class="eq">مهلت (روز) =</span>
         <span class="term"><input class="tp-input" data-dl="base" value="${D.base}"> <b>پایه</b></span>${opSel("op1", D.op1)}
         <span class="term"><input class="tp-input" data-dl="we" value="${D.we}"> <b>ضریب کارشناس</b></span>${opSel("op2", D.op2)}
@@ -673,8 +655,7 @@
     const list = [...seen.values()].sort((a, b) => b.n - a.n);
     const known = list.filter((x) => x.g && x.g !== PL().MISC_GUILD).length;
     return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>اقلام و کدها</h2>
-      <p class="lead">کد هر قلم همان «کد قلم خریدنی» راهکاران است (یک کد ⇄ یک عنوان). گروه اصناف هر قلم در بک‌اند از فهرست اقلام خوانده می‌شود — کد قلم → طبقهٔ اصناف → گروه — و همان گروهی است که در ارجاع و مهلت هوشمند امتیاز و ضریب می‌گیرد.
-        ${M(known)} از ${M(list.length)} قلم در فهرست اصناف پیدا شد؛ بقیه «متفرقه» شمرده می‌شوند.</p>
+      <p class="dim" style="margin:0 0 8px">${M(known)} از ${M(list.length)} قلم در فهرست اصناف پیدا شد؛ بقیه «متفرقه» شمرده می‌شوند.</p>
       <div class="tp-scroll" style="max-height:60vh"><table class="tp-mx"><thead><tr><th>کد قلم</th><th style="width:42%">عنوان</th><th>واحد</th><th>تکرار در میز</th><th>گروه اصناف</th></tr></thead><tbody>
         ${list.map((x) => `<tr><td class="num" style="color:var(--tp-accent);font-weight:700">${esc(x.code || "—")}</td><td class="name" style="white-space:normal">${esc(x.title)}</td><td>${esc(x.unit)}</td><td class="num">${x.n}</td><td title="${esc(x.g || "")}">${esc(groupName(x.g))}</td></tr>`).join("")}
       </tbody></table></div></div>`;
@@ -1161,7 +1142,7 @@
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
     if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); throw e; } } }); return; }
-    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
+    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
     const ih = G("[data-hist-import]"); if (ih) ih.onclick = pickHistory;
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.manager.clear(); render(); };
@@ -1199,22 +1180,6 @@
     Q("[data-ename]").forEach((i) => {
       const done = async () => { const id = +i.dataset.ename, e = S.data.experts.find((x) => x.id === id); const v = i.value.trim(); S.editName = null; if (!v || v === (e.label || e.name)) return render(); await expertPatch(id, { name: v, label: v }); };
       i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editName = null; render(); } };
-      i.onblur = done;
-    });
-    /* کد ورود: کلیک → کادر؛ Enter ذخیره، Esc انصراف. تکراری بودنش را سرور می‌گوید */
-    Q("[data-ecode-edit]").forEach((x) => x.onclick = () => { S.editCode = +x.dataset.ecodeEdit; render(); const i = G("[data-ecode]"); if (i) { i.focus(); i.select(); } });
-    Q("[data-ecode]").forEach((i) => {
-      let busy = false;
-      const done = async () => {
-        if (busy) return; busy = true;
-        const id = +i.dataset.ecode, e = S.data.experts.find((x) => x.id === id);
-        const v = TP.digits(i.value).trim();
-        S.editCode = null;
-        if (!v || v === String(e.code)) return render();
-        if (!/^\d{4,8}$/.test(v)) { render(); return TP.modal("کد نامعتبر", "کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.", null, "باشد", ""); }
-        await expertPatch(id, { code: v });
-      };
-      i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editCode = null; render(); } };
       i.onblur = done;
     });
     Q("[data-estar]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); expertPatch(e.id, { senior: !e.senior }); });

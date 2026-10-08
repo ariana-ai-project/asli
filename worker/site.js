@@ -10,11 +10,12 @@
  * اگر رمز مشترک را فراموش کردند مدیر بتواند عوضش کند.
  */
 import { HttpError } from "./http.js";
+import { managerCode } from "./settings.js";
 
 const KEY_CARDS = "siteCards";
 const KEY_PASS = "sitePassHash";
 export const CARD_STATES = ["active", "soon", "off"];
-const CODE_RE = /^\d{4,8}$/;
+const CODE_RE = /^\d{4}$/;
 const T = (v) => String(v == null ? "" : v).trim();
 /* رقم فارسی و عربی → لاتین؛ رمز با همین شکل هش می‌شود، پس ورود هم باید همین را بسنجد */
 const digits = (v) => T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
@@ -52,7 +53,8 @@ export async function siteState(env) {
 export async function checkSiteCode(env, code) {
   const c = digits(code);
   if (!c) return false;
-  if (env.MANAGER_CODE && c === env.MANAGER_CODE) return true;
+  const mc = await managerCode(env);
+  if (mc && c === mc) return true;
   const k = await readKeys(env);
   return !!k[KEY_PASS] && k[KEY_PASS] === (await sha256(c));
 }
@@ -91,8 +93,8 @@ export async function putSite(env, body, code) {
 
   if (b.pass !== undefined) {
     const p = digits(b.pass);
-    if (!CODE_RE.test(p)) throw new HttpError("رمز باید ۴ تا ۸ رقم باشد.", 400);
-    if (env.MANAGER_CODE && p === env.MANAGER_CODE) throw new HttpError("رمز تب نباید همان کد مدیر باشد.", 400);
+    if (!CODE_RE.test(p)) throw new HttpError("رمز باید ۴ رقم باشد.", 400);
+    if (p === await managerCode(env)) throw new HttpError("رمز تب نباید همان کد مدیر باشد.", 400);
     stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
       .bind(KEY_PASS, await sha256(p), Date.now()));
   }

@@ -94,7 +94,7 @@
   /* ---------- ورود و کارتابل ---------- */
   /* کارتِ ورود با چهار خانهٔ کد (کدهای بلندتر خانه می‌افزایند) و دکمهٔ سه‌بعدی — ui.js (مهر ۱۴۰۵) */
   function vLogin() {
-    return TP.ui.login({ title: "ورود کارشناس خرید", sub: "کد ورود را رقم‌به‌رقم بنویسید", len: 4, max: 8, error: S.error, back: { href: "index.html" }, company: COMPANY });
+    return TP.ui.login({ title: "ورود کارشناس خرید", sub: "کد ورود را رقم‌به‌رقم بنویسید", len: 4, max: 4, error: S.error, back: { href: "index.html" }, company: COMPANY });
   }
   const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
   function trayRows() {
@@ -123,7 +123,7 @@
     return `<div class="tp-wrap"><div class="tp-card tp-pane"><div class="toolrow" style="margin-bottom:6px"><button class="tp-btn sm" data-stab="tray">→ کارتابل</button><h2 style="margin:0">حساب من</h2>${TP.ui.info("expert.account")}</div>
       <div class="kpi">${k("نام", esc(e.name))}${k("نام کوتاه", esc(e.label || e.name))}${k("نقش", isSenior() ? "کارشناس ارشد" : "کارشناس خرید")}
         ${tg.botConfigured ? k("تلگرام کارشناسی", tg.connected ? "✅ وصل" : "وصل نیست") : ""}${isSenior() ? k("تلگرام تیمی", e.team_connected ? "✅ وصل" : "وصل نیست") : ""}</div>
-      <div class="tp-sect"><h3>تغییر کد ورود <span>۴ تا ۸ رقم</span></h3>
+      <div class="tp-sect"><h3>تغییر کد ورود <span>۴ رقم</span></h3>
         <div class="tp-fields3">
           <div class="tp-field"><b>کد فعلی</b><input class="tp-input" id="acc-cur" type="password" inputmode="numeric" autocomplete="current-password"></div>
           <div class="tp-field"><b>کد تازه</b><input class="tp-input" id="acc-new" type="password" inputmode="numeric" autocomplete="new-password"></div>
@@ -164,7 +164,7 @@
     const digits = (s) => TP.digits(s).trim();
     const cur = digits(G("#acc-cur").value), nw = digits(G("#acc-new").value), rp = digits(G("#acc-rep").value);
     if (!cur) return say("کد فعلی را بنویسید.", true);
-    if (!/^\d{4,8}$/.test(nw)) return say("کد تازه باید ۴ تا ۸ رقم باشد.", true);
+    if (!/^\d{4}$/.test(nw)) return say("کد تازه باید ۴ رقم باشد.", true);
     if (nw !== rp) return say("کد تازه و تکرارش یکی نیستند.", true);
     try {
       const r = await TP.api("/me/code", { method: "PUT", body: { current: cur, code: nw } });
@@ -190,7 +190,7 @@
         <button class="tp-btn sm ${S.traySort ? "primary" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال — تازه‌ترها اول" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>
         <span class="spacer"></span><span class="dim" style="font-size:.85rem">${rows.length} از ${S.tray.length} درخواست</span>
         ${aiOn() ? `<span class="chip info" title="تیکِ شما در پنل پشتیبانی روی «هوشمند» است">🤖 هوشمند</span>` : ""}${TP.ui.info(aiOn() ? "expert.ai" : "expert.tray", "راهنمای کارتابل")}</div>
-      ${rows.length ? `<div class="tp-cards">${rows.map(trayCard).join("")}</div>`
+      ${rows.length ? `<div class="tp-cards ${TP.ui.once("exp.tray")}">${rows.map(trayCard).join("")}</div>`
         : `<div class="tp-wrap"><div class="tp-card"><div class="empty"><b>درخواستی در کارتابل شما نیست.</b>وقتی مدیر درخواستی ارجاع و ارسال کند، این‌جا کارت می‌شود.</div></div></div>`}`;
   }
   /* بدترین رنگِ شش مرحله (همان TP.stageColor باکس‌های پایش) برای رنگِ کلِ کارت: زرد، نارنجی، قرمز */
@@ -286,7 +286,7 @@
       return `<button type="button" class="${on ? "on" : ""}" data-tcard="${k}" role="tab" aria-selected="${on ? "true" : "false"}">${esc(l)}<span class="cnt">${M(cnt(k === "all" ? "all" : +k))}</span></button>`; }).join("");
     const rows = teamRows();
     return `<div class="tp-subbar" style="padding-top:12px"><div class="tp-seg" role="tablist" aria-label="کارشناسان تیم">${seg}</div><span class="spacer"></span><span class="dim" style="font-size:.85rem">${rows.length} درخواست</span>${TP.ui.info("expert.team", "راهنمای تیم")}</div>
-      ${rows.length ? `<div class="tp-cards wide">${rows.map(teamCard).join("")}</div>` : `<div class="tp-wrap"><div class="tp-card"><div class="empty">درخواستی برای این کارشناس نیست.</div></div></div>`}`;
+      ${rows.length ? `<div class="tp-cards wide ${TP.ui.once("exp.team")}">${rows.map(teamCard).join("")}</div>` : `<div class="tp-wrap"><div class="tp-card"><div class="empty">درخواستی برای این کارشناس نیست.</div></div></div>`}`;
   }
 
   /* «ارجاع به تیم» / «تغییر کارشناس»: فهرست زیرمجموعه‌ها (و خودِ ارشد) و «ارسال» */
@@ -305,7 +305,7 @@
         try {
           await TP.api("/team/delegate", { body: { assignment_id: aid, expert_id: eid, days } });
           /* از نمای فقط‌خواندنیِ درخواستِ زیرمجموعه: ارجاعِ قبلی دیگر معتبر نیست، به تب تیم برمی‌گردیم */
-          if (S.screen === "detail") { S.screen = "list"; S.d = null; S.tab = "team"; S.fromTeam = false; }
+          if (S.screen === "detail") { S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); S.d = null; S.tab = "team"; S.fromTeam = false; }
           await Promise.all([loadTray(), loadTeam(true)]);
         }
         catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
@@ -323,7 +323,6 @@
     const thr = own || mgr;
     const tg = S.tg || {};
     return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تنظیم اعلانات تیم</h2>
-      <p class="lead">تیکِ بالای هر مرحله یعنی تغییر وضعیت آن مرحله برای کارشناسان تیم شما در «تلگرام تیمی» اعلام شود. هر درصد یعنی چند درصد از مهلتِ کارشناس باید بگذرد تا اگر آن مرحله انجام نشده باشد، هشدار برود و باکسش زرد شود. خالی = هشدار آن مرحله خاموش. عبور از مهلت و بسته شدن درخواست همیشه اعلام می‌شود.</p>
       <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label title="اعلان این مرحله در تلگرام تیمی"><input type="checkbox" data-sstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label>
         <input class="tp-input" data-sthr="${i}" value="${thr[i] === "" || thr[i] == null ? "" : thr[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
       <div id="sthrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
@@ -332,7 +331,7 @@
           : `<span class="chip">اکنون همان آستانه‌های مدیر برقرار است؛ با تغییر هر درصد، آستانه‌های شما جایگزین می‌شود</span>`}
         <span class="dim" data-sthr-saved style="font-size:.85rem"></span></div>
       <div class="tp-sect"><h3>تلگرام تیمی <span>${S.expert.team_connected ? "✅ وصل است" : "هنوز وصل نیست"}</span></h3>
-        <p class="lead">اعلان‌های پایش کارشناسان تیم شما — همان پیام‌هایی که برای مدیر واحد می‌رود — ${tg.teamBot ? `با بات <b dir="ltr">@${esc(tg.teamBot)}</b>` : "با بات تیمی"} برای شما فرستاده می‌شود. ارجاع‌های خودتان همچنان در «تلگرام کارشناسی» می‌آید.</p>
+        ${tg.teamBot ? `<p class="dim" style="margin:0 0 8px">بات تیمی: <b dir="ltr">@${esc(tg.teamBot)}</b></p>` : ""}
         <button class="tp-btn ${S.expert.team_connected ? "" : "primary"}" data-team-link>${S.expert.team_connected ? "اتصال دوباره / گفت‌وگوی دیگر" : "اتصال تلگرام تیمی"}</button></div></div></div>`;
   }
   async function teamLink() {
@@ -2254,7 +2253,7 @@
   /* ---------- اتصال ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
-    if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } }); return; }
+    if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); await loadTray(); } }); return; }
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
     const tg = G("[data-tg]"); if (tg) tg.onclick = tgConnect;
@@ -2264,7 +2263,7 @@
       x.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === x) { e.preventDefault(); openDetail(+x.dataset.req); } };
     });
     /* تیم کارشناسی */
-    Q("[data-stab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.stab === "tray" ? "history" : b.dataset.stab; if (S.tab === "team") loadTeam(true); render(); });
+    Q("[data-stab]").forEach((b) => b.onclick = () => { TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); S.tab = b.dataset.stab === "tray" ? "history" : b.dataset.stab; if (S.tab === "team") loadTeam(true); render(); });
     Q("[data-tcard]").forEach((x) => x.onclick = () => { S.teamCard = x.dataset.tcard; render(); });
     Q("[data-ttoggle]").forEach((b) => b.onclick = () => { S.teamOpen[b.dataset.ttoggle] = !S.teamOpen[b.dataset.ttoggle]; render(); });
     Q("[data-delegate]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); delegateDialog(+b.dataset.delegate, b.dataset.from ? +b.dataset.from : null); });
@@ -2291,7 +2290,7 @@
     Q("[data-q]").forEach((i) => { if (i.dataset.q === "date") i.onclick = () => TP.openDatePicker(i, (v) => { S.q.date = v; render(); }); else i.oninput = (e) => { S.q[e.target.dataset.q] = e.target.value; TP.keepFocus(e.target, "q", render); }; });
     const cq = G("[data-clr]"); if (cq) cq.onclick = () => { S.q = { id: "", date: "", party: "", item: "" }; render(); };
     const ts = G("[data-tsort]"); if (ts) ts.onclick = () => { S.traySort = !S.traySort; try { localStorage.setItem("tp.traySort", S.traySort ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };
-    const bk = G("[data-back]"); if (bk) bk.onclick = () => { if (S.lt.on) recStop(true); S.screen = "list"; S.d = null; S.letter = null; if (S.fromTeam) { S.tab = "team"; S.fromTeam = false; loadTeam(true); } loadTray(); };
+    const bk = G("[data-back]"); if (bk) bk.onclick = () => { if (S.lt.on) recStop(true); S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); S.d = null; S.letter = null; if (S.fromTeam) { S.tab = "team"; S.fromTeam = false; loadTeam(true); } loadTray(); };
     Q("[data-item]").forEach((x) => x.onclick = () => { S.itemIdx = +x.dataset.item; render(); });
     Q("[data-tab]").forEach((x) => x.onclick = () => { if (S.lt.on && x.dataset.tab !== "letter") recStop(true); S.tab = x.dataset.tab; render(); });
     Q("[data-eact]").forEach((b) => b.onclick = () => doExpertAct(b.dataset.eact));
@@ -2552,14 +2551,14 @@
     TP.modal(`${lbl} — درخواست ${esc(S.d.request.id)}`, body, async () => {
       try { const r = await TP.api(`/assignments/${A().id}/decision`, { body: { action: act, item_ids: act === "end" ? done.map((i) => i.id) : null } });
         if (r.pending) { TP.modal("ارسال شد", "درخواست شما برای تأیید مدیر ارسال شد. تا تأیید او وضعیت تغییر نمی‌کند.", null, "باشد", ""); await reload(); }
-        else { S.screen = "list"; S.d = null; await loadTray(); } }
+        else { S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); S.d = null; await loadTray(); } }
       catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
     }, `تأیید ${lbl}`);
   }
 
   /* ---------- شروع ---------- */
   /* مینی‌اپ تلگرام: کارشناس با initData همان بات شناخته می‌شود و کد ورود لازم نیست (shared.js: TP.tg) */
-  if (S.expert || TP.tg) { S.screen = "list"; loadTray(); } else render();
+  if (S.expert || TP.tg) { S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); loadTray(); } else render();
   window.addEventListener("tp-theme", render);
   /* اعلانِ پیامِ تازهٔ تأمین‌کننده در گوشهٔ صفحه (مهر ۱۴۰۵) — فقط یک لایهٔ شناور است و صفحه را دوباره نمی‌سازد؛
      کلیکش صفحهٔ مکاتبات را روی همان گفت‌وگو باز می‌کند (shared.js: TP.inbox) */

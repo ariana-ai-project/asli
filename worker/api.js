@@ -23,7 +23,7 @@ import { extractProforma, toRial, ExtractError } from "./extract.js";
 import { transcribe, writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { HttpError } from "./http.js";
-import { DEFAULTS, getSettings, settingsFromRows } from "./settings.js";
+import { DEFAULTS, getSettings, settingsFromRows, managerCode, managerCodeStmt } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
@@ -84,10 +84,12 @@ async function readJson(request) {
 /* ------------------------------------------------------------------ */
 /* احراز هویت                                                            */
 /* ------------------------------------------------------------------ */
-function requireManager(request, env) {
-  if (!env.MANAGER_CODE) throw new HttpError("MANAGER_CODE در تنظیمات Cloudflare ست نشده؛ پنل مدیر تا آن زمان قفل است.", 503);
+async function requireManager(request, env) {
+  /* کد مدیر در دیتابیس است (پنل پشتیبانی)، و تا وقتی نیست env.MANAGER_CODE */
+  const want = await managerCode(env);
+  if (!want) throw new HttpError("کد مدیر تعریف نشده (MANAGER_CODE یا پنل پشتیبانی)؛ پنل مدیر تا آن زمان قفل است.", 503);
   const code = request.headers.get("X-Manager-Code") || "";
-  if (code !== env.MANAGER_CODE) throw new HttpError("کد مدیر نادرست است.", 401);
+  if (code !== want) throw new HttpError("کد مدیر نادرست است.", 401);
 }
 async function requireExpert(request, env) {
   const code = T(request.headers.get("X-Expert-Code"));
@@ -117,7 +119,7 @@ function stageTicks(v) {
 }
 /* مدیر یا کارشناس — برای خواندن‌های مشترک */
 async function requireAny(request, env) {
-  if (request.headers.get("X-Manager-Code")) { requireManager(request, env); return { role: "manager" }; }
+  if (request.headers.get("X-Manager-Code")) { await requireManager(request, env); return { role: "manager" }; }
   const ex = await requireExpert(request, env); return { role: "expert", expert: ex };
 }
 
@@ -171,6 +173,7 @@ CREATE INDEX IF NOT EXISTS ix_smart_item ON smart_searches(item_id);
 CREATE TABLE IF NOT EXISTS smart_jobs (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, assignment_id INTEGER, expert_id INTEGER NOT NULL, chat_id TEXT NOT NULL, params_json TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'queued', search_id INTEGER, error TEXT, created_at INTEGER NOT NULL, started_at INTEGER, finished_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_smart_jobs_state ON smart_jobs(state, id);
 CREATE TABLE IF NOT EXISTS counters (key TEXT PRIMARY KEY, value INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS ix_experts_code ON experts(code);
 CREATE TABLE IF NOT EXISTS search_suppliers (id INTEGER PRIMARY KEY, search_id INTEGER NOT NULL, idx INTEGER NOT NULL, item_id INTEGER, assignment_id INTEGER, request_id TEXT, expert_id INTEGER, name TEXT, name_n TEXT, type TEXT, market TEXT, website TEXT, emails_json TEXT, price_text TEXT, price_unit TEXT, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_ssup_search ON search_suppliers(search_id);
 CREATE INDEX IF NOT EXISTS ix_ssup_name ON search_suppliers(name_n);
@@ -348,8 +351,10 @@ let schemaReady = false;
 async function ensureSchema(env) {
   if (schemaReady) return;
   if (!env.DB) throw new HttpError("بایندینگ D1 با نام DB روی این پروژه ست نشده است.", 503);
+  let existing = false;
   try {
     const fp = await env.DB.prepare("SELECT value FROM counters WHERE key='schema_fp'").first();
+    existing = !!fp;
     if (fp && Number(fp.value) === SCHEMA_FP) { schemaReady = true; return; }
   } catch (_) { /* دیتابیس تازه — جدول counters هنوز ساخته نشده؛ مسیر کامل */ }
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
@@ -365,6 +370,8 @@ async function ensureSchema(env) {
     await env.DB.batch(SEED_EXPERTS.map(([code, name, label]) =>
       env.DB.prepare("INSERT OR IGNORE INTO experts (code,name,label,active,speed,created_at) VALUES (?,?,?,1,1.0,?)").bind(code, nrm(name), label, t)));
   }
+  /* کدهای ورود چهاررقمی و کد مدیر در دیتابیس — یک بار روی هر دیتابیس */
+  await migrateCodes4(env, existing).catch((e) => console.error("migrateCodes4", e && e.message));
   await env.DB.prepare("INSERT INTO counters (key,value) VALUES ('schema_fp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(SCHEMA_FP).run();
   schemaReady = true;
 }
@@ -799,13 +806,13 @@ async function listExperts(env) {
 const listExpertsStmt = (env) => env.DB.prepare(`SELECT e.id,e.name,e.label,e.code,e.active,e.speed,e.telegram_chat,e.senior,e.senior_id,e.notify_to,e.team_chat,e.team_via,e.alert_stages,e.alert_thresholds,
       (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND i.state IN ('open','hold')) AS open_load
     FROM experts e ORDER BY e.active DESC, e.senior DESC, e.name`);
-const expertRows = (rows) => rows.map((e) => ({ ...e, senior: e.senior ? 1 : 0, notify_to: e.notify_to === "senior" ? "senior" : "manager", alert_stages: stageTicks(e.alert_stages),
+const expertRows = (rows) => rows.map((e) => ({ ...e, code: undefined, senior: e.senior ? 1 : 0, notify_to: e.notify_to === "senior" ? "senior" : "manager", alert_stages: stageTicks(e.alert_stages),
   alert_thresholds: parseThresholds(e.alert_thresholds), team_connected: !!e.team_chat, team_bot: e.team_via === "team", team_chat: undefined, team_via: undefined }));
 
 /* ------------------------------------------------------------------ */
 /* کد ورود کارشناس                                                       */
 /* ------------------------------------------------------------------ */
-const CODE_RE = /^\d{4,8}$/;
+const CODE_RE = /^\d{4}$/;
 /* ارقام فارسی و عربی ← لاتین. کد در جدول با رقم لاتین ذخیره می‌شود (setExpertCode، addExpert)؛
    ورود هم باید همین را بسنجد، وگرنه کسی که کدش را با صفحه‌کلید فارسی می‌زند «کد معتبر نیست» می‌گیرد. */
 const asciiDigits = (v) => T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
@@ -819,8 +826,8 @@ const retiredCode = (id) => `x${id}-${now()}`;
  */
 async function setExpertCode(env, id, raw, { reveal } = {}) {
   const code = asciiDigits(raw);
-  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
-  if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.", 409);
+  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ رقم باشد و فقط عدد.");
+  if (code === await managerCode(env)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.", 409);
   const holder = await env.DB.prepare("SELECT id,name,active FROM experts WHERE code=?").bind(code).first();
   if (holder && holder.id === id) return { ok: true, code, unchanged: true };
   if (holder && holder.active) throw new HttpError(reveal ? `این کد ورودِ «${holder.name}» است؛ کد دیگری بدهید.` : "این کد را کارشناس دیگری دارد؛ کد دیگری انتخاب کنید.", 409);
@@ -829,6 +836,50 @@ async function setExpertCode(env, id, raw, { reveal } = {}) {
   stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(code, id));
   await env.DB.batch(stmts);
   return { ok: true, code };
+}
+
+/** یک کد چهاررقمیِ آزاد (نه مالِ کارشناسی، نه کد مدیر) — کارشناسِ تازه با این کد ساخته می‌شود و فقط پشتیبانی می‌بیندش */
+async function freeCode(env, extra) {
+  const used = new Set(((await env.DB.prepare("SELECT code FROM experts").all()).results || []).map((r) => String(r.code)));
+  used.add(await managerCode(env)); for (const x of extra || []) used.add(String(x));
+  for (let i = 0; i < 500; i++) { const c = String(1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000)); if (!used.has(c)) return c; }
+  throw new HttpError("کد ورود آزاد پیدا نشد.", 500);
+}
+/* پنل پشتیبانی تنها جایی است که کدهای ورود دیده و عوض می‌شوند (تصمیم مالک، مهر ۱۴۰۵) */
+async function supportCodes(env) {
+  const rows = (await env.DB.prepare("SELECT id,name,label,code,senior,(telegram_chat IS NOT NULL) AS tg FROM experts WHERE active=1 ORDER BY senior DESC, name").all()).results || [];
+  return { manager: await managerCode(env), experts: rows.map((r) => ({ id: r.id, name: r.name, label: r.label, code: String(r.code), senior: r.senior ? 1 : 0, tg: !!r.tg, ok: CODE_RE.test(String(r.code)) })) };
+}
+async function setManagerCode(env, raw) {
+  const code = asciiDigits(raw);
+  if (!CODE_RE.test(code)) throw new HttpError("کد مدیر باید ۴ رقم باشد و فقط عدد.");
+  const holder = await env.DB.prepare("SELECT name FROM experts WHERE code=? AND active=1").bind(code).first();
+  if (holder) throw new HttpError(`این کد ورودِ «${holder.name}» است؛ کد دیگری بدهید.`, 409);
+  await managerCodeStmt(env, code).run();
+  return { ok: true };
+}
+/* مهر ۱۴۰۵ (تصمیم مالک): همهٔ کدهای ورود چهاررقمی. دیتابیسِ موجود یک بار ارتقا می‌گیرد: کد مدیر «۱۴۰۲» در دیتابیس
+   (از پنل پشتیبانی عوض می‌شود) و هر کارشناسِ فعالی که کدش چهار رقم نیست کد تازه می‌گیرد؛ رخدادش ثبت می‌شود و اگر
+   تلگرامش وصل است کد تازه برایش می‌رود. دیتابیس تازه (آزمون‌ها، استقرار نو) کد مدیر را از env می‌گیرد. */
+export async function migrateCodes4(env, existing) {
+  if (await env.DB.prepare("SELECT 1 FROM settings WHERE key='codes4'").first()) return;
+  const stmts = [], t = now();
+  if (existing && !(await env.DB.prepare("SELECT 1 FROM settings WHERE key='managerCode'").first())) stmts.push(managerCodeStmt(env, "1402"));
+  const rows = (await env.DB.prepare("SELECT id,name,code,telegram_chat FROM experts WHERE active=1").all()).results || [];
+  const used = new Set(rows.map((r) => String(r.code))); used.add("1402"); if (env.MANAGER_CODE) used.add(String(env.MANAGER_CODE));
+  let changed = 0;
+  for (const r of rows) {
+    if (CODE_RE.test(String(r.code))) continue;
+    let c = null;
+    for (let i = 0; i < 500 && !c; i++) { const x = String(1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000)); if (!used.has(x)) c = x; }
+    if (!c) continue;
+    used.add(c); changed++;
+    stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(c, r.id));
+    stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)").bind(t, "system", "code_reset", null, null, JSON.stringify({ expert_id: r.id, name: r.name, reason: "codes4" })));
+    if (r.telegram_chat && env.TG_BOT_TOKEN) stmts.push(queueStmt(env, `codes4:${r.id}`, r.telegram_chat, `🔑 کد ورود پنل شما چهاررقمی شد: <b>${c}</b>\nبا همین کد وارد پنل کارشناس می‌شوید؛ از منوی پروفایل ← «حساب من» می‌توانید عوضش کنید.`, null, null));
+  }
+  stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('codes4',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(JSON.stringify({ at: t, changed, existing: !!existing }), t));
+  await env.DB.batch(stmts);
 }
 
 /**
@@ -842,8 +893,8 @@ async function addExpert(env, b) {
   const name = nrm(b.name), label = T(b.label) || T(b.name);
   const code = asciiDigits(b.code);
   if (!name || !code) throw new HttpError("نام و کد ورود لازم است.");
-  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ تا ۸ رقم باشد و فقط عدد.");
-  if (env.MANAGER_CODE && code === String(env.MANAGER_CODE)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری بدهید.", 409);
+  if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ رقم باشد و فقط عدد.");
+  if (code === await managerCode(env)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری بدهید.", 409);
   const rows = (await env.DB.prepare("SELECT id,name,code,active FROM experts WHERE name=? OR code=?").bind(name, code).all()).results || [];
   const byCode = rows.find((r) => r.active && r.code === code);
   if (byCode) throw new HttpError(`کد ورود ${code} مالِ «${byCode.name}» است؛ کد دیگری بدهید.`, 409);
@@ -1535,7 +1586,7 @@ async function route(request, env, ctx) {
   try {
     await ensureSchema(env);
 
-    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!env.MANAGER_CODE, botConfigured: !!env.TG_BOT_TOKEN, storage: storageInfo(env) });
+    if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!(await managerCode(env)), botConfigured: !!env.TG_BOT_TOKEN, storage: storageInfo(env) });
 
     /* ---------- بات تلگرام ---------- */
 
@@ -1598,7 +1649,7 @@ async function route(request, env, ctx) {
     }
     /* فراموشیِ رمزِ ویس (حالتِ صوتِ بات مکاتبات «sp» یا بات ویس «vb»): فقط مدیر؛ رمز برمی‌گردد به VOICE_PASS */
     if (path === "/voice/reset" && m === "POST") {
-      requireManager(request, env);
+      await requireManager(request, env);
       const b = await readJson(request);
       if (!["sp", "vb"].includes(b.bot)) throw new HttpError("bot باید sp یا vb باشد.");
       await resetVoicePass(env, b.bot);
@@ -1639,7 +1690,7 @@ async function route(request, env, ctx) {
     }
     /* مدیر: ثبت/بررسی وبهوک روی تلگرام */
     if (path === "/tg/setup" && m === "POST") {
-      requireManager(request, env);
+      await requireManager(request, env);
       if (!env.TG_BOT_TOKEN || !env.TG_WEBHOOK_SECRET) return NOT_CONNECTED("بات تلگرام");
       const api = telegram(env);
       await api.setWebhook(`${url.origin}${PREFIX}/tg/webhook`, env.TG_WEBHOOK_SECRET);
@@ -1652,7 +1703,7 @@ async function route(request, env, ctx) {
       return json({ ok: true, me: await api.getMe(), webhook: await api.getWebhookInfo(), team, sp, vb });
     }
     if (path === "/tg/setup" && m === "GET") {
-      requireManager(request, env);
+      await requireManager(request, env);
       if (!env.TG_BOT_TOKEN) return NOT_CONNECTED("بات تلگرام");
       const api = telegram(env);
       return json({ me: await api.getMe(), webhook: await api.getWebhookInfo() });
@@ -1660,7 +1711,7 @@ async function route(request, env, ctx) {
     /* گفت‌وگوهای نیمه‌کارهٔ بات — برای پشتیبانی: وقتی کارشناس می‌گوید «بات گیر کرده»،
        مدیر می‌تواند ببیند کجای کار مانده است. */
     if (path === "/tg/flows" && m === "GET") {
-      requireManager(request, env);
+      await requireManager(request, env);
       return json({
         flows: (await env.DB.prepare(
           `SELECT f.id, f.kind, f.step, f.assignment_id, f.created_at, f.expires_at, e.name AS expert
@@ -1675,7 +1726,7 @@ async function route(request, env, ctx) {
       });
     }
     /* اجرای دستی چرخهٔ هشدار — برای تست؛ همان کاری که Cron می‌کند */
-    if (path === "/tg/tick" && m === "POST") { requireManager(request, env); return json(await scheduled(env)); }
+    if (path === "/tg/tick" && m === "POST") { await requireManager(request, env); return json(await scheduled(env)); }
 
     /* --- ورود --- */
     /* تب «پشتیبانی» صفحهٔ اول: وضعیت کارت‌ها برای همه خواندنی است، نوشتن با رمز تب */
@@ -1690,7 +1741,7 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       /* رقم فارسی در Headers خطای داخلی می‌داد (هدر فقط نویسهٔ لاتین می‌پذیرد) و در جدول هم پیدا نمی‌شد */
       const code = asciiDigits(b.code);
-      if (b.role === "manager") { requireManager({ headers: { get: () => code } }, env); return json({ role: "manager" }); }
+      if (b.role === "manager") { await requireManager({ headers: { get: () => code } }, env); return json({ role: "manager" }); }
       const ex = await env.DB.prepare("SELECT id,name,label,code,senior FROM experts WHERE code=? AND active=1").bind(code).first();
       if (!ex) throw new HttpError("کد کارشناسی معتبر نیست.", 401);
       return json({ role: "expert", expert: { ...ex, senior: ex.senior ? 1 : 0 } });
@@ -1708,13 +1759,16 @@ async function route(request, env, ctx) {
 
     /* --- تنظیمات و کارشناسان --- */
     if (path === "/settings" && m === "GET") { await requireAny(request, env); return json(await getSettings(env)); }
-    if (path === "/settings" && m === "PUT") { requireManager(request, env); return json(await putSettings(env, await readJson(request))); }
+    if (path === "/settings" && m === "PUT") { await requireManager(request, env); return json(await putSettings(env, await readJson(request))); }
     /* فقط مدیر: کد ورودِ همهٔ کارشناسان در این فهرست است و کد همان رمز است (پنل کارشناس این مسیر را نمی‌خواند) */
-    if (path === "/experts" && m === "GET") { requireManager(request, env); return json({ experts: await listExperts(env) }); }
+    if (path === "/experts" && m === "GET") { await requireManager(request, env); return json({ experts: await listExperts(env) }); }
     /* افزودن کارشناس — کارکنان عوض می‌شوند و نباید برای هر نفر تازه استقرار لازم باشد */
     if (path === "/experts" && m === "POST") {
-      requireManager(request, env);
-      return json(await addExpert(env, await readJson(request)));
+      await requireManager(request, env);
+      /* کد ورودِ کارشناسِ تازه را سامانه می‌سازد و فقط پنل پشتیبانی نشانش می‌دهد (مدیر کد نمی‌بیند) */
+      const r = await addExpert(env, { ...(await readJson(request)), code: await freeCode(env) });
+      delete r.code;
+      return json(r);
     }
     /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ کارشناس — کدام کارِ کارشناس هوشمند پیش از رفتن تأییدِ او را بخواهد (worker/ai-supervise.js) */
     if (path === "/me/supervise" && (m === "GET" || m === "PUT")) {
@@ -1731,13 +1785,13 @@ async function route(request, env, ctx) {
     }
 
     /* خودآزمون سرویس‌های بیرونی — تلگرام، انبار فایل، تبدیل صوت، مدل، دیتابیس */
-    if (path === "/selftest" && m === "GET") { requireManager(request, env); return json(await selfTest(env)); }
+    if (path === "/selftest" && m === "GET") { await requireManager(request, env); return json(await selfTest(env)); }
 
     /* حذف درخواست — با همهٔ چیزهایی که به آن آویزان‌اند.
        فایل‌های ذخیره‌شده هم پاک می‌شوند، وگرنه در انبار یتیم می‌مانند و
        فضای رایگان را بی‌دلیل پر می‌کنند. */
     if (path === "/requests/delete" && m === "POST") {
-      requireManager(request, env);
+      await requireManager(request, env);
       const b = await readJson(request);
       const all = b.all === true;
       const ids = Array.isArray(b.ids) ? b.ids.map((x) => T(x)).filter(Boolean) : [];
@@ -1749,7 +1803,7 @@ async function route(request, env, ctx) {
     /* تعطیلات رسمی (SLA-01) — بدون این، مهلت‌ها وسط نوروز هم می‌شمارند */
     if (path === "/holidays" && m === "GET") { await requireAny(request, env); return json({ holidays: (await env.DB.prepare("SELECT * FROM holidays ORDER BY date_j").all()).results || [] }); }
     if (path === "/holidays" && m === "PUT") {
-      requireManager(request, env);
+      await requireManager(request, env);
       const b = await readJson(request); const list = Array.isArray(b.holidays) ? b.holidays : [];
       const t = now(); const bad = [];
       const rows = list.map((h) => {
@@ -1773,7 +1827,7 @@ async function route(request, env, ctx) {
       if (path === "/support/setup" && m === "POST") return json(await supportSetup(env, await readJson(request)));
       if (path === "/support/login" && m === "POST") return json(await supportLogin(env, await readJson(request)));
       /* فراموشیِ رمز: فقط مدیر، با کد مدیر */
-      if (path === "/support/reset" && m === "POST") { requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
+      if (path === "/support/reset" && m === "POST") { await requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
       await requireSupport(request, env);
       if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));
       if (path === "/support/desk" && m === "GET") {
@@ -1784,6 +1838,14 @@ async function route(request, env, ctx) {
         return json({ ...d, experts: d.experts.map(pubExpert) });
       }
       if (path === "/support/experts" && m === "GET") return json(await supportExperts(env));
+      /* کدهای ورود (کارشناسان و مدیر) — فقط این‌جا دیده و عوض می‌شوند */
+      if (path === "/support/codes" && m === "GET") return json(await supportCodes(env));
+      if (path === "/support/codes" && m === "PUT") {
+        const cb = await readJson(request);
+        if (cb.manager !== undefined) await setManagerCode(env, cb.manager);
+        if (cb.expert_id) await setExpertCode(env, int(cb.expert_id), cb.code, { reveal: true });
+        return json(await supportCodes(env));
+      }
       if ((mm = /^\/support\/experts\/(\d+)$/.exec(path)) && m === "GET") return json(await supportExpert(env, int(mm[1])));
       if (path === "/support/activity" && m === "GET") return json(await supportActivity(env, url));
       if (path === "/support/threads" && m === "GET") return json(await supportThreads(env, url));
@@ -1804,8 +1866,10 @@ async function route(request, env, ctx) {
     }
 
     if ((mm = /^\/experts\/(\d+)$/.exec(path)) && m === "PUT") {
-      requireManager(request, env);
-      return json(await updateExpert(env, int(mm[1]), await readJson(request)));
+      await requireManager(request, env);
+      const eb = await readJson(request);
+      if ("code" in eb) throw new HttpError("کد ورود کارشناس فقط از پنل پشتیبانی تغییر می‌کند.", 403);
+      return json(await updateExpert(env, int(mm[1]), eb));
     }
     /* تنظیم اعلانات خودِ کارشناس ارشد (تیک مرحله‌ها) و لینک اتصال گروه تیمش */
     /* تنظیم اعلانات کارشناس ارشد — همان تب مدیر برای تیم خودش: تیک مرحله‌هایی که در تلگرام تیمی
@@ -1848,38 +1912,38 @@ async function route(request, env, ctx) {
       return json(await delegate(env, ex, await readJson(request), ctx));
     }
     if (path === "/scores" && m === "GET") { await requireAny(request, env); return json(await scoresGet(env)); }
-    if (path === "/scores" && m === "PUT") { requireManager(request, env); return json(await scoresPut(env, await readJson(request))); }
+    if (path === "/scores" && m === "PUT") { await requireManager(request, env); return json(await scoresPut(env, await readJson(request))); }
     /* محورهای ماتریس‌های ارجاع و مهلت هوشمند: گروه‌های اصناف دیتابیس و پروژه‌های گزارش */
-    if (path === "/axes" && m === "GET") { requireManager(request, env); return json(await axes(env)); }
+    if (path === "/axes" && m === "GET") { await requireManager(request, env); return json(await axes(env)); }
 
     /* --- بارگذاری اکسل (مدیر) --- */
-    if (path === "/import/begin" && m === "POST") { requireManager(request, env); return json(await importBegin(env, await readJson(request))); }
-    if (path === "/import/chunk" && m === "POST") { requireManager(request, env); return json(await importChunk(env, await readJson(request))); }
-    if (path === "/import/finish" && m === "POST") { requireManager(request, env); return json(await importFinish(env, await readJson(request))); }
-    if (path === "/import/apply" && m === "POST") { requireManager(request, env); return json(await importApply(env, await readJson(request))); }
-    if (path === "/import/history" && m === "GET") { requireManager(request, env); return json(await historyFingerprints(env)); }
-    if (path === "/import/history" && m === "POST") { requireManager(request, env); return json(await importHistory(env, await readJson(request))); }
-    if (path === "/imports" && m === "GET") { requireManager(request, env); return json({ imports: (await env.DB.prepare("SELECT * FROM imports ORDER BY id DESC LIMIT 30").all()).results || [] }); }
+    if (path === "/import/begin" && m === "POST") { await requireManager(request, env); return json(await importBegin(env, await readJson(request))); }
+    if (path === "/import/chunk" && m === "POST") { await requireManager(request, env); return json(await importChunk(env, await readJson(request))); }
+    if (path === "/import/finish" && m === "POST") { await requireManager(request, env); return json(await importFinish(env, await readJson(request))); }
+    if (path === "/import/apply" && m === "POST") { await requireManager(request, env); return json(await importApply(env, await readJson(request))); }
+    if (path === "/import/history" && m === "GET") { await requireManager(request, env); return json(await historyFingerprints(env)); }
+    if (path === "/import/history" && m === "POST") { await requireManager(request, env); return json(await importHistory(env, await readJson(request))); }
+    if (path === "/imports" && m === "GET") { await requireManager(request, env); return json({ imports: (await env.DB.prepare("SELECT * FROM imports ORDER BY id DESC LIMIT 30").all()).results || [] }); }
 
     /* --- میز ارجاع (مدیر) --- */
-    if (path === "/desk" && m === "GET") { requireManager(request, env); return json(await desk(env, url)); }
-    if (path === "/workload" && m === "GET") { requireManager(request, env); return json(await workload(env)); }
-    if (path === "/assign" && m === "POST") { requireManager(request, env); return json(await assign(env, await readJson(request))); }
-    if (path === "/assign/days" && m === "POST") { requireManager(request, env); return json(await setDays(env, await readJson(request))); }
-    if (path === "/assign/ai" && m === "POST") { const r = await (requireManager(request, env), setAiTick(env, await readJson(request))); flush(env, ctx, 1); return json(r); }
-    if (path === "/assign/sup" && m === "POST") { const r = await (requireManager(request, env), setSupTick(env, await readJson(request))); flush(env, ctx, 1); return json(r); }
-    if (path === "/dispatch" && m === "POST") { requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
-    if (path === "/reassign" && m === "POST") { requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
-    if (path === "/unassign" && m === "POST") { requireManager(request, env); return json(await unassign(env, await readJson(request))); }
-    if (path === "/items/state" && m === "POST") { requireManager(request, env); const r = await setState(env, await readJson(request), "manager"); flush(env, ctx, r.notified); return json(r); }
-    if (path === "/decisions" && m === "GET") { requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
+    if (path === "/desk" && m === "GET") { await requireManager(request, env); return json(await desk(env, url)); }
+    if (path === "/workload" && m === "GET") { await requireManager(request, env); return json(await workload(env)); }
+    if (path === "/assign" && m === "POST") { await requireManager(request, env); return json(await assign(env, await readJson(request))); }
+    if (path === "/assign/days" && m === "POST") { await requireManager(request, env); return json(await setDays(env, await readJson(request))); }
+    if (path === "/assign/ai" && m === "POST") { await requireManager(request, env); const r = await setAiTick(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
+    if (path === "/assign/sup" && m === "POST") { await requireManager(request, env); const r = await setSupTick(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
+    if (path === "/dispatch" && m === "POST") { await requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
+    if (path === "/reassign" && m === "POST") { await requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
+    if (path === "/unassign" && m === "POST") { await requireManager(request, env); return json(await unassign(env, await readJson(request))); }
+    if (path === "/items/state" && m === "POST") { await requireManager(request, env); const r = await setState(env, await readJson(request), "manager"); flush(env, ctx, r.notified); return json(r); }
+    if (path === "/decisions" && m === "GET") { await requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
     if ((mm = /^\/decisions\/(\d+)\/(approve|reject)$/.exec(path)) && m === "POST") {
-      requireManager(request, env); const b = await readJson(request).catch(() => ({}));
+      await requireManager(request, env); const b = await readJson(request).catch(() => ({}));
       const r = mm[2] === "approve" ? await approveDecision(env, int(mm[1]), "panel") : await rejectDecision(env, int(mm[1]), b && b.note);
       flush(env, ctx, 1);
       return json(r);
     }
-    if (path === "/events" && m === "GET") { requireManager(request, env); const since = int(url.searchParams.get("since"), 0); return json({ events: (await env.DB.prepare("SELECT * FROM events WHERE at>? ORDER BY at DESC LIMIT 300").bind(since).all()).results || [] }); }
+    if (path === "/events" && m === "GET") { await requireManager(request, env); const since = int(url.searchParams.get("since"), 0); return json({ events: (await env.DB.prepare("SELECT * FROM events WHERE at>? ORDER BY at DESC LIMIT 300").bind(since).all()).results || [] }); }
 
     /* --- پنل کارشناس --- */
     if (path === "/tray" && m === "GET") { const ex = await requireExpert(request, env); return json(await tray(env, ex, url)); }
@@ -2212,7 +2276,7 @@ async function route(request, env, ctx) {
     /* گزارش‌های مدیر (reports.js): «وضعیت درخواست ها» و «گزارش سه ماهه» — JSON برای نمایش در پنل،
        .xlsx با همان ساختار فایل‌های نمونهٔ واحد. سه‌ماهه POST است چون انتخاب سال/فصل/ماه/برگه‌ها در بدنه است. */
     if (path.startsWith("/reports/")) {
-      requireManager(request, env);
+      await requireManager(request, env);
       /* گروه‌بندیِ گزارش سه‌ماهه: روابط سرگروه/عضو جدا از تب کارشناسان (reports.js:TEAM_KEY) — جدول پیش از
          ساخت از این پر می‌شود و با تأیید مدیر نگاشتِ تازه این‌جا ذخیره می‌شود */
       if (path === "/reports/team" && m === "GET") return json(await reportTeam(env));
@@ -2237,9 +2301,9 @@ async function route(request, env, ctx) {
     }
     if (path === "/history/status" && m === "GET") { await requireAny(request, env); return json(await historyStatus(env)); }
     /* بارگذاری چهار فایل مرجع (اقلام، شاخص تعدیل، نرخ تبدیل، سوابق) — worker/catalog.js */
-    if (path === "/catalog/begin" && m === "POST") { requireManager(request, env); return json(await catalogBegin(env, await readJson(request))); }
-    if (path === "/catalog/chunk" && m === "POST") { requireManager(request, env); return json(await catalogChunk(env, await readJson(request))); }
-    if (path === "/catalog/finish" && m === "POST") { requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
+    if (path === "/catalog/begin" && m === "POST") { await requireManager(request, env); return json(await catalogBegin(env, await readJson(request))); }
+    if (path === "/catalog/chunk" && m === "POST") { await requireManager(request, env); return json(await catalogChunk(env, await readJson(request))); }
+    if (path === "/catalog/finish" && m === "POST") { await requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
     /* نرمال‌سازی اقلام: ساختار از دیتابیس (کد، بعد عنوان) یا فقط برای قلمِ تازه از مدل؛ ذخیرهٔ کارشناس
        (روی قلم و در دیتابیس اصلی) و برداشتنش — worker/normalize.js */
     if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {

@@ -13,6 +13,7 @@
  * می‌آید: HMAC با رازِ سرور و هشِ رمز، پس عوض شدنِ رمز همهٔ نشانه‌های قبلی را باطل می‌کند.
  */
 import { HttpError } from "./http.js";
+import { managerCode } from "./settings.js";
 import { queueStmt } from "./queue.js";
 import { threadRow, threadOut, lineOut, bundleOut, msgOut, msgFor, FILE_LABELS } from "./sp-core.js";
 
@@ -61,10 +62,10 @@ const delKey = (env, key) => env.DB.prepare("DELETE FROM settings WHERE key=?").
 const evStmt = (env, kind, requestId, itemId, payload) => env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)")
   .bind(now(), "support", kind, requestId || null, itemId || null, payload ? JSON.stringify(payload) : null);
 
-function cleanPass(env, p) {
+async function cleanPass(env, p) {
   const s = latin(p);
   if (s.length < PASS_MIN || s.length > PASS_MAX) throw new HttpError(`رمز باید ${faN(PASS_MIN)} تا ${faN(PASS_MAX)} نویسه باشد.`, 400);
-  if (env.MANAGER_CODE && s === env.MANAGER_CODE) throw new HttpError("رمز پشتیبانی نباید همان کد مدیر باشد.", 400);
+  if (s === await managerCode(env)) throw new HttpError("رمز پشتیبانی نباید همان کد مدیر باشد.", 400);
   return s;
 }
 const hashPass = (pass, salt) => sha256(`${salt}:${pass}`);
@@ -87,7 +88,7 @@ export async function supportStatus(env) {
 
 /** اولین بازدیدکننده رمز را می‌گذارد — فقط وقتی هنوز رمزی نیست (DO NOTHING: دو نفرِ هم‌زمان، یکی برنده) */
 export async function supportSetup(env, body) {
-  const rec = await makeRec(cleanPass(env, body && body.pass));
+  const rec = await makeRec(await cleanPass(env, body && body.pass));
   const r = await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO NOTHING").bind(KEY_PASS, JSON.stringify(rec), now()).run();
   if (!r.meta.changes) throw new HttpError("رمز پشتیبانی قبلاً گذاشته شده؛ با همان وارد شوید.", 409, { set: true });
   await evStmt(env, "support_pass", null, null, { how: "setup" }).run();
@@ -117,7 +118,7 @@ export async function supportLogin(env, body) {
 
 /** فراموشیِ رمز: مدیر (مسیرش کد مدیر را پیش از این سنجیده) رمز تازه می‌گذارد؛ قفل هم برداشته می‌شود */
 export async function supportReset(env, body) {
-  const rec = await makeRec(cleanPass(env, body && body.pass));
+  const rec = await makeRec(await cleanPass(env, body && body.pass));
   await env.DB.batch([putKey(env, KEY_PASS, rec), delKey(env, KEY_LOCK), evStmt(env, "support_pass", null, null, { how: "reset" })]);
   return issue(env, rec);
 }
@@ -126,7 +127,7 @@ export async function supportReset(env, body) {
 export async function supportChangePass(env, body) {
   const old = await readKey(env, KEY_PASS);
   if (!old || !same(await hashPass(latin(body && body.current), old.salt), old.hash)) throw new HttpError("رمز فعلی درست نیست.", 403);
-  const rec = await makeRec(cleanPass(env, body && body.pass));
+  const rec = await makeRec(await cleanPass(env, body && body.pass));
   await env.DB.batch([putKey(env, KEY_PASS, rec), evStmt(env, "support_pass", null, null, { how: "change" })]);
   return issue(env, rec);
 }

@@ -62,14 +62,16 @@ test("ورود مدیر با رقم فارسی خطای داخلی نمی‌ده
   assert.equal((await login({ role: "manager", code: "رمز" })).status, 401, "نویسهٔ غیرلاتین ۴۰۱ است نه ۵۰۰");
 });
 
-test("کادر ورود پنل‌ها: خانه‌های کد تا هشت رقم (ui.js) و تبدیل رقم فارسی پیش از ارسال", () => {
+test("کادر ورود پنل‌ها: فقط چهار خانه (ui.js؛ تصمیم مالک مهر ۱۴۰۵) و تبدیل رقم فارسی پیش از ارسال", () => {
   const expert = readFileSync(resolve(FRONT, "expert.js"), "utf8");
   const manager = readFileSync(resolve(FRONT, "manager.js"), "utf8");
   const shared = readFileSync(resolve(FRONT, "shared.js"), "utf8");
   const ui = readFileSync(resolve(FRONT, "ui.js"), "utf8");
-  /* مهر ۱۴۰۵: کارتِ ورود با چهار خانه که تا هشت رقم خانه می‌افزاید (TP.ui.login)؛ هر خانه فقط رقمِ لاتین‌شده می‌پذیرد */
-  assert.match(expert, /TP\.ui\.login\(\{[^}]*len: 4, max: 8/, "کد ورود کارشناس: چهار خانه تا ۸ رقم");
-  assert.match(manager, /TP\.ui\.login\(\{[^}]*len: 4, max: 8/, "کد مدیر: چهار خانه تا ۸ رقم");
+  /* مهر ۱۴۰۵: کارتِ ورود با چهار خانه و بس — خانه‌ای اضافه نمی‌شود (TP.ui.login)؛ هر خانه فقط رقمِ لاتین‌شده می‌پذیرد */
+  assert.match(expert, /TP\.ui\.login\(\{[^}]*len: 4, max: 4/, "کد ورود کارشناس: فقط چهار خانه");
+  assert.match(manager, /TP\.ui\.login\(\{[^}]*len: 4, max: 4/, "کد مدیر: فقط چهار خانه");
+  assert.match(readFileSync(resolve(FRONT, "correspond.js"), "utf8"), /TP\.ui\.login\(\{[^}]*len: 4, max: 4/, "مکاتبات: فقط چهار خانه");
+  assert.match(ui, /data-max="\$\{o\.max \|\| o\.len \|\| 4\}"/, "پیش‌فرضِ سقفِ خانه‌ها همان شمارِ خانه‌هاست");
   assert.match(ui, /const digits = \(s\) => String\(s == null \? "" : s\)\.replace\(\/\[۰-۹\]\/g/, "ارقام فارسی و عربی لاتین می‌شوند");
   assert.match(ui, /const d = digits\(c\.value\)\.replace\(\/\\D\/g, ""\);\s*c\.value = d\.slice\(-1\);/, "هر خانه یک رقمِ لاتین‌شده");
   assert.match(shared, /TP\.digits = dig;/);

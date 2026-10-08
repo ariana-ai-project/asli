@@ -67,13 +67,15 @@ async function call(method, path, { body, expert, raw, ctype } = {}) {
 }
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-test("فهرست کارشناسان (با کد ورودشان) فقط برای مدیر است", { skip: SKIP }, async () => {
+test("فهرست کارشناسان فقط برای مدیر است و کد ورود در آن نیست", { skip: SKIP }, async () => {
   const asExpert = await call("GET", "/experts", { expert: "1111" });
   assert.equal(asExpert.status, 401);
   assert.doesNotMatch(JSON.stringify(asExpert.data), /2222|3333/, "کد کارشناس دیگر بیرون نمی‌رود");
   const asManager = await call("GET", "/experts");
   assert.equal(asManager.status, 200);
-  assert.ok(asManager.data.experts.some((e) => e.code === "2222"), "پنل مدیر همچنان کدها را می‌بیند");
+  /* مهر ۱۴۰۵: مدیر هم کد نمی‌بیند — کدها فقط در پنل پشتیبانی (/support/codes) */
+  assert.ok(asManager.data.experts.length >= 2);
+  assert.doesNotMatch(JSON.stringify(asManager.data), /2222|3333/, "پنل مدیر کدها را نمی‌بیند");
 });
 
 test("جایگزینیِ فایل پیش‌فاکتور از پنل، خوانده‌های فایل قبلی را پاک می‌کند", { skip: SKIP }, async () => {

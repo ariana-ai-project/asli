@@ -140,7 +140,7 @@
       <div class="tp-auth-head"><div class="tp-auth-brand"><img src="../assets/logo-new.jpg" alt=""><div><b>${esc(o.company || "تونل سد آریانا")}</b><span>${esc(o.system || "سامانه پشتیبانی خرید")}</span></div></div>${themeBtn()}</div>
       <h1>${esc(o.title)}</h1>${o.sub ? `<p class="tp-auth-sub">${o.sub}</p>` : ""}
       ${o.password ? `<input class="tp-auth-pass" id="${esc(o.id || "pass")}" type="password" autocomplete="${esc(o.autocomplete || "current-password")}" placeholder="${esc(o.placeholder || "")}" aria-label="${esc(o.placeholder || "رمز")}">${o.extra || ""}`
-        : `<div class="tp-otp" data-otp data-len="${o.len || 4}" data-max="${o.max || 8}" role="group" aria-label="${esc(o.placeholder || "کد ورود")}">${cells}</div>`}
+        : `<div class="tp-otp" data-otp data-len="${o.len || 4}" data-max="${o.max || o.len || 4}" role="group" aria-label="${esc(o.placeholder || "کد ورود")}">${cells}</div>`}
       <button class="tp-auth-go" type="submit" data-login><span class="tp-go-3d" aria-hidden="true"><i></i><i></i><i></i></span><span>${esc(o.submit || "ورود")}</span></button>
       <div class="tp-auth-err ${o.ok ? "ok" : ""}" role="alert" aria-live="polite">${esc(o.error || "")}</div>
       ${o.alt ? `<div class="tp-auth-extra">${o.alt}</div>` : ""}
@@ -337,5 +337,11 @@
         <span class="l2"><span class="pv">${o.sub || ""}</span><span class="bd">${o.badges || ""}</span></span></span></button>`;
   }
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial };
+  /* انیمیشنِ ورودِ کارت‌ها فقط بارِ اولی که فهرست نشان داده می‌شود؛ بازرندرهای بعدی (ذخیرهٔ یک فیلد، بازخوانی خودکار)
+     کلاس settled می‌گیرند تا کارت‌ها «نپرند». resetOnce وقتی کاربر دوباره به آن فهرست می‌آید. */
+  const shown = new Set();
+  const once = (key) => { if (shown.has(key)) return "settled"; shown.add(key); return ""; };
+  const resetOnce = (key) => { shown.delete(key); };
+
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce };
 })();

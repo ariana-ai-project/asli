@@ -35,3 +35,15 @@ export function settingsFromRows(rows) {
   }
   return s;
 }
+
+/* کد ورود مدیر (مهر ۱۴۰۵): در دیتابیس (کلید managerCode) و فقط از پنل پشتیبانی عوض می‌شود؛ تا وقتی در دیتابیس
+   نیست، همان env.MANAGER_CODE. این کلید در DEFAULTS نیست، پس هیچ‌وقت به پنل مدیر نمی‌رسد. */
+const KEY_MGR = "managerCode";
+export async function managerCode(env) {
+  let v = null;
+  try { const r = await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(KEY_MGR).first(); v = r ? JSON.parse(r.value) : null; }
+  catch (_) { v = null; }
+  return String(v || env.MANAGER_CODE || "");
+}
+export const managerCodeStmt = (env, code) => env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+  .bind(KEY_MGR, JSON.stringify(String(code)), Date.now());

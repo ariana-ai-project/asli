@@ -61,6 +61,8 @@
     experts: [], settings: null,
     desk: null, deskErr: "", deskLoading: false, rf: { win: "7d", project: "", expert: "", status: "", q: "", id: "" },
     exId: null, ex: null, exErr: "",
+    /* کدهای ورود (فقط پشتیبانی می‌بیند و عوض می‌کند) */
+    codes: null, codesOpen: false, codesErr: "",
     th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null,
     log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null,
     cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1,
@@ -345,11 +347,30 @@
   }
 
   /* ---------- تب «کارشناسان» ---------- */
+  /* کدهای ورود کارشناسان و کد مدیر — تنها جای دیدن و تغییرشان (تصمیم مالک، مهر ۱۴۰۵) */
+  function vCodes() {
+    const C = S.codes;
+    if (S.codesErr) return `<div class="tp-note warn">${esc(S.codesErr)}</div>`;
+    if (!C) return `<div class="empty">در حال خواندن کدها…</div>`;
+    const inp = (attrs, v, bad) => `<input class="tp-input ${bad ? "bad" : ""}" ${attrs} value="${esc(v)}" inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="off" title="چهار رقم؛ Enter یا خروج از کادر = ذخیره">`;
+    return `<div class="tp-card tp-codes" style="margin-bottom:12px;padding:14px 16px"><h3 style="margin:0 0 10px">🔑 کدهای ورود <span class="dim" style="font-weight:400;font-size:.8rem">چهار رقم؛ فقط همین‌جا دیده و عوض می‌شوند</span></h3>
+      <div class="tp-row" style="margin-bottom:10px;align-items:center;gap:10px"><b>کد مدیر</b>${inp("data-code-mgr", C.manager, !/^\d{4}$/.test(C.manager))}</div>
+      <div class="tp-scroll" style="max-height:50vh"><table class="tp-table"><thead><tr><th class="rt">کارشناس</th><th>کد ورود</th><th>تلگرام</th></tr></thead><tbody>
+      ${C.experts.map((e) => `<tr><td class="rt">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</td><td>${inp(`data-code-ex="${e.id}"`, e.code, !e.ok)}${e.ok ? "" : ` <span class="chip warn">چهاررقمی نیست</span>`}</td><td>${e.tg ? "✓" : "—"}</td></tr>`).join("")}
+      </tbody></table></div></div>`;
+  }
+  async function loadCodes() { S.codesErr = ""; try { S.codes = await api("/codes"); } catch (e) { S.codesErr = e.message; } render(); }
+  async function saveCode(body) {
+    try { S.codes = await api("/codes", { method: "PUT", body }); S.codesErr = ""; }
+    catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
+    render();
+  }
   function vExperts() {
     const E = S.experts;
     if (!E.length) return `<div class="empty">در حال بارگذاری…</div>`;
     const sum = (k) => E.reduce((a, e) => a + (e[k] || 0), 0);
-    return `<div class="kpi" style="margin-bottom:12px"><div class="k"><b>کارشناس فعال</b><span>${E.length}</span></div><div class="k"><b>ارجاع باز</b><span>${sum("open_asg")}</span></div>
+    return `<div class="tp-row" style="margin-bottom:10px"><button class="tp-btn sm ${S.codesOpen ? "primary" : ""}" data-codes aria-expanded="${S.codesOpen ? "true" : "false"}">🔑 کدهای ورود</button></div>${S.codesOpen ? vCodes() : ""}
+      <div class="kpi" style="margin-bottom:12px"><div class="k"><b>کارشناس فعال</b><span>${E.length}</span></div><div class="k"><b>ارجاع باز</b><span>${sum("open_asg")}</span></div>
         <div class="k"><b>قلم باز</b><span>${sum("open_items")}</span></div><div class="k"><b>از مهلت گذشته</b><span>${sum("overdue")}</span></div>
         <div class="k"><b>دیده‌نشده</b><span>${sum("unseen")}</span></div><div class="k"><b>منتظر تأیید کمیسیون</b><span>${sum("cm_wait")}</span></div></div>
       <div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 300px)"><table class="tp-table" data-stick><thead><tr>
@@ -1131,6 +1152,7 @@
     if (d.cmprev) return cmPreview(d.cmprev);
     if (d.cmdl) { const b = TP.busy("ساختن فایل…", "جدول کمیسیون (اکسل)"); return download(`/assignments/${d.cmdl}/sheet/commission`, `کمیسیون-${d.rid || d.cmdl}.xlsx`).catch((e) => TP.modal("نشد", esc(e.message), null, "باشد", "")).finally(() => b.close()); }
     if (d.goto) return goto(d.goto, t);
+    if (d.codes !== undefined) { S.codesOpen = !S.codesOpen; if (S.codesOpen && !S.codes) loadCodes(); return render(); }
     if (d.ex) return loadExpert(Number(d.ex));
     if (d.exback !== undefined) { S.exId = null; S.ex = null; loadExperts().catch(() => {}); return render(); }
     if (d.th) return openThread(Number(d.th));
@@ -1176,13 +1198,15 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
   });
   app.addEventListener("change", (e) => {
     const t = e.target, d = t.dataset;
+    if (d.codeEx) return saveCode({ expert_id: Number(d.codeEx), code: t.value });
+    if (d.codeMgr !== undefined) return saveCode({ manager: t.value });
     if (d.rf) { S.rf[d.rf] = t.value; if (d.rf === "win" || d.rf === "status") return loadDesk(); return render(); }
     if (d.thf) { S.thF[d.thf] = t.value; return loadThreads(); }
     if (d.lf) { S.logF[d.lf] = t.value; return loadLog(); }
@@ -1215,7 +1239,7 @@
     if (e.key !== "Enter") return;
     const t = e.target;
     if (S.view === "login" && t.tagName === "INPUT") { e.preventDefault(); const b = app.querySelector("[data-do]"); if (b && !b.disabled) doAuth(b.dataset.do); }
-    else if (t.dataset && t.dataset.lrid !== undefined) { e.preventDefault(); t.blur(); }
+    else if (t.dataset && (t.dataset.lrid !== undefined || t.dataset.codeEx || t.dataset.codeMgr !== undefined)) { e.preventDefault(); t.blur(); }
   });
   window.addEventListener("tp-theme", render);
 
