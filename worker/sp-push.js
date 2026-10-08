@@ -320,6 +320,8 @@ export function lineCard(l, files, others, terms, opt = {}) {
   const miss = [...lineMissing(l), ...termsMissing(tm)];
   if (editable && miss.length) text += `\n\n<i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   if (editable) {
+    /* یک دکمهٔ اصلی: «📝 پر کردن اطلاعات» — پرسش‌های نوبتی، همان ترتیبِ پنل وب (sp-bot.js:wizardNext؛ مهر ۱۴۰۵) */
+    kb.push([{ text: "📝 پر کردن اطلاعات", callback_data: `wz:${l.id}` }]);
     /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
     kb.push([...(lk.legacy || !lk.qty ? [{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ text: "📏 واحد", callback_data: `sv:${l.id}:u` }] : []),
       { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }]);

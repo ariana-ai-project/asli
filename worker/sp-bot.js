@@ -484,10 +484,14 @@ export function extraOf(name, value) {
   return { k, v };
 }
 /** پرسیدنِ یک مقدار؛ برای «مقدار» دکمهٔ «همان مقدارِ درخواست» هم هست. f «y»: لایهٔ 🔓ِ شمارهٔ yi */
-async function askValue(env, row, l, f, head, yi) {
-  P.setFlow(row, { step: "val", line: l.id, f, ...(f === "y" ? { i: yi } : {}) });
+async function askValue(env, row, l, f, head, yi, opt) {
+  /* opt.wz: پرسش‌های نوبتیِ «📝 پر کردن اطلاعات» — گام در جریان می‌ماند و دکمهٔ «⏭» دارد */
+  const wz = opt && opt.wz;
+  P.setFlow(row, { step: "val", line: l.id, f, ...(f === "y" ? { i: yi } : {}), ...(wz ? { wz } : {}) });
   const kb = [];
   if (f === "q" && l.req_qty != null) kb.push([{ text: `✔️ همان مقدار درخواست (${P.qty(l.req_qty)} ${l.req_unit || ""})`, callback_data: `sv:${l.id}:qd` }]);
+  if (wz && opt.keep) kb.push([{ text: `⏭ همین که هست (${opt.keep})`, callback_data: `wz:${l.id}:s` }]);
+  else if (wz && opt.skip) kb.push([{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]);
   kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
   let prompt = VAL_PROMPT[f];
   if (f === "q") {
@@ -499,7 +503,8 @@ async function askValue(env, row, l, f, head, yi) {
     if (!x) return lineCardSend(env, row, { supplier_id: l.supplier_id }, l.id, null, "این لایه دیگر نیست.");
     prompt = `🔓 <b>${esc(x.k)}</b> — مقدارِ پیشنهادیِ خودتان را بنویسید (یا «-» برای همان مقدارِ درخواست: ${esc(x.v)}):`;
   }
-  await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${prompt}`, kb);
+  const r = await P.send(env, row, `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n${prompt}`, kb);
+  if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
 }
 /* شرایطِ فاکتور (برای همهٔ اقلامِ استعلام): فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
@@ -508,23 +513,73 @@ const TERM_PROMPT = {
   x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):",
 };
 const TERM_OPTS = { p: ENUMS.pay, i: ENUMS.invoice, v: ENUMS.vat };
-async function askTerm(env, row, l, k, head) {
+async function askTerm(env, row, l, k, head, opt) {
   const f = P.TERM_KEY[k];
+  const wz = opt && opt.wz;
   const top = `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n`;
+  const skipRow = wz ? [[{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]] : [];
   /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت برای همین قلم — فقط گزینه‌های مجاز، و بازهٔ تحویل در پرسش (سرور هم همین را می‌سنجد) */
   const lk = C.lockOfLines([l], await C.limitsOfLines(env, [l])).lock;
   if (TERM_OPTS[k]) {
-    P.setFlow(row, null);
+    /* در پرسش‌های نوبتی، گام روی خودِ گفت‌وگو می‌ماند تا «tv» بداند بعدش کجا برود */
+    P.setFlow(row, wz ? { step: "wz", line: l.id, wz } : null);
     const allow = lk[f] && lk[f].length ? lk[f] : null;
     const kb = TERM_OPTS[k].map((v, i) => ({ v, i })).filter((x) => !allow || allow.includes(x.v)).map(({ v, i }) => [{ text: v, callback_data: `tv:${l.id}:${k}:${i}` }]);
-    kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
-    await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${allow ? `\n<i>🔒 شرطِ شرکت: فقط ${esc(allow.join(" یا "))}</i>` : ""}`, kb);
+    kb.push(...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
+    const r = await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${allow ? `\n<i>🔒 شرطِ شرکت: فقط ${esc(allow.join(" یا "))}</i>` : ""}`, kb);
+    if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { step: "wz", line: l.id, wz }); }
     return { ok: true };
   }
-  P.setFlow(row, { step: "term", line: l.id, k });
+  P.setFlow(row, { step: "term", line: l.id, k, ...(wz ? { wz } : {}) });
   const dl = f === "dtime" && lk.dtime && (lk.dtime.from || lk.dtime.to) ? `\n<i>🔒 شرطِ شرکت: زمان تحویل ${esc(rangeTxt(lk.dtime))}</i>` : "";
-  await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [[{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+  const r = await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+  if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
+}
+/* ------------------------------------------------------------------ */
+/* «📝 پر کردن اطلاعات» — پرسش‌های نوبتی، همان ترتیبِ کارت‌های نوبتیِ پنل وب (supplier.js:wzSteps؛ مهر ۱۴۰۵):
+   عنوانِ 🔓، مقدار (اگر باز)، واحد (اگر خالی)، قیمت واحد، لایه‌های 🔓، شرایطِ خالیِ فاکتور، توضیح و پیوست (اختیاری).
+   هر پرسش که جواب گرفت، پیامش پاک می‌شود و پرسشِ بعدی می‌آید؛ «⏭» رد می‌شود، «✖️ انصراف» بیرون می‌رود.             */
+/* ------------------------------------------------------------------ */
+function wizardSteps(l) {
+  const lk = C.locksOfLine(l), tm = C.termsOf(l), layers = C.lineLayers(l), st = [];
+  if (!lk.legacy && !lk.title) st.push({ k: "t" });
+  if (lk.legacy || !lk.qty) st.push({ k: "q" });
+  if ((lk.legacy || !lk.unit) && !T(l.unit)) st.push({ k: "u" });
+  st.push({ k: "p" });
+  layers.forEach((x, i) => { if (lk.layers[x.k] === false) st.push({ k: "y", i }); });
+  for (const k of ["d", "p", "i", "v", "x"]) if (!T(tm[P.TERM_KEY[k]])) st.push({ k: "term", t: k });
+  st.push({ k: "n" }, { k: "a" });
+  return st;
+}
+async function wizardNext(env, row, sup, lineId, wz, head) {
+  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
+  if (!l || l.supplier_id !== sup.supplier_id) { P.setFlow(row, null); await P.send(env, row, "این قلم پیدا نشد."); return { ok: true }; }
+  /* پیامِ پرسشِ قبلی برداشته می‌شود تا فقط پرسشِ تازه بماند — مثل کارت‌های نوبتیِ پنل وب */
+  if (wz.mid) { await P.spApi(env).call("deleteMessage", { chat_id: row.chat, message_id: wz.mid }).catch(() => {}); wz.mid = null; }
+  if (!C.LINE_EDITABLE.includes(l.state) || l.state === "ready") { P.setFlow(row, null); return lineCardSend(env, row, sup, l.id, null, head); }
+  wz.i = (wz.i == null ? -1 : wz.i) + 1;
+  if (wz.i >= wz.steps.length) {
+    P.setFlow(row, null);
+    const miss = [...C.lineMissing(l), ...C.termsMissing(C.termsOf(l))];
+    return lineCardSend(env, row, sup, l.id, null, `${head ? `${head} ` : ""}🎉 <b>اطلاعاتِ این قلم کامل شد.</b>${miss.length ? ` <i>مانده: ${esc(miss.join("، "))}</i>` : " حالا «✅ آمادهٔ ارسال» را بزنید."}`);
+  }
+  const s = wz.steps[wz.i];
+  /* واحدی که در همین مسیر پر شد (مثلاً با «همان مقدار درخواست») دیگر پرسیده نمی‌شود */
+  if (s.k === "u" && T(l.unit)) return wizardNext(env, row, sup, lineId, wz, head);
+  const h = `${head ? `${head}\n\n` : ""}📝 <b>پر کردن اطلاعات</b> — گام ${P.fa(wz.i + 1)} از ${P.fa(wz.steps.length)}`;
+  if (s.k === "term") return askTerm(env, row, l, s.t, h, { wz });
+  if (s.k === "a") {
+    const r = await P.send(env, row, `${h}\n📎 <b>پیوست</b> — اگر مدرک یا عکسی دارید (گواهی کیفیت، تصویر محصول، …) بیفزایید؛ وگرنه رد شوید.`,
+      [[{ text: "📎 افزودن پیوست", callback_data: `sa:${l.id}` }], [{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }], [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+    wz.mid = r && r.message_id;
+    P.setFlow(row, { step: "wz", line: l.id, wz });
+    return { ok: true };
+  }
+  const layers = C.lineLayers(l), ly = s.k === "y" ? layers[s.i] : null, title = C.lineTitle(l);
+  const keep = s.k === "q" && l.qty != null ? `${P.qty(l.qty)} ${l.unit || ""}` : s.k === "p" && l.price != null ? `${P.money(l.price)} ریال` : s.k === "u" && T(l.unit) ? l.unit
+    : s.k === "n" && T(l.note) ? P.short(l.note, 20) : s.k === "t" && title !== l.title ? P.short(title, 20) : s.k === "y" && ly && ly.req != null ? P.short(ly.v, 20) : null;
+  return askValue(env, row, l, s.k, h, s.i, { wz, keep, skip: ["n", "t", "y"].includes(s.k) });
 }
 /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده — مقدار، قیمت یا شرطِ فاکتور — همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
 async function afterSave(env, row, sup, lineId, head) {
@@ -596,6 +651,7 @@ async function supplierMessage(env, row, msg, text) {
       const l = await env.DB.prepare("SELECT thread_id FROM sp_lines WHERE id=?").bind(f.line).first();
       await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[f.k]]: text });
       P.setFlow(row, null);
+      if (f.wz) return wizardNext(env, row, sup, f.line, f.wz, "✅ ذخیره شد.");
       return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
@@ -623,11 +679,12 @@ async function supplierMessage(env, row, msg, text) {
       P.setFlow(row, null);
       await P.pushMsgs(env, th, r.msgs);
       aiKick(env, row._ctx, th.id);
+      if (f.wz) return wizardNext(env, row, sup, f.line, f.wz, "✅ پیوست ثبت شد.");
       return lineCardSend(env, row, sup, f.line, null, "✅ پیوست ثبت شد.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
   if (f && f.step === "label" && text) {
-    P.setFlow(row, { step: "file", line: f.line, label: text.slice(0, 40) });
+    P.setFlow(row, { step: "file", line: f.line, label: text.slice(0, 40), ...(f.wz ? { wz: f.wz } : {}) });
     await P.send(env, row, `حالا فایلِ «${esc(text.slice(0, 40))}» را بفرستید (توضیح اختیاری در کپشن).`, [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
     return { ok: true };
   }
@@ -648,6 +705,7 @@ async function supplierMessage(env, row, msg, text) {
         await C.lineSave(env, sup, f.line, { layers: { [x.k]: text === "-" ? "" : text } });
       } else if (body) await C.lineSave(env, sup, f.line, body);
       P.setFlow(row, null);
+      if (f.wz) return wizardNext(env, row, sup, f.line, f.wz, "✅ ذخیره شد.");
       return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
     } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
   }
@@ -798,6 +856,18 @@ async function onCallback(env, cq, ctx) {
     }
     if (a === "ic") { await ack(); return await itemsCardSend(env, row, sup, n(1), mid); }
     if (a === "si") { P.setFlow(row, null); await ack(); return await lineCardSend(env, row, sup, n(1), mid); }
+    /* «📝 پر کردن اطلاعات»: wz:<قلم> شروع · wz:<قلم>:s رد شدن از گامِ جاری */
+    if (a === "wz") {
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
+      await ack();
+      if (parts[2] === "s") {
+        const f0 = P.flowOf(row), wz = f0 && f0.line === l.id ? f0.wz : null;
+        if (!wz) { P.setFlow(row, null); return await lineCardSend(env, row, sup, l.id, mid); }
+        return await wizardNext(env, row, sup, l.id, wz);
+      }
+      return await wizardNext(env, row, sup, l.id, { steps: wizardSteps(l), i: -1, mid: null });
+    }
     if (a === "sv") {
       const f = parts[2];
       const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
@@ -805,7 +875,9 @@ async function onCallback(env, cq, ctx) {
       if (f === "qd") {
         try { await C.lineSave(env, sup, l.id, { qty: l.req_qty, unit: l.req_unit }); await ack("همان مقدار درخواست"); }
         catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+        const f0 = P.flowOf(row);
         P.setFlow(row, null);
+        if (f0 && f0.wz && f0.line === l.id) return await wizardNext(env, row, sup, l.id, f0.wz, "✅ مقدار ثبت شد.");
         return await afterSave(env, row, sup, l.id, "✅ مقدار ثبت شد.");
       }
       if (!VAL_PROMPT[f]) { await ack(); return { ok: true }; }
@@ -852,6 +924,8 @@ async function onCallback(env, cq, ctx) {
       if (!l || l.supplier_id !== sup.supplier_id || !v) { await ack("این گزینه پیدا نشد.", true); return { ok: true }; }
       try { await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[k]]: v }); await ack(v); }
       catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+      const f0 = P.flowOf(row);
+      if (f0 && f0.wz && f0.line === n(1)) { P.setFlow(row, null); return await wizardNext(env, row, sup, n(1), f0.wz, `✅ ${C.TERM_FA[P.TERM_KEY[k]]}: ${v}`); }
       return await afterSave(env, row, sup, n(1), `✅ ${C.TERM_FA[P.TERM_KEY[k]]}: ${v}`);
     }
     if (a === "sl") {
@@ -863,18 +937,20 @@ async function onCallback(env, cq, ctx) {
       return await lineCardSend(env, row, sup, n(1), mid);
     }
     if (a === "sa") {
+      /* در پرسش‌های نوبتی، گام (wz) از پیوست عبور می‌کند تا بعد از ثبتِ فایل ادامه بیابد */
+      const f0 = P.flowOf(row), wz = f0 && f0.wz && f0.line === n(1) ? f0.wz : null;
       if (parts[2] === undefined) {
         await ack();
         const kb = C.FILE_LABELS.map((x, i) => [{ text: x, callback_data: `sa:${n(1)}:${i}` }]);
-        kb.push([{ text: "✏️ برچسب دیگر…", callback_data: `sa:${n(1)}:o` }], [{ text: "↩️ کارت قلم", callback_data: `si:${n(1)}` }]);
+        kb.push([{ text: "✏️ برچسب دیگر…", callback_data: `sa:${n(1)}:o` }], [wz ? { text: "⏭ رد شدن", callback_data: `wz:${n(1)}:s` } : { text: "↩️ کارت قلم", callback_data: `si:${n(1)}` }]);
         await P.show(env, row, mid, "📎 برچسب این پیوست چیست؟", kb);
         return { ok: true };
       }
       await ack();
-      if (parts[2] === "o") { P.setFlow(row, { step: "label", line: n(1) }); await P.send(env, row, "برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»):", [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]); return { ok: true }; }
+      if (parts[2] === "o") { P.setFlow(row, { step: "label", line: n(1), ...(wz ? { wz } : {}) }); await P.send(env, row, "برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»):", [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]); return { ok: true }; }
       const label = C.FILE_LABELS[n(2)];
       if (!label) return { ok: true };
-      P.setFlow(row, { step: "file", line: n(1), label });
+      P.setFlow(row, { step: "file", line: n(1), label, ...(wz ? { wz } : {}) });
       await P.send(env, row, `فایلِ «${esc(label)}» را بفرستید — PDF یا عکس. توضیح اختیاری را در کپشن بنویسید.`, [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
       return { ok: true };
     }

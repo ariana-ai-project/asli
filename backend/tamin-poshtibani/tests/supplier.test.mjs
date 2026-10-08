@@ -916,6 +916,61 @@ test("بات تأمین‌کننده: شرایط فاکتور گام‌به‌گ
   assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "deleteMessages"), "پیام‌های تلگرامِ صفحه پاک شد");
   assert.ok(sent(n, "sp", C9).some((c) => /هنوز پیامی نیست/.test(c.body.text)), "تاریخچهٔ همین طرف از این به بعد خالی");
 });
+
+test("بات تأمین‌کننده: «📝 پر کردن اطلاعات» — پرسش‌های نوبتی با «⏭»، پیامِ پرسشِ قبلی پاک می‌شود، پایان با «آمادهٔ ارسال»", { skip: SKIP }, async () => {
+  const C10 = 910;
+  const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "شرکت دهم", phone: "09120000010", label: "فروش" } });
+  const sp = async (u) => { await handleSpUpdate(env, { update_id: 21000 + calls.length, ...u }); };
+  const cb = (data) => sp({ callback_query: { id: `w${calls.length}`, data, message: { message_id: 1, chat: { id: C10 } } } });
+  const txt = (text) => sp({ message: { message_id: 7500 + calls.length, chat: { id: C10, type: "private" }, text } });
+  const lastTo = (n) => shown(n, "sp", C10).pop();
+  await txt(`/start s${keyOf(r.data.sms.text)}`);
+  await txt(passOf(r.data.sms.text));
+  const th = r.data.thread_id;
+  const line = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=?").get(th).id;
+  let n = calls.length;
+  await cb(`si:${line}`);
+  assert.ok(btns(lastTo(n)).some((b) => b.callback_data === `wz:${line}` && /پر کردن اطلاعات/.test(b.text)), "کارت قلم دکمهٔ «📝 پر کردن اطلاعات» دارد");
+  const n0 = calls.length;
+  await cb(`wz:${line}`);
+  const q1 = lastTo(n0);
+  /* مقدار و واحدِ این قلم 🔒 است (فاز ۴)، پس گامِ اول قیمت واحد است */
+  assert.match(q1.body.text, /پر کردن اطلاعات<\/b> — گام ۱ از ۸/, "گام اول با شمارش: قیمت، پنج شرطِ فاکتور، توضیح، پیوست");
+  assert.match(q1.body.text, /ریال و بدون ارزش افزوده/, "اول قیمت واحد (مقدار و واحد قفل‌اند)");
+  assert.ok(btns(q1).some((b) => b.callback_data === `si:${line}`), "و انصراف");
+  n = calls.length;
+  await txt("2,900");
+  const q3 = lastTo(n);
+  assert.match(q3.body.text, /ذخیره شد[\s\S]*گام ۲ از ۸[\s\S]*زمان تحویل<\/b> را بنویسید/, "بعد شرایطِ خالیِ فاکتور");
+  assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "deleteMessage"), "پیامِ پرسشِ قبلی پاک شد");
+  assert.ok(btns(q3).some((b) => b.callback_data === `wz:${line}:s` && /⏭/.test(b.text)), "دکمهٔ ⏭ رد شدن");
+  n = calls.length;
+  await txt("۱۰");
+  const payAsk = lastTo(n);
+  assert.match(payAsk.body.text, /شرایط تسویه<\/b> را انتخاب کنید/);
+  await cb(btns(payAsk).find((b) => b.text === "نقدی").callback_data);
+  await cb(`tv:${line}:i:0`);
+  n = calls.length;
+  await cb(`tv:${line}:v:0`);
+  assert.match(lastTo(n).body.text, /اعتبار پیش‌فاکتور<\/b> را به روز بنویسید/);
+  n = calls.length;
+  await txt("۷");
+  const noteAsk = lastTo(n);
+  assert.match(noteAsk.body.text, /توضیح را بنویسید/, "توضیح، اختیاری");
+  assert.ok(btns(noteAsk).some((b) => b.callback_data === `wz:${line}:s`));
+  n = calls.length;
+  await cb(`wz:${line}:s`);
+  assert.match(lastTo(n).body.text, /<b>پیوست<\/b>/, "پیوست، اختیاری");
+  n = calls.length;
+  await cb(`wz:${line}:s`);
+  const done = lastTo(n);
+  assert.match(done.body.text, /اطلاعاتِ این قلم کامل شد/);
+  assert.ok(btns(done).some((b) => b.callback_data === `sr:${line}:1`), "کارتِ قلم با «✅ آمادهٔ ارسال»");
+  assert.equal(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(C10)).flow_json, null, "گامی نمانده");
+  const L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line);
+  assert.equal(L.price, 2900);
+  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 });
+});
 test("پیامکِ واقعی با TextBee: استعلام و «ارسال رمز» به گوشیِ تأمین‌کننده، رمز پیش کارشناس نمی‌آید؛ فرضی هرگز؛ سقفِ پلن ← شبیه‌سازی؛ سقفِ روزانهٔ رمز", { skip: SKIP }, async () => {
   env.TEXTBEE_API_KEY = "tbk"; env.TEXTBEE_API_BASE = "https://sms.test";
   try {

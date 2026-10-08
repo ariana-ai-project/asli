@@ -72,7 +72,10 @@
      سامانه از همین فیلدها می‌سازد — «👁 پیش‌نمایش پیش‌فاکتور» و بعد «ارسال»؛ پیش‌فاکتورِ خودِ تأمین‌کننده اختیاری و فقط پیوست است. */
   const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1,
     company: "تونل سد آریانا", labels: [], botLogin: null, busy: false, enums: {}, termFa: {}, termsDraft: null, termsDirty: false, pfFile: null,
-    bot: [], seq: 0, flow: null, pending: [], drafts: {}, pfRead: false };
+    bot: [], seq: 0, flow: null, pending: [], drafts: {}, pfRead: false,
+    /* wz: کارت‌های نوبتیِ «📝 پر کردن اطلاعات» ({line, steps, i, cardId}) · kbFull: کارتِ قلمی که «ویرایش یک مورد» را باز کرده ·
+       formOpen: کارتِ فرمِ راست که به‌جای خلاصه، فرمِ کامل را نشان می‌دهد (مهر ۱۴۰۵) */
+    wz: null, kbFull: {}, formOpen: {} };
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   /* شرایطِ اجباری از خودِ سرور (/sp/me) — فاز ۴: اعتبار پیش‌فاکتور هم */
   let TERM_REQUIRED = ["dtime", "pay", "invoice", "vat", "valid_days"];
@@ -132,59 +135,36 @@
   const say = (msg, title) => modal(title || "توجه", `<p style="white-space:pre-line">${esc(msg)}</p>`, null, "باشد");
 
   /* ---------- سرآیند (دسکتاپ و صفحهٔ ورود) ---------- */
-  const isDark = () => document.documentElement.dataset.theme === "dark";
+  /* پوستهٔ مشترک (ui.js): حالت شب و روزِ این صفحه در sp.theme می‌ماند (تأمین‌کننده بیرون از شرکت است، پیش‌فرض روشن) */
+  const UI = window.TP.ui;
+  UI.theme.key = "sp.theme";
   function top() {
-    return `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل تأمین‌کنندگان</h1>
-      <div class="sub">${S.me ? `${esc(S.me.name)}${S.me.demo ? " <span class=\"sp-tag\">فرضی</span>" : ""} · ` : ""}شرکت ${esc(S.company)}</div></div></div>
-      <span class="spacer"></span><button class="tp-btn sm" data-theme-btn title="${isDark() ? "حالت روز" : "حالت شب"}">${isDark() ? "☀️" : "🌙"}</button>
-      ${S.me ? `<button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>`;
+    UI.mountBg("");
+    const items = [...(S.botLogin && !inTg ? [{ label: "همین پنل در تلگرام", icon: "telegram", href: S.botLogin, attrs: 'target="_blank" rel="noopener"' }] : []),
+      { label: "راهنما", icon: "help", attrs: 'data-help="sup.panel"' }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }];
+    return UI.topbar({ title: "پنل تأمین‌کنندگان", sub: `شرکت ${esc(S.company)}`, home: "#", homeTitle: "",
+      user: S.me ? { name: S.me.name, sub: S.me.demo ? "تأمین‌کنندهٔ فرضی" : "تأمین‌کننده" } : null, items: S.me ? items : [] });
   }
-  /* «data-theme» روی خودِ <html> است؛ دکمه نام دیگری دارد تا closest به ریشهٔ صفحه نرسد */
-  document.addEventListener("click", (e) => {
-    const b = e.target.closest("[data-theme-btn]");
-    if (b) {
-      const t = isDark() ? "light" : "dark";
-      document.documentElement.dataset.theme = t; store.set("sp.theme", t);
-      $$("[data-theme-btn]").forEach((x) => { x.innerHTML = x.classList.contains("ph-circ") ? (t === "dark" ? "☀️" : "🌙") : t === "dark" ? "☀️" : "🌙"; x.title = t === "dark" ? "حالت روز" : "حالت شب"; });
-    }
-    if (e.target.closest("[data-logout]")) askLogout();
-  });
+  document.addEventListener("click", (e) => { if (e.target.closest("[data-logout]")) askLogout(); });
   const askLogout = () => modal("خروج", "<p>بعد از خروج، برای ورود دوباره باید «ارسال رمز به پیامک» را بزنید.</p>", logout, "خروج", "انصراف");
 
   /* ---------- ورود ---------- */
+  /* کارتِ ورود با شش خانهٔ رمزِ پیامک (ui.js) روی «مه ساحلی» */
   function renderLogin(msg, ok) {
     S.me = null;
     app.className = "";
-    app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box">
-      <h2>ورود به پنل تأمین‌کنندگان</h2>
-      <p class="lead">رمز ۶ رقمیِ پیامک را وارد کنید. همین پنل را در تلگرام هم دارید (لینک دوم پیامک).</p>
-      ${key ? `<input class="tp-input sp-pass" id="pw" inputmode="numeric" maxlength="6" autocomplete="one-time-code" placeholder="••••••" aria-label="رمز ورود">
-        <div class="sp-row" style="margin-top:12px"><button class="tp-btn primary sp-grow" id="go">ورود</button></div>
-        <div class="sp-row" style="margin-top:10px"><button class="tp-btn sm" id="rs">📱 رمز ندارم — ارسال رمز به پیامک</button></div>`
-        : `<div class="sp-err">لینک ورود ناقص است؛ لینک را از آخرین پیامک باز کنید.</div>`}
-      <div id="msg" class="${ok ? "sp-ok" : "sp-err"}">${esc(msg || "")}</div>
-      <p class="sp-muted" style="margin-top:16px">این پنل برای پاسخ به استعلام‌های خرید شرکت ${esc(S.company)} است: مشخصات و قیمت هر قلم، پیوست‌ها، پیش‌فاکتور و گفت‌وگو با کارشناس خرید.</p>
-    </div></div>`;
+    UI.mountBg("fog");
+    app.innerHTML = key
+      ? UI.login({ title: "ورود به پنل تأمین‌کنندگان", sub: "رمز ۶ رقمیِ پیامک را بنویسید", len: 6, max: 6, error: msg, ok, company: S.company, system: "پاسخ به استعلام خرید",
+        alt: `<button class="tp-btn" type="button" id="rs">📱 رمز ندارم — ارسال رمز به پیامک</button>`, foot: `<button type="button" data-help="login.supplier">راهنما</button>` })
+      : `<div class="tp-auth"><div class="tp-auth-card"><div class="tp-auth-head"><div class="tp-auth-brand"><img src="../assets/logo-new.jpg" alt=""><div><b>${esc(S.company)}</b><span>پنل تأمین‌کنندگان</span></div></div>${UI.themeBtn()}</div>
+          <h1>لینک ورود ناقص است</h1><p class="tp-auth-sub">لینک را از آخرین پیامک باز کنید.</p></div></div>`;
+    UI.help.set("login.supplier");
     if (!key) return;
-    const pw = $("#pw"), m = $("#msg");
-    pw.focus();
-    const go = async () => {
-      m.className = "sp-err"; m.textContent = "";
-      try {
-        const d = await api("/sp/login", { json: { k: key, password: latin(pw.value).trim() } });
-        S.session = d.session; store.set("sp.session", d.session);
-        boot();
-      } catch (e) { m.textContent = e.message; }
-    };
-    $("#go").onclick = go;
-    pw.onkeydown = (e) => { if (e.key === "Enter") go(); };
+    const L = UI.bindLogin(app, { onSubmit: async (code) => { const d = await api("/sp/login", { json: { k: key, password: code } }); S.session = d.session; store.set("sp.session", d.session); boot(); } });
     $("#rs").onclick = async () => {
-      try {
-        const d = await api("/sp/resend", { json: { k: key } });
-        m.className = d.sent ? "sp-ok" : "sp-err";
-        m.textContent = d.sent ? `رمز تازه به ${d.to} پیامک شد.` : (d.note || "پیامک فرستاده نشد.");
-      }
-      catch (e) { m.className = "sp-err"; m.textContent = e.message; }
+      try { const d = await api("/sp/resend", { json: { k: key } }); L.setErr(d.sent ? `رمز تازه به ${d.to} پیامک شد.` : (d.note || "پیامک فرستاده نشد."), d.sent); }
+      catch (e) { L.setErr(e.message); }
     };
   }
 
@@ -220,7 +200,7 @@
     if (!first && (S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return false;
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; store.sset("sp.th", String(id));
-    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.pending = [];
+    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.wz = null; S.pending = [];
     await loadThread();
     return true;
   }
@@ -252,6 +232,8 @@
           <section class="ph-stage">${PH.frame(screenHtml(true))}</section></div></div>`
       : `<div class="sp-full sup-mobile">${screenHtml(false)}</div>`;
     bindSide(); bindChat();
+    /* راهنما: در دسکتاپ گوشی سمت چپ است، پس دکمهٔ «؟» سمت راست؛ در موبایل دکمهٔ «؟» داخلِ نوارِ گفت‌وگوست */
+    UI.help.set("sup.panel", phoneMode ? { side: "right" } : { fab: false });
     keepSide();
     restoreChat(chatPos);
   }
@@ -286,16 +268,17 @@
       mine: (m) => m.who === "s",
       rich: (m) => PH.evCard(m, { mine: m.who === "s", termsLine, goLabel: phoneMode ? "دیدن در فرمِ کنار" : "دیدن و پر کردن", actions: evActions }),
       transcript: false, after,
-      empty: `<div class="ph-void"><b>گفت‌وگو با کارشناس خرید</b>هر پیامی این‌جا بنویسید یا با 🎤 بگویید برای کارشناس فرستاده می‌شود؛ برای پر کردن اقلام «📦 اقلام» را بزنید.</div>`,
+      empty: `<div class="ph-void"><b>گفت‌وگو با کارشناس خرید</b>برای پر کردن اقلام «📦 اقلام» را بزنید.</div>`,
     });
     const waiting = S.d.lines.filter((l) => FILLING.includes(l.state)).length + S.d.bundles.filter((b) => b.state === "approved").length;
     return PH.screen({
       framed, body, label: "گفت‌وگو با کارشناس خرید",
       nav: {
-        start: !framed ? `<button class="ph-glass ph-circ" data-theme-btn title="${isDark() ? "حالت روز" : "حالت شب"}" aria-label="حالت روز یا شب">${isDark() ? "☀️" : "🌙"}</button>` : "",
+        /* گوشیِ واقعی (بی‌قاب): حالت شب و روز و «؟» داخلِ خودِ نوار — نوار بالای صفحه و دکمهٔ شناور نیست */
+        start: !framed ? `<button class="ph-glass ph-circ tp-theme" type="button" data-theme-toggle title="حالت روز یا شب" aria-label="حالت روز یا شب">${UI.ICON.sun}${UI.ICON.moon}</button>` : "",
         title: th.expert ? `کارشناس خرید — ${th.expert}` : "کارشناس خرید", avatar: '<img src="../assets/logo-new.jpg" alt="">',
         whoAttrs: 'data-bot="ic"', whoTitle: `استعلام ${th.request_id} · شرکت ${S.company}${th.expert ? ` · ${th.expert}` : ""}`,
-        acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${PH.I.erase}</button>
+        acts: `${!framed ? `<button class="ph-glass ph-circ" type="button" data-help="sup.panel" aria-label="راهنما" title="راهنما">${UI.ICON.help}</button>` : ""}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${PH.I.erase}</button>
           <button class="ph-glass ph-circ" data-bot="ic" aria-label="اقلام${waiting ? ` — ${fa(waiting)} کار مانده` : ""}" title="اقلام و قیمت‌ها">${PH.I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
       composer: { placeholder: S.flow ? S.flow.ph || "بنویسید…" : "پیام به کارشناس خرید", draft: S.th, hint: S.flow ? S.flow.hint : "", keys: MENU, mic: true },
@@ -325,6 +308,8 @@
     const id = ++S.seq;
     S.bot.push({ id, after: lastRealId(), html: body.replace('class="ph-bot"', `class="ph-bot" data-card="${id}"`) });
     renderChat(true);
+    /* کارتِ نوبتیِ «پر کردن اطلاعات» با فنر می‌آید (یک بار؛ با رسمِ دوباره تکرار نمی‌شود) */
+    if (S.wz) requestAnimationFrame(() => { const el = $(`[data-card="${id}"]`); if (el) el.classList.add("wz-in"); });
     return id;
   }
   /** متنی که تأمین‌کننده در جوابِ بات نوشت — مثل تلگرام در گفت‌وگو می‌ماند ولی برای کارشناس نمی‌رود */
@@ -356,7 +341,7 @@
     const html = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t">📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i></div><ul class="ph-bot-l">${rows}</ul>
       <div class="ph-bot-t">🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${miss.length ? `<br><i>مانده: ${esc(miss.join("، "))}</i>` : ""}</div>
       ${waitPf.length ? `<div class="ph-bot-t">📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.</div>` : ""}
-      <div class="ph-bot-t"><i>روی هر قلم بزنید تا قیمت واحد و شرایط را ثبت کنید؛ بعد «آمادهٔ ارسال». لایه‌های 🔒 ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید.${S.pfRead ? "" : " پیش‌فاکتور را سامانه از همین‌ها می‌سازد."}</i></div>`;
+      <div class="ph-bot-t"><i>روی هر قلم بزنید و «📝 پر کردن اطلاعات» را بزنید؛ بعد «آمادهٔ ارسال».</i></div>`;
     const kb = L.slice(0, 30).map((l) => [{ t: `${FILLING.includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${tag(l, 30)}`, d: `si:${l.id}` }]);
     if (ready.length) kb.push([{ t: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, d: "ss" }]);
     for (const b of waitPf) kb.push([{ t: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, d: `sp:${b.id}` }]);
@@ -389,18 +374,24 @@
     if (ed && miss.length) h += `<div class="ph-bot-t"><i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i></div>`;
     if (!ed && !EDITABLE.includes(l.state)) h += `<div class="ph-bot-t"><i>${esc(lockedMsg(l))}</i></div>`;
     if (ed) {
-      /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
-      kb.push([...(lk.legacy || !lk.qty ? [{ t: "🔢 مقدار", d: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ t: "📏 واحد", d: `sv:${l.id}:u` }] : []), { t: "💰 قیمت واحد", d: `sv:${l.id}:p` }]);
-      kb.push(["d", "p", "i"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
-      kb.push(["v", "x"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
-      /* 🔓ها: عنوان و هر لایهٔ باز (sy:<خط>:<شمارهٔ لایه>) */
-      const open = [...(!lk.legacy && !lk.title ? [{ t: "🔓 عنوان", d: `sv:${l.id}:t` }] : []),
-        ...l.layers.map((x, i) => (x.lock === false ? { t: `🔓 ${x.k.length > 14 ? x.k.slice(0, 13) + "…" : x.k}`, d: `sy:${l.id}:${i}` } : null)).filter(Boolean)];
-      for (let i = 0; i < open.length && i < 8; i += 2) kb.push(open.slice(i, i + 2));
-      kb.push([{ t: "➕ لایهٔ تازه", d: `sv:${l.id}:l` }, { t: "📝 توضیح", d: `sv:${l.id}:n` }, { t: "📎 پیوست", d: `sa:${l.id}` }]);
-      const ex = []; l.extra.slice(0, 8).forEach((x, i) => ex.push({ t: `🗑 ${x.k.length > 14 ? x.k.slice(0, 13) + "…" : x.k}`, d: `sl:${l.id}:${i}` }));
-      for (let i = 0; i < ex.length; i += 2) kb.push(ex.slice(i, i + 2));
-      kb.push([{ t: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
+      /* یک دکمهٔ اصلی: «📝 پر کردن اطلاعات» — کارت‌های نوبتی (مهر ۱۴۰۵)؛ دکمه‌های تک‌فیلد زیرِ «✏️ ویرایش یک مورد…» */
+      kb.push([{ t: "📝 پر کردن اطلاعات", d: `wz:${l.id}` }]);
+      if (!S.kbFull[l.id]) {
+        kb.push([{ t: "✏️ ویرایش یک مورد…", d: `wz:${l.id}:m` }, { t: "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
+      } else {
+        /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
+        kb.push([...(lk.legacy || !lk.qty ? [{ t: "🔢 مقدار", d: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ t: "📏 واحد", d: `sv:${l.id}:u` }] : []), { t: "💰 قیمت واحد", d: `sv:${l.id}:p` }]);
+        kb.push(["d", "p", "i"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
+        kb.push(["v", "x"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
+        /* 🔓ها: عنوان و هر لایهٔ باز (sy:<خط>:<شمارهٔ لایه>) */
+        const open = [...(!lk.legacy && !lk.title ? [{ t: "🔓 عنوان", d: `sv:${l.id}:t` }] : []),
+          ...l.layers.map((x, i) => (x.lock === false ? { t: `🔓 ${x.k.length > 14 ? x.k.slice(0, 13) + "…" : x.k}`, d: `sy:${l.id}:${i}` } : null)).filter(Boolean)];
+        for (let i = 0; i < open.length && i < 8; i += 2) kb.push(open.slice(i, i + 2));
+        kb.push([{ t: "➕ لایهٔ تازه", d: `sv:${l.id}:l` }, { t: "📝 توضیح", d: `sv:${l.id}:n` }, { t: "📎 پیوست", d: `sa:${l.id}` }]);
+        const ex = []; l.extra.slice(0, 8).forEach((x, i) => ex.push({ t: `🗑 ${x.k.length > 14 ? x.k.slice(0, 13) + "…" : x.k}`, d: `sl:${l.id}:${i}` }));
+        for (let i = 0; i < ex.length; i += 2) kb.push(ex.slice(i, i + 2));
+        kb.push([{ t: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
+      }
     }
     if (l.state === "final" && S.d.revise) {
       h += `<div class="ph-bot-t">🏁 اگر قیمت یا شرایطِ بهتری دارید، «✏️ اصلاحِ پیشنهاد» را بزنید و دوباره بفرستید؛ پیشنهادِ تازه جای قبلی را می‌گیرد.</div>`;
@@ -418,7 +409,7 @@
       proforma: "پیش‌فاکتور رسید؛ منتظر تأیید نهایی کارشناس.", final: "✓ تأیید نهایی شد.", rejected: "این قلم رد شد." }[l.state] || "";
   }
   /** پرسیدنِ یک مقدار؛ جواب، متنِ بعدیِ کادرِ پیام است. f «y»: لایهٔ 🔓ِ شمارهٔ yi */
-  function askValue(l, f, head, yi) {
+  function askValue(l, f, head, yi, extraKb) {
     let prompt = VAL_PROMPT[f];
     const lk = lockOf(l);
     if (f === "q" && !lk.legacy && !lk.qty && l.req_qty != null) prompt = `🔢 مقدار را بنویسید (فقط عدد) — 🔓 کمتر هم می‌شود، حداکثر ${qty(l.req_qty)} ${esc(l.req_unit || "")}:`;
@@ -430,11 +421,13 @@
     S.flow = { step: "val", line: l.id, f, ...(f === "y" ? { i: yi } : {}), hint: `${prompt.replace(/<[^>]+>/g, "")} — ${tag(l, 30)}`, ph: VAL_PH[f] };
     const kb = [];
     if (f === "q" && l.req_qty != null) kb.push([{ t: `✔️ همان مقدار درخواست (${qty(l.req_qty)} ${l.req_unit || ""})`, d: `sv:${l.id}:qd` }]);
+    (extraKb || []).forEach((r) => kb.push(r));
     kb.push([{ t: "✖️ انصراف", d: `si:${l.id}` }]);
-    card(`${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b><br>${prompt}</div>`, kb);
+    const id = card(`${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b><br>${prompt}</div>`, kb);
     focusComposer();
+    return id;
   }
-  function askTerm(l, k, head) {
+  function askTerm(l, k, head, extraKb) {
     const f = TERM_KEY[k];
     const top = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t"><b>${esc(tag(l))}</b></div>`;
     if (TERM_OPTS[k]) {
@@ -442,18 +435,21 @@
       /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت — فقط گزینه‌های مجاز (شمارهٔ گزینه همان شمارهٔ فهرستِ کامل می‌ماند) */
       const allow = allowOf(f);
       const kb = (S.enums[TERM_OPTS[k]] || []).map((v, i) => ({ v, i })).filter((x) => !allow || allow.includes(x.v)).map(({ v, i }) => [{ t: v, d: `tv:${l.id}:${k}:${i}` }]);
+      (extraKb || []).forEach((r) => kb.push(r));
       kb.push([{ t: "✖️ انصراف", d: `si:${l.id}` }]);
       return card(`${top}<div class="ph-bot-t">🧾 <b>${esc(termFa(f))}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${limHint(f, l) ? `<br>${limHint(f, l)}` : ""}</div>`, kb);
     }
     S.flow = { step: "term", line: l.id, k, hint: `${TERM_PROMPT[k].replace(/<[^>]+>/g, "")}`, ph: k === "d" ? "۱۰ روز کاری یا ۱۴۰۵/۰۸/۰۱" : "شمار روز…" };
-    card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}${f === "dtime" && limHint(f, l) ? `<br>${limHint(f, l)}` : ""}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
+    const id = card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}${f === "dtime" && limHint(f, l) ? `<br>${limHint(f, l)}` : ""}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [...(extraKb || []), [{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
     focusComposer();
+    return id;
   }
   const focusComposer = () => { const i = $("#msgIn"); if (i && phoneMode) i.focus(); };
-  /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
+  /** بعد از ذخیرهٔ هر مقدار: در کارت‌های نوبتی گامِ بعدی؛ وگرنه اگر چیزِ ضروری‌ای مانده همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
   async function afterSave(lineId, head) {
     await loadThread(true);
     refreshSide();
+    if (S.wz && S.wz.line === lineId) return wzNext(head);
     const l = lineOf(lineId);
     if (!l) return itemsCard(head);
     const tm = threadTerms();
@@ -464,6 +460,60 @@
     }
     const all = [...(l.missing || []), ...termsMissing(tm)];
     return lineCard(l, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
+  }
+  /* ================================================================
+     «📝 پر کردن اطلاعات» — کارت‌های نوبتی (خواستهٔ مالک، مهر ۱۴۰۵): هر کارت یک چیز می‌پرسد و با پاسخ، کارتِ پرسش
+     برداشته می‌شود و کارتِ بعدی با فنر می‌آید. گام‌ها از خودِ قلم: عنوانِ 🔓، مقدار (اگر باز)، واحد (اگر خالی)، قیمت واحد،
+     لایه‌های 🔓، شرایطِ خالیِ فاکتور (برای همهٔ اقلام یکی است)، توضیح و پیوست (اختیاری). همان ترتیب در بات تلگرام (sp-bot.js).
+     ================================================================ */
+  function wzSteps(l) {
+    const lk = lockOf(l), tm = threadTerms(), st = [];
+    if (!lk.legacy && !lk.title) st.push({ k: "t" });
+    if (lk.legacy || !lk.qty) st.push({ k: "q" });
+    if ((lk.legacy || !lk.unit) && !String(l.unit || "").trim()) st.push({ k: "u" });
+    st.push({ k: "p" });
+    l.layers.forEach((x, i) => { if (x.lock === false) st.push({ k: "y", i }); });
+    for (const k of ["d", "p", "i", "v", "x"]) if (TERM_REQUIRED.includes(TERM_KEY[k]) && !String(tm[TERM_KEY[k]] ?? "").trim()) st.push({ k: "term", t: k });
+    st.push({ k: "n" }, { k: "a" });
+    return st;
+  }
+  const wzHead = () => { const w = S.wz; return `📝 <b>پر کردن اطلاعات</b> — گام ${fa(w.i + 1)} از ${fa(w.steps.length)}<div class="tp-bar" style="margin-top:.4em"><i style="--p:${Math.round(w.i / w.steps.length * 100)}%"></i></div>`; };
+  function wzStart(l) {
+    S.wz = { line: l.id, steps: wzSteps(l), i: -1, cardId: null };
+    return wzNext();
+  }
+  /** کارتِ پرسشِ قبلی می‌رود، گامِ بعدی می‌آید؛ در پایان، کارتِ قلم با «✅ آمادهٔ ارسال» */
+  function wzNext(msg) {
+    const w = S.wz; if (!w) return;
+    if (w.cardId) { S.bot = S.bot.filter((c) => c.id !== w.cardId); w.cardId = null; }
+    const l = lineOf(w.line);
+    if (!l || !FILLING.includes(l.state)) { S.wz = null; return l ? lineCard(l, msg) : itemsCard(msg); }
+    w.i++;
+    if (w.i >= w.steps.length) {
+      S.wz = null; S.flow = null;
+      const miss = [...(l.missing || []), ...termsMissing(threadTerms())];
+      return lineCard(l, `${msg ? `${msg} ` : ""}🎉 <b>اطلاعاتِ این قلم کامل شد.</b>${miss.length ? ` <i>مانده: ${esc(miss.join("، "))}</i>` : " حالا «✅ آمادهٔ ارسال» را بزنید."}`);
+    }
+    const s = w.steps[w.i];
+    /* واحدی که در همین مسیر پر شد (مثلاً با «همان مقدار درخواست») دیگر پرسیده نمی‌شود */
+    if (s.k === "u" && String(l.unit || "").trim()) return wzNext(msg);
+    const head = `${msg ? `<div class="ph-bot-t">${msg}</div>` : ""}${wzHead()}`;
+    const skip = { t: "⏭ رد شدن", d: `wz:${l.id}:s` };
+    const keep = (v) => ({ t: `⏭ همین که هست (${v})`, d: `wz:${l.id}:s` });
+    const short = (x) => { const t = String(x || ""); return t.length > 20 ? `${t.slice(0, 19)}…` : t; };
+    let id;
+    if (s.k === "term") id = askTerm(l, s.t, head, [[skip]]);
+    else if (s.k === "a") id = card(`${head}<div class="ph-bot-t">📎 <b>پیوست</b> — اگر مدرک یا عکسی دارید (گواهی کیفیت، تصویر محصول، …) بیفزایید؛ وگرنه رد شوید.</div>`, [[{ t: "📎 افزودن پیوست", d: `sa:${l.id}` }], [skip], [{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
+    else {
+      const ly = s.k === "y" ? l.layers[s.i] : null;
+      /* مقدار: اگر همان مقدارِ درخواست است، دکمهٔ «✔️ همان مقدار درخواست» کافی است */
+      const extra = s.k === "q" && l.qty != null && !(l.req_qty != null && Number(l.qty) === Number(l.req_qty)) ? [[keep(`${qty(l.qty)} ${l.unit || ""}`)]] : s.k === "p" && l.price != null ? [[keep(`${money(l.price)} ریال`)]]
+        : s.k === "u" && l.unit ? [[keep(l.unit)]] : s.k === "n" ? [[l.note ? keep(short(l.note)) : skip]] : s.k === "t" ? [[l.s_title ? keep(short(l.s_title)) : skip]]
+          : s.k === "y" ? [[ly && ly.s ? keep(short(ly.s)) : skip]] : [];
+      id = askValue(l, s.k, head, s.i, extra);
+    }
+    if (S.wz) S.wz.cardId = id || null;
+    return id;
   }
   /** فرمِ راست (دسکتاپ) بعد از کارِ بات، بی آن‌که چیزی که کاربر نیمه نوشته بپرد */
   function refreshSide() {
@@ -485,10 +535,17 @@
   async function bot(data, cardId) {
     const p = String(data).split(":"), a = p[0], n = (i) => parseInt(p[i], 10) || 0;
     try {
-      if (a === "ic") { S.flow = null; return itemsCard("", cardId); }
+      if (a === "ic") { S.flow = null; S.wz = null; return itemsCard("", cardId); }
       if (a === "list") return threadsCard();
       if (a === "st") { if (n(1) !== S.th) { if (await openThread(n(1))) itemsCard(); return; } return itemsCard("", cardId); }
-      if (a === "si") { S.flow = null; const l = lineOf(n(1)); return l ? lineCard(l, "", cardId) : itemsCard("", cardId); }
+      if (a === "si") { S.flow = null; S.wz = null; const l = lineOf(n(1)); return l ? lineCard(l, "", cardId) : itemsCard("", cardId); }
+      /* کارت‌های نوبتی: wz:<قلم> شروع · wz:<قلم>:s رد شدن از گام · wz:<قلم>:m دکمه‌های تک‌فیلد روی کارتِ قلم */
+      if (a === "wz") {
+        const l = lineOf(n(1)); if (!l) return;
+        if (p[2] === "m") { S.kbFull[l.id] = true; return lineCard(l, "", cardId); }
+        if (p[2] === "s") { S.flow = null; return S.wz && S.wz.line === l.id ? wzNext() : lineCard(l, "", cardId); }
+        return wzStart(l);
+      }
       if (a === "sv") {
         const l = lineOf(n(1)); if (!l) return;
         if (p[2] === "qd") {
@@ -513,6 +570,7 @@
         const v = (S.enums[TERM_OPTS[p[2]]] || [])[n(3)]; if (!v) return;
         const r = await api(`/sp/thread/${S.th}/terms`, { json: { [TERM_KEY[p[2]]]: v } });
         if (!S.termsDirty) S.termsDraft = { ...r.terms };
+        if (S.wz) echo(v);
         return afterSave(n(1), `✅ ${termFa(TERM_KEY[p[2]])}: ${esc(v)}`);
       }
       if (a === "sl") {
@@ -526,7 +584,7 @@
         const l = lineOf(n(1)); if (!l) return;
         if (p[2] === undefined) {
           const kb = S.labels.map((x, i) => [{ t: x, d: `sa:${l.id}:${i}` }]);
-          kb.push([{ t: "✏️ برچسب دیگر…", d: `sa:${l.id}:o` }], [{ t: "↩️ کارت قلم", d: `si:${l.id}` }]);
+          kb.push([{ t: "✏️ برچسب دیگر…", d: `sa:${l.id}:o` }], [S.wz && S.wz.line === l.id ? { t: "⏭ رد شدن", d: `wz:${l.id}:s` } : { t: "↩️ کارت قلم", d: `si:${l.id}` }]);
           return card(`<div class="ph-bot-t">📎 برچسب این پیوست چیست؟ <i>(${esc(tag(l, 30))})</i></div>`, kb, cardId);
         }
         if (p[2] === "o") { S.flow = { step: "label", line: l.id, hint: "برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»)", ph: "برچسب پیوست…" }; card(`<div class="ph-bot-t">برچسب پیوست را بنویسید (مثلاً «گواهی استاندارد»):</div>`, [[{ t: "✖️ انصراف", d: `si:${l.id}` }]]); return focusComposer(); }
@@ -564,13 +622,14 @@
         return submitBot(ids, null, cardId);
       }
       if (a === "sp") return pickFile(".pdf,image/*", (f) => pfBot(n(1), f));
-      if (a === "x") { S.flow = null; return card(`<div class="ph-bot-t">باشد، کنار گذاشته شد.</div>`, null, cardId); }
+      if (a === "x") { S.flow = null; S.wz = null; return card(`<div class="ph-bot-t">باشد، کنار گذاشته شد.</div>`, null, cardId); }
     } catch (e) { say2(e.message); }
   }
   async function uploadAttach(lineId, label, file) {
     try {
       await api(`/sp/line/${lineId}/file?filename=${encodeURIComponent(file.name)}&label=${encodeURIComponent(label)}&note=`, { method: "POST", body: file, headers: { "Content-Type": file.type || "application/octet-stream" } });
       S.flow = null; await loadThread(true); refreshSide();
+      if (S.wz && S.wz.line === lineId) return wzNext(`✅ پیوستِ «${esc(label)}» ثبت شد.`);
       lineCard(lineOf(lineId), `✅ پیوستِ «${esc(label)}» ثبت شد.`);
     } catch (e) { say2(e.message); }
   }
@@ -795,6 +854,8 @@
    */
   function formCard(l) {
     const ed = FILLING.includes(l.state);
+    /* پیش‌فرض: خلاصه با «📝 پر کردن اطلاعات»؛ فرمِ کامل فقط با «ویرایش جزئی» */
+    if (ed && !S.formOpen[l.id]) return summaryCard(l);
     const ro = ed ? "" : "readonly";
     const lk = lockOf(l);
     const files = S.d.files.filter((f) => f.line_id === l.id);
@@ -833,7 +894,7 @@
         ${!["final", "rejected"].includes(l.state) ? `<div class="sp-upl"><select class="tp-select" data-flabel>${opts}</select><input class="tp-input hide" data-flabel2 placeholder="برچسب دلخواه">
           <input class="tp-input" data-fnote placeholder="توضیح پیوست (اختیاری)"><input class="tp-input full" type="file" data-file accept=".pdf,image/*,.doc,.docx,.xls,.xlsx">
           <button class="tp-btn sm full" data-upload>بارگذاری پیوست</button></div>` : ""}</div>
-      ${ed ? `<div class="sp-actions"><button class="tp-btn" data-save>ذخیره</button><button class="tp-btn primary" data-ready="1">✓ آمادهٔ ارسال</button></div>`
+      ${ed ? `<div class="sp-actions"><button class="tp-btn" data-form-close="${l.id}">↩ خلاصه</button><button class="tp-btn" data-save>ذخیره</button><button class="tp-btn primary" data-ready="1">✓ آمادهٔ ارسال</button></div>`
         : l.state === "ready" ? `<div class="sp-lockedmsg">${readyMsg}</div>
           <div class="sp-actions"><button class="tp-btn" data-ready="0">✏️ ویرایش</button><button class="tp-btn primary" data-send-ready>📤 ارسال</button></div>`
         : `<div class="sp-lockedmsg">${esc(lockedMsg(l))}</div>${l.state === "final" && S.d.revise ? `<div class="sp-actions"><button class="tp-btn" data-revise="${l.id}" title="قیمت یا شرایطِ بهتری دارید؟ پیشنهاد دوباره باز می‌شود؛ ارسالِ تازه جای قبلی را می‌گیرد">✏️ اصلاحِ پیشنهاد</button></div>` : ""}`}
@@ -867,11 +928,24 @@
     const lines = d.lines.slice().sort((a, b) => b.id - a.id);
     const locked = d.lines.some((l) => !lockOf(l).legacy);
     return `${ret ? `<div class="tp-note warn">↩️ کارشناس برگرداند: ${esc(ret.comment)}</div>` : ""}
-      ${locked ? `<div class="tp-note">🔒 لایه‌ها و مقدارِ قفل‌شده ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید و ارسال کنید. 🔓 یعنی می‌توانید مقدارِ خودتان را پیشنهاد دهید.</div>` : ""}
       ${sendBox("spec")}
-      <p class="sp-muted">${S.pfRead ? "برای هر قلم مقدار، واحد و قیمت واحد (ریال، بدون ارزش افزوده) و شرایط فاکتور را بنویسید — قیمت کل خودکار است — اگر لازم است لایهٔ تازه و پیوست اضافه کنید و «آمادهٔ ارسال» را بزنید؛ بعد «📤 ارسال». تازه‌ترها بالا هستند."
-        : "برای هر قلم قیمت واحد (ریال، بدون ارزش افزوده) و شرایط فاکتور را بنویسید — قیمت کل خودکار است — اگر لازم است لایهٔ تازه، توضیح و پیوست اضافه کنید و «آمادهٔ ارسال» را بزنید؛ بعد «📤 ارسال»: پیش‌نمایشِ پیش‌فاکتوری را که سامانه از همین‌ها می‌سازد می‌بینید و می‌فرستید. تازه‌ترها بالا هستند."}</p>
+      <p class="sp-muted">${locked ? "🔒 ثابت · 🔓 قابل تغییر — " : ""}هر قلم را با «📝 پر کردن اطلاعات» (در گوشی) یا «ویرایش جزئی» کامل کنید؛ بعد «✓ آمادهٔ ارسال» و «📤 ارسال». ${UI.info("sup.panel", "راهنما")}</p>
       ${lines.map(formCard).join("")}`;
+  }
+  /** کارتِ خلاصهٔ هر قلم در فرمِ راست (دسکتاپ): چیپ‌های مشخصات، یک خطِ مقدار و قیمت، مانده‌ها و سه دکمه (مهر ۱۴۰۵) */
+  function summaryCard(l) {
+    const tm = termsFor(l), files = S.d.files.filter((f) => f.line_id === l.id), lk = lockOf(l);
+    const miss = [...(l.missing || []), ...termsMissing(threadTerms())];
+    const extra = S.extra[l.id] || l.extra;
+    return `<article class="sp-card sp-sum" data-line="${l.id}" data-line-no="${l.no || ""}">
+      <header><h3>${code(l)}${esc(l.s_title || l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
+      <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map((x) => `<span class="sp-chip ${x.lock === false ? "add" : "lock"}">${x.lock === false ? "🔓" : "🔒"} <i>${esc(x.k)}:</i> ${esc(x.s || x.v)}</span>`).join("")}${extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`).join("")}</div>
+      <div class="sp-row" style="margin-top:8px"><b>${qty(l.qty)} ${esc(l.unit || "")}</b> × <b>${money(l.price)}</b> = <b>${money(l.total)}</b> ریال <span class="sp-muted">(درخواست${lk.legacy ? "" : lk.qty ? " 🔒" : " 🔓"}: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
+      <div class="sp-muted">🧾 ${esc(termsLine(tm)) || "شرایط فاکتور: —"}</div>
+      ${l.note ? `<div class="sp-muted">📝 ${esc(l.note)}</div>` : ""}${files.length ? `<div class="sp-muted">📎 ${files.map((f) => esc(f.label)).join("، ")}</div>` : ""}
+      ${miss.length ? `<div class="sp-muted" style="margin-top:6px">مانده: <b>${esc(miss.join("، "))}</b></div>` : `<div class="sp-ok">همه‌چیز پر است؛ «✓ آمادهٔ ارسال» را بزنید.</div>`}
+      <div class="sp-actions"><button class="tp-btn ${miss.length ? "primary" : ""}" data-wz="${l.id}">📝 پر کردن اطلاعات</button><button class="tp-btn" data-form-open="${l.id}">✏️ ویرایش جزئی</button><button class="tp-btn ${miss.length ? "" : "primary"}" data-ready-sum="1" ${miss.length ? "disabled" : ""}>✓ آمادهٔ ارسال</button></div>
+    </article>`;
   }
   function readyPane() {
     const d = S.d;
@@ -913,8 +987,10 @@
 
   function cardOf(el) { const c = el.closest("[data-line]"); return c ? { c, id: +c.dataset.line } : null; }
   function recalc(c) {
-    const q = toNum($('[data-f="qty"]', c).value), p = toNum($('[data-f="price"]', c).value);
-    $("[data-total]", c).textContent = q != null && p != null && !isNaN(q) && !isNaN(p) ? money(q * p) : "—";
+    const qi = $('[data-f="qty"]', c), pi = $('[data-f="price"]', c), t = $("[data-total]", c);
+    if (!qi || !pi || !t) return;   /* کارتِ خلاصه فیلد ندارد */
+    const q = toNum(qi.value), p = toNum(pi.value);
+    t.textContent = q != null && p != null && !isNaN(q) && !isNaN(p) ? money(q * p) : "—";
   }
   /** شناسه‌های اقلامی که کادرِ ارسال برایشان است: جدولِ «ارسال‌ها» (تیک‌خورده‌ها) یا همهٔ آماده‌ها */
   function sendIds(where) {
@@ -926,6 +1002,11 @@
     const Q = (s) => $$(s, side);
     Q("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; side.innerHTML = sideHtml(); bindSide(); }; });
     Q("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th).catch((e) => say(e.message)); });
+    /* کارتِ خلاصه: «📝 پر کردن اطلاعات» کارت‌های نوبتی را در گوشی می‌آورد؛ «ویرایش جزئی» فرمِ کامل را باز می‌کند */
+    Q("[data-wz]").forEach((b) => { b.onclick = () => { bot(`wz:${b.dataset.wz}`); const ph = $(".ph-screen"); if (ph) ph.scrollIntoView({ block: "nearest", behavior: "smooth" }); }; });
+    Q("[data-form-open]").forEach((b) => { b.onclick = () => { S.formOpen[+b.dataset.formOpen] = true; rerenderCard(+b.dataset.formOpen); }; });
+    Q("[data-form-close]").forEach((b) => { b.onclick = () => { const id = +b.dataset.formClose; if (S.dirty.has(id) && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بسته شود؟")) return; S.dirty.delete(id); delete S.formOpen[id]; rerenderCard(id); }; });
+    Q("[data-ready-sum]").forEach((b) => { b.onclick = async () => { const id = cardOf(b).id; try { await api(`/sp/line/${id}/ready`, { json: { on: true } }); await loadThread(); } catch (e) { say(e.message); } }; });
     Q("[data-f], [data-ly]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
     /* شرایط فاکتور در همهٔ کارت‌ها یکی است: نوشتن در یکی، بقیه را هم همان می‌کند */
     Q("[data-t]").forEach((i) => {
