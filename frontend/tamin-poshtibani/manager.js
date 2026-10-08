@@ -163,31 +163,28 @@
   }
 
   /* ---------- ورود مدیر ---------- */
+  /* کارتِ ورود با خانه‌های کد (ui.js، مهر ۱۴۰۵) */
   function vLogin() {
-    return `<div class="tp-card tp-login"><h2>ورود مدیر تدارکات</h2><p>کد مدیر را وارد کنید.</p>
-      <input id="mcode" class="tp-input" type="password" inputmode="numeric" autocomplete="off" autofocus>
-      <button class="tp-btn primary" data-login style="width:100%;margin-top:14px">ورود</button>
-      <div class="err">${esc(S.error)}</div>
-      <a class="tp-back" href="index.html">← بازگشت به تدارکات</a></div>`;
+    return TP.ui.login({ title: "ورود مدیر تدارکات", sub: "کد مدیر را رقم‌به‌رقم بنویسید", len: 4, max: 8, secret: true, error: S.error, back: { href: "index.html" }, company: CFG.company });
   }
 
-  /* ---------- سرآیند و تب‌ها ---------- */
+  /* ---------- سرآیند و بخش‌ها ----------
+     نُه تب در یک کپسول: چهار تبِ پرکاربرد مستقیم، سه تبِ تنظیمات زیرِ «تنظیمات ▾» و دو تبِ داده زیرِ «داده‌ها ▾» (مهر ۱۴۰۵) */
+  const TAB_FA = { desk: "میز ارجاع", experts: "کارشناسان", alerts: "تنظیم اعلانات", asg: "ارجاع هوشمند", dl: "مهلت هوشمند", norm: "اقلام و کدها", hist: "سوابق تأمین", reports: "گزارش‌ها", log: "تصمیم‌ها و رویدادها" };
   function vTop() {
     const R = S.data.requests, items = R.reduce((a, r) => a + r.items.length, 0);
-    const TABS = [["desk", "میز ارجاع"], ["experts", "کارشناسان"], ["alerts", "تنظیم اعلانات"], ["asg", "ارجاع هوشمند"], ["dl", "مهلت هوشمند"], ["norm", "اقلام و کدها"], ["hist", "سوابق تأمین"], ["reports", "گزارش‌ها"], ["log", "تصمیم‌ها و رویدادها"]];
-    return `<header class="tp-top">
-      <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>میز ارجاع خرید</h1><div class="sub">${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}</div></div></div>
+    const sub = `${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}`;
+    const chev = TP.ui.ICON.chevron.replace("<svg", '<svg style="width:14px;height:14px;opacity:.7"');
+    const tab = (k) => `<button class="${S.tab === k ? "on" : ""}" data-tab="${k}" role="tab" aria-selected="${S.tab === k ? "true" : "false"}">${TAB_FA[k]}${k === "log" && S.decisions.length ? `<span class="cnt">${S.decisions.length}</span>` : ""}</button>`;
+    const grp = (label, icon, keys) => TP.ui.menu({ cls: keys.includes(S.tab) ? "on start" : "start", btn: `<button type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${keys.includes(S.tab) ? TAB_FA[S.tab] : label}${chev}</button>`,
+      items: keys.map((k) => ({ label: TAB_FA[k], icon, attrs: `data-tab="${k}"` })) });
+    return TP.ui.topbar({ title: "میز ارجاع خرید", sub, actions: `<button class="tp-btn primary" data-import>${TP.ui.ICON.upload}بارگذاری درخواست‌های روزانه</button>`,
+      user: { name: "مدیر تدارکات", sub: esc(CFG.company), initial: "م" },
+      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+      + `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("desk")}${tab("experts")}${grp("تنظیمات", "settings", ["alerts", "asg", "dl"])}${grp("داده‌ها", "data", ["norm", "hist"])}${tab("reports")}${tab("log")}</div>
       <span class="spacer"></span>
-      <button class="tp-btn" data-import>بارگذاری درخواست‌های روزانه</button>
-      ${TP.themeBtn()}
-      <button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button>
-      <a class="tp-back" href="index.html">تدارکات</a>
-      <button class="tp-btn xs" data-logout title="خروج">خروج</button>
-    </header>
-    <div class="tp-tabs">${TABS.map(([k, l]) => `<button class="tp-tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}${k === "log" && S.decisions.length ? `<span class="cnt">${S.decisions.length}</span>` : ""}</button>`).join("")}
-      <label class="chip ${settings().approvalRequired ? "warn" : ""}" style="margin-inline-start:auto;display:inline-flex;gap:6px;align-items:center;cursor:pointer;padding:4px 12px">
-        <input type="checkbox" data-approval ${settings().approvalRequired ? "checked" : ""}> توقف / تعلیق / خاتمه توسط کارشناس منوط به تأیید من باشد</label>
-    </div>`;
+      <label class="chip ${settings().approvalRequired ? "warn" : ""}" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;padding:4px 12px" title="توقف / تعلیق / خاتمه توسط کارشناس منوط به تأیید من باشد"><input type="checkbox" data-approval ${settings().approvalRequired ? "checked" : ""}> تصمیم کارشناس با تأیید من</label>
+      ${TP.ui.info(`manager.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
   /* ---------- میز ارجاع ---------- */
@@ -1130,7 +1127,11 @@
   /* ---------- رندر ---------- */
   function render() {
     const app = document.getElementById("app");
-    if (!TP.manager.get()) { app.innerHTML = vLogin(); wire(); return; }
+    if (!TP.manager.get()) { TP.ui.mountBg("fog"); app.innerHTML = vLogin(); TP.ui.help.set("login.manager"); wire(); return; }
+    TP.ui.mountBg("");
+    TP.ui.help.set(`manager.${S.tab}`);
+    /* میز ارجاع نوار پایینِ چسبان دارد؛ دکمهٔ راهنما بالاتر می‌نشیند */
+    document.body.classList.toggle("has-foot", S.tab === "desk");
     const restore = TP.snapScroll();
     app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
@@ -1144,7 +1145,7 @@
   /* ---------- اتصال رویدادها ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
-    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = TP.digits(G("#mcode").value).trim(); if (!c) return; TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); S.error = e.message; render(); } }; lg.onclick = go; G("#mcode").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
+    if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); throw e; } } }); return; }
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
     const ih = G("[data-hist-import]"); if (ih) ih.onclick = pickHistory;
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
@@ -1519,7 +1520,7 @@
   /* ---------- شروع ---------- */
   if (TP.manager.get()) refresh(); else render();
   window.addEventListener("tp-theme", render);
-  /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه فقط با کار خود کاربر
-     یا دکمهٔ ↻ تازه می‌شود، تا وسط کار جابه‌جا نشود. همین‌طور ساعت رنگ باکس‌ها هم با
-     هر بازخوانی به‌روز می‌شود، نه با تایمر. */
+  /* بازخوانیِ خودکارِ بی‌پرش (خواستهٔ مالک، مهر ۱۴۰۵): فقط میز ارجاع، هر دقیقه، وقتی مدیر وسطِ نوشتن در فیلدی یا پنجره‌ای نیست؛
+     فیلترها و جای اسکرول می‌مانند. ساعتِ رنگ باکس‌ها هم با همین بازخوانی به‌روز می‌شود. */
+  TP.ui.autoRefresh(refresh, 60000, () => !!TP.manager.get() && S.tab === "desk" && !S.loading && !S.pop);
 })();

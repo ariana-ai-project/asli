@@ -90,28 +90,29 @@
     try { S.status = await TP.api("/support/status"); } catch (e) { S.err = S.err || e.message; S.status = S.status || { set: true }; }
     S.view = "login"; render();
   }
+  /* کارتِ ورود با همان پوستهٔ ورودِ مدیر و کارشناس (ui.css)؛ رمزِ پشتیبانی متن است نه رقم، پس یک فیلد (مهر ۱۴۰۵) */
   function vLogin() {
     const st = S.status || {};
     const locked = st.locked_until && st.locked_until > Date.now();
-    const pw = (id, ph, ac) => `<input id="${id}" class="tp-input" type="password" placeholder="${ph}" autocomplete="${ac}" dir="ltr">`;
+    const pw = (id, ph, ac) => `<input id="${id}" class="tp-auth-pass" type="password" placeholder="${ph}" aria-label="${ph}" autocomplete="${ac}" dir="ltr">`;
+    const go = (kind, label, dis) => `<button class="tp-auth-go" type="submit" data-do="${kind}" ${dis ? "disabled" : ""}><span class="tp-go-3d" aria-hidden="true"><i></i><i></i><i></i></span><span>${label}</span></button>`;
     let h;
     if (S.mode === "reset") {
-      h = `<h2>رمز تازهٔ پشتیبانی</h2><p>فقط مدیر: کد مدیر و رمز تازهٔ پشتیبانی را وارد کنید.</p>
-        <input id="mgr" class="tp-input" type="password" inputmode="numeric" placeholder="کد مدیر" autocomplete="off" dir="ltr">
-        ${pw("p1", "رمز تازه (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز تازه", "new-password")}
-        <button class="tp-btn primary" data-do="reset" style="width:100%;margin-top:14px" ${S.busy ? "disabled" : ""}>ثبت رمز تازه و ورود</button>`;
+      h = `<h1>رمز تازهٔ پشتیبانی</h1><p class="tp-auth-sub">فقط مدیر: کد مدیر و رمز تازهٔ پشتیبانی</p>
+        <input id="mgr" class="tp-auth-pass" type="password" inputmode="numeric" placeholder="کد مدیر" aria-label="کد مدیر" autocomplete="off" dir="ltr">
+        ${pw("p1", "رمز تازه (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز تازه", "new-password")}${go("reset", "ثبت رمز تازه و ورود", S.busy)}`;
     } else if (!st.set) {
-      h = `<h2>تعیین رمز پشتیبانی</h2><p>این پنل هنوز رمز ندارد. رمزی که این‌جا بگذارید، از این پس رمز ورود پشتیبانی است — آن را به همکاران پشتیبانی بدهید.</p>
-        ${pw("p1", "رمز (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز", "new-password")}
-        <button class="tp-btn primary" data-do="setup" style="width:100%;margin-top:14px" ${S.busy ? "disabled" : ""}>ثبت رمز و ورود</button>`;
+      h = `<h1>تعیین رمز پشتیبانی</h1><p class="tp-auth-sub">این پنل هنوز رمز ندارد؛ رمزی که می‌گذارید رمز ورود همهٔ همکاران پشتیبانی است</p>
+        ${pw("p1", "رمز (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز", "new-password")}${go("setup", "ثبت رمز و ورود", S.busy)}`;
     } else {
-      h = `<h2>ورود پشتیبانی</h2><p>رمز پشتیبانی را وارد کنید.</p>${pw("p1", "رمز", "current-password")}
-        <button class="tp-btn primary" data-do="login" style="width:100%;margin-top:14px" ${S.busy || locked ? "disabled" : ""}>ورود</button>`;
+      h = `<h1>ورود پشتیبانی</h1><p class="tp-auth-sub">رمز پشتیبانی را وارد کنید</p>${pw("p1", "رمز", "current-password")}${go("login", "ورود", S.busy || locked)}`;
     }
-    const alt = S.mode === "reset" ? `<div class="alt"><button data-mode="login">بازگشت به ورود</button></div>`
-      : st.set ? `<div class="alt"><button data-mode="reset">رمز را فراموش کرده‌اید؟ (مدیر با کد مدیر)</button></div>` : "";
-    return `<div class="tp-card tp-login sup-login">${h}<div class="err">${esc(S.err)}${locked && !S.err ? `ورود تا ${fmtShort(st.locked_until)} بسته است.` : ""}</div>${alt}
-      <a class="tp-back" href="index.html" style="margin-top:14px">← بازگشت به تدارکات</a></div>`;
+    const alt = S.mode === "reset" ? `<button type="button" data-mode="login">بازگشت به ورود</button>`
+      : st.set ? `<button type="button" data-mode="reset">رمز را فراموش کرده‌اید؟ (مدیر با کد مدیر)</button>` : "<span></span>";
+    return `<div class="tp-auth"><form class="tp-auth-card" data-login-card novalidate>
+      <div class="tp-auth-head"><div class="tp-auth-brand"><img src="../assets/logo-new.jpg" alt=""><div><b>${esc(CFG.company || "تونل سد آریانا")}</b><span>پنل پشتیبانی تدارکات</span></div></div>${TP.themeBtn()}</div>
+      ${h}<div class="tp-auth-err" role="alert">${esc(S.err)}${locked && !S.err ? `ورود تا ${fmtShort(st.locked_until)} بسته است.` : ""}</div>
+      <div class="tp-auth-foot"><a href="index.html">← بازگشت به تدارکات</a>${alt}</div></form></div>`;
   }
   async function doAuth(kind) {
     const v = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
@@ -172,21 +173,17 @@
   }
 
   /* ---------- سرآیند ---------- */
+  /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها (ui.js، مهر ۱۴۰۵) */
   function vTop() {
-    return `<header class="tp-top">
-      <div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل پشتیبانی تدارکات</h1><div class="sub">نظارت بر کار کارشناسان و تأیید کمیسیون · ${esc(CFG.company || "")}</div></div></div>
-      <span class="spacer"></span>
-      ${TP.themeBtn()}
-      <button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button>
-      <button class="tp-btn sm" data-pass>تغییر رمز</button>
-      <a class="tp-back" href="index.html">تدارکات</a>
-      <button class="tp-btn xs" data-logout title="خروج">خروج</button>
-    </header>
-    ${vTabs()}`;
+    return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: `نظارت بر کار کارشناسان و تأیید کمیسیون · ${esc(CFG.company || "")}`,
+      user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
+      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+      + vTabs();
   }
   function vTabs() {
     const wait = S.experts.reduce((a, e) => a + (e.cm_wait || 0), 0);
-    return `<div class="tp-tabs">${TABS.map(([k, l]) => `<button class="tp-tab ${S.tab === k ? "on" : ""}" data-tab="${k}">${l}${k === "cm" && wait ? `<span class="cnt" title="قلم‌هایی که جدول کمیسیونشان ساخته شده و منتظر تأیید پشتیبانی‌اند">${wait}</span>` : ""}${k === "ai" && S.ai && S.ai.asks.length ? `<span class="cnt" title="پرسش‌های بی‌پاسخِ کارشناس هوشمند از کارشناسان">🚨 ${S.ai.asks.length}</span>` : ""}${k === "ai" && S.ai && S.ai.handovers && S.ai.handovers.length ? `<span class="cnt" title="کارهایی که به حداقلِ استعلام نرسیدند و به کارشناس واگذار شدند">⚠️ ${S.ai.handovers.length}</span>` : ""}${k === "dl" && S.ai && S.ai.deliveries && S.ai.deliveries.new ? `<span class="cnt" title="تحویل‌های بررسی‌نشدهٔ کارشناس هوشمند">${S.ai.deliveries.new}</span>` : ""}</button>`).join("")}</div>`;
+    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${TABS.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-tab="${k}" role="tab" aria-selected="${S.tab === k ? "true" : "false"}">${l}${k === "cm" && wait ? `<span class="cnt" title="قلم‌هایی که جدول کمیسیونشان ساخته شده و منتظر تأیید پشتیبانی‌اند">${wait}</span>` : ""}${k === "ai" && S.ai && S.ai.asks.length ? `<span class="cnt" title="پرسش‌های بی‌پاسخِ کارشناس هوشمند از کارشناسان">🚨 ${S.ai.asks.length}</span>` : ""}${k === "ai" && S.ai && S.ai.handovers && S.ai.handovers.length ? `<span class="cnt" title="کارهایی که به حداقلِ استعلام نرسیدند و به کارشناس واگذار شدند">⚠️ ${S.ai.handovers.length}</span>` : ""}${k === "dl" && S.ai && S.ai.deliveries && S.ai.deliveries.new ? `<span class="cnt" title="تحویل‌های بررسی‌نشدهٔ کارشناس هوشمند">${S.ai.deliveries.new}</span>` : ""}</button>`).join("")}</div>
+      <span class="spacer"></span>${TP.ui.info(`support.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
   /* ---------- مراحل (همان شش باکس میز مدیر) ---------- */
@@ -1106,8 +1103,8 @@
     S.now = Date.now();
     const restore = TP.snapScroll();
     if (S.view === "boot") app.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
-    else if (S.view === "login") app.innerHTML = vLogin();
-    else app.innerHTML = vTop() + `<div class="tp-wrap">${vTab()}</div>`;
+    else if (S.view === "login") { TP.ui.mountBg("fog"); app.innerHTML = vLogin(); TP.ui.help.set("login.support"); const f = app.querySelector("form[data-login-card]"); if (f) f.onsubmit = (e) => { e.preventDefault(); const b = f.querySelector("[data-do]"); if (b && !b.disabled) b.click(); }; }
+    else { TP.ui.mountBg(""); app.innerHTML = vTop() + `<div class="tp-wrap">${vTab()}</div>`; TP.ui.help.set(`support.${S.tab}`); }
     restore();
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */

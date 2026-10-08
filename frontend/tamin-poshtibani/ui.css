@@ -1,0 +1,499 @@
+/* ============================================================
+   سامانهٔ پشتیبانی خرید — لایهٔ ظاهرِ مدرن مشترک (مهر ۱۴۰۵)
+   پس از panel.css می‌آید و روی همهٔ صفحه‌ها (مدیر، کارشناس، مکاتبات، تأمین‌کننده، پشتیبانی) یکی است.
+
+   اصول (liquid-glass-claude-skill + simplify-modern-ux):
+   - شیشهٔ واقعی (backdrop-filter) فقط روی لایهٔ کارکردیِ شناور: نوار بالا، منوهای بازشونده، کشوی راهنما،
+     دکمهٔ راهنما و اعلان‌ها — در هر نما ۲ تا ۳ لایه.
+   - کارت‌ها و باکس‌ها «شیشهٔ ایستا»اند (پرکنندهٔ نیمه‌شفاف + نور لبه، بی تاری) — خواستهٔ مالک: کارت‌های شفاف
+     روی پس‌زمینهٔ متحرک، بی هزینهٔ هر فریم.
+   - پس‌زمینه: گرادیان پیوسته + سه هالهٔ رنگیِ برند که آرام می‌لغزند + دایره‌های شناور (خواستهٔ مالک؛ کم‌رنگ،
+     فقط transform، با prefers-reduced-motion خاموش).
+   - رنگ از برند: آبیِ لوگو #1c3c8c، آبیِ روشن، نارنجی؛ گردی‌ها از یک مقیاس: ۲۴ (سطح) · ۱۸ (کارت) · ۱۲ (کنترل).
+   ============================================================ */
+:root {
+  --ui-ease: cubic-bezier(.2, .8, .2, 1);
+  --ui-spring: cubic-bezier(.34, 1.3, .4, 1);
+  --ui-fast: 150ms; --ui-base: 240ms; --ui-slow: 420ms;
+  --ui-r-surface: 24px; --ui-r-card: 18px; --ui-r-ctl: 12px;
+  --ui-brand: #1c3c8c;
+  /* سه ردهٔ شیشه (پرکننده از سطحِ برند، نه سفید) */
+  --ui-thin: rgba(14, 24, 52, 0.42);
+  --ui-regular: rgba(11, 20, 46, 0.66);
+  --ui-thick: rgba(11, 20, 44, 0.84);
+  --ui-solid: #0f1a36;
+  --ui-edge: rgba(255, 255, 255, 0.14);
+  --ui-hl: rgba(255, 255, 255, 0.22);
+  --ui-shadow: 0 18px 44px -18px rgba(0, 8, 30, 0.75);
+  /* کارتِ ایستا: روی پس‌زمینهٔ متحرک، متنِ روشن ۱۱:۱ می‌ماند */
+  --ui-card: rgba(14, 26, 56, 0.58);
+  --ui-card-hover: rgba(18, 32, 66, 0.72);
+  --ui-card-edge: rgba(170, 200, 255, 0.16);
+  --ui-card-hl: rgba(255, 255, 255, 0.1);
+  --ui-fab-bg: linear-gradient(135deg, #2f6fe4, #1c3c8c);
+  /* نوارهای مهلت و پیشرفت */
+  --ui-track: rgba(255, 255, 255, 0.1);
+  --ui-prog: linear-gradient(90deg, #4f8cff, #8fb0ff);
+  --ui-warn: #f2c230; --ui-late: #e8801e; --ui-over: #e5484d; --ui-ok: #22c55e;
+  --ui-help-fab: 20px;
+}
+:root[data-theme="light"] {
+  --ui-thin: rgba(255, 255, 255, 0.48);
+  --ui-regular: rgba(255, 255, 255, 0.7);
+  --ui-thick: rgba(255, 255, 255, 0.88);
+  --ui-solid: #ffffff;
+  --ui-edge: rgba(255, 255, 255, 0.95);
+  --ui-hl: #ffffff;
+  --ui-shadow: 0 18px 44px -20px rgba(20, 40, 80, 0.38);
+  --ui-card: rgba(255, 255, 255, 0.62);
+  --ui-card-hover: rgba(255, 255, 255, 0.8);
+  --ui-card-edge: rgba(255, 255, 255, 0.95);
+  --ui-card-hl: #ffffff;
+  --ui-track: rgba(30, 60, 120, 0.1);
+  --ui-prog: linear-gradient(90deg, #2f6fe4, #6a9bff);
+  --ui-warn: #e0ac08; --ui-late: #d9731a; --ui-over: #d63a3f; --ui-ok: #16a34a;
+}
+
+/* ============================================================
+   پس‌زمینه: آسمان + هاله‌ها + دایره‌های شناور
+   ============================================================ */
+.tp-sky { position: fixed; inset: 0; z-index: -2; pointer-events: none; overflow: hidden;
+  background: linear-gradient(180deg, #060b1c 0%, #0a1430 46%, #070d22 100%); }
+:root[data-theme="light"] .tp-sky { background: linear-gradient(180deg, #f4f7fc 0%, #e9eff9 55%, #eef2f8 100%); }
+.tp-sky i { position: absolute; border-radius: 50%; filter: blur(64px); opacity: .5; will-change: transform; transform: translate3d(0, 0, 0);
+  animation: uiDrift var(--d, 28s) ease-in-out infinite alternate; animation-delay: var(--dl, 0s); }
+.tp-sky .b1 { width: 62vmax; height: 62vmax; left: -16vmax; top: -22vmax; background: #2f5fe0; }
+.tp-sky .b2 { width: 48vmax; height: 48vmax; right: -14vmax; top: 18vh; background: #6a4bd8; --d: 36s; --dl: -11s; }
+.tp-sky .b3 { width: 42vmax; height: 42vmax; left: 26vw; bottom: -24vmax; background: #ff8c42; opacity: .24; --d: 42s; --dl: -20s; }
+:root[data-theme="light"] .tp-sky i { opacity: .55; }
+:root[data-theme="light"] .tp-sky .b1 { background: #9ec0ff; }
+:root[data-theme="light"] .tp-sky .b2 { background: #c9b8ff; }
+:root[data-theme="light"] .tp-sky .b3 { background: #ffd2b3; opacity: .6; }
+@keyframes uiDrift { from { transform: translate3d(0, 0, 0) scale(1); } to { transform: translate3d(7vw, 5vh, 0) scale(1.08); } }
+/* «مه ساحلی» (Coastal Fog، نمونهٔ اسکیل liquid-glass، MIT) — صفحه‌های ورود، همان پس‌زمینهٔ صفحهٔ انتخاب پنل */
+.tp-sky.fog, :root[data-theme="light"] .tp-sky.fog {
+  background:
+    radial-gradient(90% 70% at 72% 18%, rgba(255, 233, 204, 0.55), transparent 60%),
+    radial-gradient(60% 40% at 20% 70%, rgba(120, 150, 150, 0.35), transparent 70%),
+    linear-gradient(180deg, #2e4150 0%, #5f7a86 38%, #aebcb9 58%, #6d8388 60%, #3b5260 72%, #1f2e37 100%);
+}
+.tp-sky.fog i { display: none; }
+.tp-orbs { position: fixed; inset: 0; z-index: -1; pointer-events: none; overflow: hidden; }
+.tp-orbs i { position: absolute; border-radius: 50%; width: var(--s); height: var(--s); left: var(--x); top: var(--y); opacity: .36;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.26), rgba(255, 255, 255, 0.04) 58%, transparent 72%);
+  box-shadow: inset 0 0 22px rgba(255, 255, 255, 0.1), 0 10px 40px -20px rgba(0, 0, 0, 0.4);
+  will-change: transform; transform: translate3d(0, 0, 0);
+  animation: uiFloat var(--d, 26s) ease-in-out infinite alternate; animation-delay: var(--dl, 0s); }
+:root[data-theme="light"] .tp-orbs i { border-color: rgba(60, 100, 180, 0.22); opacity: .45;
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.9), rgba(255, 255, 255, 0.25) 58%, transparent 72%); }
+.tp-sky.fog ~ .tp-orbs i { opacity: .6; }
+.tp-orbs i:nth-child(1) { --s: 42vmin; --x: -8vw; --y: 8vh; --d: 34s; --dx: 5vw; --dy: 9vh; }
+.tp-orbs i:nth-child(2) { --s: 16vmin; --x: 22vw; --y: 62vh; --d: 22s; --dl: -6s; --dx: -6vw; --dy: -10vh; }
+.tp-orbs i:nth-child(3) { --s: 28vmin; --x: 58vw; --y: -10vh; --d: 30s; --dl: -12s; --dx: -4vw; --dy: 12vh; }
+.tp-orbs i:nth-child(4) { --s: 9vmin; --x: 76vw; --y: 40vh; --d: 18s; --dl: -3s; --dx: 5vw; --dy: -8vh; }
+.tp-orbs i:nth-child(5) { --s: 22vmin; --x: 84vw; --y: 70vh; --d: 27s; --dl: -15s; --dx: -9vw; --dy: -6vh; }
+.tp-orbs i:nth-child(6) { --s: 6vmin; --x: 40vw; --y: 30vh; --d: 16s; --dl: -9s; --dx: 7vw; --dy: 7vh; }
+.tp-orbs i:nth-child(7) { --s: 13vmin; --x: 12vw; --y: 86vh; --d: 24s; --dl: -20s; --dx: 8vw; --dy: -12vh; }
+.tp-orbs i:nth-child(8) { --s: 34vmin; --x: 44vw; --y: 78vh; --d: 38s; --dl: -25s; --dx: -5vw; --dy: -9vh; }
+.tp-orbs i:nth-child(9) { --s: 5vmin; --x: 64vw; --y: 54vh; --d: 14s; --dl: -1s; --dx: -6vw; --dy: 5vh; }
+@keyframes uiFloat { 0% { transform: translate3d(0, 0, 0); } 50% { transform: translate3d(var(--dx), var(--dy), 0) rotate(2deg); } 100% { transform: translate3d(calc(var(--dx) * -0.6), calc(var(--dy) * -0.5), 0); } }
+/* زمینهٔ تختِ قبلیِ body با آسمان جایگزین می‌شود */
+body.tp-body.has-sky { background: transparent; }
+
+/* ============================================================
+   نوار بالا: شیشهٔ معمولی، نام و منوی پروفایل
+   ============================================================ */
+.tp-top.ui { background: var(--ui-regular); border-bottom: 1px solid var(--ui-edge);
+  -webkit-backdrop-filter: blur(20px) saturate(150%); backdrop-filter: blur(20px) saturate(150%);
+  box-shadow: inset 0 -1px 0 rgba(255, 255, 255, 0.04), 0 10px 30px -22px rgba(0, 8, 30, 0.8); gap: 10px; padding: 8px 18px; }
+:root[data-theme="light"] .tp-top.ui { box-shadow: inset 0 -1px 0 rgba(30, 60, 120, 0.08), 0 10px 30px -24px rgba(20, 40, 80, 0.5); }
+.tp-top.ui .brand { text-decoration: none; color: inherit; min-width: 0; }
+.tp-top.ui .brand h1 { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
+.tp-top.ui .brand img { width: 36px; height: 36px; border-width: 1.5px; }
+.tp-top.ui .brand .sub { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 42vw; }
+.tp-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.tp-tools { display: flex; gap: 8px; align-items: center; }
+/* دکمهٔ آیکونی گرد (حالت شب و روز، بستن، …) */
+.tp-icon-btn { width: 38px; height: 38px; flex-shrink: 0; border-radius: 50%; display: inline-grid; place-items: center; padding: 0; color: var(--tp-fg); cursor: pointer;
+  border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim);
+  transition: background-color var(--ui-fast) ease, transform var(--ui-fast) ease, border-color var(--ui-fast) ease; }
+.tp-icon-btn:hover { background: var(--gl-sheen), var(--gl-fill-hover); border-color: var(--gl-edge-hover); }
+.tp-icon-btn:active { transform: scale(.94); }
+.tp-icon-btn svg { width: 18px; height: 18px; }
+.tp-icon-btn.sm { width: 30px; height: 30px; }
+.tp-icon-btn.sm svg { width: 15px; height: 15px; }
+/* خورشید و ماه: یکی می‌چرخد و می‌آید، دیگری می‌رود */
+.tp-theme .ui-sun, .tp-theme .ui-moon { transition: transform var(--ui-base) var(--ui-spring), opacity var(--ui-fast) ease; }
+:root[data-theme="dark"] .tp-theme .ui-sun, :root:not([data-theme="light"]) .tp-theme .ui-sun { display: block; }
+:root[data-theme="dark"] .tp-theme .ui-moon, :root:not([data-theme="light"]) .tp-theme .ui-moon { display: none; }
+:root[data-theme="light"] .tp-theme .ui-sun { display: none; }
+:root[data-theme="light"] .tp-theme .ui-moon { display: block; }
+.tp-theme:hover svg { transform: rotate(18deg); }
+
+/* ---------- منوی بازشونده (کارت): با نشستنِ موشواره یا کلیک ---------- */
+.tp-menu { position: relative; display: inline-block; }
+.tp-menu-btn { display: inline-flex; align-items: center; gap: 8px; }
+.tp-menu-list { position: absolute; top: calc(100% + 8px); inset-inline-end: 0; z-index: 75; min-width: 240px; max-width: min(92vw, 360px); padding: 8px;
+  border-radius: 18px; background: var(--ui-thick); border: 1px solid var(--ui-edge);
+  -webkit-backdrop-filter: blur(24px) saturate(140%); backdrop-filter: blur(24px) saturate(140%);
+  box-shadow: inset 0 1px 0 var(--ui-hl), var(--ui-shadow);
+  opacity: 0; transform: translateY(-6px) scale(.98); transform-origin: top; pointer-events: none;
+  transition: opacity var(--ui-fast) ease, transform var(--ui-base) var(--ui-ease); }
+.tp-menu-list::before { content: ""; position: absolute; top: -10px; left: 0; right: 0; height: 10px; } /* پلِ نامرئی تا با عبورِ موشواره بسته نشود */
+.tp-menu.start .tp-menu-list { inset-inline-end: auto; inset-inline-start: 0; }
+@media (hover: hover) { .tp-menu:hover > .tp-menu-list { opacity: 1; transform: none; pointer-events: auto; } }
+.tp-menu:focus-within > .tp-menu-list, .tp-menu.open > .tp-menu-list { opacity: 1; transform: none; pointer-events: auto; }
+.tp-menu-list > button, .tp-menu-list > a, .tp-menu-list > label { display: flex; width: 100%; gap: 10px; align-items: center; padding: 9px 12px; border-radius: 12px; border: 0;
+  background: none; color: var(--tp-fg); font: inherit; font-size: .92rem; font-weight: 600; text-align: start; cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: background-color var(--ui-fast) ease; }
+.tp-menu-list > button:hover, .tp-menu-list > a:hover, .tp-menu-list > label:hover, .tp-menu-list > button:focus-visible, .tp-menu-list > a:focus-visible { background: rgba(120, 165, 255, 0.14); outline: none; }
+.tp-menu-list > button[disabled] { opacity: .45; cursor: not-allowed; }
+.tp-menu-list > button.danger, .tp-menu-list > a.danger { color: #fca5a5; }
+:root[data-theme="light"] .tp-menu-list > button.danger, :root[data-theme="light"] .tp-menu-list > a.danger { color: #b91c1c; }
+.tp-menu-list > button.danger:hover { background: rgba(229, 72, 77, 0.12); }
+.tp-menu-list .ico { width: 20px; height: 20px; flex-shrink: 0; display: inline-grid; place-items: center; opacity: .85; }
+.tp-menu-list .ico svg { width: 18px; height: 18px; }
+.tp-menu-list .cnt { margin-inline-start: auto; }
+.tp-menu-list .tp-menu-head { padding: 8px 12px 10px; margin-bottom: 6px; border-bottom: 1px solid var(--tp-line); white-space: normal; }
+.tp-menu-list .tp-menu-head b { display: block; font-size: .98rem; }
+.tp-menu-list .tp-menu-head span { display: block; color: var(--tp-muted); font-size: .8rem; }
+.tp-menu-list .tp-menu-cap { padding: 8px 12px 2px; color: var(--tp-muted); font-size: .74rem; font-weight: 700; letter-spacing: 0; }
+.tp-menu-sep { height: 1px; background: var(--tp-line); margin: 6px 4px; }
+/* آواتار و نامِ پروفایل در نوار بالا */
+.tp-avatar-btn { display: inline-flex; align-items: center; gap: 8px; height: 40px; padding: 0 12px 0 4px; padding-inline-end: 4px; padding-inline-start: 12px; border-radius: 999px;
+  border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim); color: var(--tp-fg); cursor: pointer; font: inherit; font-weight: 700; font-size: .88rem; max-width: 220px; }
+.tp-avatar-btn:hover, .tp-menu.open .tp-avatar-btn { background: var(--gl-sheen), var(--gl-fill-hover); }
+.tp-avatar-btn .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-avatar { width: 32px; height: 32px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: .95rem;
+  background: var(--ui-fab-bg); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 2px 8px -3px rgba(28, 60, 140, 0.8); }
+.tp-avatar.img { background: #fff; padding: 3px; }
+.tp-avatar.img img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+.tp-dot-badge { position: absolute; top: -3px; inset-inline-start: -3px; min-width: 18px; height: 18px; padding: 0 5px; border-radius: 999px; display: grid; place-items: center;
+  font-size: .68rem; font-weight: 800; color: #1d1600; background: #ffb340; box-shadow: 0 0 0 2px var(--tp-bg); }
+.tp-nav .tp-btn { position: relative; }
+@media (max-width: 720px) {
+  .tp-top.ui { padding: 8px 12px; }
+  .tp-avatar-btn .nm { display: none; }
+  .tp-avatar-btn { padding: 0 3px; width: 40px; justify-content: center; }
+  .tp-top.ui .brand h1 { font-size: .95rem; }
+}
+
+/* ---------- ناوبریِ بخشی (تب‌های صفحه): کپسول شیشه‌ای ---------- */
+.tp-seg { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid var(--gl-edge); border-radius: 14px; background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim), var(--gl-lift); max-width: 100%; overflow-x: auto; scrollbar-width: none; }
+.tp-seg::-webkit-scrollbar { display: none; }
+.tp-seg > button, .tp-seg > .tp-menu > button { border: 0; border-radius: 11px; background: transparent; color: var(--tp-muted); padding: 6px 16px; font: inherit; font-weight: 700; font-size: .9rem; white-space: nowrap; cursor: pointer;
+  display: inline-flex; align-items: center; gap: 6px; transition: background-color var(--ui-fast) ease, color var(--ui-fast) ease; }
+.tp-seg > button:hover, .tp-seg > .tp-menu > button:hover { color: var(--tp-fg); background: var(--gl-fill-hover); }
+.tp-seg > button.on, .tp-seg > .tp-menu.on > button { background: var(--gl-tint-sheen), var(--gl-tint); color: #fff; box-shadow: var(--gl-tint-rim), var(--gl-tint-glow); }
+.tp-seg .cnt { background: rgba(255, 255, 255, 0.2); border-radius: 9px; padding: 0 7px; font-size: .75rem; }
+.tp-seg > button:not(.on) .cnt { background: rgba(79, 140, 255, 0.18); }
+.tp-seg .tp-menu-list { inset-inline-start: 0; inset-inline-end: auto; }
+.tp-subbar { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 10px 18px 0; }
+.tp-subbar .spacer { flex: 1; }
+@media (max-width: 720px) { .tp-subbar { padding-inline: 12px; } }
+
+/* ============================================================
+   کارت‌ها و دکمه‌ها: شفاف‌تر، نرم‌تر
+   ============================================================ */
+body.has-sky .tp-card { background: var(--ui-card); border-color: var(--ui-card-edge); box-shadow: inset 0 1px 0 var(--ui-card-hl), 0 14px 36px -24px rgba(0, 8, 30, 0.8); }
+:root[data-theme="light"] body.has-sky .tp-card { box-shadow: inset 0 1px 0 var(--ui-card-hl), 0 14px 36px -26px rgba(20, 40, 80, 0.4); }
+body.has-sky .tp-filters { background: rgba(9, 20, 46, 0.3); }
+:root[data-theme="light"] body.has-sky .tp-filters { background: rgba(255, 255, 255, 0.45); }
+body.has-sky .tp-scroll { background: rgba(6, 14, 34, 0.42); }
+:root[data-theme="light"] body.has-sky .tp-scroll { background: rgba(255, 255, 255, 0.72); }
+body.has-sky .tp-table thead th { background: rgba(15, 30, 61, 0.96); }
+:root[data-theme="light"] body.has-sky .tp-table thead th { background: #e6edf8; }
+body.has-sky .tp-foot { background: var(--ui-regular); -webkit-backdrop-filter: blur(18px) saturate(140%); backdrop-filter: blur(18px) saturate(140%); border-top-color: var(--ui-edge); }
+/* نوار اطلاع (tp-note) فقط برای هشدارِ مربوط به همین لحظه می‌ماند؛ توضیح‌ها به راهنما رفته‌اند */
+body.has-sky .tp-note { background: rgba(79, 140, 255, 0.1); }
+:root[data-theme="light"] body.has-sky .tp-note { background: rgba(47, 111, 228, 0.08); }
+/* نوارِ وضعیت یک‌خطی: آیکون + جمله + دکمهٔ راهنما */
+.tp-status { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 8px 12px; margin: 10px 0; border-radius: 14px; font-size: .9rem;
+  background: rgba(79, 140, 255, 0.1); border: 1px solid rgba(79, 140, 255, 0.28); }
+.tp-status.warn { background: rgba(242, 194, 48, 0.1); border-color: rgba(242, 194, 48, 0.4); }
+.tp-status.ok { background: rgba(34, 197, 94, 0.1); border-color: rgba(34, 197, 94, 0.35); }
+.tp-status > b { white-space: nowrap; }
+.tp-status .sp { flex: 1; min-width: 0; }
+.tp-status .chips { display: flex; gap: 6px; flex-wrap: wrap; }
+/* دکمهٔ کوچکِ «؟» کنار بخش‌های پیچیده — کشوی راهنما را روی همان موضوع باز می‌کند */
+.tp-info { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--gl-edge-hover); background: var(--gl-sheen), var(--gl-fill); color: var(--tp-accent);
+  font-weight: 800; font-size: .78rem; line-height: 1; display: inline-grid; place-items: center; padding: 0; cursor: pointer; vertical-align: middle; margin-inline-start: 4px; }
+.tp-info:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+
+/* ============================================================
+   نوار مهلت و نوار پیشرفت
+   ============================================================ */
+.tp-bar { position: relative; height: 8px; border-radius: 999px; background: var(--ui-track); overflow: hidden; box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.15); }
+.tp-bar > i { position: absolute; inset: 0 auto 0 0; inset-inline: 0 auto; width: var(--p, 0%); border-radius: inherit; background: var(--ui-prog);
+  transition: width var(--ui-slow) var(--ui-ease); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.tp-bar.warn > i { background: linear-gradient(90deg, #e0ac08, #ffd166); }
+.tp-bar.late > i { background: linear-gradient(90deg, #d9731a, #ffa65c); }
+.tp-bar.over > i { background: linear-gradient(90deg, #d63a3f, #ff7b80); }
+.tp-dl { display: flex; flex-direction: column; gap: 5px; }
+.tp-dl-h { display: flex; justify-content: space-between; align-items: baseline; font-size: .8rem; color: var(--tp-muted); }
+.tp-dl-h b { color: var(--tp-fg); font-variant-numeric: tabular-nums; }
+.tp-dl-h .over { color: #fca5a5; }
+:root[data-theme="light"] .tp-dl-h .over { color: #b91c1c; }
+/* پیشرفتِ شش مرحله: قطعه‌های پیوسته، بی رنگِ معنایی (فقط انجام‌شده / نشده)؛ در سرآیندِ درخواست با رنگ مرحله */
+.tp-prog { display: flex; flex-direction: column; gap: 5px; }
+.tp-prog-track { display: flex; gap: 3px; height: 7px; }
+.tp-prog-track > i { flex: 1; border-radius: 999px; background: var(--ui-track); box-shadow: inset 0 1px 1px rgba(0, 0, 0, 0.12); position: relative; overflow: hidden; }
+.tp-prog-track > i.done { background: var(--ui-prog); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.tp-prog-track > i.done::after { content: ""; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.45), transparent); transform: translateX(-120%); animation: uiShine 2.6s var(--ui-ease) 1; }
+@keyframes uiShine { to { transform: translateX(120%); } }
+.tp-prog-labels { display: flex; gap: 3px; }
+.tp-prog-labels > span { flex: 1; min-width: 0; text-align: center; font-size: .64rem; line-height: 1.3; color: var(--tp-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tp-prog-labels > span.done { color: var(--tp-fg); font-weight: 700; }
+/* سرآیندِ درخواست: قطعه‌ها رنگِ همان مرحله را می‌گیرند (مثل باکس‌های پایش) */
+.tp-prog.big .tp-prog-track { height: 11px; gap: 4px; }
+.tp-prog.big .tp-prog-labels > span { font-size: .74rem; }
+.tp-prog-track > i.c-done { background: linear-gradient(90deg, #16a34a, #4ade80); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35); }
+.tp-prog-track > i.c-warn { background: linear-gradient(90deg, #e0ac08, #ffd166); }
+.tp-prog-track > i.c-late { background: linear-gradient(90deg, #d9731a, #ffa65c); }
+.tp-prog-track > i.c-over { background: linear-gradient(90deg, #d63a3f, #ff7b80); }
+.tp-prog-track > i.c-empty { background: rgba(238, 244, 255, 0.5); }
+:root[data-theme="light"] .tp-prog-track > i.c-empty { background: rgba(30, 60, 120, 0.14); }
+.tp-prog-track > i.c-idle, .tp-prog-track > i.c-muted { background: var(--ui-track); }
+.tp-prog-track > i .cnt { position: absolute; inset: 0; display: grid; place-items: center; font-size: .6rem; font-weight: 800; color: #1d1600; line-height: 1; }
+
+/* ============================================================
+   کارتابل کارشناس: کارت‌ها
+   ============================================================ */
+.tp-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 318px), 1fr)); gap: 14px; padding: 14px 18px 32px; }
+@media (max-width: 720px) { .tp-cards { padding: 10px 12px 28px; gap: 10px; } }
+.tp-rcard { position: relative; display: flex; flex-direction: column; gap: 10px; padding: 14px 16px 14px; border-radius: var(--ui-r-card); cursor: pointer; color: inherit; text-align: start;
+  background: var(--ui-card); border: 1px solid var(--ui-card-edge); box-shadow: inset 0 1px 0 var(--ui-card-hl), 0 14px 36px -24px rgba(0, 8, 30, 0.8);
+  transition: transform var(--ui-base) var(--ui-ease), background-color var(--ui-fast) ease, border-color var(--ui-fast) ease, box-shadow var(--ui-base) ease;
+  animation: uiCardIn var(--ui-slow) var(--ui-ease) both; animation-delay: calc(var(--i, 0) * 40ms); }
+.tp-rcard:hover { background: var(--ui-card-hover); transform: translateY(-3px); box-shadow: inset 0 1px 0 var(--ui-card-hl), 0 22px 44px -22px rgba(0, 8, 30, 0.85); }
+.tp-rcard:active { transform: translateY(-1px) scale(.995); }
+.tp-rcard:focus-visible { outline: 2px solid var(--tp-accent); outline-offset: 3px; }
+@keyframes uiCardIn { from { opacity: 0; transform: translateY(10px) scale(.985); } }
+/* رنگِ کارت از بدترین مرحله‌اش: زرد (هشدار) · نارنجی (دیر) · قرمز (مهلت تمام) — شیشهٔ رنگی، نه رنگ تخت */
+.tp-rcard.lvl-warn { background: linear-gradient(180deg, rgba(242, 194, 48, 0.2), rgba(242, 194, 48, 0.08)), var(--ui-card); border-color: rgba(242, 194, 48, 0.42); }
+.tp-rcard.lvl-late { background: linear-gradient(180deg, rgba(232, 128, 30, 0.24), rgba(232, 128, 30, 0.08)), var(--ui-card); border-color: rgba(232, 128, 30, 0.45); }
+.tp-rcard.lvl-over { background: linear-gradient(180deg, rgba(229, 72, 77, 0.26), rgba(229, 72, 77, 0.1)), var(--ui-card); border-color: rgba(229, 72, 77, 0.5); }
+.tp-rcard.lvl-warn:hover { background: linear-gradient(180deg, rgba(242, 194, 48, 0.26), rgba(242, 194, 48, 0.1)), var(--ui-card-hover); }
+.tp-rcard.lvl-late:hover { background: linear-gradient(180deg, rgba(232, 128, 30, 0.3), rgba(232, 128, 30, 0.1)), var(--ui-card-hover); }
+.tp-rcard.lvl-over:hover { background: linear-gradient(180deg, rgba(229, 72, 77, 0.32), rgba(229, 72, 77, 0.12)), var(--ui-card-hover); }
+.tp-rcard > header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tp-rcard .rid { font-size: 1.08rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.tp-rcard .rdate { color: var(--tp-muted); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.tp-rcard .more { margin-inline-start: auto; }
+.tp-rcard .rproj { display: flex; gap: 6px; align-items: center; font-size: .92rem; font-weight: 600; min-height: 1.4em; }
+.tp-rcard .rproj svg { width: 16px; height: 16px; flex-shrink: 0; opacity: .8; }
+.tp-rcard .rproj span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-rcard .rmeta { display: flex; gap: 6px 14px; flex-wrap: wrap; font-size: .8rem; color: var(--tp-muted); }
+.tp-rcard .rmeta b { color: var(--tp-fg); font-variant-numeric: tabular-nums; }
+.tp-rcard .chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.tp-rcard .chip { font-size: .72rem; }
+
+/* ============================================================
+   سرآیندِ صفحهٔ درخواست (کارشناس)
+   ============================================================ */
+.tp-dhead { padding: 14px 18px 12px; display: flex; flex-direction: column; gap: 10px; border-bottom: 1px solid var(--tp-line); }
+.tp-dhead-top { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.tp-dhead-top h2 { margin: 0; font-size: 1.15rem; display: flex; align-items: baseline; gap: 8px; }
+.tp-dhead-top .spacer { flex: 1; }
+.tp-dhead-meta { display: flex; gap: 6px 18px; flex-wrap: wrap; font-size: .86rem; color: var(--tp-muted); }
+.tp-dhead-meta b { color: var(--tp-fg); font-weight: 600; }
+.tp-dhead-bars { display: grid; grid-template-columns: minmax(200px, 1fr) minmax(260px, 2fr); gap: 14px 24px; align-items: end; }
+@media (max-width: 760px) { .tp-dhead-bars { grid-template-columns: 1fr; } }
+.tp-dhead .tp-status { margin: 0; }
+/* نوارِ اقلام: چیپ‌های شیشه‌ای به‌جای کارت‌های بزرگ */
+.tp-items { display: flex; gap: 8px; padding: 10px 18px; overflow-x: auto; border-bottom: 1px solid var(--tp-line); scrollbar-width: thin; }
+.tp-item { flex: 0 0 auto; max-width: 280px; min-width: 150px; padding: 8px 12px; border-radius: 14px; text-align: start; cursor: pointer; color: inherit;
+  border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim); transition: background-color var(--ui-fast) ease, border-color var(--ui-fast) ease, transform var(--ui-fast) ease; }
+.tp-item:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+.tp-item.on { border-color: var(--tp-accent); background: var(--gl-sheen), rgba(79, 140, 255, 0.18); box-shadow: inset 0 0 0 1px var(--tp-accent); }
+.tp-item.closed { opacity: .55; }
+.tp-item .t { display: block; font-weight: 700; font-size: .88rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tp-item .m { display: block; color: var(--tp-muted); font-size: .76rem; margin-top: 2px; }
+.tp-item .chips { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 5px; }
+.tp-item .chip { font-size: .68rem; padding: 0 6px; }
+.tp-tabs2 { display: flex; gap: 4px; padding: 8px 18px 0; overflow-x: auto; scrollbar-width: none; }
+.tp-tabs2::-webkit-scrollbar { display: none; }
+
+/* ============================================================
+   ورود: کارت با چهار خانهٔ کد و دکمهٔ سه‌بعدی
+   ============================================================ */
+.tp-auth { min-height: calc(100dvh - 0px); display: flex; align-items: center; justify-content: center; padding: 24px 16px; }
+.tp-auth-card { position: relative; width: min(440px, 100%); padding: 22px 24px 26px; border-radius: 28px; color: #f3f6ff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.03) 50%), rgba(12, 24, 44, 0.58);
+  border: 1px solid rgba(255, 255, 255, 0.28); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 30px 70px -30px rgba(0, 10, 30, 0.8);
+  -webkit-backdrop-filter: blur(22px) saturate(140%); backdrop-filter: blur(22px) saturate(140%);
+  animation: uiAuthIn .6s var(--ui-ease) both; }
+:root[data-theme="light"] .tp-auth-card { color: #0f1b33; background: linear-gradient(180deg, rgba(255, 255, 255, 0.72), rgba(255, 255, 255, 0.4) 50%), rgba(246, 248, 253, 0.6);
+  border-color: rgba(255, 255, 255, 0.95); box-shadow: inset 0 1px 0 #fff, 0 30px 70px -30px rgba(20, 40, 80, 0.55); }
+@keyframes uiAuthIn { from { opacity: 0; transform: translateY(14px) scale(.98); } }
+.tp-auth-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 18px; }
+.tp-auth-brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.tp-auth-brand img { width: 44px; height: 44px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.9); object-fit: cover; background: #fff; box-shadow: 0 4px 14px -6px rgba(0, 0, 0, 0.6); }
+.tp-auth-brand b { display: block; font-size: 1rem; }
+.tp-auth-brand span { display: block; font-size: .76rem; opacity: .78; }
+.tp-auth-card .tp-icon-btn { color: inherit; border-color: rgba(255, 255, 255, 0.3); background: rgba(255, 255, 255, 0.1); }
+:root[data-theme="light"] .tp-auth-card .tp-icon-btn { border-color: rgba(30, 60, 120, 0.2); background: rgba(255, 255, 255, 0.6); }
+.tp-auth-card h1 { margin: 0 0 4px; font-size: 1.25rem; font-weight: 800; text-align: center; }
+.tp-auth-sub { margin: 0 0 18px; text-align: center; font-size: .88rem; opacity: .8; }
+.tp-otp { display: flex; justify-content: center; gap: 10px; direction: ltr; margin: 6px 0 18px; }
+/* کدهای بلندتر (تا ۸ رقم) خانه می‌افزایند؛ خانه‌ها کوچک می‌شوند تا در کارت جا بگیرند */
+.tp-otp-cell { flex: 1 1 54px; max-width: 54px; min-width: 34px; width: 54px; height: 62px; border-radius: 16px; text-align: center; font: inherit; font-size: 1.6rem; font-weight: 800; font-variant-numeric: tabular-nums; color: inherit; caret-color: #8fb0ff; padding: 0;
+  border: 1.5px solid rgba(255, 255, 255, 0.32); background: rgba(255, 255, 255, 0.1); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), inset 0 -8px 16px -14px rgba(0, 0, 0, 0.6);
+  outline: none; transition: border-color var(--ui-fast) ease, background-color var(--ui-fast) ease, transform var(--ui-base) var(--ui-spring), box-shadow var(--ui-fast) ease; }
+.tp-otp-cell:focus { border-color: #8fb0ff; background: rgba(79, 140, 255, 0.22); box-shadow: 0 0 0 4px rgba(79, 140, 255, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.25); transform: translateY(-2px); }
+.tp-otp-cell.filled { border-color: rgba(255, 255, 255, 0.55); background: rgba(255, 255, 255, 0.18); }
+.tp-otp-cell.extra { animation: uiCellIn var(--ui-base) var(--ui-spring) both; }
+.tp-otp.shake { animation: uiShake .45s ease; }
+:root[data-theme="light"] .tp-otp-cell { border-color: rgba(30, 60, 120, 0.25); background: rgba(255, 255, 255, 0.75); caret-color: #2f6fe4; }
+:root[data-theme="light"] .tp-otp-cell:focus { border-color: #2f6fe4; background: #fff; box-shadow: 0 0 0 4px rgba(47, 111, 228, 0.18); }
+:root[data-theme="light"] .tp-otp-cell.filled { background: #fff; border-color: rgba(47, 111, 228, 0.55); }
+@keyframes uiCellIn { from { opacity: 0; transform: scale(.6); } }
+@keyframes uiShake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+@media (max-width: 400px) { .tp-otp { gap: 6px; } .tp-otp-cell { width: 44px; height: 54px; font-size: 1.35rem; } }
+.tp-auth-pass { width: 100%; height: 50px; border-radius: 14px; text-align: center; font-size: 1.1rem; letter-spacing: .25em; direction: ltr; color: inherit; margin-bottom: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.32); background: rgba(255, 255, 255, 0.1); outline: none; }
+.tp-auth-pass:focus { border-color: #8fb0ff; background: rgba(79, 140, 255, 0.22); }
+:root[data-theme="light"] .tp-auth-pass { border-color: rgba(30, 60, 120, 0.25); background: rgba(255, 255, 255, 0.8); }
+/* دکمهٔ ورود: خودش ثابت است؛ درونش سه حلقهٔ سه‌بعدی با نشستنِ موشواره می‌چرخند و نور از رویش رد می‌شود */
+.tp-auth-go { position: relative; overflow: hidden; width: 100%; height: 56px; border-radius: 16px; border: 1px solid rgba(150, 190, 255, 0.6); color: #fff; font: inherit; font-size: 1.05rem; font-weight: 800; cursor: pointer; isolation: isolate;
+  background: linear-gradient(135deg, #2f6fe4, #1c3c8c); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 12px 28px -12px rgba(28, 60, 140, 0.9);
+  perspective: 520px; transition: box-shadow var(--ui-base) ease, filter var(--ui-fast) ease; }
+.tp-auth-go:hover { box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 16px 34px -12px rgba(47, 111, 228, 0.95); filter: brightness(1.06); }
+.tp-auth-go:active { filter: brightness(.96); }
+.tp-auth-go[disabled] { opacity: .6; cursor: progress; }
+.tp-auth-go > span { position: relative; z-index: 2; }
+.tp-go-3d { position: absolute; inset: 0; z-index: 1; display: grid; place-items: center; pointer-events: none; transform-style: preserve-3d; }
+.tp-go-3d i { position: absolute; width: var(--s); height: var(--s); border-radius: 50%; border: 1.5px solid rgba(255, 255, 255, 0.55); opacity: 0;
+  box-shadow: 0 0 18px -6px rgba(255, 255, 255, 0.6), inset 0 0 12px -6px rgba(255, 255, 255, 0.6); transform: rotateX(68deg); transition: opacity var(--ui-base) ease; }
+.tp-go-3d i:nth-child(1) { --s: 34px; }
+.tp-go-3d i:nth-child(2) { --s: 58px; }
+.tp-go-3d i:nth-child(3) { --s: 86px; border-style: dashed; }
+.tp-auth-go:hover .tp-go-3d i, .tp-auth-go:focus-visible .tp-go-3d i { opacity: .85; animation: uiRing 3.2s linear infinite; }
+.tp-auth-go:hover .tp-go-3d i:nth-child(2) { animation-duration: 4.4s; animation-direction: reverse; }
+.tp-auth-go:hover .tp-go-3d i:nth-child(3) { animation-duration: 6s; }
+@keyframes uiRing { from { transform: rotateX(68deg) rotateZ(0deg); } to { transform: rotateX(68deg) rotateZ(360deg); } }
+.tp-auth-go::after { content: ""; position: absolute; inset: -40% -60%; z-index: 1; background: linear-gradient(100deg, transparent 40%, rgba(255, 255, 255, 0.28) 50%, transparent 60%); transform: translateX(-70%); pointer-events: none; }
+.tp-auth-go:hover::after { animation: uiSweep 1.6s var(--ui-ease) infinite; }
+@keyframes uiSweep { to { transform: translateX(70%); } }
+.tp-auth-err { min-height: 24px; margin-top: 10px; text-align: center; font-size: .88rem; color: #ffb4b4; }
+:root[data-theme="light"] .tp-auth-err { color: #b91c1c; }
+.tp-auth-err.ok { color: #a7f3d0; }
+:root[data-theme="light"] .tp-auth-err.ok { color: #15803d; }
+.tp-auth-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 6px; font-size: .84rem; }
+.tp-auth-foot a, .tp-auth-foot button { color: inherit; opacity: .8; background: none; border: 0; padding: 0; font: inherit; font-size: .84rem; cursor: pointer; text-decoration: none; }
+.tp-auth-foot a:hover, .tp-auth-foot button:hover { opacity: 1; text-decoration: underline; }
+.tp-auth-extra { margin-top: 12px; display: flex; flex-direction: column; gap: 8px; }
+
+/* ============================================================
+   راهنما: دکمهٔ شناورِ «؟» پایین-چپ و کشوی راهنما
+   (مالک: پایین صفحه، سمت چپ — در صفحهٔ راست‌به‌چپ انتهای سطر است و از منو دور)
+   ============================================================ */
+.tp-help-fab { position: fixed; z-index: 880; left: max(var(--ui-help-fab), env(safe-area-inset-left)); bottom: max(var(--ui-help-fab), env(safe-area-inset-bottom));
+  width: 58px; height: 64px; padding: 0; border-radius: 22px; border: 1px solid rgba(255, 255, 255, 0.3); color: #fff; cursor: pointer;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 1px; font: inherit; font-size: .66rem; font-weight: 700;
+  background: var(--ui-fab-bg); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4), 0 14px 30px -12px rgba(28, 60, 140, 0.95);
+  transition: transform var(--ui-base) var(--ui-spring), box-shadow var(--ui-base) ease; }
+.tp-help-fab:hover { transform: translateY(-3px) scale(1.04); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 18px 36px -12px rgba(47, 111, 228, 1); }
+.tp-help-fab:active { transform: scale(.96); }
+.tp-help-fab:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+.tp-help-fab svg { width: 26px; height: 26px; }
+.tp-help-fab.pulse::before { content: ""; position: absolute; inset: -4px; border-radius: 26px; border: 2px solid rgba(79, 140, 255, 0.8); animation: uiPulse 2s ease-out infinite; }
+@keyframes uiPulse { 70% { transform: scale(1.22); opacity: 0; } 100% { transform: scale(1.22); opacity: 0; } }
+body.has-foot .tp-help-fab { bottom: max(68px, env(safe-area-inset-bottom)); }
+/* وقتی گوشی سمت چپِ صفحه است (مکاتبات، پنل تأمین‌کننده)، دکمه و کشو سمت راست می‌روند تا روی گوشی نیفتند */
+.tp-help-fab.right { left: auto; right: max(var(--ui-help-fab), env(safe-area-inset-right)); }
+.tp-help.right .tp-help-panel { left: auto; right: 0; border-inline-end: 0; border-inline-start: 1px solid var(--ui-edge); animation-name: uiSlideInR; }
+@keyframes uiSlideInR { from { transform: translateX(24px); opacity: 0; } }
+.tp-help-fab[hidden] { display: none; }
+/* کارت‌های نوبتیِ «پر کردن اطلاعات» در گوشی: کارتِ تازه با فنر می‌آید */
+.ph-bot.wz-in { animation: wzIn .42s var(--ui-spring) both; }
+@keyframes wzIn { from { opacity: 0; transform: translateY(16px) scale(.96); } }
+.ph-bot .tp-bar { height: 5px; background: rgba(28, 60, 140, 0.12); }
+.ph-bot .tp-bar > i { background: linear-gradient(90deg, #4673dc, #1c3c8c); }
+/* نماد داخل دکمه‌ها */
+.tp-btn svg { width: 16px; height: 16px; vertical-align: -3px; margin-inline-end: 5px; }
+.tp-btn.sm svg { width: 14px; height: 14px; }
+.tp-status .chip { white-space: normal; line-height: 1.5; padding: 2px 8px; }
+.tp-status a.chip { text-decoration: none; cursor: pointer; }
+/* کارتِ خلاصهٔ قلم در فرمِ راستِ پنل تأمین‌کننده */
+.sp-card.sp-sum { padding: 12px 14px; }
+.sp-card.sp-sum .sp-actions { justify-content: flex-start; }
+.sp-card.sp-sum .sp-chips { margin-top: 4px; }
+.tp-help { position: fixed; inset: 0; z-index: 890; }
+.tp-help[hidden] { display: none; }
+.tp-help-scrim { position: absolute; inset: 0; background: rgba(3, 8, 20, 0.45); animation: uiFade var(--ui-base) ease both; }
+:root[data-theme="light"] .tp-help-scrim { background: rgba(15, 27, 51, 0.28); }
+@keyframes uiFade { from { opacity: 0; } }
+.tp-help-panel { position: absolute; top: 0; bottom: 0; left: 0; width: min(420px, 100%); display: flex; flex-direction: column; color: var(--tp-fg);
+  background: var(--ui-thick); border-inline-end: 1px solid var(--ui-edge);
+  -webkit-backdrop-filter: blur(26px) saturate(140%); backdrop-filter: blur(26px) saturate(140%);
+  box-shadow: inset -1px 0 0 rgba(255, 255, 255, 0.06), 30px 0 70px -30px rgba(0, 8, 30, 0.8);
+  animation: uiSlideIn var(--ui-slow) var(--ui-ease) both; }
+@keyframes uiSlideIn { from { transform: translateX(-24px); opacity: 0; } }
+.tp-help-panel > header { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.tp-help-panel > header h2 { margin: 0; font-size: 1.05rem; flex: 1; display: flex; align-items: center; gap: 8px; }
+.tp-help-panel > header h2 svg { width: 22px; height: 22px; color: var(--tp-accent); }
+.tp-help-search { padding: 0 16px 10px; }
+.tp-help-search input { width: 100%; height: 40px; border-radius: 12px; padding: 0 12px; font: inherit; color: inherit; border: 1px solid var(--tp-line-2); background: rgba(3, 8, 20, 0.35); outline: none; }
+.tp-help-search input:focus { border-color: var(--tp-accent); }
+:root[data-theme="light"] .tp-help-search input { background: #fff; }
+.tp-help-body { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 24px; overscroll-behavior: contain; }
+.tp-help-topic { padding: 12px 14px; border-radius: 16px; background: rgba(79, 140, 255, 0.1); border: 1px solid rgba(79, 140, 255, 0.28); margin-bottom: 14px; animation: uiFade var(--ui-base) ease both; }
+.tp-help-topic h3 { margin: 0 0 6px; font-size: 1rem; display: flex; align-items: center; gap: 8px; }
+.tp-help-topic .area { font-size: .72rem; font-weight: 600; color: var(--tp-muted); background: rgba(255, 255, 255, 0.08); border-radius: 999px; padding: 0 8px; }
+:root[data-theme="light"] .tp-help-topic .area { background: rgba(30, 60, 120, 0.08); }
+.tp-help-topic p { margin: 0 0 8px; font-size: .9rem; line-height: 1.9; }
+.tp-help-topic ol, .tp-help-topic ul { margin: 6px 0 8px; padding-inline-start: 22px; font-size: .88rem; line-height: 1.85; }
+.tp-help-topic ol li::marker { color: var(--tp-accent); font-weight: 800; }
+.tp-help-topic ul.tips li::marker { content: "💡 "; }
+.tp-help-topic .tip-h { font-size: .8rem; font-weight: 700; color: var(--tp-muted); margin: 8px 0 2px; }
+.tp-help-topic .rel { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
+.tp-help-topic .rel button, .tp-help-list button { border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim); color: var(--tp-fg); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+.tp-help-topic .rel button:hover, .tp-help-list button:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+.tp-help-list h4 { margin: 10px 0 6px; font-size: .78rem; color: var(--tp-muted); font-weight: 700; }
+.tp-help-list .grp { display: flex; gap: 6px; flex-wrap: wrap; }
+.tp-help-list button.on { border-color: var(--tp-accent); background: var(--gl-sheen), rgba(79, 140, 255, 0.18); }
+.tp-help-none { color: var(--tp-muted); font-size: .88rem; padding: 10px 2px; }
+.tp-help-panel .tp-icon-btn { color: inherit; }
+@media (max-width: 640px) {
+  .tp-help-panel { top: auto; left: 0; right: 0; width: auto; height: 86vh; height: 86dvh; border-radius: 24px 24px 0 0; border-inline-end: 0; border-top: 1px solid var(--ui-edge); animation: uiSheetIn var(--ui-slow) var(--ui-ease) both; }
+  .tp-help-panel::before { content: ""; width: 44px; height: 5px; border-radius: 999px; background: var(--tp-line-2); margin: 8px auto 0; }
+  @keyframes uiSheetIn { from { transform: translateY(40px); opacity: 0; } }
+  .tp-help-fab { width: 52px; height: 58px; border-radius: 20px; }
+}
+
+/* ============================================================
+   موبایل: بی اسکرولِ افقی، بی زومِ خودکار روی فیلدها
+   ============================================================ */
+html, body.tp-body { max-width: 100%; overflow-x: hidden; }
+@media (max-width: 720px) {
+  /* iOS با فونتِ زیر ۱۶ پیکسل روی فیلد زوم می‌کند */
+  input, select, textarea, .tp-input, .tp-select, .tp-textarea, .ph-field textarea { font-size: 16px !important; }
+}
+
+/* ============================================================
+   دسترس‌پذیری: حرکت کمتر، شفافیت کمتر، کنتراست بیشتر، رنگ اجباری
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  .tp-sky i, .tp-orbs i, .tp-prog-track > i.done::after, .tp-help-fab.pulse::before, .tp-auth-go::after, .tp-go-3d i { animation: none !important; }
+  .tp-rcard, .tp-auth-card, .tp-help-panel, .tp-help-scrim, .tp-help-topic, .tp-otp-cell.extra { animation: none !important; }
+  .tp-rcard, .tp-menu-list, .tp-icon-btn, .tp-help-fab, .tp-bar > i { transition: none !important; }
+  .tp-rcard:hover { transform: none; }
+}
+@media (prefers-reduced-transparency: reduce) {
+  .tp-top.ui, .tp-menu-list, .tp-help-panel, .tp-auth-card { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--ui-solid); }
+  .tp-card, .tp-rcard { background: var(--ui-solid); }
+  .tp-sky i, .tp-orbs { display: none; }
+}
+@media (prefers-contrast: more) {
+  .tp-card, .tp-rcard, .tp-menu-list, .tp-help-panel, .tp-auth-card { background: var(--ui-solid); border-color: var(--tp-fg); -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tp-icon-btn, .tp-avatar-btn, .tp-item { background: var(--tp-surface-2); border-color: var(--tp-fg); box-shadow: none; }
+  .tp-orbs { display: none; }
+}
+@media (forced-colors: active) {
+  .tp-card, .tp-rcard, .tp-menu-list, .tp-help-panel, .tp-auth-card { background: Canvas; border: 1px solid CanvasText; -webkit-backdrop-filter: none; backdrop-filter: none; }
+  .tp-icon-btn, .tp-avatar-btn, .tp-item, .tp-help-fab, .tp-auth-go { background: ButtonFace; color: ButtonText; border: 1px solid ButtonText; box-shadow: none; }
+  .tp-bar > i, .tp-prog-track > i.done { background: Highlight; }
+  .tp-sky, .tp-orbs { display: none; }
+}

@@ -62,12 +62,15 @@ test("ورود مدیر با رقم فارسی خطای داخلی نمی‌ده
   assert.equal((await login({ role: "manager", code: "رمز" })).status, 401, "نویسهٔ غیرلاتین ۴۰۱ است نه ۵۰۰");
 });
 
-test("کادر ورود پنل‌ها: هشت رقم و تبدیل رقم فارسی پیش از ارسال", () => {
+test("کادر ورود پنل‌ها: خانه‌های کد تا هشت رقم (ui.js) و تبدیل رقم فارسی پیش از ارسال", () => {
   const expert = readFileSync(resolve(FRONT, "expert.js"), "utf8");
   const manager = readFileSync(resolve(FRONT, "manager.js"), "utf8");
   const shared = readFileSync(resolve(FRONT, "shared.js"), "utf8");
-  assert.match(expert, /<input id="code"[^>]*maxlength="8"/, "کد ورود تا ۸ رقم است");
-  assert.match(expert, /TP\.digits\(G\("#code"\)\.value\)/);
-  assert.match(manager, /TP\.digits\(G\("#mcode"\)\.value\)/);
+  const ui = readFileSync(resolve(FRONT, "ui.js"), "utf8");
+  /* مهر ۱۴۰۵: کارتِ ورود با چهار خانه که تا هشت رقم خانه می‌افزاید (TP.ui.login)؛ هر خانه فقط رقمِ لاتین‌شده می‌پذیرد */
+  assert.match(expert, /TP\.ui\.login\(\{[^}]*len: 4, max: 8/, "کد ورود کارشناس: چهار خانه تا ۸ رقم");
+  assert.match(manager, /TP\.ui\.login\(\{[^}]*len: 4, max: 8/, "کد مدیر: چهار خانه تا ۸ رقم");
+  assert.match(ui, /const digits = \(s\) => String\(s == null \? "" : s\)\.replace\(\/\[۰-۹\]\/g/, "ارقام فارسی و عربی لاتین می‌شوند");
+  assert.match(ui, /const d = digits\(c\.value\)\.replace\(\/\\D\/g, ""\);\s*c\.value = d\.slice\(-1\);/, "هر خانه یک رقمِ لاتین‌شده");
   assert.match(shared, /TP\.digits = dig;/);
 });

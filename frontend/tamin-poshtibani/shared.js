@@ -214,8 +214,8 @@
     toggle() { TP.theme.set(TP.theme.get() === "light" ? "dark" : "light"); },
   };
   const themeLabel = () => (TP.theme.get() === "light" ? ["🌙", "حالت شب"] : ["☀️", "حالت روز"]);
-  /** دکمهٔ نوار بالا — پنل‌ها فقط همین را در سرآیندشان می‌گذارند؛ کلیکش را شنوندهٔ سراسری زیر می‌گیرد */
-  TP.themeBtn = () => { const [ic, lab] = themeLabel(); return `<button class="tp-btn sm tp-theme" data-theme-toggle title="${lab}" aria-label="${lab}">${ic} ${lab}</button>`; };
+  /** دکمهٔ نوار بالا — فقط آیکونِ خورشید/ماه (ui.js، مهر ۱۴۰۵)؛ بی ui.js همان دکمهٔ متنی. کلیکش را شنوندهٔ سراسری زیر می‌گیرد */
+  TP.themeBtn = () => { if (TP.ui && TP.ui.themeBtn) return TP.ui.themeBtn(); const [ic, lab] = themeLabel(); return `<button class="tp-btn sm tp-theme" data-theme-toggle title="${lab}" aria-label="${lab}">${ic} ${lab}</button>`; };
   /* تست‌ها همین فایل را بیرون از مرورگر اجرا می‌کنند — بی document یا با document ساختگی */
   const inBrowser = typeof document !== "undefined" && !!document.documentElement && typeof document.addEventListener === "function";
   if (inBrowser) { TP.theme.apply(TP.theme.get()); ensureCss(); }
@@ -224,7 +224,7 @@
     if (!b) return;
     TP.theme.toggle();
     const [ic, lab] = themeLabel();
-    document.querySelectorAll("[data-theme-toggle]").forEach((x) => { x.textContent = `${ic} ${lab}`; x.title = lab; x.setAttribute("aria-label", lab); });
+    document.querySelectorAll("[data-theme-toggle]").forEach((x) => { if (!x.classList.contains("tp-icon-btn")) x.textContent = `${ic} ${lab}`; x.title = lab; x.setAttribute("aria-label", lab); });
     /* پنل‌ها با این رویداد از نو رندر می‌کنند تا هیچ عنصری با رنگ‌های حالت قبلی نماند */
     window.dispatchEvent(new Event("tp-theme"));
   });

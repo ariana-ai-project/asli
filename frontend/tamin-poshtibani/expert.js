@@ -92,15 +92,13 @@
   }
 
   /* ---------- ورود و کارتابل ---------- */
+  /* کارتِ ورود با چهار خانهٔ کد (کدهای بلندتر خانه می‌افزایند) و دکمهٔ سه‌بعدی — ui.js (مهر ۱۴۰۵) */
   function vLogin() {
-    return `<div class="tp-card tp-login"><h2>ورود کارشناس خرید</h2><p>کد کارشناسی خود را وارد کنید.</p>
-      <input id="code" class="tp-input" inputmode="numeric" maxlength="8" autocomplete="off" autofocus>
-      <button class="tp-btn primary" data-login style="width:100%;margin-top:14px">ورود</button>
-      <div class="err">${esc(S.error)}</div><a class="tp-back" href="index.html">← بازگشت به تدارکات</a></div>`;
+    return TP.ui.login({ title: "ورود کارشناس خرید", sub: "کد ورود را رقم‌به‌رقم بنویسید", len: 4, max: 8, error: S.error, back: { href: "index.html" }, company: COMPANY });
   }
   const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
   function trayRows() {
-    return S.tray.filter((a) => TP.hit(a.request_id, S.q.id) && (!dateList().length || dateList().includes(a.date)) && TP.hit(a.party, S.q.party));
+    return S.tray.filter((a) => TP.hit(a.request_id, S.q.id) && (!dateList().length || dateList().includes(a.date)) && (TP.hit(a.party, S.q.party) || TP.hit(a.project, S.q.party)));
   }
   /* ساعت کاری مانده تا مهلت — منفی یعنی مهلت گذشته */
   const trayLeft = (a) => TP.budget(a.dispatched_at, a.days || 1) - TP.wh(a.dispatched_at, S.now);
@@ -108,9 +106,12 @@
   const LIST_TABS = ["team", "alerts", "account"];
   /* تیکِ «🤖 هوشمند / ✋ دستی» این کارشناس در پنل پشتیبانی (worker/ai-agent.js، aiAdmin) — داشبوردش هم همان‌جاست */
   const aiOn = () => !!(S.expert && S.expert.ai === "on");
+  /* کپسولِ بخش‌ها فقط برای کارشناس ارشد (کارتابل · تیم · اعلانات)؛ «حساب من» به منوی پروفایل رفت (مهر ۱۴۰۵) */
   function vSeniorTabs() {
-    const T = [["tray", "کارتابل من"], ...(isSenior() ? [["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]] : []), ["account", "حساب من"]];
-    return `<div class="tp-tabs" style="padding-top:12px">${T.map(([k, l]) => `<button class="tp-tab ${(S.tab === k || (k === "tray" && !LIST_TABS.includes(S.tab))) ? "on" : ""}" data-stab="${k}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div>`;
+    if (!isSenior()) return "";
+    const T = [["tray", "کارتابل من"], ["team", "تیم کارشناسی"], ["alerts", "تنظیم اعلانات"]];
+    const on = (k) => S.tab === k || (k === "tray" && !LIST_TABS.includes(S.tab));
+    return `<div class="tp-subbar" style="padding-top:12px"><div class="tp-seg" role="tablist">${T.map(([k, l]) => `<button class="${on(k) ? "on" : ""}" data-stab="${k}" role="tab" aria-selected="${on(k) ? "true" : "false"}">${l}${k === "team" && S.team ? `<span class="cnt">${S.team.requests.length}</span>` : ""}</button>`).join("")}</div></div>`;
   }
   /* باکس‌های تب تیم با آستانه‌های تیم (ارشد اگر گذاشته، وگرنه مدیر) — جدا از آستانه‌های کارتابل خودش */
   const teamThr = () => ((S.team && S.team.settings) || settings()).thresholds;
@@ -119,11 +120,10 @@
   function vAccount() {
     const e = S.expert, tg = S.tg || {};
     const k = (lab, val) => `<div class="k"><b>${lab}</b><span style="font-size:.95rem">${val}</span></div>`;
-    return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>حساب من</h2>
+    return `<div class="tp-wrap"><div class="tp-card tp-pane"><div class="toolrow" style="margin-bottom:6px"><button class="tp-btn sm" data-stab="tray">→ کارتابل</button><h2 style="margin:0">حساب من</h2>${TP.ui.info("expert.account")}</div>
       <div class="kpi">${k("نام", esc(e.name))}${k("نام کوتاه", esc(e.label || e.name))}${k("نقش", isSenior() ? "کارشناس ارشد" : "کارشناس خرید")}
         ${tg.botConfigured ? k("تلگرام کارشناسی", tg.connected ? "✅ وصل" : "وصل نیست") : ""}${isSenior() ? k("تلگرام تیمی", e.team_connected ? "✅ وصل" : "وصل نیست") : ""}</div>
-      <div class="tp-sect"><h3>تغییر کد ورود</h3>
-        <p class="lead">کد ورود، رمز پنل شماست: ۴ تا ۸ رقم. بعد از تغییر، همین مرورگر وارد می‌ماند و دفعهٔ بعد با کد تازه وارد می‌شوید. مدیر هم هر وقت لازم باشد می‌تواند کد شما را عوض کند.</p>
+      <div class="tp-sect"><h3>تغییر کد ورود <span>۴ تا ۸ رقم</span></h3>
         <div class="tp-fields3">
           <div class="tp-field"><b>کد فعلی</b><input class="tp-input" id="acc-cur" type="password" inputmode="numeric" autocomplete="current-password"></div>
           <div class="tp-field"><b>کد تازه</b><input class="tp-input" id="acc-new" type="password" inputmode="numeric" autocomplete="new-password"></div>
@@ -140,9 +140,8 @@
     if (!s || s === "loading") { if (!s) loadSup(); return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead">در حال خواندن…</p></div>`; }
     if (s.err) return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead" style="color:#fca5a5">${esc(s.err)}</p></div>`;
     const c = s.cfg || {}, fa = s.fa || {};
-    return `<div class="tp-sect"><h3>👁 حالت تأیید</h3>
-      <p class="lead">در اقلامی که «👁 با تأیید» اند — مدیر اجازه داده یا درخواستِ شما را پذیرفته — کارشناس هوشمند هر کاری را که این‌جا تیک بزنید، اول به شما پیشنهاد می‌کند (در «💬 مکاتبات» و بات):
-        تأیید توضیح نمی‌خواهد؛ رد با توضیح است و بعدش پیامِ خودتان می‌رود یا هیچ. کاری که تیک نخورده خودکار است.${s.heads ? "" : " <b>فعلاً پشتیبانی هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است.</b>"}</p>
+    return `<div class="tp-sect"><h3>👁 حالت تأیید <span>کدام کارِ کارشناس هوشمند اول به شما پیشنهاد شود</span>${TP.ui.info("expert.account", "راهنمای حالت تأیید")}</h3>
+      ${s.heads ? "" : `<p class="lead"><b>فعلاً پشتیبانی هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است.</b></p>`}
       <label class="chkline"><input type="checkbox" data-sup="chat" ${c.chat ? "checked" : ""}> ${esc(fa.chat || "پیامِ چت")} — با تأیید</label>
       <label class="chkline"><input type="checkbox" data-sup="bundle" ${c.bundle ? "checked" : ""}> ${esc(fa.bundle || "تصمیمِ بسته")} — با تأیید</label>
       <div id="sup-msg" style="min-height:22px;font-size:.9rem"></div></div>`;
@@ -180,27 +179,49 @@
     if (isSenior() && S.tab === "alerts") return vSeniorTabs() + vSeniorAlerts();
     if (S.tab === "account") return vSeniorTabs() + vAccount();
     const rows = trayRows();
-    /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول) */
+    /* مرتب‌سازی با مهلت باقی‌مانده: کم‌ترین ساعت کاری بالا (تمام‌شده‌ها اول)؛ پیش‌فرض: تازه‌ترین ارسال اول */
     if (S.traySort) rows.sort((x, y) => trayLeft(x) - trayLeft(y));
-    const teamCol = isSenior() && (S.team ? S.team.team : []).length;
-    return `${vSeniorTabs()}<div class="tp-wrap" style="padding-bottom:20px">${aiOn() ? `<div class="tp-note" style="max-width:none;margin:0 0 10px">🤖 تیکِ شما در «پنل پشتیبانی» روی <b>هوشمند</b> است: در هر ارجاعِ تازه (نشانِ 🤖) ساختارِ اقلام را خودتان تأیید و 🔒/🔓 می‌کنید (🧩) و «بررسی سوابق و سپردن به کارشناس هوشمند» را می‌زنید؛ از آن پس بررسی سوابق، جستجوی هوشمند، مذاکره، جدول و نامه با کارشناس هوشمند است و برای شما قفل. اگر سؤالی از شما داشته باشد، کنارِ «💬 مکاتبات» 🚨 می‌آید و در تلگرام هم خبر می‌دهد.</div>` : ""}<div class="tp-card">
-      <div class="tp-filters" style="border-top:0;border-radius:16px 16px 0 0">
-        <span class="lab">شماره درخواست</span><input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" style="width:120px">
-        <span class="lab">تاریخ</span><input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="انتخاب تاریخ" readonly style="width:170px">
-        <span class="lab">طرف مقابل</span><input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" style="width:190px">
-        <button class="tp-btn sm" data-clr>پاک کردن</button>
-        <span class="end">${rows.length} از ${S.tray.length} · خاتمه‌یافته، معلق و متوقف در کارتابل نیستند</span></div>
-      <div class="tp-scroll" style="border:0;border-radius:0 0 16px 16px"><table class="tp-table" style="width:100%"><thead><tr>
-        <th>شماره درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>اقلام باز</th><th>مهلت</th>
-        <th><button class="sortbtn ${S.traySort ? "on" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>باقی‌مانده</th><th>پیشرفت</th><th>استعلام</th>${teamCol ? `<th>ارجاع به تیم</th>` : ""}</tr></thead><tbody>
-        ${rows.map((a) => { const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), lf = Math.max(0, b - el);
-          const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-          return `<tr data-req="${a.id}" style="cursor:pointer"><td class="id num">${esc(a.request_id)}${a.ai === 1 && !a.ai_run ? ` <span class="chip ${a.norm_count >= a.open_count ? "ok" : "warn"}" title="حالتِ هوشمند: ساختارِ اقلام را تأیید کنید و «بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید">🧩 ${a.norm_count} از ${a.open_count}</span>` : ""}${a.ai === 2 ? ` <span class="chip warn" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ بررسی سوابق و جستجو برای شما باز شد">⚠️🤖</span>` : a.ai ? ` <span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : ""}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
-            <td class="num">${a.open_count} از ${a.item_count}</td><td class="num">${a.days} روز</td>
-            <td class="num" style="${lf <= 0 ? "color:#fca5a5;font-weight:700" : ""}">${lf <= 0 ? "تمام شد" : lf.toFixed(1) + " ساعت کاری"}</td>
-            <td>${boxes(a, done, true, true)}</td><td class="num">${a.quote_count}</td>${teamCol ? `<td data-stop><button class="tp-btn xs" data-delegate="${a.id}" title="این درخواست به یکی از کارشناسان تیم داده شود">ارجاع به تیم</button></td>` : ""}</tr>`; }).join("")}
-        ${rows.length ? "" : `<tr><td colspan="${teamCol ? 9 : 8}"><div class="empty">درخواستی در کارتابل شما نیست.</div></td></tr>`}
-      </tbody></table></div></div></div>`;
+    const any = S.q.id || S.q.date || S.q.party;
+    return `${vSeniorTabs()}<div class="tp-subbar" style="padding-top:12px">
+        <input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" placeholder="شماره درخواست" aria-label="شماره درخواست" style="width:140px">
+        <input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" aria-label="تاریخ" readonly style="width:150px">
+        <input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" placeholder="پروژه یا طرف مقابل" aria-label="پروژه یا طرف مقابل" style="width:200px">
+        ${any ? `<button class="tp-btn sm" data-clr>پاک کردن</button>` : ""}
+        <button class="tp-btn sm ${S.traySort ? "primary" : ""}" data-tsort title="${S.traySort ? "برگشت به ترتیب ارسال — تازه‌ترها اول" : "مرتب‌سازی با مهلت باقی‌مانده — نزدیک‌ترین مهلت بالا"}">${S.traySort ? "✓ مرتب با مهلت" : "⇅ مرتب با مهلت"}</button>
+        <span class="spacer"></span><span class="dim" style="font-size:.85rem">${rows.length} از ${S.tray.length} درخواست</span>
+        ${aiOn() ? `<span class="chip info" title="تیکِ شما در پنل پشتیبانی روی «هوشمند» است">🤖 هوشمند</span>` : ""}${TP.ui.info(aiOn() ? "expert.ai" : "expert.tray", "راهنمای کارتابل")}</div>
+      ${rows.length ? `<div class="tp-cards">${rows.map(trayCard).join("")}</div>`
+        : `<div class="tp-wrap"><div class="tp-card"><div class="empty"><b>درخواستی در کارتابل شما نیست.</b>وقتی مدیر درخواستی ارجاع و ارسال کند، این‌جا کارت می‌شود.</div></div></div>`}`;
+  }
+  /* بدترین رنگِ شش مرحله (همان TP.stageColor باکس‌های پایش) برای رنگِ کلِ کارت: زرد، نارنجی، قرمز */
+  const LVL = { warn: 1, late: 2, over: 3 };
+  function trayLevel(a, done) {
+    const st = { dispatchedAt: a.dispatched_at, days: a.days, done, active: true };
+    let worst = "";
+    TP.STAGES.forEach((_, i) => { const c = TP.stageColor(st, i, settings().thresholds, S.now); if ((LVL[c] || 0) > (LVL[worst] || 0)) worst = c; });
+    return worst;
+  }
+  /** کارتِ هر درخواست در کارتابل: شماره و تاریخ، پروژه، اقلام، نوار مهلت و نوار شش مرحله (مهر ۱۴۰۵) */
+  function trayCard(a, i) {
+    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, el / b * 100) : 0;
+    const done = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
+    const lvl = trayLevel(a, done);
+    const barLvl = el >= b ? "over" : pct >= 85 ? "late" : pct >= 60 ? "warn" : "";
+    const chips = [
+      a.ai === 1 && !a.ai_run ? `<span class="chip ${a.norm_count >= a.open_count ? "ok" : "warn"}" title="حالتِ هوشمند: ساختارِ اقلام را تأیید کنید و «بررسی سوابق و سپردن به کارشناس هوشمند» را بزنید">🧩 ${a.norm_count} از ${a.open_count}</span>` : "",
+      a.ai === 2 ? `<span class="chip warn" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ بررسی سوابق و جستجو برای شما باز شد">⚠️🤖</span>` : a.ai ? `<span class="chip info" title="این درخواست دستِ کارشناس هوشمند است (پنل پشتیبانی)">🤖</span>` : "",
+    ].filter(Boolean).join("");
+    const team = isSenior() && (S.team ? S.team.team : []).length;
+    const more = team ? `<span class="more" data-stop>${TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
+      items: [{ label: "ارجاع به تیم", icon: "users", attrs: `data-delegate="${a.id}"` }] })}</span>` : "";
+    const proj = a.project || a.party || "—";
+    return `<article class="tp-rcard ${lvl ? `lvl-${lvl}` : ""}" data-req="${a.id}" role="button" tabindex="0" style="--i:${Math.min(i, 12)}" aria-label="درخواست ${esc(a.request_id)}">
+      <header><span class="rid">${esc(a.request_id)}</span><span class="rdate">${esc(a.date)}</span><span class="chips">${chips}</span>${more}</header>
+      <div class="rproj" title="${esc(proj)}">${TP.ui.ICON.project}<span>${esc(proj)}</span></div>
+      <div class="rmeta"><span>اقلام باز <b>${a.open_count}</b> از <b>${a.item_count}</b></span><span>استعلام <b>${a.quote_count}</b></span>${a.project && a.party && a.project !== a.party ? `<span title="طرف مقابل">${esc(a.party)}</span>` : ""}</div>
+      ${TP.ui.bar.deadline(pct, barLvl, "مهلت", `${a.days} روز`)}
+      ${TP.ui.bar.progress(TP.STAGES.map((s, k) => ({ label: TP.ui.STAGE_SHORT[k], title: s, done: done[k], cnt: k === 3 && a.quote_count ? a.quote_count : k === 4 && a.proforma_count ? a.proforma_count : "" })))}
+    </article>`;
   }
 
   /* ---------- تیم کارشناسی (کارشناس ارشد) ----------
@@ -369,85 +390,82 @@
   const itemFree = (it) => { const st = iState(it); return st === "manual" || st === "free" || (st === "direct" && !S.pickOpen[it.id]); };
   const PILL = { select: ["warn", "🎯 منتظرِ شروع", "فهرستِ دعوتِ این قلم را ببینید و «🚀 شروع» را بزنید"], direct: ["", "✋ مستقیم", "از نوعِ «مستقیم»: خودتان مکاتبه کنید یا به انتخابِ خودتان بسپارید"],
     manual: ["", "✋ دستی", "«انجام دستی»ِ تأییدشدهٔ مدیر"], waiting: ["warn", "⏳ مدیر", "درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر"] };
-  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return (p ? ` <span class="chip ${p[0]}" style="margin-top:6px" title="${p[2]}">${p[1]}</span>` : "") + pillSup(x); };
+  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return (p ? ` <span class="chip ${p[0]}" title="${p[2]}">${p[1]}</span>` : "") + pillSup(x); };
   /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ قلم — روشن، یا درخواستش منتظرِ مدیر */
   const supTip = () => { const c = (S.d && S.d.ai && S.d.ai.sup && S.d.ai.sup.cfg) || {}; return `پیامِ چت: ${c.chat ? "با تأیید" : "خودکار"} · تصمیمِ بسته: ${c.bundle ? "با تأیید" : "خودکار"} (تنظیمش در «حساب من»)`; };
   const pillSup = (x) => {
     const m = x.state === "open" && aiOwned() ? aiItem(x) : null;
     if (!m) return "";
-    if (m.sup_on) return ` <span class="chip info" style="margin-top:6px" title="${esc(supTip())}">👁 با تأیید</span>`;
-    return m.sup_wait ? ` <span class="chip warn" style="margin-top:6px" title="درخواستِ «👁 حالت تأیید» در انتظارِ تصمیمِ مدیر">⏳ حالت تأیید</span>` : "";
+    if (m.sup_on) return ` <span class="chip info" title="${esc(supTip())}">👁 با تأیید</span>`;
+    return m.sup_wait ? ` <span class="chip warn" title="درخواستِ «👁 حالت تأیید» در انتظارِ تصمیمِ مدیر">⏳ حالت تأیید</span>` : "";
   };
+  /* نوارِ یک‌خطیِ وضعیتِ کارشناس هوشمند: فقط همین لحظه (شمارها، سؤال‌ها، واگذاری)؛ توضیحِ روال در راهنما (expert.ai) */
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
+    const H = TP.ui.info("expert.ai", "راهنمای کارشناس هوشمند");
     const free = items().filter((i) => i.state === "open" && aiItem(i) && itemFree(i));
-    const freeTxt = free.length ? `<br>✋ <b>دستِ خودِ شما:</b> ${free.map((i) => esc(i.title)).join("، ")} — ${free.some((i) => (aiItem(i) || {}).manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم»${flow2()
-      ? "؛ «مستقیم» را هم اگر خواستید با «🤖 سپردن به کارشناس هوشمند» در «بررسی سوابق» می‌سپارید" : "؛ بررسی سوابق و جستجویشان برایتان باز است"}.` : "";
+    const freeTxt = free.length ? `<span class="chip" title="${free.some((i) => (aiItem(i) || {}).manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم» — بررسی سوابق و جستجویشان برایتان باز است${flow2() ? "؛ «مستقیم» را هم اگر خواستید با «🤖 سپردن به کارشناس هوشمند» در «بررسی سوابق» می‌سپارید" : ""}">✋ دستِ شما: ${free.map((i) => esc(i.title)).join("، ")}</span>` : "";
     if (!aiOwned()) return ai.review && ai.review.state === "rejected"
-      ? `<div class="tp-note warn" style="margin:10px 0">↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b>${ai.review.reason ? `: ${esc(ai.review.reason)}` : ""} — این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</div>`
-      : ai.on === false ? `<div class="tp-note" style="margin:10px 0">✋ <b>مدیر این درخواست را دستی ارجاع داده است</b>${ai.note ? `: ${esc(ai.note)}` : ""} — همهٔ کارهایش با خودِ شماست.</div>` : "";
+      ? `<div class="tp-status warn"><b>↩️ پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b><span class="sp">${ai.review.reason ? `${esc(ai.review.reason)} — ` : ""}این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</span>${H}</div>`
+      : ai.on === false ? `<div class="tp-status"><b>✋ ارجاعِ دستیِ مدیر</b><span class="sp">${ai.note ? `${esc(ai.note)} — ` : ""}همهٔ کارهایش با خودِ شماست.</span>${H}</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
-    const ask = k ? `<br><b style="color:#fcd34d">🚨 کارشناس هوشمند ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</b> — <a href="correspond.html" style="text-decoration:underline">در «💬 مکاتبات» جواب دهید</a>.` : "";
-    const need = cv.length ? `<br>حداقلِ استعلام (پنل پشتیبانی): ${cv.map((c) => `${esc(c.title)} <b>${c.have} از ${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join("، ")}` : "";
+    const ask = k ? `<a class="chip warn" href="correspond.html" title="پاسخ را در همان گفت‌وگو در «💬 مکاتبات» بنویسید">🚨 ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</a>` : "";
+    const need = cv.length ? `<span class="chip" title="حداقلِ استعلامِ هر قلم (پنل پشتیبانی)">حداقلِ استعلام: ${cv.map((c) => `${esc(c.title)} <b>${c.have}/${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join(" · ")}</span>` : "";
     /* فاز ۴ب گام ۲ (روالِ تازه): هر قلم جدا — فهرستِ دعوت و «🚀 شروع» کارِ کارشناس، دعوت و مذاکره کارِ کارشناس هوشمند */
     if (flow2()) {
       const st = items().filter((i) => i.state === "open").map(iState);
       const nGo = st.filter((s) => s === "started").length, nSel = st.filter((s) => s === "select").length;
-      const tally = `<br><b>${M(nGo)}</b> قلم سپرده شد${nSel ? ` · <b>${M(nSel)}</b> قلم منتظرِ «🚀 شروع»` : ""}.`;
-      const ho = aiHandover() ? `<br>⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید:</b> در «🎯 فهرست دعوت» نفرهای دیگری تیک بزنید یا از «جستجوی هوشمند» بیفزایید و «📨 دعوت از انتخاب‌های تازه» را بزنید — یا خطِ دستیِ ✋ بیفزایید.` : "";
-      return `<div class="tp-note ${aiHandover() ? "warn" : ""}" style="margin:10px 0">🤖 <b>حالتِ هوشمند — هر قلم جدا.</b> ساختارِ قلم را تأیید کنید (🔒/🔓)، «بررسی سوابق» را بزنید و در «🎯 فهرست دعوت» تیک‌ها را ببینید:
-        پنج نفر اول به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت» از پیش تیک خورده‌اند (در «انتخاب کارشناس» برداشتنِ هر کدام توضیح می‌خواهد)؛ بعد «🚀 شروع» را بزنید.
-        کارشناس هوشمند فقط تیک‌خورده‌هایی را دعوت می‌کند که شمارهٔ پنلِ تیک‌خورده دارند، و از «جستجوی هوشمند» فقط آن‌که خودتان با «🎯 به فهرست دعوت» بیفزایید. مذاکره، جدول کمیسیون و نامه با اوست؛
-        خطِ دستیِ خودتان (✋) را در «استعلامات» می‌افزایید.${tally}${ho}${need}${ask}${freeTxt}</div>`;
+      const ho = aiHandover() ? `<span class="chip warn" title="در «🎯 فهرست دعوت» نفرهای دیگری تیک بزنید یا از «جستجوی هوشمند» بیفزایید و «📨 دعوت از انتخاب‌های تازه» را بزنید — یا خطِ دستیِ ✋ بیفزایید">⚠️ در مهلت به حداقلِ استعلام نرسید</span>` : "";
+      return `<div class="tp-status ${aiHandover() ? "warn" : ""}"><b>🤖 حالتِ هوشمند — هر قلم جدا</b><span class="sp chips"><span class="chip ok">${M(nGo)} قلم سپرده شد</span>${nSel ? `<span class="chip warn">${M(nSel)} قلم منتظرِ «🚀 شروع»</span>` : ""}${ho}${need}${ask}${freeTxt}</span>${H}</div>`;
     }
-    if (aiHandover()) return `<div class="tp-note warn" style="margin:10px 0">⚠️ <b>کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید و کار به شما واگذار شد.</b>
-      بررسی سوابق و جستجوی هوشمندِ این درخواست حالا برایتان باز است: تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید («ارسال استعلام» در مکاتبات، یا خطِ دستیِ ✋ با پیش‌فاکتور).
-      گفت‌وگوهای کارشناس هوشمند ادامه دارند و وقتی حد پر شد، جدول کمیسیون و نامه را خودش می‌سازد.${need}${ask}${freeTxt}</div>`;
-    return `<div class="tp-note" style="margin:10px 0">🤖 <b>این درخواست دستِ کارشناس هوشمند است.</b> بررسی سوابق، جستجوی هوشمند، مذاکره با تأمین‌کنندگان، جدول کمیسیون و نامه را خودش انجام می‌دهد
-      و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد. در «استعلامات» می‌توانید خطِ دستیِ خودتان (✋) را بیفزایید و پیش‌فاکتورش را بارگذاری و استخراج کنید.${need}${ask}${freeTxt}</div>`;
+    if (aiHandover()) return `<div class="tp-status warn"><b>⚠️ کار به شما واگذار شد</b><span class="sp chips"><span class="chip" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید — گفت‌وگوهایش ادامه دارند و وقتی حد پر شد، جدول و نامه را خودش می‌سازد">بررسی سوابق و جستجو برایتان باز است</span>${need}${ask}${freeTxt}</span>${H}</div>`;
+    return `<div class="tp-status"><b>🤖 دستِ کارشناس هوشمند</b><span class="sp chips"><span class="chip" title="بررسی سوابق، جستجوی هوشمند، مذاکره، جدول کمیسیون و نامه با اوست و برای شما قفل؛ گفت‌وگوهایش بسته‌اند مگر وقتی از شما سؤال دارد">خطِ دستیِ ✋ را در «استعلامات» می‌افزایید</span>${need}${ask}${freeTxt}</span>${H}</div>`;
   }
   function vAiLocked(tab) {
     const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
     return `<div class="pad"><div class="empty"><b>🔒 ${what} دستِ کارشناس هوشمند است.</b>تا وقتی تیکِ این کارشناس در پنل پشتیبانی «🤖 هوشمند» است، این کار را خودش انجام می‌دهد
       و نتیجه در جدول‌ها و گزارش‌ها می‌آید. برای کارِ دستی، پشتیبانی باید تیکِ شما را «✋ دستی» کند.</div></div>`;
   }
-  function vEndBar() {
-    const a = A(), its = items(), n = its.length, k = its.filter((i) => i.commission_ok).length, o = openItems().length;
+  /* اقدام‌های درخواست در یک منو (قالب‌ها، تعلیق، توقف، خاتمه) و یک خطِ وضعیت — به‌جای نوارِ پُردکمه (مهر ۱۴۰۵) */
+  function endMenu() {
+    const its = items(), n = its.length, k = its.filter((i) => i.commission_ok).length, o = openItems().length;
     const pend = S.d.pendingDecisions.length;
-    return `<div class="endbar">
-      <span class="st ${o ? "st-run" : "st-cls"}">${o ? "در جریان" : "بدون قلم باز"}</span>
-      <span class="muted" style="font-size:.88rem" title="تیکِ تأیید کمیسیون را پنل پشتیبانی می‌زند؛ «خاتمه» همان اقلام را می‌بندد">${k} از ${n} قلم را پشتیبانی تأیید کمیسیون کرده${o < n ? ` · ${n - o} قلم بسته/متوقف` : ""}</span>
-      <span style="margin-inline-start:auto"></span>
-      ${pend ? `<span class="chip warn">در انتظار تأیید مدیر (${pend})</span>` : settings().approvalRequired ? `<span class="chip warn">تصمیم شما نیاز به تأیید مدیر دارد</span>` : ""}
-      <button class="tp-btn sm" data-tpl>قالب‌های پیام</button>
-      <button class="tp-btn sm warn" data-eact="hold" ${o ? "" : "disabled"}>تعلیق</button>
-      <button class="tp-btn sm danger" data-eact="stop" ${o ? "" : "disabled"}>توقف</button>
-      <button class="tp-btn sm primary" data-eact="end" ${k ? "" : "disabled"}>خاتمه (${k} قلم)</button>
-      ${a.commission_at ? "" : ""}</div>`;
+    const note = pend ? `<span class="chip warn">در انتظار تأیید مدیر (${pend})</span>` : settings().approvalRequired ? `<span class="chip" title="تصمیم شما (تعلیق، توقف، خاتمه) نیاز به تأیید مدیر دارد">با تأیید مدیر</span>` : "";
+    const menu = TP.ui.menu({ btn: `<button class="tp-btn sm tp-menu-btn" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${TP.ui.ICON.more}اقدام‌ها</button>`, items: [
+      { label: "قالب‌های پیام", icon: "chat", attrs: "data-tpl" }, "-",
+      { label: "تعلیق", icon: "clock", attrs: 'data-eact="hold"', disabled: !o },
+      { label: "توقف", icon: "flag", attrs: 'data-eact="stop"', disabled: !o, cls: "danger" },
+      { label: `خاتمه (${k} قلم)`, icon: "check", attrs: 'data-eact="end"', disabled: !k },
+    ] });
+    return { menu, status: `<span class="st ${o ? "st-run" : "st-cls"}">${o ? "در جریان" : "بدون قلم باز"}</span><span class="dim" style="font-size:.84rem" title="تیکِ تأیید کمیسیون را پنل پشتیبانی می‌زند؛ «خاتمه» همان اقلام را می‌بندد">${k} از ${n} قلم تأیید کمیسیون${o < n ? ` · ${n - o} قلم بسته/متوقف` : ""}</span>${note}` };
   }
   function vDetail() {
     const a = A(), r = S.d.request, its = items(), it = item();
     const mine = a.expert_id === S.expert.id;
-    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, Math.round(el / b * 100)) : 0;
-    const dl = TP.endN(a.dispatched_at, a.days || 1), left = Math.max(0, b - el), dd = new Date(dl);
+    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, el / b * 100) : 0;
+    const dl = TP.endN(a.dispatched_at, a.days || 1), dd = new Date(dl);
     const done = flagsOf(a, its, qCount(), pCount());
+    /* نوار شش مرحله با رنگِ هر مرحله — همان رنگِ باکس‌های پایش مدیر */
+    const st = { dispatchedAt: a.dispatched_at, days: a.days, done, active: openItems().length > 0 };
+    const segs = TP.STAGES.map((s, i) => { const c = TP.stageColor(st, i, settings().thresholds, S.now); return { label: TP.ui.STAGE_SHORT[i], title: s, done: c === "done", cls: `c-${c}`, cnt: i === 3 && qCount() ? qCount() : i === 4 && pCount() ? pCount() : "" }; });
+    const barLvl = el >= b ? "over" : pct >= 85 ? "late" : pct >= 60 ? "warn" : "";
+    const E = endMenu();
+    const proj = r.project || r.party;
     return `<div class="tp-wrap" style="padding-bottom:24px"><div class="tp-card">
-      <div class="head"><div><button class="tp-btn sm" data-back>→ کارتابل</button>${mine ? "" : `<div class="chip warn" style="margin-top:6px">ارجاعِ ${esc(a.expert_label || a.expert_name)} — فقط‌خواندنی</div>${isSenior() ? ` <button class="tp-btn xs" data-delegate="${a.id}" data-from="${a.expert_id}" title="این درخواست به کارشناس دیگری از تیم شما (یا خودتان) داده شود" style="margin-top:6px">تغییر کارشناس</button>` : ""}`}</div>
-        <div><h2>درخواست <span class="num">${esc(r.id)}</span></h2>
-          <div class="kpi" style="margin-top:8px"><div class="k" style="text-align:right;min-width:auto;max-width:360px"><b>طرف مقابل</b><span style="font-size:.9rem;font-weight:500">${esc(r.party)}</span></div>
-            <div class="k"><b>اقلام</b><span>${its.length}</span></div><div class="k"><b>تاریخ ثبت</b><span class="num" style="font-size:.95rem">${esc(r.date)}</span></div>
-            ${r.urgency ? `<div class="k"><b>فوریت</b><span style="font-size:.9rem;color:#fcd34d">${esc(r.urgency)}</span></div>` : ""}</div></div>
-        <div class="right"><div style="display:flex;justify-content:flex-end">${boxes({ ...a, quote_count: qCount(), proforma_count: pCount() }, done, openItems().length > 0)}</div>
-          <div class="kpi" style="margin-top:8px;justify-content:flex-end"><div class="k"><b>سپری‌شده</b><span>${pct}٪</span></div><div class="k"><b>ساعت کاری مانده</b><span>${left.toFixed(1)}</span></div>
-            <div class="k" style="background:rgba(79,140,255,.14);border-color:var(--tp-accent)"><b>مهلت تحویل</b><span style="font-size:.95rem">${TP.WD[dd.getDay()]} ${TP.fmtD(dl)}</span></div></div></div></div>
-      ${vEndBar()}
-      <div class="strip">${its.map((x, i) => `<div class="pill ${i === S.itemIdx ? "sel" : ""} ${x.state !== "open" ? "closed" : ""}">
-        <span class="t" data-item="${i}" title="${esc(x.title)}">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
-        ${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}" style="margin-top:6px;display:inline-block">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" style="margin-top:6px" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ تأیید کمیسیون</span>`
-          : `<span class="chip" style="margin-top:6px" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ منتظر تأیید پشتیبانی</span>`}
-        ${x.state === "open" ? (frozen(x) ? ` <span class="chip info" style="margin-top:6px" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد</span>` : normOk(x) ? ` <span class="chip ok" style="margin-top:6px" title="ساختارِ قلم (نوع، لایه‌ها، نرخ‌ها و قفل‌ها) تأیید شده">🧩 ✓</span>`
-          : ` <span class="chip warn" style="margin-top:6px" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}${pillAi(x)}</div>`).join("")}</div>
-      ${vAiBar()}
+      <div class="tp-dhead">
+        <div class="tp-dhead-top"><button class="tp-btn sm" data-back>→ کارتابل</button><h2>درخواست <span class="num">${esc(r.id)}</span></h2>
+          ${r.urgency ? `<span class="chip warn">${esc(r.urgency)}</span>` : ""}${mine ? "" : `<span class="chip warn">ارجاعِ ${esc(a.expert_label || a.expert_name)} — فقط‌خواندنی</span>${isSenior() ? ` <button class="tp-btn xs" data-delegate="${a.id}" data-from="${a.expert_id}" title="این درخواست به کارشناس دیگری از تیم شما (یا خودتان) داده شود">تغییر کارشناس</button>` : ""}`}
+          <span class="spacer"></span>${E.status}${E.menu}${TP.ui.info("expert.detail", "راهنمای این صفحه")}</div>
+        <div class="tp-dhead-meta"><span title="پروژه">${TP.ui.ICON.project.replace("<svg", '<svg style="width:15px;height:15px;vertical-align:-3px"')} <b>${esc(proj)}</b>${r.project && r.project !== r.party ? ` <span class="dim">(${esc(r.party)})</span>` : ""}</span><span>اقلام <b>${its.length}</b></span><span>تاریخ ثبت <b class="num">${esc(r.date)}</b></span><span>مهلت تحویل <b>${TP.WD[dd.getDay()]} ${TP.fmtD(dl)}</b></span></div>
+        <div class="tp-dhead-bars">${TP.ui.bar.deadline(pct, barLvl, "مهلت", `${a.days} روز · ${Math.round(pct)}٪ سپری شده`)}${TP.ui.bar.progress(segs, true)}</div>
+        ${vAiBar()}
+      </div>
+      <div class="tp-items" role="tablist" aria-label="اقلام">${its.map((x, i) => `<button type="button" class="tp-item ${i === S.itemIdx ? "on" : ""} ${x.state !== "open" ? "closed" : ""}" data-item="${i}" role="tab" aria-selected="${i === S.itemIdx ? "true" : "false"}" title="${esc(x.title)}">
+        <span class="t">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
+        <span class="chips">${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ کمیسیون</span>`
+          : `<span class="chip" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ تأیید پشتیبانی</span>`}
+        ${x.state === "open" ? (frozen(x) ? `<span class="chip info" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد</span>` : normOk(x) ? `<span class="chip ok" title="ساختارِ قلم (نوع، لایه‌ها، نرخ‌ها و قفل‌ها) تأیید شده">🧩 ✓</span>`
+          : `<span class="chip warn" title="نرمال‌سازی اجباری است: ساختارِ این قلم هنوز تأیید نشده">🧩 تأیید نشده</span>`) : ""}${pillAi(x)}</span></button>`).join("")}</div>
       <div class="tabs">
         <button class="tab ${S.tab === "history" ? "on" : ""}" data-tab="history">${aiResearch() && !itemFree(it) ? "🔒 " : ["select", "started"].includes(iState(it)) || (iState(it) === "direct" && S.pickOpen[it.id]) ? "🎯 " : ""}بررسی سوابق</button>
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() && !itemFree(it) ? "🔒 " : ""}جستجوی هوشمند</button>
@@ -676,11 +694,11 @@
     if (!flow2() || !it || it.state !== "open" || !pkOn(it)) return "";
     const P = S.picks[it.id];
     if (P === undefined && normOk(it)) loadPicks(it);
-    if (P && P.mode === "handoff") return `<div class="tp-note" style="margin:8px 0">🎯 این قلم در حالت «سپردن یا برگشت» است: فهرستِ دعوت همان رتبه‌بندیِ سوابق است و از جستجوی هوشمند چیزی به آن افزوده نمی‌شود.</div>`;
+    if (P && P.mode === "handoff") return `<div class="tp-status"><b>🎯 سپردن یا برگشت</b><span class="sp">فهرستِ دعوت همان رتبه‌بندیِ سوابق است و از جستجوی هوشمند چیزی به آن افزوده نمی‌شود.</span>${TP.ui.info("expert.picks")}</div>`;
     const n = P && P.list ? P.list.filter((e) => e.src === "smart").length : 0;
-    return `<div class="tp-note" style="margin:8px 0">🎯 کارشناس هوشمند خودش جستجو نمی‌کند و از این نتایج فقط آن‌هایی را دعوت می‌کند که شما با «🎯 به فهرست دعوت» انتخاب کنید و شمارهٔ پنلِ تیک‌خورده دارند؛ نفرستادن توضیح نمی‌خواهد.
-      ${n ? `<b>${M(n)}</b> انتخاب از جستجو در فهرست است. ` : ""}${P && P.started_at ? (P.fresh ? "برای دعوت، «📨 دعوت از انتخاب‌های تازه» را در «بررسی سوابق» بزنید. " : "") : "بعد در «بررسی سوابق» «🚀 شروع» را بزنید. "}
-      <button class="tp-btn xs" data-pkgo>🎯 رفتن به فهرست دعوت</button></div>`;
+    return `<div class="tp-status"><b>🎯 فهرست دعوت</b><span class="sp chips"><span class="chip" title="کارشناس هوشمند خودش جستجو نمی‌کند و از این نتایج فقط آن‌هایی را دعوت می‌کند که شما با «🎯 به فهرست دعوت» انتخاب کنید و شمارهٔ پنلِ تیک‌خورده دارند؛ نفرستادن توضیح نمی‌خواهد">${n ? `${M(n)} انتخاب از جستجو در فهرست است` : "با «🎯 به فهرست دعوت» کنار هر نتیجه بیفزایید"}</span>
+      <span class="chip">${P && P.started_at ? (P.fresh ? "بعد «📨 دعوت از انتخاب‌های تازه» در «بررسی سوابق»" : "دعوت‌شده") : "بعد «🚀 شروع» در «بررسی سوابق»"}</span></span>
+      <button class="tp-btn xs" data-pkgo>🎯 رفتن به فهرست دعوت</button>${TP.ui.info("expert.picks")}</div>`;
   }
   async function smPickUI(sid, idx) {
     const it = item(), s = supOfSearch(sid, idx); if (!it || !s) return;
@@ -1075,7 +1093,7 @@
           <b style="margin-top:10px">قفل برای تأمین‌کننده</b>
           <div class="toolrow" style="gap:6px;margin:3px 0 0">${lockBtn("title", dr.tl, "عنوان", dr.tl ? "🔒 تأمین‌کننده عنوان را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند عنوان را اصلاح کند — کلیک: قفل")}
             ${lockBtn("qty", dr.ql, `مقدار${it.qty != null ? ` (${M(it.qty)} ${esc(it.unit || "")})` : ""}`, dr.ql ? "🔒 کلِ مقدار لازم است — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد — کلیک: قفل")}</div>
-          <span class="dim" style="font-size:.78rem;margin-top:3px">🔒: تأمین‌کننده نمی‌تواند عوضش کند (مقدارِ 🔒 یعنی کلِ مقدار). 🔓: می‌تواند اصلاح کند — مقدارِ 🔓 یعنی کمتر هم پذیرفته است. کنارِ هر لایه هم همین.</span></label>
+          <span class="dim" style="font-size:.78rem;margin-top:3px">🔒 ثابت برای تأمین‌کننده · 🔓 قابل اصلاح ${TP.ui.info("expert.history", "راهنمای 🔒/🔓")}</span></label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
           ${pickMode ? `<div class="tp-note" style="margin:2px 0 6px;font-size:.82rem"><b>قلم انتخابی:</b> لایه‌ای را که تیک بزنید، فقط اقلامی از همین نوع قلم می‌آیند که همان لایه را با <b>همان مقدار</b> دارند — از هر کدی (مثلاً «ضخامت ۸ میلی‌متر» ورق‌های ۸ میلِ همهٔ کدها را می‌آورد). بی‌تیک یعنی آن لایه مهم نیست.</div>` : ""}
           ${dr.layers.map((l, i) => { const qn = isQuant(l.k), rf = qn ? refTxt(l.k, l.t, l.u) : ""; return `<div class="normlayer">
@@ -1143,8 +1161,7 @@
     const norm = S.normOn || S.hmode === "pick" || !normOk(it) ? vNorm(it) : "";
 
     if (!d) return `<div class="pad">${head}${norm}${vTerms(it)}${vPicks(it)}<div class="empty"><b>سوابق تأمین «${esc(it.title)}» هنوز خوانده نشده.</b>
-      حالت «نوع قلم»، «قلم انتخابی» یا «عین قلم» را انتخاب کنید و «بررسی سوابق» را بزنید؛ ساختار قلم خودکار از دیتابیس خوانده می‌شود (با کد، بعد با عنوان).
-      رتبه‌بندی بر مبنای دفعات خرید، مقدار و گشتاورِ مقدار است و به مدل زبانی نیاز ندارد.</div></div>`;
+      حالت جستجو را انتخاب کنید و «بررسی سوابق» را بزنید. ${TP.ui.info("expert.history", "راهنمای بررسی سوابق")}</div></div>`;
     if (d.available === false) return `<div class="pad">${head}${vTerms(it)}${vPicks(it)}<div class="tp-note warn">${esc(d.message)}</div>${norm}</div>`;
     const st = d.struct || {}, mt = d.match || {};
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
@@ -1203,11 +1220,9 @@
         <td><button class="tp-btn xs" data-buys="${esc(s.key)}">${M(s.n)}</button></td></tr>`).join("")}
       </tbody></table></div>
       ${norm}
-      <div class="tp-note"><b>رتبهٔ نهایی</b> (پیش‌فرضِ مرتب‌سازی و ترتیبِ دعوتِ کارشناس هوشمند) میانگینِ وزنیِ چهار رتبه — <b>دفعات خرید</b>، <b>مقدار</b>، <b>امتیاز گشتاوری</b> و <b>ارزش خرید به قیمت روز</b> — و <b>رده</b> (A صد، B شصت‌وشش، C سی‌وسه درصد) است${d.weights ? ` با وزن‌های پنل پشتیبانی (دفعات ${d.weights.n}، مقدار ${d.weights.qty}، گشتاور ${d.weights.qtyM}، ارزش ${d.weights.val}، رده ${d.weights.grade})` : ""}؛ <b>در امتیاز برابر، ردهٔ بالاتر تأمین‌کننده (A، بعد B، بعد C) جلوتر است</b>.
-        ${d.usd ? `<b>قیمت روز</b>: مبلغِ هر خرید × نرخ دلارِ امروز (${M(d.usd.latest)} ریال، ${esc(d.usd.latestDay)}) ÷ نرخ دلارِ روزِ همان خرید؛ خریدِ پیش از ${esc(d.usd.firstDay)} (اولین نرخِ کانال) با نرخِ همان روز (*). تیکِ «تعدیل مرکز آمار» قیمت‌ها را به زمستان ۱۴۰۴ نشان می‌دهد؛ رتبه‌ها همیشه دلاری‌اند.` : "نرخ دلار هنوز بارگذاری نشده؛ ارزش خرید با تعدیلِ مرکز آمار (زمستان ۱۴۰۴) است."}
-        <b>مقدارها به واحد مرجعِ نوع قلم («${esc(st.refUnit || "")}») برده شده‌اند</b> تا خریدهای با واحدهای مختلف قابل جمع باشند.
-        <b>امتیاز گشتاوری عدد است، نه درصد</b>: جمعِ مقدارِ هر خرید ضرب در ضریب تازگی‌اش. ضریب برای خرید در ${esc(d.base.label)} یک است و با هر ماه فاصله کم می‌شود — با ضریب اهمیت ${d.base.k}، هر ماه ${(d.base.decay * 100).toFixed(2)}٪ — و قدیمی‌ترین خریدِ فایل (${M(d.base.ageMax)} ماه پیش) ${((1 - d.base.decay * d.base.ageMax) * 100).toFixed(0)}٪ وزنش را نگه می‌دارد.
-        عددهای برابر (با ردهٔ برابر) رتبهٔ برابر می‌گیرند (۴، ۲، ۲، ۱ ← رتبهٔ ۱، ۲، ۲، ۴). ستون‌های زردِ «رتبه» کل جدول را مرتب می‌کنند؛ پیش‌فرض، رتبهٔ نهایی است.</div></div>`;
+      <div class="dim" style="font-size:.82rem;margin-top:8px;line-height:1.8">رتبهٔ نهایی${d.weights ? ` با وزن‌های پشتیبانی (دفعات ${d.weights.n}، مقدار ${d.weights.qty}، گشتاور ${d.weights.qtyM}، ارزش ${d.weights.val}، رده ${d.weights.grade})` : ""} ·
+        ${d.usd ? `قیمت روز با نرخ دلارِ ${M(d.usd.latest)} ریال (${esc(d.usd.latestDay)})؛ خریدِ پیش از ${esc(d.usd.firstDay)} با نرخِ همان روز (*)` : "نرخ دلار هنوز بارگذاری نشده؛ ارزش خرید با تعدیلِ مرکز آمار (زمستان ۱۴۰۴)"} ·
+        مقدارها به واحد مرجع «${esc(st.refUnit || "")}» · گشتاور با ضریب ${d.base.k} (هر ماه ${(d.base.decay * 100).toFixed(2)}٪ کمتر) ${TP.ui.info("expert.history", "رتبه‌ها و قیمت روز چطور حساب می‌شوند؟")}</div></div>`;
   }
 
   const supOf = (key) => { const d = S.hist[(item() || {}).id]; return d && (d.suppliers || []).find((x) => x.key === key); };
@@ -1706,7 +1721,7 @@
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">مقدارهای هر خط فقط از پنل تأمین‌کننده (تأیید نهایی) یا «استخراج» پیش‌فاکتور می‌آیند؛ ورود و ویرایش دستی بسته است. اجباری: واحد، مقدار، قیمت واحد، زمان تحویل، شرایط تسویه، نوع فاکتور، ارزش افزوده — خانهٔ قرمز یعنی هنوز خالی است.</span></div>
+        <span class="dim" style="font-size:.85rem">مقدارها از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آیند؛ خانهٔ قرمز یعنی هنوز خالی است ${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr>
@@ -1723,8 +1738,7 @@
           <td>${q.ai ? "" : `<button class="tp-btn xs danger" data-del="${q.id}">حذف</button>`}</td></tr>`).join("")}
         </tbody></table></div>
         ${vFormHead(r)}${vGuard()}`
-        : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید؛ در تب‌های «بررسی سوابق» و «جستجوی هوشمند» هم دکمهٔ «افزودن» کنار هر تأمین‌کننده او را به همین‌جا می‌آورد.</div>`}
-      <div class="tp-note">قیمت، مقدار، «زمان تحویل»، «اعتبار پیش‌فاکتور»، «شرایط تسویه» و بقیهٔ فیلدها یا از پنل تأمین‌کننده (با تأیید نهایی شما در «💬 مکاتبات») می‌آیند، یا با دکمهٔ «استخراج» از پیش‌فاکتورِ بارگذاری‌شده خوانده می‌شوند و با تأیید شما در جدول می‌نشینند. اگر عددی درست خوانده نشده، «دوباره بخوان» را بزنید یا پیش‌فاکتورِ درست را بارگذاری کنید.</div></div>`;
+        : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید، یا از «💬 مکاتبات» استعلام بفرستید. ${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</div>`}</div>`;
   }
   function vFormHead(r) {
     return `<div class="endbar" style="margin:16px 0 0;align-items:flex-end">
@@ -1740,7 +1754,7 @@
   }
   function vGuard() {
     const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
-    if (aiOwned()) return `<div class="tp-note" style="margin-top:14px">🤖 جدول کمیسیونِ این درخواست را کارشناس هوشمند در پایانِ کار می‌سازد (با خط‌های تأییدنهایی‌شده، از جمله خط‌های دستیِ شما).</div>`;
+    if (aiOwned()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
       ${g.miss.length ? `<div style="color:#fca5a5">مدیر حداقل <b>${g.need}</b> استعلام برای هر قلم باز را الزامی کرده. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${g.need})`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز حداقل ${g.need} استعلام دارند.</div>`}</div></div>`;
@@ -1778,7 +1792,7 @@
         <button class="tp-btn sm" data-dl="request">دانلود Word برگهٔ درخواست خرید</button>
         <button class="tp-btn sm primary" data-print ${ready ? "" : "disabled"}>پرینت / PDF (برگه درخواست + جدول)</button></div>
       <div class="tp-note" style="display:block;margin-bottom:10px">
-        <b>توضیحات تدارکات و پشتیبانی</b> — این متن در خانهٔ «توضیحات تدارکات و پشتیبانی» جدول کمیسیون می‌نشیند. از بات تلگرام هم در منوی «تولید جدول کمیسیون» با «درج توضیحات» می‌توانید بنویسید.
+        <b>توضیحات تدارکات و پشتیبانی</b> <span class="dim" style="font-size:.82rem">— در خانهٔ همین نام در جدول کمیسیون چاپ می‌شود</span>${TP.ui.info("expert.comm", "راهنمای جدول کمیسیون")}
         <textarea class="tp-input" data-notes rows="3" maxlength="1500" placeholder="مثلاً: تأمین‌کنندهٔ دوم زمان تحویل بهتری داشت ولی قیمتش بالاتر است…"
           style="width:100%;margin-top:8px;resize:vertical;font-family:inherit">${esc(a.notes || "")}</textarea>
         <div style="display:flex;gap:8px;align-items:center;margin-top:6px">
@@ -1790,8 +1804,7 @@
         <style>${sh.rq.css}${sh.cm.css}</style>
         <div class="sheetview" data-keep-scroll>
           <div class="sheetpage" style="--u:${(z * 0.42).toFixed(2)}px">${sh.rq.html}</div>
-          <div class="sheetpage" style="font-size:${z}px">${sh.cm.html}</div></div>`}
-      <div class="tp-note">پیش‌نمایش، فایل اکسل و فایل Word از یک مدل ساخته می‌شوند و عیناً قالب فرم‌های شرکت‌اند: جدول کمیسیون مثل «مقایسه استعلام بها» (TSA-PS-FO-02) و برگهٔ درخواست مثل چاپ راهکاران. پرینت هر برگه را در یک صفحهٔ A4 افقی جا می‌دهد؛ برای PDF در پنجرهٔ چاپ «Save as PDF» را انتخاب کنید.</div></div>`;
+          <div class="sheetpage" style="font-size:${z}px">${sh.cm.html}</div></div>`}</div>`;
   }
 
   /* دانلود فایل از سرور با کد کارشناس — لینک مستقیم هدر احراز هویت را نمی‌فرستد */
@@ -2031,16 +2044,13 @@
   }
   function vLetterIntro(L) {
     return `<div class="tp-note" style="display:block">
-      <b>نامه را با حرف زدن بسازید.</b>
-      <p class="lead" style="margin:8px 0 0">توضیح بدهید در جریان این خرید چه اتفاقی افتاده: چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید. محاوره‌ای و به زبان خودتان بگویید — متنِ رسمی را سامانه می‌نویسد و روی سربرگ شرکت می‌گذارد.</p>
-      <p class="lead" style="margin:8px 0 0">مخاطب، «موضوع: گزارش خرید …»، «با سلام و احترام» و امضا را سامانه می‌گذارد و عددها از جدول کمیسیون برداشته می‌شوند، نه از حرف شما.</p>
+      <b>نامه را با حرف زدن بسازید.</b> <span class="dim" style="font-size:.85rem">بگویید در این خرید چه گذشت؛ متنِ رسمی را سامانه می‌نویسد.</span>${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}
       <div style="margin-top:12px"><button class="tp-btn primary" data-lt-start>${L ? "شروع دوبارهٔ نامه" : "شروع نامه"}</button></div></div>`;
   }
   function vLetterAsk(L, box) {
     const stt = box.stt !== false, rec = canRecord();
     return `<div class="tp-note" style="display:block">
-        <b>۱ — توضیحتان را بگویید</b>
-        <p class="lead" style="margin:6px 0 0">چه چالشی داشتید، چرا این تأمین‌کننده، چه چیزی طول کشید. یک تا دو دقیقه کافی است.</p>
+        <b>۱ — توضیحتان را بگویید</b> <span class="dim" style="font-size:.85rem">یک تا دو دقیقه کافی است</span>${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}
         ${stt ? "" : `<div class="tp-note warn" style="margin-top:10px">سرویس تبدیل صوت به متن هنوز وصل نیست؛ فعلاً توضیحتان را تایپ کنید.</div>`}
         <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
           ${S.lt.on
@@ -2055,7 +2065,6 @@
       </div>
       <div class="tp-note" style="display:block;margin-top:10px">
         <b>یا همین‌جا تایپ کنید</b>
-        <p class="lead" style="margin:6px 0 0">جایی که نمی‌شود حرف زد، بنویسید؛ از این نقطه به بعد مسیر یکی است.</p>
         <textarea class="tp-input" data-lt-type rows="5" maxlength="${LT_MAX}" placeholder="مثلاً: برای این قلم از پنج تأمین‌کننده استعلام گرفتیم، سه‌تا جواب دادند…" style="width:100%;margin-top:8px;resize:vertical;font-family:inherit"></textarea>
         <div style="margin-top:8px"><button class="tp-btn primary" data-lt-typed>ثبت متن</button></div>
       </div>`;
@@ -2066,14 +2075,12 @@
     const text = S.lt.draftFor === L.id && S.lt.draft != null ? S.lt.draft : String(L.transcript || "");
     return `${L.state === "failed" ? `<div class="tp-note warn">نگارش نامه بار قبل انجام نشد؛ متن شما سر جایش است و می‌توانید دوباره بزنید.</div>` : ""}
       <div class="tp-note" style="display:block">
-        <b>۱ — این را شنیدم</b>
-        <p class="lead" style="margin:6px 0 0">اگر کلمه‌ای اشتباه شنیده شده همین‌جا اصلاحش کنید؛ نامه از روی همین متن نوشته می‌شود.</p>
+        <b>۱ — این را شنیدم</b> <span class="dim" style="font-size:.85rem">اگر کلمه‌ای اشتباه شنیده شده همین‌جا اصلاحش کنید</span>
         <textarea class="tp-input" data-lt-text rows="7" maxlength="${LT_MAX}" style="width:100%;margin-top:8px;resize:vertical;font-family:inherit">${esc(text)}</textarea>
         <div style="margin-top:8px"><button class="tp-btn sm" data-lt-again>✏️ از نو می‌گویم</button></div>
       </div>
       <div class="tp-note" style="display:block;margin-top:10px">
-        <b>۲ — موضوع نامه</b>
-        <p class="lead" style="margin:6px 0 0">نامه دربارهٔ کدام اقلام است؟ پیش‌فرض، اقلامی است که در جدول کمیسیون «تأیید نهایی» دارند.</p>
+        <b>۲ — موضوع نامه</b> <span class="dim" style="font-size:.85rem">نامه دربارهٔ کدام اقلام است؟</span>
         <div style="display:flex;flex-direction:column;gap:6px;margin-top:8px;max-height:34vh;overflow:auto">
           ${its.map((i) => `<label style="display:flex;gap:8px;align-items:center;cursor:pointer"><input type="checkbox" data-lt-sub="${i.id}" ${sel.includes(i.id) ? "checked" : ""}><span>${esc(i.title)}</span>${i.qty == null ? "" : `<span class="dim" style="font-size:.8rem">— ${M(i.qty)} ${esc(i.unit || "")}</span>`}</label>`).join("")}
         </div>
@@ -2101,7 +2108,7 @@
         ${b.closing ? `<p>${esc(b.closing)}</p>` : ""}
         <div class="lt-sign"><b>${esc(b.thanks || "")}</b><br><b>${esc(b.signature || "")}</b></div>
       </div>
-      <div class="tp-note">همین متن در فایل Word روی سربرگ شرکت نشسته است. اگر جایی را می‌خواهید عوض کنید فایل را دانلود و در Word اصلاحش کنید، یا «نامهٔ تازه» بزنید و دوباره توضیح بدهید.</div>`;
+      <div class="dim" style="font-size:.85rem;margin-top:8px">همین متن در فایل Word روی سربرگ شرکت است ${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}</div>`;
   }
 
   /* ---------- قالب‌های پیام (واقعی، ذخیره در D1) ---------- */
@@ -2191,11 +2198,28 @@
   /* دکمه‌های تلگرام نوار بالا. کارشناس ارشد دو تلگرام دارد (تصمیم مدیر): «تلگرام کارشناسی» — همان
      بات کارشناسان برای ارجاع‌های خودش (با «ارجاع به تیم» کنار «مشاهده») — و «تلگرام تیمی» برای
      اعلان‌های پایش کارشناسان زیر نظرش. */
-  function tgButtons() {
+  /* یک گزینهٔ «تلگرام» در منوی پروفایل: کارشناس ارشد میان «تلگرام کارشناسی» و «تلگرام تیمی» انتخاب می‌کند (مهر ۱۴۰۵) */
+  function tgChooser() {
     const tg = S.tg || {};
-    const exp = tg.botConfigured ? `<button class="tp-btn sm ${tg.connected ? "" : "primary"}" data-tg title="${tg.connected ? "ارجاع‌ها و یادآوری مهلت در تلگرام شما می‌آید" : "دریافت ارجاع‌ها و یادآوری مهلت در تلگرام"}">${tg.connected ? "✅ " : ""}${isSenior() ? "تلگرام کارشناسی" : tg.connected ? "تلگرام" : "اتصال به تلگرام"}</button>` : "";
-    const team = isSenior() && (tg.teamBotConfigured || tg.botConfigured) ? `<button class="tp-btn sm ${S.expert.team_connected ? "" : "primary"}" data-team-link title="اعلان‌های پایش کارشناسان تیم شما">${S.expert.team_connected ? "✅ " : ""}تلگرام تیمی</button>` : "";
-    return exp + team;
+    if (!isSenior() || !(tg.teamBotConfigured || tg.botConfigured)) return tgConnect();
+    const d = TP.modal("تلگرام", `<p style="margin-top:0">کدام را می‌خواهید وصل یا باز کنید؟</p><div style="display:flex;flex-direction:column;gap:8px;margin-top:8px">
+      ${tg.botConfigured ? `<button class="tp-btn ${tg.connected ? "" : "primary"}" data-tgc="exp" style="white-space:normal;text-align:start">${tg.connected ? "✅ " : ""}تلگرام کارشناسی <span class="dim">— ارجاع‌ها و یادآوری مهلتِ خودتان</span></button>` : ""}
+      <button class="tp-btn ${S.expert.team_connected ? "" : "primary"}" data-tgc="team" style="white-space:normal;text-align:start">${S.expert.team_connected ? "✅ " : ""}تلگرام تیمی <span class="dim">— اعلان‌های پایش کارشناسان تیم شما</span></button></div>`, null, "بستن", "");
+    d.querySelectorAll("[data-tgc]").forEach((b) => { b.onclick = () => { d.remove(); if (b.dataset.tgc === "exp") tgConnect(); else teamLink(); }; });
+  }
+  /** گزینه‌های منوی پروفایل در نوار بالا (ui.js:topbar) */
+  function profileItems() {
+    const tg = S.tg || {};
+    const items = [{ label: "حساب من", icon: "user", attrs: 'data-stab="account"' }];
+    if (tg.botConfigured || (isSenior() && tg.teamBotConfigured)) items.push({ label: "تلگرام", icon: "telegram", attrs: "data-tgmenu", cnt: tg.connected || S.expert.team_connected ? "✅ وصل" : "وصل کنید", cntCls: tg.connected || S.expert.team_connected ? "ok" : "warn" });
+    items.push({ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" });
+    return items;
+  }
+  /** موضوعِ راهنمای صفحهٔ فعلی (help-content.js) */
+  function helpKey() {
+    if (S.screen === "login") return "login.expert";
+    if (S.screen === "detail") return `expert.${{ history: "history", smart: "smart", quotes: "quotes", comm: "comm", letter: "letter" }[S.tab] || "detail"}`;
+    return S.tab === "team" ? "expert.team" : S.tab === "alerts" ? "expert.alerts" : S.tab === "account" ? "expert.account" : "expert.tray";
   }
 
   /* ---------- رندر ---------- */
@@ -2203,10 +2227,12 @@
     const app = document.getElementById("app");
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
-    app.innerHTML = `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>پنل کارشناس خرید</h1><div class="sub">${S.expert ? esc(S.expert.name) + " · " : ""}${esc(COMPANY)}</div></div></div>
-      <span class="spacer"></span>${TP.themeBtn()}${S.expert ? `${tgButtons()}<a class="tp-btn sm ${S.asks ? "warn" : ""}" href="correspond.html" data-corr title="${S.asks ? "کارشناس هوشمند از شما سؤال دارد — پاسخ را در همان گفت‌وگو بنویسید" : "مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی"}">💬 مکاتبات${S.asks ? ` <span class="cnt" data-asks>🚨 ${S.asks}</span>` : ""}</a><button class="tp-btn sm" data-refresh title="به‌روزرسانی">↻</button><a class="tp-back" href="index.html">تدارکات</a><button class="tp-btn xs" data-logout>خروج</button>` : ""}</header>
-      ${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
+    TP.ui.mountBg(S.screen === "login" ? "fog" : "");
+    const nav = S.expert ? `<a class="tp-btn sm ${S.asks ? "warn" : ""}" href="correspond.html" data-corr title="${S.asks ? "کارشناس هوشمند از شما سؤال دارد — پاسخ را در همان گفت‌وگو بنویسید" : "مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی"}">💬 مکاتبات${S.asks ? `<span class="tp-dot-badge" data-asks title="پرسش از کارشناس">${S.asks}</span>` : ""}</a>` : "";
+    const head = S.screen === "login" ? "" : TP.ui.topbar({ title: "پنل کارشناس خرید", sub: esc(COMPANY), nav, user: { name: S.expert.name, sub: isSenior() ? "کارشناس ارشد" : "کارشناس خرید" }, items: profileItems() });
+    app.innerHTML = `${head}${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
+    TP.ui.help.set(helpKey());
     wire();
     /* سرآیند چهارطبقهٔ جدول سوابق باید بچسبد، وگرنه با اسکرول معلوم نیست
        هر ستون مال کدام گروه است. */
@@ -2217,11 +2243,15 @@
   /* ---------- اتصال ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
-    const lg = G("[data-login]"); if (lg) { const go = async () => { const c = TP.digits(G("#code").value).trim(); if (!c) return; try { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } catch (e) { S.error = e.message; render(); } }; lg.onclick = go; G("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; return; }
+    if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; await loadTray(); } }); return; }
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
     const tg = G("[data-tg]"); if (tg) tg.onclick = tgConnect;
-    Q("[data-req]").forEach((x) => x.onclick = (e) => { if (e.target.closest("[data-stop]")) return; openDetail(+x.dataset.req); });
+    const tgm = G("[data-tgmenu]"); if (tgm) tgm.onclick = tgChooser;
+    Q("[data-req]").forEach((x) => {
+      x.onclick = (e) => { if (e.target.closest("[data-stop]")) return; openDetail(+x.dataset.req); };
+      x.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === x) { e.preventDefault(); openDetail(+x.dataset.req); } };
+    });
     /* تیم کارشناسی */
     Q("[data-stab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.stab === "tray" ? "history" : b.dataset.stab; if (S.tab === "team") loadTeam(true); render(); });
     Q("[data-tcard]").forEach((x) => x.onclick = () => { S.teamCard = x.dataset.tcard; render(); });
@@ -2523,6 +2553,7 @@
   /* اعلانِ پیامِ تازهٔ تأمین‌کننده در گوشهٔ صفحه (مهر ۱۴۰۵) — فقط یک لایهٔ شناور است و صفحه را دوباره نمی‌سازد؛
      کلیکش صفحهٔ مکاتبات را روی همان گفت‌وگو باز می‌کند (shared.js: TP.inbox) */
   TP.inbox.start({ active: () => !!S.expert, onAsks: (k) => { if (k !== (S.asks || 0)) { S.asks = k; if (S.screen !== "login") render(); } } });
-  /* هیچ به‌روزرسانی خودکاری نداریم (تصمیم مدیر، شهریور ۱۴۰۵): صفحه با دکمهٔ ↻ یا با کار
-     خود کارشناس تازه می‌شود، تا وسط پر کردن استعلام چیزی جابه‌جا نشود. */
+  /* بازخوانیِ خودکارِ بی‌پرش (خواستهٔ مالک، مهر ۱۴۰۵): فقط کارتابل و تیم، هر دقیقه، وقتی کارشناس وسطِ نوشتن یا پنجره‌ای نیست.
+     صفحهٔ درخواست همچنان فقط با کارِ خودِ کارشناس یا «به‌روزرسانی» تازه می‌شود (تصمیم مدیر، شهریور ۱۴۰۵) تا وسط پر کردن چیزی جابه‌جا نشود. */
+  TP.ui.autoRefresh(() => (S.tab === "team" ? loadTeam(true) : loadTray()), 60000, () => !!S.expert && S.screen === "list" && !LIST_TABS.includes(S.tab === "team" ? "" : S.tab));
 })();

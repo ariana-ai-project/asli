@@ -93,22 +93,20 @@
   const say = (msg, title) => dlg(title || "توجه", `<p style="white-space:pre-line">${esc(msg)}</p>`);
 
   /* ---------- ورود ---------- */
+  /* نوار بالا: پنل اصلیِ مکاتبات (نه «دمو»)؛ بات مکاتبات، پنل کارشناس و تدارکات در منوی پروفایل (ui.js، مهر ۱۴۰۵) */
   function top() {
-    return `<header class="tp-top"><div class="brand"><img src="../assets/logo-new.jpg" alt=""><div><h1>مکاتبات با تأمین‌کنندگان</h1>
-      <div class="sub">${S.me ? `${esc(S.me.label || S.me.name)} · ` : ""}دموی پنل تأمین‌کننده</div></div></div><span class="spacer"></span>
-      ${S.me && S.via !== "telegram" ? `<button class="tp-btn sm" data-tg>💬 بات مکاتبات</button>` : ""}
-      ${TP.themeBtn()}${S.me && !spApp ? `<a class="tp-back" href="expert.html">پنل کارشناس</a>` : ""}</header>`;
+    TP.ui.mountBg("");
+    const items = [...(S.me && S.via !== "telegram" ? [{ label: "بات مکاتبات در تلگرام", icon: "telegram", attrs: "data-tg" }] : []),
+      ...(S.me && !spApp ? [{ label: "پنل کارشناس", icon: "user", href: "expert.html" }, { label: "تدارکات", icon: "home", href: "index.html" }] : [])];
+    return TP.ui.topbar({ title: "مکاتبات با تأمین‌کنندگان", sub: S.me ? esc(S.me.label || S.me.name) : "", home: spApp ? "#" : "expert.html", homeTitle: "پنل کارشناس",
+      user: S.me ? { name: S.me.label || S.me.name, sub: "کارشناس خرید" } : null, items });
   }
   function renderLogin(msg) {
     app.classList.remove("sp-app");
-    app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>ورود کارشناس</h2><p class="lead">همان کد ورود پنل کارشناس.</p>
-      <input class="tp-input" id="code" inputmode="numeric" placeholder="کد ورود" style="width:100%"><div class="sp-row" style="margin-top:12px"><button class="tp-btn primary sp-grow" id="go">ورود</button></div>
-      <div class="sp-err" id="msg">${esc(msg || "")}</div></div></div>`;
-    const go = async () => {
-      try { const r = await TP.api("/login", { body: { code: TP.digits ? TP.digits($("#code").value).trim() : $("#code").value.trim() } }); TP.session.set(r.expert); boot(); }
-      catch (e) { $("#msg").textContent = e.message; }
-    };
-    $("#go").onclick = go; $("#code").onkeydown = (e) => { if (e.key === "Enter") go(); }; $("#code").focus();
+    TP.ui.mountBg("fog");
+    app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 8, error: msg, back: { href: "expert.html", label: "← پنل کارشناس" } });
+    TP.ui.help.set("login.expert");
+    TP.ui.bindLogin(app, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); boot(); } });
   }
 
   /* ---------- بارگذاری ---------- */
@@ -211,6 +209,8 @@
       ${phoneMode ? `<section class="ph-stage"><div class="ph"><img class="ph-frame" src="phone-frame.svg" alt="" draggable="false">${screen(true)}</div></section>` : ""}
     </div></div>`;
     bind();
+    /* راهنما: در دسکتاپ گوشی سمت چپ است، پس دکمهٔ «؟» سمت راست؛ در گوشیِ واقعی «؟» داخلِ نوارِ گفت‌وگوست */
+    TP.ui.help.set("corr.main", phoneMode ? { side: "right" } : { fab: false });
     const inp = $("#msgIn"); if (inp && S.drafts[S.th]) { inp.value = S.drafts[S.th]; composerState(inp); }
     const c = $("#chat"); if (c) c.scrollTop = S.chatPos != null ? S.chatPos : c.scrollHeight;
     S.chatPos = null;
@@ -290,7 +290,7 @@
         start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
         title: th.supplier, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
         whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
-        acts: `<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
+        acts: `${framed ? "" : `<button class="ph-glass ph-circ" type="button" data-help="corr.main" aria-label="راهنما" title="راهنما">${TP.ui.ICON.help}</button>`}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
           <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
       composer: { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "👁 پیامِ خودتان — با «❌ رد»ِ پیشنهاد می‌رود" : `پیام به ${th.supplier}`, draft: S.th },

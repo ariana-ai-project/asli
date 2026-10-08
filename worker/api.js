@@ -1221,6 +1221,9 @@ async function tray(env, ex, url) {
     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
       AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')
     ORDER BY a.dispatched_at DESC`).bind(ex.id).all(), getSettings(env)]);
+  /* نامِ پروژهٔ هر درخواست (همان projectOf میز مدیر) — روی کارتِ کارتابل به‌جای «طرف مقابل» (مهر ۱۴۰۵) */
+  const projects = reportProjects(settings);
+  for (const a of res.results || []) { const p = projectOf(projects, a.party, a.center); a.project = p ? p.name : null; }
   const out = { assignments: res.results || [], settings: await settingsFor(env, ex.id, settings) };
   if (!full) return out;
   const tg = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(ex.id).first();
