@@ -112,8 +112,13 @@ test("کارشناسِ دستی: سوابقِ قلمِ تأییدنشده خوا
   const sg = JSON.parse(DB.raw.prepare("SELECT sugg_json FROM items WHERE id=51").get().sugg_json);
   assert.equal(sg.head, "پیچ");
   assert.equal(sg.source, "catalog", "پیشنهادِ سامانه یک بار ثبت شد");
-  /* کارشناس اندازه را عوض می‌کند و مقدار و اندازه را 🔓 می‌کند («فولاد» همان جنسِ «آهنی» است) */
-  const sv = await call("/items/51/norm", { method: "PUT", headers: HUMAN, body: { head: "پیچ", layers: { "اندازه": "M10", "جنس": "فولاد" }, source: "catalog", code: "1001", locks: { title: true, qty: false, layers: { "اندازه": false } } } });
+  /* کارشناس اندازه را عوض می‌کند و مقدار و اندازه را 🔓 می‌کند («فولاد» همان جنسِ «آهنی» است) — بی علت پذیرفته نمی‌شود (مهر ۱۴۰۵) */
+  const noWhy = await call("/items/51/norm", { method: "PUT", headers: HUMAN, body: { head: "پیچ", layers: { "اندازه": "M10", "جنس": "فولاد" }, source: "catalog", code: "1001" } });
+  assert.equal(noWhy.status, 422, JSON.stringify(noWhy.data));
+  assert.equal(noWhy.data.need_reason, true);
+  assert.deepEqual(noWhy.data.lines, ["لایهٔ «اندازه»: «M8» ← «M10»"], "فهرستِ تغییرها برای کادرِ علت");
+  assert.equal(changes(51).length, 0, "بی علت چیزی ذخیره نشد");
+  const sv = await call("/items/51/norm", { method: "PUT", headers: HUMAN, body: { reason: "نقشهٔ کارگاه M10 می‌خواهد", head: "پیچ", layers: { "اندازه": "M10", "جنس": "فولاد" }, source: "catalog", code: "1001", locks: { title: true, qty: false, layers: { "اندازه": false } } } });
   assert.equal(sv.status, 200, JSON.stringify(sv.data));
   assert.deepEqual(sv.data.norm.locks, { title: true, qty: false, layers: { "اندازه": false, "جنس": true } }, "لایهٔ بی‌قفل‌گفته 🔒");
   const ch = changes(51);
@@ -121,6 +126,11 @@ test("کارشناسِ دستی: سوابقِ قلمِ تأییدنشده خوا
   assert.equal(ch[0].kind, "norm");
   assert.equal(ch[0].actor, "expert:2");
   assert.deepEqual(diffLines(ch[0].diff), ["لایهٔ «اندازه»: «M8» ← «M10»", "مقدار: 🔓 باز — تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد", "لایهٔ «اندازه»: 🔓 باز"]);
+  assert.equal(DB.raw.prepare("SELECT reason FROM item_changes WHERE item_id=51").get().reason, "نقشهٔ کارگاه M10 می‌خواهد", "علت با تغییر می‌ماند");
+  /* ذخیرهٔ دوبارهٔ همان ساختار علتِ تازه نمی‌خواهد */
+  const again = await call("/items/51/norm", { method: "PUT", headers: HUMAN, body: { head: "پیچ", layers: { "اندازه": "M10", "جنس": "فولاد" }, source: "catalog", code: "1001", locks: { title: true, qty: false, layers: { "اندازه": false } } } });
+  assert.equal(again.status, 200, JSON.stringify(again.data));
+  DB.raw.prepare("DELETE FROM item_changes WHERE item_id=51 AND id > (SELECT MIN(id) FROM item_changes WHERE item_id=51)").run();
   const h1 = await call("/suppliers/history?item_id=51&mode=head&norm=1", { headers: HUMAN });
   assert.equal(h1.status, 200);
   assert.notEqual(h1.data.available, false, JSON.stringify(h1.data));
@@ -180,4 +190,18 @@ test("حالتِ هوشمند: نرمال‌سازی پیش از سپردن با
   assert.equal(log.item.title, "پیچ آلن M8 فولادی");
   assert.deepEqual(log.changes.map((c) => c.kind), ["norm"]);
   assert.equal(log.changes[0].lines.length, 3);
+});
+
+test("بی پیشنهادِ سامانه: مبنای علتِ تغییر، ساختارِ تأییدشدهٔ قبلی است (قلمی که پیش از ثبتِ پیشنهاد نرمال شده بود)", { skip: SKIP }, async () => {
+  const nj = { v: 2, head: "پیچ", layers: { "اندازه": "M10" }, source: "edit", confirmed_at: Date.now() };
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,code,title,qty,unit,state,assignment_id,norm_json) VALUES (52,'R-S2','b',2,'1003','پیچ M10',3,'عدد','open',2,?)").run(JSON.stringify(nj));
+  assert.equal(DB.raw.prepare("SELECT sugg_json FROM items WHERE id=52").get().sugg_json, null);
+  const body = { head: "پیچ", layers: { "اندازه": "M12" }, source: "edit", code: "1003" };
+  const no = await call("/items/52/norm", { method: "PUT", headers: HUMAN, body });
+  assert.equal(no.status, 422, JSON.stringify(no.data));
+  assert.equal(no.data.need_reason, true);
+  assert.ok(no.data.lines.includes("لایهٔ «اندازه»: «M10» ← «M12»"), JSON.stringify(no.data.lines));
+  const yes = await call("/items/52/norm", { method: "PUT", headers: HUMAN, body: { ...body, reason: "اندازهٔ تازه در نقشه" } });
+  assert.equal(yes.status, 200, JSON.stringify(yes.data));
+  assert.equal(DB.raw.prepare("SELECT reason FROM item_changes WHERE item_id=52 ORDER BY id DESC").get().reason, "اندازهٔ تازه در نقشه");
 });

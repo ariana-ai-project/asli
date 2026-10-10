@@ -101,8 +101,18 @@
   document.addEventListener("click", (e) => {
     const t = e.target.closest("[data-menu-toggle]");
     $$(".tp-menu.open").forEach((m) => { if (!m.contains(e.target) || e.target.closest(".tp-menu-list")) m.classList.remove("open"); });
-    if (t) { const m = t.closest(".tp-menu"); if (m) { m.classList.toggle("open"); t.setAttribute("aria-expanded", m.classList.contains("open") ? "true" : "false"); } }
+    if (t) { const m = t.closest(".tp-menu"); if (m) { m.classList.toggle("open"); t.setAttribute("aria-expanded", m.classList.contains("open") ? "true" : "false"); if (m.classList.contains("open")) fitMenu(m); } }
   });
+  /* فهرستِ باز از لبهٔ صفحه بیرون نزند (گوشی: دکمهٔ «⋯» وسطِ ردیف است و فهرست از سمتِ راست بیرون می‌رفت) */
+  function fitMenu(m) {
+    const l = m && m.querySelector(":scope > .tp-menu-list"); if (!l) return;
+    l.style.left = ""; l.style.right = "";
+    const vw = document.documentElement.clientWidth, r = l.getBoundingClientRect(), pad = 8;
+    const d = r.right > vw - pad ? vw - pad - r.right : r.left < pad ? pad - r.left : 0;
+    if (!d) return;
+    l.style.right = "auto"; l.style.left = `${l.offsetLeft + d}px`;
+  }
+  document.addEventListener("pointerover", (e) => { const m = e.pointerType === "mouse" && e.target.closest && e.target.closest(".tp-menu"); if (m && !m.contains(e.relatedTarget)) fitMenu(m); });
   document.addEventListener("keydown", (e) => { if (e.key === "Escape") $$(".tp-menu.open").forEach((m) => m.classList.remove("open")); });
 
   /* ---------- نوار بالا ----------

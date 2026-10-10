@@ -791,3 +791,83 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
   .tp-ghost { display: none; }
 }
 @media (forced-colors: active) { .tp-ghost, .fx-glow :is(.tp-seg > button, .tp-tab)::before { display: none; } }
+
+/* ============================================================
+   پنل کارشناس — «بررسی سوابق» جمع‌وجور (مهر ۱۴۰۵)
+   ============================================================ */
+.hx { display: flex; flex-direction: column; gap: 12px; }
+.hx-top { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border-radius: var(--ui-r-card); background: var(--ui-card); border: 1px solid var(--ui-card-edge); box-shadow: inset 0 1px 0 var(--ui-card-hl); }
+.hx-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.hx-title > b { font-size: 1.05rem; font-weight: 800; }
+.hx-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.hx-bar .spacer { flex: 1; }
+.hx-opts .hx-optsb { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; padding-top: 8px; }
+.hx-mom { display: inline-flex; align-items: center; gap: 8px; font-size: .88rem; }
+.hx-step { border-radius: var(--ui-r-card); }
+.hx-step.need { padding: 10px; border: 1px dashed rgba(242, 194, 48, 0.55); background: rgba(242, 194, 48, 0.05); }
+.hx-stepn { display: flex; align-items: center; gap: 8px; font-weight: 700; margin: 0 0 8px; }
+.hx-stepn b { width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: #f2c230; color: #1d1600; font-size: .8rem; }
+.hx-struct { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 14px; border-radius: 14px; background: rgba(34, 197, 94, 0.06); border: 1px solid rgba(34, 197, 94, 0.3); }
+.hx-struct .hx-head { font-weight: 800; }
+.hx-struct .hx-layers { display: flex; gap: 4px; flex-wrap: wrap; flex: 1; min-width: 0; }
+.hx-struct .tp-btn svg { width: 14px; height: 14px; }
+.hx-lock { margin: 0 0 8px; padding: 8px 12px; border-radius: 12px; font-size: .86rem; background: rgba(242, 194, 48, 0.08); border: 1px solid rgba(242, 194, 48, 0.35); }
+.hx-sum { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.hx-warn { display: inline-block; }
+.hx-warn > summary { list-style: none; cursor: pointer; }
+.hx-warn > summary::-webkit-details-marker { display: none; }
+.hx-warn[open] > div { margin-top: 6px; padding: 8px 12px; border-radius: 12px; background: var(--ui-card); border: 1px solid var(--ui-card-edge); font-size: .84rem; line-height: 1.9; animation: tpRevealIn .3s var(--ui-ease) both; }
+.hx-titles { display: flex; gap: 4px; flex-wrap: wrap; max-height: 160px; overflow: auto; }
+.hx-table .tp-table th.sortable { cursor: pointer; }
+.hx-table .tp-table th.sortable:hover { color: var(--tp-fg); }
+.hx-table .tp-table th.sorted { color: #ffd479; }
+.hx-table sup.rk, .picks sup.rk { display: inline-block; margin-inline-start: 4px; min-width: 18px; padding: 0 5px; border-radius: 999px; font-size: .66rem; font-weight: 800; line-height: 1.6; background: rgba(242, 194, 48, 0.16); color: #ffd479; vertical-align: super; }
+:root[data-theme="light"] .hx-table sup.rk, :root[data-theme="light"] .picks sup.rk { color: #8a6100; background: rgba(242, 194, 48, 0.22); }
+.hx-share { font-size: .7rem; }
+.hx-final b { font-size: 1rem; }
+.hx-none { display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 24px; color: var(--tp-muted); text-align: center; }
+.hx-none svg { width: 26px; height: 26px; opacity: .7; }
+.hx-none b { color: var(--tp-fg); }
+.hx-basis { padding: 0 4px; }
+.hx-basis .dim { font-size: .8rem; line-height: 1.9; padding-top: 6px; }
+.normrates-box { margin-top: 10px; }
+.normrates-box > div { padding-top: 6px; }
+.pk-rule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; font-size: .84rem; }
+.pk-ph { font-size: .8rem; margin-inline-start: 4px; }
+.why-lines { margin: 4px 0 10px; padding-inline-start: 20px; line-height: 1.9; color: var(--tp-fg); }
+.chg-why { margin-top: 6px; padding: 6px 10px; border-radius: 10px; background: rgba(79, 140, 255, 0.1); border: 1px solid rgba(120, 170, 255, 0.35); font-size: .84rem; }
+
+/* ============================================================
+   مکاتبات — ستونِ وسط: سرآیند، کارت‌برگ‌ها، بخش‌ها، کارتِ قلمِ فشرده (مهر ۱۴۰۵)
+   ============================================================ */
+.sp-head2 { display: flex; align-items: center; gap: 12px; }
+.sp-head2 .hd { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sp-head2 h3 { margin: 0; font-size: 1.05rem; font-weight: 800; }
+.sp-av { width: 44px; height: 44px; border-radius: 50%; flex-shrink: 0; display: grid; place-items: center; color: #fff; font-weight: 800; font-size: 1.1rem;
+  background: linear-gradient(145deg, color-mix(in srgb, var(--av, #5f8ad6) 80%, #fff), var(--av, #5f8ad6)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), 0 2px 8px -3px rgba(0, 0, 0, 0.5); }
+.sp-kpis { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 10px 0; }
+@media (max-width: 400px) { .sp-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); } .sp-kpis > :last-child { grid-column: 1 / -1; } }
+.sp-kpis .tp-stat { min-width: 0; }
+.sp-kpis .tp-stat { padding: 8px 10px; }
+.sp-kpis .tp-stat .si { width: 30px; height: 30px; border-radius: 10px; }
+.sp-kpis .tp-stat .si svg { width: 16px; height: 16px; }
+.sp-kpis .tp-stat b { font-size: 1rem; }
+.sp-terms { font-size: .82rem; color: var(--tp-muted); margin: -2px 0 10px; }
+.sp-panes { margin-bottom: 12px; }
+@media (max-width: 560px) { .sp-panes { display: flex; width: 100%; flex-wrap: nowrap; } .sp-panes > button { flex: 1 1 auto; min-width: 0; white-space: nowrap; padding-inline: 8px; font-size: .84rem; } }
+.sp-panes .cnt { margin-inline-start: 6px; }
+.sp-none { display: flex; align-items: center; gap: 8px; justify-content: center; padding: 22px; color: var(--tp-muted); }
+.sp-none svg { width: 18px; height: 18px; color: #6ee7b7; }
+.sp-it2 header { display: flex; align-items: center; gap: 8px; }
+.sp-it2 header h3 { flex: 1; min-width: 0; margin: 0; font-size: .95rem; font-weight: 700; }
+.sp-price { display: flex; align-items: baseline; gap: 6px; flex-wrap: wrap; margin: 8px 0 6px; }
+.sp-price .p { font-size: 1.15rem; font-weight: 800; color: #9cc0ff; font-variant-numeric: tabular-nums; }
+.sp-price .t { font-weight: 800; font-variant-numeric: tabular-nums; }
+.sp-price .q { margin-inline-start: auto; font-size: .78rem; }
+:root[data-theme="light"] .sp-price .p { color: #1f5fd6; }
+.sp-more { margin-top: 6px; }
+.sp-more > summary { cursor: pointer; font-size: .8rem; color: var(--tp-accent); list-style: none; }
+.sp-more > summary::-webkit-details-marker { display: none; }
+.sp-more[open] > summary { margin-bottom: 6px; }
+.sp-more[open] > :not(summary) { animation: tpRevealIn .3s var(--ui-ease) both; }
+.sp-files { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }

@@ -28,6 +28,7 @@ export const STRUCT_COLUMNS = [
   ["items", "sugg_json", "TEXT"],    /* اولین پیشنهادِ سامانه که کارشناس دید — مبنای پیامِ «تغییرات اقلام» */
   ["items", "frozen_at", "INTEGER"], /* ساختار منجمد شد: «بررسی سوابق و سپردن به کارشناس هوشمند» */
   ["items", "frozen_by", "TEXT"],    /* expert:<id> | support */
+  ["item_changes", "reason", "TEXT"],  /* علتِ کارشناس برای تغییرِ نوع قلم یا لایه‌ها نسبت به پیشنهادِ سامانه (مهر ۱۴۰۵) */
 ];
 
 /** ساختارِ تأییدشده به دستِ کارشناس (شرطِ SQL روی نامِ مستعارِ items) */
@@ -120,11 +121,11 @@ export function diffLines(diff) {
  * یک ردیفِ item_changes. kind: norm (ذخیرهٔ ساختار) | clear (برداشتنِ ذخیره) | revert (برگشت به فهرست اقلام) |
  * freeze (سپردن به کارشناس هوشمند: فرقِ پیشنهادِ سامانه با ساختارِ منجمد). it: {id, request_id, aid|assignment_id}
  */
-export function changeStmt(env, it, actor, kind, before, after, at = Date.now()) {
+export function changeStmt(env, it, actor, kind, before, after, at = Date.now(), reason = null) {
   const diff = after ? structDiff(before, after) : [];
-  return env.DB.prepare("INSERT INTO item_changes (at,item_id,request_id,assignment_id,actor,kind,before_json,after_json,diff_json) VALUES (?,?,?,?,?,?,?,?,?)")
+  return env.DB.prepare("INSERT INTO item_changes (at,item_id,request_id,assignment_id,actor,kind,before_json,after_json,diff_json,reason) VALUES (?,?,?,?,?,?,?,?,?,?)")
     .bind(at, it.id, it.request_id || null, it.aid || it.assignment_id || null, actor, kind,
-      before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, JSON.stringify(diff));
+      before ? JSON.stringify(before) : null, after ? JSON.stringify(after) : null, JSON.stringify(diff), reason || null);
 }
 
 /**
@@ -141,7 +142,8 @@ export async function changesList(env, url) {
   const { results } = await env.DB.prepare(`SELECT i.id, i.request_id, i.title, i.qty, i.unit, i.code, i.state, i.norm_json, i.norm_at, i.sugg_json, i.frozen_at, i.frozen_by,
       a.id AS aid, a.expert_id, r.party,
       (SELECT COUNT(*) FROM item_changes c WHERE c.item_id=i.id) AS n_changes,
-      (SELECT c.actor FROM item_changes c WHERE c.item_id=i.id AND c.kind='norm' ORDER BY c.id DESC LIMIT 1) AS last_by
+      (SELECT c.actor FROM item_changes c WHERE c.item_id=i.id AND c.kind='norm' ORDER BY c.id DESC LIMIT 1) AS last_by,
+      (SELECT c.reason FROM item_changes c WHERE c.item_id=i.id AND c.reason IS NOT NULL ORDER BY c.id DESC LIMIT 1) AS reason
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=i.request_id
     WHERE ${where.join(" AND ")} ORDER BY COALESCE(i.frozen_at, i.norm_at) DESC, i.id DESC LIMIT ? OFFSET ?`).bind(...args, limit + 1, offset).all();
   const rows = (results || []).map((r) => {
@@ -151,7 +153,7 @@ export async function changesList(env, url) {
       id: r.id, request_id: r.request_id, party: r.party, title: r.title, qty: r.qty, unit: r.unit, code: r.code, state: r.state,
       aid: r.aid, expert_id: r.expert_id, by: r.last_by || null, norm_at: r.norm_at, frozen_at: r.frozen_at, frozen_by: r.frozen_by,
       head: norm.head || "", sugg_source: sugg ? sugg.source : null, has_sugg: !!sugg, changes: r.n_changes || 0,
-      diff, lines: sugg ? diffLines(diff) : [], locks: locksOf(norm),
+      diff, lines: sugg ? diffLines(diff) : [], locks: locksOf(norm), reason: r.reason || null,
     };
   });
   const more = rows.length > limit;
@@ -163,9 +165,9 @@ export async function changesList(env, url) {
 export async function changeLog(env, itemId) {
   const it = await env.DB.prepare("SELECT i.id, i.title, i.request_id, i.sugg_json, i.norm_json, i.frozen_at, a.expert_id FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(itemId).first();
   if (!it) return { item: null, changes: [] };
-  const { results } = await env.DB.prepare("SELECT id, at, actor, kind, diff_json FROM item_changes WHERE item_id=? ORDER BY id").bind(itemId).all();
+  const { results } = await env.DB.prepare("SELECT id, at, actor, kind, diff_json, reason FROM item_changes WHERE item_id=? ORDER BY id").bind(itemId).all();
   return {
     item: { id: it.id, title: it.title, request_id: it.request_id, expert_id: it.expert_id, frozen_at: it.frozen_at, sugg: parse(it.sugg_json, null), norm: parse(it.norm_json, null) },
-    changes: (results || []).map((c) => ({ id: c.id, at: c.at, actor: c.actor, kind: c.kind, lines: diffLines(parse(c.diff_json, [])) })),
+    changes: (results || []).map((c) => ({ id: c.id, at: c.at, actor: c.actor, kind: c.kind, lines: diffLines(parse(c.diff_json, [])), reason: c.reason || null })),
   };
 }

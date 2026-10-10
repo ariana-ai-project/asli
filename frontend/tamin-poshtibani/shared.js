@@ -42,6 +42,8 @@
   /* ---------- متن ---------- */
   TP.esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   TP.M = (n) => Number(n || 0).toLocaleString("en-US");
+  /** سطرِ «قبل ← بعد» در متنِ راست‌به‌چپ: بی نشانهٔ RLM دو مقدارِ لاتین («M500» ← «M600») یک تکهٔ چپ‌به‌راست می‌شوند و وارونه خوانده می‌شوند */
+  TP.rtlArrow = (html) => String(html).replace(/ \u2190 /g, " \u200f\u2190\u200f ");
   /* نرمال‌سازی برای مقایسه: ي/ك عربی → فارسی، نیم‌فاصله → فاصله، فاصله‌های تکراری → یکی */
   TP.nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
   /* برای جستجوی فیلترها: ارقام فارسی و عربی هم لاتین می‌شوند. «۲۱» باید «21» را پیدا کند —
@@ -336,7 +338,9 @@
     const h = {};
     const ex = TP.session.get();
     if (ex && ex.code) h["X-Expert-Code"] = ex.code; else if (TP.tg) h["X-TG-Init"] = TP.tg;
-    const mg = TP.manager.get(); if (mg) h["X-Manager-Code"] = mg;
+    /* پنلِ کارشناس و مکاتبات هرگز کدِ مدیر نمی‌فرستند: در تبی که پیش‌تر پنل مدیر باز بوده، سرور کارشناس را «مدیر» می‌شناخت
+       و قاعده‌های کارشناس (مثلِ علتِ اجباریِ تغییرِ ساختار) و نامِ کنشگر به هم می‌خورد (مهر ۱۴۰۵) */
+    const mg = TP.asExpert ? "" : TP.manager.get(); if (mg) h["X-Manager-Code"] = mg;
     return h;
   };
 

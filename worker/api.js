@@ -59,7 +59,7 @@ import { USD_DDL, usdAdmin } from "./usd.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
-import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog } from "./structure.js";
+import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -372,6 +372,8 @@ async function ensureSchema(env) {
   }
   /* کدهای ورود چهاررقمی و کد مدیر در دیتابیس — یک بار روی هر دیتابیس */
   await migrateCodes4(env, existing).catch((e) => console.error("migrateCodes4", e && e.message));
+  /* گفت‌وگوها و اجراهای یتیمِ درخواست‌های حذف‌شده — یک بار */
+  await cleanOrphans(env).catch((e) => console.error("cleanOrphans", e && e.message));
   await env.DB.prepare("INSERT INTO counters (key,value) VALUES ('schema_fp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(SCHEMA_FP).run();
   schemaReady = true;
 }
@@ -419,13 +421,19 @@ async function deleteRequests(env, ids) {
   const before = await env.DB.prepare(`SELECT COUNT(*) AS n FROM requests WHERE id ${where}`).bind(...args).first();
   if (!before || !before.n) return { ok: true, requests: 0, files: 0 };
 
+  /* گفت‌وگوهای تأمین‌کننده و اجرای کارشناس هوشمندِ همین ارجاع‌ها (مهر ۱۴۰۵): پیش‌تر می‌ماندند و چون شناسهٔ ارجاع و قلم دوباره
+     استفاده می‌شود، درخواستِ تازه‌ای که همان شناسه را می‌گرفت گفت‌وگوهای قدیمی و «قفلِ فرستاده‌شده»ی اقلامِ قدیمی را به ارث می‌برد */
+  const thr = ((await env.DB.prepare(`SELECT id FROM sp_threads WHERE assignment_id IN (${inAsg})`).bind(...args).all()).results || []).map((r) => r.id);
+  const runs = ((await env.DB.prepare(`SELECT id FROM ai_runs WHERE assignment_id IN (${inAsg})`).bind(...args).all()).results || []).map((r) => r.id);
   const keys = [
+    ...await spRunKeys(env, thr, runs),
     ...((await env.DB.prepare(`SELECT storage_key AS k FROM proformas WHERE assignment_id IN (${inAsg}) AND storage_key IS NOT NULL`).bind(...args).all()).results || []),
     ...((await env.DB.prepare(`SELECT docx_key AS k FROM letters WHERE assignment_id IN (${inAsg}) AND docx_key IS NOT NULL`).bind(...args).all()).results || []),
     ...((await env.DB.prepare(`SELECT voice_key AS k FROM letters WHERE assignment_id IN (${inAsg}) AND voice_key IS NOT NULL`).bind(...args).all()).results || []),
   ].map((r) => r.k).filter(Boolean);
 
   const t = now();
+  await purgeThreads(env, thr, runs);
   await env.DB.batch([
     env.DB.prepare(`DELETE FROM quotes WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM proformas WHERE assignment_id IN (${inAsg})`).bind(...args),
@@ -451,7 +459,8 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
     /* ثبت‌های هر درخواست هم با خودش می‌روند — شناسهٔ ارجاع بعد از پاک‌کردن میز دوباره استفاده می‌شود */
-    ...["assignment_log", "quotes_deleted", "commission_tables", "closures"].map((tb) => env.DB.prepare(`DELETE FROM ${tb} WHERE request_id ${where}`).bind(...args)),
+    ...["assignment_log", "quotes_deleted", "commission_tables", "closures", "item_changes", "search_suppliers"].map((tb) => env.DB.prepare(`DELETE FROM ${tb} WHERE request_id ${where}`).bind(...args)),
+    env.DB.prepare(`UPDATE tg_nav SET aid=NULL WHERE aid IN (${inAsg})`).bind(...args),
     /* بایگانیِ گزارش‌ها هم — درخواستِ آزمایشیِ پاک‌شده نباید در گزارش سه‌ماهه بماند. فقط همان‌هایی که روی میز بودند:
        درخواستِ بستهٔ سال‌های پیش که هیچ‌وقت روی میز نیامده با «پاک کردن همه» نمی‌رود، و درخواستِ واقعی با ورود بعدی برمی‌گردد */
     env.DB.prepare(`DELETE FROM req_hist WHERE id IN (SELECT id FROM requests WHERE id ${where})`).bind(...args),
@@ -465,6 +474,63 @@ async function deleteRequests(env, ids) {
   let files = 0;
   if (store) for (const k of keys) { try { await store.remove(k); files++; } catch (_) { /* یتیم می‌ماند، ولی دیتابیس تمیز است */ } }
   return { ok: true, requests: before.n, files };
+}
+
+/** کلیدهای انبارِ فایل‌های گفت‌وگو (پیوست‌ها، پیش‌فاکتورِ بسته‌ها، پروندهٔ مذاکره) — پیش از پاک کردنِ ردیف‌ها */
+async function spRunKeys(env, thr, runs) {
+  const out = [];
+  for (let i = 0; i < thr.length; i += 80) {
+    const p = thr.slice(i, i + 80), q = p.map(() => "?").join(",");
+    out.push(...((await env.DB.prepare(`SELECT skey AS k FROM sp_files WHERE thread_id IN (${q}) AND skey IS NOT NULL`).bind(...p).all()).results || []));
+    out.push(...((await env.DB.prepare(`SELECT pf_key AS k FROM sp_bundles WHERE thread_id IN (${q}) AND pf_key IS NOT NULL`).bind(...p).all()).results || []));
+  }
+  for (let i = 0; i < runs.length; i += 80) {
+    const p = runs.slice(i, i + 80);
+    out.push(...((await env.DB.prepare(`SELECT md_key AS k FROM ai_runs WHERE id IN (${p.map(() => "?").join(",")}) AND md_key IS NOT NULL`).bind(...p).all()).results || []));
+  }
+  return out;
+}
+/** گفت‌وگوهای تأمین‌کننده (و هرچه به آن‌ها بسته است) و اجراهای کارشناس هوشمند را پاک می‌کند. هزینهٔ مدل (ai_calls) برای گزارشِ
+    هزینه می‌ماند ولی از اجرا و گفت‌وگو جدا می‌شود؛ پیامک‌های فرستاده‌شده هم می‌مانند (بی گفت‌وگو) */
+async function purgeThreads(env, thr, runs) {
+  const stmts = [];
+  for (let i = 0; i < thr.length; i += 80) {
+    const p = thr.slice(i, i + 80), q = p.map(() => "?").join(",");
+    for (const sql of [`DELETE FROM ai_props WHERE thread_id IN (${q})`, `DELETE FROM ai_threads WHERE thread_id IN (${q})`, `UPDATE ai_calls SET thread_id=NULL WHERE thread_id IN (${q})`,
+      `DELETE FROM ai_log WHERE thread_id IN (${q})`, `DELETE FROM sp_files WHERE thread_id IN (${q})`, `DELETE FROM sp_msgs WHERE thread_id IN (${q})`,
+      `DELETE FROM sp_bundles WHERE thread_id IN (${q})`, `DELETE FROM sp_lines WHERE thread_id IN (${q})`, `UPDATE sp_sms SET thread_id=NULL WHERE thread_id IN (${q})`,
+      `UPDATE sp_tg SET focus=NULL, flow_json=NULL WHERE focus IN (${q})`, `DELETE FROM sp_threads WHERE id IN (${q})`]) stmts.push(env.DB.prepare(sql).bind(...p));
+  }
+  for (let i = 0; i < runs.length; i += 80) {
+    const p = runs.slice(i, i + 80), q = p.map(() => "?").join(",");
+    for (const sql of [`DELETE FROM ai_props WHERE run_id IN (${q})`, `DELETE FROM ai_threads WHERE run_id IN (${q})`, `DELETE FROM ai_log WHERE run_id IN (${q})`,
+      `UPDATE ai_calls SET run_id=NULL WHERE run_id IN (${q})`, `DELETE FROM ai_runs WHERE id IN (${q})`]) stmts.push(env.DB.prepare(sql).bind(...p));
+  }
+  for (let i = 0; i < stmts.length; i += 50) await env.DB.batch(stmts.slice(i, i + 50));
+}
+/**
+ * پاک‌سازیِ یک‌باره (مهر ۱۴۰۵): گفت‌وگو و اجرای کارشناس هوشمندی که درخواستش پیش‌تر حذف شده و ردیف‌هایش مانده بودند — یتیم:
+ * ارجاعش نیست، یا شناسه‌اش حالا مالِ درخواستِ دیگری است (request_id فرق دارد). سابقهٔ تغییرِ ساختار و تأمین‌کنندگانِ جستجو که
+ * قلمشان دیگر همان قلم نیست هم. با کلیدِ settings.orphans1 فقط یک بار.
+ */
+export async function cleanOrphans(env) {
+  if (await env.DB.prepare("SELECT 1 FROM settings WHERE key='orphans1'").first()) return null;
+  const thr = ((await env.DB.prepare(`SELECT t.id FROM sp_threads t LEFT JOIN assignments a ON a.id=t.assignment_id
+    WHERE a.id IS NULL OR (t.request_id IS NOT NULL AND a.request_id <> t.request_id)`).all()).results || []).map((r) => r.id);
+  const runs = ((await env.DB.prepare(`SELECT r.id FROM ai_runs r LEFT JOIN assignments a ON a.id=r.assignment_id
+    WHERE a.id IS NULL OR (r.request_id IS NOT NULL AND a.request_id <> r.request_id)`).all()).results || []).map((r) => r.id);
+  const keys = (await spRunKeys(env, thr, runs)).map((r) => r.k).filter(Boolean);
+  await purgeThreads(env, thr, runs);
+  const t = now();
+  const res = await env.DB.batch([
+    env.DB.prepare(`DELETE FROM item_changes WHERE request_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=item_changes.item_id AND i.request_id=item_changes.request_id)`),
+    env.DB.prepare(`DELETE FROM search_suppliers WHERE request_id IS NOT NULL AND item_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM items i WHERE i.id=search_suppliers.item_id AND i.request_id=search_suppliers.request_id)`),
+    env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('orphans1',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+      .bind(JSON.stringify({ at: t, threads: thr.length, runs: runs.length }), t),
+  ]);
+  const store = storage(env);
+  if (store) for (const k of keys.slice(0, 40)) { try { await store.remove(k); } catch (_) { /* یتیمِ انبار؛ بی‌ضرر */ } }
+  return { threads: thr.length, runs: runs.length, changes: (res[0].meta && res[0].meta.changes) || 0 };
 }
 
 /* ------------------------------------------------------------------ */
@@ -2337,10 +2403,23 @@ async function route(request, env, ctx) {
         await env.DB.batch([ev(env, actorOf(who), "norm_clear", it.request_id, it.id, { assignment_id: it.aid }), changeStmt(env, it, actorOf(who), "clear", before, null)]);
         return json(r);
       }
-      const check = lock ? (s) => { if (!sameAsLock(lock, s.head, s.layers, it.spec)) throw new HttpError(LOCK_MSG, 409); } : null;
-      const r = await confirmNorm(env, it, await readJson(request), who, { check });
-      /* سابقهٔ تغییرات (طرح «خرید هوشمند»): هر ذخیره — کنشگر، زمان، قبل ← بعد */
-      await changeStmt(env, it, actorOf(who), "norm", before, r.norm).run();
+      const nb = await readJson(request), reason = T(nb && nb.reason).slice(0, 500);
+      /* علتِ تغییر (درخواست مالک، مهر ۱۴۰۵): کارشناسی که نوع قلم یا لایه‌ها را نسبت به پیشنهادِ سامانه عوض می‌کند، باید بنویسد چرا —
+         فقط وقتی همین ذخیره چیزی را نسبت به ذخیرهٔ قبلی هم عوض کرده (ذخیرهٔ دوبارهٔ همان ساختار دوباره علت نمی‌خواهد) */
+      const sugg = it.sugg_json ? JSON.parse(it.sugg_json) : null;
+      const structural = (d) => ["head", "layer", "layer+", "layer-"].includes(d.k);
+      const check = (s) => {
+        if (lock && !sameAsLock(lock, s.head, s.layers, it.spec)) throw new HttpError(LOCK_MSG, 409);
+        /* مبنا: پیشنهادِ سامانه؛ قلمی که پیش از ثبتِ پیشنهاد نرمال شده بود، ساختارِ تأییدشدهٔ قبلی */
+        const base = sugg || (normConfirmed(it) ? before : null);
+        if (who.role !== "expert" || reason || !base) return;
+        const vsBase = structDiff(base, { head: s.head, layers: s.layers }).filter(structural);
+        const vsBefore = structDiff(before || base, { head: s.head, layers: s.layers }).filter(structural);
+        if (vsBase.length && vsBefore.length) throw new HttpError("ساختارِ این قلم عوض شده؛ بنویسید چرا این تغییر لازم است.", 422, { need_reason: true, lines: diffLines(vsBase) });
+      };
+      const r = await confirmNorm(env, it, nb, who, { check });
+      /* سابقهٔ تغییرات (طرح «خرید هوشمند»): هر ذخیره — کنشگر، زمان، قبل ← بعد، و علتِ کارشناس */
+      await changeStmt(env, it, actorOf(who), "norm", before, r.norm, undefined, reason || null).run();
       if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
     }

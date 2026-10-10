@@ -399,8 +399,9 @@ export async function itemLocks(env, itemIds) {
   const out = new Map();
   for (let i = 0; i < ids.length; i += 80) {
     const part = ids.slice(i, i + 80);
+    /* فقط خطِ همان درخواست: شناسهٔ قلمِ درخواستِ حذف‌شده دوباره استفاده می‌شود */
     const rows = (await env.DB.prepare(`SELECT l.item_id, l.title, l.head, l.layers_json, l.req_qty, l.req_unit, l.locks_json, l.created_at FROM sp_lines l
-        JOIN sp_threads t ON t.id=l.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id
+        JOIN sp_threads t ON t.id=l.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id JOIN items i ON i.id=l.item_id AND (t.request_id IS NULL OR i.request_id=t.request_id)
         WHERE s.demo=0 AND l.item_id IN (${part.map(() => "?").join(",")}) ORDER BY l.id`).bind(...part).all()).results || [];
     for (const r of rows) {
       if (!out.has(r.item_id)) {
@@ -779,7 +780,7 @@ export async function expertThreads(env, ex) {
         (SELECT COUNT(*) FROM sp_bundles b WHERE b.thread_id=t.id AND b.state IN ('pending','proforma')) AS waiting,
         (SELECT COUNT(*) FROM sp_lines l WHERE l.thread_id=t.id) AS lines,
         (SELECT m.who||'|'||m.kind||'|'||substr(replace(replace(m.body,char(10),' '),char(13),' '),1,120) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_msg
-      FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id JOIN requests r ON r.id=a.request_id
+      FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id AND (t.request_id IS NULL OR a.request_id=t.request_id) JOIN requests r ON r.id=a.request_id
       JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id
       WHERE a.expert_id=? ORDER BY t.last_at DESC LIMIT 300`).bind(ex.id).all(),
     env.DB.prepare(`SELECT a.id, a.request_id, r.party, a.dispatched_at,

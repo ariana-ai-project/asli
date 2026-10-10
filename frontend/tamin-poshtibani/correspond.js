@@ -19,6 +19,7 @@
    ============================================================ */
 (function () {
   "use strict";
+  window.TP.asExpert = true;
   const TP = window.TP;
   const app = document.getElementById("app");
   const $ = (s, r) => (r || document).querySelector(s);
@@ -27,6 +28,14 @@
   const FA = "۰۱۲۳۴۵۶۷۸۹";
   const fa = (s) => String(s == null ? "" : s).replace(/\d/g, (d) => FA[+d]);
   const money = (n) => (n == null || !isFinite(n) ? "—" : fa(Math.round(Number(n)).toLocaleString("en-US")).replace(/,/g, "٬"));
+  /** مبلغِ کوتاه برای کادرهای خلاصه: [عدد، واحد] — «۱۱٫۳» و «میلیارد ریال»؛ عددِ کامل در title */
+  const short = (n) => {
+    const v = Math.abs(Number(n) || 0);
+    const cut = (x) => fa(String(Math.round(x * 10) / 10).replace(".", "٫"));
+    if (v >= 1e9) return [cut(n / 1e9), "میلیارد ریال"];
+    if (v >= 1e6) return [cut(n / 1e6), "میلیون ریال"];
+    return [money(n), "ریال"];
+  };
   const qty = (n) => (n == null ? "—" : fa(String(Math.round(Number(n) * 1000) / 1000)));
   const code = (l) => (l && l.no ? `<span class="sp-code">کد ${fa(l.no)}</span> ` : "");
   function when(ms) {
@@ -139,6 +148,7 @@
   function findThread(id) { for (const g of S.reqs) for (const t of g.threads) if (t.id === id) return { g, t }; return null; }
   /** باز کردنِ یک گفت‌وگو — از فهرستِ تأمین‌کنندگان یا از اعلانِ گوشهٔ صفحه؛ پیش‌نویسِ گفت‌وگوی قبلی می‌ماند */
   function openThread(id) {
+    S.pane = null;
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; S.view = "chat"; S.tab = "chat"; S.mainScroll = 0; S.unseen = 0;
     loadThread().catch((e) => (e.status === 423 ? shut(e.message) : say(e.message)));
@@ -263,12 +273,29 @@
   /* خوانش هوشمند خاموش: بستهٔ «تأییدشده» (راهِ پیشین) هم تصمیمِ تأیید نهایی می‌خواهد */
   const waitingCount = () => S.d.bundles.filter((b) => ["pending", "proforma", ...(S.pfRead ? [] : ["approved"])].includes(b.state)).length;
   /** اقلام و تصمیم‌ها: در چیدمانِ گوشی ستونِ وسط؛ در صفحهٔ باریک جای گفت‌وگو با دکمهٔ برگشت به آن */
+  /* بخش‌های ستونِ وسط (مهر ۱۴۰۵): یک بخش در هر لحظه — «منتظر تصمیم»، «اقلام»، «تصمیم‌های قبلی»، «👁 پیشنهادها» */
+  const OPEN_ST = ["pending", "approved", "proforma"];
+  const panes = () => {
+    const d = S.d, w = watchOf();
+    return [["wait", "منتظر تصمیم", d.bundles.filter((b) => OPEN_ST.includes(b.state)).length], ["items", "اقلام", d.lines.length],
+      ["done", "تصمیم‌های قبلی", d.bundles.filter((b) => !OPEN_ST.includes(b.state)).length], ...(w && (w.done || []).length ? [["props", "👁 پیشنهادها", w.done.length]] : [])];
+  };
+  const curPane = () => { const L = panes(); if (S.pane && L.some((p) => p[0] === S.pane)) return S.pane; return L[0][2] ? "wait" : "items"; };
+  /** کارت یا بسته‌ای که باید دیده شود در کدام بخش است */
+  const paneFor = (sel) => { const m = /data-b="(\d+)"/.exec(sel); if (!m) return "items"; const b = S.d.bundles.find((x) => x.id === +m[1]); return b && !OPEN_ST.includes(b.state) ? "done" : "wait"; };
   function convo() {
-    const th = S.d.thread;
+    const th = S.d.thread, pane = curPane();
     const back = phoneMode ? "" : `<button class="tp-btn sm" data-tab="chat" title="برگشت به گفت‌وگو">→ گفت‌وگو${badge(S.unseen)}</button>`;
-    return `<div class="sp-conv"><div class="sp-head ${phoneMode ? "" : "sp-sticky"}">${back}<h3>${esc(th.supplier)}</h3>${th.demo ? `<span class="sp-tag">تأمین‌کنندهٔ فرضی</span>` : ""}
-      <span class="sp-muted">📞 ${esc(th.phone || "")}${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست ${esc(th.request_id)}</span></div>
-      <div id="pane">${itemsPane()}</div></div>`;
+    const sum = S.d.lines.reduce((x, l) => x + (l.total || 0), 0), priced = S.d.lines.filter((l) => l.price != null).length;
+    const av = `<span class="sp-av" style="--av:${TP.ui.avColor(th.supplier)}" aria-hidden="true">${esc(TP.ui.avInitial(th.supplier))}</span>`;
+    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${th.demo ? ` <span class="sp-tag">فرضی</span>` : ""}</h3>
+        <span class="sp-muted">📞 <span dir="ltr">${esc(th.phone || "—")}</span>${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست <b>${esc(th.request_id)}</b></span></div>${back}</div>
+      <div class="sp-kpis">${TP.ui.stat({ label: "اقلام", value: fa(S.d.lines.length), icon: "box", sub: `${fa(priced)} با قیمت` })}
+        ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}
+        ${TP.ui.stat({ label: "جمع پیشنهادها", value: sum ? short(sum)[0] : "—", icon: "file", sub: sum ? short(sum)[1] : "", attrs: sum ? `title="${money(sum)} ریال"` : "" })}</div>
+      ${termsLine(th.terms) ? `<div class="sp-terms">🧾 ${esc(termsLine(th.terms))}</div>` : ""}
+      <div class="tp-seg sm sp-panes" role="tablist">${panes().map(([k, l, n]) => `<button type="button" role="tab" class="${pane === k ? "on" : ""}" aria-selected="${pane === k}" data-pane="${k}">${l}${n ? `<span class="cnt">${fa(n)}</span>` : ""}</button>`).join("")}</div>
+      <div id="pane">${itemsPane(pane)}</div></div>`;
   }
 
   /* --- گفت‌وگو به سبک پیام‌رسانِ iOS 26 (ph-chat.js): پیامِ ما (کارشناس و کارشناس هوشمند) سمت راست و آبیِ لوگو، پیامِ
@@ -448,30 +475,37 @@
     for (const row of b.ai.header || []) if (acceptable(row) && !(b.accept || {})[`h|${row.key}`]) n++;
     return n;
   }
-  function itemsPane() {
+  function itemsPane(pane) {
     const d = S.d, byId = new Map(d.lines.map((l) => [l.id, l]));
-    const open = d.bundles.filter((b) => ["pending", "approved", "proforma"].includes(b.state)).reverse();
-    const done = d.bundles.filter((b) => !["pending", "approved", "proforma"].includes(b.state)).reverse();
-    let h = open.length ? `<h3 class="sp-h3">منتظر تصمیم شما</h3>${open.map((b) => bundleCard(b, byId)).join("")}` : `<div class="tp-note">بسته‌ای منتظر تصمیم نیست.</div>`;
-    h += `<h3 class="sp-h3">همهٔ اقلام این گفت‌وگو</h3>`;
-    if (termsLine(d.thread.terms)) h += `<div class="sp-muted" style="margin-bottom:8px">🧾 شرایطِ فاکتورِ اعلامیِ تأمین‌کننده: ${esc(termsLine(d.thread.terms))}</div>`;
+    const open = d.bundles.filter((b) => OPEN_ST.includes(b.state)).reverse();
+    const done = d.bundles.filter((b) => !OPEN_ST.includes(b.state)).reverse();
+    const none = (t) => `<div class="sp-none">${TP.ui.ICON.check}<span>${t}</span></div>`;
+    if (pane === "wait") return open.length ? open.map((b) => bundleCard(b, byId)).join("") : none("بسته‌ای منتظر تصمیم شما نیست.");
+    if (pane === "done") return done.length ? done.map((b) => bundleCard(b, byId)).join("") : none("هنوز تصمیمی گرفته نشده.");
+    if (pane === "props") {
+      const w = watchOf();
+      return w && (w.done || []).length ? `<div class="sp-card sp-props-done">${w.done.map((p) => `<div>${esc(p.state_fa)} — ${esc(p.kind_fa)}${p.bundle_id ? ` بستهٔ ${fa(p.bundle_id)}` : ""}
+        <span class="sp-muted">${when(p.decided_at || p.created_at)}</span>${p.reason ? `<div class="r">علت: ${esc(p.reason)}</div>` : ""}${p.own ? `<div class="r">پیامِ شما: ${esc(p.own)}</div>` : ""}</div>`).join("")}</div>` : none("پیشنهادی نیست.");
+    }
+    let h = "";
     /* 🔒 ثابت · 🔓 قابل تغییر (فاز ۴): پیشنهادِ تأمین‌کننده روی 🔓ها کنارِ مقدارِ درخواست */
     const chip = (x) => (x.lock === false ? `<span class="sp-chip ${x.s ? "add" : "lock"}">🔓 <i>${esc(x.k)}:</i> ${x.s ? `<b>${esc(x.s)}</b> <span class="sp-muted">(درخواست: ${esc(x.v)})</span>` : esc(x.v)}</span>`
       : `<span class="sp-chip lock">🔒 <i>${esc(x.k)}:</i> ${esc(x.v)}</span>`);
     const qLock = (l) => (!l.locks || l.locks.legacy ? "" : l.locks.qty ? " 🔒" : " 🔓");
-    h += d.lines.slice().sort((a, b) => b.id - a.id).map((l) => `<div class="sp-card" data-no="${l.no || ""}"><header><h3>${code(l)}${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
-      ${l.s_title ? `<div class="sp-muted" style="margin-bottom:6px">🔓 عنوانِ پیشنهادیِ تأمین‌کننده: <b>${esc(l.s_title)}</b></div>` : ""}
-      <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map(chip).join("")}${l.extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`).join("")}</div>
-      <div class="sp-row" style="margin-top:8px">${qty(l.qty)} ${esc(l.unit || "")} × <b>${money(l.price)}</b> ریال = <b>${money(l.total)}</b> ریال <span class="sp-muted">(خواسته${qLock(l)}: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
-      ${l.note ? `<div class="sp-muted">📝 توضیح تأمین‌کننده: ${esc(l.note)}</div>` : ""}${fileLinks(l.id) ? `<div style="margin-top:6px">${fileLinks(l.id)}</div>` : ""}
-      ${l.quote_id ? `<div class="sp-ok">✓ ${S.pfRead ? "با مقدارهای پیش‌فاکتور" : "با مقدارهای تأمین‌کننده و پیش‌فاکتورِ سامانه"} در تب استعلامات است.</div>` : ""}</div>`).join("");
-    if (done.length) h += `<h3 class="sp-h3">تصمیم‌های قبلی</h3>${done.map((b) => bundleCard(b, byId)).join("")}`;
-    /* «👁 با تأیید»: ده تصمیمِ آخرِ شما روی پیشنهادهای کارشناس هوشمند */
-    const w = watchOf();
-    if (w && (w.done || []).length) {
-      h += `<h3 class="sp-h3">👁 پیشنهادهای اخیرِ کارشناس هوشمند</h3><div class="sp-card sp-props-done">${w.done.map((p) => `<div>${esc(p.state_fa)} — ${esc(p.kind_fa)}${p.bundle_id ? ` بستهٔ ${fa(p.bundle_id)}` : ""}
-        <span class="sp-muted">${when(p.decided_at || p.created_at)}</span>${p.reason ? `<div class="r">علت: ${esc(p.reason)}</div>` : ""}${p.own ? `<div class="r">پیامِ شما: ${esc(p.own)}</div>` : ""}</div>`).join("")}</div>`;
-    }
+    /* کارتِ قلم: عنوان و وضعیت، خطِ قیمت، نوع قلم و سه ویژگیِ اول؛ بقیه و توضیح‌ها با «بیشتر» */
+    const SHOW = 3;
+    h += d.lines.slice().sort((a, b) => b.id - a.id).map((l) => {
+      const chips = [...l.layers.map(chip), ...l.extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`)];
+      const shown = chips.slice(0, SHOW), rest = chips.slice(SHOW);
+      return `<div class="sp-card sp-it2" data-no="${l.no || ""}"><header>${code(l)}<h3>${esc(l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
+      <div class="sp-price">${l.price != null ? `<b class="p">${money(l.price)}</b><span class="sp-muted">ریال × ${qty(l.qty)} ${esc(l.unit || "")}</span><b class="t">= ${money(l.total)}</b>` : `<span class="sp-muted">هنوز قیمتی نیامده</span>`}
+        <span class="sp-muted q" title="مقدارِ درخواست">خواسته${qLock(l)}: ${qty(l.req_qty)} ${esc(l.req_unit || "")}</span></div>
+      <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع:</i> ${esc(l.head)}</span>` : ""}${shown.join("")}</div>
+      ${rest.length || l.s_title || l.note ? `<details class="sp-more"><summary>${rest.length ? `${fa(rest.length)} ویژگیِ دیگر` : "جزئیات"}${l.note ? " · توضیح تأمین‌کننده" : ""}</summary>
+        ${l.s_title ? `<div class="sp-muted">🔓 عنوانِ پیشنهادی: <b>${esc(l.s_title)}</b></div>` : ""}${rest.length ? `<div class="sp-chips">${rest.join("")}</div>` : ""}${l.note ? `<div class="sp-muted">📝 ${esc(l.note)}</div>` : ""}</details>` : ""}
+      ${fileLinks(l.id) ? `<div class="sp-files">${fileLinks(l.id)}</div>` : ""}
+      ${l.quote_id ? `<div class="sp-ok">✓ در تب استعلامات</div>` : ""}</div>`;
+    }).join("") || none("قلمی در این گفت‌وگو نیست.");
     return h;
   }
 
@@ -485,6 +519,7 @@
     $$("[data-th-lock]").forEach((b) => { b.onclick = () => say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و تا وقتی تیکِ شما در «پنل پشتیبانی» روی «🤖 هوشمند» است برای شما بسته است.\nاگر سؤالی از شما داشته باشد همین‌جا با 🚨 باز می‌شود و در تلگرام هم خبر می‌دهد.", "🔒 گفت‌وگوی کارشناس هوشمند"); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });
+    $$("[data-pane]").forEach((b) => { b.onclick = () => { S.pane = b.dataset.pane; S.mainScroll = 0; render(); }; });
     const tg = $("[data-tg]"); if (tg) tg.onclick = connectTg;
     const snd = $("[data-send]"); if (snd) snd.onclick = () => sendDialog().catch((e) => say(e.message));
     $$("[data-file]").forEach((b) => { b.onclick = () => openUrl(`/sp/file/${b.dataset.file}/url`); });
@@ -504,7 +539,7 @@
     });
     /* کلیک روی کارتِ پیامِ بسته یا قلم: «اقلام و تصمیم‌ها» روی همان بسته یا قلم — در چیدمانِ گوشی ستونِ وسط همان‌جا
        اسکرول می‌خورد و گفت‌وگو سرِ جایش می‌ماند */
-    const goto = (sel) => { if (phoneMode) return jumpTo(sel); S.tab = "items"; S.goto = sel; render(); };
+    const goto = (sel) => { const p = paneFor(sel); if (phoneMode && p === curPane()) return jumpTo(sel); S.pane = p; S.tab = "items"; S.goto = sel; render(); };
     const press = (el, fn) => { el.onclick = (e) => { e.stopPropagation(); fn(); }; el.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fn(); } }; };
     $$("[data-goto-b]").forEach((el) => press(el, () => goto(`[data-b="${el.dataset.gotoB}"]`)));
     $$("[data-goto-no]").forEach((el) => press(el, () => goto(`[data-no="${el.dataset.gotoNo}"]`)));
@@ -513,7 +548,7 @@
       el.onclick = () => {
         if (!phoneMode) { S.tab = "items"; S.mainScroll = 0; return render(); }
         const open = S.d && S.d.bundles.filter((b) => ["pending", "approved", "proforma"].includes(b.state)).pop();
-        if (open) return jumpTo(`[data-b="${open.id}"]`);
+        if (open) { if (curPane() !== "wait") { S.pane = "wait"; S.goto = `[data-b="${open.id}"]`; return render(); } return jumpTo(`[data-b="${open.id}"]`); }
         const m = $(".sp-main"); if (m) m.scrollTo({ top: 0, behavior: "smooth" });
         const hd = $(".sp-main .sp-head"); if (hd) { hd.classList.add("sp-flash"); setTimeout(() => hd.classList.remove("sp-flash"), 1600); }
       };

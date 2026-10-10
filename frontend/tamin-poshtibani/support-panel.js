@@ -718,9 +718,10 @@
         <span style="flex:1"></span>${x.frozen_at ? `<span class="chip info" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد ${fmtShort(x.frozen_at)}</span>` : ""}
         <span class="dim" style="font-size:.8rem" title="آخرین تأییدِ ساختار">${fmtS(x.norm_at)}</span></div>
       <div class="dim" style="font-size:.85rem;margin:4px 0 6px">کارشناس: ${esc(exName(x.expert_id))}${x.by && x.by !== `expert:${x.expert_id}` ? ` (ذخیره: ${esc(actorFa(x.by))})` : ""} · نوع قلم: <b>${esc(x.head)}</b>${x.qty != null ? ` · مقدار ${M(x.qty)} ${esc(x.unit || "")}` : ""}${x.sugg_source ? ` · پیشنهادِ سامانه از: ${esc(SUGG_SRC[x.sugg_source] || x.sugg_source)}` : ""}</div>
-      ${x.lines.length ? `<ul style="margin:0;padding-inline-start:20px;line-height:1.9">${x.lines.map((l) => `<li>${esc(l)}</li>`).join("")}</ul>`
+      ${x.lines.length ? `<ul style="margin:0;padding-inline-start:20px;line-height:1.9">${x.lines.map((l) => `<li>${TP.rtlArrow(esc(l))}</li>`).join("")}</ul>`
         : x.has_sugg ? `<div style="color:#86efac">✓ بی‌تغییر — همان پیشنهادِ سامانه تأیید شد (همه 🔒).</div>`
         : `<div class="dim">پیشنهادِ سامانه برای این قلم ثبت نشده (پیش از این بخش نرمال شده بود).</div>`}
+      ${x.reason ? `<div class="chg-why">📝 علتِ کارشناس: <b>${esc(x.reason)}</b></div>` : ""}
       <div class="dim" style="font-size:.8rem;margin-top:6px">${lockTxt(x.locks)}</div>
       <div style="display:flex;gap:8px;margin-top:8px"><button class="tp-btn xs" data-chglog="${x.id}">تاریخچه (${M(x.changes)})</button><button class="tp-btn xs" data-asg="${x.aid}">جزئیاتِ ارجاع</button></div></div>`).join("");
     if (S.chgMore) h += `<div style="text-align:center;margin:10px 0"><button class="tp-btn sm" data-chgmore>بیشتر…</button></div>`;
@@ -733,7 +734,7 @@
       const it = r.item || {};
       ov.set(`تاریخچهٔ ساختار — ${esc(it.title || "")}`, r.changes.length ? `<div class="tp-scroll"><table class="tp-table"><thead><tr><th>زمان</th><th>کنشگر</th><th>کار</th><th class="rt">تغییرها</th></tr></thead><tbody>
         ${r.changes.map((c) => `<tr><td class="num" style="font-size:.8rem">${fmtS(c.at)}</td><td>${esc(actorFa(c.actor))}</td><td>${esc(CHG_KIND[c.kind] || c.kind)}</td>
-          <td class="rt" style="white-space:normal">${c.lines.length ? c.lines.map((l) => `<div>${esc(l)}</div>`).join("") : `<span class="dim">${c.kind === "norm" || c.kind === "freeze" ? "بی‌تغییر" : "—"}</span>`}</td></tr>`).join("")}</tbody></table></div>`
+          <td class="rt" style="white-space:normal">${c.lines.length ? c.lines.map((l) => `<div>${TP.rtlArrow(esc(l))}</div>`).join("") : `<span class="dim">${c.kind === "norm" || c.kind === "freeze" ? "بی‌تغییر" : "—"}</span>`}${c.reason ? `<div class="chg-why">📝 علت: ${esc(c.reason)}</div>` : ""}</td></tr>`).join("")}</tbody></table></div>`
         : `<div class="empty">هنوز تغییری ثبت نشده — این قلم پیش از این بخش نرمال شده بود.</div>`);
     } catch (e) { ov.set("خطا", `<div class="tp-note warn">${esc(e.message)}</div>`); }
   }
