@@ -33,7 +33,8 @@ const short = (s, n) => { const x = T(s).replace(/\s+/g, " "); return x.length >
 /* ------------------------------------------------------------------ */
 const KEY_PASS = "supportPass";   /* {salt, hash, at} */
 const KEY_LOCK = "supportLock";   /* {n, until}: رمزهای غلطِ پشت‌سرهم و پایانِ قفل */
-const PASS_MIN = 6, PASS_MAX = 64;
+/* رمزِ پشتیبانی هم مثلِ همهٔ کدهای ورود دقیقاً ۴ رقم است (تصمیم مالک، ۱۶ و ۱۸ مهر ۱۴۰۵)؛ رمزِ قدیمیِ بلندتر تا عوض شدن کار می‌کند */
+const PASS_RE = /^\d{4}$/;
 const MAX_FAILS = 5, LOCK_MS = 15 * 60000;
 export const TOKEN_TTL = 12 * 3600000;
 
@@ -64,7 +65,7 @@ const evStmt = (env, kind, requestId, itemId, payload) => env.DB.prepare("INSERT
 
 async function cleanPass(env, p) {
   const s = latin(p);
-  if (s.length < PASS_MIN || s.length > PASS_MAX) throw new HttpError(`رمز باید ${faN(PASS_MIN)} تا ${faN(PASS_MAX)} نویسه باشد.`, 400);
+  if (!PASS_RE.test(s)) throw new HttpError("رمز پشتیبانی باید ۴ رقم باشد.", 400);
   if (s === await managerCode(env)) throw new HttpError("رمز پشتیبانی نباید همان کد مدیر باشد.", 400);
   return s;
 }

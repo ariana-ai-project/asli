@@ -86,7 +86,7 @@ const tg = (data) => handleUpdate(env, { callback_query: { id: `cb${++cbn}`, dat
 const tgText = (text) => handleUpdate(env, { message: { message_id: 5000 + ++cbn, chat: { id: EXPERT_CHAT, type: "private" }, text } });
 const sentTexts = () => calls.filter((c) => c.bot === "tg" && c.method === "sendMessage").map((c) => c.body.text);
 let SUPH = {};
-if (DB) SUPH = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
+if (DB) SUPH = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 const S = {};
 
 test("تنظیماتِ «👁 حالت تأیید» و بدنهٔ «رد» (بی پایگاه داده)", () => {

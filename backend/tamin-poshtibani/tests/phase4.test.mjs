@@ -138,7 +138,7 @@ async function call(path, { method, body, headers, raw } = {}) {
 }
 const since = (n) => calls.slice(n);
 let SUP = {};
-if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 const usage = { input_tokens: 6000, output_tokens: 700, cache_read_input_tokens: 3000, cache_creation_input_tokens: 0 };
 const jsonOut = (o) => ({ model: "claude-opus-5-5", stop_reason: "end_turn", usage, content: [{ type: "thinking", thinking: "" }, { type: "text", text: JSON.stringify(o) }] });
 const lineOf = (th, item) => DB.raw.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND item_id=?").get(th, item);

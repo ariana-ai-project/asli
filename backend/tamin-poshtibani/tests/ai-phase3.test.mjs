@@ -80,7 +80,7 @@ async function call(path, { method, body, headers } = {}) {
   return { status: res.status, data };
 }
 let SUP = {};
-if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "faz-se-123" } })).data.token };
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 const since = (n) => calls.slice(n);
 const usage = { input_tokens: 5000, output_tokens: 500, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 };
 const jsonOut = (o) => ({ model: "claude-opus-5-5", stop_reason: "end_turn", usage, content: [{ type: "text", text: JSON.stringify(o) }] });

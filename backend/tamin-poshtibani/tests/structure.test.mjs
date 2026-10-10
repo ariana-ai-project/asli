@@ -175,7 +175,7 @@ test("حالتِ هوشمند: نرمال‌سازی پیش از سپردن با
   assert.equal((await call("/items/41/norm", { method: "DELETE", headers: AI })).status, 409, "برداشتنِ ذخیره هم نه");
   assert.equal((await call("/assignments/1/handoff", { headers: AI, body: {} })).status, 409, "دو بار سپرده نمی‌شود");
   /* پنل پشتیبانی: «🧩 تغییرات اقلام» */
-  SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "sakhtar-123" } })).data.token };
+  SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
   assert.equal((await call("/support/changes")).status, 401, "بی رمز پشتیبانی نه");
   const list = (await call("/support/changes?expert=1", { headers: SUP })).data.items;
   assert.deepEqual(list.map((x) => x.id).sort(), [41, 42]);

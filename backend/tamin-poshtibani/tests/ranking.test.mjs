@@ -128,7 +128,7 @@ test("پنل پشتیبانی: وزن‌ها و قاعدهٔ دعوت — خوا
     return { status: res.status, data: await res.json() };
   };
   assert.equal((await call("/support/ai/ranking")).status, 401);
-  const SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "rotbe-123" } })).data.token };
+  const SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
   const g = await call("/support/ai/ranking", { headers: SUP });
   assert.deepEqual(g.data.weights, RANK_DEFAULT);
   assert.equal(g.data.dispatch.then, "type");

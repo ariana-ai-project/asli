@@ -58,21 +58,24 @@ let TOKEN = null;
 
 test("ورود پشتیبانی: اولین بازدیدکننده رمز می‌گذارد و بعد فقط با همان رمز", { skip: SKIP }, async () => {
   assert.equal((await call("GET", "/support/status")).data.set, false);
-  assert.equal((await call("POST", "/support/login", { body: { pass: "123456" } })).status, 409, "پیش از گذاشتنِ رمز ورود معنی ندارد");
+  assert.equal((await call("POST", "/support/login", { body: { pass: "1234" } })).status, 409, "پیش از گذاشتنِ رمز ورود معنی ندارد");
   assert.equal((await call("POST", "/support/setup", { body: { pass: "12" } })).status, 400, "رمز کوتاه پذیرفته نمی‌شود");
-  const s = await call("POST", "/support/setup", { body: { pass: "۱۲۳۴۵۶ab" } });
+  assert.equal((await call("POST", "/support/setup", { body: { pass: "12345" } })).status, 400, "بیش از ۴ رقم پذیرفته نمی‌شود");
+  assert.equal((await call("POST", "/support/setup", { body: { pass: "ab12" } })).status, 400, "فقط رقم");
+  assert.equal((await call("POST", "/support/setup", { body: { pass: "4321" } })).status, 400, "همان کد مدیر نه");
+  const s = await call("POST", "/support/setup", { body: { pass: "۱۴۰۵" } });
   assert.equal(s.status, 200);
   assert.match(s.data.token, /^\d{13}\.[0-9a-f]{64}$/);
   TOKEN = s.data.token;
-  const again = await call("POST", "/support/setup", { body: { pass: "999999" } });
+  const again = await call("POST", "/support/setup", { body: { pass: "9999" } });
   assert.equal(again.status, 409, "نفر دوم نمی‌تواند رمز را عوض کند");
   assert.equal((await call("GET", "/support/status")).data.set, true);
 
   /* رقم فارسی و لاتین یکی‌اند */
-  assert.equal((await call("POST", "/support/login", { body: { pass: "123456ab" } })).status, 200);
+  assert.equal((await call("POST", "/support/login", { body: { pass: "1405" } })).status, 200);
   /* خودِ رمز ذخیره نمی‌شود و تنظیماتِ پنل‌ها آن را نمی‌دهند */
   const stored = row("SELECT value FROM settings WHERE key='supportPass'");
-  assert.ok(stored && !stored.value.includes("123456"), "فقط نمک و هش");
+  assert.deepEqual(Object.keys(JSON.parse(stored.value)).sort(), ["at", "hash", "salt"], "فقط نمک و هش");
   const settings = await call("GET", "/settings", { manager: "4321" });
   assert.equal(settings.status, 200);
   assert.ok(!("supportPass" in settings.data) && !JSON.stringify(settings.data).includes(JSON.parse(stored.value).hash));
@@ -233,20 +236,20 @@ test("قفل بعد از پنج رمز غلط؛ مدیر رمز تازه می‌
   for (let k = 0; k < 4; k++) assert.equal((await call("POST", "/support/login", { body: { pass: "غلط-غلط" } })).status, 401);
   const fifth = await call("POST", "/support/login", { body: { pass: "غلط-غلط" } });
   assert.equal(fifth.status, 429);
-  assert.equal((await call("POST", "/support/login", { body: { pass: "123456ab" } })).status, 429, "در قفل، رمز درست هم نه");
+  assert.equal((await call("POST", "/support/login", { body: { pass: "1405" } })).status, 429, "در قفل، رمز درست هم نه");
   assert.ok((await call("GET", "/support/status")).data.locked_until > Date.now());
 
-  assert.equal((await call("POST", "/support/reset", { body: { pass: "tazeh-123" } })).status, 401, "بی کد مدیر نه");
-  assert.equal((await call("POST", "/support/reset", { manager: "0000", body: { pass: "tazeh-123" } })).status, 401);
-  const rs = await call("POST", "/support/reset", { manager: "4321", body: { pass: "tazeh-123" } });
+  assert.equal((await call("POST", "/support/reset", { body: { pass: "5678" } })).status, 401, "بی کد مدیر نه");
+  assert.equal((await call("POST", "/support/reset", { manager: "0000", body: { pass: "5678" } })).status, 401);
+  const rs = await call("POST", "/support/reset", { manager: "4321", body: { pass: "5678" } });
   assert.equal(rs.status, 200);
   assert.equal((await call("GET", "/support/experts", { token: TOKEN })).status, 401, "نشانهٔ رمزِ قبلی باطل شد");
   assert.equal((await call("GET", "/support/experts", { token: rs.data.token })).status, 200);
-  assert.equal((await call("POST", "/support/login", { body: { pass: "tazeh-123" } })).status, 200, "قفل هم برداشته شد");
+  assert.equal((await call("POST", "/support/login", { body: { pass: "5678" } })).status, 200, "قفل هم برداشته شد");
 
   /* تغییر رمز با رمز فعلی */
-  assert.equal((await call("POST", "/support/pass", { token: rs.data.token, body: { current: "x", pass: "sevvomi-1" } })).status, 403);
-  const ch = await call("POST", "/support/pass", { token: rs.data.token, body: { current: "tazeh-123", pass: "sevvomi-1" } });
+  assert.equal((await call("POST", "/support/pass", { token: rs.data.token, body: { current: "x", pass: "8765" } })).status, 403);
+  const ch = await call("POST", "/support/pass", { token: rs.data.token, body: { current: "5678", pass: "8765" } });
   assert.equal(ch.status, 200);
   assert.equal((await call("GET", "/support/experts", { token: rs.data.token })).status, 401);
   assert.equal((await call("GET", "/support/experts", { token: ch.data.token })).status, 200);

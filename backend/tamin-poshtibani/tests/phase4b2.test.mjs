@@ -119,7 +119,7 @@ async function call(path, { method, body, headers } = {}) {
   return { status: res.status, data };
 }
 let SUP = {};
-if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 const picks = (id, headers = EX) => call(`/items/${id}/picks`, { headers });
 const edit = (id, body) => call(`/items/${id}/picks`, { method: "PUT", headers: EX, body });
 const start = (id) => call(`/items/${id}/ai-start`, { headers: EX, body: {} });

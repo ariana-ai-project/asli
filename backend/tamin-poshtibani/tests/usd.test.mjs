@@ -194,7 +194,7 @@ test("پنل پشتیبانی: وضعیت، بارگذاری و خواندن د�
     return { status: res.status, data: await res.json() };
   };
   assert.equal((await call("/support/usd")).status, 401, "بی رمز پشتیبانی بسته است");
-  const SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "dollar-123" } })).data.token };
+  const SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
   const up = await call("/support/usd/rows", { body: { rows: [{ jday: "1405/07/06", rate: 2440000 }, { jday: "1405/07/08", rate: 2553000 }], file: "dollar_rates.xlsx" }, headers: SUP });
   assert.equal(up.data.written, 2);
   assert.equal(up.data.interp, 1);

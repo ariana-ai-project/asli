@@ -37,7 +37,7 @@ let TOKEN = null;
 
 test("دیتابیس تازه: کد مدیر همان env است؛ پشتیبانی کدها را می‌بیند و کد مدیر را عوض می‌کند", { skip: SKIP }, async () => {
   assert.equal((await call("POST", "/login", { body: { role: "manager", code: "4321" } })).status, 200);
-  TOKEN = (await call("POST", "/support/setup", { body: { pass: "pass-1234" } })).data.token;
+  TOKEN = (await call("POST", "/support/setup", { body: { pass: "9753" } })).data.token;
   assert.ok(TOKEN, "رمز پشتیبانی گذاشته شد");
   const c = await call("GET", "/support/codes", { token: TOKEN });
   assert.equal(c.status, 200);

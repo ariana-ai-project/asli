@@ -92,20 +92,20 @@
     try { S.status = await TP.api("/support/status"); } catch (e) { S.err = S.err || e.message; S.status = S.status || { set: true }; }
     S.view = "login"; render();
   }
-  /* کارتِ ورود با همان پوستهٔ ورودِ مدیر و کارشناس (ui.css)؛ رمزِ پشتیبانی متن است نه رقم، پس یک فیلد (مهر ۱۴۰۵) */
+  /* کارتِ ورود با همان پوستهٔ ورودِ مدیر و کارشناس (ui.css)؛ رمزِ پشتیبانی هم ۴ رقم است، ولی یک فیلد تا رمزِ قدیمیِ بلندتر هم وارد شود (مهر ۱۴۰۵) */
   function vLogin() {
     const st = S.status || {};
     const locked = st.locked_until && st.locked_until > Date.now();
-    const pw = (id, ph, ac) => `<input id="${id}" class="tp-auth-pass" type="password" placeholder="${ph}" aria-label="${ph}" autocomplete="${ac}" dir="ltr">`;
+    const pw = (id, ph, ac, n) => `<input id="${id}" class="tp-auth-pass" type="password" placeholder="${ph}" aria-label="${ph}" autocomplete="${ac}" dir="ltr"${n ? ' inputmode="numeric" maxlength="4"' : ""}>`;
     const go = (kind, label, dis) => `<button class="tp-auth-go" type="submit" data-do="${kind}" ${dis ? "disabled" : ""}><span class="tp-go-3d" aria-hidden="true"><i></i><i></i><i></i></span><span>${label}</span></button>`;
     let h;
     if (S.mode === "reset") {
       h = `<h1>رمز تازهٔ پشتیبانی</h1><p class="tp-auth-sub">فقط مدیر: کد مدیر و رمز تازهٔ پشتیبانی</p>
         <input id="mgr" class="tp-auth-pass" type="password" inputmode="numeric" placeholder="کد مدیر" aria-label="کد مدیر" autocomplete="off" dir="ltr">
-        ${pw("p1", "رمز تازه (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز تازه", "new-password")}${go("reset", "ثبت رمز تازه و ورود", S.busy)}`;
+        ${pw("p1", "رمز تازه (۴ رقم)", "new-password", 1)}${pw("p2", "تکرار رمز تازه", "new-password", 1)}${go("reset", "ثبت رمز تازه و ورود", S.busy)}`;
     } else if (!st.set) {
       h = `<h1>تعیین رمز پشتیبانی</h1><p class="tp-auth-sub">این پنل هنوز رمز ندارد؛ رمزی که می‌گذارید رمز ورود همهٔ همکاران پشتیبانی است</p>
-        ${pw("p1", "رمز (دست‌کم ۶ نویسه)", "new-password")}${pw("p2", "تکرار رمز", "new-password")}${go("setup", "ثبت رمز و ورود", S.busy)}`;
+        ${pw("p1", "رمز (۴ رقم)", "new-password", 1)}${pw("p2", "تکرار رمز", "new-password", 1)}${go("setup", "ثبت رمز و ورود", S.busy)}`;
     } else {
       h = `<h1>ورود پشتیبانی</h1><p class="tp-auth-sub">رمز پشتیبانی را وارد کنید</p>${pw("p1", "رمز", "current-password")}${go("login", "ورود", S.busy || locked)}`;
     }
@@ -145,8 +145,8 @@
   function changePass() {
     const d = TP.modal("تغییر رمز پشتیبانی", `<div style="display:flex;flex-direction:column;gap:8px">
         <input class="tp-input" type="password" data-pc="cur" placeholder="رمز فعلی" autocomplete="current-password" dir="ltr">
-        <input class="tp-input" type="password" data-pc="p1" placeholder="رمز تازه (دست‌کم ۶ نویسه)" autocomplete="new-password" dir="ltr">
-        <input class="tp-input" type="password" data-pc="p2" placeholder="تکرار رمز تازه" autocomplete="new-password" dir="ltr">
+        <input class="tp-input" type="password" data-pc="p1" placeholder="رمز تازه (۴ رقم)" autocomplete="new-password" dir="ltr" inputmode="numeric" maxlength="4">
+        <input class="tp-input" type="password" data-pc="p2" placeholder="تکرار رمز تازه" autocomplete="new-password" dir="ltr" inputmode="numeric" maxlength="4">
         <span class="dim" style="font-size:.85rem">با تغییر رمز، همهٔ نشست‌های باز (روی دستگاه‌های دیگر) بیرون می‌روند.</span></div>`, async () => {
       const g = (k) => d.querySelector(`[data-pc="${k}"]`).value;
       if (g("p1") !== g("p2")) return TP.modal("نشد", "دو رمز تازه یکی نیستند.", null, "باشد", "");

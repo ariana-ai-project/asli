@@ -93,7 +93,7 @@ async function call(path, { method, body, headers, raw } = {}) {
 }
 /* پنل پشتیبانی (فاز ۲): رمزِ اول را همین آزمون می‌گذارد؛ نشانه‌اش برای /support/ai/* */
 let SUP = {};
-if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 const since = (n) => calls.slice(n);
 const smsTo = (n) => since(n).filter((c) => c.bot === "sms");
 const usage = { input_tokens: 6000, output_tokens: 700, cache_read_input_tokens: 3000, cache_creation_input_tokens: 0 };

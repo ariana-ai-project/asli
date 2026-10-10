@@ -68,7 +68,7 @@ async function call(path, { method, body, headers } = {}) {
   return { status: res.status, data };
 }
 let SUP = {};
-if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "azmoon-123" } })).data.token };
+if (DB) SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
 /** «بررسی سوابق»ِ یک قلم برای کارشناس: ۴۲۳ یعنی دستِ کارشناس هوشمند است */
 const hist = (item, headers = EX) => call(`/suppliers/history?item_id=${item}`, { headers });
 const outbox = (like) => DB.raw.prepare("SELECT target, payload_json FROM outbox WHERE idem LIKE ? ORDER BY id").all(like).map((r) => ({ to: r.target, text: JSON.parse(r.payload_json).text }));
