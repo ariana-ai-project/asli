@@ -253,7 +253,7 @@ test("«سپردن یا برگشت»: فهرست عوض نمی‌شود؛ قلم
   const th = threadsOf(1).find((t) => t.name === "شرکت الف");
   assert.deepEqual(th.lines.split(",").map(Number).sort(), [41, 42], "قلمِ دوم در همان گفت‌وگو");
   const last = DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND who='e' AND kind='text' ORDER BY id DESC LIMIT 1").get(th.id);
-  assert.match(last.body, /^سلام دوباره/, "پیامِ کوتاهِ قلمِ تازه");
+  assert.match(last.body, /^برای همین درخواست یه قلم دیگه هم لازم داریم/, "پیامِ کوتاهِ قلمِ تازه، بی سلامِ دوباره");
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM quotes WHERE assignment_id=1 AND item_id=42 AND supplier_name='شرکت الف'").get(), "خطِ استعلامِ قلمِ تازه");
 });
 

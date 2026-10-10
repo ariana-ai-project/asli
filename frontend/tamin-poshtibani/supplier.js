@@ -72,7 +72,7 @@
      سامانه از همین فیلدها می‌سازد — «👁 پیش‌نمایش پیش‌فاکتور» و بعد «ارسال»؛ پیش‌فاکتورِ خودِ تأمین‌کننده اختیاری و فقط پیوست است. */
   const S = { session: store.get("sp.session"), me: null, threads: [], th: null, d: null, tab: "spec", dirty: new Set(), extra: {}, lastMsg: 0, rev: -1,
     company: "تونل سد آریانا", labels: [], botLogin: null, busy: false, enums: {}, termFa: {}, termsDraft: null, termsDirty: false, pfFile: null,
-    bot: [], seq: 0, flow: null, pending: [], drafts: {}, pfRead: false,
+    bot: [], seq: 0, flow: null, pending: [], outbox: [], drafts: {}, pfRead: false,
     /* wz: کارت‌های نوبتیِ «📝 پر کردن اطلاعات» ({line, steps, i, cardId}) · kbFull: کارتِ قلمی که «ویرایش یک مورد» را باز کرده ·
        formOpen: کارتِ فرمِ راست که به‌جای خلاصه، فرمِ کامل را نشان می‌دهد (مهر ۱۴۰۵) */
     wz: null, kbFull: {}, formOpen: {} };
@@ -101,6 +101,8 @@
   /* دسکتاپ: گوشی + فرم؛ زیرش فقط گفت‌وگو */
   const PHONE = window.matchMedia("(min-width: 961px)");
   let phoneMode = PHONE.matches;
+  /* گوشیِ واقعی: صفحهٔ ثابت و هم‌قدِ بخشِ دیدنی (ph-chat.js: PH.lockView) */
+  const lockPhone = (on) => PH.lockView(on, on);
   const onPhoneMode = () => { if (phoneMode === PHONE.matches) return; phoneMode = PHONE.matches; if (S.d) renderAll(); };
   if (PHONE.addEventListener) PHONE.addEventListener("change", onPhoneMode); else if (PHONE.addListener) PHONE.addListener(onPhoneMode);
 
@@ -152,7 +154,7 @@
   /* کارتِ ورود با شش خانهٔ رمزِ پیامک (ui.js) روی «مه ساحلی» */
   function renderLogin(msg, ok) {
     S.me = null;
-    app.className = "";
+    app.className = ""; lockPhone(false);
     UI.mountBg("fog");
     app.innerHTML = key
       ? UI.login({ title: "ورود به پنل تأمین‌کنندگان", sub: "رمز ۶ رقمیِ پیامک را بنویسید", len: 6, max: 6, error: msg, ok, company: S.company, system: "پاسخ به استعلام خرید",
@@ -172,7 +174,7 @@
     try { await api("/sp/logout", { json: {} }); } catch (_) { /* نشست از قبل باطل */ }
     S.session = ""; store.set("sp.session", "");
     stopPoll();
-    if (inTg) { app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>خارج شدید</h2><p class="lead">اتصال این گفت‌وگوی تلگرام برداشته شد. برای ورود دوباره، لینک پیامک را در بات باز کنید و «ارسال رمز به پیامک» را بزنید.</p></div></div>`; return; }
+    if (inTg) { app.className = ""; lockPhone(false); app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>خارج شدید</h2><p class="lead">اتصال این گفت‌وگوی تلگرام برداشته شد. برای ورود دوباره، لینک پیامک را در بات باز کنید و «ارسال رمز به پیامک» را بزنید.</p></div></div>`; return; }
     renderLogin("خارج شدید. برای ورود دوباره «ارسال رمز به پیامک» را بزنید.", true);
   }
 
@@ -185,14 +187,14 @@
       S.enums = d.term_enums || {}; S.termFa = d.term_fa || {};
       if (Array.isArray(d.term_required) && d.term_required.length) TERM_REQUIRED = d.term_required;
       S.pfRead = d.pf_read === true;
-      if (!S.threads.length) { app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>فعلاً استعلامی نیست</h2><p class="lead">وقتی کارشناس خرید استعلامی بفرستد، همین‌جا دیده می‌شود.</p></div></div>`; return; }
+      if (!S.threads.length) { app.className = ""; lockPhone(false); app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>فعلاً استعلامی نیست</h2><p class="lead">وقتی کارشناس خرید استعلامی بفرستد، همین‌جا دیده می‌شود.</p></div></div>`; return; }
       const want = parseInt(hp.get("t") || store.sget("sp.th"), 10);
       await openThread(S.threads.some((t) => t.id === want) ? want : S.threads[0].id, true);
       startPoll();
     } catch (e) {
       if (e.status === 401 && !inTg) { S.session = ""; store.set("sp.session", ""); return renderLogin(e.data && e.data.relogin ? "نشست شما تمام شده است؛ دوباره وارد شوید." : ""); }
       if (e.status === 404 && inTg) e.message = "این صفحهٔ تأمین‌کننده است؛ این گفت‌وگوی تلگرام به‌عنوان کارشناس وصل است.";
-      app.className = ""; app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
+      app.className = ""; lockPhone(false); app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;
     }
   }
 
@@ -200,7 +202,7 @@
     if (!first && (S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return false;
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; store.sset("sp.th", String(id));
-    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.wz = null; S.pending = [];
+    S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.wz = null; S.pending = []; S.outbox = [];
     await loadThread();
     return true;
   }
@@ -227,6 +229,7 @@
     const keepSide = keepSideState();
     const chatPos = chatScroll();
     app.className = "sp-app sup-app";
+    lockPhone(!phoneMode);
     app.innerHTML = phoneMode
       ? `${top()}<div class="sp-full"><div class="sup-cols"><section class="sup-side" id="side">${sideHtml()}</section>
           <section class="ph-stage">${PH.frame(screenHtml(true))}</section></div></div>`
@@ -242,6 +245,28 @@
     const scr = $(".ph-screen");
     if (!scr) return renderAll();
     const pos = chatScroll();
+    /* فقط فهرستِ پیام‌ها، نوارِ بالا، منو و راهنمای گام عوض می‌شوند؛ کادرِ پیام (با فوکوس، متنِ نیمه‌نوشته و ضبطِ صدا) همان می‌ماند */
+    const t0 = document.createElement("div"); t0.innerHTML = screenHtml(!!scr.closest(".ph"));
+    const neu = t0.firstElementChild;
+    const chat = $("#chat", scr), nchat = neu && $("#chat", neu), comp = $(".ph-compose", scr), ncomp = neu && $(".ph-compose", neu);
+    const inp = comp && $("#msgIn", comp), ninp = ncomp && $("#msgIn", ncomp);
+    if (chat && nchat && comp && ncomp && inp && ninp && inp.dataset.draft === ninp.dataset.draft) {
+      if (chat.innerHTML !== nchat.innerHTML) chat.innerHTML = nchat.innerHTML;
+      const nav = $(".ph-nav", scr), nnav = $(".ph-nav", neu);
+      if (nav && nnav && nav.innerHTML !== nnav.innerHTML) nav.replaceWith(nnav);
+      const field = $(".ph-field", comp);
+      for (const sel of [".ph-kb", ".ph-hint"]) {
+        const a = $(sel, comp), b = $(sel, ncomp);
+        if (a && b) { if (a.outerHTML !== b.outerHTML) a.replaceWith(b); }
+        else if (a) a.remove();
+        else if (b) comp.insertBefore(b, field);
+      }
+      inp.placeholder = ninp.placeholder; inp.setAttribute("aria-label", ninp.getAttribute("aria-label") || "");
+      if (scr.className !== neu.className) scr.className = neu.className;
+      bindChat();
+      const c = $("#chat"); if (c) c.scrollTop = stick || pos == null ? c.scrollHeight : pos;
+      return;
+    }
     const focused = document.activeElement && document.activeElement.id === "msgIn";
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     const t = document.createElement("div"); t.innerHTML = screenHtml(!!scr.closest(".ph"));
@@ -263,7 +288,7 @@
     const lastId = S.d.msgs.length ? S.d.msgs[S.d.msgs.length - 1].id : 0;
     const after = {};
     for (const c of S.bot) { const a = c.after > lastId ? lastId : c.after; after[a] = (after[a] || "") + c.html; }
-    const list = S.d.msgs.concat(S.pending.map((p, i) => ({ id: -(i + 1), pending: true, who: "s", kind: "voice", at: p.at, meta: { voice: { dur: p.dur } } })));
+    const list = S.d.msgs.concat(PH.outboxMsgs(S.outbox, S.d.msgs, "s"), S.pending.map((p, i) => ({ id: -(i + 1), pending: true, who: "s", kind: "voice", at: p.at, meta: { voice: { dur: p.dur } } })));
     const body = PH.feed(list, {
       mine: (m) => m.who === "s",
       rich: (m) => PH.evCard(m, { mine: m.who === "s", termsLine, goLabel: phoneMode ? "دیدن در فرمِ کنار" : "دیدن و پر کردن", actions: evActions }),
@@ -697,8 +722,18 @@
       onSend: async (text) => {
         const clear = () => { const i = $("#msgIn"); if (i) i.value = ""; S.drafts[S.th] = ""; };
         if (S.flow) { clear(); await flowInput(text); return; }
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { json: { text } }); clear(); addMsgs(r.msgs, true); }
-        catch (e) { say(e.message); throw e; }
+        /* حباب همان لحظه می‌آید (کادر خالی و آماده)؛ پاسخِ سرور جایش را با پیامِ واقعی عوض می‌کند — شبکهٔ کند دیگر «لگ» به نظر نمی‌رسد */
+        const p = { at: Date.now(), body: text };
+        S.outbox.push(p); clear(); renderChat(true);
+        try {
+          const r = await api(`/sp/thread/${S.th}/msg`, { json: { text } });
+          S.outbox = S.outbox.filter((x) => x !== p);
+          const last = S.lastMsg; addMsgs(r.msgs, true); if (S.lastMsg === last) renderChat(true);
+        } catch (e) {
+          S.outbox = S.outbox.filter((x) => x !== p); renderChat(false);
+          const i = $("#msgIn"); if (i && !i.value) { i.value = text; PH.grow(i); }
+          say(e.message); throw e;
+        }
       },
       onVoice: sendVoice,
       onKey: (k) => {

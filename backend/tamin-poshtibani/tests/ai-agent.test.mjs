@@ -166,7 +166,8 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.equal(ath.source, "manual");
   S.th = ath.thread_id;
   const first = DB.raw.prepare("SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id").all(S.th);
-  assert.match(first[0].body, /^سلام، وقتتون بخیر[\s\S]*تأمین‌کنندهٔ آزمایشی، از واحد تدارکات شرکت/, "قالبِ دعوت، محاوره‌ای");
+  assert.match(first[0].body, /^سلام، وقتتون بخیر\nاز واحد تدارکات شرکت [\s\S]*از تأمین‌کنندهٔ آزمایشی قیمت می‌خواستیم/, "قالبِ دعوت، محاوره‌ای");
+  assert.doesNotMatch(first[0].body, /🌷|🙏/u, "بی شکلک");
   assert.equal(JSON.parse(first[0].meta_json).ai, true, "پیامِ کارشناس هوشمند علامت دارد");
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=1 AND supplier_name='تأمین‌کنندهٔ آزمایشی'").get().n, 1, "انتخاب جهت استعلام در تب استعلامات");
   assert.equal(DB.raw.prepare("SELECT via FROM sp_sms ORDER BY id DESC LIMIT 1").get().via, "textbee");

@@ -505,7 +505,7 @@
 .ph-wave i.on { opacity: 1; }
 .ph-b.voice.them .ph-wave { color: #1c3c8c; }
 .ph-dur { font-size: .72em; font-variant-numeric: tabular-nums; min-width: 2.4em; position: relative; z-index: 1; opacity: .9; }
-.ph-b.voice.sending { opacity: .72; }
+.ph-b.voice.sending, .ph-b.sending { opacity: .72; }
 .ph-spin { width: .95em; height: .95em; border-radius: 50%; border: 2px solid currentColor; border-top-color: transparent; animation: phSpin .8s linear infinite; }
 @keyframes phSpin { to { transform: rotate(360deg); } }
 /* متنِ پیاده‌شدهٔ صوتی — فقط صفحهٔ کارشناس */
@@ -550,3 +550,19 @@
 .sup-mobile { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .sup-mobile .ph-screen.full { flex: 1; }.ph-av.img { background: #fff; padding: .28em; }
 .ph-av.img img { width: 100%; height: 100%; object-fit: contain; border-radius: 50%; }
+/* ============================================================
+   گفت‌وگوی تمام‌صفحه روی گوشیِ واقعی (مهر ۱۴۰۵): صفحه ثابت، قابِ گفت‌وگو هم‌قدِ بخشِ دیدنی (visualViewport)،
+   بی کشیدنِ صفحه و بی پس‌زمینهٔ متحرکِ پنهان پشتِ گفت‌وگو؛ شیشه با تاریِ کم‌هزینه‌تر تا اسکرول روان بماند.
+   ============================================================ */
+html.sp-lock, html.sp-lock body { height: 100%; overflow: hidden; overscroll-behavior: none; }
+html.sp-lock body { position: fixed; inset: 0; width: 100%; }
+html.sp-lock #app.sp-app { position: fixed; left: 0; right: 0; top: var(--app-top, 0px); height: var(--app-h, 100dvh); }
+html.sp-chatv .tp-sky, html.sp-chatv .tp-orbs { display: none; }
+html.sp-lock .ph-screen.full { touch-action: manipulation; }
+html.sp-lock .ph-scroll { overscroll-behavior-y: contain; -webkit-overflow-scrolling: touch; }
+@media (max-width: 960px) {
+  .ph-screen.full .ph-glass { -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+}
+@media (max-width: 960px) and (prefers-reduced-transparency: reduce) {
+  .ph-screen.full .ph-glass { -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

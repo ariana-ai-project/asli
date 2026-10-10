@@ -117,13 +117,41 @@
         const cap = first && ai ? `<div class="ph-cap">🤖 <span>کارشناس هوشمند</span></div>` : "";
         const body = k === "rich" ? o.rich(m)
           : k === "voice" ? voiceHtml(m, side, last, o)
-            : `<div class="ph-b ${side}${ai ? " ai" : ""}${last ? " tail" : ""}" title="${hm(m.at)}">${esc(m.body)}</div>`;
-        h += `<div class="ph-row ${side}${first ? " first" : ""}">${cap}${body}${last ? `<div class="ph-meta">${hm(m.at)}</div>` : ""}</div>`;
+            : `<div class="ph-b ${side}${ai ? " ai" : ""}${last ? " tail" : ""}${m.pending ? " sending" : ""}" title="${m.pending ? "در حال ارسال…" : hm(m.at)}">${esc(m.body)}</div>`;
+        h += `<div class="ph-row ${side}${first ? " first" : ""}">${cap}${body}${last ? `<div class="ph-meta">${m.pending ? "در حال ارسال…" : hm(m.at)}</div>` : ""}</div>`;
       }
       if (after[m.id]) h += after[m.id];
     });
     return h + (o.tail || "");
   }
+
+  /* --- گوشیِ واقعی: صفحهٔ ثابت (مهر ۱۴۰۵، گزارشِ مالک: صفحه تکان می‌خورد و با کیبورد بالا می‌رفت) ---
+     خودِ صفحه دیگر اسکرول نمی‌خورد و کشیده نمی‌شود؛ برنامه هم‌قدِ بخشِ دیدنیِ صفحه است (visualViewport)، پس کیبورد که باز شد
+     کادرِ پیام درست بالای کیبورد می‌ماند و فقط فهرستِ پیام‌ها اسکرول می‌خورد. chatv: گفت‌وگوی تمام‌صفحه پیداست، پس پس‌زمینهٔ
+     متحرکِ پشتش (که دیده نمی‌شود و روی گوشی پردازنده‌ی گرافیک را می‌گیرد) خاموش می‌شود. */
+  const VV = window.visualViewport;
+  function fitView() {
+    const de = document.documentElement;
+    if (!de.classList.contains("sp-lock")) return;
+    const c = document.getElementById("chat"), stick = !!c && c.scrollHeight - c.scrollTop - c.clientHeight < 90;
+    const h = VV ? VV.height : window.innerHeight, top = VV ? Math.max(0, VV.offsetTop) : 0;
+    de.style.setProperty("--app-h", `${Math.round(h)}px`); de.style.setProperty("--app-top", `${Math.round(top)}px`);
+    if (window.scrollY) window.scrollTo(0, 0);
+    if (stick) requestAnimationFrame(() => { const x = document.getElementById("chat"); if (x) x.scrollTop = x.scrollHeight; });
+  }
+  /** پیامِ متنیِ در راه (مهر ۱۴۰۵): همان لحظه در فهرست می‌آید و با پاسخِ سرور جایش را به پیامِ واقعی می‌دهد. who: طرفِ همین صفحه.
+      پیامی که پیش از پاسخِ ارسال با نظرسنجی رسیده، دوبار نشان داده نمی‌شود. */
+  function outboxMsgs(box, msgs, who) {
+    return (box || []).filter((p) => !(msgs || []).some((m) => m.who === who && m.kind === "text" && m.body === p.body && m.at >= p.at - 60e3))
+      .map((p, i) => ({ id: -(1000 + i), pending: true, who, kind: "text", body: p.body, at: p.at }));
+  }
+  function lockView(on, chatv) {
+    const de = document.documentElement;
+    de.classList.toggle("sp-lock", !!on); de.classList.toggle("sp-chatv", !!(on && chatv));
+    if (on) fitView(); else { de.style.removeProperty("--app-h"); de.style.removeProperty("--app-top"); }
+  }
+  if (VV) { VV.addEventListener("resize", fitView); VV.addEventListener("scroll", fitView); }
+  window.addEventListener("resize", fitView);
 
   /* --- صفحهٔ گوشی --- */
   const clock = () => hm(Date.now());
@@ -284,5 +312,5 @@
     setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 4000);
   }
 
-  window.PH = { fa, esc, money, qty, hm, stamp, dayKey, durTxt, I, EV_HEAD, evItems, evCard, feed, screen, frame, grow, bindComposer, bindVoices, clock, printDoc, saveBlob };
+  window.PH = { fa, esc, money, qty, hm, stamp, dayKey, durTxt, I, EV_HEAD, evItems, evCard, feed, screen, frame, grow, bindComposer, bindVoices, clock, printDoc, saveBlob, lockView, fitView, outboxMsgs };
 })();

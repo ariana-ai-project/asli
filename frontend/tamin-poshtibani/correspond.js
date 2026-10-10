@@ -113,6 +113,7 @@
   }
   function renderLogin(msg) {
     app.classList.remove("sp-app");
+    PH.lockView(false);
     TP.ui.mountBg("fog");
     app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 4, error: msg, back: { href: "expert.html", label: "← پنل کارشناس" } });
     TP.ui.help.set("login.expert");
@@ -242,6 +243,7 @@
     const main = !on ? `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">${phoneMode ? "گفت‌وگو در گوشیِ کنار صفحه و اقلام و تصمیم‌ها همین‌جا می‌آیند." : "پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند."}</span></div>`
       : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
+    PH.lockView(!phoneMode, screenInMain);
     app.innerHTML = `${top()}<div class="sp-full"><div class="sp-cols ${phoneMode ? "ph-mode" : ""}" data-view="${S.view}">
       <aside class="sp-col reqs"><h4>درخواست‌ها ${S.asks ? `<span class="sp-badge ask" title="«پرسش از کارشناس»های بی‌پاسخ">🚨 ${fa(S.asks)}</span>` : ""}${propBadge(S.props)}${badge(S.unread)}${badge(S.waiting, "wait")}</h4>
         ${S.reqs.length > 4 || S.rq ? `<div class="tp-chat-search"><input data-rq value="${esc(S.rq)}" placeholder="جستجوی درخواست یا تأمین‌کننده" aria-label="جستجوی درخواست یا تأمین‌کننده" autocomplete="off"></div>` : ""}
@@ -328,7 +330,7 @@
     return w.pending.map(propCard).join("");
   };
   const feedHtml = () => msgsHtml() + askNote() + propsNote();
-  const msgsHtml = () => PH.feed(S.d.msgs, {
+  const msgsHtml = () => PH.feed(S.d.msgs.concat(PH.outboxMsgs((S.outbox || []).filter((x) => x.th === S.th), S.d.msgs, "e")), {
     mine: (m) => m.who === "e",
     ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
     rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine, goLabel: "دیدن در اقلام و تصمیم‌ها" }),
@@ -570,8 +572,20 @@
           const p = (watchOf().pending || []).slice().reverse().find((x) => x.kind !== "final") || (watchOf().pending || []).slice(-1)[0];
           return p ? propNo(p.id, text) : say("این گفت‌وگو را کارشناس هوشمند با تأییدِ شما پیش می‌برد و الان پیشنهادی منتظرِ شما نیست؛ پیامِ خودتان را با «❌ رد»ِ پیشنهادِ بعدی بفرستید.", "👁 با تأییدِ شما");
         }
-        try { const r = await api(`/sp/thread/${S.th}/msg`, { body: { text } }); inp.value = ""; S.drafts[S.th] = ""; addMsgs(r.msgs); }
-        catch (e) { if (e.status === 423 && !(e.data && e.data.ai_watch)) return shut(e.message); say(e.message); if (e.data && e.data.ai_watch) await loadThread().catch(() => {}); }
+        /* حباب همان لحظه می‌آید؛ پاسخِ سرور جایش را با پیامِ واقعی عوض می‌کند (مهر ۱۴۰۵) */
+        const th = S.th, p = { at: Date.now(), body: text, th };
+        S.outbox = (S.outbox || []).concat(p); inp.value = ""; S.drafts[S.th] = "";
+        const paint = () => { const c = $("#chat"); if (c && S.th === th) { c.innerHTML = feedHtml(); c.scrollTop = c.scrollHeight; bind(); } };
+        paint();
+        try {
+          const r = await api(`/sp/thread/${th}/msg`, { body: { text } });
+          S.outbox = S.outbox.filter((x) => x !== p);
+          const last = S.lastMsg; addMsgs(r.msgs); if (S.lastMsg === last) paint();
+        } catch (e) {
+          S.outbox = S.outbox.filter((x) => x !== p); paint();
+          if (!inp.value) inp.value = text;
+          if (e.status === 423 && !(e.data && e.data.ai_watch)) return shut(e.message); say(e.message); if (e.data && e.data.ai_watch) await loadThread().catch(() => {});
+        }
         composerState(inp); inp.focus();
       };
       send.onclick = go;
