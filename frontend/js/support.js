@@ -51,7 +51,10 @@
   }
 
   /* ---------- پنل ---------- */
-  let box = null, state = { cards: {}, hasPass: false };
+  let box = null, state = { cards: {}, hasPass: false, fx: { glow: true, ghost: true } };
+  /* جلوه‌های پنل‌های تدارکات — همین مرورگر هم فوراً به‌روز شود (پنل‌ها از tp.fx می‌خوانند) */
+  const FX = [["glow", "درخشش دکمه‌های ناوبری", "نورِ شیشه‌ای زیرِ موشواره روی دکمه‌های بخش‌ها"], ["ghost", "روحِ نوری بین دکمه‌ها", "هالهٔ سفید که با کلیک از دکمهٔ فعال به دکمهٔ تازه می‌پرد"]];
+  const keepFx = (fx) => { try { if (fx) localStorage.setItem("tp.fx", JSON.stringify(fx)); } catch (_) { /* حالت خصوصی */ } };
 
   function css() {
     if (document.getElementById("sp-css")) return;
@@ -80,7 +83,16 @@
 .sp-btn:focus-visible,.sp-opt:focus-visible{outline:2px solid #4f8cff;outline-offset:2px}
 .sp-foot{display:flex;gap:10px;align-items:center;margin-top:18px;padding-top:14px;border-top:1px solid rgba(120,160,255,.14);flex-wrap:wrap}
 .sp-msg{min-height:20px;margin-top:10px;font-size:.82rem;color:#7ee0a8}
-.sp-msg.bad{color:#ffa8a8}`;
+.sp-msg.bad{color:#ffa8a8}
+.sp-fx{margin-top:16px;padding-top:12px;border-top:1px solid rgba(120,160,255,.14)}
+.sp-fx h4{margin:0 0 6px;font-size:.95rem}
+.sp-sw{display:flex;align-items:center;gap:12px;width:100%;background:none;border:0;color:inherit;font:inherit;text-align:start;padding:8px 0;cursor:pointer}
+.sp-sw .sp-name{flex:1}
+.sp-tr{position:relative;width:46px;height:26px;border-radius:999px;flex-shrink:0;background:rgba(255,255,255,.1);border:1px solid rgba(180,208,255,.22);box-shadow:inset 0 2px 6px rgba(0,0,0,.35);transition:background-color .25s}
+.sp-tr i{position:absolute;top:2px;inset-inline-start:2px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#fff,#d6e2ff);box-shadow:0 2px 6px rgba(0,0,0,.4);transition:inset-inline-start .3s cubic-bezier(.34,1.3,.4,1)}
+.sp-sw[aria-checked="true"] .sp-tr{background:linear-gradient(135deg,#22c55e,#15a34a);border-color:rgba(110,231,183,.6);box-shadow:0 0 14px -3px rgba(34,197,94,.75)}
+.sp-sw[aria-checked="true"] .sp-tr i{inset-inline-start:22px}
+.sp-sw:focus-visible{outline:2px solid #4f8cff;outline-offset:2px;border-radius:10px}`;
     document.head.appendChild(s);
   }
 
@@ -113,9 +125,11 @@
     return `<h3>وضعیت بخش‌ها</h3>
       <p class="sp-hint">روی هر گزینه که بزنید همان لحظه ذخیره می‌شود. فقط بخشِ «فعال» باز می‌شود؛ دو حالت دیگر قابل ورود نیستند.</p>
       ${rows}
+      <div class="sp-fx"><h4>جلوه‌های پنل‌های تدارکات</h4>
+        ${FX.map(([k, t, sub]) => `<button class="sp-sw" role="switch" aria-checked="${(state.fx || {})[k] !== false}" data-fx="${k}"><span class="sp-tr"><i></i></span><span class="sp-name">${t}<small>${sub}</small></span></button>`).join("")}</div>
       <div class="sp-foot">
         <span style="flex:1;font-size:.9rem">${state.hasPass ? "تغییر رمز تب" : "تعریف رمز تب"}</span>
-        <input type="password" inputmode="numeric" autocomplete="off" id="sp-pass" placeholder="۴ تا ۸ رقم" />
+        <input type="password" inputmode="numeric" autocomplete="off" id="sp-pass" placeholder="۴ رقم" maxlength="4" />
         <button class="sp-btn" data-act="pass">ذخیرهٔ رمز</button>
         <button class="sp-btn ghost" data-act="close">بستن</button>
       </div>
@@ -141,16 +155,29 @@
     try {
       const r = await api("/site/login", { body: { code: ascii(c) } });
       code.set(ascii(c));
-      state = { cards: r.cards || {}, hasPass: !!r.hasPass };
+      state = { cards: r.cards || {}, hasPass: !!r.hasPass, fx: r.fx || state.fx };
       paint(state.cards);
       draw(adminView());
     } catch (e) { msg(e.message, true); }
   }
 
+  async function setFx(key, on) {
+    try {
+      const r = await api("/site", { method: "PUT", auth: true, body: { fx: { [key]: on } } });
+      state = { cards: r.cards || {}, hasPass: !!r.hasPass, fx: r.fx || state.fx };
+      keepFx(state.fx);
+      draw(adminView());
+      msg(on ? "روشن شد ✓" : "خاموش شد ✓");
+    } catch (e) {
+      if (/رمز/.test(e.message)) { code.clear(); draw(lockView()); }
+      msg(e.message, true);
+    }
+  }
+
   async function setCard(dept, st) {
     try {
       const r = await api("/site", { method: "PUT", auth: true, body: { cards: { [dept]: st } } });
-      state = { cards: r.cards || {}, hasPass: !!r.hasPass };
+      state = { cards: r.cards || {}, hasPass: !!r.hasPass, fx: r.fx || state.fx };
       paint(state.cards);
       draw(adminView());
       msg("ذخیره شد ✓");
@@ -190,6 +217,7 @@
     if (b.dataset.act === "close") return close();
     if (b.dataset.act === "unlock") { const i = box.querySelector("#sp-code"); return unlock((i.value || "").trim()); }
     if (b.dataset.act === "pass") { const i = box.querySelector("#sp-pass"); return savePass((i.value || "").trim()); }
+    if (b.dataset.fx) return setFx(b.dataset.fx, b.getAttribute("aria-checked") !== "true");
     if (b.dataset.dept) return setCard(b.dataset.dept, b.dataset.state);
   });
   document.addEventListener("keydown", (e) => {
@@ -199,5 +227,5 @@
   });
 
   /* وضعیت‌ها را همان اول می‌گیریم؛ اگر سرور در دسترس نبود، همان چیزی که در HTML است می‌ماند */
-  api("/site").then((r) => { state = r; paint(r.cards || {}); }).catch(() => { paint({}); });
+  api("/site").then((r) => { state = r; keepFx(r.fx); paint(r.cards || {}); }).catch(() => { paint({}); });
 })();

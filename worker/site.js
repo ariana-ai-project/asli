@@ -14,6 +14,9 @@ import { managerCode } from "./settings.js";
 
 const KEY_CARDS = "siteCards";
 const KEY_PASS = "sitePassHash";
+/* جلوه‌های پنل‌ها (مهر ۱۴۰۵): درخششِ دکمه‌های ناوبری و «روح» نوری بینِ آن‌ها — مالک از همین تب روشن و خاموش می‌کند */
+const KEY_FX = "siteFx";
+const FX_KEYS = ["glow", "ghost"];
 export const CARD_STATES = ["active", "soon", "off"];
 const CODE_RE = /^\d{4}$/;
 const T = (v) => String(v == null ? "" : v).trim();
@@ -28,7 +31,7 @@ async function sha256(s) {
 }
 
 async function readKeys(env) {
-  const rows = (await env.DB.prepare("SELECT key,value FROM settings WHERE key IN (?,?)").bind(KEY_CARDS, KEY_PASS).all()).results || [];
+  const rows = (await env.DB.prepare("SELECT key,value FROM settings WHERE key IN (?,?,?)").bind(KEY_CARDS, KEY_PASS, KEY_FX).all()).results || [];
   const out = {};
   for (const r of rows) out[r.key] = r.value;
   return out;
@@ -43,10 +46,19 @@ function parseCards(raw) {
   return out;
 }
 
-/** آنچه صفحهٔ اول بدون ورود می‌خواند: وضعیت کارت‌ها و این‌که رمزی تعریف شده یا نه */
+/** جلوه‌ها: پیش‌فرض هر دو روشن؛ فقط کلیدهای شناخته‌شده و فقط بولی */
+function parseFx(raw) {
+  let v = null;
+  try { v = JSON.parse(raw || "null"); } catch (_) { /* مقدار خراب — پیش‌فرض */ }
+  const out = { glow: true, ghost: true };
+  if (v && typeof v === "object" && !Array.isArray(v)) for (const k of FX_KEYS) if (typeof v[k] === "boolean") out[k] = v[k];
+  return out;
+}
+
+/** آنچه صفحهٔ اول و پنل‌ها بدون ورود می‌خوانند: وضعیت کارت‌ها، این‌که رمزی تعریف شده یا نه، و جلوه‌ها */
 export async function siteState(env) {
   const k = await readKeys(env);
-  return { cards: parseCards(k[KEY_CARDS]), hasPass: !!k[KEY_PASS] };
+  return { cards: parseCards(k[KEY_CARDS]), hasPass: !!k[KEY_PASS], fx: parseFx(k[KEY_FX]) };
 }
 
 /** رمز تب: رمز مشترک، یا کد مدیر */
@@ -70,7 +82,7 @@ export async function siteLogin(env, code) {
 }
 
 /**
- * تغییر وضعیت کارت‌ها و/یا رمز. body: { cards?: {dept: state}, pass?: "1234" }
+ * تغییر وضعیت کارت‌ها، جلوه‌ها و/یا رمز. body: { cards?: {dept: state}, fx?: { glow?, ghost? }, pass?: "1234" }
  * cards به‌صورت وصله اعمال می‌شود تا دو نفر هم‌زمان کار همدیگر را پاک نکنند.
  */
 export async function putSite(env, body, code) {
@@ -89,6 +101,17 @@ export async function putSite(env, body, code) {
     }
     stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
       .bind(KEY_CARDS, JSON.stringify(cards), Date.now()));
+  }
+
+  if (b.fx !== undefined) {
+    if (!b.fx || typeof b.fx !== "object" || Array.isArray(b.fx)) throw new HttpError("تنظیمِ جلوه‌ها درست نیست.", 400);
+    const fx = parseFx(k[KEY_FX]);
+    for (const [key, on] of Object.entries(b.fx)) {
+      if (!FX_KEYS.includes(key) || typeof on !== "boolean") throw new HttpError(`جلوهٔ «${key}» شناخته نیست.`, 400);
+      fx[key] = on;
+    }
+    stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+      .bind(KEY_FX, JSON.stringify(fx), Date.now()));
   }
 
   if (b.pass !== undefined) {

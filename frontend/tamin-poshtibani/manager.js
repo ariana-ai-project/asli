@@ -23,6 +23,11 @@
     q: { id: "", date: "", party: "", item: "" },
     page: { limit: 300, offset: 0, total: 0 },   // صفحه‌بندی سمت سرور برای بازه‌های بزرگ
     open: {},            // کشوی اقلام هر درخواست
+    fOpen: false, fAnim: null,                   // کادرِ «فیلتر» میز و حرکتِ بازشدنش
+    exQ: "", exPick: null, exPickQ: "", exLand: null,   // تخته‌ی کارشناسان: جستجو، انتخابگرِ عضو، تراشهٔ تازه‌نشسته
+    smEx: null, smKind: "guild", dlTab: "speed", dlMore: false,   // ارجاع و مهلت هوشمند
+    nm: { q: "", g: "*", sort: "n", limit: 120 },                 // اقلام و کدها
+    evCat: "",                                                     // دستهٔ رویدادها
     loading: false, error: "",
   };
   const settings = () => S.data.settings || CFG.defaults;
@@ -202,30 +207,57 @@
     return `<div class="fpop" data-pop><div class="fpop-list">${STATUS_ALL.map((s) => `<label><input type="checkbox" data-fst="${esc(s)}" ${sel.includes(s) ? "checked" : ""}> <span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span></label>`).join("")}</div>
       <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-fclear="status">پیش‌فرض</button><button class="tp-btn xs" data-fall>همه</button><button class="tp-btn xs primary" data-fclose>بستن</button></div></div>`;
   }
-  function vFilters() {
+  /* ---------- نوارِ میز (مهر ۱۴۰۵): دکمهٔ «فیلتر» که کادرِ فیلترها را با حرکت باز و بسته می‌کند ----------
+     همهٔ فیلترها داخلِ کادرند و همان لحظه اعمال می‌شوند؛ «تأیید» کادر را می‌بندد. حرکت فقط هنگامِ باز و بسته شدن است. */
+  const FUNNEL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h17l-6.6 7.6v5.6l-3.8 1.9v-7.5z"/></svg>`;
+  const STAGE_F = { pending: "ارسال‌نشده", ready: "آماده ارسال", sent: "ارسال‌شده", closed: "بسته/متوقف" };
+  const statusDefault = () => { const sel = statusSel(); return sel.length === STATUS_DEFAULT.length && STATUS_DEFAULT.every((s) => sel.includes(s)); };
+  /** فیلترهای فعال برای چیپ‌های کنارِ دکمه: [برچسب، مقدار، کلید برای برداشتن] */
+  function activeFilters() {
+    const L = [];
+    [["id", "شماره"], ["date", "تاریخ"], ["party", "پروژه"], ["item", "قلم"]].forEach(([k, l]) => { if (String(S.q[k] || "").trim()) L.push([l, S.q[k], `q:${k}`]); });
+    const nE = S.filter.experts.length;
+    if (nE || S.filter.expertText) L.push(["کارشناس", nE ? `${M(nE)} نفر` : `«${S.filter.expertText}»`, "expert"]);
+    if (!statusDefault()) L.push(["وضعیت", statusSel().length === STATUS_ALL.length ? "همه" : `${M(statusSel().length)} مورد`, "status"]);
+    if (S.filter.state) L.push(["مرحله", STAGE_F[S.filter.state] || S.filter.state, "state"]);
+    return L;
+  }
+  function vFilterPanel() {
     const nE = S.filter.experts.length, txt = S.filter.expertText;
     const expLabel = nE || txt ? `${nE ? `${M(nE)} کارشناس` : ""}${nE && txt ? " · " : ""}${txt ? `«${esc(txt)}»` : ""}` : "همه";
-    const sel = statusSel(), stLabel = sel.length === STATUS_ALL.length ? "همه" : sel.length === STATUS_DEFAULT.length && STATUS_DEFAULT.every((s) => sel.includes(s)) ? "بازها (پیش‌فرض)" : sel.join("، ");
-    const anyF = Object.values(S.q).some((v) => String(v || "").trim()) || nE || txt || S.filter.statuses || S.filter.state;
+    const sel = statusSel(), stLabel = sel.length === STATUS_ALL.length ? "همه" : statusDefault() ? "بازها (پیش‌فرض)" : sel.join("، ");
+    const field = (k, label, ph, extra) => `<label class="mg-f"><span>${label}</span><input class="tp-input ${extra || ""} ${S.q[k] ? "on" : ""}" data-q="${k}" value="${esc(S.q[k])}" placeholder="${ph}" aria-label="${label}" ${extra ? "readonly" : ""}></label>`;
+    const pill = (attr, v, label, on) => `<button type="button" class="tp-pill ${on ? "on" : ""}" data-${attr}="${v}" aria-pressed="${on ? "true" : "false"}">${label}</button>`;
+    return `<div class="mg-fpanel" data-fpanel-box role="region" aria-label="فیلترهای میز">
+      <div class="mg-fgrid">${field("id", "شماره درخواست", "مثلاً ۱۴۰۵۰۷")}${field("date", "تاریخ", "انتخاب از تقویم", "date")}${field("party", "پروژه یا طرف مقابل", "نام پروژه…")}${field("item", "عنوان یا کد قلم", "سیمان، ۲۰۱۳…")}</div>
+      <div class="mg-frow"><span class="lab">کارشناس</span><span class="fwrap"><button class="tp-btn sm ${nE || txt ? "primary" : ""}" data-fopen="expert">${expLabel} ▾</button>${vPop("expert")}</span>
+        <span class="lab">وضعیت</span><span class="fwrap"><button class="tp-btn sm ${statusDefault() ? "" : "primary"}" data-fopen="status" title="${esc(sel.join("، "))}">${stLabel.length > 40 ? stLabel.slice(0, 38) + "…" : esc(stLabel)} ▾</button>${vPop("status")}</span></div>
+      <div class="mg-frow"><span class="lab">مرحله</span><div class="tp-pills">${pill("fstate", "", "همه", !S.filter.state)}${Object.entries(STAGE_F).map(([k, l]) => pill("fstate", k, l, S.filter.state === k)).join("")}</div></div>
+      <div class="mg-frow"><span class="lab">بازه</span><div class="tp-pills">${WINDOWS.map(([k, l]) => pill("fwin", k, l, S.filter.window === k)).join("")}</div></div>
+      <div class="mg-ffoot"><button class="tp-btn sm" data-clear>پاک کردن همه</button><span class="spacer"></span><button class="tp-btn primary" data-fok>${TP.ui.ICON.check} تأیید</button></div></div>`;
+  }
+  function vFilters() {
+    const act = activeFilters(), win = WINDOWS.find((w) => w[0] === S.filter.window);
     /* ابزارهای میز در یک منو: ارجاع و مهلتِ هوشمند روی همه، و «پاک کردن میز» دور از دکمه‌های روزمره */
     const tools = TP.ui.menu({ btn: `<button class="tp-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" title="ارجاع و مهلت هوشمند روی همهٔ ارسال‌نشده‌ها">${TP.ui.ICON.settings}خودکار ▾</button>`,
       items: [{ label: "ارجاع هوشمند روی همهٔ ارسال‌نشده‌ها", icon: "users", attrs: `data-auto="asg"` }, { label: "مهلت هوشمند روی ارسال‌نشده‌های کارشناس‌دار", icon: "clock", attrs: `data-auto="dl"` },
         ...(S.page.total ? ["-", { label: "پاک کردن میز (همهٔ درخواست‌ها)", icon: "x", attrs: "data-purge", cls: "danger" }] : [])] });
-    return `<div class="tp-filters">
-      <input class="tp-input ${S.q.id ? "on" : ""}" data-q="id" value="${esc(S.q.id)}" placeholder="شماره درخواست" aria-label="شماره درخواست" style="width:130px">
-      <input class="tp-input date ${S.q.date ? "on" : ""}" data-q="date" value="${esc(S.q.date)}" placeholder="تاریخ" aria-label="تاریخ" readonly style="width:140px">
-      <input class="tp-input ${S.q.party ? "on" : ""}" data-q="party" value="${esc(S.q.party)}" placeholder="پروژه یا طرف مقابل" aria-label="پروژه یا طرف مقابل" style="width:180px">
-      <input class="tp-input ${S.q.item ? "on" : ""}" data-q="item" value="${esc(S.q.item)}" placeholder="عنوان یا کد قلم" aria-label="عنوان یا کد قلم" style="width:160px">
-      <span class="lab">کارشناس</span><span class="fwrap"><button class="tp-btn sm ${nE || txt ? "primary" : ""}" data-fopen="expert">${expLabel} ▾</button>${vPop("expert")}</span>
-      <span class="lab">وضعیت</span><span class="fwrap"><button class="tp-btn sm ${sel.length !== STATUS_DEFAULT.length || !STATUS_DEFAULT.every((s) => sel.includes(s)) ? "primary" : ""}" data-fopen="status" title="${esc(sel.join("، "))}">${stLabel.length > 40 ? stLabel.slice(0, 38) + "…" : stLabel} ▾</button>${vPop("status")}</span>
-      <span class="lab">مرحله</span><select class="tp-select" data-f="state" aria-label="مرحله"><option value="">همه</option>
-        <option value="pending" ${S.filter.state === "pending" ? "selected" : ""}>ارسال‌نشده</option><option value="ready" ${S.filter.state === "ready" ? "selected" : ""}>آماده ارسال</option>
-        <option value="sent" ${S.filter.state === "sent" ? "selected" : ""}>ارسال‌شده</option><option value="closed" ${S.filter.state === "closed" ? "selected" : ""}>بسته/متوقف</option></select>
-      <span class="lab">بازه</span><select class="tp-select" data-f="window" aria-label="بازه">${WINDOWS.map(([k, l]) => `<option value="${k}" ${S.filter.window === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      ${anyF ? `<button class="tp-btn sm" data-clear>پاک کردن فیلترها</button>` : ""}
-      ${tools}
-      <span class="end">${visible().length} از ${S.data.requests.length} درخواست${S.page.total > S.page.limit ? ` · صفحهٔ ${Math.floor(S.page.offset / S.page.limit) + 1} از ${Math.ceil(S.page.total / S.page.limit)}
-        <button class="tp-btn xs" data-page="-1" ${S.page.offset ? "" : "disabled"}>قبلی</button><button class="tp-btn xs" data-page="1" ${S.page.offset + S.page.limit < S.page.total ? "" : "disabled"}>بعدی</button>` : ""}</span></div>`;
+    return `<div class="mg-bar">
+      <button type="button" class="mg-fbtn ${S.fOpen ? "on" : ""}" data-fpanel aria-expanded="${S.fOpen ? "true" : "false"}" title="فیلترهای میز">${FUNNEL}<span>فیلتر</span>${act.length ? `<i class="badge">${M(act.length)}</i>` : ""}</button>
+      <div class="mg-chips">${act.map(([l, v, k]) => `<button type="button" class="mg-chip" data-fdrop="${esc(k)}" title="برداشتن این فیلتر">${esc(l)}: <b>${esc(String(v).length > 18 ? String(v).slice(0, 17) + "…" : v)}</b> ${TP.ui.ICON.x}</button>`).join("")}
+        ${act.length > 1 ? `<button type="button" class="mg-chip clear" data-clear>پاک کردن همه</button>` : ""}</div>
+      <span class="spacer"></span>
+      <span class="mg-count"><b>${M(visible().length)}</b> از ${M(S.data.requests.length)} درخواست · ${esc(win ? win[1] : "")}${S.page.total > S.page.limit ? ` · صفحهٔ ${M(Math.floor(S.page.offset / S.page.limit) + 1)} از ${M(Math.ceil(S.page.total / S.page.limit))}
+        <button class="tp-btn xs" data-page="-1" ${S.page.offset ? "" : "disabled"}>قبلی</button><button class="tp-btn xs" data-page="1" ${S.page.offset + S.page.limit < S.page.total ? "" : "disabled"}>بعدی</button>` : ""}</span>
+      ${tools}</div>
+      ${S.fOpen ? vFilterPanel() : ""}`;
+  }
+  /* بستنِ کادرِ فیلتر: اول حرکتِ بسته شدن، بعد رسم */
+  function closeFilters() {
+    const box = document.querySelector("[data-fpanel-box]"), btn = document.querySelector("[data-fpanel]");
+    if (btn) { btn.classList.remove("spin", "spin-back"); void btn.offsetWidth; btn.classList.add("spin-back"); }
+    S.pop = null;
+    TP.ui.reveal(box, false, () => { S.fOpen = false; render(); });
   }
   /* وضعیت به تفکیک قلم — درخواست یک وضعیت ندارد، هر قلمش دارد.
      تا شش قلم ردیف‌به‌ردیف، بیشتر از آن شمارشِ هر وضعیت؛ فهرست کامل در کشو. */
@@ -347,53 +379,78 @@
     return `<div class="tp-cards wide ${TP.ui.once("mgr.desk")}">${rows.map(deskCard).join("")}</div>`;
   }
 
-  /* ---------- کارشناسان ----------
-     ستون اول نام (کلیک = ویرایش)، ✕ حذف (غیرفعال)، ★ کارشناس ارشد — ارشدها ستون می‌شوند و در
-     خانهٔ (کارشناس × ارشد) تیک سبز یعنی زیر نظر اوست؛ هر کارشناس فقط یک سرپرست.
-     «مشاهده اعلانات» می‌گوید پایشِ آن کارشناس برای مدیر بیاید یا فقط برای ارشدش. */
-  /* چینش ثابت از راست: «اعلان به مدیر» (تیک، کم‌عرض) · ✕ · ★ · نام — این چهار ستون عرض و جای ثابت
-     دارند و با افزودن ارشد تکان نمی‌خورند؛ ستون ارشدها از پنجم به بعد، و «کد ورود» و «بار باز» ته جدول.
-     table-layout:fixed + colgroup: عرض هر ستون از خودِ colgroup می‌آید نه از محتوایش. */
-  const EX_W = { notify: 58, del: 40, star: 40, name: 230, senior: 120, load: 66 };
+  /* ---------- کارشناسان: تخته‌ی تیم‌ها (مهر ۱۴۰۵) ----------
+     هر کارشناس ارشد یک کارتِ تیم است و اعضایش تراشه‌هایی که می‌شود میانِ تیم‌ها کشید (یا با «＋ افزودن عضو» و منوی ⋯
+     جابه‌جا کرد)؛ کارتِ «بی‌سرپرست» کارشناسانی‌اند که زیرِ هیچ ارشدی نیستند. زنگوله روی تراشهٔ عضو = اعلان‌های پایشِ او
+     برای مدیر هم بیاید (بی آن فقط برای ارشدش). همان کارهای جدولِ قبلی: نام، ارشد، حذف، تیم، مقصدِ اعلان، بار باز. */
+  const exName = (e) => e.label || e.name;
+  const exAv = (e, cls) => `<span class="ex-av ${cls || ""}" style="--av:${TP.ui.avColor(e.name)}" aria-hidden="true">${esc(TP.ui.avInitial(exName(e)))}</span>`;
+  const exHit = (e) => !S.exQ || TP.hit(exName(e), S.exQ) || TP.hit(e.name, S.exQ);
+  const moreBtn = (label) => `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="${esc(label)}" title="گزینه‌ها">${TP.ui.ICON.more}</button>`;
+  function exNameEl(e, big) {
+    if (S.editName === e.id) return `<input class="tp-input ex-edit" data-ename="${e.id}" value="${esc(exName(e))}" aria-label="نام کارشناس">`;
+    return `<b class="${big ? "big" : ""}">${big ? "★ " : ""}${esc(exName(e))}</b>${e.label && e.label !== e.name ? `<small>${esc(e.name)}</small>` : ""}`;
+  }
+  function exChip(e, inTeam) {
+    const seniors = S.data.experts.filter((s) => s.active && s.senior && s.id !== e.id && s.id !== e.senior_id);
+    const menu = TP.ui.menu({ cls: "start", btn: moreBtn(`گزینه‌های ${exName(e)}`), items: [
+      { label: "ویرایش نام", icon: "edit", attrs: `data-ename-edit="${e.id}"` },
+      { label: "کارشناس ارشد شود", icon: "users", attrs: `data-estar="${e.id}"` },
+      ...(seniors.length ? [{ cap: "انتقال به تیمِ" }, ...seniors.map((s) => ({ label: esc(exName(s)), icon: "users", attrs: `data-eteam="${e.id}|${s.id}"` }))] : []),
+      ...(inTeam ? [{ label: "خروج از تیم", icon: "back", attrs: `data-eteam="${e.id}|${e.senior_id}"` }] : []),
+      "-", { label: "حذف از فهرست", icon: "x", attrs: `data-edel="${e.id}"`, cls: "danger" }] });
+    const bellOn = e.notify_to !== "senior";
+    const bell = inTeam ? `<button type="button" class="ex-bell ${bellOn ? "on" : ""}" data-ebell="${e.id}" aria-pressed="${bellOn ? "true" : "false"}" title="${bellOn ? "اعلان‌های پایشِ این کارشناس برای شما هم می‌آید — بزنید تا فقط برای ارشدش برود" : "اعلان‌ها فقط برای ارشدش می‌رود — بزنید تا برای شما هم بیاید"}">${TP.ui.ICON.bell}</button>` : "";
+    return `<div class="ex-chip ${S.exLand === e.id ? "land" : ""}" draggable="${S.editName === e.id ? "false" : "true"}" data-exdrag="${e.id}">${exAv(e)}
+      <span class="ex-nm">${exNameEl(e)}</span>
+      <span class="ex-load ${e.open_load ? "" : "zero"}" title="درخواست‌های باز">${M(e.open_load || 0)}</span>${bell}${menu}</div>`;
+  }
+  function exPicker(s) {
+    const q = S.exPickQ || "";
+    const cands = expertsSorted().filter((e) => !e.senior && e.senior_id !== s.id && (TP.hit(exName(e), q) || TP.hit(e.name, q)));
+    const sName = (id) => { const x = S.data.experts.find((y) => y.id === id); return x ? exName(x) : ""; };
+    return `<div class="fpop ex-pick" data-pop><input class="tp-input" data-epickq placeholder="نام کارشناس…" value="${esc(q)}" aria-label="جستجوی کارشناس" style="width:100%;margin-bottom:6px">
+      <div class="fpop-list">${cands.map((e) => `<button type="button" class="ex-pi" data-eteam="${e.id}|${s.id}">${exAv(e, "sm")}<span>${esc(exName(e))}</span>${e.senior_id && sName(e.senior_id) ? `<small>از تیمِ ${esc(sName(e.senior_id))}</small>` : ""}</button>`).join("") || `<span class="dim">کسی نمانده.</span>`}</div>
+      <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-epick-close>بستن</button></div></div>`;
+  }
+  function exTeam(s, members, i) {
+    const load = members.reduce((n, m) => n + (m.open_load || 0), s.open_load || 0);
+    const menu = TP.ui.menu({ btn: moreBtn(`گزینه‌های تیم ${exName(s)}`), items: [
+      { label: "ویرایش نام", icon: "edit", attrs: `data-ename-edit="${s.id}"` },
+      { label: "برداشتن ارشدی", icon: "x", attrs: `data-estar="${s.id}"` },
+      "-", { label: "حذف از فهرست", icon: "x", attrs: `data-edel="${s.id}"`, cls: "danger" }] });
+    return `<section class="ex-team" data-drop-team="${s.id}" style="--i:${Math.min(i, 10)}" aria-label="تیم ${esc(exName(s))}">
+      <header>${exAv(s, "lg")}<div class="ex-th">${exNameEl(s, true)}<small>${M(members.length)} عضو · ${M(load)} درخواست باز${s.team_connected ? ` · <span class="ok">گروه تلگرام وصل</span>` : ""}</small></div>
+        <span class="ex-load ${s.open_load ? "" : "zero"}" title="درخواست‌های باز خودِ ارشد">${M(s.open_load || 0)}</span>${menu}</header>
+      <div class="ex-members">${members.map((m) => exChip(m, true)).join("") || `<div class="ex-empty">کارشناسی را این‌جا بکشید</div>`}</div>
+      <footer><span class="fwrap"><button type="button" class="tp-btn sm" data-eadd-to="${s.id}" aria-expanded="${S.exPick === s.id ? "true" : "false"}">${TP.ui.ICON.plus} افزودن عضو</button>${S.exPick === s.id ? exPicker(s) : ""}</span></footer></section>`;
+  }
   function vExperts() {
-    const E = expertsSorted(), seniors = E.filter((e) => e.senior), W = EX_W;
-    const total = W.notify + W.del + W.star + W.name + seniors.length * W.senior + W.load;
-    const nameCell = (e) => S.editName === e.id
-      ? `<input class="tp-input" data-ename="${e.id}" value="${esc(e.label || e.name)}" style="width:100%" autofocus>`
-      : `<span class="ename" data-ename-edit="${e.id}" title="برای ویرایش نام کلیک کنید">${esc(e.label || e.name)}</span>`;
-    const notifyCell = (e) => {
-      const hasSenior = !!(e.senior_id && seniors.some((s) => s.id === e.senior_id));
-      const tip = hasSenior ? (e.notify_to === "senior" ? "اعلان‌های این کارشناس فقط برای کارشناس ارشدش می‌رود — تیک بزنید تا برای شما هم بیاید" : "اعلان‌های این کارشناس برای شما هم می‌آید — تیک را بردارید تا فقط برای ارشدش برود")
-        : "این کارشناس زیر نظر ارشدی نیست؛ اعلان‌هایش همیشه برای شما می‌آید";
-      return `<input type="checkbox" data-enotify="${e.id}" ${!hasSenior || e.notify_to !== "senior" ? "checked" : ""} ${hasSenior ? "" : "disabled"} title="${tip}">`;
-    };
-    return `<div class="tp-card tp-pane" style="max-width:none"><h2>کارشناسان</h2>
-      <div class="tp-scroll" data-keep-scroll style="max-height:60vh"><table class="tp-mx ex-mx" style="width:${total}px"><colgroup>
-          <col style="width:${W.notify}px"><col style="width:${W.del}px"><col style="width:${W.star}px"><col style="width:${W.name}px">
-          ${seniors.map(() => `<col style="width:${W.senior}px">`).join("")}<col style="width:${W.load}px"></colgroup>
-        <thead><tr><th title="اعلان‌های پایش این کارشناس برای مدیر هم بیاید">اعلان به<br>مدیر</th><th title="حذف از فهرست">✕</th><th title="کارشناس ارشد">★</th><th class="rt">کارشناس</th>
-          ${seniors.map((s) => `<th class="sen" title="${esc(s.label || s.name)}">★ ${esc(s.label || s.name)}${s.team_connected ? ` <span class="chip ok" title="گروه تلگرام تیم وصل است">گروه</span>` : ""}</th>`).join("")}<th>بار باز</th></tr></thead><tbody>
-        ${E.map((e) => `<tr>
-          <td>${notifyCell(e)}</td>
-          <td><button class="tp-btn xs danger" data-edel="${e.id}" title="حذف از فهرست">✕</button></td>
-          <td><button class="tp-btn xs ${e.senior ? "primary" : ""}" data-estar="${e.id}" title="${e.senior ? "برداشتن ارشدی" : "کارشناس ارشد شود"}">★</button></td>
-          <td class="rt nm">${nameCell(e)}</td>
-          ${seniors.map((s) => `<td>${s.id === e.id ? `<span class="dim">—</span>` : `<button class="tri ${e.senior_id === s.id ? "ok" : "unk"}" data-eteam="${e.id}|${s.id}" title="${e.senior_id === s.id ? "زیر نظر " + esc(s.label || s.name) : "زیر نظر " + esc(s.label || s.name) + " قرار بگیرد"}">${e.senior_id === s.id ? "✓" : ""}</button>`}</td>`).join("")}
-          <td class="num">${M(e.open_load || 0)}</td></tr>`).join("")}
-        <tr><td colspan="3"></td><td class="rt" colspan="${3 + seniors.length}"><button class="tp-btn sm" data-eadd>＋ کارشناس جدید</button></td></tr>
-      </tbody></table></div>
-    </div>`;
+    const all = expertsSorted(), seniors = all.filter((e) => e.senior), sIds = new Set(seniors.map((s) => s.id));
+    const pool = all.filter((e) => !e.senior && !(e.senior_id && sIds.has(e.senior_id)));
+    const teams = seniors.map((s) => [s, all.filter((e) => !e.senior && e.senior_id === s.id)]);
+    const showTeam = ([s, m]) => !S.exQ || exHit(s) || m.some(exHit);
+    const k = (label, value, icon, tone) => TP.ui.stat({ label, value, icon, tone });
+    return `<div class="ex-board ${TP.ui.once("mgr.ex")}">
+      <section class="tp-box ex-head"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.users}</span><h2>کارشناسان</h2>${TP.ui.info("manager.experts", "راهنمای کارشناسان")}
+        <span class="end"><label class="ex-search">${TP.ui.ICON.search}<input class="tp-input" data-exq value="${esc(S.exQ || "")}" placeholder="جستجوی نام…" aria-label="جستجوی کارشناس"></label>
+        <button class="tp-btn primary" data-eadd>${TP.ui.ICON.plus} کارشناس جدید</button></span></div>
+        <div class="tp-stats">${k("کارشناس فعال", M(all.length), "users")}${k("تیم", M(seniors.length), "flag", "info")}${k("بی‌سرپرست", M(pool.length), "user", pool.length ? "warn" : "ok")}${k("درخواست باز", M(all.reduce((n, e) => n + (e.open_load || 0), 0)), "box")}</div></section>
+      <div class="ex-teams">${teams.filter(showTeam).map(([s, m], i) => exTeam(s, m.filter((x) => !S.exQ || exHit(s) || exHit(x)), i)).join("")}
+        <section class="ex-team pool" data-drop-team="0" aria-label="بی‌سرپرست"><header><span class="ex-av lg pool" aria-hidden="true">${TP.ui.ICON.user}</span><div class="ex-th"><b class="big">بی‌سرپرست</b><small>${M(pool.length)} کارشناس · اعلان‌هایشان برای شما می‌آید</small></div></header>
+          <div class="ex-members">${pool.filter(exHit).map((e) => exChip(e, false)).join("") || `<div class="ex-empty">${S.exQ ? "کسی با این نام نیست" : "همه در تیم‌اند"}</div>`}</div></section></div>
+      ${seniors.length ? "" : `<div class="ex-hint">${TP.ui.ICON.users} برای ساختن تیم، از منوی ⋯ یک کارشناس «کارشناس ارشد شود» را بزنید.</div>`}</div>`;
   }
   async function expertPatch(id, body) {
-    try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); }
-    catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+    try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); return true; }
+    catch (e) { S.exLand = null; TP.modal("خطا", esc(e.message), null, "باشد", ""); return false; }
   }
   function addExpertDialog() {
     const d = TP.modal("کارشناس جدید", `<div class="tp-field"><b>نام و نام خانوادگی</b><input class="tp-input" id="ne-name" style="width:100%"></div>
       <div class="tp-field" style="margin-top:8px"><b>نام کوتاه (مثلاً «آقای بهمنی») — اختیاری</b><input class="tp-input" id="ne-label" style="width:100%"></div>
       <p class="dim" style="margin:10px 0 0;font-size:.85rem">کد ورودِ چهاررقمی را سامانه می‌سازد؛ در پنل پشتیبانی (کارشناسان ← کدهای ورود) دیده و عوض می‌شود.</p>`,
       async () => {
-        try { await TP.api("/experts", { body: { name: d.querySelector("#ne-name").value, label: d.querySelector("#ne-label").value } }); S.data.experts = (await TP.api("/experts")).experts; render(); }
+        try { await TP.api("/experts", { body: { name: d.querySelector("#ne-name").value, label: d.querySelector("#ne-label").value } }); S.data.experts = (await TP.api("/experts")).experts; render(); TP.ui.success("کارشناس افزوده شد"); }
         catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
       }, "افزودن");
   }
@@ -409,25 +466,29 @@
   const PLAN_FA = { skip: "بی‌تغییر — نوشته نمی‌شود", append: "فقط ردیف‌های تازه", replace: "از نو ساخته می‌شود" };
   const GROUP_FA = { catalog: "فهرست اقلام، نرخ‌ها و شاخص‌ها", grades: "کد و ردهٔ تأمین‌کنندگان", purchases: "ردیف‌های خرید" };
 
+  /* سوابق تأمین (مهر ۱۴۰۵): کارت‌برگ‌ها، فایل‌ها و جای رها کردنِ فایل؛ جزئیاتِ بارگذاری جمع‌شده و توضیح‌ها در راهنما */
   function vHist() {
     const h = S.hist, c = h && h.current, v2 = h && h.format === 2;
-    const k = (lab, val) => `<div class="k"><b>${lab}</b><span style="font-size:.95rem">${val}</span></div>`;
     const fs = (c && c.file) || {};
-    const files = c && c.files ? Object.values(c.files).map((n) => `<span class="chip">${esc(n)}</span>`).join(" ") : "";
-    return `<div class="tp-card tp-pane" style="max-width:1000px"><h2>سوابق تأمین</h2>
-      ${!h ? `<div class="empty">در حال بارگیری وضعیت…</div>`
-        : c && v2 ? `<div class="kpi">${k("بارگذاری", TP.fmt(c.finished_at || c.imported_at))}${k("ردیف خرید", M(c.rows))}${k("تأمین‌کننده", M(c.suppliers))}
-            ${k("با کد و رده", M(fs.graded || 0))}${k("کد قلم", M(c.codes))}${k("بازه", `${ymFa(c.minYm)} تا ${ymFa(c.maxYm)}`)}
-            ${k("فهرست اقلام", `${M(fs.items || 0)} قلم · ${M(fs.heads || 0)} نوع`)}${k("مبنای قیمت", h.base.priceLabel)}</div>
-          ${files ? `<div class="tp-row" style="flex-wrap:wrap;gap:6px">${files}</div>` : ""}
-          ${fs.noIndex ? `<div class="tp-note">${M(fs.noIndex)} خرید (${Object.keys(fs.noIndexYears || {}).map((y) => M(y)).join("، ")}) شاخص تعدیل ندارند — آمارشان هنوز منتشر نشده — و با ضریب ۱ آمده‌اند.</div>` : ""}
-          ${fs.skipped ? `<div class="tp-note">${M(fs.skipped)} ردیف فایل سوابق تأمین‌کننده نداشت و کنار گذاشته شد (در رتبه‌بندی تأمین‌کنندگان به کاری نمی‌آید).</div>` : ""}
-          ${fs.norm ? `<div class="tp-note">${normLine(fs.norm)}</div>` : ""}`
-        : c ? `<div class="tp-note warn"><b>سوابق فعلی با قالب قدیمی است</b> (شاخص تعدیل درون هر ردیف، ${M(c.rows)} ردیف از «${esc(c.filename || "—")}»). تا چهار فایل تازه بارگذاری نشود، تب «بررسی سوابق» کارشناس پیام «قالب قدیمی» می‌دهد.</div>`
-        : `<div class="empty"><b>هنوز سوابقی بارگذاری نشده است.</b>تا آن زمان تب «بررسی سوابق» کارشناس پیام «بارگذاری نشده» می‌دهد.</div>`}
-      ${h && h.loading && h.loading.fp ? `<div class="tp-note warn">یک بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)} هست — احتمالاً سهمیهٔ روزانهٔ دیتابیس تمام شده بود. همان چهار فایل را دوباره بارگذاری کنید تا از همان‌جا ادامه یابد؛ ردیف‌های نوشته‌شده دوباره نوشته نمی‌شوند. تا پایانش، سوابق قبلی سر جایش است.</div>` : ""}
-      <div class="tp-row"><button class="tp-btn primary" data-hist-import>بارگذاری چهار فایل مرجع (.xlsx)</button></div>
-    </div>`;
+    const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
+    const state = !h ? ["", "در حال خواندن…"] : h.loading && h.loading.fp ? ["warn", "بارگذاری نیمه‌کاره"] : c && v2 ? ["ok", "به‌روز"] : c ? ["warn", "قالب قدیمی"] : ["bad", "بارگذاری نشده"];
+    const files = (c && c.files) || {};
+    /* کلیدها همان catalog-import.js: items، indices، units، history */
+    const SLOTS = [["items", "اقلام", "box"], ["indices", "شاخص تعدیل", "data"], ["units", "نرخ تبدیل واحد", "settings"], ["history", "سوابق خرید", "file"]];
+    const details = [fs.noIndex ? `${M(fs.noIndex)} خرید (${Object.keys(fs.noIndexYears || {}).map((y) => M(y)).join("، ")}) شاخص تعدیل ندارند و با ضریب ۱ آمده‌اند.` : "",
+      fs.skipped ? `${M(fs.skipped)} ردیفِ بی‌تأمین‌کننده کنار گذاشته شد.` : "", fs.norm ? normLine(fs.norm) : "",
+      h && h.loading && h.loading.fp ? `بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)}؛ همان چهار فایل را دوباره بارگذاری کنید تا از همان‌جا ادامه یابد.` : "",
+      c && !v2 ? `سوابق فعلی با قالب قدیمی است (${M(c.rows)} ردیف از «${esc(c.filename || "—")}»).` : ""].filter(Boolean);
+    return `<div class="hs-wrap ${TP.ui.once("mgr.hist")}">
+      ${hero("data", "سوابق تأمین", c ? `آخرین بارگذاری ${esc(TP.fmt(c.finished_at || c.imported_at))}` : "چهار فایل مرجع را بارگذاری کنید",
+        `<span class="chip ${state[0]}">${state[1]}</span>${TP.ui.info("manager.hist", "راهنمای سوابق تأمین")}<button class="tp-btn primary" data-hist-import>${TP.ui.ICON.upload} بارگذاری چهار فایل</button>`)}
+      ${c && v2 ? `<div class="tp-stats">${stat("ردیف خرید", M(c.rows), "file")}${stat("تأمین‌کننده", M(c.suppliers), "users")}${stat("با کد و رده", M(fs.graded || 0), "check", "ok")}${stat("کد قلم", M(c.codes), "box")}
+          ${stat("بازهٔ سوابق", `${ymFa(c.minYm)} – ${ymFa(c.maxYm)}`, "clock", "info")}${stat("فهرست اقلام", `${M(fs.items || 0)} قلم`, "data", "", `${M(fs.heads || 0)} نوع`)}${stat("مبنای قیمت", esc(h.base.priceLabel), "flag")}</div>`
+        : c ? `<div class="tp-stats">${stat("ردیف", M(c.rows), "file", "warn")}${stat("فایل", esc(c.filename || "—"), "data")}</div>` : ""}
+      <section class="tp-box hs-drop" data-hist-import role="button" tabindex="0" aria-label="بارگذاری چهار فایل مرجع">
+        <div class="hs-slots">${SLOTS.map(([k, n, ic]) => { const f = files[k]; return `<div class="hs-slot ${f ? "on" : ""}"><span class="bi">${TP.ui.ICON[ic]}</span><b>${n}</b><small title="${esc(f || "")}">${f ? esc(f) : "—"}</small></div>`; }).join("")}</div>
+        <div class="hs-cta">${TP.ui.ICON.upload}<b>چهار فایل را این‌جا رها کنید</b><span>یا بزنید و انتخاب کنید (.xlsx)</span></div></section>
+      ${details.length ? `<details class="tp-more hs-more"><summary>جزئیاتِ آخرین بارگذاری</summary><div>${details.map((d) => `<p>${d}</p>`).join("")}</div></details>` : ""}</div>`;
   }
 
   /* یکسان‌سازی فهرست اقلام (catalog-rules.mjs): لایهٔ کمّی عدد + واحدِ استاندارد، و جنسِ گفته‌نشده با عرفِ نوع قلم */
@@ -542,123 +603,135 @@
       <span class="legend"><span><i class="b-empty"></i>در مهلت</span><span><i class="b-warn"></i>از آستانه گذشت</span><span><i class="b-late"></i>از آستانه بعدی هم گذشت</span><span><i class="b-over"></i>مهلت تمام شد</span><span><i class="b-done"></i>انجام شد</span><span><i class="b-muted"></i>هشدار خاموش</span><span><i class="b-idle"></i>ارسال‌نشده</span></span></div>`;
   }
 
-  /* ---------- تنظیم اعلانات ---------- */
+  /* ---------- تنظیم اعلانات (مهر ۱۴۰۵): نوارِ آستانه‌ها با دستگیره‌های کشیدنی، کلیدها و دایره‌های چرخان ----------
+     هر دستگیره آستانهٔ یک مرحله است (درصدی از مهلتِ کارشناس) و فقط میانِ همسایه‌هایش جابه‌جا می‌شود — پس آستانه‌ها
+     همیشه صعودی و میان ۱ تا ۱۰۰ می‌مانند و خطای «صعودی نیست» دیگر پیش نمی‌آید. */
+  const STAGE_C = ["#60a5fa", "#a78bfa", "#2dd4bf", "#fbbf24", "#f472b6", "#f87171"];
+  const SAVED = `<span class="tp-saved" data-autosaved>${"<svg viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2.4\" stroke-linecap=\"round\" stroke-linejoin=\"round\" aria-hidden=\"true\"><path d=\"M5 12.5l4.5 4.5L19 7\"/></svg>"}<span>ذخیرهٔ خودکار</span></span>`;
+  const thrList = () => (settings().thresholds || []).map((x) => (x === "" || x == null ? null : +x));
   function vAlerts() {
     const s = settings(), ticks = Array.isArray(s.mgrStages) && s.mgrStages.length === 6 ? s.mgrStages : [true, false, false, false, true, true];
-    return `<div class="tp-card tp-pane"><h2>تنظیم اعلانات</h2>
-      <div class="tp-grid6">${TP.STAGES.map((st, i) => `<div class="cell"><label title="اعلان این مرحله در تلگرام مدیر"><input type="checkbox" data-mstage="${i}" ${ticks[i] ? "checked" : ""}> <b>${st}</b></label><input class="tp-input" data-thr="${i}" value="${s.thresholds[i] === "" || s.thresholds[i] == null ? "" : s.thresholds[i]}" inputmode="numeric" placeholder="خالی"></div>`).join("")}</div>
-      <div id="thrErr" style="color:#fca5a5;min-height:20px;font-size:.88rem"></div>
-      <div class="tp-fields3">
-        <div class="tp-field"><b>مهلت ارسال توسط مدیر (روز کاری از لحظهٔ بارگذاری)</b><input class="tp-input" id="ddays" value="${s.dispatchDays}" inputmode="numeric"></div>
-        <div class="tp-field"><b>حداقل تأمین‌کننده به ازای هر قلم</b><input class="tp-input" id="minsup" value="${s.minSuppliers}" inputmode="numeric"></div>
-        <div class="tp-field"><b>ظرفیت درخواست باز هر کارشناس (بار کاری)</b><input class="tp-input" id="capacity" value="${s.capacity}" inputmode="numeric"></div>
-        <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
-    </div>`;
+    const T = thrList(), points = TP.STAGES.map((st, i) => ({ label: st, value: T[i], color: STAGE_C[i] }));
+    const knob = (k, label, unit, min, max) => TP.ui.knob({ attrs: `data-al="${k}"`, value: +s[k] || 0, min, max: Math.max(max, +s[k] || 0), unit, label });
+    return `<div class="al-wrap ${TP.ui.once("mgr.alerts")}">
+      <section class="tp-box al-main"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.bell}</span><h2>آستانه‌های هشدار</h2><span class="sub">دستگیره‌ها را روی مهلت بکشید</span>${TP.ui.info("manager.alerts", "راهنمای اعلانات")}<span class="end">${SAVED}</span></div>
+        ${TP.ui.track({ attrs: "data-thr-track", points })}
+        <div class="al-stages">${points.map((p, i) => `<div class="al-st ${p.value == null ? "off" : ""}" style="--c:${p.color};--i:${i}">
+            <div class="al-sth"><i class="no">${M(i + 1)}</i><b>${esc(p.label)}</b><span class="al-v" data-thr-v="${i}">${p.value == null ? "خاموش" : `${M(p.value)}٪`}</span></div>
+            ${TP.ui.switchEl({ attrs: `data-thr-on="${i}"`, on: p.value != null, label: "هشدار مهلت" })}
+            ${TP.ui.switchEl({ attrs: `data-mstage="${i}"`, on: !!ticks[i], label: "اعلان تلگرام به من" })}</div>`).join("")}</div></section>
+      <section class="tp-box al-rules"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h2>قواعدِ کار</h2><span class="sub">دایره را بچرخانید یا − و + بزنید</span></div>
+        <div class="al-knobs">${knob("dispatchDays", "مهلتِ ارسال توسط مدیر", "روز کاری", 0, 10)}${knob("minSuppliers", "حداقل تأمین‌کننده برای هر قلم", "تأمین‌کننده", 1, 10)}${knob("capacity", "ظرفیتِ درخواستِ باز هر کارشناس", "درخواست", 1, 40)}</div></section></div>`;
   }
 
-  /* ---------- ارجاع هوشمند ---------- */
-  /* ماتریس‌های بلند (۲۵ گروه اصناف، ۳۰ پروژه): ستون کارشناس‌ها ثابت می‌ماند و بقیه می‌چرخند */
-  function scoreMatrix(E, kind, keys, attr, label) {
-    return `<div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx mx-sticky"><thead><tr><th class="rt">کارشناس</th>${keys.map((k) => `<th title="${esc(k.title || k.name)}">${esc(k.name)}</th>`).join("")}</tr></thead><tbody>
-      ${E.map((e) => `<tr><td class="name rt">${esc(e.label || e.name)}</td>${keys.map((k) => `<td><input class="tp-input" data-${attr}="${e.id}|${esc(k.key)}" value="${scoreOf(e.id, kind, k.key)}" inputmode="numeric" title="${esc(`${e.label || e.name} — ${k.name}`)}"></td>`).join("")}</tr>`).join("")}
-      ${E.length ? "" : `<tr><td colspan="${keys.length + 1}" class="dim">کارشناس فعالی نیست.</td></tr>`}</tbody></table></div>
-      ${keys.length ? "" : `<div class="tp-note warn">${label}</div>`}`;
-  }
+  /* ---------- ارجاع و مهلت هوشمند (مهر ۱۴۰۵): کارتی، با لغزنده، دایره، شمارنده و امتیازِ نقطه‌ای ---------- */
   const guildKeys = () => GROUPS().map((g) => ({ key: g.code, name: g.name, title: `${g.name} — کد ${g.code}${g.n ? ` · ${g.n} طبقه` : ""}` }));
-  const projKeys = () => projectKeys().map((p) => ({ key: p, name: p.length > 22 ? p.slice(0, 21) + "…" : p, title: p }));
+  const projKeys = () => projectKeys().map((p) => ({ key: p, name: p.length > 30 ? p.slice(0, 29) + "…" : p, title: p }));
+  const opSeg = (attr, k, v, ops) => `<div class="sm-op" role="group" aria-label="عملگر">${ops.map((o) => `<button type="button" class="${o === v ? "on" : ""}" data-${attr}="${k}" data-v="${o}" aria-pressed="${o === v ? "true" : "false"}">${o}</button>`).join("")}</div>`;
+  const avOf = (e, cls) => `<span class="ex-av ${cls || "sm"}" style="--av:${TP.ui.avColor(e.name)}" aria-hidden="true">${esc(TP.ui.avInitial(e.label || e.name))}</span>`;
+  const hero = (icon, title, sub, actions) => `<section class="tp-box sm-hero"><span class="bi big">${TP.ui.ICON[icon]}</span><div class="sm-ht"><h2>${title}</h2><span class="sub">${sub}</span></div><span class="end">${actions}</span></section>`;
   function vAssign() {
     const E = activeExperts(), A = settings().assign, L = PL().limitsOf(A);
     const pend = S.data.requests.filter((r) => unassignedOpen(r).length);
-    const opSel = (k, v) => `<select class="tp-select op" data-asg-op="${k}">${["+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
     needWorkload(); needAxes();
     const P = WL && AX ? planAssign(pend) : null;
+    const wa = +A.a || 0, wb = +A.b || 0, wc = +A.c || 0, wsum = wa + wb + wc || 1;
     const pctOf = (x, cap) => (cap ? Math.round(100 * x / cap) : 0);
-    const bar = (p) => `<span class="bar-load"><i style="width:${Math.min(100, p)}%"></i></span> ${M(p)}٪`;
-    const capCell = (n, max) => `<span class="${n >= max ? "chip warn" : ""}">${M(n)} از ${M(max)}</span>`;
-    const preview = WL_ERR || AX_ERR ? `<div class="tp-note warn">${esc(WL_ERR || AX_ERR)}</div>`
-      : !P ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان و گروه‌های اصناف…</div>`
-      : `<div class="tp-sect"><h3>پیش‌نمایش توزیع <span>${P.plan.length ? `با فرض تأیید همهٔ ${M(P.plan.length)} پیشنهاد` : "درخواست بی‌کارشناسی نیست — بار فعلی"}</span></h3>
-        ${P.over ? `<div class="tp-note warn">${M(P.over)} درخواست از سقف بار همهٔ کارشناسان گذشت و به کم‌بارترین داده شد (با نشان ⚠). سقف‌ها را بالا ببرید یا این درخواست‌ها را دستی ارجاع بدهید.</div>` : ""}
-        <div class="tp-scroll" data-keep-scroll style="max-height:380px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>درخواست باز<br><span class="dim">سقف ${M(L.maxReq)}</span></th><th>اقلام باز<br><span class="dim">سقف ${M(L.maxItems)}</span></th><th>زحمت</th><th>ظرفیت</th><th>اشغال فعلی</th><th>پیشنهاد تازه</th><th>اشغال بعد از تأیید</th></tr></thead><tbody>
-        ${E.map((e) => {
+    const preview = WL_ERR || AX_ERR ? `<div class="chip warn">${esc(WL_ERR || AX_ERR)}</div>`
+      : !P ? `<div class="sm-wait"><span class="tp-spin"></span>در حال خواندن بار فعلی کارشناسان…</div>`
+      : `${P.over ? `<div class="chip warn" style="margin-bottom:10px">⚠ ${M(P.over)} درخواست از سقف همه گذشت و به کم‌بارترین رسید</div>` : ""}
+        <div class="sm-exs">${E.map((e, i) => {
           const b = P.before.get(e.id), a2 = P.after.get(e.id), cap = P.cap.get(e.id), add = P.plan.filter((p) => p.expert.id === e.id);
-          return `<tr><td class="name">${esc(e.label || e.name)}</td>
-            <td class="num">${M(b.reqs)}${add.length ? ` → ${capCell(a2.reqs, L.maxReq)}` : ""}</td><td class="num">${M(b.items)}${add.length ? ` → ${capCell(a2.items, L.maxItems)}` : ""}</td>
-            <td class="num">${b.effort.toFixed(1)}${add.length ? ` → <b>${a2.effort.toFixed(1)}</b>` : ""}</td><td class="num">${cap.toFixed(1)}</td>
-            <td>${bar(pctOf(b.effort, cap))}</td>
-            <td style="white-space:normal;max-width:280px">${add.length ? add.slice(0, 6).map((p) => `<span class="chip num ${p.over ? "warn" : ""}" title="${esc(p.job.project)} · ${M(p.items)} قلم${p.over ? " · بیش از سقف" : ""}">${p.over ? "⚠ " : ""}${esc(p.id)}</span>`).join(" ") + (add.length > 6 ? ` <span class="dim">و ${M(add.length - 6)} دیگر</span>` : "") : "—"}</td>
-            <td>${bar(pctOf(a2.effort, cap))}</td></tr>`;
-        }).join("")}
-        </tbody></table></div></div>`;
-    return `<div class="tp-card tp-pane" style="max-width:none">
-      <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>اعمال پیشنهاد روی درخواست‌های بی‌کارشناس (${pend.length})</button>
-        <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>ارجاع هوشمند</h2>
-      <div class="tp-formula"><span class="eq">امتیاز =</span>
-        <span class="term"><input class="tp-input" data-asg="a" value="${A.a}">٪ <b>تخصص در گروه اصناف</b></span>${opSel("op1", A.op1)}
-        <span class="term"><input class="tp-input" data-asg="b" value="${A.b}">٪ <b>سابقه در این پروژه</b></span>${opSel("op2", A.op2)}
-        <span class="term"><input class="tp-input" data-asg="c" value="${A.c}">٪ <b>جریمهٔ بار کاری</b></span></div>
-      <div class="tp-fields3" style="margin-top:10px">
-        <div class="tp-field"><b>حداکثر درخواست باز هر کارشناس</b><input class="tp-input" data-asg="maxReq" value="${esc(A.maxReq == null ? PL().DEFAULT_LIMITS.maxReq : A.maxReq)}" inputmode="numeric"></div>
-        <div class="tp-field"><b>حداکثر قلم باز هر کارشناس</b><input class="tp-input" data-asg="maxItems" value="${esc(A.maxItems == null ? PL().DEFAULT_LIMITS.maxItems : A.maxItems)}" inputmode="numeric"></div>
-        <div style="padding-bottom:6px">${AUTOSAVED}</div></div>
-      ${preview}
-      <div class="tp-sect"><h3>۱. ماتریس کارشناس / گروه اصناف <span>امتیاز ۱ تا ۵ — ${M(GROUPS().length)} گروه فهرست اصناف</span></h3>
-        ${scoreMatrix(E, "guild", guildKeys(), "g", "فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در تب «سوابق تأمین» بارگذاری کنید.")}</div>
-      <div class="tp-sect"><h3>۲. ماتریس کارشناس / پروژه <span>امتیاز ۱ تا ۵ — ${M(projectKeys().length)} پروژه</span></h3>
-        ${scoreMatrix(E, "project", projKeys(), "p", "پروژه‌ای تعریف نشده است.")}</div></div>`;
+          const pb = pctOf(b.effort, cap), pa = pctOf(a2.effort, cap), full = a2.reqs >= L.maxReq || a2.items >= L.maxItems;
+          return `<div class="sm-ex ${add.length ? "has" : ""} ${full ? "full" : ""}" style="--i:${Math.min(i, 14)}"><header>${avOf(e)}<b>${esc(e.label || e.name)}</b><span class="sm-pct ${pa >= 100 ? "over" : pa >= 80 ? "hi" : ""}">${M(add.length ? pa : pb)}٪</span></header>
+            <div class="sm-bar" title="اشغال: ${M(pb)}٪${add.length ? ` ← ${M(pa)}٪` : ""}"><i class="now" style="--w:${Math.min(100, pb)}%"></i>${add.length ? `<i class="add" style="--s:${Math.min(100, pb)}%;--w:${Math.max(0, Math.min(100, pa) - Math.min(100, pb))}%"></i>` : ""}</div>
+            <div class="sm-nums"><span>درخواست <b>${M(b.reqs)}${add.length ? `→${M(a2.reqs)}` : ""}</b><em>/${M(L.maxReq)}</em></span><span>قلم <b>${M(b.items)}${add.length ? `→${M(a2.items)}` : ""}</b><em>/${M(L.maxItems)}</em></span><span>ظرفیت <b>${cap.toFixed(1)}</b></span></div>
+            ${add.length ? `<div class="sm-adds">${add.slice(0, 8).map((p) => `<span class="chip num ${p.over ? "warn" : "info"}" title="${esc(p.job.project)} · ${M(p.items)} قلم${p.over ? " · بیش از سقف" : ""}">${p.over ? "⚠ " : ""}${esc(p.id)}</span>`).join("")}${add.length > 8 ? `<span class="dim">+${M(add.length - 8)}</span>` : ""}</div>` : ""}</div>`;
+        }).join("")}</div>`;
+    const kind = S.smKind === "project" ? "project" : "guild", keys = kind === "guild" ? guildKeys() : projKeys();
+    const ex = E.find((x) => x.id === S.smEx) || E[0];
+    const rk = (k) => `${ex.id}|${kind}|${k.key}`;
+    const knobL = (k, label, min, max, step) => TP.ui.knob({ attrs: `data-asg-knob="${k}"`, value: L[k], min, max: Math.max(max, L[k]), step, unit: k === "maxReq" ? "درخواست" : "قلم", label });
+    return `<div class="sm-wrap ${TP.ui.once("mgr.asg")}">
+      ${hero("users", "ارجاع هوشمند", pend.length ? `${M(pend.length)} درخواستِ بی‌کارشناس روی میز` : "همهٔ درخواست‌ها کارشناس دارند",
+        `${SAVED}${TP.ui.info("manager.asg", "راهنمای ارجاع هوشمند")}<button class="tp-btn primary" data-apply-asg ${pend.length && P ? "" : "disabled"}>${TP.ui.ICON.check} اعمال پیشنهاد (${M(pend.length)})</button>`)}
+      <div class="sm-grid">
+        <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h3>وزنِ معیارها</h3></div>
+          <div class="sm-mix" aria-hidden="true"><i class="a" style="--w:${wa / wsum * 100}%"></i><i class="b" style="--w:${wb / wsum * 100}%"></i><i class="c" style="--w:${wc / wsum * 100}%"></i></div>
+          <div class="sm-w">
+            <div class="sm-wr a">${TP.ui.range({ attrs: 'data-asg="a"', value: wa, min: 0, max: 100, step: 5, label: "تخصص در گروه اصناف", unit: "٪" })}</div>${opSeg("asg-op", "op1", A.op1, ["+", "−"])}
+            <div class="sm-wr b">${TP.ui.range({ attrs: 'data-asg="b"', value: wb, min: 0, max: 100, step: 5, label: "سابقه در این پروژه", unit: "٪" })}</div>${opSeg("asg-op", "op2", A.op2, ["+", "−"])}
+            <div class="sm-wr c">${TP.ui.range({ attrs: 'data-asg="c"', value: wc, min: 0, max: 100, step: 5, label: "جریمهٔ بار کاری", unit: "٪" })}</div></div></section>
+        <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.box}</span><h3>سقفِ بارِ هر کارشناس</h3></div>
+          <div class="al-knobs">${knobL("maxReq", "درخواستِ باز", 1, 40, 1)}${knobL("maxItems", "قلمِ باز", 5, 300, 5)}</div></section></div>
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.users}</span><h3>پیش‌نمایش توزیع</h3><span class="sub">${P && P.plan.length ? `با فرض تأیید همهٔ ${M(P.plan.length)} پیشنهاد` : "بار فعلی"}</span></div>${preview}</section>
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">★</span><h3>امتیازِ کارشناسان</h3><span class="sub">۱ تا ۵ — روی نقطه‌ها بزنید</span>
+          <span class="end"><div class="tp-seg sm" role="tablist">${[["guild", "گروه اصناف"], ["project", "پروژه"]].map(([k2, l]) => `<button type="button" role="tab" class="${kind === k2 ? "on" : ""}" aria-selected="${kind === k2}" data-sm-kind="${k2}">${l}</button>`).join("")}</div></span></div>
+        ${ex ? `<div class="sm-expick" data-ghost-group>${E.map((e) => `<button type="button" class="sm-exb ${e.id === ex.id ? "on" : ""}" aria-pressed="${e.id === ex.id}" data-sm-ex="${e.id}">${avOf(e)}<span>${esc(e.label || e.name)}</span></button>`).join("")}</div>
+        <div class="sm-keys">${keys.map((k2) => `<div class="sm-key"><span title="${esc(k2.title || k2.name)}">${esc(k2.name)}</span>${TP.ui.rating({ attrs: `data-score="${esc(rk(k2))}"`, value: scoreOf(ex.id, kind, k2.key), label: `${ex.label || ex.name} — ${k2.name}` })}</div>`).join("")
+          || `<div class="chip warn">${kind === "guild" ? "فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در «سوابق تأمین» بارگذاری کنید." : "پروژه‌ای تعریف نشده است."}</div>`}</div>`
+          : `<div class="dim">کارشناس فعالی نیست.</div>`}</section></div>`;
   }
 
   /* ---------- مهلت هوشمند ---------- */
   function vDeadline() {
     const E = activeExperts(), D = settings().deadline;
     const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && !(Number(a.days) > 0)).map((a) => ({ r, a })));
-    const opSel = (k, v) => `<select class="tp-select op" data-dl-op="${k}">${["×", "÷", "+", "−"].map((o) => `<option ${o === v ? "selected" : ""}>${o}</option>`).join("")}</select>`;
     needWorkload(); needAxes();
     const plans = WL && AX ? planDeadlines(list) : [];
     const x0 = plans[0];
-    const preview = WL_ERR || AX_ERR ? `<div class="tp-note warn">${esc(WL_ERR || AX_ERR)}</div>`
-      : !WL || !AX ? `<div class="tp-note">در حال خواندن بار فعلی کارشناسان و گروه‌های اصناف…</div>`
-      : plans.length ? `<div class="tp-sect"><h3>پیش‌نمایش مهلت‌ها <span>${M(plans.length)} ارجاع ارسال‌نشده — با فرض تأیید همه</span></h3>
-        <div class="tp-scroll" data-keep-scroll style="max-height:360px"><table class="tp-mx"><thead><tr><th>درخواست</th><th>کارشناس</th><th>اقلام</th><th>فرمول</th><th>√اقلام</th><th>اشغال کارشناس</th><th>مهلت پیشنهادی</th></tr></thead><tbody>
-        ${plans.slice(0, 60).map((x) => `<tr><td class="num">${esc(x.r.id)}</td><td class="name">${esc(x.e.label || x.e.name)}</td><td class="num">${M(x.items)}</td>
-          <td class="num">${x.base.toFixed(2)}</td><td class="num">${x.size.toFixed(2)}</td><td class="num">${M(Math.round(x.pct))}٪${x.busy > 1 ? ` (× ${x.busy.toFixed(2)})` : ""}</td><td class="num"><b>${M(x.days)} روز</b></td></tr>`).join("")}
-        </tbody></table></div></div>` : "";
-    return `<div class="tp-card tp-pane" style="max-width:none">
-      <div class="tp-row" style="background:rgba(79,140,255,.08);border:1px solid var(--tp-line);border-radius:12px;padding:12px 14px">
-        <button class="tp-btn primary" data-apply-dl ${list.length && WL && AX ? "" : "disabled"}>اعمال روی ارجاع‌های ارسال‌نشدهٔ بی‌مهلت (${list.length})</button>
-        ${x0 ? `<span style="font-size:.9rem">نمونه — درخواست <b>${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: فرمول ${x0.base.toFixed(2)} × √اقلام ${x0.size.toFixed(2)} × اشغال ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></span>` : ""}
-        <span style="margin-inline-start:auto">${AUTOSAVED}</span></div>
-      <h2>مهلت هوشمند</h2>
-      <div class="tp-formula"><span class="eq">مهلت (روز) =</span>
-        <span class="term"><input class="tp-input" data-dl="base" value="${D.base}"> <b>پایه</b></span>${opSel("op1", D.op1)}
-        <span class="term"><input class="tp-input" data-dl="we" value="${D.we}"> <b>ضریب کارشناس</b></span>${opSel("op2", D.op2)}
-        <span class="term"><input class="tp-input" data-dl="wp" value="${D.wp}"> <b>ضریب پروژه</b></span>${opSel("op3", D.op3)}
-        <span class="term"><input class="tp-input" data-dl="wi" value="${D.wi}"> <b>ضریب گروه اصناف</b></span>
-        <span class="eq">× √تعداد اقلام × ضریب اشغال</span></div>
-      ${preview}
-      <div class="tp-sect"><h3>۱. سرعت انجام کار کارشناس <span>عدد کمتر یعنی سریع‌تر — ظرفیت هم به همان نسبت بیشتر</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:300px"><table class="tp-mx"><thead><tr><th>کارشناس</th><th>ضریب</th></tr></thead><tbody>
-        ${E.map((x) => `<tr><td class="name">${esc(x.label || x.name)}</td><td><input class="tp-input" data-sp="${x.id}" value="${x.speed}"></td></tr>`).join("")}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۲. اهمیت و زمان هر گروه اصناف <span>همین ضریب «سختی» قلم در ارجاع هوشمند است — ${M(GROUPS().length)} گروه فهرست اصناف</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx"><thead><tr><th class="rt">گروه اصناف</th><th>کد</th><th>طبقه</th><th>ضریب</th></tr></thead><tbody>
-        ${GROUPS().map((g) => `<tr><td class="name rt">${esc(g.name)}</td><td class="num dim">${esc(g.code)}</td><td class="num dim">${M(g.n)}</td><td><input class="tp-input" data-cw="${esc(g.code)}" value="${weightOf("guild", g.code)}"></td></tr>`).join("")
-          || `<tr><td colspan="4" class="dim">فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در تب «سوابق تأمین» بارگذاری کنید.</td></tr>`}</tbody></table></div></div>
-      <div class="tp-sect"><h3>۳. اهمیت و زمان هر پروژه <span>همین ضریب «اهمیت» پروژه در ارجاع هوشمند است — ${M(projectKeys().length)} پروژه</span></h3><div class="tp-scroll" data-keep-scroll style="max-height:340px"><table class="tp-mx"><thead><tr><th class="rt">پروژه</th><th>شهر</th><th>مدیر پروژه</th><th>ضریب</th></tr></thead><tbody>
-        ${projectKeys().map((p) => { const x = PROJECTS().find((y) => y.name === p) || {}; return `<tr><td class="name rt" title="${esc(p)}">${esc(p)}</td><td class="dim">${esc(x.city || "")}</td><td class="dim">${esc(x.manager || "")}</td><td><input class="tp-input" data-pw="${esc(p)}" value="${weightOf("project", p)}"></td></tr>`; }).join("")}</tbody></table></div></div></div>`;
+    const term = (k, label, step, unit) => `<div class="dl-term"><small>${label}</small>${TP.ui.stepper({ attrs: `data-dl="${k}"`, value: +D[k] || 0, min: 0, max: Math.max(60, +D[k] || 0), step, unit, label })}</div>`;
+    const OPS = ["×", "÷", "+", "−"];
+    const tab = S.dlTab || "speed";
+    const coef = tab === "speed" ? E.map((x) => ({ attrs: `data-sp="${x.id}"`, v: +x.speed || 1, max: 3, name: x.label || x.name, av: avOf(x) }))
+      : tab === "guild" ? GROUPS().map((g) => ({ attrs: `data-cw="${esc(g.code)}"`, v: weightOf("guild", g.code), max: 5, name: g.name, sub: `کد ${g.code}` }))
+      : projectKeys().map((p) => { const x = PROJECTS().find((y) => y.name === p) || {}; return { attrs: `data-pw="${esc(p)}"`, v: weightOf("project", p), max: 5, name: p, sub: [x.city, x.manager].filter(Boolean).join(" · ") }; });
+    const preview = WL_ERR || AX_ERR ? `<div class="chip warn">${esc(WL_ERR || AX_ERR)}</div>`
+      : !WL || !AX ? `<div class="sm-wait"><span class="tp-spin"></span>در حال خواندن بار فعلی کارشناسان…</div>`
+      : plans.length ? `<div class="dl-prev">${plans.slice(0, S.dlMore ? 200 : 24).map((x, i) => `<div class="dl-p" style="--i:${Math.min(i, 14)}"><div class="dl-pd"><b>${M(x.days)}</b><small>روز</small></div>
+            <div class="dl-pt"><b class="num">${esc(x.r.id)}</b><span>${avOf(x.e)} ${esc(x.e.label || x.e.name)}</span><em>${M(x.items)} قلم · اشغال ${M(Math.round(x.pct))}٪${x.busy > 1 ? ` (×${x.busy.toFixed(2)})` : ""}</em></div></div>`).join("")}</div>
+          ${plans.length > 24 && !S.dlMore ? `<button class="tp-btn sm" data-dl-more style="margin-top:10px">همهٔ ${M(plans.length)} ارجاع</button>` : ""}`
+      : `<div class="dim">ارجاعِ ارسال‌نشدهٔ بی‌مهلتی نیست.</div>`;
+    return `<div class="sm-wrap ${TP.ui.once("mgr.dl")}">
+      ${hero("clock", "مهلت هوشمند", list.length ? `${M(list.length)} ارجاعِ ارسال‌نشدهٔ بی‌مهلت` : "همهٔ ارجاع‌های ارسال‌نشده مهلت دارند",
+        `${SAVED}${TP.ui.info("manager.dl", "راهنمای مهلت هوشمند")}<button class="tp-btn primary" data-apply-dl ${list.length && WL && AX ? "" : "disabled"}>${TP.ui.ICON.check} اعمال روی ${M(list.length)} ارجاع</button>`)}
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h3>فرمولِ مهلت</h3><span class="sub">− و + را بزنید یا نگه دارید</span></div>
+        <div class="dl-formula"><span class="eq">مهلت =</span>${term("base", "پایه", 0.5, "روز")}${opSeg("dl-op", "op1", D.op1, OPS)}${term("we", "ضریب کارشناس", 0.1)}${opSeg("dl-op", "op2", D.op2, OPS)}${term("wp", "ضریب پروژه", 0.1)}${opSeg("dl-op", "op3", D.op3, OPS)}${term("wi", "ضریب گروه اصناف", 0.1)}<span class="eq">× √اقلام × اشغال</span></div>
+        ${x0 ? `<div class="dl-sample">نمونه — <b class="num">${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: ${x0.base.toFixed(2)} × ${x0.size.toFixed(2)} × ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></div>` : ""}</section>
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.clock}</span><h3>پیش‌نمایش مهلت‌ها</h3></div>${preview}</section>
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.data}</span><h3>ضریب‌ها</h3>
+          <span class="end"><div class="tp-seg sm" role="tablist">${[["speed", "سرعت کارشناسان"], ["guild", "گروه‌های اصناف"], ["project", "پروژه‌ها"]].map(([k, l]) => `<button type="button" role="tab" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}" data-dl-tab="${k}">${l}</button>`).join("")}</div></span></div>
+        <div class="dl-coefs">${coef.map((c) => `<div class="dl-c">${c.av || ""}${TP.ui.range({ attrs: c.attrs, value: c.v, min: 0.1, max: Math.max(c.max, c.v), step: 0.1, label: c.name })}${c.sub ? `<small>${esc(c.sub)}</small>` : ""}</div>`).join("")
+          || `<div class="chip warn">فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در «سوابق تأمین» بارگذاری کنید.</div>`}</div></section></div>`;
   }
 
-  /* ---------- اقلام و کدها (کد واقعی راهکاران — نیازی به کدِ ساختگی نیست) ---------- */
+  /* ---------- اقلام و کدها (کد واقعی راهکاران) — کارتی، با جستجو و گروه ---------- */
   function vNorm() {
     needAxes();
+    const st = S.nm;
     const seen = new Map();
     S.data.requests.forEach((r) => r.items.forEach((it) => { const k = it.code || it.title; if (!seen.has(k)) seen.set(k, { code: it.code, title: it.title, unit: it.unit, n: 0, g: it.g || "" }); seen.get(k).n++; }));
-    const list = [...seen.values()].sort((a, b) => b.n - a.n);
-    const known = list.filter((x) => x.g && x.g !== PL().MISC_GUILD).length;
-    return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>اقلام و کدها</h2>
-      <p class="dim" style="margin:0 0 8px">${M(known)} از ${M(list.length)} قلم در فهرست اصناف پیدا شد؛ بقیه «متفرقه» شمرده می‌شوند.</p>
-      <div class="tp-scroll" style="max-height:60vh"><table class="tp-mx"><thead><tr><th>کد قلم</th><th style="width:42%">عنوان</th><th>واحد</th><th>تکرار در میز</th><th>گروه اصناف</th></tr></thead><tbody>
-        ${list.map((x) => `<tr><td class="num" style="color:var(--tp-accent);font-weight:700">${esc(x.code || "—")}</td><td class="name" style="white-space:normal">${esc(x.title)}</td><td>${esc(x.unit)}</td><td class="num">${x.n}</td><td title="${esc(x.g || "")}">${esc(groupName(x.g))}</td></tr>`).join("")}
-      </tbody></table></div></div>`;
+    const list = [...seen.values()];
+    const isMisc = (x) => !x.g || x.g === PL().MISC_GUILD;
+    const known = list.filter((x) => !isMisc(x)).length, pct = list.length ? Math.round(100 * known / list.length) : 0;
+    const byG = new Map(); list.forEach((x) => { const g = isMisc(x) ? "" : x.g; byG.set(g, (byG.get(g) || 0) + 1); });
+    const gs = [...byG].filter(([g]) => g).sort((a, b) => b[1] - a[1]);
+    const shown = list.filter((x) => (!st.q || TP.hit(x.title, st.q) || TP.hit(x.code || "", st.q)) && (st.g === "*" ? true : st.g === "" ? isMisc(x) : !st.g || x.g === st.g))
+      .sort(st.sort === "code" ? (a, b) => String(a.code || "").localeCompare(String(b.code || "")) : st.sort === "title" ? (a, b) => a.title.localeCompare(b.title, "fa") : (a, b) => b.n - a.n);
+    const ring = `<svg class="nm-ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.9" class="bg"/><circle cx="18" cy="18" r="15.9" class="fg" style="--p:${pct}"/></svg>`;
+    const pill = (g, label, n) => `<button type="button" class="tp-pill ${st.g === g ? "on" : ""}" data-nmg="${esc(g)}">${esc(label)} <span class="n">${M(n)}</span></button>`;
+    return `<div class="nm-wrap ${TP.ui.once("mgr.norm")}">
+      <section class="tp-box nm-hero"><div class="nm-rw">${ring}<b>${M(pct)}٪</b></div><div class="sm-ht"><h2>اقلام و کدها</h2><span class="sub">${M(known)} از ${M(list.length)} قلمِ میز در فهرست اصناف پیدا شد</span></div>
+        <div class="tp-stats nm-st">${TP.ui.stat({ label: "قلمِ یکتا", value: M(list.length), icon: "box" })}${TP.ui.stat({ label: "در فهرست اصناف", value: M(known), icon: "check", tone: "ok" })}${TP.ui.stat({ label: "متفرقه", value: M(list.length - known), icon: "flag", tone: list.length - known ? "warn" : "ok" })}${TP.ui.stat({ label: "گروه اصناف", value: M(gs.length), icon: "data", tone: "info" })}</div>
+        <span class="end">${TP.ui.info("manager.norm", "راهنمای اقلام و کدها")}</span></section>
+      <section class="tp-box"><div class="nm-tools"><label class="ex-search">${TP.ui.ICON.search}<input class="tp-input" data-nmq value="${esc(st.q)}" placeholder="عنوان یا کد قلم…" aria-label="جستجوی قلم"></label>
+          <div class="tp-seg sm" role="tablist">${[["n", "پرتکرار"], ["code", "کد"], ["title", "عنوان"]].map(([k, l]) => `<button type="button" role="tab" class="${st.sort === k ? "on" : ""}" aria-selected="${st.sort === k}" data-nmsort="${k}">${l}</button>`).join("")}</div>
+          <span class="dim">${M(shown.length)} قلم</span></div>
+        <div class="tp-pills nm-groups">${pill("*", "همه", list.length)}${gs.map(([g, n]) => pill(g, groupName(g), n)).join("")}${byG.get("") ? pill("", "متفرقه", byG.get("")) : ""}</div>
+        <div class="nm-grid">${shown.slice(0, st.limit).map((x, i) => `<div class="nm-card ${isMisc(x) ? "misc" : ""}" style="--i:${Math.min(i, 16)}"><div class="nm-ch"><span class="nm-code">${esc(x.code || "—")}</span><span class="nm-n" title="تکرار در میز">×${M(x.n)}</span></div>
+            <div class="nm-tt" title="${esc(x.title)}">${esc(x.title)}</div><div class="nm-cf">${x.unit ? `<span class="chip">${esc(x.unit)}</span>` : ""}<span class="chip ${isMisc(x) ? "warn" : "info"}" title="${esc(x.g || "")}">${esc(groupName(x.g))}</span></div></div>`).join("")
+          || `<div class="dim">قلمی با این جستجو نیست.</div>`}</div>
+        ${shown.length > st.limit ? `<button class="tp-btn sm" data-nm-more style="margin-top:12px">${M(Math.min(120, shown.length - st.limit))} قلم بیشتر</button>` : ""}</section></div>`;
   }
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
@@ -673,9 +746,14 @@
     ai_sup: "تیکِ «👁 حالت تأیید»", ai_sup_item: "«👁 حالت تأیید»ِ اقلام", ai_prop_ok: "✅ تأییدِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "❌ ردِ پیشنهادِ کارشناس هوشمند",
     decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
     manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
-    commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک" };
+    commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک",
+    commission_ok: "تأیید کمیسیون", quote_add: "افزودن استعلام", quote_final: "انتخابِ نهایی استعلام", rfq: "ارسال استعلام به تأمین‌کننده",
+    code_reset: "🔑 کد ورود تازه", support_login: "ورود به پنل پشتیبانی", support_pass: "تغییر رمز پشتیبانی",
+    ai_ask: "🤖 پرسش از کارشناس", ai_answer: "پاسخ به کارشناس هوشمند", ai_delivery: "📥 تحویلِ کارشناس هوشمند", ai_handover: "🤖 سپردن به کارشناس هوشمند", ai_handoff: "🤖 سپردن به کارشناس هوشمند",
+    ai_reject: "ردِ تحویلِ کارشناس هوشمند", ai_rules: "قواعدِ حداقلِ استعلام", ai_sup_cfg: "تنظیمِ «👁 حالت تأیید»", ai_ranking: "رتبه‌بندی تأمین‌کنندگان", ai_switches: "کلیدهای کارشناس هوشمند",
+    ai_on: "کارشناس هوشمند روشن شد", ai_off: "کارشناس هوشمند خاموش شد" };
   /* عامل رویداد: manager، system یا expert:<id> — کارشناس با نامش، نه شناسه */
-  const actorName = (a) => { if (a === "manager") return "مدیر"; if (a === "system") return "سامانه";
+  const actorName = (a) => { if (a === "manager") return "مدیر"; if (a === "system") return "سامانه"; if (a === "support") return "پشتیبانی"; if (a === "ai" || /^ai:/.test(a || "")) return "کارشناس هوشمند";
     const m = /^expert:(\d+)$/.exec(a || ""), e = m && S.data.experts.find((x) => x.id === +m[1]);
     return e ? esc(e.label || e.name) : esc(a); };
   /* notify رویداد همان است که واقعاً به صف تلگرام رفت (telegram) یا نرفت (none). تعلیق/توقف/خاتمه/
@@ -683,16 +761,71 @@
      (شمار کارشناسانِ خبرشده) هم دارند و فقط همان‌ها معتبرند (worker/api.js، setState). */
   const STATE_KINDS = new Set(["hold", "stop", "closed", "open"]);
   const notifyChip = (kind, p) => p.notify === "telegram" && (!STATE_KINDS.has(kind) || p.notified > 0) ? `<span class="chip info">با اعلان تلگرام</span>` : `<span class="chip">بدون اعلان تلگرام</span>`;
+  /* تصمیم‌ها و رویدادها (مهر ۱۴۰۵): کارتِ هر تصمیمِ منتظر با تأیید/رد، و خطِ زمانِ رویدادها به زبانِ آدم —
+     کلیدهای فنیِ رویداد (شناسه‌ها، JSON) نشان داده نمی‌شوند؛ فقط آنچه برای مدیر معنا دارد. */
+  const DEC_FA = { hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی", supervise: "👁 حالت تأیید" };
+  const DEC_TONE = { hold: "warn", stop: "bad", end: "info", manual: "info", supervise: "info" };
+  const EV_CAT = [
+    ["assign", "ارجاع و ارسال", "users", ["dispatch", "reassign", "unassign", "delete", "import", "close"]],
+    ["state", "وضعیت و تصمیم", "flag", ["hold", "stop", "closed", "open", "decision_requested", "decision_rejected"]],
+    ["work", "کارِ کارشناس", "file", ["viewed", "hist", "smart", "manual_quote", "quote_saved", "quote_deleted", "proforma", "extract_applied", "commission", "commission_table", "letter", "deliver", "item_terms"]],
+    ["ai", "کارشناس هوشمند", "settings", null],
+  ];
+  const evCat = (k) => { for (const [c, , , ks] of EV_CAT) if (ks && ks.includes(k)) return c; return /^ai_/.test(k) ? "ai" : "other"; };
+  const evIcon = (k) => { const c = EV_CAT.find((x) => x[0] === evCat(k)); return TP.ui.ICON[c ? c[2] : "clock"]; };
+  const exById = (id) => { const e = S.data.experts.find((x) => x.id === +id); return e ? (e.label || e.name) : null; };
+  const REASON_FA = { codes4: "یکسان‌سازیِ کدها به چهار رقم" };
+  const SRC_FA = { import: "فایل روزانه", smart: "هوشمند", manual: "دستی", panel: "پنل", bot: "تلگرام", telegram: "تلگرام", web: "وب" };
+  /** جزئیاتِ خوانا از payload: فقط کلیدهای شناخته‌شده؛ شناسه‌ها به نام */
+  function evDetails(kind, p) {
+    const out = [], add = (l, v) => { if (v != null && v !== "" && !(Array.isArray(v) && !v.length)) out.push(`${l}: <b>${v}</b>`); };
+    if (p.from_expert_id || p.to_expert_id) add("کارشناس", `${esc(exById(p.from_expert_id) || "—")} ← ${esc(exById(p.to_expert_id) || "—")}`);
+    else if (p.expert || p.expert_id || p.name) add("کارشناس", esc(p.expert || exById(p.expert_id) || p.name || ""));
+    if (p.days) add("مهلت", `${M(p.days)} روز`);
+    if (p.action) add("درخواستِ", esc(DEC_FA[p.action] || p.action));
+    if (typeof p.on === "boolean") add("وضعیت", p.on ? "روشن" : "خاموش");
+    if (p.source) add("منبع", esc(SRC_FA[p.source] || p.source));
+    if (p.channel) add("از", esc(SRC_FA[p.channel] || p.channel));
+    if (p.supplier || p.supplier_name) add("تأمین‌کننده", esc(p.supplier || p.supplier_name));
+    if (p.commission_no) add("شمارهٔ کمیسیون", M(p.commission_no));
+    const items = p.items || p.item_ids; if (Array.isArray(items)) add("اقلام", `${M(items.length)} قلم`); else if (typeof items === "number") add("اقلام", `${M(items)} قلم`);
+    if (typeof p.eligible === "number") add("اقلامِ مجاز", M(p.eligible));
+    if (typeof p.closeCandidates === "number") add("پیشنهادِ خاتمه", M(p.closeCandidates));
+    if (typeof p.stateDrift === "number" && p.stateDrift) add("تغییرِ وضعیت", M(p.stateDrift));
+    if (typeof p.expertDrift === "number" && p.expertDrift) add("تغییرِ کارشناس", M(p.expertDrift));
+    if (p.rows) add("ردیف", M(p.rows));
+    if (p.file || p.filename) add("فایل", esc(p.file || p.filename));
+    if (p.title && typeof p.title === "string") add("قلم", esc(p.title));
+    if (p.reason) add("علت", esc(REASON_FA[p.reason] || p.reason));
+    if (p.note) add("یادداشت", esc(p.note));
+    return out.join(" · ");
+  }
+  const dayOf = (ms) => String(TP.fmt(ms)).split(" — ")[0];
+  const timeOf = (ms) => String(TP.fmt(ms)).split(" — ")[1] || "";
   function vLog() {
-    const D = S.decisions;
-    return `<div class="tp-card tp-pane" style="max-width:1100px"><h2>تصمیم‌های در انتظار تأیید <span class="chip ${D.length ? "warn" : ""}">${D.length}</span></h2>
-      ${D.length ? D.map((d) => `<div class="conf"><div style="flex:1"><b>${esc(d.expert_name)}</b> برای درخواست <b class="num">${esc(d.request_id)}</b> درخواستِ <b>${({ hold: "تعلیق", stop: "توقف", end: "خاتمه", manual: "انجام دستی", supervise: "👁 حالت تأیید" })[d.action] || esc(d.action)}</b> داده — ${TP.fmt(d.requested_at)}${decWhy(d)}</div>
-        <button class="tp-btn sm primary" data-dec="approve|${d.id}">تأیید</button><button class="tp-btn sm" data-dec="reject|${d.id}">رد</button></div>`).join("")
-      : `<p class="lead">تصمیمی در انتظار نیست.${settings().approvalRequired ? "" : " (تأیید مدیر برای تصمیم کارشناس غیرفعال است.)"}</p>`}
-      <div class="tp-sect"><h3>رویدادهای اخیر <span>${S.events.length}</span> <button class="tp-btn xs" data-load-events style="margin-inline-start:8px">بارگیری</button></h3>
-      <div class="tp-scroll" style="max-height:50vh"><table class="tp-mx"><thead><tr><th>زمان</th><th>عامل</th><th>رویداد</th><th>درخواست</th><th>جزئیات</th></tr></thead><tbody>
-        ${S.events.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ } return `<tr><td class="num" style="white-space:nowrap">${TP.fmt(e.at)}</td><td>${actorName(e.actor)}</td><td>${KIND[e.kind] || esc(e.kind)}</td><td class="num">${esc(e.request_id || "")}</td><td class="dim" style="white-space:normal;text-align:right">${esc(Object.entries(p).filter(([k]) => k !== "notify" && k !== "notified").map(([k, v]) => `${k}: ${typeof v === "object" ? JSON.stringify(v) : v}`).join(" · "))}${p.notify ? ` ${notifyChip(e.kind, p)}` : ""}</td></tr>`; }).join("")}
-      </tbody></table></div></div></div>`;
+    const D = S.decisions, cat = S.evCat || "";
+    const evs = S.events.filter((e) => !cat || evCat(e.kind) === cat);
+    const groups = []; evs.forEach((e) => { const d = dayOf(e.at); const g = groups[groups.length - 1]; if (g && g[0] === d) g[1].push(e); else groups.push([d, [e]]); });
+    const counts = {}; S.events.forEach((e) => { const c = evCat(e.kind); counts[c] = (counts[c] || 0) + 1; });
+    const decCard = (d, i) => { const e = S.data.experts.find((x) => x.name === d.expert_name || x.label === d.expert_name) || { name: d.expert_name };
+      return `<article class="lg-dec" style="--i:${Math.min(i, 10)}"><header>${avOf(e, "")}<div><b>${esc(d.expert_name)}</b><small>${esc(TP.fmt(d.requested_at))}</small></div>
+          <span class="chip ${DEC_TONE[d.action] || "info"}">${esc(DEC_FA[d.action] || d.action)}</span></header>
+        <div class="lg-req">${TP.ui.ICON.project}<span>درخواست <b class="num">${esc(d.request_id)}</b></span></div>${decWhy(d)}
+        <footer><button class="tp-btn primary" data-dec="approve|${d.id}">${TP.ui.ICON.check} تأیید</button><button class="tp-btn" data-dec="reject|${d.id}">${TP.ui.ICON.x} رد</button></footer></article>`; };
+    return `<div class="lg-wrap ${TP.ui.once("mgr.log")}">
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.flag}</span><h2>تصمیم‌های در انتظار تأیید</h2><span class="chip ${D.length ? "warn" : "ok"}">${M(D.length)}</span>${TP.ui.info("manager.log", "راهنمای تصمیم‌ها")}</div>
+        ${D.length ? `<div class="lg-decs">${D.map(decCard).join("")}</div>`
+          : `<div class="lg-none">${TP.ui.ICON.check}<b>تصمیمی در انتظار نیست</b>${settings().approvalRequired ? "" : `<span>تأیید مدیر برای تصمیم کارشناس خاموش است</span>`}</div>`}</section>
+      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.clock}</span><h2>رویدادهای اخیر</h2><span class="sub">${M(S.events.length)} رویداد</span>
+          <span class="end"><button class="tp-icon-btn sm" data-load-events title="به‌روزرسانی" aria-label="به‌روزرسانی رویدادها">${TP.ui.ICON.refresh}</button></span></div>
+        <div class="tp-pills lg-cats"><button type="button" class="tp-pill ${!cat ? "on" : ""}" data-evcat="">همه <span class="n">${M(S.events.length)}</span></button>
+          ${EV_CAT.map(([c, l]) => counts[c] ? `<button type="button" class="tp-pill ${cat === c ? "on" : ""}" data-evcat="${c}">${l} <span class="n">${M(counts[c])}</span></button>` : "").join("")}
+          ${counts.other ? `<button type="button" class="tp-pill ${cat === "other" ? "on" : ""}" data-evcat="other">دیگر <span class="n">${M(counts.other)}</span></button>` : ""}</div>
+        ${groups.length ? `<div class="lg-tl">${groups.map(([d, list]) => `<div class="lg-day"><h4>${esc(d)}</h4>${list.map((e) => { let p = {}; try { p = JSON.parse(e.payload_json || "{}"); } catch (_) { /* خالی */ }
+            const det = evDetails(e.kind, p), c = evCat(e.kind);
+            return `<div class="lg-ev c-${c}"><span class="lg-ic">${evIcon(e.kind)}</span><div class="lg-eb"><div class="lg-et"><b title="${esc(e.kind)}">${KIND[e.kind] || "رویدادِ سامانه"}</b>${e.request_id ? `<span class="chip num">${esc(e.request_id)}</span>` : ""}${p.notify ? notifyChip(e.kind, p) : ""}</div>
+              <div class="lg-ed"><span class="lg-who">${actorName(e.actor)}</span>${det ? ` · ${det}` : ""}</div></div><time>${esc(timeOf(e.at))}</time></div>`; }).join("")}</div>`).join("")}</div>`
+          : `<div class="lg-none">${TP.ui.ICON.clock}<b>${S.events.length ? "رویدادی در این دسته نیست" : "رویدادی بارگیری نشده"}</b></div>`}</section></div>`;
   }
 
   /* ---------- گزارش‌ها ----------
@@ -760,39 +893,44 @@
   const RP_DW = [9.1, 20.1, 15.3, 21.4, 14.8, 17.2];
   const px = (w) => Math.round(w * 7 + 5);
 
+  /* گزارش‌ها (مهر ۱۴۰۵): کارتی — بازه با چیپ و کلید، کارت‌برگِ هر وضعیت (کلیک = برش)، برش‌دهنده‌ها چیپی، جدول در «کاغذ» */
+  const ST_TONE = { "بسته شده": "ok", "تایید شده": "info", "ثبت شده": "", "در جریان": "info", "بررسی مجدد": "warn", "متوقف شده": "bad", "معلق": "warn" };
   function vReports() {
     const part = RP.part;
-    return `<div class="tp-card tp-pane rp" style="max-width:none">
-      <div class="rp-head"><h2>گزارش‌ها</h2>
-        <div class="rp-seg"><button class="${part === "status" ? "on" : ""}" data-rpart="status">وضعیت درخواست‌ها</button><button class="${part === "season" ? "on" : ""}" data-rpart="season">گزارش سه ماهه</button></div></div>
-      ${RP.err ? `<div class="tp-note warn">${esc(RP.err)}</div>` : ""}
+    return `<div class="rp2 ${TP.ui.once("mgr.rep")}">
+      <section class="tp-box sm-hero rp2-hero"><span class="bi big">${TP.ui.ICON.file}</span><div class="sm-ht"><h2>گزارش‌ها</h2><span class="sub">${part === "status" ? "وضعیتِ درخواست‌ها در یک بازه" : "گزارشِ دوره‌ای برای واحد"}</span></div>
+        <span class="end"><div class="tp-seg" role="tablist"><button type="button" role="tab" class="${part === "status" ? "on" : ""}" aria-selected="${part === "status"}" data-rpart="status">وضعیت درخواست‌ها</button><button type="button" role="tab" class="${part === "season" ? "on" : ""}" aria-selected="${part === "season"}" data-rpart="season">گزارش سه ماهه</button></div>${TP.ui.info("manager.reports", "راهنمای گزارش‌ها")}</span></section>
+      ${RP.err ? `<div class="chip bad" style="margin:0 0 10px">${esc(RP.err)}</div>` : ""}
       ${part === "status" ? vRepStatus() : vRepSeason()}</div>`;
   }
 
   /* بازهٔ گزارش وضعیت — تاریخ شروع و پایان از تقویم؛ پایانِ خالی یعنی «تاکنون» */
   function vRepRange() {
     const R = RP.range, stale = RP.status && RP.rangeKey !== `${R.from}|${R.to}`;
-    return `<div class="rp-range">
-      <span class="lab">از تاریخ</span><input class="tp-input date" data-rfrom value="${esc(R.from)}" placeholder="از ابتدا" readonly style="width:120px;text-align:center">
-      <span class="lab">تا تاریخ</span><input class="tp-input date" data-rto value="${esc(R.to)}" placeholder="تاکنون" readonly style="width:120px;text-align:center">
-      <label class="chip ${R.to ? "" : "on"}" style="cursor:pointer;padding:4px 12px" title="بازه تا امروز ادامه دارد"><input type="checkbox" data-rnow ${R.to ? "" : "checked"}> تاکنون</label>
-      <button class="tp-btn xs" data-rquick="month">ماه جاری</button><button class="tp-btn xs" data-rquick="year">سال جاری</button><button class="tp-btn xs" data-rquick="all">همه</button>
-      <button class="tp-btn sm ${stale ? "primary" : ""}" data-rstatus-reload>${stale ? "نمایش این بازه" : "↻ به‌روزرسانی"}</button>
-      ${stale ? `<span class="chip warn">بازه عوض شده — برای دیدنش دکمه را بزنید</span>` : ""}</div>`;
+    const [y] = TP.todayJ(), quick = R.to ? "" : R.from === monthStart() ? "month" : R.from === `${y}/01/01` ? "year" : !R.from ? "all" : "";
+    return `<section class="tp-box rp2-range"><span class="lab">${TP.ui.ICON.clock} بازه</span>
+      <label class="rp2-date"><small>از</small><input class="tp-input date" data-rfrom value="${esc(R.from)}" placeholder="از ابتدا" readonly aria-label="از تاریخ"></label>
+      <label class="rp2-date"><small>تا</small><input class="tp-input date" data-rto value="${esc(R.to)}" placeholder="تاکنون" readonly aria-label="تا تاریخ" ${R.to ? "" : "disabled"}></label>
+      ${TP.ui.switchEl({ attrs: "data-rnow", on: !R.to, label: "تاکنون" })}
+      <div class="tp-pills">${[["month", "ماه جاری"], ["year", "سال جاری"], ["all", "همه"]].map(([k, l]) => `<button type="button" class="tp-pill ${quick === k ? "on" : ""}" data-rquick="${k}">${l}</button>`).join("")}</div>
+      <span class="spacer"></span><button class="tp-btn sm ${stale ? "primary" : ""}" data-rstatus-reload>${stale ? "نمایش این بازه" : `${TP.ui.ICON.refresh} به‌روزرسانی`}</button></section>`;
   }
   function vRepStatus() {
     const D = RP.status;
     if (!D) {
       if (!RP.loading && !RP.statusFailed) loadRepStatus();
-      return vRepRange() + `<div class="empty">${RP.statusFailed ? "گزارش ساخته نشد؛ برای تلاش دوباره «↻ به‌روزرسانی» را بزنید." : "در حال ساخت گزارش وضعیت درخواست‌ها…"}</div>`;
+      return vRepRange() + `<div class="lg-none">${RP.statusFailed ? `${TP.ui.ICON.x}<b>گزارش ساخته نشد</b><span>«به‌روزرسانی» را بزنید</span>` : `<span class="tp-spin"></span><b>در حال ساخت گزارش…</b>`}</div>`;
     }
-    const tabs = [["general", "درخواست کلی"], ["daily", "گزارش روزانه"]].map(([k, l]) => `<button class="rp-sheet ${RP.sheet === k ? "on" : ""}" data-rsheet="${k}">${l}</button>`).join("");
     const R = D.range || {};
-    return vRepRange() + `<div class="rp-tools"><div class="rp-sheets">${tabs}</div><span class="rp-sp"></span>
-        ${RP.sheet === "general" ? `<label class="chip" style="cursor:pointer;padding:3px 10px"><input type="checkbox" data-rhidden ${RP.hidden ? "checked" : ""}> ستون‌های پنهان فایل را هم نشان بده</label>` : ""}
-        <button class="tp-btn sm primary" data-rstatus-xlsx>دانلود اکسل (هر دو برگه)</button>
-        <span class="dim" style="font-size:.8rem">${esc(R.from ? `از ${R.from}` : "از ابتدا")} ${esc(R.to ? `تا ${R.to}` : "تاکنون")} · ساخته‌شده ${TP.fmt(D.generatedAt)}</span></div>
-      ${D.capped ? `<div class="tp-note warn">این بازه ${M(D.total)} درخواست دارد و فقط ${M(D.general.length)} تای تازه‌ترش آمد؛ برای دیدن بقیه بازه را کوچک‌تر کنید (فایل اکسل هم همین‌قدر است).</div>` : ""}
+    /* کارت‌برگِ هر وضعیت: شمار با برش‌های دیگر؛ کلیک = برشِ «وضعیت» (همان برش‌دهندهٔ اکسل) */
+    const st = slicerItems(2), sel = RP.sl[2];
+    const tiles = `<div class="tp-stats rp2-tiles">${st.map((it) => `<button type="button" class="tp-stat ${ST_TONE[it.k] || ""} ${sel.includes(it.k) ? "on" : ""} ${it.n ? "" : "nodata"}" data-sl="2" data-k="${esc(it.k)}" aria-pressed="${sel.includes(it.k)}"><span class="sb"><small>${esc(it.k)}</small><b>${M(it.n)}</b></span></button>`).join("")}</div>`;
+    return vRepRange() + `${tiles}
+      <div class="rp2-tools"><div class="tp-seg sm" role="tablist">${[["general", "درخواست کلی"], ["daily", "گزارش روزانه"]].map(([k, l]) => `<button type="button" role="tab" class="${RP.sheet === k ? "on" : ""}" aria-selected="${RP.sheet === k}" data-rsheet="${k}">${l}</button>`).join("")}</div>
+        ${RP.sheet === "general" ? TP.ui.switchEl({ attrs: "data-rhidden", on: RP.hidden, label: "ستون‌های پنهان فایل" }) : ""}
+        <span class="spacer"></span><span class="dim">${esc(R.from ? `از ${R.from}` : "از ابتدا")} ${esc(R.to ? `تا ${R.to}` : "تاکنون")} · ${esc(TP.fmt(D.generatedAt))}</span>
+        <button class="tp-btn sm primary" data-rstatus-xlsx>${TP.ui.ICON.upload} دانلود اکسل</button></div>
+      ${D.capped ? `<div class="chip warn" style="margin-bottom:10px">فقط ${M(D.general.length)} درخواستِ تازه‌تر از ${M(D.total)} آمد — بازه را کوچک‌تر کنید</div>` : ""}
       ${RP.sheet === "general" ? vRepGeneral() : vRepDaily()}`;
   }
   function vRepGeneral() {
@@ -803,22 +941,21 @@
       <thead><tr>${cols.map((x) => `<th class="${D.hidden.includes(x.i + 1) ? "hid" : ""}">${esc(x.h)}</th>`).join("")}</tr></thead>
       <tbody>${rows.slice(0, RP.limit).map((r) => `<tr>${cols.map((x) => `<td class="${x.i === 7 || x.i === 8 ? "w" : ""}${D.hidden.includes(x.i + 1) ? " hid" : ""}">${esc(r[x.i])}</td>`).join("")}</tr>`).join("")}
       ${rows.length ? "" : `<tr><td colspan="${cols.length}" class="rp-none">با این برش‌ها درخواستی نیست.</td></tr>`}</tbody></table>
-      ${rows.length > RP.limit ? `<div class="rp-more"><button class="tp-btn sm" data-rmore>${M(Math.min(300, rows.length - RP.limit))} ردیف بیشتر</button> <span>${M(RP.limit)} از ${M(rows.length)} ردیف نمایش داده شد</span></div>` : ""}</div>`;
-    const slicers = SL.map(([c, cap]) => {
+      ${rows.length > RP.limit ? `<div class="rp-more"><button class="tp-btn sm" data-rmore>${M(Math.min(300, rows.length - RP.limit))} ردیف بیشتر</button> <span>${M(RP.limit)} از ${M(rows.length)} ردیف</span></div>` : ""}</div>`;
+    const slicers = SL.filter(([c]) => c !== 2).map(([c, cap]) => {
       const items = slicerItems(c), sel = RP.sl[c];
-      return `<div class="slicer ${c === 7 ? "wide" : ""}"><div class="slh"><b>${cap}</b><button class="slx" data-slclear="${c}" ${sel.length ? "" : "disabled"} title="پاک کردن فیلتر">⊘</button></div>
-        <div class="sll">${items.map((it) => `<button class="sli ${!sel.length || sel.includes(it.k) ? "on" : ""} ${it.n ? "" : "nodata"}" data-sl="${c}" data-k="${esc(it.k)}" title="${M(it.n)} درخواست">${esc(it.k)}</button>`).join("")}</div></div>`;
+      return `<section class="tp-box rp2-sl"><div class="tp-box-h"><h3>${cap}</h3><span class="end">${sel.length ? `<button class="tp-btn xs" data-slclear="${c}">پاک کردن</button>` : ""}</span></div>
+        <div class="tp-pills">${items.map((it) => `<button type="button" class="tp-pill ${sel.includes(it.k) ? "on" : ""} ${it.n ? "" : "nodata"}" data-sl="${c}" data-k="${esc(it.k)}" title="${M(it.n)} درخواست">${esc(it.k)} <span class="n">${M(it.n)}</span></button>`).join("")}</div></section>`;
     }).join("");
-    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.general.length)} درخواست ${any ? `<button class="tp-btn xs" data-slall>پاک کردن همهٔ برش‌ها</button>` : ""}
-        <span class="dim">روی هر گزینهٔ برش‌دهنده بزنید تا فقط همان بماند؛ گزینه‌های بعدی به انتخاب اضافه می‌شوند.</span></div>
-      <div class="rp-grid">${table}<div class="rp-slicers">${slicers}</div></div>`;
+    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.general.length)} درخواست ${any ? `<button class="tp-btn xs" data-slall>پاک کردن همهٔ برش‌ها</button>` : ""}</div>
+      <div class="rp2-grid">${table}<div class="rp2-sls">${slicers}</div></div>`;
   }
   function vRepDaily() {
     const D = RP.status, rows = D.daily.filter((r) => RP.dq.every((q, i) => !q || TP.hit(String(r[i] == null ? "" : r[i]), q)));
-    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.daily.length)} ارجاع ارسال‌شده · به ترتیب تاریخ تحویل به کارشناس</div>
+    return `<div class="rp-count"><b>${M(rows.length)}</b> از ${M(D.daily.length)} ارجاعِ ارسال‌شده · به ترتیب تاریخ تحویل</div>
       <div class="rp-paper rp-scroll" data-keep-scroll style="max-width:${RP_DW.reduce((a, w) => a + px(w), 0) + 180}px"><table class="rp-t rp-daily"><colgroup>${RP_DW.map((w) => `<col style="width:${px(w)}px">`).join("")}<col style="width:124px"></colgroup>
         <thead><tr>${D.dailyColumns.map((h) => `<th>${esc(h)}</th>`).join("")}<th></th></tr>
-        <tr class="flt">${D.dailyColumns.map((_, i) => `<th>${i ? `<input class="tp-input" data-dq="${i}" value="${esc(RP.dq[i])}" placeholder="فیلتر">` : ""}</th>`).join("")}<th></th></tr></thead>
+        <tr class="flt">${D.dailyColumns.map((_, i) => `<th>${i ? `<input class="tp-input" data-dq="${i}" value="${esc(RP.dq[i])}" placeholder="فیلتر" aria-label="فیلتر ${esc(D.dailyColumns[i])}">` : ""}</th>`).join("")}<th></th></tr></thead>
         <tbody>${rows.slice(0, RP.dLimit).map((r) => `<tr>${r.map((v) => `<td>${esc(v)}</td>`).join("")}<td></td></tr>`).join("")}
         ${rows.length ? "" : `<tr><td colspan="7" class="rp-none">ارجاعی با این فیلترها نیست.</td></tr>`}</tbody></table>
         ${rows.length > RP.dLimit ? `<div class="rp-more"><button class="tp-btn sm" data-dmore>${M(Math.min(300, rows.length - RP.dLimit))} ردیف بیشتر</button></div>` : ""}</div>`;
@@ -839,36 +976,30 @@
     const meta = RP.meta, s = RP.season;
     if (!meta) {
       if (!RP.metaLoading && !RP.metaFailed) loadRepMeta();
-      return RP.metaFailed ? `<div class="empty">سال‌ها و پروژه‌ها خوانده نشد. <button class="tp-btn sm" data-rmeta-retry>تلاش دوباره</button></div>`
-        : `<div class="empty">در حال خواندن سال‌ها و پروژه‌ها…</div>`;
+      return RP.metaFailed ? `<div class="lg-none">${TP.ui.ICON.x}<b>سال‌ها و پروژه‌ها خوانده نشد</b><button class="tp-btn sm" data-rmeta-retry>تلاش دوباره</button></div>`
+        : `<div class="lg-none"><span class="tp-spin"></span><b>در حال خواندن سال‌ها و پروژه‌ها…</b></div>`;
     }
-    const pop = (kind, label, active, body) => `<span class="fwrap"><button class="tp-btn sm ${active ? "primary" : ""}" data-rpop="${kind}">${label} ▾</button>${RP.pop === kind ? `<div class="fpop" data-pop>${body}
-      <div class="tp-acts" style="margin-top:8px"><button class="tp-btn xs" data-rpclear="${kind}">پاک کردن</button><button class="tp-btn xs primary" data-rpclose>بستن</button></div></div>` : ""}</span>`;
-    const yBody = `<div class="fpop-list">${meta.years.map((y) => `<label><input type="checkbox" data-ry="${y}" ${s.years.includes(y) ? "checked" : ""}> ${y}</label>`).join("") || `<span class="dim">درخواستی در سامانه نیست.</span>`}</div>`;
-    const qBody = `<div class="fpop-list">${RP_SEASONS.map((n, i) => `<label><input type="checkbox" data-rq="${i + 1}" ${s.seasons.includes(i + 1) ? "checked" : ""}> ${n} <span class="dim" style="font-size:.78rem">(${RP_MONTHS.slice(i * 3, i * 3 + 3).join("، ")})</span></label>`).join("")}</div>`;
-    const mBody = `<div class="fpop-list rp-months">${RP_MONTHS.map((n, i) => `<label><input type="checkbox" data-rm="${i + 1}" ${s.months.includes(i + 1) ? "checked" : ""}> ${n}</label>`).join("")}</div>`;
-    const yl = s.years.length ? s.years.slice().sort().join("، ") : "انتخاب کنید";
-    const ql = s.seasons.length ? s.seasons.map((q) => RP_SEASONS[q - 1]).join("، ") : "همه";
-    const ml = s.months.length ? (s.months.length > 3 ? `${M(s.months.length)} ماه` : s.months.map((m) => RP_MONTHS[m - 1]).join("، ")) : "همه";
+    const tog = (attr, v, on, label, sub) => `<button type="button" class="rp2-tog ${on ? "on" : ""}" data-${attr}="${v}" aria-pressed="${on ? "true" : "false"}"><i class="ck">${TP.ui.ICON.check}</i><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ""}</span></button>`;
     const R = s.result, sh = R && R.sheets[Math.min(s.idx, R.sheets.length - 1)];
-    return `<div class="rp-form">
-        <div class="rp-field"><b>برگه‌های گزارش</b><div class="rp-ticks">${meta.sheets.map((x) => `<label class="chip rp-tick ${s.sheets.includes(x.key) ? "on" : ""}"><input type="checkbox" data-rsh="${x.key}" ${s.sheets.includes(x.key) ? "checked" : ""}> ${esc(x.name)}</label>`).join("")}</div></div>
-        <div class="rp-field"><b>بازهٔ زمانی</b><div class="rp-ticks">
-          <span class="lab">سال</span>${pop("y", yl, s.years.length, yBody)}
-          <span class="lab">فصل</span>${pop("q", ql, s.seasons.length, qBody)}
-          <span class="lab">ماه</span>${pop("m", ml, s.months.length, mBody)}
-          <span class="rp-period">دوره: <b>${esc(repPeriodLabel(s))}</b></span></div>
-          <div class="dim" style="font-size:.8rem;margin-top:4px">فصل‌ها و ماه‌های انتخابی با هم جمع می‌شوند و در هر سالِ انتخابی شمرده می‌شوند؛ اگر نه فصلی تیک خورده نه ماهی، کل سال. ستون «پیش از دوره» از فروردین همان سال تا ماهِ پیش از دوره است.</div></div>
-        <div class="rp-actions"><button class="tp-btn primary" data-rgen ${s.busy ? "disabled" : ""}>${s.busy ? "در حال ساخت…" : "نمایش گزارش"}</button>
-          <button class="tp-btn" data-rgenx ${s.busy ? "disabled" : ""}>دانلود اکسل</button>
-          <button class="tp-btn sm" data-rproj title="نام پروژه‌ها، شهر، مدیر پروژه و کلیدواژهٔ تطبیق با «طرف مقابل»">پروژه‌ها و مدیران پروژه</button></div></div>
+    return `<div class="rp2-steps">
+        <section class="tp-box rp2-step"><div class="tp-box-h"><span class="bi">۱</span><h3>برگه‌ها</h3><span class="sub">${M(s.sheets.length)} از ${M(meta.sheets.length)}</span></div>
+          <div class="rp2-togs">${meta.sheets.map((x) => tog("rsh", x.key, s.sheets.includes(x.key), esc(x.name))).join("")}</div></section>
+        <section class="tp-box rp2-step"><div class="tp-box-h"><span class="bi">۲</span><h3>دوره</h3><span class="end"><span class="rp-period">${esc(repPeriodLabel(s))}</span></span></div>
+          <div class="rp2-prow"><span class="lab">سال</span><div class="tp-pills">${meta.years.map((y) => `<button type="button" class="tp-pill ${s.years.includes(y) ? "on" : ""}" data-ry="${y}">${y}</button>`).join("") || `<span class="dim">درخواستی در سامانه نیست</span>`}</div></div>
+          <div class="rp2-prow"><span class="lab">فصل</span><div class="rp2-togs four">${RP_SEASONS.map((n, i) => tog("rq", i + 1, s.seasons.includes(i + 1), n, RP_MONTHS.slice(i * 3, i * 3 + 3).join("، "))).join("")}</div></div>
+          <div class="rp2-prow"><span class="lab">ماه</span><div class="tp-pills">${RP_MONTHS.map((n, i) => `<button type="button" class="tp-pill ${s.months.includes(i + 1) ? "on" : ""}" data-rm="${i + 1}">${n}</button>`).join("")}</div></div></section>
+        <section class="tp-box rp2-step rp2-go"><div class="tp-box-h"><span class="bi">۳</span><h3>ساخت</h3></div>
+          <button class="tp-btn primary" data-rgen ${s.busy ? "disabled" : ""}>${s.busy ? `<span class="tp-spin"></span> در حال ساخت…` : "نمایش گزارش"}</button>
+          <button class="tp-btn" data-rgenx ${s.busy ? "disabled" : ""}>${TP.ui.ICON.upload} دانلود اکسل</button>
+          <button class="tp-btn sm" data-rproj>${TP.ui.ICON.project} پروژه‌ها و مدیران پروژه</button></section></div>
       ${R ? `<style>${R.css}</style>
-        <div class="rp-result-head">گزارش <b>${esc(R.label)}</b> · مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری${R.picked && R.picked.n < R.picked.of ? ` · <span class="chip info" title="کارشناسانی که در پنجرهٔ پیش از ساخت تیک خوردند">${M(R.picked.n)} از ${M(R.picked.of)} کارشناس</span>` : ""}${R.hasExpertAmounts ? "" : ` · <span class="chip warn">مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد</span>`}</div>
-        <div class="rp-sheets bottom">${R.sheets.map((x, i) => `<button class="rp-sheet ${i === s.idx ? "on" : ""}" data-rtab="${i}">${esc(x.name)}</button>`).join("")}</div>
-        ${(sh.notes || []).map((n) => `<div class="tp-note warn">${esc(n)}</div>`).join("")}
-        <div class="rp-paper rp-scroll rp-book" data-keep-scroll>${sh.html}</div>
-        ${sh.charts.length ? `<div class="rp-charts">${sh.charts.map((c) => `<div class="rp-chart">${c.svg}</div>`).join("")}</div>` : ""}`
-      : s.busy ? `<div class="empty">در حال ساخت گزارش…</div>` : `<div class="empty"><b>برگه‌ها و بازه را انتخاب کنید و «نمایش گزارش» را بزنید.</b>همان برگه‌ها و نمودارهایی نمایش داده می‌شود که در فایل اکسل می‌رود.</div>`}`;
+        <section class="tp-box rp2-res"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.file}</span><h3>گزارش ${esc(R.label)}</h3><span class="sub">مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری</span>
+            <span class="end">${R.picked && R.picked.n < R.picked.of ? `<span class="chip info">${M(R.picked.n)} از ${M(R.picked.of)} کارشناس</span>` : ""}${R.hasExpertAmounts ? "" : `<span class="chip warn" title="مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد">مبلغ گروه‌ها ناقص</span>`}</span></div>
+          <div class="tp-seg sm rp2-tabs" role="tablist">${R.sheets.map((x, i) => `<button type="button" role="tab" class="${i === s.idx ? "on" : ""}" aria-selected="${i === s.idx}" data-rtab="${i}">${esc(x.name)}</button>`).join("")}</div>
+          ${(sh.notes || []).map((n) => `<div class="chip warn" style="margin:8px 0 0">${esc(n)}</div>`).join("")}
+          <div class="rp-paper rp-scroll rp-book" data-keep-scroll>${sh.html}</div>
+          ${sh.charts.length ? `<div class="rp-charts">${sh.charts.map((c) => `<div class="rp-chart">${c.svg}</div>`).join("")}</div>` : ""}</section>`
+      : s.busy ? `<div class="lg-none"><span class="tp-spin"></span><b>در حال ساخت گزارش…</b></div>` : `<div class="lg-none">${TP.ui.ICON.file}<b>برگه‌ها و دوره را انتخاب کنید و «نمایش گزارش» را بزنید</b></div>`}`;
   }
   /* پیش از ساخت (تصمیم مدیر، مهر ۱۴۰۵): کارشناسانی که در این دوره در گزارش می‌آیند، هر کدام با تیک —
      پیش‌فرض همه — و گزارش فقط با تیک‌خورده‌ها ساخته می‌شود. خروجی: { ids: شناسهٔ تیک‌خورده‌ها، list: همهٔ
@@ -1086,34 +1217,31 @@
   function wireReports(Q, G) {
     Q("[data-rpart]").forEach((b) => b.onclick = () => { RP.part = b.dataset.rpart; RP.pop = null; render(); });
     Q("[data-rsheet]").forEach((b) => b.onclick = () => { RP.sheet = b.dataset.rsheet; render(); });
-    const rh = G("[data-rhidden]"); if (rh) rh.onchange = (e) => { RP.hidden = e.target.checked; render(); };
+    const rh = G("[data-rhidden]"); if (rh) rh.addEventListener("tp-change", (e) => { RP.hidden = e.detail.value; render(); });
     const rr = G("[data-rstatus-reload]"); if (rr) rr.onclick = () => { RP.status = null; RP.statusFailed = false; RP.limit = 300; RP.dLimit = 300; render(); };
     const mr = G("[data-rmeta-retry]"); if (mr) mr.onclick = () => { RP.metaFailed = false; RP.err = ""; render(); };
     const rx = G("[data-rstatus-xlsx]"); if (rx) rx.onclick = () => repDownload("/reports/status.xlsx" + rangeQs(), null, "وضعیت درخواست ها.xlsx");
     /* بازهٔ گزارش وضعیت */
     const rfr = G("[data-rfrom]"); if (rfr) rfr.onclick = () => TP.openDatePicker(rfr, (v) => { RP.range.from = String(v || "").split("،")[0].trim(); render(); }, { single: true });
     const rto = G("[data-rto]"); if (rto) rto.onclick = () => TP.openDatePicker(rto, (v) => { RP.range.to = String(v || "").split("،")[0].trim(); render(); }, { single: true });
-    const rnow = G("[data-rnow]"); if (rnow) rnow.onchange = (e) => { if (e.target.checked) RP.range.to = ""; else { const [y, m, d] = TP.todayJ(); RP.range.to = `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`; } render(); };
+    const rnow = G("[data-rnow]"); if (rnow) rnow.addEventListener("tp-change", (e) => { if (e.detail.value) RP.range.to = ""; else { const [y, m, d] = TP.todayJ(); RP.range.to = `${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`; } render(); });
     Q("[data-rquick]").forEach((b) => b.onclick = () => {
       const [y] = TP.todayJ(), k = b.dataset.rquick;
       RP.range = { from: k === "all" ? "" : k === "year" ? `${y}/01/01` : monthStart(), to: "" };
       RP.status = null; RP.statusFailed = false; RP.limit = 300; RP.dLimit = 300; render();
     });
-    Q("[data-sl]").forEach((b) => b.onclick = () => { const sel = RP.sl[+b.dataset.sl], k = b.dataset.k, i = sel.indexOf(k); if (!sel.length) sel.push(k); else if (i >= 0) sel.splice(i, 1); else sel.push(k); RP.limit = 300; render(); });
+    Q("[data-sl]").forEach((b) => b.onclick = () => { const sel = RP.sl[+b.dataset.sl], k = b.dataset.k, i = sel.indexOf(k); if (i >= 0) sel.splice(i, 1); else sel.push(k); RP.limit = 300; render(); });
     Q("[data-slclear]").forEach((b) => b.onclick = () => { RP.sl[+b.dataset.slclear] = []; render(); });
     const sa = G("[data-slall]"); if (sa) sa.onclick = () => { SL.forEach(([c]) => { RP.sl[c] = []; }); render(); };
     const mo = G("[data-rmore]"); if (mo) mo.onclick = () => { RP.limit += 300; render(); };
     const dm = G("[data-dmore]"); if (dm) dm.onclick = () => { RP.dLimit += 300; render(); };
     Q("[data-dq]").forEach((i) => i.oninput = (e) => { RP.dq[+e.target.dataset.dq] = e.target.value; RP.dLimit = 300; TP.keepFocus(e.target, "dq", render); });
-    /* گزارش سه ماهه */
-    const s = RP.season, tog = (arr, v, on) => { const i = arr.indexOf(v); if (on && i < 0) arr.push(v); if (!on && i >= 0) arr.splice(i, 1); arr.sort((a, b) => a - b); };
-    Q("[data-rpop]").forEach((b) => b.onclick = () => { RP.pop = RP.pop === b.dataset.rpop ? null : b.dataset.rpop; render(); });
-    Q("[data-rpclose]").forEach((b) => b.onclick = () => { RP.pop = null; render(); });
-    Q("[data-rpclear]").forEach((b) => b.onclick = () => { const k = b.dataset.rpclear; if (k === "y") s.years = []; if (k === "q") s.seasons = []; if (k === "m") s.months = []; render(); });
-    Q("[data-ry]").forEach((c) => c.onchange = (e) => { tog(s.years, +e.target.dataset.ry, e.target.checked); render(); });
-    Q("[data-rq]").forEach((c) => c.onchange = (e) => { tog(s.seasons, +e.target.dataset.rq, e.target.checked); render(); });
-    Q("[data-rm]").forEach((c) => c.onchange = (e) => { tog(s.months, +e.target.dataset.rm, e.target.checked); render(); });
-    Q("[data-rsh]").forEach((c) => c.onchange = (e) => { const k = e.target.dataset.rsh, i = s.sheets.indexOf(k); if (e.target.checked && i < 0) s.sheets.push(k); if (!e.target.checked && i >= 0) s.sheets.splice(i, 1); const order = RP.meta.sheets.map((x) => x.key); s.sheets.sort((a, b) => order.indexOf(a) - order.indexOf(b)); render(); });
+    /* گزارش سه ماهه — کاشی‌ها و چیپ‌ها با کلیک روشن و خاموش می‌شوند */
+    const s = RP.season, flip = (arr, v) => { const i = arr.indexOf(v); if (i < 0) arr.push(v); else arr.splice(i, 1); arr.sort((a, b) => a - b); };
+    Q("[data-ry]").forEach((b) => b.onclick = () => { flip(s.years, +b.dataset.ry); render(); });
+    Q("[data-rq]").forEach((b) => b.onclick = () => { flip(s.seasons, +b.dataset.rq); render(); });
+    Q("[data-rm]").forEach((b) => b.onclick = () => { flip(s.months, +b.dataset.rm); render(); });
+    Q("[data-rsh]").forEach((b) => b.onclick = () => { const k = b.dataset.rsh, i = s.sheets.indexOf(k); if (i < 0) s.sheets.push(k); else s.sheets.splice(i, 1); const order = RP.meta.sheets.map((x) => x.key); s.sheets.sort((a, c) => order.indexOf(a) - order.indexOf(c)); render(); });
     const gn = G("[data-rgen]"); if (gn) gn.onclick = () => genSeason(false);
     const gx = G("[data-rgenx]"); if (gx) gx.onclick = () => genSeason(true);
     const pj = G("[data-rproj]"); if (pj) pj.onclick = () => projectsDialog();
@@ -1134,8 +1262,11 @@
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
         : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : S.tab === "reports" ? vReports() : vLog()}</div>`);
     wire();
+    TP.ui.paintAll(app);
     TP.stickHeader(app.querySelector("table.tp-table"));
     restore();
+    if (S.fAnim === "in") { S.fAnim = null; const btn = app.querySelector("[data-fpanel]"); if (btn) btn.classList.add("spin"); TP.ui.reveal(app.querySelector("[data-fpanel-box]"), true); }
+    if (S.exLand) { const id = S.exLand; S.exLand = null; setTimeout(() => { const c = app.querySelector(`[data-exdrag="${id}"]`); if (c) c.classList.remove("land"); }, 900); }
   }
 
   /* ---------- اتصال رویدادها ---------- */
@@ -1143,7 +1274,7 @@
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
     if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); throw e; } } }); return; }
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
-    const ih = G("[data-hist-import]"); if (ih) ih.onclick = pickHistory;
+    Q("[data-hist-import]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); pickHistory(); }; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickHistory(); } }; });
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
@@ -1175,20 +1306,52 @@
     });
     const fa = G("[data-fall]"); if (fa) fa.onclick = () => { const was = needsAllScope(); S.filter.statuses = STATUS_ALL.slice(); if (!was) refresh(); else render(); };
     Q("[data-fclear]").forEach((b) => b.onclick = () => { if (b.dataset.fclear === "expert") { S.filter.experts = []; S.filter.expertText = ""; render(); } else { const was = needsAllScope(); S.filter.statuses = null; if (was) refresh(); else render(); } });
-    /* تب کارشناسان */
+    /* میز: کادرِ فیلتر — باز و بسته با حرکت؛ هر فیلتر همان لحظه اعمال می‌شود */
+    const fpb = G("[data-fpanel]"); if (fpb) fpb.onclick = () => { if (S.fOpen) return closeFilters(); S.fOpen = true; S.fAnim = "in"; render(); };
+    const fok = G("[data-fok]"); if (fok) fok.onclick = closeFilters;
+    Q("[data-fstate]").forEach((b) => b.onclick = () => { S.filter.state = b.dataset.fstate; render(); });
+    Q("[data-fwin]").forEach((b) => b.onclick = () => { if (S.filter.window === b.dataset.fwin) return; S.filter.window = b.dataset.fwin; S.page.offset = 0; refresh(); });
+    Q("[data-fdrop]").forEach((b) => b.onclick = () => {
+      const k = b.dataset.fdrop;
+      if (k.startsWith("q:")) S.q[k.slice(2)] = "";
+      else if (k === "expert") { S.filter.experts = []; S.filter.expertText = ""; }
+      else if (k === "state") S.filter.state = "";
+      else if (k === "status") { const was = needsAllScope(); S.filter.statuses = null; if (was) return refresh(); }
+      render();
+    });
+    /* تب کارشناسان: تخته‌ی تیم‌ها */
+    const exq = G("[data-exq]"); if (exq) exq.oninput = (e) => { S.exQ = e.target.value; TP.keepFocus(e.target, "exq", render); };
     Q("[data-ename-edit]").forEach((x) => x.onclick = () => { S.editName = +x.dataset.enameEdit; render(); const i = G("[data-ename]"); if (i) { i.focus(); i.select(); } });
     Q("[data-ename]").forEach((i) => {
       const done = async () => { const id = +i.dataset.ename, e = S.data.experts.find((x) => x.id === id); const v = i.value.trim(); S.editName = null; if (!v || v === (e.label || e.name)) return render(); await expertPatch(id, { name: v, label: v }); };
       i.onkeydown = (e) => { if (e.key === "Enter") done(); if (e.key === "Escape") { S.editName = null; render(); } };
       i.onblur = done;
     });
-    Q("[data-estar]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); expertPatch(e.id, { senior: !e.senior }); });
+    Q("[data-estar]").forEach((b) => b.onclick = async () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); if (await expertPatch(e.id, { senior: !e.senior })) TP.ui.success(e.senior ? "ارشدی برداشته شد" : "کارشناس ارشد شد"); });
     Q("[data-edel]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.edel);
-      TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, () => expertPatch(e.id, { active: false }), "حذف"); });
-    Q("[data-eteam]").forEach((b) => b.onclick = () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); expertPatch(eid, { senior_id: e.senior_id === sid ? null : sid }); });
-    Q("[data-enotify]").forEach((s) => s.onchange = (e) => expertPatch(+e.target.dataset.enotify, { notify_to: e.target.checked ? "manager" : "senior" }));
+      TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, async () => { if (await expertPatch(e.id, { active: false })) TP.ui.success("کارشناس حذف شد"); }, "حذف"); });
+    Q("[data-eteam]").forEach((b) => b.onclick = async () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); S.exPick = null; S.exLand = eid; await expertPatch(eid, { senior_id: e.senior_id === sid ? null : sid }); });
+    Q("[data-ebell]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.ebell); expertPatch(e.id, { notify_to: e.notify_to === "senior" ? "manager" : "senior" }); });
+    Q("[data-eadd-to]").forEach((b) => b.onclick = () => { const id = +b.dataset.eaddTo; S.exPick = S.exPick === id ? null : id; S.exPickQ = ""; render(); const i = G("[data-epickq]"); if (i) i.focus(); });
+    const epq = G("[data-epickq]"); if (epq) epq.oninput = (e) => { S.exPickQ = e.target.value; TP.keepFocus(e.target, "epickq", render); };
+    Q("[data-epick-close]").forEach((b) => b.onclick = () => { S.exPick = null; render(); });
     const ea = G("[data-eadd]"); if (ea) ea.onclick = addExpertDialog;
-    Q("[data-mstage]").forEach((c) => c.onchange = () => autoSave("mstages", () => saveQuiet({ mgrStages: [...Q("[data-mstage]")].map((x) => x.checked) })));
+    /* کشیدن و رها کردنِ کارشناس روی کارتِ تیم (یا «بی‌سرپرست») — همان senior_id */
+    Q("[data-exdrag]").forEach((c) => {
+      c.ondragstart = (e) => { e.dataTransfer.setData("text/x-expert", c.dataset.exdrag); e.dataTransfer.effectAllowed = "move"; c.classList.add("dragging"); a.classList.add("ex-dragging"); };
+      c.ondragend = () => { c.classList.remove("dragging"); a.classList.remove("ex-dragging"); Q(".ex-team.over").forEach((t) => t.classList.remove("over")); };
+    });
+    Q("[data-drop-team]").forEach((t) => {
+      t.ondragover = (e) => { if (![...e.dataTransfer.types].includes("text/x-expert")) return; e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = "move"; t.classList.add("over"); };
+      t.ondragleave = (e) => { if (!t.contains(e.relatedTarget)) t.classList.remove("over"); };
+      t.ondrop = (e) => {
+        const id = +e.dataTransfer.getData("text/x-expert"); if (!id) return;
+        e.preventDefault(); e.stopPropagation(); t.classList.remove("over");
+        const sid = +t.dataset.dropTeam || null, ex = S.data.experts.find((x) => x.id === id);
+        if (!ex || ex.id === sid || (ex.senior_id || null) === sid) return;
+        S.exLand = id; expertPatch(id, { senior_id: sid });
+      };
+    });
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
     Q("[data-del]").forEach((b) => b.onclick = () => askDelete([b.dataset.del]));
     const pg = G("[data-purge]"); if (pg) pg.onclick = () => askDelete(null);
@@ -1222,35 +1385,61 @@
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
     Q("[data-suptick]").forEach((b) => b.onclick = () => supTickSet(+b.dataset.suptick, b.dataset.on === "1"));
-    /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ درصدهای نامعتبر فرستاده نمی‌شوند */
-    const alertsPatch = () => {
-      const thr = [...Q("[data-thr]")];
-      if (!thr.length || !G("#ddays")) return null;   /* تب عوض شده؛ چیزی برای خواندن نیست */
-      return { thresholds: thr.map((x) => x.value === "" ? "" : +x.value), dispatchDays: +G("#ddays").value || 0,
-        minSuppliers: Math.max(1, +G("#minsup").value || 1), capacity: Math.max(1, +G("#capacity").value || 8) };
-    };
-    const saveAlerts = () => autoSave("alerts", async () => { const p = alertsPatch(); if (p) await saveQuiet(p); });
-    Q("[data-thr]").forEach((i) => i.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); const vals = [...Q("[data-thr]")].map((x) => x.value === "" ? "" : +x.value); const act = vals.filter((v) => v !== ""); const ok = act.every((v, k) => k === 0 || v > act[k - 1]) && act.every((v) => v >= 1 && v <= 100); G("#thrErr").textContent = ok ? "" : "درصدها باید صعودی و بین ۱ تا ۱۰۰ باشند."; if (ok) saveAlerts(); });
-    ["#ddays", "#minsup", "#capacity"].forEach((id) => { const el = G(id); if (el) el.oninput = (e) => { e.target.value = e.target.value.replace(/[^0-9]/g, ""); saveAlerts(); }; });
-    /* ارجاع/مهلت هوشمند — هر تغییر همان‌جا روی سرور می‌نشیند */
+    /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ هر چهار مقدار از settings() یک‌جا (یک تایمر برای همه) */
+    const saveAlerts = () => autoSave("alerts", () => { const s = settings(); return saveQuiet({ thresholds: s.thresholds, dispatchDays: s.dispatchDays, minSuppliers: s.minSuppliers, capacity: s.capacity }); });
+    const thrTrack = G("[data-thr-track]");
+    if (thrTrack) {
+      thrTrack.addEventListener("tp-input", (e) => { const v = G(`[data-thr-v="${e.detail.index}"]`); if (v) v.textContent = `${M(e.detail.value)}٪`; });
+      thrTrack.addEventListener("tp-change", (e) => { const t = (settings().thresholds || []).slice(); t[e.detail.index] = e.detail.value; settings().thresholds = t; saveAlerts(); });
+    }
+    Q("[data-thr-on]").forEach((sw) => sw.addEventListener("tp-change", (e) => {
+      const i = +sw.dataset.thrOn, T = thrList();
+      if (!e.detail.value) T[i] = null;
+      else {
+        /* روشن: میانهٔ جای خالی میانِ همسایه‌های روشن (مرحلهٔ آخر: ۱۰۰ اگر جا هست) */
+        let lo = 1, hi = 100;
+        for (let k = i - 1; k >= 0; k--) if (T[k] != null) { lo = T[k] + 1; break; }
+        for (let k = i + 1; k < T.length; k++) if (T[k] != null) { hi = T[k] - 1; break; }
+        if (lo > hi) { sw.classList.remove("on"); sw.setAttribute("aria-checked", "false"); TP.ui.success("میانِ مرحله‌های همسایه جایی نمانده", { tone: "bad" }); return; }
+        T[i] = i === T.length - 1 && hi === 100 ? 100 : Math.round((lo + hi) / 2);
+      }
+      settings().thresholds = T.map((x) => (x == null ? "" : x)); saveAlerts(); render();
+    }));
+    Q("[data-mstage]").forEach((sw) => sw.addEventListener("tp-change", () => { const m = [...Q("[data-mstage]")].map((x) => x.classList.contains("on")); settings().mgrStages = m; autoSave("mstages", () => saveQuiet({ mgrStages: m })); }));
+    Q("[data-al]").forEach((k) => k.addEventListener("tp-change", (e) => { settings()[k.dataset.al] = e.detail.value; saveAlerts(); }));
+    /* ارجاع/مهلت هوشمند — هر تغییر همان‌جا روی سرور می‌نشیند؛ حینِ کشیدن دوباره رسم نمی‌شود */
     const saveCoef = () => autoSave("coef", () => saveQuiet({ assign: settings().assign, deadline: settings().deadline }));
-    Q("[data-asg]").forEach((i) => i.oninput = (e) => { settings().assign[e.target.dataset.asg] = e.target.value.replace(/[^0-9]/g, ""); saveCoef(); TP.keepFocus(e.target, "asg", render); });
-    Q("[data-asg-op]").forEach((s) => s.onchange = (e) => { settings().assign[e.target.dataset.asgOp] = e.target.value; saveCoef(); render(); });
-    Q("[data-dl]").forEach((i) => i.oninput = (e) => { settings().deadline[e.target.dataset.dl] = e.target.value.replace(/[^0-9.]/g, ""); saveCoef(); TP.keepFocus(e.target, "dl", render); });
-    Q("[data-dl-op]").forEach((s) => s.onchange = (e) => { settings().deadline[e.target.dataset.dlOp] = e.target.value; saveCoef(); render(); });
-    /* ماتریس‌ها — فقط همان خانهٔ تغییرکرده فرستاده می‌شود؛ سرور upsert می‌کند */
+    const mix = () => { const A = settings().assign, sum = (+A.a || 0) + (+A.b || 0) + (+A.c || 0) || 1; ["a", "b", "c"].forEach((k) => { const i = G(`.sm-mix .${k}`); if (i) i.style.setProperty("--w", `${(+A[k] || 0) / sum * 100}%`); }); };
+    Q("input[data-asg]").forEach((i) => { i.oninput = (e) => { settings().assign[e.target.dataset.asg] = +e.target.value; mix(); saveCoef(); }; i.onchange = () => render(); });
+    Q("[data-asg-op]").forEach((b) => b.onclick = () => { settings().assign[b.dataset.asgOp] = b.dataset.v; saveCoef(); render(); });
+    Q("[data-asg-knob]").forEach((k) => k.addEventListener("tp-change", (e) => { if (+settings().assign[k.dataset.asgKnob] === e.detail.value) return; settings().assign[k.dataset.asgKnob] = e.detail.value; saveCoef(); render(); }));
+    Q(".tp-step[data-dl]").forEach((st) => { st.addEventListener("tp-input", (e) => { settings().deadline[st.dataset.dl] = e.detail.value; saveCoef(); }); st.addEventListener("tp-change", () => render()); });
+    Q("[data-dl-op]").forEach((b) => b.onclick = () => { settings().deadline[b.dataset.dlOp] = b.dataset.v; saveCoef(); render(); });
+    Q("[data-dl-tab]").forEach((b) => b.onclick = () => { S.dlTab = b.dataset.dlTab; render(); });
+    const dlm = G("[data-dl-more]"); if (dlm) dlm.onclick = () => { S.dlMore = true; render(); };
+    Q("[data-sm-kind]").forEach((b) => b.onclick = () => { S.smKind = b.dataset.smKind; render(); });
+    Q("[data-sm-ex]").forEach((b) => b.onclick = () => { S.smEx = +b.dataset.smEx; render(); });
+    /* امتیازها و ضریب‌ها — فقط همان خانهٔ تغییرکرده فرستاده می‌شود؛ سرور upsert می‌کند */
     const setScore = (eid, kind, key, v) => { const x = S.scores.scores.find((s) => s.expert_id === eid && s.kind === kind && s.key === key); const score = Math.max(0, Math.min(5, +String(v).replace(/[^0-9]/g, "") || 0)); if (x) x.score = score; else S.scores.scores.push({ expert_id: eid, kind, key, score }); return score; };
     const setW = (kind, key, v) => { const x = S.scores.weights.find((s) => s.kind === kind && s.key === key); const w = +v || 1; if (x) x.w = w; else S.scores.weights.push({ kind, key, w }); return w; };
-    /* کلید امتیازها: گروه اصناف (کد گروه) و پروژه (نام پروژهٔ گزارش) — هر دو ثابت‌اند */
-    Q("[data-g]").forEach((i) => i.oninput = (e) => { const [eid, c] = e.target.dataset.g.split("|"); const score = setScore(+eid, "guild", c, e.target.value);
-      autoSave(`g:${e.target.dataset.g}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "guild", key: c, score }] } })); TP.keepFocus(e.target, "g", render); });
-    Q("[data-p]").forEach((i) => i.oninput = (e) => { const [eid, p] = e.target.dataset.p.split("|"); const score = setScore(+eid, "project", p, e.target.value);
-      autoSave(`p:${e.target.dataset.p}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: +eid, kind: "project", key: p, score }] } })); TP.keepFocus(e.target, "p", render); });
-    Q("[data-sp]").forEach((i) => i.onchange = async (e) => { const ex = S.data.experts.find((x) => x.id === +e.target.dataset.sp); ex.speed = +e.target.value || 1; await TP.api(`/experts/${ex.id}`, { method: "PUT", body: { speed: ex.speed } }); savedFlash(); render(); });
-    Q("[data-cw]").forEach((i) => i.oninput = (e) => { const w = setW("guild", e.target.dataset.cw, e.target.value);
-      autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "guild", key: e.target.dataset.cw, w }] } })); TP.keepFocus(e.target, "cw", render); });
-    Q("[data-pw]").forEach((i) => i.oninput = (e) => { const w = setW("project", e.target.dataset.pw, e.target.value);
-      autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "project", key: e.target.dataset.pw, w }] } })); TP.keepFocus(e.target, "pw", render); });
+    Q(".tp-rate[data-score]").forEach((r) => r.addEventListener("tp-change", (e) => {
+      const parts = r.dataset.score.split("|"), eid = +parts[0], kind = parts[1], key = parts.slice(2).join("|");
+      const score = setScore(eid, kind, key, e.detail.value);
+      autoSave(`s:${r.dataset.score}`, () => TP.api("/scores", { method: "PUT", body: { scores: [{ expert_id: eid, kind, key, score }] } }));
+    }));
+    Q("input[data-sp]").forEach((i) => i.onchange = async (e) => { const ex = S.data.experts.find((x) => x.id === +e.target.dataset.sp); ex.speed = +e.target.value || 1;
+      try { await TP.api(`/experts/${ex.id}`, { method: "PUT", body: { speed: ex.speed } }); savedFlash(); } catch (er) { TP.modal("ذخیره نشد", esc(er.message), null, "باشد", ""); } render(); });
+    Q("input[data-cw]").forEach((i) => { i.oninput = (e) => { const w = setW("guild", e.target.dataset.cw, e.target.value);
+      autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "guild", key: e.target.dataset.cw, w }] } })); }; i.onchange = () => render(); });
+    Q("input[data-pw]").forEach((i) => { i.oninput = (e) => { const w = setW("project", e.target.dataset.pw, e.target.value);
+      autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "project", key: e.target.dataset.pw, w }] } })); }; i.onchange = () => render(); });
+    /* اقلام و کدها */
+    const nmq = G("[data-nmq]"); if (nmq) nmq.oninput = (e) => { S.nm.q = e.target.value; S.nm.limit = 120; TP.keepFocus(e.target, "nmq", render); };
+    Q("[data-nmg]").forEach((b) => b.onclick = () => { S.nm.g = b.dataset.nmg; S.nm.limit = 120; render(); });
+    Q("[data-nmsort]").forEach((b) => b.onclick = () => { S.nm.sort = b.dataset.nmsort; render(); });
+    const nmm = G("[data-nm-more]"); if (nmm) nmm.onclick = () => { S.nm.limit += 120; render(); };
+    /* رویدادها: دسته‌ها */
+    Q("[data-evcat]").forEach((b) => b.onclick = () => { S.evCat = b.dataset.evcat; render(); });
     const aa = G("[data-apply-asg]"); if (aa) aa.onclick = applyAssignAll;
     const ad = G("[data-apply-dl]"); if (ad) ad.onclick = applyDeadlineAll;
     Q("[data-dec]").forEach((b) => b.onclick = async () => {
@@ -1258,10 +1447,11 @@
       if (what === "reject") {
         /* دلیلِ رد برای کارشناس در تلگرام فرستاده می‌شود — همان‌طور که از دکمهٔ تلگرامِ مدیر */
         const d = TP.modal("رد تصمیم کارشناس", `<div class="tp-field"><b>چرا رد می‌کنید؟</b><textarea class="tp-input" id="dec-note" rows="3" style="width:100%;margin-top:6px" placeholder="همین متن برای کارشناس می‌رود"></textarea></div>`,
-          async () => { await TP.api(`/decisions/${id}/reject`, { body: { note: (d.querySelector("#dec-note") || {}).value || "" } }); await refresh(); }, "رد و اطلاع به کارشناس");
+          async () => { try { await TP.api(`/decisions/${id}/reject`, { body: { note: (d.querySelector("#dec-note") || {}).value || "" } }); TP.ui.success("رد شد و به کارشناس خبر رفت"); await refresh(); } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); } }, "رد و اطلاع به کارشناس");
         return;
       }
-      await TP.api(`/decisions/${id}/approve`, { body: {} }); await refresh();
+      b.disabled = true;
+      try { await TP.api(`/decisions/${id}/approve`, { body: {} }); TP.ui.success("تصمیم تأیید شد"); await refresh(); } catch (e) { b.disabled = false; TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     });
     const le = G("[data-load-events]"); if (le) le.onclick = loadEvents;
     wireReports(Q, G);
@@ -1274,8 +1464,9 @@
   async function saveQuiet(patch) { S.data.settings = await TP.api("/settings", { method: "PUT", body: patch }); }
   function savedFlash() {
     document.querySelectorAll("[data-autosaved]").forEach((el) => {
-      el.textContent = "ذخیره شد ✓"; el.style.color = "#6ee7b7";
-      clearTimeout(el._t); el._t = setTimeout(() => { el.textContent = "ذخیرهٔ خودکار روشن است"; el.style.color = ""; }, 1800);
+      const t = el.querySelector("span") || el;
+      t.textContent = "ذخیره شد"; el.classList.remove("flash"); void el.offsetWidth; el.classList.add("flash");
+      clearTimeout(el._t); el._t = setTimeout(() => { t.textContent = "ذخیرهٔ خودکار"; el.classList.remove("flash"); }, 1800);
     });
   }
   const AS_TIMERS = {};
@@ -1286,7 +1477,6 @@
       catch (e) { TP.modal("ذخیرهٔ خودکار انجام نشد", esc(e.message), null, "باشد", ""); }
     }, ms);
   }
-  const AUTOSAVED = `<span class="dim" data-autosaved style="font-size:.85rem">ذخیرهٔ خودکار روشن است</span>`;
   async function loadEvents() { try { S.events = (await TP.api("/events")).events || []; render(); } catch (e) { S.error = e.message; render(); } }
 
   /* ---------- اقدام‌های گروهی ---------- */
@@ -1303,8 +1493,9 @@
         n++; b.set(`${n} از ${P.plan.length}`);
       }
     } catch (e) { b.close(); WL = null; await refresh(); return TP.modal("ارجاع هوشمند نیمه‌کاره ماند", `${n} درخواست ارجاع شد؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
-    b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("ارجاع هوشمند اعمال شد", `برای ${n} درخواست کارشناس پیشنهادی گذاشته شد — توزیع با فرض تأیید همه متوازن شده است و سقف بار هر کارشناس رعایت شده.${P && P.over ? `<br><br><b>${M(P.over)} درخواست</b> از سقف همهٔ کارشناسان گذشت و به کم‌بارترین داده شد؛ در تب «ارجاع هوشمند» با ⚠ دیده می‌شوند.` : ""} هرکدام را می‌توانید دستی عوض کنید.`, null, "باشد", "");
+    b.close(); await refresh(); S.tab = "desk"; TP.ui.resetOnce("mgr.desk"); render();
+    TP.ui.success(`برای ${M(n)} درخواست کارشناس گذاشته شد`);
+    if (P && P.over) setTimeout(() => TP.modal("ارجاع هوشمند", `<b>${M(P.over)} درخواست</b> از سقف همهٔ کارشناسان گذشت و به کم‌بارترین داده شد؛ در «ارجاع هوشمند» با ⚠ دیده می‌شوند.`, null, "باشد", ""), 1500);
   }
   /* فقط ارجاع‌های ارسال‌نشده‌ای که هنوز مهلت ندارند (تصمیم مدیر): مهلتی که خودِ مدیر گذاشته نمی‌پرد
      و در اشغالِ کارشناس (بار همهٔ ارجاع‌های باز) از قبل حساب شده است */
@@ -1317,8 +1508,8 @@
       if (!AX) AX = await TP.api("/axes");
       for (const x of planDeadlines(list)) { await TP.api("/assign/days", { body: { assignment_id: x.a.id, days: x.days, source: "smart" } }); n++; b.set(`${n} از ${list.length}`); }
     } catch (e) { b.close(); await refresh(); return TP.modal("مهلت هوشمند نیمه‌کاره ماند", `${n} ارجاع مهلت گرفت؛ بعد خطا: ${esc(e.message)}`, null, "باشد", ""); }
-    b.close(); await refresh(); S.tab = "desk"; render();
-    TP.modal("مهلت هوشمند اعمال شد", `برای ${n} ارجاعِ بی‌مهلت مهلت گذاشته شد — با حساب تعداد اقلام، سختی گروه‌ها، پروژه و اشغال هر کارشناس پس از تأیید همهٔ ارجاع‌ها. مهلت‌هایی که خودتان گذاشته بودید دست نخورد.`, null, "باشد", "");
+    b.close(); await refresh(); S.tab = "desk"; TP.ui.resetOnce("mgr.desk"); render();
+    TP.ui.success(`${M(n)} ارجاع مهلت گرفت`);
   }
   /* طرح «خرید هوشمند، کارشناس ناظر» فاز ۴ب: تیکِ «🤖 هوشمند»ِ هر ارجاع، پیش‌فرض روشن — برداشتنش توضیح می‌خواهد (مگر همهٔ اقلامش از
      نوعِ «مستقیم» باشند)؛ تا کار به کارشناس هوشمند سپرده نشده عوض‌شدنی است. فقط برای کارشناسی که کارشناس هوشمندش روشن است. */
@@ -1365,7 +1556,7 @@
     list.forEach((a) => by[a.expert_label || a.expert_name] = (by[a.expert_label || a.expert_name] || 0) + 1);
     const aiN = list.filter((a) => aiExpert(a) && a.ai_on !== 0).length, manN = list.filter((a) => aiExpert(a) && a.ai_on === 0).length;
     TP.modal(`ارسال ${list.length} ارجاع`, `ساعت‌شمار مهلت شروع می‌شود و برای این کارشناسان اعلان می‌رود:<br><br>${Object.entries(by).map(([e, c]) => `${esc(e)} — ${c} درخواست`).join("<br>")}<br><br><span class="chip info">اعلان تلگرام — اگر تلگرام کارشناس وصل باشد</span>${aiN || manN ? ` <span class="chip">🤖 ${M(aiN)} هوشمند · ✋ ${M(manN)} دستی</span>` : ""}`,
-      async () => { try { await TP.api("/dispatch", { body: { assignment_ids: list.map((a) => a.id) } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تأیید و ارسال");
+      async () => { try { await TP.api("/dispatch", { body: { assignment_ids: list.map((a) => a.id) } }); TP.ui.success(`${M(list.length)} ارجاع ارسال شد`); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تأیید و ارسال");
   }
   const ACT = {
     hold: ["تعلیق", "<b>تعلیق موقت است.</b> پایش و یادآوری مهلت متوقف می‌شود و درخواست از کارتابل خارج می‌شود، ولی هر زمان با «بازگشت» دوباره در جریان می‌افتد."],
@@ -1381,7 +1572,7 @@
       : !change ? `<span class="chip">وضعیت اقلام همین است؛ اعلانی نمی‌رود</span>`
       : ex && ex.telegram_chat ? `<span class="chip info">اعلان تلگرام به کارشناس می‌رود</span>` : `<span class="chip warn">تلگرام کارشناس وصل نیست؛ اعلانی نمی‌رود</span>`;
     TP.modal(`${ACT[st][0]} — درخواست ${esc(r.id)}`, `<b>${esc(r.party)}</b> · کارشناس ${esc(a.expert_label || a.expert_name)}<br><br>${ACT[st][1]}<br><br>${tg}`,
-      async () => { try { await TP.api("/items/state", { body: { assignment_id: aid, request_id: r.id, state: st } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, `تأیید ${ACT[st][0]}`);
+      async () => { try { await TP.api("/items/state", { body: { assignment_id: aid, request_id: r.id, state: st } }); TP.ui.success(`${ACT[st][0]} انجام شد`); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, `تأیید ${ACT[st][0]}`);
   }
   function moveDialog(aid) {
     const r = S.data.requests.find((x) => x.assignments.some((a) => a.id === aid)); const a = r.assignments.find((x) => x.id === aid);
@@ -1391,7 +1582,7 @@
       <div class="tp-field" style="margin-top:10px"><b>مهلت جدید (روز کاری)</b><input class="tp-input" id="mv-days" value="${a.days || ""}" inputmode="numeric" style="width:110px;text-align:center"></div>
       <p class="dim" style="margin-top:10px;font-size:.85rem">اقلام، استعلام‌ها و پیش‌فاکتورها منتقل می‌شوند، ساعت‌شمار از نو شروع می‌شود و پیام «ارجاع جدید» در تلگرامِ کارشناس جدید می‌آید (اگر تلگرامش وصل باشد). کارشناس فعلی پیامی نمی‌گیرد.</p>`,
       /* مودال پیش از اجرای onYes از DOM جدا می‌شود؛ مقدارها را از خودِ عنصر مودال می‌خوانیم، نه document */
-      async () => { const eid = +d.querySelector("#mv-exp").value, days = +d.querySelector("#mv-days").value; if (!eid) return; try { await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid, days } }); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تغییر ارجاع");
+      async () => { const eid = +d.querySelector("#mv-exp").value, days = +d.querySelector("#mv-days").value; if (!eid) return; try { await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid, days } }); TP.ui.success("کارشناس عوض شد"); await refresh(); } catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); } }, "تغییر ارجاع");
     d.querySelector("#mv-exp").focus();
   }
   async function openDetail(aid) {
@@ -1491,13 +1682,14 @@
         const r = await TP.api("/requests/delete", { body: all ? { all: true, confirm: (confirm || "").trim() } : { ids } });
         S.page.offset = 0;
         await refresh();
-        TP.modal("پاک شد", `${M(r.requests)} درخواست حذف شد${r.files ? ` و ${M(r.files)} فایل از انبار پاک شد` : ""}.`, null, "باشد", "");
+        TP.ui.success(`${M(r.requests)} درخواست حذف شد`);
       } catch (e) { TP.modal("حذف نشد", esc(e.message), null, "باشد", ""); }
     }, all ? "پاک کن" : "حذف کن");
     return d;
   }
 
   /* ---------- شروع ---------- */
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && S.fOpen && !S.pop && !document.querySelector(".tp-modal-bg, .tp-menu.open")) closeFilters(); });
   if (TP.manager.get()) refresh(); else render();
   window.addEventListener("tp-theme", render);
   /* بازخوانیِ خودکارِ بی‌پرش (خواستهٔ مالک، مهر ۱۴۰۵): فقط میز ارجاع، هر دقیقه، وقتی مدیر وسطِ نوشتن در فیلدی یا پنجره‌ای نیست؛

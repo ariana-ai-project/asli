@@ -10,7 +10,7 @@
    هم‌زمان «?v=» نشانی‌های css/js را در index.html و tamin-poshtibani/index.html هم بالا ببرید:
    ناوبری شبکه‌اول است ولی دارایی‌ها کش‌اول، و بدون نشانی تازه، بازدیدکنندهٔ قبلی اولین بار
    HTML تازه را با main.js کهنهٔ کش‌شده می‌گرفت (صفحهٔ سیاه تا رفرش بعدی). */
-const CACHE_NAME = "ariana-pwa-v8";
+const CACHE_NAME = "ariana-pwa-v9";
 
 /* پوستهٔ اولیهٔ برنامه — از فریم‌های لوگوموشن فقط اولی (بقیه در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -20,7 +20,7 @@ const PRECACHE_URLS = [
   "./css/styles.css?v=8",
   "./js/main.js?v=8",
   "./js/liquid-glass.js?v=8",
-  "./js/support.js?v=8",
+  "./js/support.js?v=9",
   "./assets/logo-new.jpg",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
