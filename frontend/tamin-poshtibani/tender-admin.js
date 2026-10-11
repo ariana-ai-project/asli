@@ -49,7 +49,8 @@
     T.poll = setInterval(() => {
       if (document.hidden || !T.on || document.querySelector(".tp-modal-bg, .sup-ov, .tp-cmres")) return;
       const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
-      if (T.id && T.d && ["live", "scheduled", "sealed"].includes(T.d.tender.state)) loadOne(T.id, true);
+      const searching = T.d && (T.d.jobs || []).some((j) => ["pending", "running"].includes(j.state));
+      if (T.id && T.d && (searching || ["live", "scheduled", "sealed"].includes(T.d.tender.state))) loadOne(T.id, true);
       else if (!T.id && !T.w && T.list && T.list.some((x) => ["live", "scheduled", "sealed"].includes(x.state))) loadList();
     }, 3000);
     T.tick = setInterval(() => {
@@ -57,7 +58,7 @@
       const t = T.d && T.d.tender; const root = document.getElementById("app");
       if (t && t.state === "live") D.tickRing(root, t.end_at - now(), Math.max(1, t.end_at - (t.sealed_end_at || t.start_at)));
       if (t && t.state === "sealed") D.tickRing(root, t.sealed_end_at - now(), Math.max(1, t.sealed_end_at - t.start_at));
-      document.querySelectorAll("[data-tdleft]").forEach((el) => { el.textContent = D.clock(Number(el.dataset.tdleft) - now()); });
+      document.querySelectorAll("[data-tdleft]").forEach((el) => { const v = Number(el.dataset.tdleft); el.textContent = D.clock(el.hasAttribute("data-tdup") ? now() - v : v - now()); });
     }, 1000);
   }
 
@@ -376,10 +377,7 @@
         <span class="a"><b>${money(b.amount)}</b><small>${t.start_price ? `${faD(((1 - b.amount / t.start_price) * 100).toFixed(1))}٪ زیرِ شروع` : ""}</small></span>
         ${b.state !== "void" && t.state !== "cancelled" ? `<span class="acts"><button class="tp-btn xs" data-tdfix="${b.id}">اصلاح</button><button class="tp-btn xs danger" data-tdvoid="${b.id}">باطل</button></span>` : ""}</div>`).join("");
     const job = (d.jobs || [])[0];
-    const jobHtml = !job ? "" : job.state === "pending" || job.state === "running" ? `<div class="tp-note"><span class="tp-spin"></span> جستجو برای «${esc(job.query)}» در جریان است؛ چند دقیقه طول می‌کشد.</div>`
-      : job.state === "error" ? `<div class="tp-note warn">جستجو نشد: ${esc(job.error || "")}</div>`
-        : `<div class="td-hits">${((job.result && job.result.suppliers) || []).map((s, i) => `<button type="button" class="td-hit" data-tdsmart="${i}"><b>${esc(s.name)}</b><small dir="ltr">${esc((s.phones || [])[0] || "بی‌شماره")}</small>
-            <small>${esc([s.type, s.price, s.website].filter(Boolean).join(" · "))}</small><span class="chip">افزودن</span></button>`).join("") || `<div class="dim">چیزی پیدا نشد.</div>`}</div>`;
+    const jobHtml = smartHtml(job, inv);
     const ref = d.hist && d.hist.unit === t.unit && d.hist.median ? { v: d.hist.median, label: "میانهٔ سوابق (قیمتِ روز)" } : null;
     const flags = [t.sealed_end_at ? "دورِ سربسته" : "", !t.show_prices ? "فقط رتبه" : "", t.proxy_on ? "خودکار مجاز" : "", t.require_accept ? "پذیرشِ شرایط" : "", t.outbid_sms ? "پیامکِ رتبه" : ""].filter(Boolean);
     return `<div class="td-wrap" style="padding:0 0 32px">
@@ -399,10 +397,43 @@
           <section class="td-card"><h3>پیشنهادها <span class="sub">${fa(d.bids.length)} پیشنهاد · اصلاح و ابطال با علت، در رخدادها می‌ماند</span></h3>${bids ? `<div class="td-bids" style="max-height:520px">${bids}</div>` : `<div class="td-empty">هنوز پیشنهادی نیست.</div>`}</section></div>
         <div class="td-col">
           <section class="td-card"><h3>دعوت‌شده‌ها <span class="sub">${fa(inv.filter((i) => i.on).length)} نفر${many ? " — برای همهٔ قلم‌ها" : ""}</span></h3><div class="td-sups">${inv.map((s) => supRow(s, 0, "d")).join("")}</div>${open ? addBox("d") : ""}</section>
-          ${open ? `<section class="td-card"><h3>🔎 جستجوی هوشمند در وب <span class="sub">تأمین‌کنندهٔ تازه برای همین کالا</span></h3>
-            <div class="td-form"><label class="wide">چه چیزی جستجو شود؟<input class="tp-input" data-tdsq value="${esc(T.sq != null ? T.sq : t.title)}"></label></div>
-            <div class="td-foot"><button class="tp-btn" data-tdsmartgo ${job && ["pending", "running"].includes(job.state) ? "disabled" : ""}>جستجو</button></div>${jobHtml}</section>` : ""}</div></div></div>`;
+          ${open ? smartCard(t, job, jobHtml) : ""}</div></div></div>`;
   }
+  /* --- جستجوی هوشمند: همان موتور، مدل، کلید و ورودی‌های «جستجوی هوشمند»ِ پنل کارشناس --- */
+  const ROLE_FA = { manufacturer: "تولیدکننده", authorized_dealer: "نمایندگی رسمی", wholesaler: "عمده‌فروش/واردکننده", retailer: "فروشگاه", online_seller: "فروشندهٔ آنلاین",
+    authorized_distributor: "نمایندهٔ رسمی", wholesaler_importer: "عمده‌فروش/واردکننده", retailer_shop: "فروشگاه", marketplace_only: "فقط آگهی", broker_intermediary: "واسطه", unknown: "" };
+  function smartCard(t, job, jobHtml) {
+    const ai = (T.cfg && T.cfg.ai) || { ready: true, markets: [{ key: "IR", fa: "ایران" }], max: 3 };
+    const mk = T.mk || new Set(((job && job.params && job.params.markets) || ["IR"]));
+    T.mk = mk;
+    const busy = job && ["pending", "running"].includes(job.state);
+    return `<section class="td-card"><h3>🔎 جستجوی هوشمند در وب <span class="sub">همان جستجوی هوشمندِ پنل کارشناسان${ai.model ? ` · ${esc(ai.model)}` : ""}</span></h3>
+      ${ai.ready === false ? `<div class="tp-note warn">کلیدِ هوش مصنوعی روی سامانه ست نشده است.</div>` : ""}
+      <div class="td-form"><label class="wide">چه چیزی جستجو شود؟<input class="tp-input" data-tdsq value="${esc(T.sq != null ? T.sq : t.title)}"></label>
+        <label>برند <small>اختیاری</small><input class="tp-input" data-tdsbrand value="${esc(T.sbrand || "")}"></label>
+        <label>توضیح برای جستجو <small>اختیاری</small><input class="tp-input" data-tdsnotes value="${esc(T.snotes || "")}"></label></div>
+      <div class="dim" style="font-size:.8rem;margin-top:8px">بازارها (حداکثر ${fa(ai.max || 3)})</div>
+      <div class="tp-pills" style="margin-top:4px">${(ai.markets || []).map((m) => `<button type="button" class="tp-pill ${mk.has(m.key) ? "on" : ""}" data-tdmk="${esc(m.key)}" aria-pressed="${mk.has(m.key)}">${esc(m.fa)}</button>`).join("")}</div>
+      <div class="td-foot"><button class="tp-btn primary" data-tdsmartgo ${busy || ai.ready === false ? "disabled" : ""}>${busy ? "در جریان…" : "جستجو"}</button><span class="dim" style="font-size:.78rem">چند دقیقه طول می‌کشد؛ نتیجه همین‌جا می‌آید.</span></div>${jobHtml}</section>`;
+  }
+  const mkFa = (k) => { const m = ((T.cfg && T.cfg.ai && T.cfg.ai.markets) || []).find((x) => x.key === k); return m ? m.fa : k; };
+  function smartHtml(job, inv) {
+    if (!job) return "";
+    if (job.state === "pending" || job.state === "running") {
+      const since = job.started_at || job.at;
+      return `<div class="tp-note"><span class="tp-spin"></span> ${job.state === "pending" ? "در صف" : "در حال جستجو"} برای «${esc(job.query)}»${job.params ? ` در ${esc((job.params.markets || []).map(mkFa).join("، "))}` : ""} — <b data-tdleft="${since}" data-tdup>${D.clock(now() - since)}</b> گذشته.</div>`;
+    }
+    if (job.state === "error") return `<div class="tp-note warn">جستجو نشد: ${esc(job.error || "")}</div>`;
+    const list = (job.result && job.result.suppliers) || [];
+    const have = new Set((inv || []).map((i) => nameKey(i.name)));
+    const head = `<div class="dim" style="font-size:.78rem;margin:8px 0 4px">${fa(list.length)} تأمین‌کننده · ${esc(job.model || "")} · ${fa(job.searches || 0)} جستجو و ${fa(job.fetches || 0)} صفحه${job.cost != null ? ` · هزینه حدود ${esc(fa(String(job.cost).replace(".", "٫")))} دلار` : ""} · ${esc(D.when(job.done_at))}</div>`;
+    return head + (list.length ? `<div class="td-hits">${list.map((x, i) => `<div class="td-hit" style="flex-wrap:wrap;cursor:default"><b>${esc(x.name)}</b>
+        <small>${esc([ROLE_FA[x.type] || "", x.market, x.price].filter(Boolean).join(" · "))}</small>${x.website ? `<a class="dim" style="font-size:.74rem" href="${esc(/^https?:/.test(x.website) ? x.website : `https://${x.website}`)}" target="_blank" rel="noopener noreferrer" dir="ltr">${esc(x.website.replace(/^https?:\/\//, "").slice(0, 40))}</a>` : ""}
+        <span style="display:flex;gap:4px;flex-wrap:wrap;width:100%">${have.has(nameKey(x.name)) ? `<span class="chip ok">در فهرست</span>` : (x.phones || []).length
+          ? x.phones.map((p, k) => `<button type="button" class="chip" data-tdsmart="${i}:${k}" title="افزودن با همین شماره" dir="ltr">+ ${esc(p)}</button>`).join("")
+          : `<button type="button" class="chip" data-tdsmart="${i}:-1">+ بی‌شماره</button>`}</span></div>`).join("")}</div>` : `<div class="dim">چیزی پیدا نشد.</div>`);
+  }
+
   /** گزارشِ چاپی (و «ذخیره به PDF» از همان پنجرهٔ چاپ) */
   function printReport() {
     const d = T.d, t = d.tender;
@@ -423,13 +454,13 @@
 
   /* ---------- رفتارها ---------- */
   function onClick(e) {
-    const el = e.target.closest("[data-tdnew],[data-tdf],[data-tdopen],[data-tdback],[data-tdcancelw],[data-tditem],[data-tdfree],[data-tdstep],[data-tdcreate],[data-tdxadd],[data-tdbook],[data-tdstart],[data-tdinvite],[data-tdcopy],[data-tdrules],[data-tdend],[data-tdcancel],[data-tdfix],[data-tdvoid],[data-tdpass],[data-tdresend],[data-tdshow],[data-tdsmartgo],[data-tdsmart],[data-tdcfg],[data-tditdel],[data-tdwsw],[data-tdcsv],[data-tdprint],[data-tdridgo],[data-tdlink],[data-tdcmres]");
+    const el = e.target.closest("[data-tdnew],[data-tdf],[data-tdopen],[data-tdback],[data-tdcancelw],[data-tditem],[data-tdfree],[data-tdstep],[data-tdcreate],[data-tdxadd],[data-tdbook],[data-tdstart],[data-tdinvite],[data-tdcopy],[data-tdrules],[data-tdend],[data-tdcancel],[data-tdfix],[data-tdvoid],[data-tdpass],[data-tdresend],[data-tdshow],[data-tdsmartgo],[data-tdsmart],[data-tdcfg],[data-tditdel],[data-tdwsw],[data-tdcsv],[data-tdprint],[data-tdridgo],[data-tdlink],[data-tdcmres],[data-tdmk]");
     if (!el || el.disabled || !T.on) return;
     const d = el.dataset;
     if (d.tdcfg !== undefined) return settingsDialog();
     if (d.tdnew !== undefined) { const go = () => { T.w = W0(); T.id = null; T.d = null; rerender(); }; return T.cfg ? go() : loadCfg().then(go); }
     if (d.tdf !== undefined) { T.filter = d.tdf; return rerender(); }
-    if (d.tdopen) return loadOne(Number(d.tdopen));
+    if (d.tdopen) { T.mk = null; T.sq = null; return loadOne(Number(d.tdopen)); }
     if (d.tdback !== undefined) { T.id = null; T.d = null; T.sq = null; T.req = null; return loadList(); }
     if (d.tdcancelw !== undefined) { T.w = null; return T.list ? rerender() : loadList(); }
     if (d.tditem) return addItem(d.tditem);
@@ -444,7 +475,16 @@
     if (d.tdcreate) return create(d.tdcreate === "go");
     if (d.tdxadd) return addExtra(d.tdxadd);
     if (d.tdbook !== undefined) { const s = (T.bhits || [])[Number(d.tdbook)]; if (s) return addSup({ name: s.name, phone: s.phone || "", source: "book", supplier_id: s.supplier_id, n: s.n, grade: s.grade }); return null; }
-    if (d.tdsmart !== undefined) { const j = (T.d.jobs || [])[0], s = j && j.result && j.result.suppliers[Number(d.tdsmart)]; if (s) return addSup({ name: s.name, phone: (s.phones || [])[0] || "", source: "smart", info: { website: s.website } }); return null; }
+    if (d.tdsmart !== undefined) {
+      const [i, k] = d.tdsmart.split(":").map(Number), j = (T.d.jobs || [])[0], s = j && j.result && j.result.suppliers[i];
+      if (s) return addSup({ name: s.name, phone: k >= 0 ? (s.phones || [])[k] || "" : "", source: "smart", info: { website: s.website, market: s.market } });
+      return null;
+    }
+    if (d.tdmk) {
+      const mk = T.mk || new Set(["IR"]), max = (T.cfg && T.cfg.ai && T.cfg.ai.max) || 3;
+      if (mk.has(d.tdmk)) mk.delete(d.tdmk); else if (mk.size < max) mk.add(d.tdmk); else return TP.modal("بازارها", `هر جستجو حداکثر ${fa(max)} بازار دارد.`, null, "باشد", "");
+      T.mk = mk; return rerender();
+    }
     if (d.tdcopy) { try { navigator.clipboard.writeText(d.tdcopy); TP.ui.success("لینک کپی شد"); } catch (_) { TP.modal("لینک", `<p dir="ltr" style="word-break:break-all">${esc(d.tdcopy)}</p>`, null, "باشد", ""); } return null; }
     const id = T.id;
     if (d.tdcsv !== undefined) { if (C.download) C.download(`/tenders/${id}/csv`, `مناقصه-${T.d.tender.code}.csv`).catch((x) => TP.modal("نشد", esc(x.message), null, "باشد", "")); return null; }
@@ -460,7 +500,10 @@
     if (d.tdfix) return fixDialog(Number(d.tdfix));
     if (d.tdpass) return C.api(`/tenders/${id}/invites/${d.tdpass}/pass`, { body: {} }).then((r) => TP.modal("رمزِ تلفنی", `<p>این رمز را تلفنی به <b>${esc(r.name)}</b> بگویید؛ با شمارهٔ <b dir="ltr">${esc(r.phone)}</b> و این رمز وارد می‌شود (تا ${fa(r.valid_h)} ساعت):</p>
         <div class="td-confirm"><div class="big" style="letter-spacing:.3em">${fa(r.pass)}</div></div><p class="dim" style="font-size:.8rem">رمز فقط همین یک بار نشان داده می‌شود.</p>`, null, "باشد", "")).catch((x) => TP.modal("نشد", esc(x.message), null, "باشد", ""));
-    if (d.tdsmartgo !== undefined) { const q = (document.querySelector("[data-tdsq]") || {}).value || ""; return act(() => C.api(`/tenders/${id}/discover`, { body: { query: q } })); }
+    if (d.tdsmartgo !== undefined) {
+      const q = (document.querySelector("[data-tdsq]") || {}).value || "", markets = [...(T.mk || new Set(["IR"]))];
+      return act(() => C.api(`/tenders/${id}/discover`, { body: { query: q, markets, brand: T.sbrand || "", notes: T.snotes || "" } }));
+    }
     if (d.tdridgo !== undefined) {
       const rid = ((document.querySelector("[data-tdrid]") || {}).value || "").trim();
       if (!rid) return null;
@@ -546,6 +589,8 @@
     if (d.tdq !== undefined && T.w) { T.w.q = t.value; return searchItems(t.value); }
     if (d.tdbq !== undefined) return searchBook(t.value);
     if (d.tdsq !== undefined) { T.sq = t.value; return null; }
+    if (d.tdsbrand !== undefined) { T.sbrand = t.value; return null; }
+    if (d.tdsnotes !== undefined) { T.snotes = t.value; return null; }
     if (d.tdxname !== undefined && T.w) { T.w.extra.name = t.value; return null; }
     if (d.tdxph !== undefined && T.w) { T.w.extra.phone = t.value; return null; }
     if (d.tdfld && T.w) { T.w.f[d.tdfld] = t.value; return null; }

@@ -262,3 +262,56 @@ test("پیش‌فرض‌ها و درگاهِ پیامکِ مناقصه (همان
   assert.equal(SMS[0].key, "tbk", "برگشت به همان درگاهِ مکاتبات");
   assert.equal((await call("POST", "/support/tender-settings/test", { phone: "021444" }, SUP)).status, 400);
 });
+
+/* ---------------- جستجوی هوشمند: همان موتور و ورودی‌های پنل کارشناس ---------------- */
+test("جستجوی هوشمندِ مناقصه: همان مدل، کلید و ورودی‌های پنل کارشناس؛ نتیجه با هزینه و شماره‌ها", { skip: SKIP }, async () => {
+  const { id } = await fresh({ item_code: "M14", spec: "IPE 14 — شاخهٔ ۱۲ متری" });
+  /* بی کلید: نه */
+  assert.equal((await call("POST", `/support/tenders/${id}/discover`, { query: "تیرآهن" }, SUP)).status, 400);
+  env.ANTHROPIC_API_KEY = "k-test"; env.ANTHROPIC_API_BASE = "https://ai.test";
+  assert.equal((await call("POST", `/support/tenders/${id}/discover`, { query: "تیرآهن ۱۴", markets: ["IR", "TR", "AE", "CN"] }, SUP)).status, 422, "حداکثر سه بازار");
+  const q = await call("POST", `/support/tenders/${id}/discover`, { query: "تیرآهن ۱۴", markets: ["IR", "TR"], brand: "ذوب آهن", notes: "فقط عمده‌فروش" }, SUP);
+  assert.equal(q.status, 200, JSON.stringify(q.data));
+  assert.equal((await call("POST", `/support/tenders/${id}/discover`, { query: "x" }, SUP)).status, 400, "یکی در جریان");
+  const cfg = (await call("GET", "/support/tender-settings", null, SUP)).data.ai;
+  assert.equal(cfg.model, "claude-haiku-4-5-20251001", "همان مدلِ پیش‌فرضِ جستجوی هوشمندِ کارشناسان");
+  assert.ok(cfg.markets.some((m) => m.key === "TR"));
+  /* پاسخِ جریانیِ مدل */
+  const sent = [];
+  const prev = globalThis.fetch;
+  globalThis.fetch = async (url, init = {}) => {
+    if (String(url).startsWith("https://ai.test/")) {
+      sent.push({ url: String(url), key: init.headers["x-api-key"], body: JSON.parse(init.body) });
+      const result = { suppliers: [{ name: "آهن‌آلات تازه", type: "wholesaler", market: "ایران", phones: [{ e164: "+989125556677" }], emails: [], website: "ahan.example", price: { text: "۴۲ هزار تومان هر کیلو" } }] };
+      const ev = (o) => `data: ${JSON.stringify(o)}\n\n`;
+      const sse = ev({ type: "message_start", message: { usage: { input_tokens: 1000, output_tokens: 0 } } })
+        + ev({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } })
+        + ev({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: `<result>${JSON.stringify(result)}</result>` } })
+        + ev({ type: "content_block_stop", index: 0 })
+        + ev({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 500, server_tool_use: { web_search_requests: 3, web_fetch_requests: 2 } } });
+      return new Response(sse, { headers: { "content-type": "text/event-stream" } });
+    }
+    return prev(url, init);
+  };
+  try { assert.equal(await (await import("../../../worker/tender.js")).tenderDiscoverTick(env), true); }
+  finally { globalThis.fetch = prev; delete env.ANTHROPIC_API_KEY; delete env.ANTHROPIC_API_BASE; }
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0].key, "k-test", "همان کلیدِ ANTHROPIC_API_KEY");
+  assert.equal(sent[0].body.model, "claude-haiku-4-5-20251001");
+  assert.ok(sent[0].body.tools.some((t) => t.name === "web_search") && sent[0].body.tools.some((t) => t.name === "web_fetch"));
+  const user = JSON.stringify([sent[0].body.system, sent[0].body.messages]);
+  for (const w of ["تیرآهن ۱۴", "ذوب آهن", "فقط عمده‌فروش", "IPE 14", "ترکیه"]) assert.ok(user.includes(w), `ورودیِ «${w}» به مدل رفت`);
+  const d = (await call("GET", `/support/tenders/${id}`, null, SUP)).data;
+  const j = d.jobs[0];
+  assert.equal(j.state, "done");
+  assert.equal(j.model, "claude-haiku-4-5-20251001");
+  assert.equal(j.searches, 3);
+  assert.ok(j.cost > 0);
+  assert.deepEqual(j.params.markets, ["IR", "TR"]);
+  assert.equal(j.result.suppliers[0].phones[0], "09125556677");
+  assert.equal(j.result.suppliers[0].market, "ایران");
+  /* کارِ مانده از سقفِ زمان می‌گذرد ← «تمام نشد» و دوباره می‌شود زد */
+  run("INSERT INTO tender_jobs (tender_id,query,state,at,started_at) VALUES (?,?,'running',?,?)", id, "x", Date.now() - 20 * 60000, Date.now() - 20 * 60000);
+  await (await import("../../../worker/tender.js")).tenderDiscoverTick(env);
+  assert.equal(get("SELECT state FROM tender_jobs WHERE tender_id=? ORDER BY id DESC LIMIT 1", id).state, "error");
+});

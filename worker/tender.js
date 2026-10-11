@@ -23,6 +23,7 @@ import { keyOf } from "./catalog.js";
 import { raiseAlarm } from "./alarms.js";
 import { telegram } from "./telegram.js";
 import { usdTable } from "./usd.js";
+import { runDiscovery, MARKETS, MAX_MARKETS, MODEL as DISCOVERY_MODEL } from "./discovery.js";
 import { TENDER_DEFAULTS, tenderState, bidRange, checkBid, extendOnBid, bestOf, ranksOf, mineOf, rankDrops, proxyRun, numWords } from "./tender-core.js";
 
 export const TENDER_DDL = `
@@ -59,6 +60,12 @@ export const TENDER_COLUMNS = [
   ["tender_bids", "auto", "INTEGER NOT NULL DEFAULT 0"],
   ["tender_bids", "sealed", "INTEGER NOT NULL DEFAULT 0"],
   ["tender_sessions", "phone", "TEXT"],
+  ["tender_jobs", "params_json", "TEXT"],                       /* همان ورودی‌های جستجوی هوشمندِ پنل کارشناس */
+  ["tender_jobs", "model", "TEXT"],
+  ["tender_jobs", "cost", "REAL"],
+  ["tender_jobs", "searches", "INTEGER"],
+  ["tender_jobs", "fetches", "INTEGER"],
+  ["tender_jobs", "started_at", "INTEGER"],
 ];
 
 const T = (v) => String(v == null ? "" : v).trim();
@@ -127,6 +134,7 @@ export async function tenderSettingsGet(env) {
   const c = (await setting(env, "tenderSms")) || {};
   const se = await smsEnv(env);
   return { defaults: await defaultsOf(env), terms: T((await setting(env, "tenderTerms")) || ""),
+    ai: { ready: !!T(env.ANTHROPIC_API_KEY), model: env.DISCOVERY_MODEL || DISCOVERY_MODEL, markets: MARKETS.map((m) => ({ key: m.key, fa: m.fa })), max: MAX_MARKETS },
     sms: { ready: smsReady(se), provider: "TextBee", own_key: !!T(c.key), key_tail: T(c.key) ? `…${T(c.key).slice(-4)}` : "", device: T(c.device), shared: smsReady(env) && !T(c.key) } };
 }
 /** PUT /support/tender-settings — {defaults, terms, sms: {key ("" = همان مکاتبات؛ نفرستاده = بی‌تغییر), device}} */
@@ -383,7 +391,7 @@ export async function tenderDetail(env, id, ctx) {
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
   t = await finalizeIfDue(env, t, ctx);
   const [inv, bids, jobs, lots, hist] = await Promise.all([invitesOf(env, t.id), bidsOf(env, t.id),
-    env.DB.prepare("SELECT id, query, state, result_json, error, at, done_at FROM tender_jobs WHERE tender_id=? ORDER BY id DESC LIMIT 3").bind(t.id).all().then((r) => r.results || []),
+    env.DB.prepare("SELECT id, query, state, result_json, error, at, done_at, params_json, model, cost, searches, fetches, started_at FROM tender_jobs WHERE tender_id=? ORDER BY id DESC LIMIT 3").bind(t.id).all().then((r) => r.results || []),
     lotsOf(env, t), historyOf(env, t)]);
   const n = now(), ranks = ranksOf(bids), names = new Map(inv.map((i) => [i.alias, i.name]));
   const lastBy = new Map(); for (const b of bids) if (b.state !== "void") lastBy.set(b.alias, b);
@@ -398,7 +406,7 @@ export async function tenderDetail(env, id, ctx) {
     bids: bids.map((b) => ({ id: b.id, alias: b.alias, name: names.get(b.alias) || aliasLabel(b.alias), amount: b.amount, at: b.at, state: b.state, orig_amount: b.orig_amount,
       fix_reason: b.fix_reason, fix_at: b.fix_at, ext: !!b.ext, auto: !!b.auto, sealed: !!b.sealed })),
     series: seriesOf(bids), hist,
-    jobs: jobs.map((j) => ({ ...j, result: parse(j.result_json, null), result_json: undefined })),
+    jobs: jobs.map((j) => ({ ...j, result: parse(j.result_json, null), params: parse(j.params_json, null), result_json: undefined, params_json: undefined })),
     now: n, sms: smsReady(se), link: tenderLink(env, t.code),
   };
 }
@@ -756,30 +764,50 @@ export async function tenderCsv(env, id) {
   return new Response(csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="tender-${t.code}.csv"`, "cache-control": "no-store" } });
 }
 
-/* --- جستجوی هوشمند در وب: کار در صف، با Cron (discovery.js چند دقیقه طول می‌کشد) --- */
+/* --- جستجوی هوشمند در وب — همان موتورِ «جستجوی هوشمند»ِ پنل کارشناس (discovery.js:runDiscovery): همان کلیدِ ANTHROPIC_API_KEY،
+   همان مدل (DISCOVERY_MODEL یا پیش‌فرضِ discovery.js)، همان ابزارها، همان ورودی‌ها (بازارها تا سه تا، برند، مشخصات، توضیح، کدِ قلم،
+   مقدار و واحد) و همان سقفِ زمانِ کار در صف (۱۶ دقیقه؛ bot.js:runSmartJobs). کار چند دقیقه طول می‌کشد، پس در صف و با Cron. --- */
+const JOB_STALE = 16 * 60000;
 export async function tenderDiscoverQueue(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
   if (!T(env.ANTHROPIC_API_KEY)) throw new HttpError("کلیدِ هوش مصنوعی وصل نیست؛ جستجوی هوشمند ممکن نیست.");
-  const busy = await env.DB.prepare("SELECT id FROM tender_jobs WHERE tender_id=? AND state IN ('pending','running')").bind(t.id).first();
+  const busy = await env.DB.prepare("SELECT id FROM tender_jobs WHERE tender_id=? AND state IN ('pending','running') AND COALESCE(started_at, at)>?").bind(t.id, now() - JOB_STALE).first();
   if (busy) throw new HttpError("یک جستجوی هوشمند برای همین مناقصه در جریان است.");
+  const markets = [...new Set((Array.isArray(b && b.markets) ? b.markets : []).filter((k) => MARKETS.some((m) => m.key === k)))];
+  if (markets.length > MAX_MARKETS) throw new HttpError("هر جستجو حداکثر سه بازار دارد؛ بازارهای کمتری تیک بزنید.", 422);
   const query = T(b && b.query).slice(0, 200) || t.title;
-  await env.DB.prepare("INSERT INTO tender_jobs (tender_id,query,state,at) VALUES (?,?,'pending',?)").bind(t.id, query, now()).run();
+  const params = { markets: markets.length ? markets : ["IR"], brand: T(b && b.brand).slice(0, 120) || null, specs: T(b && b.specs).slice(0, 1000) || null,
+    notes: T(b && b.notes).slice(0, 1000) || null };
+  await env.DB.prepare("INSERT INTO tender_jobs (tender_id,query,state,at,params_json) VALUES (?,?,'pending',?,?)").bind(t.id, query, now(), JSON.stringify(params)).run();
+  await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), "support", "tender_smart", null, JSON.stringify({ tender_id: t.id, query, ...params })).run();
   return tenderDetail(env, t.id);
 }
-/** Cron: یک جستجوی منتظر (runDiscovery با ایمپورتِ پویا، تا بارِ ماژول برای همهٔ درخواست‌ها نباشد) */
+/** ورودیِ مدل — عینِ smartSearch در discovery.js (فقط «قلم» این‌جا خودِ مناقصه است) */
+export function discoveryInput(t, j) {
+  const p = parse(j.params_json, {}) || {};
+  return { item: T(j.query) || (t && t.title), itemCode: (t && t.item_code) || null, code2: null, qty: t ? t.qty : null, unit: t ? t.unit : null,
+    markets: Array.isArray(p.markets) && p.markets.length ? p.markets : ["IR"], brand: p.brand || null, specs: p.specs || (t && t.spec) || null,
+    notes: p.notes || null, deliveryHint: p.deliveryHint || null };
+}
+/** Cron: یک جستجوی منتظر؛ کارِ ماندهٔ بیش از سقفِ زمان «تمام نشد» می‌شود تا دوباره بشود زد */
 export async function tenderDiscoverTick(env) {
-  const j = await env.DB.prepare("SELECT * FROM tender_jobs WHERE state='pending' ORDER BY id LIMIT 1").first().catch(() => null);
+  const n = now();
+  await env.DB.prepare("UPDATE tender_jobs SET state='error', error='جستجو در زمانِ مجاز تمام نشد؛ دوباره بزنید (بازارِ کمتری تیک بزنید).', done_at=? WHERE state='running' AND started_at<?")
+    .bind(n, n - JOB_STALE).run().catch(() => {});
+  const claimed = (await env.DB.prepare("UPDATE tender_jobs SET state='running', started_at=? WHERE id=(SELECT id FROM tender_jobs WHERE state='pending' ORDER BY id LIMIT 1) AND state='pending' RETURNING *")
+    .bind(n).all().catch(() => ({ results: [] }))).results || [];
+  const j = claimed[0];
   if (!j) return false;
-  const r = await env.DB.prepare("UPDATE tender_jobs SET state='running' WHERE id=? AND state='pending'").bind(j.id).run();
-  if (!r.meta.changes) return false;
   try {
     const t = await rowOf(env, j.tender_id);
-    const { runDiscovery } = await import("./discovery.js");
-    const out = await runDiscovery(env, { item: j.query, qty: t ? t.qty : undefined, unit: t ? t.unit : undefined, markets: ["IR"], specs: t && t.spec ? t.spec : undefined });
-    const list = ((out && out.result && out.result.suppliers) || []).map((s) => ({ name: T(s.name).slice(0, 120), phones: (s.phones || []).map((p) => normPhone(p)).filter(Boolean).slice(0, 3),
-      website: T(s.website).slice(0, 200) || null, type: T(s.type).slice(0, 40) || null, price: s.price && s.price.text ? T(s.price.text).slice(0, 80) : null })).filter((s) => s.name);
-    await env.DB.prepare("UPDATE tender_jobs SET state='done', result_json=?, done_at=? WHERE id=?").bind(JSON.stringify({ suppliers: list, cost: out && out.cost }), now(), j.id).run();
+    const out = await runDiscovery(env, discoveryInput(t, j));
+    const list = ((out && out.result && out.result.suppliers) || []).map((x) => ({ name: T(x.name).slice(0, 120), type: T(x.type).slice(0, 40) || null, market: T(x.market).slice(0, 40) || null,
+      phones: (x.phones || []).map((p) => normPhone(p) || T(p)).filter(Boolean).slice(0, 5), emails: (x.emails || []).slice(0, 3),
+      website: T(x.website).slice(0, 200) || null, price: x.price && x.price.text ? T(x.price.text).slice(0, 120) : null })).filter((x) => x.name);
+    const u = out.usage || {};
+    await env.DB.prepare("UPDATE tender_jobs SET state='done', result_json=?, model=?, cost=?, searches=?, fetches=?, done_at=? WHERE id=?")
+      .bind(JSON.stringify({ suppliers: list }), out.model, out.cost, u.searches || 0, u.fetches || 0, now(), j.id).run();
   } catch (e) {
     await env.DB.prepare("UPDATE tender_jobs SET state='error', error=?, done_at=? WHERE id=?").bind(T(e && e.message).slice(0, 300) || "نشد", now(), j.id).run();
   }
