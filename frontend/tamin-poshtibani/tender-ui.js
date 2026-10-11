@@ -50,7 +50,7 @@
   const F_HMS = dtf({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }), F_WHEN = dtf({ weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false });
   const hms = (ms) => (F_HMS ? F_HMS.format(new Date(ms)) : fa(new Date(ms).toLocaleTimeString()));
   const when = (ms) => (F_WHEN ? F_WHEN.format(new Date(ms)) : fa(new Date(ms).toLocaleString()));
-  const ST = { draft: "پیش‌نویس", scheduled: "شروع‌نشده", live: "در جریان", ended: "تمام شد", cancelled: "لغو شد" };
+  const ST = { draft: "پیش‌نویس", scheduled: "شروع‌نشده", sealed: "دورِ سربسته", live: "در جریان", ended: "تمام شد", cancelled: "لغو شد" };
   const stChip = (st) => `<span class="td-st ${esc(st)}"><i></i>${ST[st] || esc(st)}</span>`;
 
   /** حلقهٔ شمارشِ معکوس — left/total به میلی‌ثانیه؛ data-ring برای به‌روزرسانیِ ثانیه‌ای */
@@ -81,7 +81,8 @@
     if (!S.length) return `<div class="td-empty">هنوز پیشنهادی ثبت نشده؛ نمودار با اولین پیشنهاد کشیده می‌شود.</div>`;
     const W = 600, H = 220, L = 8, R = 70, Tp = 12, B = 24;
     const t0 = Math.min(o.from || S[0].at, S[0].at), t1 = Math.max(o.to || 0, S[S.length - 1].at, t0 + 60e3);
-    const lo0 = Math.min(...S.map((p) => p.amount)), hi0 = Math.max(o.start || 0, ...S.map((p) => p.amount));
+    const refV = o.ref && o.ref.v > 0 ? [o.ref.v] : [];
+    const lo0 = Math.min(...S.map((p) => p.amount), ...refV), hi0 = Math.max(o.start || 0, ...S.map((p) => p.amount));
     const pad = Math.max(1, (hi0 - lo0) * 0.12);
     const lo = Math.max(0, lo0 - pad), hi = hi0 + pad * 0.4;
     const x = (t) => L + ((t - t0) / (t1 - t0)) * (W - L - R), y = (v) => Tp + (1 - (v - lo) / (hi - lo || 1)) * (H - Tp - B);
@@ -95,7 +96,7 @@
     const dots = S.map((p) => `<circle class="dot ${p.mine ? "me" : ""}" cx="${x(p.at).toFixed(1)}" cy="${y(p.amount).toFixed(1)}" r="${p.mine ? 4.2 : 3.2}"><title>${esc(`${money(p.amount)} ریال — ${hms(p.at)}`)}</title></circle>`).join("");
     return `<svg class="td-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="نمودارِ کمترین قیمت در طولِ مناقصه">
       <defs><linearGradient id="tdArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6aa0ff" stop-opacity=".32"/><stop offset="1" stop-color="#6aa0ff" stop-opacity="0"/></linearGradient></defs>
-      ${grid}${line(o.start, "start", "قیمتِ شروع")}${line(o.floor, "floor", "کف")}<path class="ar" d="${area}"/><path class="ln" d="${d}"/>${dots}
+      ${grid}${line(o.start, "start", "قیمتِ شروع")}${line(o.floor, "floor", "کف")}${o.ref ? line(o.ref.v, "ref", o.ref.label) : ""}<path class="ar" d="${area}"/><path class="ln" d="${d}"/>${dots}
       <text class="lab" x="${L}" y="${H - 6}">${esc(hms(t0))}</text><text class="lab" x="${W - R}" y="${H - 6}" text-anchor="end">${esc(hms(t1))}</text></svg>`;
   }
 

@@ -58,7 +58,7 @@ import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
-import { TENDER_DDL, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
+import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
@@ -286,6 +286,7 @@ const COLUMN_MIGRATIONS = [
   ["items", "norm_at", "INTEGER"],
   /* (مهر ۱۴۰۵) پنل تأمین‌کننده: کد افزایشیِ قلم، پذیرش‌های جدول تطابق، پیامکِ منتظرِ اتصالِ بات مکاتبات (sp-core.js) */
   ...SP_COLUMNS,
+  ...TENDER_COLUMNS,
   /* (فاز ۲ پنل پشتیبانی) «پرسش از کارشناس»: سؤالِ کارشناس هوشمند، زمانش و پاسخِ کارشناس (ai-lock.js) */
   ["ai_threads", "ask_json", "TEXT"],
   ["ai_runs", "handover_at", "INTEGER"],     /* فاز ۳: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد (ai-rules.js) */
@@ -1738,7 +1739,7 @@ async function route(request, env, ctx) {
     /* صفحهٔ مناقصهٔ تأمین‌کننده (worker/tender.js) — مزایدهٔ معکوسِ زنده، ورود هر بار با رمزِ پیامکی */
     if (path === "/tender/market" && m === "GET") return json(await tenderMarket(env));
     {
-      const tm = /^\/tender\/([0-9a-f]{6,20})\/(info|pass|login|logout|state|bid|fixreq)$/.exec(path);
+      const tm = /^\/tender\/([0-9a-f]{6,20})\/(info|pass|login|logout|state|bid|fixreq|proxy|accept|pref|lots)$/.exec(path);
       if (tm) {
         const [, code, act] = tm;
         if (act === "info" && m === "GET") return json(await tenderPublic(env, code, ctx));
@@ -1748,6 +1749,10 @@ async function route(request, env, ctx) {
         if (act === "state" && m === "GET") return json(await tenderStateOf(env, request, code, url, ctx));
         if (act === "bid" && m === "POST") return json(await tenderBid(env, request, code, await readJson(request), ctx));
         if (act === "fixreq" && m === "POST") return json(await tenderFixRequest(env, request, code, await readJson(request), ctx));
+        if (act === "proxy" && m === "POST") return json(await tenderProxy(env, request, code, await readJson(request), ctx));
+        if (act === "accept" && m === "POST") return json(await tenderAccept(env, request, code));
+        if (act === "pref" && m === "POST") return json(await tenderPref(env, request, code, await readJson(request)));
+        if (act === "lots" && m === "GET") return json(await tenderLots(env, request, code));
       }
     }
 
@@ -1934,12 +1939,18 @@ async function route(request, env, ctx) {
       if (path === "/support/tender-items" && m === "GET") return json(await tenderItems(env, url.searchParams.get("q")));
       if (path === "/support/tender-suppliers" && m === "GET") return json(await tenderSuppliers(env, url.searchParams.get("code")));
       if (path === "/support/tender-book" && m === "GET") return json(await tenderBook(env, url.searchParams.get("q")));
-      if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover))?$/.exec(path))) {
+      if (path === "/support/tender-req-items" && m === "GET") return json(await tenderReqItems(env, url.searchParams.get("rid")));
+      if (path === "/support/tender-settings" && m === "GET") return json(await tenderSettingsGet(env));
+      if (path === "/support/tender-settings" && m === "PUT") return json(await tenderSettingsSave(env, await readJson(request)));
+      if (path === "/support/tender-settings/test" && m === "POST") return json(await tenderSmsTest(env, await readJson(request)));
+      if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover|link|csv))?$/.exec(path))) {
         const tid = mm[1], act = mm[2] || "";
         if (!act && m === "GET") return json(await tenderDetail(env, tid, ctx));
         if (!act && m === "PUT") return json(await tenderUpdate(env, tid, await readJson(request)));
         if (act === "schedule" && m === "POST") return json(await tenderSchedule(env, tid, await readJson(request)));
-        if (act === "end" && m === "POST") return json(await tenderEnd(env, tid, ctx));
+        if (act === "end" && m === "POST") return json(await tenderEnd(env, tid, await readJson(request), ctx));
+        if (act === "link" && m === "POST") return json(await tenderToRequest(env, tid, await readJson(request)));
+        if (act === "csv" && m === "GET") return await tenderCsv(env, tid);
         if (act === "cancel" && m === "POST") return json(await tenderCancel(env, tid, await readJson(request)));
         if (act === "invite" && m === "POST") return json(await tenderInviteSend(env, tid, await readJson(request)));
         if (act === "invites" && m === "POST") return json(await tenderInviteAdd(env, tid, await readJson(request)));

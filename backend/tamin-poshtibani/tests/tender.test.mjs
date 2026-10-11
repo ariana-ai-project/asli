@@ -41,7 +41,7 @@ test("قواعد: سقف، گام، کف، پرشِ مجاز و «خودت پی�
   assert.equal(checkBid(t, 1_000_000, 1, 5).ok, true);
   assert.equal(checkBid(t, 699_999, 1, 5).code, "floor");
   const b = { ...t, best_amount: 900_000, best_alias: 2 };
-  assert.deepEqual(bidRange(b), { max: 895_500, min: 810_000, step: 4_500, floor: 700_000 });
+  assert.deepEqual(bidRange(b), { max: 895_500, min: 810_000, step: 4_500, floor: 700_000, mode: "open" });
   assert.equal(checkBid(b, 896_000, 1, 5).code, "high", "دست‌کم یک گام پایین‌تر");
   assert.equal(checkBid(b, 90_000, 1, 5).code, "floor", "صفرِ جاافتاده");
   assert.equal(checkBid(b, 800_000, 1, 5).code, "low", "بیش از ۱۰٪ پرش");

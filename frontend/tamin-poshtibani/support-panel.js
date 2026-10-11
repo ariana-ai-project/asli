@@ -1460,7 +1460,7 @@
   window.addEventListener("tp-theme", render);
 
   /* تبِ «🔨 مناقصه» (tender-admin.js): همان api و رسمِ همین پنل */
-  if (window.TP_TENDER) { window.TP_TENDER.configure({ api, render }); window.TP_TENDER.mount(app); }
+  if (window.TP_TENDER) { window.TP_TENDER.configure({ api, render, download, cmResult: (aid) => cmResult(aid) }); window.TP_TENDER.mount(app); }
 
   /* ---------- شروع ---------- */
   (async function boot() {
