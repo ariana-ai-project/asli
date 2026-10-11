@@ -53,7 +53,7 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["td", "🔨 مناقصه"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
@@ -166,6 +166,7 @@
     else if (S.tab === "log" && (force || !S.log)) loadLog();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
+    else if (S.tab === "td" && window.TP_TENDER) window.TP_TENDER.load(force);
     else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); if (S.aiView === "sw" && (force || !S.sw)) loadSw(); if (S.aiView === "md" && (force || !S.md)) loadMd(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
@@ -178,7 +179,7 @@
 
   /* ---------- سرآیند ---------- */
   /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها — مثلِ پنل مدیر: چهار بخشِ روزمره و دو گروهِ ▾ (مهر ۱۴۰۵) */
-  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", log: "رخدادها", chg: "🧩 تغییرات اقلام" };
+  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", td: "🔨 مناقصه", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", log: "رخدادها", chg: "🧩 تغییرات اقلام" };
   function vTop() {
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
@@ -198,7 +199,7 @@
     const grp = (label, keys) => TP.ui.menu({ cls: keys.includes(S.tab) ? "on start" : "start",
       btn: `<button type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${keys.includes(S.tab) ? TAB_FA[S.tab] : label}${cnt(keys.reduce((a, k) => a + (N[k] || 0), 0))}${chev}</button>`,
       items: keys.map((k) => ({ label: TAB_FA[k], attrs: `data-tab="${k}"`, cnt: N[k] || null })) });
-    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${grp("هوشمند", ["ai", "dl"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
+    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${tab("td", window.TP_TENDER && window.TP_TENDER.live() ? "●" : 0)}${grp("هوشمند", ["ai", "dl"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
       <span class="spacer"></span>${TP.ui.info(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
@@ -1289,6 +1290,7 @@
 
   /* ---------- رسم ---------- */
   function vTab() {
+    if (S.tab === "td") return window.TP_TENDER ? window.TP_TENDER.view() : "";
     if (S.tab === "ai") return vAi();
     if (S.tab === "dl") return vDl();
     if (S.tab === "chg") return vChg();
@@ -1311,6 +1313,8 @@
     else { TP.ui.mountBg(""); app.innerHTML = vTop() + TP.ui.alarmBar(S.alarms, (a) => (a.thread_id ? `<button class="tp-btn sm" type="button" data-th-open="${a.thread_id}">گفت‌وگو</button>` : "")) + `<div class="tp-wrap ${S.tab === "chat" && phoneMode ? "sv-wide" : ""}">${vTab()}</div>`; TP.ui.help.set(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, S.tab === "chat" && phoneMode ? { side: "right" } : undefined); }
     restore();
     if (S.view === "app" && S.tab === "chat") afterChat(pos);
+    /* مناقصه: نظرسنجیِ نمای زنده فقط وقتی همین تب پیداست */
+    if (window.TP_TENDER) window.TP_TENDER.active(S.view === "app" && S.tab === "td");
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
     if (S.view === "app" && S.tab === "ai" && S.aiEx && window.TP_AI) window.TP_AI.wire(app, S, render);
@@ -1454,6 +1458,9 @@
     else if (t.dataset && (t.dataset.lrid !== undefined || t.dataset.codeEx || t.dataset.codeMgr !== undefined)) { e.preventDefault(); t.blur(); }
   });
   window.addEventListener("tp-theme", render);
+
+  /* تبِ «🔨 مناقصه» (tender-admin.js): همان api و رسمِ همین پنل */
+  if (window.TP_TENDER) { window.TP_TENDER.configure({ api, render }); window.TP_TENDER.mount(app); }
 
   /* ---------- شروع ---------- */
   (async function boot() {

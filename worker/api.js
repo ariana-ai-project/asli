@@ -58,6 +58,9 @@ import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
+import { TENDER_DDL, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
+  tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf,
+  tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
@@ -201,6 +204,7 @@ ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
 ${CR_DDL.trim()}
 ${ALARM_DDL.trim()}
+${TENDER_DDL.trim()}
 ${STRUCT_DDL.trim()}
 `;
 
@@ -1731,6 +1735,22 @@ async function route(request, env, ctx) {
       return json({ ok: true, bot: b.bot });
     }
 
+    /* صفحهٔ مناقصهٔ تأمین‌کننده (worker/tender.js) — مزایدهٔ معکوسِ زنده، ورود هر بار با رمزِ پیامکی */
+    if (path === "/tender/market" && m === "GET") return json(await tenderMarket(env));
+    {
+      const tm = /^\/tender\/([0-9a-f]{6,20})\/(info|pass|login|logout|state|bid|fixreq)$/.exec(path);
+      if (tm) {
+        const [, code, act] = tm;
+        if (act === "info" && m === "GET") return json(await tenderPublic(env, code, ctx));
+        if (act === "pass" && m === "POST") return json(await tenderSendPass(env, code, await readJson(request)));
+        if (act === "login" && m === "POST") return json(await tenderLogin(env, code, await readJson(request)));
+        if (act === "logout" && m === "POST") return json(await tenderLogout(env, request));
+        if (act === "state" && m === "GET") return json(await tenderStateOf(env, request, code, url, ctx));
+        if (act === "bid" && m === "POST") return json(await tenderBid(env, request, code, await readJson(request), ctx));
+        if (act === "fixreq" && m === "POST") return json(await tenderFixRequest(env, request, code, await readJson(request), ctx));
+      }
+    }
+
     /* پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (worker/sp-api.js) */
     if (path.startsWith("/sp/")) {
       const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json, flush: (k) => flush(env, ctx, k) });
@@ -1908,6 +1928,28 @@ async function route(request, env, ctx) {
       if (path === "/support/reset" && m === "POST") { await requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
       await requireSupport(request, env);
       if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));
+      /* مناقصه (worker/tender.js) */
+      if (path === "/support/tenders" && m === "GET") return json(await tenderList(env, ctx));
+      if (path === "/support/tenders" && m === "POST") return json(await tenderCreate(env, await readJson(request)));
+      if (path === "/support/tender-items" && m === "GET") return json(await tenderItems(env, url.searchParams.get("q")));
+      if (path === "/support/tender-suppliers" && m === "GET") return json(await tenderSuppliers(env, url.searchParams.get("code")));
+      if (path === "/support/tender-book" && m === "GET") return json(await tenderBook(env, url.searchParams.get("q")));
+      if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover))?$/.exec(path))) {
+        const tid = mm[1], act = mm[2] || "";
+        if (!act && m === "GET") return json(await tenderDetail(env, tid, ctx));
+        if (!act && m === "PUT") return json(await tenderUpdate(env, tid, await readJson(request)));
+        if (act === "schedule" && m === "POST") return json(await tenderSchedule(env, tid, await readJson(request)));
+        if (act === "end" && m === "POST") return json(await tenderEnd(env, tid, ctx));
+        if (act === "cancel" && m === "POST") return json(await tenderCancel(env, tid, await readJson(request)));
+        if (act === "invite" && m === "POST") return json(await tenderInviteSend(env, tid, await readJson(request)));
+        if (act === "invites" && m === "POST") return json(await tenderInviteAdd(env, tid, await readJson(request)));
+        if (act === "discover" && m === "POST") return json(await tenderDiscoverQueue(env, tid, await readJson(request)));
+      }
+      if ((mm = /^\/support\/tenders\/(\d+)\/invites\/(\d+)(?:\/(pass))?$/.exec(path))) {
+        if (!mm[3] && m === "PUT") return json(await tenderInviteSet(env, mm[1], mm[2], await readJson(request)));
+        if (mm[3] === "pass" && m === "POST") return json(await tenderPhonePass(env, mm[1], mm[2]));
+      }
+      if ((mm = /^\/support\/tenders\/(\d+)\/bids\/(\d+)$/.exec(path)) && m === "POST") return json(await tenderBidFix(env, mm[1], mm[2], await readJson(request)));
       if (path === "/support/desk" && m === "GET") {
         /* همان میز مدیر، بی امتیازها و تصمیم‌ها (with) و بی کد ورود و تلگرامِ کارشناسان */
         const du = new URL(url.origin);
