@@ -1,19 +1,19 @@
 /**
- * «مناقصه» — مزایدهٔ معکوسِ زنده برای خرید (مهر ۱۴۰۵، درخواست مالک).
+ * «مناقصه» — مزایدهٔ معکوس زنده برای خرید (مهر ۱۴۰۵، درخواست مالک).
  *
- * پشتیبانی در پنلِ خودش قلم (یا چند قلم) را جستجو می‌کند، تأمین‌کنندگانِ سوابق (و هر تأمین‌کنندهٔ تازه) را با تیک انتخاب
- * می‌کند، قیمتِ شروع، مقدار، واحد و قواعد را می‌گذارد و «ارسال دعوت» پیامکی می‌فرستد که فقط لینکِ سایت در آن است
- * (نه نوعِ کالا، نه مقدار). تأمین‌کننده هر بار با شمارهٔ همراه و رمزِ پیامکی وارد صفحهٔ مناقصه می‌شود، قیمتِ واحد را
- * پایین می‌آورد و کمترین قیمت در پایان برنده است. قواعدِ ناب: tender-core.js.
+ * پشتیبانی در پنل خودش قلم (یا چند قلم) را جستجو می‌کند، تأمین‌کنندگان سوابق (و هر تأمین‌کنندهٔ تازه) را با تیک انتخاب
+ * می‌کند، قیمت شروع، مقدار، واحد و قواعد را می‌گذارد و «ارسال دعوت» پیامکی می‌فرستد که فقط لینک سایت در آن است
+ * (نه نوع کالا، نه مقدار). تأمین‌کننده هر بار با شمارهٔ همراه و رمز پیامکی وارد صفحهٔ مناقصه می‌شود، قیمت واحد را
+ * پایین می‌آورد و کمترین قیمت در پایان برنده است. قواعد ناب: tender-core.js.
  *
- *   • نام‌ها پیش‌فرض پنهان‌اند («تأمین‌کنندهٔ ۳»)؛ «فقط رتبه» قیمت‌ها را هم پنهان می‌کند؛ «دورِ سربسته» پیش از دورِ زنده.
- *   • ثبتِ پیشنهاد اتمی است: درجِ پیشنهاد (و پیشنهادهای خودکارِ پاسخ) و به‌روزرسانیِ «بهترین» در یک batch با شرطِ rev.
- *   • هر کس رتبه‌اش پایین آمد پیامک (و پیامِ بات تلگرامِ تأمین‌کنندگان اگر وصل است) می‌گیرد — با فاصلهٔ کمینه، قابلِ خاموشی.
- *   • پشتیبانی پیشنهادِ اشتباه را اصلاح یا باطل می‌کند (با علت؛ در رخدادها می‌ماند) و بهترین دوباره حساب می‌شود.
- *   • پایان: با اولین خواندن یا Cron (tenderTick)؛ برنده ثبت، تلگرامِ پشتیبان، پیامکِ برنده و پیامِ تشکر به بقیه.
+ *   • نام‌ها پیش‌فرض پنهان‌اند («تأمین‌کنندهٔ ۳»)؛ «فقط رتبه» قیمت‌ها را هم پنهان می‌کند؛ «دور سربسته» پیش از دور زنده.
+ *   • ثبت پیشنهاد اتمی است: درج پیشنهاد (و پیشنهادهای خودکار پاسخ) و به‌روزرسانی «بهترین» در یک batch با شرط rev.
+ *   • هر کس رتبه‌اش پایین آمد پیامک (و پیام بات تلگرام تأمین‌کنندگان اگر وصل است) می‌گیرد — با فاصلهٔ کمینه، قابل خاموشی.
+ *   • پشتیبانی پیشنهاد اشتباه را اصلاح یا باطل می‌کند (با علت؛ در رخدادها می‌ماند) و بهترین دوباره حساب می‌شود.
+ *   • پایان: با اولین خواندن یا Cron (tenderTick)؛ برنده ثبت، تلگرام پشتیبان، پیامک برنده و پیام تشکر به بقیه.
  *   • چندقلمی: قلم‌های یک «گروه» (grp) با یک دعوت و یک ورود؛ هر قلم مزایدهٔ خودش.
- *   • پیامک از همان درگاهِ TextBeeِ مکاتبات (sms.js)؛ پشتیبانی می‌تواند کلید و دستگاهِ جدا برای مناقصه بگذارد (settings.tenderSms).
- *   • بازار: دلار، یورو، درهم، تتر، طلا و سکه از tgju (هر دقیقه یک بار، با کشِ Cloudflare).
+ *   • پیامک از همان درگاه TextBee مکاتبات (sms.js)؛ پشتیبانی می‌تواند کلید و دستگاه جدا برای مناقصه بگذارد (settings.tenderSms).
+ *   • بازار: دلار، یورو، درهم، تتر، طلا و سکه از tgju (هر دقیقه یک بار، با کش Cloudflare).
  */
 import { HttpError } from "./http.js";
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
@@ -35,15 +35,15 @@ CREATE INDEX IF NOT EXISTS ix_tbid_t ON tender_bids(tender_id, id);
 CREATE TABLE IF NOT EXISTS tender_sessions (h TEXT PRIMARY KEY, tender_id INTEGER NOT NULL, alias INTEGER NOT NULL, exp INTEGER NOT NULL, at INTEGER NOT NULL) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS tender_jobs (id INTEGER PRIMARY KEY, tender_id INTEGER NOT NULL, query TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', result_json TEXT, error TEXT, at INTEGER NOT NULL, done_at INTEGER);
 `;
-/** ستون‌های دورِ دوم (روی جدول‌های موجودِ تولید با ALTER — api.js:COLUMN_MIGRATIONS) */
+/** ستون‌های دور دوم (روی جدول‌های موجود تولید با ALTER — api.js:COLUMN_MIGRATIONS) */
 export const TENDER_COLUMNS = [
-  ["tenders", "grp", "TEXT"],                                   /* کدِ گروهِ مناقصهٔ چندقلمی */
+  ["tenders", "grp", "TEXT"],                                   /* کد گروه مناقصهٔ چندقلمی */
   ["tenders", "lot_no", "INTEGER"],
-  ["tenders", "sealed_s", "INTEGER NOT NULL DEFAULT 0"],        /* مدتِ دورِ سربسته */
+  ["tenders", "sealed_s", "INTEGER NOT NULL DEFAULT 0"],        /* مدت دور سربسته */
   ["tenders", "sealed_end_at", "INTEGER"],
   ["tenders", "sealed_done", "INTEGER NOT NULL DEFAULT 0"],
   ["tenders", "show_prices", "INTEGER NOT NULL DEFAULT 1"],     /* ۰ = «فقط رتبه» */
-  ["tenders", "proxy_on", "INTEGER NOT NULL DEFAULT 1"],        /* «پیشنهادِ خودکار» مجاز */
+  ["tenders", "proxy_on", "INTEGER NOT NULL DEFAULT 1"],        /* «پیشنهاد خودکار» مجاز */
   ["tenders", "require_accept", "INTEGER NOT NULL DEFAULT 0"],
   ["tenders", "outbid_sms", "INTEGER NOT NULL DEFAULT 1"],
   ["tenders", "outbid_gap_s", "INTEGER NOT NULL DEFAULT 120"],
@@ -60,7 +60,7 @@ export const TENDER_COLUMNS = [
   ["tender_bids", "auto", "INTEGER NOT NULL DEFAULT 0"],
   ["tender_bids", "sealed", "INTEGER NOT NULL DEFAULT 0"],
   ["tender_sessions", "phone", "TEXT"],
-  ["tender_jobs", "params_json", "TEXT"],                       /* همان ورودی‌های جستجوی هوشمندِ پنل کارشناس */
+  ["tender_jobs", "params_json", "TEXT"],                       /* همان ورودی‌های جستجوی هوشمند پنل کارشناس */
   ["tender_jobs", "model", "TEXT"],
   ["tender_jobs", "cost", "REAL"],
   ["tender_jobs", "searches", "INTEGER"],
@@ -76,13 +76,13 @@ const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => "۰۱
 const faN = (n) => String(n == null ? "" : n).replace(/\B(?=(\d{3})+(?!\d))/g, "٬").replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]);
 const escH = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const wait = (ctx, job) => { if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job.catch((e) => console.error("tender job", e && e.message))); else return job.catch(() => {}); return null; };
-/** عددِ صحیح از ورودیِ کاربر با هر رقم و جداکننده؛ نامعتبر → NaN */
+/** عدد صحیح از ورودی کاربر با هر رقم و جداکننده؛ نامعتبر → NaN */
 export const amountOf = (v) => {
   if (typeof v === "number") return v;
   const s = latin(v).replace(/[,٬،\s]/g, "").replace(/ریال/g, "");
   return s && /^\d+$/.test(s) ? Number(s) : NaN;
 };
-/** عدد در بازه؛ خالی یا نامعتبر → پیش‌فرض (فیلدِ نفرستاده یعنی «همان قبلی»، نه صفر) */
+/** عدد در بازه؛ خالی یا نامعتبر → پیش‌فرض (فیلد نفرستاده یعنی «همان قبلی»، نه صفر) */
 const num = (v, d, lo, hi) => {
   if (v == null || T(v) === "") return d;
   const n = Number(latin(v).replace(/[,٬\s]/g, "").replace(/٫/g, "."));
@@ -97,11 +97,11 @@ const PASS_TTL = 3 * 3600e3, PASS_GAP = 60e3, PASS_DAY = 6, MAX_FAILS = 5, LOCK_
 /** قواعدی که در هر مناقصه ذخیره می‌شوند (و در «پیش‌فرض‌ها»ی پشتیبان) */
 const RULES = ["step_pct", "step_min", "floor_pct", "jump_pct", "ext_window_s", "ext_s", "ext_max", "show_names", "duration_s",
   "sealed_s", "show_prices", "proxy_on", "require_accept", "outbid_sms", "outbid_gap_s", "thanks_sms"];
-/** قواعدی که در گروهِ چندقلمی برای همهٔ قلم‌ها یکی است */
+/** قواعدی که در گروه چندقلمی برای همهٔ قلم‌ها یکی است */
 const GROUP_RULES = RULES.filter((k) => !["duration_s", "sealed_s"].includes(k));
 
 /* ------------------------------------------------------------------ */
-/* تنظیماتِ پشتیبان: پیش‌فرض‌ها و درگاهِ پیامک                          */
+/* تنظیمات پشتیبان: پیش‌فرض‌ها و درگاه پیامک                          */
 /* ------------------------------------------------------------------ */
 const setting = async (env, key) => { const r = await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(key).first().catch(() => null); return r ? parse(r.value, r.value) : null; };
 const putSetting = (env, key, v) => env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(key, JSON.stringify(v), now()).run();
@@ -123,7 +123,7 @@ function cleanRules(b, base) {
   return o;
 }
 async function defaultsOf(env) { return cleanRules({}, (await setting(env, "tenderDefaults")) || {}); }
-/** درگاهِ پیامکِ مناقصه: همان TextBeeِ مکاتبات، مگر پشتیبان کلید یا دستگاهِ جدا گذاشته باشد */
+/** درگاه پیامک مناقصه: همان TextBee مکاتبات، مگر پشتیبان کلید یا دستگاه جدا گذاشته باشد */
 async function smsEnv(env) {
   const c = (await setting(env, "tenderSms")) || {};
   if (!T(c.key) && !T(c.device)) return env;
@@ -151,11 +151,11 @@ export async function tenderSettingsSave(env, b) {
     JSON.stringify({ defaults: !!b.defaults, terms: b.terms !== undefined, sms: !!b.sms })).run();
   return tenderSettingsGet(env);
 }
-/** POST /support/tender-settings/test {phone} — پیامکِ آزمایشی از درگاهِ مناقصه */
+/** POST /support/tender-settings/test {phone} — پیامک آزمایشی از درگاه مناقصه */
 export async function tenderSmsTest(env, b) {
   const p = T(b && b.phone);
   if (!isMobile(p)) throw new HttpError("شمارهٔ همراه را درست بنویسید (مثل ۰۹۱۲۱۲۳۴۵۶۷).");
-  const r = await sms(env, p, `${COMPANY(env)}\nپیامکِ آزمایشیِ مناقصه — درگاه کار می‌کند.`);
+  const r = await sms(env, p, `${COMPANY(env)}\nپیامک آزمایشی مناقصه — درگاه کار می‌کند.`);
   if (r.state !== "sent") throw new HttpError(r.error || "پیامک نرفت.", 502);
   return { ok: true };
 }
@@ -166,7 +166,7 @@ async function sms(env, to, text) {
   try { await sendSms(se, to, text); return { state: "sent" }; }
   catch (e) { return { state: "error", error: T(e && e.message).slice(0, 200) || "ارسال نشد" }; }
 }
-/** همان پیام در بات تلگرامِ تأمین‌کنندگان، برای شماره‌ای که بات را وصل کرده (با دکمهٔ «ورود به مناقصه») */
+/** همان پیام در بات تلگرام تأمین‌کنندگان، برای شماره‌ای که بات را وصل کرده (با دکمهٔ «ورود به مناقصه») */
 async function tgSupplier(env, phone, text, link) {
   if (!phone || !env.TG_SP_BOT_TOKEN) return 0;
   const chats = (await env.DB.prepare("SELECT t.chat FROM sp_tg t JOIN sp_phones p ON p.id=t.phone_id WHERE p.phone=?").bind(phone).all().catch(() => ({ results: [] }))).results || [];
@@ -187,17 +187,17 @@ async function notify(env, phone, text, link) {
 }
 
 /* ------------------------------------------------------------------ */
-/* خواندن، دورِ سربسته، پایان                                            */
+/* خواندن، دور سربسته، پایان                                            */
 /* ------------------------------------------------------------------ */
 async function rowOf(env, id) { return env.DB.prepare("SELECT * FROM tenders WHERE id=?").bind(id).first(); }
 async function rowOfCode(env, code) { return /^[0-9a-f]{6,20}$/.test(T(code)) ? env.DB.prepare("SELECT * FROM tenders WHERE code=?").bind(T(code)).first() : null; }
 const bidsOf = async (env, id) => (await env.DB.prepare("SELECT * FROM tender_bids WHERE tender_id=? ORDER BY id").bind(id).all()).results || [];
 const invitesOf = async (env, id) => (await env.DB.prepare("SELECT * FROM tender_invites WHERE tender_id=? ORDER BY alias").bind(id).all()).results || [];
-/** همهٔ قلم‌های گروهِ همین مناقصه (یا خودش) */
+/** همهٔ قلم‌های گروه همین مناقصه (یا خودش) */
 const lotsOf = async (env, t) => (t.grp ? (await env.DB.prepare("SELECT * FROM tenders WHERE grp=? ORDER BY lot_no, id").bind(t.grp).all()).results || [t] : [t]);
 const minsLeft = (t) => Math.max(0, Math.round((t.end_at - now()) / 60e3));
 
-/** پایانِ دورِ سربسته: پیشنهادهای خودکار اجرا می‌شوند و هر شرکت‌کننده رتبه‌اش را می‌گیرد (یک بار) */
+/** پایان دور سربسته: پیشنهادهای خودکار اجرا می‌شوند و هر شرکت‌کننده رتبه‌اش را می‌گیرد (یک بار) */
 async function sealedCloseIfDue(env, t, ctx) {
   if (!t || t.state !== "scheduled" || !t.sealed_end_at || t.sealed_done || now() < t.sealed_end_at || now() >= t.end_at) return t;
   const r = await env.DB.prepare("UPDATE tenders SET sealed_done=1, rev=rev+1 WHERE id=? AND sealed_done=0").bind(t.id).run();
@@ -207,14 +207,14 @@ async function sealedCloseIfDue(env, t, ctx) {
   const [bids, inv] = await Promise.all([bidsOf(env, t.id), invitesOf(env, t.id)]);
   const ranks = ranksOf(bids), link = tenderLink(env, fresh.code);
   const jobs = inv.filter((i) => ranks.has(i.alias) && !i.notify_off && fresh.outbid_sms).map((i) => notify(env, i.phone,
-    `${COMPANY(env)}\nدورِ سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دورِ زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link));
+    `${COMPANY(env)}\nدور سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دور زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link));
   if (jobs.length) wait(ctx, Promise.all(jobs));
   return fresh;
 }
 
 /**
- * مناقصه‌ای که زمانش تمام شده بسته می‌شود (یک بار، با شرطِ state و end_at): برنده ثبت، رخداد، تلگرامِ پشتیبان،
- * پیامکِ برنده و پیامِ تشکر به بقیه. خروجی: ردیفِ تازه (یا همان ردیف اگر کاری نبود)
+ * مناقصه‌ای که زمانش تمام شده بسته می‌شود (یک بار، با شرط state و end_at): برنده ثبت، رخداد، تلگرام پشتیبان،
+ * پیامک برنده و پیام تشکر به بقیه. خروجی: ردیف تازه (یا همان ردیف اگر کاری نبود)
  */
 export async function finalizeIfDue(env, t, ctx) {
   if (!t) return t;
@@ -234,17 +234,17 @@ export async function finalizeIfDue(env, t, ctx) {
   if (sc) stmts.push(queueStmt(env, `tender:${t.id}:end`, sc, `🏁 <b>مناقصهٔ «${escH(fresh.title)}» تمام شد</b>\n${escH(line)}\n${faN(ranks.size)} شرکت‌کننده · ${faN(fresh.ext_count)} بار تمدید`, null));
   await env.DB.batch(stmts);
   const link = tenderLink(env, fresh.code), co = COMPANY(env), jobs = [];
-  if (win) jobs.push(notify(env, win.phone, `${co}\nمناقصه به پایان رسید و پیشنهادِ شما کمترین قیمت بود. همکارانِ تدارکات برای ادامهٔ کار با شما تماس می‌گیرند.`, link));
+  if (win) jobs.push(notify(env, win.phone, `${co}\nمناقصه به پایان رسید و پیشنهاد شما کمترین قیمت بود. همکاران تدارکات برای ادامهٔ کار با شما تماس می‌گیرند.`, link));
   if (fresh.thanks_sms) {
     for (const i of inv) if (ranks.has(i.alias) && (!win || i.alias !== win.alias)) {
-      jobs.push(notify(env, i.phone, `${co}\nمناقصه به پایان رسید؛ این بار پیشنهادِ دیگری کمتر بود. از همراهی و پیشنهادتان سپاسگزاریم و به امیدِ همکاری‌های بعدی.`, null));
+      jobs.push(notify(env, i.phone, `${co}\nمناقصه به پایان رسید؛ این بار پیشنهاد دیگری کمتر بود. از همراهی و پیشنهادتان سپاسگزاریم و به امید همکاری‌های بعدی.`, null));
     }
   }
   if (jobs.length) wait(ctx, Promise.all(jobs));
   return fresh;
 }
 
-/** Cron: پایانِ دورِ سربسته، مناقصه‌های تمام‌شده و پیشنهادهای خودکارِ معطل */
+/** Cron: پایان دور سربسته، مناقصه‌های تمام‌شده و پیشنهادهای خودکار معطل */
 export async function tenderTick(env, ctx) {
   const n = now();
   const due = (await env.DB.prepare("SELECT * FROM tenders WHERE state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) LIMIT 20").bind(n, n).all()
@@ -255,10 +255,10 @@ export async function tenderTick(env, ctx) {
 }
 
 /* ------------------------------------------------------------------ */
-/* ثبتِ پیشنهاد (دستی و خودکار) و خبرِ «عقب افتادید»                     */
+/* ثبت پیشنهاد (دستی و خودکار) و خبر «عقب افتادید»                     */
 /* ------------------------------------------------------------------ */
 /**
- * درجِ چند پیشنهاد (به ترتیب) و به‌روزرسانیِ بهترین و پایان در یک batch با شرطِ rev. خروجی: ردیفِ تازه یا null اگر rev عوض شده بود.
+ * درج چند پیشنهاد (به ترتیب) و به‌روزرسانی بهترین و پایان در یک batch با شرط rev. خروجی: ردیف تازه یا null اگر rev عوض شده بود.
  * list: [{alias, amount, auto, sealed}]
  */
 async function commitBids(env, t, bids, list, n) {
@@ -280,12 +280,12 @@ async function commitBids(env, t, bids, list, n) {
   const res = await env.DB.batch(stmts);
   return res[res.length - 1].meta.changes ? rowOf(env, t.id) : null;
 }
-/** پیشنهادهای خودکارِ مجاز روی وضعیتِ فعلی (فقط دورِ زنده) */
+/** پیشنهادهای خودکار مجاز روی وضعیت فعلی (فقط دور زنده) */
 async function proxiesOf(env, t) {
   if (!t.proxy_on) return [];
   return ((await env.DB.prepare("SELECT alias, proxy_min AS min, proxy_at AS at FROM tender_invites WHERE tender_id=? AND on_list=1 AND proxy_min IS NOT NULL").bind(t.id).all()).results || []);
 }
-/** هر کس رتبه‌اش پایین آمد پیامک و تلگرام می‌گیرد — با فاصلهٔ کمینه و تیکِ «خبر نده»ِ خودش */
+/** هر کس رتبه‌اش پایین آمد پیامک و تلگرام می‌گیرد — با فاصلهٔ کمینه و تیک «خبر نده» خودش */
 async function notifyDrops(env, t, before, after, skip, ctx) {
   if (!t.outbid_sms) return;
   const drops = rankDrops(before, after, skip);
@@ -296,14 +296,14 @@ async function notifyDrops(env, t, before, after, skip, ctx) {
     const i = inv.find((x) => x.alias === d.alias);
     if (!i || i.notify_off || !i.on_list || (i.outbid_at && n - i.outbid_at < gap)) continue;
     const lost = d.from === 1;
-    const text = `${co}\n${lost ? "دیگر پیشتازِ مناقصه نیستید" : "در مناقصه پیشنهادِ پایین‌تری ثبت شد"}؛ رتبهٔ شما اکنون ${faN(d.to)} است. ${faN(minsLeft(t))} دقیقه تا پایان مانده.`;
+    const text = `${co}\n${lost ? "دیگر پیشتاز مناقصه نیستید" : "در مناقصه پیشنهاد پایین‌تری ثبت شد"}؛ رتبهٔ شما اکنون ${faN(d.to)} است. ${faN(minsLeft(t))} دقیقه تا پایان مانده.`;
     jobs.push(notify(env, i.phone, text, link));
     stmts.push(env.DB.prepare("UPDATE tender_invites SET outbid_at=?, outbid_n=outbid_n+1 WHERE tender_id=? AND alias=?").bind(n, t.id, i.alias));
   }
   if (stmts.length) await env.DB.batch(stmts);
   if (jobs.length) wait(ctx, Promise.all(jobs));
 }
-/** اجرای پیشنهادهای خودکار و خبرِ «عقب افتادید»؛ خروجی: ردیفِ تازه (یا null اگر کاری نبود) */
+/** اجرای پیشنهادهای خودکار و خبر «عقب افتادید»؛ خروجی: ردیف تازه (یا null اگر کاری نبود) */
 async function runProxies(env, t, ctx, skip) {
   for (let i = 0; i < 3; i++) {
     if (tenderState(t, now()) !== "live") return null;
@@ -334,7 +334,7 @@ const pub = (t, n) => ({
   sealed_s: t.sealed_s || 0, sealed_end_at: t.sealed_end_at || null, duration_s: t.duration_s, start_at: t.start_at, end_at: t.end_at, ended_at: t.ended_at,
   state: tenderState(t, n), best_amount: t.best_amount, rev: t.rev, cancel_reason: t.cancel_reason, req_aid: t.req_aid || null, req_item: t.req_item || null, req_at: t.req_at || null,
 });
-/** سری برای نمودار: بهترین قیمت پس از هر پیشنهادِ معتبر */
+/** سری برای نمودار: بهترین قیمت پس از هر پیشنهاد معتبر */
 function seriesOf(bids) {
   const out = []; let best = null;
   for (const b of bids.filter((x) => x.state !== "void").sort((a, c) => a.at - c.at || a.id - c.id)) {
@@ -345,8 +345,8 @@ function seriesOf(bids) {
 }
 
 /**
- * سوابقِ خریدِ همین کالا به «قیمت روز» (نسبتِ نرخِ دلارِ امروز به نرخِ روزِ خرید) — فقط برای پشتیبان.
- * {unit, n, last:{date, price, today, supplier}, median, min} از ده خریدِ آخرِ با مقدار
+ * سوابق خرید همین کالا به «قیمت روز» (نسبت نرخ دلار امروز به نرخ روز خرید) — فقط برای پشتیبان.
+ * {unit, n, last:{date, price, today, supplier}, median, min} از ده خرید آخر با مقدار
  */
 async function historyOf(env, t) {
   if (!t.item_code) return null;
@@ -359,7 +359,7 @@ async function historyOf(env, t) {
     const today = on && on.rate ? price * tb.latest.rate / on.rate : null;
     return { date: r.order_date, unit: r.unit, price: Math.round(price), today: today == null ? null : Math.round(today), supplier: r.supplier };
   });
-  /* بعضی خریدهای قدیمی با مقیاسِ دیگری ثبت شده‌اند (مثلاً «۴۰» برای چهل میلیون): هر چه کمتر از یک‌پنجاهمِ بیشترین است کنار می‌رود */
+  /* بعضی خریدهای قدیمی با مقیاس دیگری ثبت شده‌اند (مثلاً «۴۰» برای چهل میلیون): هر چه کمتر از یک‌پنجاهم بیشترین است کنار می‌رود */
   const all = list.map((x) => x.today ?? x.price), top = Math.max(...all);
   const keep = list.filter((x) => (x.today ?? x.price) >= top / 50);
   const vals = keep.map((x) => x.today ?? x.price).sort((a, b) => a - b);
@@ -411,7 +411,7 @@ export async function tenderDetail(env, id, ctx) {
   };
 }
 
-/** شمارهٔ تمیز یا null؛ ورودیِ نادرست خطا */
+/** شمارهٔ تمیز یا null؛ ورودی نادرست خطا */
 function phoneOf(raw, name) {
   if (!T(raw)) return null;
   const p = normPhone(raw);
@@ -423,7 +423,7 @@ async function keepPhone(env, name, phone) {
   if (!phone || !/^09\d{9}$/.test(phone)) return false;
   try { await savePhone(env, "support", { supplier_name: name, phone, label: "مناقصه" }); return true; } catch (_) { return false; }
 }
-/** شمارهٔ ناشناسِ تصادفی برای n نفرِ تازه، بعد از بزرگ‌ترینِ موجود (تا ترتیبِ فهرست از روی شماره خوانده نشود) */
+/** شمارهٔ ناشناس تصادفی برای n نفر تازه، بعد از بزرگ‌ترین موجود (تا ترتیب فهرست از روی شماره خوانده نشود) */
 function aliasesFor(n, from) {
   const a = Array.from({ length: n }, (_, i) => from + i + 1);
   for (let i = a.length - 1; i > 0; i--) { const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
@@ -431,17 +431,17 @@ function aliasesFor(n, from) {
 }
 function lotOf(x, i) {
   const title = T(x.title || x.item_title).slice(0, 200);
-  if (!title) throw new HttpError(`عنوانِ قلمِ ${faN(i + 1)} لازم است.`);
+  if (!title) throw new HttpError(`عنوان قلم ${faN(i + 1)} لازم است.`);
   const qty = Number(latin(x.qty));
-  if (!(qty > 0)) throw new HttpError(`مقدارِ «${title}» را بنویسید.`);
+  if (!(qty > 0)) throw new HttpError(`مقدار «${title}» را بنویسید.`);
   const unit = T(x.unit).slice(0, 30);
-  if (!unit) throw new HttpError(`واحدِ «${title}» را بنویسید.`);
+  if (!unit) throw new HttpError(`واحد «${title}» را بنویسید.`);
   const start = amountOf(x.start_price);
-  if (!(start > 0)) throw new HttpError(`قیمتِ شروعِ «${title}» (سقفِ قیمتِ واحد، ریال) لازم است.`);
+  if (!(start > 0)) throw new HttpError(`قیمت شروع «${title}» (سقف قیمت واحد، ریال) لازم است.`);
   return { title, qty, unit, start, item_code: T(x.item_code).slice(0, 40) || null, item_title: T(x.item_title).slice(0, 200) || null, spec: T(x.spec).slice(0, 2000) || null };
 }
 
-/** POST /support/tenders — مناقصهٔ تازه (پیش‌نویس) با فهرستِ دعوت؛ lots: چند قلم در یک گروه */
+/** POST /support/tenders — مناقصهٔ تازه (پیش‌نویس) با فهرست دعوت؛ lots: چند قلم در یک گروه */
 export async function tenderCreate(env, b) {
   const lots = (Array.isArray(b.lots) && b.lots.length ? b.lots : [b]).slice(0, 30).map(lotOf);
   const s = cleanRules(b, await defaultsOf(env));
@@ -468,7 +468,7 @@ export async function tenderCreate(env, b) {
   return tenderDetail(env, ids[0]);
 }
 
-/** PUT /support/tenders/:id — قواعد و مشخصات؛ بعد از اولین پیشنهاد قیمتِ شروع و مقدار ثابت‌اند. قواعدِ گروه برای همهٔ قلم‌ها */
+/** PUT /support/tenders/:id — قواعد و مشخصات؛ بعد از اولین پیشنهاد قیمت شروع و مقدار ثابت‌اند. قواعد گروه برای همهٔ قلم‌ها */
 export async function tenderUpdate(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
@@ -481,8 +481,8 @@ export async function tenderUpdate(env, id, b) {
   if (set.sealed_s !== undefined && t.state !== "draft") delete set.sealed_s;
   for (const k of ["title", "spec", "terms", "unit"]) if (b[k] !== undefined) set[k] = T(b[k]).slice(0, k === "spec" || k === "terms" ? 2000 : 200) || (k === "title" || k === "unit" ? t[k] : null);
   if (b.qty !== undefined) { const q = Number(latin(b.qty)); if (!(q > 0)) throw new HttpError("مقدار درست نیست."); if (hasBids && q !== t.qty) throw new HttpError("بعد از اولین پیشنهاد مقدار عوض نمی‌شود."); set.qty = q; }
-  if (b.start_price !== undefined) { const p = amountOf(b.start_price); if (!(p > 0)) throw new HttpError("قیمتِ شروع درست نیست."); if (hasBids && p !== t.start_price) throw new HttpError("بعد از اولین پیشنهاد قیمتِ شروع عوض نمی‌شود."); set.start_price = p; }
-  /* پایانِ تازه (دقیقه از حالا) — فقط وقتی در جریان یا زمان‌بندی‌شده است */
+  if (b.start_price !== undefined) { const p = amountOf(b.start_price); if (!(p > 0)) throw new HttpError("قیمت شروع درست نیست."); if (hasBids && p !== t.start_price) throw new HttpError("بعد از اولین پیشنهاد قیمت شروع عوض نمی‌شود."); set.start_price = p; }
+  /* پایان تازه (دقیقه از حالا) — فقط وقتی در جریان یا زمان‌بندی‌شده است */
   if (b.end_in_min !== undefined && t.state === "scheduled") { const m = num(b.end_in_min, null, 1, 7 * 1440); if (m) set.end_at = Math.max(t.sealed_end_at || t.start_at || 0, now()) + m * 60e3; }
   const keys = Object.keys(set);
   const groupKeys = keys.filter((k) => GROUP_RULES.includes(k) || k === "terms");
@@ -500,7 +500,7 @@ export async function tenderSchedule(env, id, b) {
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
   if (!["draft", "scheduled"].includes(t.state) || (t.state === "scheduled" && t.start_at <= now())) throw new HttpError("این مناقصه شروع شده یا بسته است.");
   const on = (await env.DB.prepare("SELECT COUNT(*) AS n FROM tender_invites WHERE tender_id=? AND on_list=1").bind(t.id).first()).n;
-  if (!on) throw new HttpError("دست‌کم یک تأمین‌کننده را در فهرستِ دعوت تیک بزنید.");
+  if (!on) throw new HttpError("دست‌کم یک تأمین‌کننده را در فهرست دعوت تیک بزنید.");
   const startIn = num(b.start_in_min, 0, 0, 30 * 1440), dur = num(b.duration_min, t.duration_s / 60, 1, 7 * 1440), sealed = num(b.sealed_min, (t.sealed_s || 0) / 60, 0, 7 * 1440);
   const start = now() + Math.round(startIn * 60e3), sealedEnd = sealed ? start + Math.round(sealed * 60e3) : null, end = (sealedEnd || start) + Math.round(dur * 60e3);
   const ids = (await lotsOf(env, t)).filter((l) => l.id === t.id || l.state === "draft").map((l) => l.id);
@@ -512,7 +512,7 @@ export async function tenderSchedule(env, id, b) {
   return tenderDetail(env, t.id);
 }
 
-/** POST /support/tenders/:id/end (پایانِ همین حالا) و /cancel {reason} — {all: همهٔ قلم‌های گروه} */
+/** POST /support/tenders/:id/end (پایان همین حالا) و /cancel {reason} — {all: همهٔ قلم‌های گروه} */
 export async function tenderEnd(env, id, b, ctx) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
@@ -529,7 +529,7 @@ export async function tenderCancel(env, id, b) {
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
   if (["ended", "cancelled"].includes(t.state)) throw new HttpError("این مناقصه از قبل بسته است.");
   const reason = T(b && b.reason).slice(0, 300);
-  if (!reason) throw new HttpError("علتِ لغو را بنویسید.");
+  if (!reason) throw new HttpError("علت لغو را بنویسید.");
   const list = (b && b.all ? await lotsOf(env, t) : [t]).filter((l) => !["ended", "cancelled"].includes(l.state));
   await env.DB.batch([
     ...list.map((l) => env.DB.prepare("UPDATE tenders SET state='cancelled', cancel_reason=?, ended_at=?, rev=rev+1, updated_at=? WHERE id=?").bind(reason, now(), now(), l.id)),
@@ -538,7 +538,7 @@ export async function tenderCancel(env, id, b) {
   return tenderDetail(env, t.id);
 }
 
-/** POST /support/tenders/:id/invites — نفرِ تازه {name, phone, source, info}؛ در گروه برای همهٔ قلم‌ها با همان شمارهٔ ناشناس */
+/** POST /support/tenders/:id/invites — نفر تازه {name, phone, source, info}؛ در گروه برای همهٔ قلم‌ها با همان شمارهٔ ناشناس */
 export async function tenderInviteAdd(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
@@ -568,7 +568,7 @@ export async function tenderInviteSet(env, id, alias, b) {
   if (b.on !== undefined) set.on_list = b.on ? 1 : 0;
   if (b.phone !== undefined) {
     const p = phoneOf(b.phone, inv.name);
-    if (p && p !== inv.phone && (await env.DB.prepare("SELECT 1 AS x FROM tender_invites WHERE tender_id=? AND phone=? AND alias<>?").bind(t.id, p, inv.alias).first())) throw new HttpError("این شماره برای نفرِ دیگری در همین فهرست است.");
+    if (p && p !== inv.phone && (await env.DB.prepare("SELECT 1 AS x FROM tender_invites WHERE tender_id=? AND phone=? AND alias<>?").bind(t.id, p, inv.alias).first())) throw new HttpError("این شماره برای نفر دیگری در همین فهرست است.");
     set.phone = p; set.sms_state = null; set.sms_err = null;
   }
   if (!Object.keys(set).length) return tenderDetail(env, t.id);
@@ -579,7 +579,7 @@ export async function tenderInviteSet(env, id, alias, b) {
   return tenderDetail(env, t.id);
 }
 
-/** متنِ پیامکِ دعوت — فقط لینک و زمان؛ نه نوعِ کالا و نه مقدار (درخواست مالک) */
+/** متن پیامک دعوت — فقط لینک و زمان؛ نه نوع کالا و نه مقدار (درخواست مالک) */
 export function inviteText(env, t) {
   const when = t.start_at && t.start_at > now() ? `\nشروع: ${faTime(t.start_at)}` : t.start_at ? "\nهم‌اکنون در جریان است." : "";
   return `${COMPANY(env)}\nشما به یک مناقصهٔ خرید دعوت شده‌اید.${when}\nورود با شمارهٔ همین گوشی:\n${tenderLink(env, t.code)}`;
@@ -588,7 +588,7 @@ function faTime(ms) {
   try { return new Intl.DateTimeFormat("fa-IR-u-ca-persian", { timeZone: "Asia/Tehran", weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(ms)); }
   catch (_) { return new Date(ms).toISOString(); }
 }
-/** POST /support/tenders/:id/invite — پیامکِ دعوت (و تلگرامِ بات) به تیک‌خورده‌های شماره‌دار؛ گروه: یک دعوت برای همهٔ قلم‌ها */
+/** POST /support/tenders/:id/invite — پیامک دعوت (و تلگرام بات) به تیک‌خورده‌های شماره‌دار؛ گروه: یک دعوت برای همهٔ قلم‌ها */
 export async function tenderInviteSend(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
@@ -614,14 +614,14 @@ export async function tenderInviteSend(env, id, b) {
 }
 
 /**
- * POST /support/tenders/:id/invites/:alias/pass — رمزِ تلفنی: وقتی پیامک نمی‌رسد یا درگاه وصل نیست، پشتیبان رمزی می‌سازد و
+ * POST /support/tenders/:id/invites/:alias/pass — رمز تلفنی: وقتی پیامک نمی‌رسد یا درگاه وصل نیست، پشتیبان رمزی می‌سازد و
  * تلفنی به همان تأمین‌کننده می‌گوید (فقط همین یک بار نشان داده می‌شود؛ خامش جایی نمی‌ماند). در گروه برای همهٔ قلم‌ها.
  */
 export async function tenderPhonePass(env, id, alias) {
   const t = await rowOf(env, int(id));
   const inv = t ? await env.DB.prepare("SELECT * FROM tender_invites WHERE tender_id=? AND alias=?").bind(t.id, int(alias)).first() : null;
   if (!inv) throw new HttpError("این نفر در فهرست نیست.", 404);
-  if (!inv.phone) throw new HttpError("اول شمارهٔ همراهِ او را ثبت کنید؛ ورود با همان شماره است.");
+  if (!inv.phone) throw new HttpError("اول شمارهٔ همراه او را ثبت کنید؛ ورود با همان شماره است.");
   const pass = rand6(), h = await passHash(pass);
   const lots = await lotsOf(env, t);
   await env.DB.batch([...lots.map((l) => env.DB.prepare("UPDATE tender_invites SET pass_hash=?, pass_exp=?, fails=0, lock_until=NULL WHERE tender_id=? AND alias=?").bind(h, now() + PASS_TTL, l.id, inv.alias)),
@@ -629,7 +629,7 @@ export async function tenderPhonePass(env, id, alias) {
   return { pass, phone: inv.phone, name: inv.name, valid_h: PASS_TTL / 3600e3 };
 }
 
-/** پیشنهادِ اشتباه: اصلاحِ مبلغ یا باطل کردن، با علت — بهترین دوباره حساب می‌شود */
+/** پیشنهاد اشتباه: اصلاح مبلغ یا باطل کردن، با علت — بهترین دوباره حساب می‌شود */
 export async function tenderBidFix(env, id, bidId, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
@@ -637,13 +637,13 @@ export async function tenderBidFix(env, id, bidId, b) {
   const bid = await env.DB.prepare("SELECT * FROM tender_bids WHERE id=? AND tender_id=?").bind(int(bidId), t.id).first();
   if (!bid) throw new HttpError("این پیشنهاد پیدا نشد.", 404);
   const reason = T(b.reason).slice(0, 300);
-  if (!reason) throw new HttpError("علتِ اصلاح را بنویسید (در رخدادها می‌ماند و تأمین‌کننده هم می‌بیند).");
+  if (!reason) throw new HttpError("علت اصلاح را بنویسید (در رخدادها می‌ماند و تأمین‌کننده هم می‌بیند).");
   let st = bid.state, amount = bid.amount;
   if (b.void) st = "void";
   else {
     amount = amountOf(b.amount);
-    if (!(amount > 0)) throw new HttpError("مبلغِ درست را به ریال بنویسید.");
-    if (amount > t.start_price) throw new HttpError("مبلغ از قیمتِ شروع بیشتر است.");
+    if (!(amount > 0)) throw new HttpError("مبلغ درست را به ریال بنویسید.");
+    if (amount > t.start_price) throw new HttpError("مبلغ از قیمت شروع بیشتر است.");
     st = "fixed";
   }
   await env.DB.prepare("UPDATE tender_bids SET state=?, amount=?, orig_amount=COALESCE(orig_amount, ?), fix_by='support', fix_reason=?, fix_at=? WHERE id=?")
@@ -658,9 +658,9 @@ export async function tenderBidFix(env, id, bidId, b) {
   return tenderDetail(env, t.id);
 }
 
-/* --- جستجوی قلم و تأمین‌کنندگانِ سوابق --- */
+/* --- جستجوی قلم و تأمین‌کنندگان سوابق --- */
 const words = (q) => latin(q).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").split(/\s+/).map((w) => w.trim()).filter((w) => w.length >= 1).slice(0, 5);
-/** GET /support/tender-items?q= — اقلامِ سوابقِ خرید (عنوان یا کد) با شمارِ خرید و تأمین‌کننده */
+/** GET /support/tender-items?q= — اقلام سوابق خرید (عنوان یا کد) با شمار خرید و تأمین‌کننده */
 export async function tenderItems(env, q) {
   const ws = words(q);
   if (!ws.length || ws.join("").length < 2) return { items: [] };
@@ -670,7 +670,7 @@ export async function tenderItems(env, q) {
       FROM purchases WHERE ${cond} GROUP BY item_code ORDER BY n DESC LIMIT 30`).bind(...args).all().catch(() => ({ results: [] }))).results || [];
   return { items: rows };
 }
-/** GET /support/tender-suppliers?code= — تأمین‌کنندگانِ همین قلم در سوابق، با رده و شماره‌های شناخته‌شده */
+/** GET /support/tender-suppliers?code= — تأمین‌کنندگان همین قلم در سوابق، با رده و شماره‌های شناخته‌شده */
 export async function tenderSuppliers(env, code) {
   const c = T(code);
   if (!c) return { suppliers: [] };
@@ -698,7 +698,7 @@ async function withPhones(env, list) {
     return { ...x, grade: g ? g.grade : null, city: bk ? bk.city : null, supplier_id: mine[0] ? mine[0].supplier_id : null, phones, phone: phones.length ? phones[0].phone : null };
   });
 }
-/** GET /support/tender-book?q= — جستجوی نام در دفترچه‌ها و سوابق، برای افزودنِ تأمین‌کنندهٔ دیگر */
+/** GET /support/tender-book?q= — جستجوی نام در دفترچه‌ها و سوابق، برای افزودن تأمین‌کنندهٔ دیگر */
 export async function tenderBook(env, q) {
   const ws = words(q);
   if (!ws.length || ws.join("").length < 2) return { suppliers: [] };
@@ -714,8 +714,8 @@ export async function tenderBook(env, q) {
   return { suppliers: await withPhones(env, [...by.values()].slice(0, 30)) };
 }
 
-/* --- ثبتِ نتیجه در درخواست: پیشنهادِ هر شرکت‌کننده یک خطِ استعلامِ ثبت‌شده؛ برنده «تأیید نهایی» --- */
-/** GET /support/tender-req-items?rid= — اقلامِ بازِ ارجاع‌های ارسال‌شدهٔ یک درخواست */
+/* --- ثبت نتیجه در درخواست: پیشنهاد هر شرکت‌کننده یک خط استعلام ثبت‌شده؛ برنده «تأیید نهایی» --- */
+/** GET /support/tender-req-items?rid= — اقلام باز ارجاع‌های ارسال‌شدهٔ یک درخواست */
 export async function tenderReqItems(env, rid) {
   const r = T(rid);
   if (!r) return { items: [] };
@@ -728,9 +728,9 @@ export async function tenderReqItems(env, rid) {
 export async function tenderToRequest(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
-  if (t.state !== "ended") throw new HttpError("بعد از پایانِ مناقصه.");
+  if (t.state !== "ended") throw new HttpError("بعد از پایان مناقصه.");
   const it = await env.DB.prepare("SELECT i.id, i.assignment_id, i.request_id, i.state, a.dispatched_at FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(int(b && b.item_id)).first();
-  if (!it || it.state !== "open" || !it.dispatched_at) throw new HttpError("قلمِ بازِ یک ارجاعِ ارسال‌شده را انتخاب کنید.");
+  if (!it || it.state !== "open" || !it.dispatched_at) throw new HttpError("قلم باز یک ارجاع ارسال‌شده را انتخاب کنید.");
   const [bids, inv] = await Promise.all([bidsOf(env, t.id), invitesOf(env, t.id)]);
   const ranks = ranksOf(bids);
   if (!ranks.size) throw new HttpError("این مناقصه پیشنهادی ندارد.");
@@ -758,20 +758,20 @@ export async function tenderCsv(env, id) {
     ["شروع", fmt(t.start_at)], ["پایان", fmt(t.ended_at || t.end_at)], ["تمدید", t.ext_count], [],
     ["رتبه", "تأمین‌کننده", "شماره", "بهترین پیشنهاد (ریال)", "جمع کل (ریال)", "پیشنهاد خودکار تا", "آخرین پیشنهاد"],
     ...d.invites.filter((i) => i.rank).sort((a, b) => a.rank - b.rank).map((i) => [i.rank, i.name, i.phone || "", i.best, Math.round(i.best * t.qty), i.proxy_min || "", fmt(i.last_at)]), [],
-    ["زمان", "تأمین‌کننده", "مبلغ (ریال)", "وضعیت", "خودکار", "تمدید", "علتِ اصلاح"],
+    ["زمان", "تأمین‌کننده", "مبلغ (ریال)", "وضعیت", "خودکار", "تمدید", "علت اصلاح"],
     ...d.bids.map((b) => [fmt(b.at), b.name, b.amount, b.state === "void" ? "باطل" : b.state === "fixed" ? `اصلاح از ${b.orig_amount}` : "", b.auto ? "بله" : "", b.ext ? "بله" : "", b.fix_reason || ""])];
   const csv = "﻿" + rows.map((r) => r.map(q).join(",")).join("\r\n");
   return new Response(csv, { headers: { "content-type": "text/csv; charset=utf-8", "content-disposition": `attachment; filename="tender-${t.code}.csv"`, "cache-control": "no-store" } });
 }
 
-/* --- جستجوی هوشمند در وب — همان موتورِ «جستجوی هوشمند»ِ پنل کارشناس (discovery.js:runDiscovery): همان کلیدِ ANTHROPIC_API_KEY،
-   همان مدل (DISCOVERY_MODEL یا پیش‌فرضِ discovery.js)، همان ابزارها، همان ورودی‌ها (بازارها تا سه تا، برند، مشخصات، توضیح، کدِ قلم،
-   مقدار و واحد) و همان سقفِ زمانِ کار در صف (۱۶ دقیقه؛ bot.js:runSmartJobs). کار چند دقیقه طول می‌کشد، پس در صف و با Cron. --- */
+/* --- جستجوی هوشمند در وب — همان موتور «جستجوی هوشمند» پنل کارشناس (discovery.js:runDiscovery): همان کلید ANTHROPIC_API_KEY،
+   همان مدل (DISCOVERY_MODEL یا پیش‌فرض discovery.js)، همان ابزارها، همان ورودی‌ها (بازارها تا سه تا، برند، مشخصات، توضیح، کد قلم،
+   مقدار و واحد) و همان سقف زمان کار در صف (۱۶ دقیقه؛ bot.js:runSmartJobs). کار چند دقیقه طول می‌کشد، پس در صف و با Cron. --- */
 const JOB_STALE = 16 * 60000;
 export async function tenderDiscoverQueue(env, id, b) {
   const t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
-  if (!T(env.ANTHROPIC_API_KEY)) throw new HttpError("کلیدِ هوش مصنوعی وصل نیست؛ جستجوی هوشمند ممکن نیست.");
+  if (!T(env.ANTHROPIC_API_KEY)) throw new HttpError("کلید هوش مصنوعی وصل نیست؛ جستجوی هوشمند ممکن نیست.");
   const busy = await env.DB.prepare("SELECT id FROM tender_jobs WHERE tender_id=? AND state IN ('pending','running') AND COALESCE(started_at, at)>?").bind(t.id, now() - JOB_STALE).first();
   if (busy) throw new HttpError("یک جستجوی هوشمند برای همین مناقصه در جریان است.");
   const markets = [...new Set((Array.isArray(b && b.markets) ? b.markets : []).filter((k) => MARKETS.some((m) => m.key === k)))];
@@ -783,17 +783,17 @@ export async function tenderDiscoverQueue(env, id, b) {
   await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), "support", "tender_smart", null, JSON.stringify({ tender_id: t.id, query, ...params })).run();
   return tenderDetail(env, t.id);
 }
-/** ورودیِ مدل — عینِ smartSearch در discovery.js (فقط «قلم» این‌جا خودِ مناقصه است) */
+/** ورودی مدل — عین smartSearch در discovery.js (فقط «قلم» این‌جا خود مناقصه است) */
 export function discoveryInput(t, j) {
   const p = parse(j.params_json, {}) || {};
   return { item: T(j.query) || (t && t.title), itemCode: (t && t.item_code) || null, code2: null, qty: t ? t.qty : null, unit: t ? t.unit : null,
     markets: Array.isArray(p.markets) && p.markets.length ? p.markets : ["IR"], brand: p.brand || null, specs: p.specs || (t && t.spec) || null,
     notes: p.notes || null, deliveryHint: p.deliveryHint || null };
 }
-/** Cron: یک جستجوی منتظر؛ کارِ ماندهٔ بیش از سقفِ زمان «تمام نشد» می‌شود تا دوباره بشود زد */
+/** Cron: یک جستجوی منتظر؛ کار ماندهٔ بیش از سقف زمان «تمام نشد» می‌شود تا دوباره بشود زد */
 export async function tenderDiscoverTick(env) {
   const n = now();
-  await env.DB.prepare("UPDATE tender_jobs SET state='error', error='جستجو در زمانِ مجاز تمام نشد؛ دوباره بزنید (بازارِ کمتری تیک بزنید).', done_at=? WHERE state='running' AND started_at<?")
+  await env.DB.prepare("UPDATE tender_jobs SET state='error', error='جستجو در زمان مجاز تمام نشد؛ دوباره بزنید (بازار کمتری تیک بزنید).', done_at=? WHERE state='running' AND started_at<?")
     .bind(n, n - JOB_STALE).run().catch(() => {});
   const claimed = (await env.DB.prepare("UPDATE tender_jobs SET state='running', started_at=? WHERE id=(SELECT id FROM tender_jobs WHERE state='pending' ORDER BY id LIMIT 1) AND state='pending' RETURNING *")
     .bind(n).all().catch(() => ({ results: [] }))).results || [];
@@ -817,10 +817,10 @@ export async function tenderDiscoverTick(env) {
 /* ------------------------------------------------------------------ */
 /* صفحهٔ تأمین‌کننده                                                     */
 /* ------------------------------------------------------------------ */
-/** پیش از ورود: فقط نامِ شرکت و زمان — نه نامِ کالا */
+/** پیش از ورود: فقط نام شرکت و زمان — نه نام کالا */
 export async function tenderPublic(env, code, ctx) {
   let t = await rowOfCode(env, code);
-  if (!t || t.state === "draft") throw new HttpError("این لینکِ مناقصه معتبر نیست.", 404);
+  if (!t || t.state === "draft") throw new HttpError("این لینک مناقصه معتبر نیست.", 404);
   t = await finalizeIfDue(env, t, ctx);
   const se = await smsEnv(env);
   return { company: COMPANY(env), state: tenderState(t, now()), start_at: t.start_at, end_at: t.end_at, sealed_end_at: t.sealed_end_at || null, now: now(), sms: smsReady(se) };
@@ -832,10 +832,10 @@ async function inviteOfPhone(env, t, raw) {
   if (!inv) throw new HttpError("این شماره به این مناقصه دعوت نشده است. اگر فکر می‌کنید اشتباه است، با تدارکات تماس بگیرید.", 403);
   return inv;
 }
-/** POST /tender/:code/pass {phone} — رمزِ شش‌رقمیِ ورود به پیامک (دقیقه‌ای یک بار، روزی شش بار؛ در گروه برای همهٔ قلم‌ها) */
+/** POST /tender/:code/pass {phone} — رمز شش‌رقمی ورود به پیامک (دقیقه‌ای یک بار، روزی شش بار؛ در گروه برای همهٔ قلم‌ها) */
 export async function tenderSendPass(env, code, b) {
   const t = await rowOfCode(env, code);
-  if (!t || t.state === "draft") throw new HttpError("این لینکِ مناقصه معتبر نیست.", 404);
+  if (!t || t.state === "draft") throw new HttpError("این لینک مناقصه معتبر نیست.", 404);
   const inv = await inviteOfPhone(env, t, b && b.phone);
   const n = now(), day = Math.floor((n + 3.5 * 3600e3) / 864e5);
   if (inv.pass_sent_at && n - inv.pass_sent_at < PASS_GAP) throw new HttpError("رمز همین الان فرستاده شد؛ یک دقیقه صبر کنید.", 429);
@@ -849,20 +849,20 @@ export async function tenderSendPass(env, code, b) {
       WHERE tender_id=? AND alias=?`).bind(h, n + PASS_TTL, n, day, day, l.id, inv.alias)));
   return { sent: true, to: maskPhone(inv.phone) };
 }
-/** POST /tender/:code/login {phone, pass} — نشستِ کوتاه (۸ ساعت؛ صفحه فقط در همان زبانه نگهش می‌دارد) */
+/** POST /tender/:code/login {phone, pass} — نشست کوتاه (۸ ساعت؛ صفحه فقط در همان زبانه نگهش می‌دارد) */
 export async function tenderLogin(env, code, b) {
   const t = await rowOfCode(env, code);
-  if (!t || t.state === "draft") throw new HttpError("این لینکِ مناقصه معتبر نیست.", 404);
+  if (!t || t.state === "draft") throw new HttpError("این لینک مناقصه معتبر نیست.", 404);
   const inv = await inviteOfPhone(env, t, b && b.phone);
   const n = now();
-  if (inv.lock_until && inv.lock_until > n) throw new HttpError(`ورود تا ${Math.ceil((inv.lock_until - n) / 60e3)} دقیقهٔ دیگر بسته است (رمزِ نادرستِ پشت‌سرهم).`, 429);
+  if (inv.lock_until && inv.lock_until > n) throw new HttpError(`ورود تا ${Math.ceil((inv.lock_until - n) / 60e3)} دقیقهٔ دیگر بسته است (رمز نادرست پشت‌سرهم).`, 429);
   const pass = latin(b && b.pass).replace(/\D/g, "");
   const salt = String(inv.pass_hash || "").split(":")[0];
   const ok = !!salt && inv.pass_exp > n && /^\d{6}$/.test(pass) && (await passHash(pass, salt)) === inv.pass_hash;
   if (!ok) {
     const fails = (inv.fails || 0) + 1;
     await env.DB.prepare("UPDATE tender_invites SET fails=?, lock_until=? WHERE tender_id=? AND alias=?").bind(fails >= MAX_FAILS ? 0 : fails, fails >= MAX_FAILS ? n + LOCK_MS : null, t.id, inv.alias).run();
-    throw new HttpError(!salt || inv.pass_exp <= n ? "رمزِ تازه بخواهید (رمزِ قبلی تمام شده یا هنوز رمزی نگرفته‌اید)." : fails >= MAX_FAILS ? "رمز پنج بار نادرست بود؛ ورود ۱۵ دقیقه بسته شد." : "رمز درست نیست.", 401);
+    throw new HttpError(!salt || inv.pass_exp <= n ? "رمز تازه بخواهید (رمز قبلی تمام شده یا هنوز رمزی نگرفته‌اید)." : fails >= MAX_FAILS ? "رمز پنج بار نادرست بود؛ ورود ۱۵ دقیقه بسته شد." : "رمز درست نیست.", 401);
   }
   const token = randHex(24);
   await env.DB.batch([
@@ -872,11 +872,11 @@ export async function tenderLogin(env, code, b) {
   ]);
   return { token, exp: n + SESSION_TTL };
 }
-/** نشستِ همین مناقصه (یا قلمِ دیگری از همان گروه) از هدرِ X-Tender-Token — {t, inv} */
+/** نشست همین مناقصه (یا قلم دیگری از همان گروه) از هدر X-Tender-Token — {t, inv} */
 export async function tenderWho(env, request, code) {
   const tok = T(request.headers.get("X-Tender-Token"));
   const t = await rowOfCode(env, code);
-  if (!t || t.state === "draft") throw new HttpError("این لینکِ مناقصه معتبر نیست.", 404);
+  if (!t || t.state === "draft") throw new HttpError("این لینک مناقصه معتبر نیست.", 404);
   const s = tok ? await env.DB.prepare("SELECT * FROM tender_sessions WHERE h=?").bind(await sha256hex(tok)).first() : null;
   if (!s || s.exp < now()) throw new HttpError("دوباره وارد شوید.", 401, { relogin: true });
   let inv = null;
@@ -886,7 +886,7 @@ export async function tenderWho(env, request, code) {
     if (home && home.grp === t.grp) inv = await env.DB.prepare("SELECT * FROM tender_invites WHERE tender_id=? AND phone=? AND on_list=1").bind(t.id, s.phone).first();
     if (!inv) throw new HttpError("در این قلم دعوت نشده‌اید.", 403);
   } else throw new HttpError("دوباره وارد شوید.", 401, { relogin: true });
-  if (!inv) throw new HttpError("دعوتِ شما برداشته شده است.", 403);
+  if (!inv) throw new HttpError("دعوت شما برداشته شده است.", 403);
   if (!inv.seen_at) await env.DB.prepare("UPDATE tender_invites SET seen_at=? WHERE tender_id=? AND alias=?").bind(now(), t.id, inv.alias).run();
   return { t, inv };
 }
@@ -898,8 +898,8 @@ export async function tenderLogout(env, request) {
 }
 
 /**
- * نمای تأمین‌کننده: نام‌های دیگران پنهان (مگر پشتیبانی نشان دهد)، خودش «شما». «فقط رتبه» و دورِ سربسته: قیمت و
- * پیشنهادهای دیگران پیدا نیست (فقط رتبهٔ خودش — و در دورِ سربسته حتی رتبه هم نه).
+ * نمای تأمین‌کننده: نام‌های دیگران پنهان (مگر پشتیبانی نشان دهد)، خودش «شما». «فقط رتبه» و دور سربسته: قیمت و
+ * پیشنهادهای دیگران پیدا نیست (فقط رتبهٔ خودش — و در دور سربسته حتی رتبه هم نه).
  */
 async function supplierView(env, t, inv) {
   const n = now(), st = tenderState(t, n);
@@ -911,7 +911,7 @@ async function supplierView(env, t, inv) {
   const label = (a) => (a === inv.alias ? "شما" : t.show_names ? names.get(a) || aliasLabel(a) : aliasLabel(a));
   const live = bids.filter((b) => b.state !== "void" && (prices || b.alias === inv.alias));
   const mineFixed = bids.filter((b) => b.alias === inv.alias && b.fix_at).map((b) => ({ id: b.id, state: b.state, amount: b.amount, orig_amount: b.orig_amount, reason: b.fix_reason, at: b.fix_at }));
-  /* قلم‌های دیگرِ گروه که همین شماره در آن‌ها دعوت شده */
+  /* قلم‌های دیگر گروه که همین شماره در آن‌ها دعوت شده */
   let lotList = [];
   if (lots.length > 1) {
     const mineLots = (await env.DB.prepare(`SELECT tender_id FROM tender_invites WHERE phone=? AND on_list=1 AND tender_id IN (${lots.map(() => "?").join(",")})`).bind(inv.phone, ...lots.map((l) => l.id)).all()).results || [];
@@ -942,11 +942,11 @@ export async function tenderLots(env, request, code) {
   const { t, inv } = await tenderWho(env, request, code);
   return { lots: (await supplierView(env, t, inv)).lots };
 }
-/** POST /tender/:code/bid {amount} — اتمی با شرطِ rev؛ پیشنهادهای خودکارِ پاسخ در همان batch؛ تا چهار بار در برخورد */
+/** POST /tender/:code/bid {amount} — اتمی با شرط rev؛ پیشنهادهای خودکار پاسخ در همان batch؛ تا چهار بار در برخورد */
 export async function tenderBid(env, request, code, b, ctx) {
   let { t, inv } = await tenderWho(env, request, code);
   const amount = amountOf(b && b.amount);
-  if (t.require_accept && !inv.accepted_at) throw new HttpError("اول شرایطِ مناقصه را بخوانید و بپذیرید.", 409, { code: "accept" });
+  if (t.require_accept && !inv.accepted_at) throw new HttpError("اول شرایط مناقصه را بخوانید و بپذیرید.", 409, { code: "accept" });
   for (let i = 0; i < 4; i++) {
     t = await finalizeIfDue(env, t, ctx);
     const n = now();
@@ -969,21 +969,21 @@ export async function tenderBid(env, request, code, b, ctx) {
     }
     t = await rowOf(env, t.id);
   }
-  throw new HttpError("پیشنهادهای هم‌زمانِ زیادی رسید؛ دوباره بزنید.", 409);
+  throw new HttpError("پیشنهادهای هم‌زمان زیادی رسید؛ دوباره بزنید.", 409);
 }
-/** POST /tender/:code/proxy {min | null} — «پیشنهادِ خودکار» تا کفِ همین نفر؛ اگر لازم است همین حالا اجرا می‌شود */
+/** POST /tender/:code/proxy {min | null} — «پیشنهاد خودکار» تا کف همین نفر؛ اگر لازم است همین حالا اجرا می‌شود */
 export async function tenderProxy(env, request, code, b, ctx) {
   let { t, inv } = await tenderWho(env, request, code);
-  if (!t.proxy_on) throw new HttpError("پیشنهادِ خودکار در این مناقصه بسته است.", 403);
+  if (!t.proxy_on) throw new HttpError("پیشنهاد خودکار در این مناقصه بسته است.", 403);
   if (["ended", "cancelled"].includes(tenderState(t, now()))) throw new HttpError("این مناقصه بسته است.");
-  if (t.require_accept && !inv.accepted_at) throw new HttpError("اول شرایطِ مناقصه را بخوانید و بپذیرید.", 409, { code: "accept" });
+  if (t.require_accept && !inv.accepted_at) throw new HttpError("اول شرایط مناقصه را بخوانید و بپذیرید.", 409, { code: "accept" });
   let min = null;
   if (b && b.min != null && T(b.min) !== "") {
     min = amountOf(b.min);
     const floor = Math.ceil(t.start_price * (1 - t.floor_pct / 100));
-    if (!(min > 0)) throw new HttpError("کفِ قیمت را به ریال بنویسید.");
-    if (min > t.start_price) throw new HttpError("کف از قیمتِ شروع بیشتر است.");
-    if (min < floor) throw new HttpError(`کمتر از ${faN(floor)} ریال (کفِ این مناقصه) پذیرفته نمی‌شود.`);
+    if (!(min > 0)) throw new HttpError("کف قیمت را به ریال بنویسید.");
+    if (min > t.start_price) throw new HttpError("کف از قیمت شروع بیشتر است.");
+    if (min < floor) throw new HttpError(`کمتر از ${faN(floor)} ریال (کف این مناقصه) پذیرفته نمی‌شود.`);
   }
   await env.DB.prepare("UPDATE tender_invites SET proxy_min=?, proxy_at=? WHERE tender_id=? AND alias=?").bind(min, min ? now() : null, t.id, inv.alias).run();
   await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), "supplier", "tender_proxy", null, JSON.stringify({ tender_id: t.id, alias: inv.alias, on: !!min })).run();
@@ -998,7 +998,7 @@ export async function tenderAccept(env, request, code) {
   const fresh = await env.DB.prepare("SELECT * FROM tender_invites WHERE tender_id=? AND alias=?").bind(t.id, inv.alias).first();
   return { ok: true, view: await supplierView(env, await rowOf(env, t.id), fresh) };
 }
-/** POST /tender/:code/pref {notify} — پیامکِ «عقب افتادید» را خودش خاموش یا روشن می‌کند */
+/** POST /tender/:code/pref {notify} — پیامک «عقب افتادید» را خودش خاموش یا روشن می‌کند */
 export async function tenderPref(env, request, code, b) {
   const { t, inv } = await tenderWho(env, request, code);
   await env.DB.batch((await lotsOf(env, t)).map((l) => env.DB.prepare("UPDATE tender_invites SET notify_off=? WHERE tender_id=? AND phone=?").bind(b && b.notify === false ? 1 : 0, l.id, inv.phone)));
@@ -1009,9 +1009,9 @@ export async function tenderPref(env, request, code, b) {
 export async function tenderFixRequest(env, request, code, b, ctx) {
   const { t, inv } = await tenderWho(env, request, code);
   const note = T(b && b.note).slice(0, 400);
-  if (!note) throw new HttpError("بنویسید کدام پیشنهاد اشتباه است و مبلغِ درست چیست.");
+  if (!note) throw new HttpError("بنویسید کدام پیشنهاد اشتباه است و مبلغ درست چیست.");
   const last = await env.DB.prepare("SELECT * FROM tender_bids WHERE tender_id=? AND alias=? AND state<>'void' ORDER BY id DESC LIMIT 1").bind(t.id, inv.alias).first();
-  await raiseAlarm(env, { kind: "tender_fix", title: `درخواستِ اصلاحِ پیشنهاد در مناقصهٔ «${t.title}»`,
+  await raiseAlarm(env, { kind: "tender_fix", title: `درخواست اصلاح پیشنهاد در مناقصهٔ «${t.title}»`,
     body: `${inv.name}${last ? ` (آخرین پیشنهاد ${faN(last.amount)} ریال)` : ""}: ${note}`, payload: { tender_id: t.id, alias: inv.alias, bid_id: last ? last.id : null } }, ctx);
   return { ok: true };
 }
@@ -1033,7 +1033,7 @@ export async function tenderMarket(env) {
     out = { ok: true, at: now(), src: "tgju.org", items: MKT.filter(([k]) => c[k]).map(([k, fa]) => ({ k, fa, p: val(c[k].p), h: val(c[k].h), l: val(c[k].l),
       d: val(c[k].d), dp: Number(c[k].dp) || 0, dt: c[k].dt || "", t: c[k].t || "", usd: k === "ons" })) };
   } catch (e) {
-    out = { ok: false, at: now(), error: "قیمتِ لحظه‌ای فعلاً در دسترس نیست." };
+    out = { ok: false, at: now(), error: "قیمت لحظه‌ای فعلاً در دسترس نیست." };
   }
   if (cache && out.ok) await cache.put(key, new Response(JSON.stringify(out), { headers: { "content-type": "application/json", "cache-control": "max-age=60" } })).catch(() => {});
   return out;

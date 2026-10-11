@@ -1,6 +1,6 @@
 /* ============================================================
-   مناقصه — ابزارهای مشترکِ صفحهٔ تأمین‌کننده (tender.js) و نمای زندهٔ پنل پشتیبانی (tender-admin.js) (مهر ۱۴۰۵)
-   window.TDUI: عدد و مبلغ، عدد به حروف، شمارشِ معکوسِ حلقه‌ای، نمودارِ قیمت (SVG بی کتابخانه)، کارت‌های بازار، ماشین‌حساب.
+   مناقصه — ابزارهای مشترک صفحهٔ تأمین‌کننده (tender.js) و نمای زندهٔ پنل پشتیبانی (tender-admin.js) (مهر ۱۴۰۵)
+   window.TDUI: عدد و مبلغ، عدد به حروف، شمارش معکوس حلقه‌ای، نمودار قیمت (SVG بی کتابخانه)، کارت‌های بازار، ماشین‌حساب.
    ============================================================ */
 (function () {
   "use strict";
@@ -10,9 +10,9 @@
   const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => FA.indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
   /** ۱۲٬۳۴۵٬۰۰۰ */
   const money = (n) => (n == null || !isFinite(n) ? "—" : fa(Math.round(Number(n)).toLocaleString("en-US")).replace(/,/g, "٬"));
-  /** ورودیِ مبلغ با هر رقم و جداکننده → عددِ صحیح یا NaN */
+  /** ورودی مبلغ با هر رقم و جداکننده → عدد صحیح یا NaN */
   const parseAmt = (s) => { const t = latin(s).replace(/[,٬،\s]/g, "").replace(/ریال|تومان/g, ""); return /^\d+$/.test(t) ? Number(t) : NaN; };
-  /** نمایشِ کوتاه: «۲٫۶۵ میلیون» */
+  /** نمایش کوتاه: «۲٫۶۵ میلیون» */
   function short(n) {
     const a = Math.abs(Number(n) || 0);
     const [d, u] = a >= 1e12 ? [1e12, "هزار میلیارد"] : a >= 1e9 ? [1e9, "میلیارد"] : a >= 1e6 ? [1e6, "میلیون"] : a >= 1e3 ? [1e3, "هزار"] : [1, ""];
@@ -50,10 +50,10 @@
   const F_HMS = dtf({ hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }), F_WHEN = dtf({ weekday: "long", day: "numeric", month: "long", hour: "2-digit", minute: "2-digit", hour12: false });
   const hms = (ms) => (F_HMS ? F_HMS.format(new Date(ms)) : fa(new Date(ms).toLocaleTimeString()));
   const when = (ms) => (F_WHEN ? F_WHEN.format(new Date(ms)) : fa(new Date(ms).toLocaleString()));
-  const ST = { draft: "پیش‌نویس", scheduled: "شروع‌نشده", sealed: "دورِ سربسته", live: "در جریان", ended: "تمام شد", cancelled: "لغو شد" };
+  const ST = { draft: "پیش‌نویس", scheduled: "شروع‌نشده", sealed: "دور سربسته", live: "در جریان", ended: "تمام شد", cancelled: "لغو شد" };
   const stChip = (st) => `<span class="td-st ${esc(st)}"><i></i>${ST[st] || esc(st)}</span>`;
 
-  /** حلقهٔ شمارشِ معکوس — left/total به میلی‌ثانیه؛ data-ring برای به‌روزرسانیِ ثانیه‌ای */
+  /** حلقهٔ شمارش معکوس — left/total به میلی‌ثانیه؛ data-ring برای به‌روزرسانی ثانیه‌ای */
   function ring(left, total, label) {
     const R = 64, C = 2 * Math.PI * R, f = total > 0 ? Math.max(0, Math.min(1, left / total)) : 0;
     const cls = left <= 60e3 ? "hot" : left <= 180e3 ? "warn" : "";
@@ -63,7 +63,7 @@
       <circle class="fg" cx="75" cy="75" r="${R}" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="${C.toFixed(1)}" stroke-dashoffset="${(C * (1 - f)).toFixed(1)}" data-c="${C.toFixed(1)}"/></svg>
       <div class="in"><span class="clock" data-clock>${clock(left)}</span><span class="lbl">${esc(label || "تا پایان")}</span></div></div>`;
   }
-  /** به‌روزرسانیِ ثانیه‌ایِ حلقه بی رسمِ دوباره */
+  /** به‌روزرسانی ثانیه‌ای حلقه بی رسم دوباره */
   function tickRing(root, left, total) {
     const r = root && root.querySelector("[data-ring]"); if (!r) return;
     const c = r.querySelector("[data-clock]"); if (c) c.textContent = clock(left);
@@ -73,7 +73,7 @@
   }
 
   /**
-   * نمودارِ «بهترین قیمت» در طولِ زمان (پله‌ای) با نقطهٔ هر پیشنهاد؛ خطِ قیمتِ شروع و کف.
+   * نمودار «بهترین قیمت» در طول زمان (پله‌ای) با نقطهٔ هر پیشنهاد؛ خط قیمت شروع و کف.
    * o: {series:[{at, amount, best, mine}], start, floor, from, to}
    */
   function chart(o) {
@@ -94,16 +94,16 @@
       return `<line class="grid" x1="${L}" x2="${W - R}" y1="${yy.toFixed(1)}" y2="${yy.toFixed(1)}"/><text class="lab" x="${W - R + 6}" y="${(yy + 3).toFixed(1)}">${esc(short(v))}</text>`; }).join("");
     const line = (v, cls, t) => (v >= lo && v <= hi ? `<line class="${cls}" x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}"><title>${esc(t)}</title></line>` : "");
     const dots = S.map((p) => `<circle class="dot ${p.mine ? "me" : ""}" cx="${x(p.at).toFixed(1)}" cy="${y(p.amount).toFixed(1)}" r="${p.mine ? 4.2 : 3.2}"><title>${esc(`${money(p.amount)} ریال — ${hms(p.at)}`)}</title></circle>`).join("");
-    return `<svg class="td-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="نمودارِ کمترین قیمت در طولِ مناقصه">
+    return `<svg class="td-chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="نمودار کمترین قیمت در طول مناقصه">
       <defs><linearGradient id="tdArea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6aa0ff" stop-opacity=".32"/><stop offset="1" stop-color="#6aa0ff" stop-opacity="0"/></linearGradient></defs>
-      ${grid}${line(o.start, "start", "قیمتِ شروع")}${line(o.floor, "floor", "کف")}${o.ref ? line(o.ref.v, "ref", o.ref.label) : ""}<path class="ar" d="${area}"/><path class="ln" d="${d}"/>${dots}
+      ${grid}${line(o.start, "start", "قیمت شروع")}${line(o.floor, "floor", "کف")}${o.ref ? line(o.ref.v, "ref", o.ref.label) : ""}<path class="ar" d="${area}"/><path class="ln" d="${d}"/>${dots}
       <text class="lab" x="${L}" y="${H - 6}">${esc(hms(t0))}</text><text class="lab" x="${W - R}" y="${H - 6}" text-anchor="end">${esc(hms(t1))}</text></svg>`;
   }
 
   /** کارت‌های بازار — مبلغ‌های ریالی به تومان */
   function market(m) {
-    if (!m) return `<div class="td-empty">در حال خواندنِ قیمت‌ها…</div>`;
-    if (!m.ok) return `<div class="td-empty">${esc(m.error || "قیمتِ لحظه‌ای در دسترس نیست.")}</div>`;
+    if (!m) return `<div class="td-empty">در حال خواندن قیمت‌ها…</div>`;
+    if (!m.ok) return `<div class="td-empty">${esc(m.error || "قیمت لحظه‌ای در دسترس نیست.")}</div>`;
     return `<div class="td-mkt">${m.items.map((i) => `<div class="td-tick" title="بیشترین ${esc(i.usd ? money(i.h) : money(i.h / 10))} · کمترین ${esc(i.usd ? money(i.l) : money(i.l / 10))}">
         <small>${esc(i.fa)}</small><b>${i.usd ? `$${esc(fa(i.p.toLocaleString("en-US")))}` : `${money(i.p / 10)} <small>تومان</small>`}</b>
         ${i.dp ? `<i class="${i.dt === "low" ? "dn" : "up"}">${i.dt === "low" ? "▼" : "▲"} ${fa(String(i.dp).replace(".", "٫"))}٪</i>` : `<i>${esc(fa(i.t || ""))}</i>`}</div>`).join("")}</div>
@@ -111,7 +111,7 @@
   }
   const dollar = (m) => { const i = m && m.ok && m.items.find((x) => x.k === "price_dollar_rl"); return i ? i.p : null; };
 
-  /** ماشین‌حسابِ سود و زیان — c: {cost, usd, price, qty}؛ rate: نرخِ دلار (ریال) */
+  /** ماشین‌حساب سود و زیان — c: {cost, usd, price, qty}؛ rate: نرخ دلار (ریال) */
   function calc(c, rate) {
     const usd = Number(latin(c.usd).replace(/[,٬\s]/g, "").replace(/٫/g, "."));
     const cost = c.usd && rate ? (usd > 0 ? Math.round(usd * rate) : NaN) : parseAmt(c.cost);
@@ -121,14 +121,14 @@
     const tone = per == null ? "" : per >= 0 ? "ok" : "bad";
     const cell = (l, v) => `<div class="${tone}"><small>${l}</small><b>${v}</b></div>`;
     return `<div class="td-calc">
-      <label>قیمتِ تمام‌شدهٔ شما (هر واحد، ریال)<input data-calc="cost" inputmode="numeric" value="${esc(c.cost || "")}" placeholder="مثلاً ۸۵۰٬۰۰۰" ${c.usd ? "disabled" : ""}></label>
+      <label>قیمت تمام‌شدهٔ شما (هر واحد، ریال)<input data-calc="cost" inputmode="numeric" value="${esc(c.cost || "")}" placeholder="مثلاً ۸۵۰٬۰۰۰" ${c.usd ? "disabled" : ""}></label>
       <label>یا بهای دلاری هر واحد${rate ? ` <span>(دلار ${money(rate / 10)} تومان)</span>` : ""}<input data-calc="usd" inputmode="decimal" value="${esc(c.usd || "")}" placeholder="مثلاً ۳۲۰" ${rate ? "" : "disabled"}></label>
-      <label>قیمتِ پیشنهادی (هر واحد، ریال)<input data-calc="price" inputmode="numeric" value="${esc(c.price || "")}"></label>
+      <label>قیمت پیشنهادی (هر واحد، ریال)<input data-calc="price" inputmode="numeric" value="${esc(c.price || "")}"></label>
       <label>مقدار<input data-calc="qty" inputmode="decimal" value="${esc(c.qty || "")}"></label>
-      <div class="res">${cell("سودِ هر واحد", per == null ? "—" : `${per < 0 ? "−" : ""}${money(Math.abs(per))}`)}${cell("سودِ کل", tot == null ? "—" : `${tot < 0 ? "−" : ""}${short(Math.abs(tot))}`)}${cell("حاشیهٔ سود", pct == null ? "—" : `${fa(pct.toFixed(1).replace(".", "٫"))}٪`)}</div></div>`;
+      <div class="res">${cell("سود هر واحد", per == null ? "—" : `${per < 0 ? "−" : ""}${money(Math.abs(per))}`)}${cell("سود کل", tot == null ? "—" : `${tot < 0 ? "−" : ""}${short(Math.abs(tot))}`)}${cell("حاشیهٔ سود", pct == null ? "—" : `${fa(pct.toFixed(1).replace(".", "٫"))}٪`)}</div></div>`;
   }
 
-  /** رنگِ ثابتِ نشانِ هر شمارهٔ ناشناس */
+  /** رنگ ثابت نشان هر شمارهٔ ناشناس */
   const avColor = (n) => ["#4f8cff", "#a78bfa", "#22c55e", "#f59e0b", "#ef4444", "#06b6d4", "#ec4899", "#84cc16", "#f97316", "#14b8a6"][Math.abs(Number(n) || 0) % 10];
 
   window.TDUI = { fa, esc, latin, money, parseAmt, short, words, clock, hms, when, ST, stChip, ring, tickRing, chart, market, dollar, calc, avColor };

@@ -175,7 +175,9 @@ body.tp-body.has-sky { background: transparent; }
 @media (max-width: 720px) {
   .tp-top.ui { padding: 8px 12px; }
   .tp-avatar-btn .nm { display: none; }
-  .tp-avatar-btn { padding: 0 3px; width: 40px; justify-content: center; }
+  /* گوشی: فقط دایرهٔ حرفِ اول، هم‌مرکز با دایرهٔ شیشه‌ای (فلشِ منو جا می‌گرفت و حرف را از وسط بیرون می‌برد) */
+  .tp-avatar-btn { padding: 0; gap: 0; width: 40px; justify-content: center; }
+  .tp-avatar-btn > svg { display: none; }
   .tp-top.ui .brand h1 { font-size: .95rem; }
 }
 
@@ -963,3 +965,30 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
 .al-cfg { display: flex; flex-direction: column; gap: 14px; }
 .al-row { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--ui-thin); border: 1px solid var(--ui-card-edge); }
 .al-row b { font-size: .98rem; }
+
+/* ============================================================
+   در حال بارگذاری: لوگوی آریانا وسط و نوارِ دایره‌ایِ چرخان دورش (مهر ۱۴۰۵) — TP.ui.loader
+   ============================================================ */
+.ui-load { --ld-a: #4f8cff; --ld-b: #b9d3ff; --ld-track: rgba(79, 140, 255, 0.16);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; padding: 40px 16px;
+  color: var(--tp-muted); text-align: center; animation: uiLoadIn .3s ease both; }
+:root[data-theme="light"] .ui-load { --ld-a: #2f6fe4; --ld-b: #1c3c8c; --ld-track: rgba(47, 111, 228, 0.14); }
+.ui-load.page { min-height: 72dvh; }
+.ui-load-ring { --s: 60px; --w: 4px; position: relative; flex: none; width: var(--s); height: var(--s); }
+.ui-load.page .ui-load-ring { --s: 88px; --w: 5px; }
+.ui-load-ring img { position: absolute; inset: 0; width: 100%; height: 100%; border-radius: 50%; object-fit: cover; background: #fff;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.5), 0 12px 30px -12px rgba(0, 10, 40, 0.75), 0 0 34px -6px rgba(79, 140, 255, 0.45); }
+/* شیار ثابت و نوار چرخان، کمی بیرون‌تر از لوگو */
+.ui-load-ring::before, .ui-load-ring > i { content: ""; position: absolute; inset: calc(var(--s) * -0.17); border-radius: 50%; }
+.ui-load-ring::before { border: var(--w) solid var(--ld-track); }
+.ui-load-ring > i { background: conic-gradient(from 0deg, transparent 0deg 90deg, var(--ld-a) 300deg, var(--ld-b) 360deg);
+  -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - var(--w) - 0.5px), #000 calc(100% - var(--w)));
+  mask: radial-gradient(farthest-side, transparent calc(100% - var(--w) - 0.5px), #000 calc(100% - var(--w)));
+  animation: uiLoadSpin 1s linear infinite; }
+/* سرِ گردِ نوار */
+.ui-load-ring > i::after { content: ""; position: absolute; top: 0; left: 50%; width: var(--w); height: var(--w); margin-left: calc(var(--w) / -2); border-radius: 50%; background: var(--ld-b); }
+.ui-load-t { font-size: .92rem; font-weight: 500; line-height: 1.8; }
+@keyframes uiLoadSpin { to { transform: rotate(360deg); } }
+@keyframes uiLoadIn { from { opacity: 0; } }
+/* حرکت کمتر: نوار آهسته می‌چرخد (نشانهٔ «هنوز در کار است» می‌ماند) */
+@media (prefers-reduced-motion: reduce) { .ui-load { animation: none; } .ui-load-ring > i { animation-duration: 2.6s; } }

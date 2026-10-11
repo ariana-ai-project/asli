@@ -206,6 +206,9 @@ tr.drawer td { background: rgba(3,8,20,.45) !important; padding: 0 !important; }
 
 /* ---------- چیپ‌ها ---------- */
 .chip { display: inline-block; font-size: .78rem; padding: 0 8px; border-radius: 999px; border: 1px solid var(--tp-line-2); color: var(--tp-muted); white-space: nowrap; line-height: 1.6; }
+/* «چیپِ» دکمه‌ای: بی زمینهٔ خاکستریِ پیش‌فرضِ مرورگر (رویش نوشتهٔ کم‌رنگ خوانا نبود) */
+button.chip { background: transparent; font: inherit; font-size: .78rem; line-height: 1.6; cursor: pointer; }
+button.chip:hover { border-color: var(--tp-accent); color: var(--tp-fg); }
 .chip.ok { background: rgba(34,197,94,.14); border-color: rgba(34,197,94,.45); color: #6ee7b7; }
 .chip.warn { background: rgba(242,194,48,.14); border-color: rgba(242,194,48,.45); color: #fcd34d; }
 .chip.bad { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.45); color: #fca5a5; }

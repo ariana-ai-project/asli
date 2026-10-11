@@ -304,7 +304,7 @@
     const d = S.desk, f = S.rf, rows = reqRows();
     let h = vReqBar(rows);
     if (S.deskErr) h += `<div class="tp-note warn">${esc(S.deskErr)}</div>`;
-    if (!d) return h + (S.deskLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!d) return h + (S.deskLoading ? `${TP.ui.loader()}` : "");
     if (!rows.length) {
       const q = f.q.trim();
       return h + `<div class="empty"><b>درخواستی با این فیلترها نیست.</b>${f.win !== "all" && !f.id ? `<br><br><button class="tp-btn" data-rwin="all">همهٔ تاریخ‌ها</button>` : ""}${q.length >= 4 && !f.id ? ` <button class="tp-btn" data-lookup="${esc(q)}">جستجوی «${esc(q)}» در کل سامانه</button>` : ""}</div>`;
@@ -327,7 +327,7 @@
     return { el, set, close: () => el.remove() };
   }
   async function openAsg(aid) {
-    const ov = overlay("جزئیات ارجاع", `<div class="empty">در حال بارگذاری…</div>`);
+    const ov = overlay("جزئیات ارجاع", `${TP.ui.loader()}`);
     try {
       const d = await api(`/assignments/${aid}`);
       ov.set(`درخواست <span class="num">${esc(d.request ? d.request.id : "")}</span> — ${esc(d.assignment.expert_label || d.assignment.expert_name)}`, asgHtml(d));
@@ -409,7 +409,7 @@
   }
   function vExperts() {
     const E = S.experts;
-    if (!E.length) return `<div class="empty">در حال بارگذاری…</div>`;
+    if (!E.length) return `${TP.ui.loader()}`;
     const sum = (k) => E.reduce((a, e) => a + (e[k] || 0), 0);
     const q = (S.exQ || "").trim();
     /* پرکارها و دیرکردها اول؛ بقیه به همان ترتیبِ سرور */
@@ -442,7 +442,7 @@
   function vExpert() {
     const back = `<button class="tp-btn sm" data-exback>→ همهٔ کارشناسان</button>`;
     if (S.exErr) return `${back}<div class="tp-note warn">${esc(S.exErr)}</div>`;
-    if (!S.ex) return `${back}<div class="empty">در حال بارگذاری…</div>`;
+    if (!S.ex) return `${back}${TP.ui.loader()}`;
     const e = S.ex.expert, row = S.experts.find((x) => x.id === e.id) || {}, A = S.ex.assignments || [];
     return `<div class="sv-exone">
       <section class="tp-box sv-exhead">${back}${avOf(e.name, e.label, "lg")}<div class="t"><h2>${e.senior ? `<span class="sv-star">★</span>` : ""}${esc(e.label || e.name)}</h2><small>${esc(e.name)}</small></div>
@@ -501,7 +501,7 @@
   }
   function vChatList() {
     const f = S.thF, list = thRows();
-    const body = S.thErr ? `<div class="tp-note warn">${esc(S.thErr)}</div>` : !S.th ? `<div class="empty">در حال بارگذاری…</div>`
+    const body = S.thErr ? `<div class="tp-note warn">${esc(S.thErr)}</div>` : !S.th ? `${TP.ui.loader()}`
       : list.length ? list.map(thRow).join("") : `<div class="empty">گفت‌وگویی${f.q ? ` با «${esc(f.q)}»` : ""} نیست.</div>`;
     return `<aside class="sv-chl"><div class="sv-chh">
         <select class="tp-select" data-thf="expert" aria-label="کارشناس"><option value="">همهٔ کارشناسان</option>${expertOpts(f.expert)}</select>
@@ -563,7 +563,7 @@
     if (!phoneMode) return `<div class="sv-chat m">${vChatList()}</div>`;
     const d = S.thData;
     const info = !S.thId ? `<div class="sv-thnone">${TP.ui.ICON.chat}<b>یک گفت‌وگو را انتخاب کنید</b><span>اقلام و مشخصاتش این‌جا و پیام‌ها در گوشی می‌آیند.</span></div>`
-      : !d ? `<div class="empty">در حال بارگذاری…</div>` : d.error ? `<div class="tp-note warn">${esc(d.error)}</div>` : thInfo(d);
+      : !d ? `${TP.ui.loader()}` : d.error ? `<div class="tp-note warn">${esc(d.error)}</div>` : thInfo(d);
     return `<div class="sv-chat">${vChatList()}<section class="sv-chm" data-keep-scroll>${info}</section>
       <section class="ph-stage">${PH.frame(thScreen(true))}</section></div>`;
   }
@@ -650,7 +650,7 @@
         <div class="mg-ffoot"><button class="tp-btn sm" data-lclear>پاک کردن همه</button><span class="spacer"></span><button class="tp-btn primary" data-lfopen>${TP.ui.ICON.check} بستن</button></div></div>` : ""}
       <div class="tp-pills lg-cats">${GROUPS.map(([k, l]) => `<button type="button" class="tp-pill ${f.g === k ? "on" : ""}" data-lg="${k}" aria-pressed="${f.g === k ? "true" : "false"}">${l}</button>`).join("")}</div>`;
     if (S.logErr) h += `<div class="tp-note warn">${esc(S.logErr)}</div>`;
-    if (!S.log) return h + (S.logLoading ? `<div class="empty">در حال بارگذاری…</div>` : "") + `</section></div>`;
+    if (!S.log) return h + (S.logLoading ? `${TP.ui.loader()}` : "") + `</section></div>`;
     h += feedTl(S.log, true);
     if (S.logMore) h += `<div class="sv-more"><button class="tp-btn" data-lmore ${S.logLoading ? "disabled" : ""}>رخدادهای قدیمی‌تر</button></div>`;
     return h + `</section></div>`;
@@ -696,7 +696,7 @@
         <input class="tp-input sv-q" data-fq="cm" value="${esc(S.cmF.q)}" placeholder="شماره، قلم، طرف مقابل یا تأمین‌کننده" aria-label="جستجو در اقلام">
         <span class="spacer"></span><span class="mg-count">${S.cm ? `<b>${M(rows.length)}</b> قلم در ${M(groups.length)} ارجاع` : ""}${S.cmLoading ? " · …" : ""}</span></div>`;
     if (S.cmErr) h += `<div class="tp-note warn">${esc(S.cmErr)}</div>`;
-    if (!S.cm) return h + (S.cmLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!S.cm) return h + (S.cmLoading ? `${TP.ui.loader()}` : "");
     if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده.</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز</button>` : ""}</div>`;
     h += `<div class="sv-cmbar ${S.cmSel.size ? "on" : ""}"><button class="tp-btn sm" data-csel="${sel.length === rows.length ? "none" : "all"}">${sel.length === rows.length ? "لغو انتخاب" : `انتخاب همه (${M(rows.length)})`}</button>
         ${S.cmSel.size ? `<span class="dim">${M(sel.length)} قلم انتخاب شده</span><span class="spacer"></span>
@@ -774,7 +774,7 @@
     if (S.aiView === "md") return sub + vMd();
     let h = sub;
     if (S.aiErr) h += `<div class="tp-note warn">${esc(S.aiErr)}</div>`;
-    if (!S.ai) return h + (S.aiLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!S.ai) return h + (S.aiLoading ? `${TP.ui.loader()}` : "");
     const A = S.ai;
     h += `<div class="sv-aiwrap ${TP.ui.once("sup.ai")}">`;
     if (!A.sms) h += `<div class="tp-note warn">درگاه پیامک (TextBee) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند.</div>`;
@@ -818,7 +818,7 @@
   function vRules() {
     let h = "";
     if (S.rulesErr) h += `<div class="tp-note warn">${esc(S.rulesErr)}</div>`;
-    if (!S.rules || !S.rulesDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    if (!S.rules || !S.rulesDraft) return h + `${TP.ui.loader()}`;
     const R = S.rulesDraft;
     const dims = S.rules.dims || [{ key: "unit", fa: "قیمت واحد", unit: "ریال" }, { key: "total", fa: "قیمت کل", unit: "ریال" }, { key: "qty", fa: "مقدار", unit: "به واحدِ خودِ قلم" }];
     const inp = (d, i, k, w, ph) => `<input class="tp-input num" data-rr="${d}:${i}:${k}" value="${esc(R[d][i][k])}" inputmode="numeric" dir="ltr" style="width:${w}px" ${ph ? `placeholder="${ph}"` : ""}>`;
@@ -863,7 +863,7 @@
       <label class="chkline"><input type="checkbox" data-chgf="frozen" ${f.frozen ? "checked" : ""}> فقط سپرده‌شده به کارشناس هوشمند</label>
       <span class="end">${S.chg ? `${M(S.chg.length)} قلم${S.chgMore ? "+" : ""}` : ""}${S.chgLoading ? " · در حال بارگذاری…" : ""}</span></div>`;
     if (S.chgErr) h += `<div class="tp-note warn">${esc(S.chgErr)}</div>`;
-    if (!S.chg) return h + (S.chgLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!S.chg) return h + (S.chgLoading ? `${TP.ui.loader()}` : "");
     if (!S.chg.length) return h + `<div class="empty"><b>قلمی نیست.</b>${f.changed ? "قلمِ تغییرکرده‌ای با این صافی‌ها نیست؛ تیکِ «فقط اقلامِ تغییرکرده» را بردارید تا همهٔ اقلامِ نرمال‌شده بیایند." : ""}</div>`;
     const lockTxt = (k) => `${k.title ? "🔒" : "🔓"} عنوان · ${k.qty ? "🔒" : "🔓"} مقدار${Object.entries(k.layers || {}).map(([n, v]) => ` · ${v ? "🔒" : "🔓"} ${esc(n)}`).join("")}`;
     h += S.chg.map((x) => `<div class="tp-card" style="padding:12px 16px;margin:10px 0">
@@ -882,7 +882,7 @@
     return h;
   }
   async function chgLog(id) {
-    const ov = overlay("تاریخچهٔ ساختارِ قلم", `<div class="empty">در حال بارگذاری…</div>`);
+    const ov = overlay("تاریخچهٔ ساختارِ قلم", `${TP.ui.loader()}`);
     try {
       const r = await api(`/changes/${id}`);
       const it = r.item || {};
@@ -916,7 +916,7 @@
   function vRank() {
     let h = "";
     if (S.rankErr) h += `<div class="tp-note warn">${esc(S.rankErr)}</div>`;
-    if (!S.rank || !S.rankDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    if (!S.rank || !S.rankDraft) return h + `${TP.ui.loader()}`;
     const W = S.rankDraft.weights, D = S.rankDraft.dispatch, fa = S.rank.fa || {}, tf = S.rank.then_fa || {};
     const inp = (attr, v, w = 80) => `<input class="tp-input num" ${attr} value="${esc(v)}" inputmode="decimal" dir="ltr" style="width:${w}px">`;
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">وزن‌های رتبهٔ نهایی <span class="dim">(۰ تا ۱۰؛ صفر یعنی آن ستون اثری ندارد)</span></h3>
@@ -957,7 +957,7 @@
   function vSw() {
     let h = "";
     if (S.swErr) h += `<div class="tp-note warn">${esc(S.swErr)}</div>`;
-    if (!S.sw) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    if (!S.sw) return h + `${TP.ui.loader()}`;
     const on = !!S.sw.pfRead;
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">📄 خوانش هوشمند پیش‌فاکتور
         <span class="chip ${on ? "info" : "ok"}" style="margin-inline-start:8px">${on ? "روشن" : "خاموش (پیش‌فرض)"}</span></h3>
@@ -1008,7 +1008,7 @@
   function vMd() {
     let h = "";
     if (S.mdErr) h += `<div class="tp-note warn">${esc(S.mdErr)}</div>`;
-    if (!S.md || !S.mdDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    if (!S.md || !S.mdDraft) return h + `${TP.ui.loader()}`;
     const fa = S.md.fa || {};
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">حالت‌ها</h3>
       <table class="sup-tbl" style="width:auto"><tbody>${Object.keys(MD_HELP).map((k) => `<tr><td><b>${esc(fa[k] || k)}</b></td><td class="dim" style="white-space:normal">${esc(MD_HELP[k])}</td></tr>`).join("")}</tbody></table></div>`;
@@ -1044,7 +1044,7 @@
     let h = "";
     if (S.usdErr) h += `<div class="tp-note warn">${esc(S.usdErr)}</div>`;
     const U = S.usd;
-    if (!U) return h + (S.usdLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!U) return h + (S.usdLoading ? `${TP.ui.loader()}` : "");
     const L = U.latest, last = U.bot.runs[0];
     const chip = (src) => { const c = USD_SRC[src] || [src, ""]; return `<span class="chip ${c[1]}">${c[0]}</span>`; };
     h += `<div class="tp-card" style="padding:12px 16px;margin:10px 0;display:flex;gap:18px;flex-wrap:wrap;align-items:center">
@@ -1161,7 +1161,7 @@
     let h = `<div class="mg-bar"><div class="tp-pills">${DL_ST.map(([k, l]) => `<button type="button" class="tp-pill ${S.dlF.state === k ? "on" : ""}" data-dlst="${k}" aria-pressed="${S.dlF.state === k}">${l}</button>`).join("")}</div>
       <span class="spacer"></span><span class="mg-count">${S.dl ? `<b>${M(S.dl.length)}</b> تحویل` : ""}${S.dlLoading ? " · …" : ""}</span></div>`;
     if (S.dlErr) h += `<div class="tp-note warn">${esc(S.dlErr)}</div>`;
-    if (!S.dl) return h + (S.dlLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
+    if (!S.dl) return h + (S.dlLoading ? `${TP.ui.loader()}` : "");
     if (!S.dl.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>تحویلی نیست</b>${S.dlF.state === "new" ? "<span>تحویلِ بررسی‌نشده‌ای نمانده.</span>" : ""}</div>`;
     return h + `<div class="sv-dls ${TP.ui.once("sup.dl")}">${S.dl.map(dlCard).join("")}</div>`;
   }
@@ -1169,7 +1169,7 @@
     const D = S.dlD;
     let h = `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px"><button class="tp-btn sm" data-dlback>→ همهٔ تحویل‌ها</button>${D ? REV_CHIP[D.run.review.state] || "" : ""}</div>`;
     if (S.dlDErr) return h + `<div class="tp-note warn">${esc(S.dlDErr)}</div>`;
-    if (!D) return h + `<div class="empty">در حال بارگذاری…</div>`;
+    if (!D) return h + `${TP.ui.loader()}`;
     const r = D.request, rv = D.run.review || {}, aid = D.run.assignment_id, rid = r.id;
     h += `<div class="tp-card" style="padding:14px 16px"><h2 style="margin:0 0 6px">درخواست <span class="num">${esc(rid)}</span> — ${esc(r.party || "")}</h2>
       <div class="dim">کارشناس: ${esc(r.expert)} (🤖 کارشناس هوشمند) · تحویل: ${fmtS(rv.at)}${r.commission_no ? ` · جدول کمیسیون TSA-PS-FO-${r.commission_no}` : ""}${D.why ? ` · پایانِ مذاکره: ${esc(D.why)}` : ""}</div>
@@ -1307,7 +1307,7 @@
     const mc = mChat();
     app.classList.toggle("sp-app", mc);
     PH.lockView(mc, mc);
-    if (S.view === "boot") app.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
+    if (S.view === "boot") app.innerHTML = TP.ui.loader("", true);
     else if (S.view === "login") { TP.ui.mountBg("fog"); app.innerHTML = vLogin(); TP.ui.help.set("login.support"); const f = app.querySelector("form[data-login-card]"); if (f) f.onsubmit = (e) => { e.preventDefault(); const b = f.querySelector("[data-do]"); if (b && !b.disabled) b.click(); }; }
     else if (mChat()) { TP.ui.mountBg(""); app.innerHTML = `<div class="sv-mfull">${thScreen(false)}</div>`; TP.ui.help.set("support.chat", { fab: false }); }
     else { TP.ui.mountBg(""); app.innerHTML = vTop() + TP.ui.alarmBar(S.alarms, (a) => (a.thread_id ? `<button class="tp-btn sm" type="button" data-th-open="${a.thread_id}">گفت‌وگو</button>` : "")) + `<div class="tp-wrap ${S.tab === "chat" && phoneMode ? "sv-wide" : ""}">${vTab()}</div>`; TP.ui.help.set(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, S.tab === "chat" && phoneMode ? { side: "right" } : undefined); }

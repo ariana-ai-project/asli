@@ -206,7 +206,7 @@
   }
 
   function view(S) {
-    if (!A.st) { if (!A.loading) load(); return `<div class="tp-wrap"><div class="tp-card tp-pane">در حال بارگذاری…${A.err ? `<div class="tp-note warn">${esc(A.err)}</div>` : ""}</div></div>`; }
+    if (!A.st) { if (!A.loading) load(); return `<div class="tp-wrap"><div class="tp-card tp-pane">${TP.ui.loader()}${A.err ? `<div class="tp-note warn">${esc(A.err)}</div>` : ""}</div></div>`; }
     tick(S);
     const body = A.sub === "calls" ? vCalls() : A.sub === "sms" ? vSms() : A.sub === "phones" ? vPhones() : A.sub === "settings" ? vSettings() : vRuns();
     return `<div class="tp-wrap" style="padding-bottom:30px">${vHead()}${vSubTabs()}<div style="margin-top:10px">${body}</div></div>`;

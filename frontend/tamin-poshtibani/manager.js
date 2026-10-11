@@ -1258,7 +1258,7 @@
     document.body.classList.toggle("has-foot", S.tab === "desk");
     const restore = TP.snapScroll();
     app.innerHTML = vTop() + TP.ui.alarmBar(S.data.alarms) + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
-      (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
+      (S.loading && !S.data.requests.length ? TP.ui.loader("", true) :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
         : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : S.tab === "reports" ? vReports() : vLog()}</div>`);
     wire();

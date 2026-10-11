@@ -353,5 +353,10 @@
   const once = (key) => { if (shown.has(key)) return "settled"; shown.add(key); return ""; };
   const resetOnce = (key) => { shown.delete(key); };
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce };
+  /** در حال بارگذاری: لوگوی آریانا با نوار دایره‌ایِ چرخان دورش (ui.css: .ui-load)؛ page = وسطِ کلِ صفحه */
+  function loader(text, page) {
+    return `<div class="ui-load${page ? " page" : ""}" role="status" aria-live="polite"><span class="ui-load-ring" aria-hidden="true"><i></i><img src="../assets/logo-new.jpg" alt=""></span><span class="ui-load-t">${esc(text || "در حال بارگذاری…")}</span></div>`;
+  }
+
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce, loader };
 })();

@@ -102,7 +102,8 @@
 .sv-chat.m .sv-chl .scroll { overflow: visible; }
 .sv-pvr { color: var(--tp-dim); font-size: .72rem; }
 .sv-chm { min-height: 0; overflow-y: auto; padding: 14px 16px; border-radius: var(--ui-r-card); background: var(--ui-card); border: 1px solid var(--ui-card-edge); }
-.sv-chat .ph-stage { --ph-h: clamp(520px, calc(100dvh - 170px), 900px); padding: 0 6px; border: 0; background: radial-gradient(48% 42% at 50% 52%, rgba(79, 140, 255, 0.13), transparent 72%); }
+/* گوشی بی‌قاب‌زمینه، مثل بقیهٔ بخش‌ها: نه هالهٔ آبی، نه بریدنِ سایهٔ گوشی در لبه‌های ستون (overflow) که مستطیلی پشتِ گوشی می‌ساخت */
+.sv-chat .ph-stage { --ph-h: clamp(520px, calc(100dvh - 170px), 900px); padding: 0 6px; border: 0; background: none; overflow: visible; }
 .sv-thnone { height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; color: var(--tp-muted); text-align: center; padding: 20px; }
 .sv-thnone svg { width: 40px; height: 40px; opacity: .6; }
 .sv-thnone b { color: var(--tp-fg); font-size: 1rem; }
