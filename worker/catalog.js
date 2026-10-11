@@ -259,9 +259,8 @@ export async function catalogMeta(env) {
 /* کد قلم با رقم فارسی هم همان کد است */
 const codeKey = (code) => ascii(T(code));
 
-/** نوع قلمِ یک کد راهکاران در فهرستِ بارگذاری‌شده (بی ویرایشِ کارشناس)، به نامِ استاندارد، یا null */
-export async function headOfCode(env, code) {
-  const c = codeKey(code); if (!c) return null;
+/** نامِ ذخیره‌شدهٔ نوع قلمِ یک کد در فهرست (همان کلیدِ cat_heads)، بی استانداردسازی، یا null */
+async function storedHeadOfCode(env, c) {
   fresh();
   const s = shardOf("code", c);
   if (!cache.codes.has(s)) {
@@ -269,6 +268,29 @@ export async function headOfCode(env, code) {
     cache.codes.set(s, r ? parse(r.data) : {});
   }
   const h = cache.codes.get(s)[c];
+  return h == null ? null : h;
+}
+
+/**
+ * نوع‌های قلمِ فایل (ستون head در purchases) برای یک کد، یا null اگر کد در فهرست نیست.
+ * سوابقِ یک کد باید با کلید اصلیِ (head, item_code) خوانده شود: شرطِ تنهای item_code=? همهٔ
+ * جدول را می‌خواند (۷۱ هزار ردیف در هر بار؛ مهر ۱۴۰۵ سقفِ روزانهٔ خواندنِ D1 را رد کرد).
+ */
+export async function purchaseHeadsOfCode(env, code) {
+  const c = codeKey(code); if (!c) return null;
+  const h = await storedHeadOfCode(env, c);
+  return h == null ? null : fileHeads(env, h);
+}
+/** نوع‌های قلمِ فایلِ یک نوع قلمِ ذخیره‌شده (بخش ۰ cat_heads) — «ورق آهنی» ← [«ورق»] */
+export async function fileHeads(env, storedHead) {
+  const top = await headTop(env, storedHead);
+  return [...new Set(((top && top.src && top.src.length) ? top.src : [storedHead]).filter(Boolean))];
+}
+
+/** نوع قلمِ یک کد راهکاران در فهرستِ بارگذاری‌شده (بی ویرایشِ کارشناس)، به نامِ استاندارد، یا null */
+export async function headOfCode(env, code) {
+  const c = codeKey(code); if (!c) return null;
+  const h = await storedHeadOfCode(env, c);
   if (h == null) return null;
   /* نامِ هم‌معنا («آرماتور آهنی») به نام استاندارد؛ اگر جنسِ نامِ استاندارد را خودِ قلم می‌گوید
      («شلنگ» ← «شیلنگ لاستیکی»)، از ردیفِ همان قلم خوانده می‌شود */

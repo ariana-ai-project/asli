@@ -19,7 +19,7 @@ import { HttpError } from "./http.js";
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
 import { sendSms, smsReady, isMobile } from "./sms.js";
 import { queueStmt } from "./queue.js";
-import { keyOf } from "./catalog.js";
+import { keyOf, purchaseHeadsOfCode } from "./catalog.js";
 import { raiseAlarm } from "./alarms.js";
 import { telegram } from "./telegram.js";
 import { usdTable } from "./usd.js";
@@ -348,9 +348,32 @@ function seriesOf(bids) {
  * سوابق خرید همین کالا به «قیمت روز» (نسبت نرخ دلار امروز به نرخ روز خرید) — فقط برای پشتیبان.
  * {unit, n, last:{date, price, today, supplier}, median, min} از ده خرید آخر با مقدار
  */
+/*
+ * سوابق یک کد از کلید اصلی purchases (head, item_code) خوانده می‌شود، با نوع‌های قلم فایل از فهرست
+ * (همان راه سوابق پنل کارشناس، history.js). شرط تنهای item_code=? کل جدول را می‌خواند: ۷۱ هزار ردیف
+ * در هر بار، و جزئیات مناقصهٔ زنده هر ۳ ثانیه تازه می‌شود — مهر ۱۴۰۵ در چند دقیقه سقف روزانهٔ
+ * خواندن D1 (۵ میلیون ردیف) رد شد. کدی که در فهرست نیست ناچار با همان شرط تنها.
+ */
+async function codeWhere(env, code) {
+  const heads = await purchaseHeadsOfCode(env, code).catch(() => null);
+  if (!heads || !heads.length || heads.length > 90) return { sql: "item_code=?", args: [code] };
+  return { sql: `head IN (${heads.map(() => "?").join(",")}) AND item_code=?`, args: [...heads, code] };
+}
+/* نتیجهٔ سوابق در حافظهٔ isolate (۱۰ دقیقه): سوابق فقط با بارگذاری ماهانه عوض می‌شود */
+const HIST = new Map();
+const HIST_TTL = 10 * 60000;
 async function historyOf(env, t) {
   if (!t.item_code) return null;
-  const rows = (await env.DB.prepare("SELECT order_date, qty, unit, amount, supplier FROM purchases WHERE item_code=? AND qty>0 AND amount>0 ORDER BY order_date DESC LIMIT 10").bind(t.item_code).all()
+  const key = T(t.item_code), hit = HIST.get(key);
+  if (hit && Date.now() - hit.at < HIST_TTL) return hit.v;
+  const v = await historyRead(env, key);
+  HIST.set(key, { at: Date.now(), v });
+  if (HIST.size > 300) HIST.delete(HIST.keys().next().value);
+  return v;
+}
+async function historyRead(env, code) {
+  const w = await codeWhere(env, code);
+  const rows = (await env.DB.prepare(`SELECT order_date, qty, unit, amount, supplier FROM purchases WHERE ${w.sql} AND qty>0 AND amount>0 ORDER BY order_date DESC LIMIT 10`).bind(...w.args).all()
     .catch(() => ({ results: [] }))).results || [];
   if (!rows.length) return null;
   const tb = await usdTable(env).catch(() => null);
@@ -664,18 +687,49 @@ const words = (q) => latin(q).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").spli
 export async function tenderItems(env, q) {
   const ws = words(q);
   if (!ws.length || ws.join("").length < 2) return { items: [] };
+  const viaCat = await itemsFromCatalog(env, q).catch((e) => { console.warn("tender-items catalog", e && e.message); return null; });
+  if (viaCat) return { items: viaCat };
+  /* فهرستی بارگذاری نشده (یا خواندنش نشد): جستجوی مستقیم در سوابق — همهٔ جدول را می‌خواند */
   const cond = ws.map(() => "(title LIKE ? OR item_code LIKE ?)").join(" AND ");
   const args = ws.flatMap((w) => [`%${w}%`, `${w}%`]);
   const rows = (await env.DB.prepare(`SELECT item_code, MAX(title) AS title, MAX(unit) AS unit, MAX(head) AS head, COUNT(*) AS n, COUNT(DISTINCT supplier_n) AS sups, MAX(order_date) AS last
       FROM purchases WHERE ${cond} GROUP BY item_code ORDER BY n DESC LIMIT 30`).bind(...args).all().catch(() => ({ results: [] }))).results || [];
   return { items: rows };
 }
+/*
+ * جستجوی قلم با فهرست اقلام (cat_heads: اقلام هر نوع قلم در JSON، [کد، عنوان، …]) به‌جای LIKE روی کل سوابق:
+ * ≈۲٬۷۰۰ ردیف فهرست خوانده می‌شود، اقلام هم‌خوان با json_each همان‌جا در SQLite جدا می‌شوند و شمار خریدشان با
+ * کلید اصلی purchases (نوع قلم فایل از بخش ۰ فهرست، src) — نه ≈۷۱ هزار ردیف در هر جستجو، و بی پردازش JSON در Worker.
+ * معنای جستجو همان قبلی است: هر واژه در عنوان باشد یا کد با آن شروع شود، فقط قلم‌های خریده‌شده، پرخریدترها اول.
+ * فهرست خالی ← null (جستجوی قدیمی).
+ */
+async function itemsFromCatalog(env, q) {
+  const ws = words(q);
+  if (!ws.length) return [];
+  const has = await env.DB.prepare("SELECT 1 AS x FROM cat_heads LIMIT 1").first().catch(() => null);
+  if (!has) return null;
+  const pre = ws.map(() => "h.data LIKE ?").join(" AND ");
+  const match = ws.map(() => "(json_extract(j.value, '$[1]') LIKE ? OR json_extract(j.value, '$[0]') LIKE ?)").join(" AND ");
+  const rows = (await env.DB.prepare(`WITH m AS (
+        SELECT DISTINCT json_extract(j.value, '$[0]') AS code, h.head AS sh FROM cat_heads h, json_each(h.data, '$.items') j
+        WHERE ${pre} AND ${match}),
+      s AS (
+        SELECT DISTINCT m.code, f.value AS fh FROM m JOIN cat_heads h0 ON h0.head=m.sh AND h0.part=0,
+          json_each(COALESCE(json_extract(h0.data, '$.src'), json_array(m.sh))) f)
+      SELECT p.item_code, MAX(p.title) AS title, MAX(p.unit) AS unit, MAX(p.head) AS head, COUNT(*) AS n, COUNT(DISTINCT p.supplier_n) AS sups, MAX(p.order_date) AS last
+      FROM s JOIN purchases p ON p.head=s.fh AND p.item_code=s.code
+      GROUP BY p.item_code ORDER BY n DESC LIMIT 30`)
+    .bind(...ws.map((w) => `%${w}%`), ...ws.flatMap((w) => [`%${w}%`, `${w}%`])).all()).results || [];
+  return rows;
+}
+
 /** GET /support/tender-suppliers?code= — تأمین‌کنندگان همین قلم در سوابق، با رده و شماره‌های شناخته‌شده */
 export async function tenderSuppliers(env, code) {
   const c = T(code);
   if (!c) return { suppliers: [] };
+  const w = await codeWhere(env, c);
   const rows = (await env.DB.prepare(`SELECT MAX(supplier) AS name, supplier_n AS sn, COUNT(*) AS n, SUM(qty) AS qty, MAX(order_date) AS last, MAX(unit) AS unit
-      FROM purchases WHERE item_code=? AND supplier_n IS NOT NULL AND supplier_n<>'' GROUP BY supplier_n ORDER BY n DESC, last DESC LIMIT 60`).bind(c).all()).results || [];
+      FROM purchases WHERE ${w.sql} AND supplier_n IS NOT NULL AND supplier_n<>'' GROUP BY supplier_n ORDER BY n DESC, last DESC LIMIT 60`).bind(...w.args).all()).results || [];
   return { suppliers: await withPhones(env, rows.map((r) => ({ name: r.name, n: r.n, qty: r.qty, last: r.last, unit: r.unit, sn: r.sn, code: c }))) };
 }
 /** رده و شماره‌های هر نام: دفترچهٔ شماره‌های پنل (sp_phones) و دفترچهٔ تأمین‌کنندگان (suppliers) */
@@ -704,13 +758,15 @@ export async function tenderBook(env, q) {
   if (!ws.length || ws.join("").length < 2) return { suppliers: [] };
   const like = (col) => ws.map(() => `${col} LIKE ?`).join(" AND ");
   const args = ws.map((w) => `%${w}%`);
-  const [a, b, c] = await Promise.all([
+  const [a, b, g] = await Promise.all([
     env.DB.prepare(`SELECT name FROM sp_suppliers WHERE demo=0 AND ${like("name")} LIMIT 20`).bind(...args).all().then((r) => r.results || []).catch(() => []),
     env.DB.prepare(`SELECT name FROM suppliers WHERE ${like("name")} LIMIT 20`).bind(...args).all().then((r) => r.results || []).catch(() => []),
-    env.DB.prepare(`SELECT MAX(supplier) AS name, supplier_n AS sn, COUNT(*) AS n, MAX(order_date) AS last FROM purchases WHERE ${like("supplier")} GROUP BY supplier_n ORDER BY n DESC LIMIT 20`).bind(...args).all().then((r) => r.results || []).catch(() => []),
+    env.DB.prepare(`SELECT name, sn FROM supplier_grades WHERE ${like("name")} LIMIT 20`).bind(...args).all().then((r) => r.results || []).catch(() => []),
   ]);
+  /* سوابق خرید (≈۷۱ هزار ردیف، بی نمایه برای نام) فقط وقتی جدول‌های کوچک کمتر از ۵ نام دادند */
+  const c = a.length + b.length + g.length >= 5 ? [] : await env.DB.prepare(`SELECT MAX(supplier) AS name, supplier_n AS sn, COUNT(*) AS n, MAX(order_date) AS last FROM purchases WHERE ${like("supplier")} GROUP BY supplier_n ORDER BY n DESC LIMIT 20`).bind(...args).all().then((r) => r.results || []).catch(() => []);
   const by = new Map();
-  for (const r of [...c, ...a, ...b]) { const k = nkey(r.name); if (r.name && !by.has(k)) by.set(k, { name: r.name, sn: r.sn || keyOf(r.name), n: r.n || 0, last: r.last || null }); }
+  for (const r of [...c, ...g, ...a, ...b]) { const k = nkey(r.name); if (r.name && !by.has(k)) by.set(k, { name: r.name, sn: r.sn || keyOf(r.name), n: r.n || 0, last: r.last || null }); }
   return { suppliers: await withPhones(env, [...by.values()].slice(0, 30)) };
 }
 
