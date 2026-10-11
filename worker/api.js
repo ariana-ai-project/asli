@@ -56,6 +56,7 @@ import { supportStatus, supportSetup, supportLogin, supportReset, supportChangeP
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
+import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
@@ -197,6 +198,7 @@ ${NAV_DDL}
 ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
+${CR_DDL.trim()}
 ${STRUCT_DDL.trim()}
 `;
 
@@ -455,6 +457,9 @@ async function deleteRequests(env, ids) {
        می‌شوند: شناسهٔ قلم دوباره استفاده می‌شود و جستجوی قدیمی روی قلمِ تازهٔ بی‌ربط «همین قلم» دیده می‌شد */
     env.DB.prepare(`UPDATE smart_searches SET item_id=0 WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
     env.DB.prepare(`DELETE FROM smart_jobs WHERE state='queued' AND item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
+    /* نتیجهٔ کمیسیون و پیام‌های تشکرِ همان اقلام (commission-result.js) — شناسهٔ قلمِ حذف‌شده دوباره داده می‌شود */
+    env.DB.prepare(`DELETE FROM commission_notes WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
+    env.DB.prepare(`DELETE FROM commission_results WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
@@ -1928,6 +1933,9 @@ async function route(request, env, ctx) {
       if (path === "/support/usd" || path.startsWith("/support/usd/")) return await usdAdmin(request, env, path.slice("/support/usd".length), m, url, { json, readJson });
       if (path === "/support/commission" && m === "GET") return json(await commissionList(env, url, await getSettings(env)));
       if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
+      /* نتیجهٔ کمیسیون: برنده و علت برای هر قلم، و پیامِ تشکر به بقیهٔ تأمین‌کنندگان (worker/commission-result.js) */
+      if (path === "/support/commission/result" && m === "GET") return json(await commissionResultGet(env, url));
+      if (path === "/support/commission/result" && m === "POST") { const r = await commissionResultSave(env, await readJson(request), env.COMPANY || "تونل سد آریانا"); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
     }
 

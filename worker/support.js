@@ -491,7 +491,9 @@ export async function commissionList(env, url, settings) {
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.saved=1) AS saved,
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS finals,
       (SELECT group_concat(q.supplier_name, '، ') FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS final_sup,
-      (SELECT MIN(q.price) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS final_price
+      (SELECT MIN(q.price) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS final_price,
+      (SELECT cr.winner FROM commission_results cr WHERE cr.item_id=i.id) AS cr_winner,
+      (SELECT cr.price FROM commission_results cr WHERE cr.item_id=i.id) AS cr_price
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=i.request_id
     WHERE ${conds.join(" AND ")}
     ORDER BY (a.commission_at IS NULL), a.commission_at DESC, r.date DESC, i.request_id, i.line_no LIMIT 600`).bind(...args).all()).results || [];

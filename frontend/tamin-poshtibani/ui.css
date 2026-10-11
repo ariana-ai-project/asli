@@ -871,3 +871,72 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
 .sp-more[open] > summary { margin-bottom: 6px; }
 .sp-more[open] > :not(summary) { animation: tpRevealIn .3s var(--ui-ease) both; }
 .sp-files { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+
+/* ============================================================
+   نشانگرِ کوچکِ «در حال کار» (مهر ۱۴۰۵)
+   ============================================================ */
+.tp-spin { display: inline-block; width: 1em; height: 1em; border-radius: 50%; border: 2px solid currentColor; border-inline-end-color: transparent; vertical-align: -0.15em; animation: tpSpin .8s linear infinite; }
+@keyframes tpSpin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .tp-spin { animation-duration: 2.4s; } }
+
+/* ============================================================
+   «🏆 نتیجهٔ کمیسیون» (پنل پشتیبانی، cm-result.js)
+   ============================================================ */
+.cmr-ov { position: fixed; inset: 0; z-index: 950; display: grid; place-items: center; padding: 16px; background: rgba(3, 8, 20, 0.6); -webkit-backdrop-filter: blur(6px); backdrop-filter: blur(6px); animation: cmrIn .22s var(--ui-ease) both; }
+:root[data-theme="light"] .cmr-ov { background: rgba(15, 27, 51, 0.32); }
+.cmr-ov.out { animation: cmrOut .2s ease both; }
+@keyframes cmrIn { from { opacity: 0; } }
+@keyframes cmrOut { to { opacity: 0; } }
+.cmr { width: min(860px, 100%); max-height: min(88dvh, 900px); display: flex; flex-direction: column; border-radius: var(--ui-r-surface); overflow: hidden;
+  background: var(--ui-thick); border: 1px solid var(--ui-card-edge); box-shadow: var(--ui-shadow), inset 0 1px 0 var(--ui-card-hl); animation: cmrPop .32s var(--ui-spring) both; }
+@keyframes cmrPop { from { transform: translateY(14px) scale(.98); opacity: 0; } }
+.cmr-load { padding: 40px; text-align: center; color: var(--tp-muted); }
+.cmr-hd { display: flex; align-items: center; gap: 12px; padding: 16px 18px; border-bottom: 1px solid var(--ui-card-edge); }
+.cmr-ic { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 1.35rem; flex-shrink: 0;
+  background: linear-gradient(145deg, rgba(242, 194, 48, 0.35), rgba(242, 150, 30, 0.18)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.cmr-hd .t { flex: 1; min-width: 0; }
+.cmr-hd h3 { margin: 0; font-size: 1.08rem; font-weight: 800; }
+.cmr-hd .t > span { color: var(--tp-muted); font-size: .86rem; }
+.cmr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 14px; overscroll-behavior: contain; }
+.cmr-item { padding: 14px; border-radius: var(--ui-r-card); background: var(--ui-card); border: 1px solid var(--ui-card-edge); box-shadow: inset 0 1px 0 var(--ui-card-hl); }
+.cmr-item.off { opacity: .75; }
+.cmr-it { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 10px; }
+.cmr-it > b { font-size: 1rem; font-weight: 800; }
+.cmr-opts { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 230px), 1fr)); gap: 8px; }
+.cmr-q { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; border-radius: 14px; cursor: pointer;
+  border: 1.5px solid var(--ui-card-edge); background: var(--ui-thin); transition: border-color var(--ui-fast) var(--ui-ease), background var(--ui-fast) var(--ui-ease), transform var(--ui-fast) var(--ui-ease); }
+.cmr-q:hover { background: var(--ui-card-hover); }
+.cmr-q input { position: absolute; opacity: 0; pointer-events: none; }
+.cmr-q:has(input:focus-visible) { outline: 2px solid #8fb0ff; outline-offset: 2px; }
+.cmr-q.on { border-color: #f2c230; background: linear-gradient(145deg, rgba(242, 194, 48, 0.16), rgba(242, 194, 48, 0.04)); box-shadow: 0 0 0 3px rgba(242, 194, 48, 0.14); }
+.cmr-q.on::after { content: "🏆"; position: absolute; inset-inline-end: 10px; top: 8px; font-size: 1.05rem; animation: cmrCrown .35s var(--ui-spring) both; }
+@keyframes cmrCrown { from { transform: scale(.4) rotate(-20deg); opacity: 0; } }
+.cmr-qh { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-inline-end: 24px; }
+.cmr-qh b { font-weight: 800; }
+.cmr-best { font-size: .68rem; font-weight: 800; padding: 1px 7px; border-radius: 999px; background: rgba(34, 197, 94, 0.16); color: #86efac; }
+:root[data-theme="light"] .cmr-best { color: #15803d; }
+.cmr-pr { display: flex; align-items: baseline; gap: 4px; flex-wrap: wrap; font-variant-numeric: tabular-nums; }
+.cmr-pr b { font-size: 1.12rem; font-weight: 800; }
+.cmr-pr small { color: var(--tp-muted); }
+.cmr-pr em { font-style: normal; color: var(--tp-muted); font-size: .8rem; margin-inline-start: auto; }
+.cmr-meta { font-size: .78rem; color: var(--tp-muted); }
+.cmr-st { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .78rem; margin-top: 2px; }
+.cmr-why { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 10px; }
+.cmr-why .lab { font-size: .84rem; color: var(--tp-muted); }
+.cmr-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.cmr-chip { padding: 6px 12px; border-radius: 999px; border: 1px solid var(--ui-card-edge); background: var(--ui-thin); color: var(--tp-fg); font: inherit; font-size: .82rem; cursor: pointer;
+  transition: background var(--ui-fast) var(--ui-ease), border-color var(--ui-fast) var(--ui-ease); }
+.cmr-chip:hover { background: var(--ui-card-hover); }
+.cmr-chip.on { background: var(--ui-fab-bg); border-color: transparent; color: #fff; }
+.cmr-other { flex: 1 1 100%; }
+.cmr-other.err { border-color: #e5484d; box-shadow: 0 0 0 3px rgba(229, 72, 77, 0.18); }
+.cmr-none { padding: 14px; text-align: center; color: var(--tp-muted); font-size: .88rem; }
+.cmr-ft { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 18px; border-top: 1px solid var(--ui-card-edge); }
+.cmr-ft .spacer { flex: 1; }
+.cmr-sw { display: flex; gap: 16px; flex-wrap: wrap; }
+@media (max-width: 560px) {
+  .cmr-ov { padding: 0; place-items: end stretch; }
+  .cmr { border-radius: var(--ui-r-surface) var(--ui-r-surface) 0 0; max-height: 92dvh; }
+  .cmr-ft .tp-btn.primary { flex: 1 1 100%; }
+}
+@media (prefers-reduced-motion: reduce) { .cmr, .cmr-ov, .cmr-q.on::after { animation: none; } }

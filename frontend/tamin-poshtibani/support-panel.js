@@ -286,8 +286,8 @@
     set(title, html);
     el.addEventListener("click", (e) => {
       if (e.target === el || e.target.closest("[data-close]")) { el.remove(); return; }
-      const t = e.target.closest("[data-cmprev],[data-cmdl],[data-goto],[data-asg]");
-      if (t) { if (t.dataset.goto) el.remove(); act(t); }
+      const t = e.target.closest("[data-cmprev],[data-cmdl],[data-goto],[data-asg],[data-cres]");
+      if (t) { if (t.dataset.goto || t.dataset.cres) el.remove(); act(t); }
     });
     document.body.appendChild(el);
     return { el, set, close: () => el.remove() };
@@ -308,6 +308,7 @@
         ${k("جدول کمیسیون", a.commission_no ? `TSA-PS-FO-${a.commission_no}<br>${fmtS(a.commission_at)}` : "ساخته نشده")}</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
         ${a.commission_no ? `<button class="tp-btn sm" data-cmprev="${a.id}">پیش‌نمایش جدول کمیسیون</button><button class="tp-btn sm" data-cmdl="${a.id}" data-rid="${esc(r.id)}">دانلود جدول کمیسیون (اکسل)</button>` : ""}
+        <button class="tp-btn sm primary" data-cres="${a.id}" title="برنده و علتِ هر قلم؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجهٔ کمیسیون</button>
         <button class="tp-btn sm" data-goto="chat" data-rid="${esc(r.id)}">مکاتبات این درخواست</button>
         <button class="tp-btn sm" data-goto="log" data-rid="${esc(r.id)}">رخدادهای این درخواست</button></div>
       ${a.notes ? `<div class="tp-note">توضیحات کارشناس (پای جدول کمیسیون): ${esc(a.notes)}</div>` : ""}
@@ -545,7 +546,7 @@
     if (!rows.length) return h + `<div class="empty"><b>قلمی نیست.</b>${S.cmF.scope === "ready" ? "هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده؛ «همهٔ اقلامِ باز» را ببینید." : ""}</div>`;
     h += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
         <button class="tp-btn sm" data-csel="all">انتخاب همه (${rows.length})</button><button class="tp-btn sm" data-csel="none" ${S.cmSel.size ? "" : "disabled"}>لغو انتخاب</button>
-        <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>✓ تأیید کمیسیونِ ${nOn} قلمِ انتخاب‌شده</button>
+        <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>🏆 نتیجه و تأییدِ ${nOn} قلمِ انتخاب‌شده</button>
         <button class="tp-btn sm danger" data-cok="0" ${nOff ? "" : "disabled"}>برداشتن تأییدِ ${nOff} قلم</button></div>
       <div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 330px)"><table class="tp-table" data-stick><thead><tr>
         <th></th><th>درخواست</th><th class="rt">طرف مقابل</th><th>کارشناس</th><th class="rt">قلم</th><th>مقدار</th><th>استعلام ثبت‌شده<br><span class="dim">حداقل ${S.cmMin}</span></th>
@@ -554,13 +555,22 @@
         <td class="id num">${esc(i.request_id)}</td><td class="party">${esc(i.party)}</td><td>${esc(exName(i.expert_id))}</td><td class="item">${esc(i.title)}</td>
         <td class="num">${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</td>
         <td class="num">${i.saved}${i.saved < S.cmMin ? ` <span class="chip warn" title="کمتر از حداقل استعلامِ مدیر">کم</span>` : ""}</td>
-        <td class="rt">${i.finals ? esc(i.final_sup) : `<span class="chip warn">ندارد</span>`}</td><td class="num">${i.final_price == null ? "—" : M(i.final_price)}</td>
+        <td class="rt">${i.cr_winner ? `<b title="برندهٔ ثبت‌شدهٔ کمیسیون">🏆 ${esc(i.cr_winner)}</b>` : i.finals ? esc(i.final_sup) : `<span class="chip warn">ندارد</span>`}</td><td class="num">${i.cr_winner ? (i.cr_price == null ? "—" : M(i.cr_price)) : i.final_price == null ? "—" : M(i.final_price)}</td>
         <td>${i.commission_no ? `<button class="tp-btn xs" data-cmprev="${i.aid}" title="${esc(fmtS(i.commission_at))}">TSA-PS-FO-${i.commission_no}</button>` : `<span class="dim">ساخته نشده</span>`}</td>
         <td>${i.commission_ok ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip">منتظر</span>`}</td>
-        <td>${i.commission_ok ? `<button class="tp-btn xs danger" data-cone="${i.id}" data-ok="0">برداشتن</button>` : `<button class="tp-btn xs primary" data-cone="${i.id}" data-ok="1">✓ تأیید</button>`}
+        <td>${i.commission_ok ? `<button class="tp-btn xs danger" data-cone="${i.id}" data-ok="0">برداشتن</button>` : `<button class="tp-btn xs primary" data-cres="${i.aid}" title="برنده و علت؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجه و تأیید</button>`}
           <button class="tp-btn xs" data-asg="${i.aid}">جزئیات</button></td></tr>`).join("")}</tbody></table></div>`;
     return h;
   }
+  /** «🏆 نتیجهٔ کمیسیون» (cm-result.js): برنده و علتِ هر قلم، تیکِ تأیید و پیامِ تشکر به بقیه */
+  function cmResult(aid, then) {
+    window.TP_CMRES.open({ api, aid, onDone: async (r) => {
+      S.cmSel.clear();
+      await Promise.all([S.tab === "cm" ? loadCm() : null, loadExperts().catch(() => {})]);
+      if (then) then(r);
+    } });
+  }
+  function cmResultQueue(aids) { if (aids.length) cmResult(aids[0], () => cmResultQueue(aids.slice(1))); }
   function cmSet(ids, ok) {
     const its = (S.cm || []).filter((i) => ids.includes(i.id));
     const noFinal = its.filter((i) => !i.finals).length, few = its.filter((i) => i.saved < S.cmMin).length;
@@ -1059,6 +1069,7 @@
     return h;
   }
   function dlDecide(id, ok) {
+    if (ok && S.dlD && S.dlD.run && S.dlD.run.id === id) return cmResult(S.dlD.run.assignment_id, () => dlSend(id, { ok: true }));
     if (ok) return TP.modal("✓ تأیید کمیسیون", "کمیسیونِ همهٔ اقلامِ بازِ این درخواست تأیید شود؟ کارشناس در تلگرام خبردار می‌شود و «خاتمه» را می‌زند.", () => dlSend(id, { ok: true }), "تأیید");
     const d = TP.modal("✗ ردِ تحویل", `<p>دلیلِ رد را بنویسید — برای کارشناس فرستاده می‌شود و درخواست کامل به او برمی‌گردد (گفت‌وگوها و خط‌های کارشناس هوشمند هم برایش باز می‌شوند).</p>
       <textarea class="tp-input tp-textarea" data-dlreason style="width:100%;min-height:90px"></textarea>`, () => {
@@ -1166,7 +1177,13 @@
     if (d.lridSet) { S.logF.rid = d.lridSet; if (S.tab !== "log") { S.log = null; return setTab("log"); } return loadLog(); }
     if (d.ld) return TP.openDatePicker(t, (v) => { S.logF[d.ld] = v; loadLog(); }, { single: true });
     if (d.csel) { if (d.csel === "all") cmRows().forEach((i) => S.cmSel.add(i.id)); else S.cmSel.clear(); return render(); }
-    if (d.cok !== undefined) { const ok = d.cok === "1"; const ids = cmRows().filter((i) => S.cmSel.has(i.id) && !!i.commission_ok !== ok).map((i) => i.id); return ids.length && cmSet(ids, ok); }
+    if (d.cok !== undefined) {
+      const ok = d.cok === "1"; const rows = cmRows().filter((i) => S.cmSel.has(i.id) && !!i.commission_ok !== ok);
+      if (!rows.length) return;
+      if (!ok) return cmSet(rows.map((i) => i.id), false);
+      return cmResultQueue([...new Set(rows.map((i) => i.aid))]);
+    }
+    if (d.cres) return cmResult(Number(d.cres));
     if (d.cone) return cmSet([Number(d.cone)], d.ok === "1");
     if (d.aiex) { if (window.TP_AI) window.TP_AI.reset(); S.aiEx = Number(d.aiex); return render(); }
     if (d.aiback !== undefined) { S.aiEx = null; if (window.TP_AI) window.TP_AI.reset(); return loadAi(); }
@@ -1199,7 +1216,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
