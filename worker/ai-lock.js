@@ -80,6 +80,8 @@ export async function aiThread(env, threadId, expertId) {
   if (!r) return { ai: false, locked: false, ask: null, watch: false };
   /* ارجاع به کارشناسِ دیگری رفته (کارِ کارشناس هوشمند بسته شد)، کارشناس «دستی» است، یا پشتیبانی تحویل را رد کرد: باز */
   if (r.mode !== "on" || r.run_expert !== expertId || aiRejected(r.review_json)) return { ai: true, locked: false, ask: null, watch: false };
+  /* «🚨 باز کردنِ اضطراری» (ai-takeover.js): کارشناس خودش ادامه می‌دهد؛ کارشناس هوشمند در این گفت‌وگو جواب نمی‌دهد */
+  if (r.state === "human") return { ai: true, locked: false, ask: null, watch: false, human: true };
   const ask = r.state === "ask" ? parse(r.ask_json, {}) : null;
   const watch = !!r.sup;
   return { ai: true, locked: !ask && !watch, ask, watch };

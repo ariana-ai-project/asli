@@ -288,5 +288,10 @@
   /** o: { label, value, sub, icon, tone (ok|warn|bad|info), attrs } */
   const stat = (o) => `<div class="tp-stat ${o.tone || ""}" ${o.attrs || ""}>${o.icon ? `<span class="si">${(UI.ICON && UI.ICON[o.icon]) || o.icon}</span>` : ""}<span class="sb"><small>${esc(o.label)}</small><b>${o.value}</b>${o.sub ? `<em>${o.sub}</em>` : ""}</span></div>`;
 
-  Object.assign(UI, { fx, success, reveal, switchEl, knob, stepper, range, rating, track, stat, paintAll });
+  /* ---------- نوارِ هشدار (مدیر و پشتیبان؛ worker/alarms.js) ---------- */
+  /** list: [{id, at, title, body}]؛ open(a) → html دکمهٔ اختیاری کنارِ «دیدم» */
+  const alarmBar = (list, open) => (!list || !list.length ? "" : `<section class="tp-alarms" aria-label="هشدارها">${list.map((a) => `<div class="tp-alarm" role="alert">
+      <span class="ic" aria-hidden="true">🚨</span><div class="t"><b>${esc(a.title)}</b>${a.body ? `<span>${esc(a.body)}</span>` : ""}<small>${esc(TP.fmt ? TP.fmt(a.at) : new Date(a.at).toLocaleString("fa-IR"))}</small></div>
+      <div class="acts">${open ? open(a) : ""}<button class="tp-btn sm" type="button" data-alarm-ack="${a.id}">دیدم</button></div></div>`).join("")}</section>`);
+  Object.assign(UI, { fx, success, reveal, switchEl, knob, stepper, range, rating, track, stat, paintAll, alarmBar });
 })();

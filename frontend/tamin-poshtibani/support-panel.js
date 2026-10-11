@@ -80,6 +80,7 @@
     /* فاز ۴ب: «🧭 حالت اقلام» — حالتِ هر نوع قلم برای کارشناس هوشمند (worker/ai-modes.js) */
     md: null, mdDraft: null, mdErr: "", mdBusy: false, mdQ: "", mdHits: [],
     /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
+    alarms: [], alerts: null,
     chg: null, chgErr: "", chgLoading: false, chgF: { expert: "", rid: "", changed: "1", frozen: "" }, chgMore: false, chgNext: null,
   };
   const thr = () => (S.settings && S.settings.thresholds) || (CFG.defaults && CFG.defaults.thresholds) || [10, 30, 50, 70, 90, 100];
@@ -139,6 +140,7 @@
   async function enter() {
     S.view = "app"; render();
     try { await loadExperts(); } catch (_) { return; /* ۴۰۱ → صفحهٔ ورود */ }
+    loadAlarms();
     loadTab();
     if (S.tab !== "ai") aiPulse();
   }
@@ -179,7 +181,7 @@
   function vTop() {
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: `نظارت بر کار کارشناسان و تأیید کمیسیون · ${esc(CFG.company || "")}`,
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
-      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "گیرندگان هشدار", icon: "bell", attrs: "data-alerts" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
       + vTabs();
   }
   function vTabs() {
@@ -1103,6 +1105,7 @@
      تب جدول از نو رسم می‌شود (مگر وسطِ تایپ)، وگرنه فقط نوارِ تب‌ها و نشانِ 🚨 */
   async function aiPulse() {
     if (S.view !== "app" || document.hidden || document.querySelector(".tp-modal-bg")) return;
+    loadAlarms();
     let r; try { r = await api("/ai/experts"); } catch (_) { return; }
     S.ai = r;
     const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
@@ -1111,6 +1114,33 @@
   }
   setInterval(aiPulse, 45000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) aiPulse(); });
+  /* هشدارها (worker/alarms.js) — نوارِ بالای پنل، «دیدم» جداگانهٔ پشتیبان */
+  async function loadAlarms() {
+    try {
+      const r = await api("/alarms");
+      const sig = (x) => (x || []).map((a) => a.id).join(",");
+      if (sig(r.alarms) !== sig(S.alarms)) { S.alarms = r.alarms || []; const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName); if (!typing) render(); }
+    } catch (_) { /* بعداً */ }
+  }
+  async function alarmAckUi(id) {
+    try { await api(`/alarms/${id}/ack`, { body: {} }); S.alarms = S.alarms.filter((a) => a.id !== id); render(); }
+    catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+  }
+  /** «📣 گیرندگان هشدار»: شمارهٔ پیامکِ مدیر و پشتیبان؛ وضعیتِ تلگرامِ هر دو */
+  async function alertsDialog() {
+    let c; try { c = await api("/alert-contacts"); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    const st = (on, cmd) => (on ? `<span class="chip ok">✅ وصل است</span>` : `<span class="chip">وصل نیست</span> <span class="dim">— بات اصلی را به گروهِ تلگرام اضافه کنید و در گروه بفرستید: <b dir="ltr">${cmd}</b></span>`);
+    const d = TP.modal("📣 گیرندگان هشدار", `<div class="al-cfg">
+        <div class="al-row"><b>مدیر</b><div>تلگرام: ${st(c.manager_tg, "/manager")}</div>
+          <input class="tp-input" data-ap="manager_phone" inputmode="tel" dir="ltr" placeholder="شمارهٔ همراه برای پیامک (اختیاری)" value="${esc(c.manager_phone)}"></div>
+        <div class="al-row"><b>پشتیبان</b><div>تلگرام: ${st(c.support_tg, "/support")}</div>
+          <input class="tp-input" data-ap="support_phone" inputmode="tel" dir="ltr" placeholder="شمارهٔ همراه برای پیامک (اختیاری)" value="${esc(c.support_phone)}"></div>
+        ${c.sms ? "" : `<div class="dim">درگاه پیامک وصل نیست؛ تا وصل شود فقط پنل و تلگرام خبر می‌دهند.</div>`}</div>`, async () => {
+      const v = (k) => (d.querySelector(`[data-ap="${k}"]`) || {}).value || "";
+      try { await api("/alert-contacts", { method: "PUT", body: { manager_phone: v("manager_phone"), support_phone: v("support_phone") } }); TP.ui.success("ذخیره شد"); }
+      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "ذخیره", "بستن");
+  }
   function aiToggle(id, on) {
     TP.modal(on ? "🤖 هوشمند" : "✋ دستی", on
       ? `از این لحظه هر ارجاعِ تازهٔ <b>${esc(exName(id))}</b> را کارشناس هوشمند پیش می‌برد و همین کارها (سوابق، جستجو، ساختار، کمیسیون، نامه و گفت‌وگوهای او) برای خودِ کارشناس قفل می‌شود. هوشمند شود؟`
@@ -1137,7 +1167,7 @@
     const restore = TP.snapScroll();
     if (S.view === "boot") app.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
     else if (S.view === "login") { TP.ui.mountBg("fog"); app.innerHTML = vLogin(); TP.ui.help.set("login.support"); const f = app.querySelector("form[data-login-card]"); if (f) f.onsubmit = (e) => { e.preventDefault(); const b = f.querySelector("[data-do]"); if (b && !b.disabled) b.click(); }; }
-    else { TP.ui.mountBg(""); app.innerHTML = vTop() + `<div class="tp-wrap">${vTab()}</div>`; TP.ui.help.set(`support.${S.tab}`); }
+    else { TP.ui.mountBg(""); app.innerHTML = vTop() + TP.ui.alarmBar(S.alarms, (a) => (a.thread_id ? `<button class="tp-btn sm" type="button" data-th-open="${a.thread_id}">گفت‌وگو</button>` : "")) + `<div class="tp-wrap">${vTab()}</div>`; TP.ui.help.set(`support.${S.tab}`); }
     restore();
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
@@ -1158,6 +1188,8 @@
     if (d.refresh !== undefined) { loadExperts().catch(() => {}); return loadTab(true); }
     if (d.logout !== undefined) { sess.clear(); S.view = "login"; S.err = ""; S.mode = "login"; return loadStatus(); }
     if (d.pass !== undefined) return changePass();
+    if (d.alarmAck) return alarmAckUi(Number(d.alarmAck));
+    if (d.alerts !== undefined) return alertsDialog();
     if (d.do) return doAuth(d.do);
     if (d.mode) { S.mode = d.mode; S.err = ""; return render(); }
     if (d.asg) return openAsg(d.asg);
@@ -1216,7 +1248,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
+    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

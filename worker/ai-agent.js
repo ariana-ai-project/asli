@@ -782,7 +782,7 @@ async function inviteOne(env, run, ex, inv) {
 async function pickThread(env, run, cfg) {
   const t = now();
   /* «پرسش از کارشناس» (state='ask'): تا پاسخِ کارشناس، گفت‌وگو دستِ اوست و کارشناس هوشمند منتظر می‌ماند */
-  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','ask') AND x.turns<? AND (x.lock_until IS NULL OR x.lock_until<?)
+  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','ask','human') AND x.turns<? AND (x.lock_until IS NULL OR x.lock_until<?)
       AND (EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s' AND m.id>x.seen_msg) OR (x.retry_at IS NOT NULL AND x.retry_at<=?))
     ORDER BY x.updated_at LIMIT 1`).bind(run.id, cfg.maxTurns, t, t).first();
 }
@@ -1289,7 +1289,7 @@ async function stepClosing(env, run, k) {
     return { step: "close-table" };
   }
   /* bye: پیامِ پایانی به گفت‌وگوهایی که تأمین‌کننده در آن‌ها پاسخ داده بود؛ بعد بسته */
-  const eng = (await env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state<>'closed'
+  const eng = (await env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','human')
       AND EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s') LIMIT 6`).bind(run.id).all()).results || [];
   for (const e of eng) {
     const th = await C.threadRow(env, e.thread_id);
@@ -1525,7 +1525,7 @@ export function aiKick(env, ctx, threadId) {
 }
 async function kickNow(env, threadId) {
   const row = await env.DB.prepare(`SELECT r.*, g.mode, g.config_json FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id
-    WHERE x.thread_id=? AND x.state NOT IN ('closed','ask')`).bind(threadId).first().catch(() => null);
+    WHERE x.thread_id=? AND x.state NOT IN ('closed','ask','human')`).bind(threadId).first().catch(() => null);
   if (!row || row.mode !== "on" || row.finished_at || row.state !== "work") return { skip: true };
   /* اجرا همین حالا سررسید می‌شود: اگر گامِ فوری فقط پیش‌فاکتور را خواند یا نرسید، Cronِ بعدی همین گفت‌وگو را برمی‌دارد */
   await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(now(), row.id, now()).run().catch(() => {});

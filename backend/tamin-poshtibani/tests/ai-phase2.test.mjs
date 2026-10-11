@@ -132,13 +132,15 @@ test("کارشناسِ «هوشمند»: سوابق، جستجو، ساختار�
   assert.equal((await call("/support/assignments/1", { headers: SUP })).status, 200);
 });
 
-test("گفت‌وگوی کارشناس هوشمند برای کارشناس بسته است — نه دیدن، نه پیام، نه اعلان", { skip: SKIP }, async () => {
+test("گفت‌وگوی کارشناس هوشمند برای کارشناس «فقط دیدن» است — پیام و اعلان نه", { skip: SKIP }, async () => {
   DB.raw.prepare("INSERT INTO sp_msgs (thread_id,who,kind,body,at) VALUES (50,'s','text','سلام، قیمت را فردا می‌فرستیم.',?)").run(Date.now());
-  assert.equal((await call("/sp/thread/50", { headers: EX })).status, 423);
+  const ro = await call("/sp/thread/50", { headers: EX });
+  assert.equal(ro.status, 200, "دیدن آزاد است (مهر ۱۴۰۵)");
+  assert.equal(ro.data.thread.ai.locked, true);
   assert.equal((await call("/sp/thread/50/msg", { headers: EX, body: { text: "سلام" } })).status, 423);
   const list = (await call("/sp/x/threads", { headers: EX })).data;
   const t = list.requests.flatMap((g) => g.threads).find((x) => x.id === 50);
-  assert.deepEqual([t.ai, t.unread, t.phone], ["locked", 0, null], "در فهرست قفل، بی شماره و بی نخوانده");
+  assert.deepEqual([t.ai, t.unread], ["locked", 0], "در فهرست قفل و بی نخوانده");
   const inbox = (await call("/sp/x/inbox?since=1", { headers: EX })).data;
   assert.deepEqual([inbox.msgs.length, inbox.unread, inbox.asks], [0, 0, 0]);
   /* پشتیبانی همه‌چیز را می‌بیند */
@@ -197,7 +199,8 @@ test("«پرسش از کارشناس»: سؤالِ بیرون از پرونده 
   assert.equal(ans.status, 200, JSON.stringify(ans.data));
   assert.equal(thState().state, "active");
   assert.ok(JSON.parse(thState().ask_json).answered_at);
-  assert.equal((await call("/sp/thread/50", { headers: EX })).status, 423, "دوباره بسته");
+  assert.equal((await call("/sp/thread/50", { headers: EX })).data.thread.ai.locked, true, "دوباره بسته (فقط دیدن)");
+  assert.equal((await call("/sp/thread/50/msg", { headers: EX, body: { text: "x" } })).status, 423);
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='ai_answer'").get());
 
   /* کارشناس هوشمند ادامه می‌دهد: پاسخِ کارشناس و سؤالِ قبلی در پرونده‌اش */

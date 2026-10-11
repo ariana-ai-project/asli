@@ -458,6 +458,13 @@ async function onMessage(env, msg, apiIn) {
     /* گروه تیم کارشناس ارشد: لینک startgroup پنل همین را می‌فرستد (بات ممکن است @نام داشته باشد) */
     const st = /^\/start(?:@\w+)?\s+(tm\w+)/.exec(gtext);
     if (st) return bindTeam(env, telegram(env), chat, st[1], null);
+    /* «/support» در گروه (مهر ۱۴۰۵): همین‌جا کانالِ هشدارهای پشتیبان می‌شود — مثلِ باز کردنِ اضطراریِ گفت‌وگوی کارشناس هوشمند (alarms.js) */
+    if (/^\/support(?:@\w+)?$/.test(gtext)) {
+      await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('supportChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+        .bind(JSON.stringify(String(chat)), now()).run();
+      await telegram(env).sendMessage(chat, "✅ این‌جا کانالِ هشدارهای پشتیبان واحد تدارکات شد (مثلِ باز کردنِ اضطراریِ گفت‌وگوهای کارشناس هوشمند).").catch(() => {});
+      return { ok: true };
+    }
     /* «/manager» در گروه: همین‌جا کانال مدیر می‌شود — برای وقتی گروه مدیر عوض شده */
     if (/^\/manager(?:@\w+)?$/.test(gtext)) {
       await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")

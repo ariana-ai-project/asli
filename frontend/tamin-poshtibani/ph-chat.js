@@ -166,6 +166,15 @@
     if (o.body == null) return `<div class="ph-screen ${o.framed ? "" : "full"}"><div class="ph-wall"></div>${chrome}<div class="ph-void center">${o.void || ""}</div></div>`;
     const n = o.nav || {}, c = o.composer || {};
     const keys = c.keys && c.keys.length ? `<div class="ph-kb" role="toolbar" aria-label="منو">${c.keys.map((k) => `<button class="ph-key ph-glass" type="button" data-key="${esc(k.key)}">${esc(k.label)}</button>`).join("")}</div>` : "";
+    /* «فقط دیدن» (مهر ۱۴۰۵): گفت‌وگوی کارشناس هوشمند برای کارشناس — نوارِ شیشه‌ای با دکمهٔ صدازننده به‌جای کادرِ پیام */
+    if (c.readonly) return `<div class="ph-screen ${o.framed ? "" : "full"}"><div class="ph-wall"></div>
+      <div class="ph-scroll" id="chat" role="log" aria-live="polite" aria-label="${esc(o.label || "گفت‌وگو")}">${o.body}</div>
+      <div class="ph-edge top" aria-hidden="true"></div><div class="ph-edge bot" aria-hidden="true"></div>${chrome}
+      <header class="ph-nav"><div>${n.start || ""}</div>
+        <button class="ph-who" ${n.whoAttrs || ""} title="${esc(n.whoTitle || n.title || "")}"><span class="ph-av${n.avatar ? " img" : ""}">${n.avatar || esc(n.initial || "؟")}</span>
+          <span class="ph-name ph-glass"><span>${esc(n.title || "")}</span>${I.chev}</span></button>
+        <div class="ph-acts">${n.acts || ""}</div></header>
+      <div class="ph-compose"><div class="ph-ro ph-glass" role="status">${c.readonly}</div></div></div>`;
     const hint = c.hint ? `<div class="ph-hint ph-glass"><span>${c.hint}</span><button type="button" data-flow-x aria-label="انصراف" title="انصراف">${I.x}</button></div>` : "";
     return `<div class="ph-screen ${o.framed ? "" : "full"}${keys ? " has-kb" : ""}${hint ? " has-hint" : ""}"><div class="ph-wall"></div>
       <div class="ph-scroll" id="chat" role="log" aria-live="polite" aria-label="${esc(o.label || "گفت‌وگو")}">${o.body}</div>

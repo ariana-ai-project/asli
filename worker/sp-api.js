@@ -16,6 +16,7 @@ import * as P from "./sp-push.js";
 import { ensureSpWebhook } from "./sp-bot.js";
 import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
 import { aiKick, autoDecide, propDecide } from "./ai-agent.js";
+import { takeoverThread, handbackThread } from "./ai-takeover.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -123,11 +124,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
 
   /* --- هر دو طرف --- */
   if ((mm = /^\/sp\/thread\/(\d+)$/.exec(path)) && m === "GET") {
-    const th = await C.threadFor(env, mm[1], who);
+    const th = await C.threadFor(env, mm[1], who, { read: true });
     return json(await C.threadFull(env, th, who.side));
   }
   if (path === "/sp/poll" && m === "GET") {
-    const th = await C.threadFor(env, url.searchParams.get("t"), who);
+    const th = await C.threadFor(env, url.searchParams.get("t"), who, { read: true });
     return json(await C.poll(env, th, who.side, url.searchParams.get("since")));
   }
   if ((mm = /^\/sp\/thread\/(\d+)\/msg$/.exec(path)) && m === "POST") {
@@ -315,6 +316,17 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     return json({ ok: true, ai });
   }
   if (path === "/sp/x/tglink" && m === "POST") return json(await C.expertLink(env, ex.id));
+  /* «🚨 باز کردنِ اضطراری» و «🤖 برگرداندن به کارشناس هوشمند» (worker/ai-takeover.js) */
+  if ((mm = /^\/sp\/x\/thread\/(\d+)\/takeover$/.exec(path)) && m === "POST") {
+    const th = await C.threadFor(env, mm[1], who, { read: true });
+    const r = await takeoverThread(env, ctx, ex, th, (await readJson(request)).reason);
+    if (r.queued && deps.flush) deps.flush(r.queued);
+    return json(r);
+  }
+  if ((mm = /^\/sp\/x\/thread\/(\d+)\/handback$/.exec(path)) && m === "POST") {
+    const th = await C.threadFor(env, mm[1], who, { read: true });
+    return json(await handbackThread(env, ex, th));
+  }
   /* فاز ۴ب گام ۴ («👁 حالت تأیید»): تأیید یا ردِ پیشنهادِ کارشناس هوشمند — {action: ok|no, reason, text, bundle} */
   if ((mm = /^\/sp\/x\/prop\/(\d+)$/.exec(path)) && m === "POST") {
     const r = await propDecide(env, ex, mm[1], await readJson(request));

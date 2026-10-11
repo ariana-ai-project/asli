@@ -635,7 +635,7 @@ export const threadRow = (env, id) => env.DB.prepare(`${THREAD_SQL} WHERE t.id=?
  * یک گفت‌وگو با سنجش دسترسی. کارشناسِ «فعلیِ» ارجاع صاحب آن است — اگر درخواست به کارشناس دیگری
  * برود، گفت‌وگو هم با آن می‌رود (درس F-05). تأمین‌کننده فقط گفت‌وگوهای خودش را می‌بیند.
  */
-export async function threadFor(env, id, who) {
+export async function threadFor(env, id, who, opts = {}) {
   const th = int(id) ? await env.DB.prepare(`${THREAD_SQL} WHERE t.id=?`).bind(int(id)).first() : null;
   if (!th) throw new HttpError("این گفت‌وگو پیدا نشد.", 404);
   if (who.expert && th.expert_id !== who.expert.id) throw new HttpError("این گفت‌وگو متعلق به شما نیست.", 403);
@@ -644,7 +644,8 @@ export async function threadFor(env, id, who) {
      (who.ai) از این‌جا رد می‌شود — تصمیم‌هایش با همین توابع است */
   if (who.expert && !who.ai) {
     const L = await aiThread(env, th.id, th.expert_id);
-    if (L.locked) throw new HttpError(AI_THREAD_MSG, 423, { ai_locked: true });
+    /* «فقط دیدن» (مهر ۱۴۰۵): خواندنِ گفت‌وگو، تازه‌ها و صدا آزاد است؛ نوشتن و تصمیم همچنان بسته */
+    if (L.locked && !opts.read) throw new HttpError(AI_THREAD_MSG, 423, { ai_locked: true });
     th.ai = L;
   }
   return th;
@@ -662,7 +663,7 @@ export function threadOut(th, side) {
     id: th.id, request_id: th.request_id, supplier: th.supplier_name, demo: !!th.demo, expert: th.expert_label || th.expert_name,
     phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
-      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch } : null } : {}),
+      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, human: !!th.ai.human, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch } : null } : {}),
   };
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */
@@ -800,6 +801,7 @@ export async function expertThreads(env, ex) {
     if (!x) return { ai: null, ask: null };
     if (!aiOn || x.run_expert !== ex.id || aiRejected(x.review_json)) return { ai: "open", ask: null };
     if (x.state === "ask") return { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "", props: x.sup ? x.props || 0 : 0 };
+    if (x.state === "human") return { ai: "human", ask: null };
     /* گام ۴: «👁 با تأیید» — باز و فقط‌خواندنی، با شمارِ پیشنهادهای منتظرِ کارشناس */
     return x.sup ? { ai: "watch", ask: null, props: x.props || 0 } : { ai: "locked", ask: null };
   };
@@ -811,10 +813,10 @@ export async function expertThreads(env, ex) {
     const A = aiOf(t.id);
     /* گفت‌وگوی بسته: نخوانده و منتظرِ تصمیمش به حسابِ کارشناس نمی‌آید */
     const shut = A.ai === "locked";
-    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: shut ? null : t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
+    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
       waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask, props: A.props || 0,
       /* پیش‌نمایشِ آخرین پیام برای فهرستِ تلگرام‌مانندِ مکاتبات («که|نوع|متن»)؛ گفت‌وگوی بسته پیش‌نمایش ندارد */
-      last_msg: shut ? null : t.last_msg || null });
+      last_msg: t.last_msg || null });
     if (!shut) { g.unread += t.unread; g.waiting += t.waiting; }
     if (A.ai === "ask") g.asks = (g.asks || 0) + 1;
     if (A.props) g.props = (g.props || 0) + A.props;
@@ -904,7 +906,7 @@ export async function postVoice(env, th, side, v) {
 export async function voiceOf(env, who, msgId) {
   const m = int(msgId) ? await env.DB.prepare("SELECT * FROM sp_msgs WHERE id=?").bind(int(msgId)).first() : null;
   if (!m || m.kind !== "voice") throw new HttpError("این پیام صوتی پیدا نشد.", 404);
-  await threadFor(env, m.thread_id, who);
+  await threadFor(env, m.thread_id, who, { read: true });
   const v = (parse(m.meta_json, {}) || {}).voice || {};
   if (!v.key) throw new HttpError("صدای این پیام در انبار نیست.", 404);
   return v;

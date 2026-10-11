@@ -161,6 +161,28 @@
     render();
     if (msg) say(msg, title || "🔒 گفت‌وگوی کارشناس هوشمند");
   }
+  /** «🚨 باز کردنِ اضطراری»: علت اجباری؛ مدیر و پشتیبان همان لحظه هشدار می‌گیرند (worker/ai-takeover.js) */
+  function takeoverDialog() {
+    if (!S.th) return;
+    const th = S.th;
+    dlg("🚨 باز کردنِ اضطراریِ گفت‌وگو", `<p class="sp-muted" style="margin-top:0">کارشناس هوشمند دیگر در این گفت‌وگو جواب نمی‌دهد و ادامه با شماست. <b>مدیر و پشتیبان همین حالا هشدار می‌گیرند.</b></p>
+        <textarea class="tp-input tp-textarea" data-sos-why style="width:100%;min-height:96px" maxlength="500" placeholder="علتِ فوریت (اجباری) — مثلاً تأمین‌کننده تلفنی گفت فقط تا امروز این قیمت را نگه می‌دارد"></textarea>
+        <div class="sp-err" data-err></div>`,
+      [{ label: "🚨 باز کن و هشدار بده", cls: "danger", fn: async (dd) => {
+        const why = ($("[data-sos-why]", dd).value || "").trim();
+        if (why.length < 3) throw new Error("علتِ باز کردنِ اضطراری را بنویسید.");
+        await api(`/sp/x/thread/${th}/takeover`, { body: { reason: why } });
+        await loadThread(); render(); if (TP.ui && TP.ui.success) TP.ui.success("گفت‌وگو دستِ شماست");
+      } }, { label: "انصراف" }]);
+    setTimeout(() => { const t = $("[data-sos-why]"); if (t) t.focus(); }, 60);
+  }
+  function handbackDialog() {
+    if (!S.th) return;
+    const th = S.th;
+    dlg("🤖 برگرداندن به کارشناس هوشمند", `<p class="sp-muted" style="margin-top:0">این گفت‌وگو دوباره دستِ کارشناس هوشمند می‌رود و برای شما «فقط دیدن» می‌شود.</p>`,
+      [{ label: "🤖 برگردان", cls: "primary", fn: async () => { await api(`/sp/x/thread/${th}/handback`, { body: {} }); await loadThread(); render(); if (TP.ui && TP.ui.success) TP.ui.success("به کارشناس هوشمند برگشت"); } },
+        { label: "انصراف" }]);
+  }
   async function refreshLists() {
     await loadList();
     const a = $("[data-reqs]"), b = $("[data-sups]");
@@ -223,12 +245,12 @@
     if (!T.length) return `<div class="sp-empty">چیزی با «${esc(S.sq)}» پیدا نشد.</div>`;
     return T.map((t) => {
       const demo = t.demo ? `<span class="sp-tag">فرضی</span>` : "", av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
-      if (t.ai === "locked") return TP.ui.chatRow({ cls: "lock", lock: true, av, attrs: `data-th-lock="${t.id}" title="گفت‌وگوی کارشناس هوشمند — برای شما بسته است"`,
-        title: `${esc(t.supplier)}${demo}`, time: when(t.last_at), sub: `🤖 دستِ کارشناس هوشمند · ${fa(t.lines)} قلم` });
+      if (t.ai === "locked") return TP.ui.chatRow({ on: S.th === t.id, cls: "lock", lock: true, av, attrs: `data-th="${t.id}" title="گفت‌وگوی کارشناس هوشمند — فقط دیدن"`,
+        title: `${esc(t.supplier)}${demo}`, time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
       const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 با تأییدِ شما · ${fa(t.lines)} قلم`
         : preview(t) || `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`;
       return TP.ui.chatRow({ on: S.th === t.id, cls: t.ai === "ask" ? "ask" : t.ai === "watch" ? "watch" : "", av, attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)}"`,
-        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "👁 " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
+        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "👁 " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
         badges: `${propBadge(t.props)}${badge(t.unread)}${badge(t.waiting, "wait")}` });
     }).join("");
   }
@@ -308,6 +330,9 @@
   const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید؛ برای ${esc(S.d.thread.supplier)} هم فرستاده می‌شود و بعدش گفت‌وگو دوباره دستِ کارشناس هوشمند است.</i></div>` : ""; };
   /* «👁 با تأیید» (فاز ۴ب گام ۴): پیشنهادهای معطلِ کارشناس هوشمند در انتهای گفت‌وگو، درست بالای کادرِ پیام */
   const watchOf = () => (S.d && S.d.watch) || null;
+  /* گفت‌وگوی کارشناس هوشمند: فقط دیدن (locked) یا «🚨 اضطراری» بازشده و دستِ کارشناس (human) */
+  const roOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.locked);
+  const humanOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.human);
   const ACT_FA = { approve: "✅ تأییدِ مشخصات", return: "↩️ برگشت برای اصلاح", reject: "❌ رد", accept_rows: "☑️ پذیرشِ مغایرت", final: "🏁 تأیید نهایی" };
   function bundleSum(bid) {
     const b = S.d.bundles.find((x) => x.id === bid);
@@ -351,12 +376,14 @@
       framed, body: feedHtml(), label: `گفت‌وگو با ${th.supplier}`,
       nav: {
         start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
-        title: th.supplier, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
+        title: `${humanOf() ? "✋ " : ""}${th.supplier}`, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
         whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
-        acts: `${framed ? "" : `<button class="ph-glass ph-circ" type="button" data-help="corr.main" aria-label="راهنما" title="راهنما">${TP.ui.ICON.help}</button>`}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
+        acts: `${humanOf() ? `<button class="ph-glass ph-circ" type="button" data-handback aria-label="برگرداندن به کارشناس هوشمند" title="✋ اضطراری دستِ شماست — برگرداندن به کارشناس هوشمند">🤖</button>` : ""}${framed ? "" : `<button class="ph-glass ph-circ" type="button" data-help="corr.main" aria-label="راهنما" title="راهنما">${TP.ui.ICON.help}</button>`}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
           <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
-      composer: { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "👁 پیامِ خودتان — با «❌ رد»ِ پیشنهاد می‌رود" : `پیام به ${th.supplier}`, draft: S.th },
+      composer: roOf()
+        ? { readonly: `<span class="ph-ro-t">🤖 کارشناس هوشمند این گفت‌وگو را پیش می‌برد — <b>فقط دیدن</b></span><button type="button" class="ph-ro-sos" data-takeover title="گفت‌وگو را خودتان ادامه دهید — مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button>` }
+        : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "👁 پیامِ خودتان — با «❌ رد»ِ پیشنهاد می‌رود" : `پیام به ${th.supplier}`, draft: S.th },
     });
   }
   const composerState = PH.grow;
@@ -464,6 +491,7 @@
    * دکمه‌های همیشگیِ تصمیم.
    */
   function watchActs(b) {
+    if (roOf()) return `<div class="sp-muted" style="margin-top:6px">🤖 تصمیمِ این بسته با کارشناس هوشمند است — فقط دیدن.</div>`;
     const w = watchOf();
     if (!w || (w.manual || []).includes(b.id)) return null;
     const p = (w.pending || []).find((x) => x.bundle_id === b.id || (x.actions || []).some((a) => +a.bundle_id === b.id));
@@ -518,6 +546,8 @@
     const sq = $("[data-sq]"); if (sq) sq.oninput = () => { S.sq = sq.value; const b = $("[data-sups]"); if (b) { b.innerHTML = supList(); bind(); } };
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; S.sq = ""; ss.set("sp.aid", String(S.aid)); render(); }; });
     $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
+    const sos = $("[data-takeover]"); if (sos) sos.onclick = takeoverDialog;
+    const hb = $("[data-handback]"); if (hb) hb.onclick = handbackDialog;
     $$("[data-th-lock]").forEach((b) => { b.onclick = () => say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و تا وقتی تیکِ شما در «پنل پشتیبانی» روی «🤖 هوشمند» است برای شما بسته است.\nاگر سؤالی از شما داشته باشد همین‌جا با 🚨 باز می‌شود و در تلگرام هم خبر می‌دهد.", "🔒 گفت‌وگوی کارشناس هوشمند"); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
     $$("[data-tab]").forEach((b) => { b.onclick = () => { S.tab = b.dataset.tab; S.mainScroll = 0; render(); }; });

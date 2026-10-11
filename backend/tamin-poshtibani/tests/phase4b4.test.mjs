@@ -280,7 +280,8 @@ test("مدیر «👁» را برمی‌دارد: پیشنهادهای معطل 
   assert.equal(DB.raw.prepare("SELECT sup_on FROM items WHERE id=31").get().sup_on, 0);
   assert.ok(DB.raw.prepare("SELECT retry_at FROM ai_threads WHERE thread_id=?").get(th).retry_at, "همان دور دوباره، بی تأیید");
   const v = await call(`/sp/thread/${th}`, { headers: EX });
-  assert.equal(v.status, 423, "گفت‌وگو دوباره دستِ کارشناس هوشمند و بسته");
+  assert.equal(v.status, 200, "فقط دیدن");
+  assert.equal(v.data.thread.ai.locked, true, "گفت‌وگو دوباره دستِ کارشناس هوشمند و بسته");
   /* اصلاحِ پیشنهاد و ارسالِ تازه: همان لحظه تأیید نهایی، بی پیشنهاد */
   assert.equal((await call(`/sp/line/${S.line}/revise`, { headers: H, body: {} })).status, 200);
   assert.equal((await call(`/sp/line/${S.line}`, { method: "PUT", headers: H, body: { price: 3800 } })).status, 200);

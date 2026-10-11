@@ -57,6 +57,7 @@ import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
+import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
@@ -199,6 +200,7 @@ ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
 ${CR_DDL.trim()}
+${ALARM_DDL.trim()}
 ${STRUCT_DDL.trim()}
 `;
 
@@ -791,10 +793,12 @@ async function desk(env, url) {
     env.DB.prepare("SELECT expert_id FROM ai_agents WHERE mode='on'"),
     ...(withAll ? [
       env.DB.prepare("SELECT * FROM expert_scores"), env.DB.prepare("SELECT * FROM weights"),
+      /* هشدارهای دیده‌نشدهٔ مدیر (worker/alarms.js) — نوارِ بالای میز */
+      env.DB.prepare("SELECT a.id, a.at, a.kind, a.title, a.body, a.request_id, a.thread_id, e.label AS expert FROM alarms a LEFT JOIN experts e ON e.id=a.expert_id WHERE a.ack_m IS NULL ORDER BY a.at DESC LIMIT 20"),
       env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at"),
     ] : []),
   ];
-  const [cnt, allCnt, reqRes, expRes, setRes, aiRes, scRes, wRes, decRes] = await env.DB.batch(first);
+  const [cnt, allCnt, reqRes, expRes, setRes, aiRes, scRes, wRes, almRes, decRes] = await env.DB.batch(first);
   const total = (cnt.results[0] || {}).n || 0, all_total = (allCnt.results[0] || {}).n || total;
   const reqs = reqRes.results || [];
   const extra = {
@@ -804,7 +808,7 @@ async function desk(env, url) {
     ai_experts: (aiRes.results || []).map((r) => r.expert_id),
     /* فاز ۴ب گام ۴: نوع قلم‌هایی که پشتیبانی «مجازِ حالت تأیید» کرده — بی هیچ، تیکِ «👁» در میز مدیر نیست */
     sup_heads: supHeadsOf(setRes.results),
-    ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [] } : {}),
+    ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [], alarms: almRes.results || [] } : {}),
   };
   if (!reqs.length) return { requests: [], ...extra };
   const ids = reqs.map((r) => r.id);
@@ -1729,7 +1733,7 @@ async function route(request, env, ctx) {
 
     /* پنل تأمین‌کننده و صفحهٔ مکاتبات کارشناس (worker/sp-api.js) */
     if (path.startsWith("/sp/")) {
-      const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json });
+      const r = await spRoute(request, env, ctx, path, m, url, { requireExpert, readJson, json, flush: (k) => flush(env, ctx, k) });
       if (r) return r;
     }
     /* تب «کارشناس هوشمند» پنل کارشناس (worker/ai-agent.js) */
@@ -1891,6 +1895,9 @@ async function route(request, env, ctx) {
       return json({ ok: true, count: rows.length });
     }
     let mm;
+    /* هشدارهای مدیر (worker/alarms.js) — همان هشدارهای پنل پشتیبانی، «دیدم» جداگانه */
+    if (path === "/alarms" && m === "GET") { await requireManager(request, env); return json(await alarmsList(env, "m", url)); }
+    if ((mm = /^\/alarms\/(\d+)\/ack$/.exec(path)) && m === "POST") { await requireManager(request, env); return json(await alarmAck(env, "m", mm[1])); }
 
     /* --- پنل «پشتیبانی» (worker/support.js): نظارتِ فقط‌خواندنی + تیک تأیید کمیسیون --- */
     if (path.startsWith("/support/")) {
@@ -1935,6 +1942,11 @@ async function route(request, env, ctx) {
       if (path === "/support/commission" && m === "POST") { const r = await setCommission(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
       /* نتیجهٔ کمیسیون: برنده و علت برای هر قلم، و پیامِ تشکر به بقیهٔ تأمین‌کنندگان (worker/commission-result.js) */
       if (path === "/support/commission/result" && m === "GET") return json(await commissionResultGet(env, url));
+      /* هشدارها (worker/alarms.js): باز کردنِ اضطراریِ گفت‌وگوی کارشناس هوشمند و …؛ شماره‌های پیامکِ هشدارِ مدیر و پشتیبان */
+      if (path === "/support/alarms" && m === "GET") return json(await alarmsList(env, "s", url));
+      if ((mm = /^\/support\/alarms\/(\d+)\/ack$/.exec(path)) && m === "POST") return json(await alarmAck(env, "s", mm[1]));
+      if (path === "/support/alert-contacts" && m === "GET") return json(await alertContacts(env));
+      if (path === "/support/alert-contacts" && m === "PUT") return json(await alertContactsSave(env, await readJson(request)));
       if (path === "/support/commission/result" && m === "POST") { const r = await commissionResultSave(env, await readJson(request), env.COMPANY || "تونل سد آریانا"); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
     }

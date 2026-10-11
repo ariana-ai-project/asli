@@ -940,3 +940,26 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
   .cmr-ft .tp-btn.primary { flex: 1 1 100%; }
 }
 @media (prefers-reduced-motion: reduce) { .cmr, .cmr-ov, .cmr-q.on::after { animation: none; } }
+
+/* ============================================================
+   نوارِ هشدار — پنل مدیر و پشتیبان (alarms.js؛ مهر ۱۴۰۵)
+   ============================================================ */
+.tp-alarms { display: flex; flex-direction: column; gap: 8px; margin: 10px auto 0; padding: 0 18px; max-width: 1480px; }
+.tp-alarm { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: var(--ui-r-card);
+  background: linear-gradient(135deg, rgba(229, 72, 77, 0.22), rgba(229, 72, 77, 0.08)); border: 1px solid rgba(248, 113, 113, 0.45);
+  box-shadow: 0 10px 28px -16px rgba(229, 72, 77, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.12); animation: alarmIn .4s var(--ui-spring) both; }
+:root[data-theme="light"] .tp-alarm { background: linear-gradient(135deg, rgba(229, 72, 77, 0.12), rgba(255, 255, 255, 0.7)); border-color: rgba(214, 58, 63, 0.4); }
+@keyframes alarmIn { from { transform: translateY(-8px); opacity: 0; } }
+.tp-alarm .ic { width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; font-size: 1.15rem; flex-shrink: 0;
+  background: rgba(229, 72, 77, 0.25); animation: alarmPulse 1.6s ease-in-out 3; }
+@keyframes alarmPulse { 50% { box-shadow: 0 0 0 8px rgba(229, 72, 77, 0); transform: scale(1.06); } 0%, 100% { box-shadow: 0 0 0 0 rgba(229, 72, 77, 0.45); } }
+.tp-alarm .t { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tp-alarm .t b { font-weight: 800; }
+.tp-alarm .t span { font-size: .88rem; overflow-wrap: anywhere; }
+.tp-alarm .t small { color: var(--tp-muted); font-size: .76rem; }
+.tp-alarm .acts { display: flex; gap: 6px; flex-wrap: wrap; flex-shrink: 0; }
+@media (max-width: 560px) { .tp-alarm { flex-wrap: wrap; } .tp-alarm .acts { width: 100%; justify-content: flex-end; } }
+@media (prefers-reduced-motion: reduce) { .tp-alarm, .tp-alarm .ic { animation: none; } }
+.al-cfg { display: flex; flex-direction: column; gap: 14px; }
+.al-row { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: 14px; background: var(--ui-thin); border: 1px solid var(--ui-card-edge); }
+.al-row b { font-size: .98rem; }

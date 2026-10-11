@@ -1257,7 +1257,7 @@
     /* میز ارجاع نوار پایینِ چسبان دارد؛ دکمهٔ راهنما بالاتر می‌نشیند */
     document.body.classList.toggle("has-foot", S.tab === "desk");
     const restore = TP.snapScroll();
-    app.innerHTML = vTop() + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
+    app.innerHTML = vTop() + TP.ui.alarmBar(S.data.alarms) + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? `<div class="empty">در حال بارگیری…</div>` :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
         : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : S.tab === "reports" ? vReports() : vLog()}</div>`);
@@ -1272,6 +1272,12 @@
   /* ---------- اتصال رویدادها ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
+    /* هشدار: «دیدم» فقط برای مدیر (پشتیبان جداگانه می‌بیند) */
+    Q("[data-alarm-ack]").forEach((b) => b.onclick = async () => {
+      const id = +b.dataset.alarmAck; b.disabled = true;
+      try { await TP.api(`/alarms/${id}/ack`, { body: {} }); S.data.alarms = (S.data.alarms || []).filter((x) => x.id !== id); render(); }
+      catch (e) { b.disabled = false; TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    });
     if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); throw e; } } }); return; }
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
     Q("[data-hist-import]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); pickHistory(); }; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickHistory(); } }; });

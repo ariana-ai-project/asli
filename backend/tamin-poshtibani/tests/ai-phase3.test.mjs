@@ -229,7 +229,7 @@ test("«پایان»ِ پشتیبانی با کمتر از حد ← جدول و 
 });
 
 test("ردِ تحویل درخواست را کامل به کارشناس برمی‌گرداند؛ تأیید = تیکِ کمیسیون", { skip: SKIP }, async () => {
-  assert.equal((await call("/sp/thread/50", { headers: EX })).status, 423, "پیش از رد: گفت‌وگوی کارشناس هوشمند بسته");
+  assert.equal((await call("/sp/thread/50", { headers: EX })).data.thread.ai.locked, true, "پیش از رد: گفت‌وگوی کارشناس هوشمند بسته (فقط دیدن)");
   assert.equal((await call("/quotes/101", { method: "PUT", headers: EX, body: { final: 0 } })).status, 423);
   const noReason = await call(`/support/ai/deliveries/${RUN}/review`, { headers: SUP, body: { ok: false } });
   assert.equal(noReason.status, 400);
