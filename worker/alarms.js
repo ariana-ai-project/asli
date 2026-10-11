@@ -9,6 +9,7 @@
  */
 import { HttpError } from "./http.js";
 import { queueStmt } from "./queue.js";
+import { pushLater, MANAGER, SUPPORT } from "./push.js";
 import { smsReady, sendSms, e164, isMobile } from "./sms.js";
 
 export const ALARM_DDL = `
@@ -57,6 +58,10 @@ export async function raiseAlarm(env, a, ctx) {
   const stmts = [];
   for (const [chat, tag] of [[mc, "m"], [sc, "s"]]) if (chat && !(tag === "s" && String(sc) === String(mc))) stmts.push(queueStmt(env, `alarm:${id}:${tag}`, chat, text, null));
   if (stmts.length) await env.DB.batch(stmts);
+  /* اعلانِ گوشی و مرورگرِ مدیر و پشتیبان — مثل پیامک همان لحظه (هشدار فوری است، ساعت اداری ندارد) */
+  const pmsg = (url) => ({ title: `🚨 ${a.title}`, body: a.body || "", url, tag: `alarm${id}` });
+  const pj = Promise.all([pushLater(env, ctx, MANAGER, pmsg("manager")), pushLater(env, ctx, SUPPORT, pmsg("support"))]);
+  if (!ctx || typeof ctx.waitUntil !== "function") await pj;
   /* پیامک — بعد از پاسخ (waitUntil)، تا کندیِ درگاه کارِ کارشناس را نگه ندارد */
   const p = (await setting(env, "alertPhones")) || {};
   const to = [...new Set([p.manager, p.support].filter(Boolean))];

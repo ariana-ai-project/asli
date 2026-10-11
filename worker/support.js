@@ -15,6 +15,7 @@
 import { HttpError } from "./http.js";
 import { managerCode } from "./settings.js";
 import { queueStmt } from "./queue.js";
+import { pushStmt, EXPERT } from "./push.js";
 import { threadRow, threadOut, lineOut, bundleOut, msgOut, msgFor, FILE_LABELS } from "./sp-core.js";
 
 const now = () => Date.now();
@@ -530,6 +531,9 @@ export async function setCommission(env, body) {
     const r0 = list[0];
     stmts.push(evStmt(env, ok ? "commission_ok" : "commission_off", r0.request_id, list.length === 1 ? r0.id : null,
       { assignment_id: aid, expert_id: r0.expert_id, item_ids: list.map((r) => r.id) }));
+    stmts.push(pushStmt(env, `sup-cm:${aid}:${t}:${ok}`, EXPERT(r0.expert_id), ok
+      ? { title: `✅ کمیسیون درخواست ${r0.request_id} تأیید شد`, body: `${list.length} قلم — حالا می‌توانید «خاتمه» بزنید.`, url: "expert", tag: `a${aid}` }
+      : { title: `↩️ تأیید کمیسیون درخواست ${r0.request_id} برداشته شد`, body: `${list.length} قلم`, url: "expert", tag: `a${aid}` }));
     if (!r0.telegram_chat) continue;
     const titles = list.slice(0, 8).map((r) => `• ${esc(short(r.title, 60))}`).join("\n") + (list.length > 8 ? `\n• … و ${faN(list.length - 8)} قلم دیگر` : "");
     const text = ok

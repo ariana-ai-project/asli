@@ -14,6 +14,7 @@ import { HttpError } from "./http.js";
 import { getSettings } from "./settings.js";
 import { alertSchedule, fmtFa } from "./time.js";
 import { queueStmt } from "./queue.js";
+import { pushStmt, EXPERT } from "./push.js";
 import { assignmentLogStmt } from "./records.js";
 import { esc } from "./telegram.js";
 
@@ -240,6 +241,8 @@ export async function reassign(env, body, actor = "manager") {
       dispatchText({ request_id: a.request_id, party: a.party, item_count: items.length, days: newDays, items, dispatched_at: t, deadline_at: deadlineAt, from: body.from }),
       seenKb(b.id, target.senior && target.team_n > 0)));
   }
+  if (a.dispatched_at) stmts.push(pushStmt(env, `dispatch:${b.id}:${t}`, EXPERT(eid), { title: `🔔 ارجاع جدید — درخواست ${a.request_id}`,
+    body: `${a.party ? `${a.party} · ` : ""}${items.length} قلم · مهلت ${newDays} روز`, url: "expert", tag: `a${b.id}` }));
   await env.DB.batch(stmts);
   return { ok: true, assignment_id: b.id, notified: !!(a.dispatched_at && target.telegram_chat), expert: { id: target.id, name: target.name, label: target.label } };
 }

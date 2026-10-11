@@ -23,6 +23,7 @@
 import { HttpError } from "./http.js";
 import { getSettings } from "./settings.js";
 import { queueStmt } from "./queue.js";
+import { pushStmt, EXPERT, MANAGER } from "./push.js";
 import { notifyClosed, managerCard } from "./manager.js";
 import { esc } from "./telegram.js";
 import { closureStmt } from "./records.js";
@@ -92,6 +93,8 @@ export async function expertDecision(env, ex, aid, body) {
     const stmts = [ev(env, `expert:${ex.id}`, "decision_requested", own.request_id, { decision_id: id, action, items: itemIds })];
     const mgr = await settingValue(env, "managerChat");
     if (mgr) stmts.push(await decisionRequestStmt(env, mgr, id, aid, action, itemIds, t));
+    stmts.push(pushStmt(env, `dec:${id}:${t}:ask`, MANAGER, { title: `🟠 درخواست تأیید: ${ACTION_FA[action] || action}`,
+      body: `درخواست ${own.request_id} — ${ex.label || ex.name}`, url: "manager", tag: `dec${id}` }));
     await env.DB.batch(stmts);
     return { ok: true, pending: true, decision_id: id, items: (itemIds || []).length };
   }
@@ -135,6 +138,8 @@ async function queueAsk(env, ex, own, action, itemIds, reason) {
   const stmts = [ev(env, `expert:${ex.id}`, "decision_requested", own.request_id, { decision_id: id, action, items: itemIds, reason })];
   const mgr = await settingValue(env, "managerChat");
   if (mgr) stmts.push(await decisionRequestStmt(env, mgr, id, own.id, action, itemIds, t, reason));
+  stmts.push(pushStmt(env, `dec:${id}:${t}:ask`, MANAGER, { title: `🟠 درخواست تأیید: ${ACTION_FA[action] || action}`,
+    body: `درخواست ${own.request_id} — ${ex.label || ex.name} · ${itemIds.length} قلم${reason ? ` · ${reason}` : ""}`, url: "manager", tag: `dec${id}` }));
   await env.DB.batch(stmts);
   return { ok: true, pending: true, decision_id: id, items: itemIds.length };
 }
@@ -227,13 +232,18 @@ export async function applyDecision(env, actor, aid, action, payload, decisionId
       if (fullyClosed) await env.DB.prepare("UPDATE assignments SET mgr_seen_at=COALESCE(mgr_seen_at,?) WHERE id=?").bind(t, aid).run();
     } else if (fullyClosed) {
       await notifyClosed(env, aid, mgr, "کارشناس").catch(() => {});
-    } else if (mgr && closed) {
+    } else if (closed) {
       /* خاتمهٔ جزئی: خبر است، ولی چیزی از میز کار برداشته نمی‌شود */
-      const items = (await env.DB.prepare("SELECT title, qty, unit, state FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
-      const text = managerCard({ ...c, items: items.filter((i) => i.state === "closed") }, ["done", "done", "done", "done", "done", "done"],
-        { head: `🔒 <b>خاتمهٔ جزئی — ${M(closed)} قلم بسته شد</b>` })
-        + `\n<i>${M(live.n)} قلم دیگر همچنان در جریان است و درخواست در کارتابل می‌ماند.</i>`;
-      await env.DB.batch([queueStmt(env, `partial:${aid}:${t}`, mgr, text)]);
+      const w = [pushStmt(env, `partial:${aid}:${t}`, MANAGER, { title: `🔒 خاتمهٔ جزئی — درخواست ${c && c.request_id}`,
+        body: `${c ? `${c.expert_label || c.expert_name} · ` : ""}${closed} قلم بسته شد؛ ${live.n} قلم دیگر در جریان است.`, url: "manager" })];
+      if (mgr) {
+        const items = (await env.DB.prepare("SELECT title, qty, unit, state FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
+        const text = managerCard({ ...c, items: items.filter((i) => i.state === "closed") }, ["done", "done", "done", "done", "done", "done"],
+          { head: `🔒 <b>خاتمهٔ جزئی — ${M(closed)} قلم بسته شد</b>` })
+          + `\n<i>${M(live.n)} قلم دیگر همچنان در جریان است و درخواست در کارتابل می‌ماند.</i>`;
+        w.push(queueStmt(env, `partial:${aid}:${t}`, mgr, text));
+      }
+      await env.DB.batch(w);
     }
   }
   return { closed, fullyClosed };
@@ -285,11 +295,15 @@ export async function rejectDecision(env, decisionId, note) {
   return { ok: true };
 }
 
-/** نتیجهٔ تصمیم مدیر برای کارشناس — در تلگرام، اگر وصل است */
+/** نتیجهٔ تصمیم مدیر برای کارشناس — در تلگرام اگر وصل است، و اعلانِ گوشی اگر روشن کرده */
 async function tellExpert(env, d, ok, reason, res) {
   const c = await context(env, d.assignment_id);
-  if (!c || !c.telegram_chat) return;
+  if (!c) return;
   const act = ACTION_FA[d.action] || d.action;
+  const push = pushStmt(env, `dec:${d.id}:${d.requested_at}:${ok ? "ok" : "no"}`, EXPERT(c.expert_id), {
+    title: ok ? `✅ مدیر ${act} را تأیید کرد` : `❌ مدیر ${act} را رد کرد`,
+    body: `درخواست ${c.request_id}${!ok && reason ? ` — علت: ${reason}` : ""}${ok && d.action === "end" && res ? ` — ${res.closed} قلم بسته شد` : ""}`, url: "expert", tag: `a${d.assignment_id}` });
+  if (!c.telegram_chat) { await env.DB.batch([push]); return; }
   const text = ok
     ? `✅ <b>مدیر ${act} را تأیید کرد</b>\n\nدرخواست <b>${esc(c.request_id)}</b>`
       + (d.action === "end" && res ? `\n${M(res.closed)} قلم بسته شد${res.fullyClosed ? " و درخواست از کارتابل شما خارج شد." : "؛ باقی اقلام در کارتابل می‌ماند."}` : "")
@@ -299,5 +313,5 @@ async function tellExpert(env, d, ok, reason, res) {
       + (reason ? `\n\n<b>علت:</b>\n${esc(reason)}` : "\n\n<i>دلیلی نوشته نشد.</i>")
       + (d.action === "manual" ? "\n\nاین اقلام با کارشناس هوشمند می‌مانند؛ بعد از نرمال‌سازی «سپردن» را بزنید."
         : d.action === "supervise" ? "\n\nکارشناس هوشمند این اقلام را بی تأیید پیش می‌برد." : `\n\nدرخواست همچنان در کارتابل شماست.`);
-  await env.DB.batch([queueStmt(env, `dec:${d.id}:${d.requested_at}:${ok ? "ok" : "no"}`, c.telegram_chat, text)]);
+  await env.DB.batch([queueStmt(env, `dec:${d.id}:${d.requested_at}:${ok ? "ok" : "no"}`, c.telegram_chat, text), push]);
 }

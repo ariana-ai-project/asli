@@ -39,7 +39,8 @@ import { renderRequestDoc } from "./reqdoc.js";
 import { REQUIRED, PER_SUPPLIER, PER_LINE, LABELS, ENUMS, INVOICE_DEFAULT, missingRequired, validateQuote, validDtime, normalizeDtime } from "./quote-rules.js";
 import { getSettings } from "./settings.js";
 import { STAGE_NAMES, queueStmt } from "./queue.js";
-import { stageWatch, markManagerSeen, recipients, RECIPIENT_COLS, RECIPIENT_JOIN } from "./manager.js";
+import { pushStmt, pushTo, EXPERT } from "./push.js";
+import { stageWatch, markManagerSeen, recipients, pushRecipients, RECIPIENT_COLS, RECIPIENT_JOIN } from "./manager.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { itemHistory, activeImport } from "./history.js";
 import { showLayer } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
@@ -265,6 +266,8 @@ export async function runAlerts(env, limit = 20) {
     /* کلید یکتایی صف، زمانِ هشدار را هم دارد: شناسهٔ ارجاع بعد از پاک‌کردن میز
        دوباره استفاده می‌شود و ردیفِ قدیمیِ صف، هشدارِ ارجاعِ تازه را بی‌صدا می‌خورد. */
     if (row.kind === "stage") {
+      stmts.push(pushStmt(env, `stage:${row.aid}:${row.stage}:${row.fire_at}`, EXPERT(row.expert_id), {
+        title: `⏳ یادآوری — ${STAGE_NAMES[row.stage]}`, body: `درخواست ${row.request_id}${row.party ? ` · ${row.party}` : ""}`, url: "expert", tag: `a${row.aid}` }));
       if (!row.telegram_chat) { skipped++; continue; }
       stmts.push(queueStmt(env, `stage:${row.aid}:${row.stage}:${row.fire_at}`, row.telegram_chat,
         stageAlertText(row, row.stage), row.stage === 0 ? seenKb(row.aid) : reqKb(row.aid)));
@@ -273,6 +276,11 @@ export async function runAlerts(env, limit = 20) {
       /* عبور از ۱۰۰٪: هم کارشناس، هم کانال مدیر و/یا گروه کارشناس ارشدش (SLA-05، TG-04) */
       if (row.telegram_chat) { stmts.push(queueStmt(env, `over:${row.aid}:${row.fire_at}`, row.telegram_chat, overdueText(row), reqKb(row.aid))); queued++; }
       for (const rc of recipients(row, null, managerChat)) { stmts.push(queueStmt(env, `over-${rc.tag}:${row.aid}:${row.fire_at}`, rc.chat, managerOverdueText(row), null, rc.bot)); queued++; }
+      stmts.push(pushStmt(env, `over:${row.aid}:${row.fire_at}`, EXPERT(row.expert_id), { title: `🔴 مهلت درخواست ${row.request_id} تمام شد`,
+        body: `${row.party ? `${row.party} · ` : ""}${row.open_count} قلم باز`, url: "expert", tag: `a${row.aid}` }));
+      for (const p of pushRecipients(row, null, null)) stmts.push(pushStmt(env, `over-${p.tag}:${row.aid}:${row.fire_at}`, p.who, {
+        title: `🔴 عبور از مهلت — درخواست ${row.request_id}`, body: `${row.label || row.name}${row.party ? ` · ${row.party}` : ""} — ${row.open_count} قلم باز`,
+        url: p.tag === "mgr" ? "manager" : "expert", tag: `over${row.aid}` }));
     }
   }
   await env.DB.batch(stmts);
@@ -2449,11 +2457,13 @@ export async function runSmartJobs(env) {
     const nav = await navLoad(env, job.chat_id);
     await smartResultsMessage(env, navApi(api, nav), job.chat_id, ex, it, params, out);
     await navSave(env, nav).catch((e) => console.error("nav save", e && e.message));
+    await pushTo(env, EXPERT(ex.id), { title: "🔎 جستجوی هوشمند تمام شد", body: `${it.title} — نتیجه در بات و پنل کارشناس`, url: "expert", tag: `sj${job.id}` });
     return { jobs: 1, stale: stale.length };
   } catch (e) {
     const msg = String((e && e.message) || e).slice(0, 300);
     await env.DB.prepare("UPDATE smart_jobs SET state='failed', error=?, finished_at=? WHERE id=?").bind(msg, now(), job.id).run();
     await api.sendMessage(job.chat_id, `❌ جستجوی هوشمند انجام نشد: ${esc(msg.slice(0, 200))}`).catch(() => {});
+    await pushTo(env, EXPERT(job.expert_id), { title: "❌ جستجوی هوشمند انجام نشد", body: msg.slice(0, 200), url: "expert", tag: `sj${job.id}` });
     return { jobs: 1, failed: 1, stale: stale.length };
   }
 }

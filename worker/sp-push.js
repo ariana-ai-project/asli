@@ -19,6 +19,7 @@ import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMone
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { storage } from "./storage.js";
 import { aiThread } from "./ai-lock.js";
+import { pushTo, EXPERT } from "./push.js";
 import { pfReadOn } from "./switches.js";
 import { limitsTxt } from "./terms-locks.js";
 import { proformaData, termRows } from "./pfdoc.js";
@@ -415,12 +416,22 @@ const rowsFor = async (env, th, side) => ((side === "e"
  * کار اصلی را نمی‌خواباند. بات کارشناسان هیچ‌کدام را نمی‌گیرد — مکاتبات فقط در بات مکاتبات است.
  */
 export async function pushMsgs(env, thIn, msgs) {
-  if (!msgs || !msgs.length || !spReady(env)) return { sent: 0 };
+  if (!msgs || !msgs.length) return { sent: 0 };
+  /* اعلانِ گوشی و مرورگرِ کارشناس (worker/push.js) مستقل از بات مکاتبات است؛ بقیه فقط وقتی بات وصل است */
+  const forE = msgs.filter((m) => m.who !== "e" && m.kind !== "note");
+  if (!spReady(env) && !forE.length) return { sent: 0 };
   const th = thIn && thIn.supplier_name !== undefined && thIn.expert_id !== undefined ? thIn : await threadRow(env, thIn.id || thIn.thread_id || thIn);
   if (!th) return { sent: 0 };
   let sent = 0;
   /* گفت‌وگوی بستهٔ کارشناس هوشمند به تلگرامِ کارشناس نمی‌رود — فقط وقتی «پرسش از کارشناس» بازش کرده (ai-lock.js) */
   const shutE = (await aiThread(env, th.id, th.expert_id)).locked;
+  if (forE.length && !shutE) {
+    const last = forE[forE.length - 1];
+    const txt = last.kind === "voice" ? `🎤 ${last.body || "پیام صوتی"}` : String(last.body || "").replace(/\s+/g, " ");
+    await pushTo(env, EXPERT(th.expert_id), { title: `💬 ${th.supplier_name}`,
+      body: `درخواست ${th.request_id}${forE.length > 1 ? ` (${forE.length} پیام)` : ""}: ${txt.slice(0, 220)}`, url: `correspond?th=${th.id}`, tag: `th${th.id}` });
+  }
+  if (!spReady(env)) return { sent: 0 };
   for (const side of ["e", "s"]) {
     if (side === "e" && shutE) continue;
     const mine = msgs.filter((m) => m.who !== side && m.kind !== "note");

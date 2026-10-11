@@ -56,6 +56,7 @@ import { getRules, saveRules, coverOf, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
 import { queueStmt } from "./queue.js";
+import { pushStmt, pushTo, EXPERT, SUPPORT } from "./push.js";
 import { NORM_OK_SQL, changeStmt } from "./structure.js";
 import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
@@ -885,6 +886,8 @@ async function handOver(env, run, ex, cover, rules) {
 }
 /** آلارمِ واگذاری در بات کارشناسان — همان لحظه، با دکمهٔ مینی‌اپِ پنل کارشناس */
 async function handoverAlarm(env, ex, run, short, hours) {
+  await pushTo(env, EXPERT(ex.id), { title: `⚠️ کارشناس هوشمند به حداقلِ استعلامِ درخواست ${run.request_id} نرسید`,
+    body: short.map((c) => `${c.title} — ${c.have} از ${c.need}`).join("، ").slice(0, 300) + " — لطفاً تأمین‌کنندهٔ بیشتری انتخاب کنید.", url: "expert", tag: `ho${run.id}` });
   if (!ex.telegram_chat || !env.TG_BOT_TOKEN) return 0;
   const text = `⚠️ <b>کارشناس هوشمند به حداقلِ استعلامِ درخواست ${esc(run.request_id)} نرسید</b>\n\n`
     + `بعد از ${faN(hours)} ساعت، این اقلام هنوز کمتر از حدی که پنل پشتیبانی تعیین کرده پیشنهادِ تأییدنهایی دارند:\n`
@@ -1038,6 +1041,8 @@ async function askAlarm(env, ex, th, q) {
     + `«${esc(q)}»\n\nاین گفت‌وگو تا پاسخِ شما برایتان باز است؛ جواب را فقط در همان گفت‌وگو بنویسید (صفحهٔ مکاتبات یا بات مکاتبات) — مستقیم برای تأمین‌کننده می‌رود. `
     + "بعد از پاسخ، گفت‌وگو دوباره دستِ کارشناس هوشمند است.";
   let sent = 0;
+  await pushTo(env, EXPERT(ex.id), { title: "🚨 کارشناس هوشمند از شما سؤال دارد", body: `${th.supplier_name} — درخواست ${th.request_id}: «${String(q).slice(0, 220)}»`,
+    url: `correspond?th=${th.id}`, tag: `ask${th.id}` });
   if (ex.telegram_chat && env.TG_BOT_TOKEN) {
     await telegram(env).call("sendMessage", { chat_id: ex.telegram_chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
       reply_markup: { inline_keyboard: [[{ text: "💬 باز کردنِ مکاتبات", web_app: { url: P.appUrl(env, "e") } }]] } }).then(() => sent++).catch((e) => console.error("ask tg", e && e.message));
@@ -1284,6 +1289,13 @@ async function stepClosing(env, run, k) {
       const md = await mdOf(env, run, ex).catch(() => null);
       if (md) await api.sendDocument(ex.telegram_chat, `پرونده-مذاکره-${run.request_id}.md`, new Blob([md], { type: "text/markdown" })).then(() => sent++).catch(() => {});
     }
+    /* اعلانِ گوشی: کارشناس (تحویل) و پشتیبان (تحویلِ تازه برای تأیید کمیسیون — تا حالا خبری نداشت) */
+    await Promise.all([
+      pushTo(env, EXPERT(ex.id), { title: `🤖 کارشناس هوشمند درخواست ${run.request_id} را تحویل داد`,
+        body: `جدول کمیسیون با ${finals.length} خطِ تأییدنهایی و نامهٔ پیوست — برای تأیید در پنل پشتیبانی.`, url: "expert", tag: `dl${run.id}` }),
+      pushTo(env, SUPPORT, { title: `📥 تحویلِ تازهٔ کارشناس هوشمند — درخواست ${run.request_id}`,
+        body: `${ex.label || ex.name} · ${finals.length} خطِ تأییدنهایی${cl.short && cl.short.length ? ` · ${cl.short.length} قلم کمتر از حداقل` : ""} — برای تأیید کمیسیون.`, url: "support#dl", tag: `dl${run.id}` }),
+    ]);
     cl.sent = sent; cl.step = "bye";
     await env.DB.batch([saveData(env, run), logStmt(env, run.id, null, "close", `جدول کمیسیون (کد ${faN(d.commission_no)}) ساخته شد${sent ? ` و ${faN(sent)} پیام و فایل به تلگرام کارشناس رفت` : ""}.`), next(env, run, 0)]);
     return { step: "close-table" };
@@ -1438,6 +1450,8 @@ async function propose(env, { run, ex, th, kind, body = null, bundle_id = null, 
     const brief = kind === "final" ? await bundleBrief(env, bundle_id).catch(() => "") : "";
     stmts.push(queueStmt(env, `prop:${id}`, ex.telegram_chat, propCardText(th, { kind, body, meta, what, brief }), propKb(env, id, th.id)));
   }
+  stmts.push(pushStmt(env, `prop:${id}`, EXPERT(ex.id), { title: "👁 پیشنهادِ کارشناس هوشمند — منتظرِ تأییدِ شما",
+    body: `${th.supplier_name} — ${what}${body ? `: «${String(body).slice(0, 160)}»` : ""}`, url: `correspond?th=${th.id}`, tag: `prop${id}` }));
   await env.DB.batch(stmts);
   return id;
 }
@@ -1719,7 +1733,9 @@ async function reviewDelivery(env, id, b, deps) {
   if (!ok) {
     const ex = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(r.expert_id).first();
     const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, "support", "ai_reject", r.request_id,
-      JSON.stringify({ assignment_id: r.assignment_id, expert_id: r.expert_id, run_id: r.id, reason }))];
+      JSON.stringify({ assignment_id: r.assignment_id, expert_id: r.expert_id, run_id: r.id, reason })),
+      pushStmt(env, `ai-rej:${r.id}:${t}`, EXPERT(r.expert_id), { title: `↩️ پشتیبانی تحویلِ کارشناس هوشمند درخواست ${r.request_id} را رد کرد`,
+        body: `دلیل: ${reason} — درخواست حالا کامل دستِ شماست.`, url: "expert" })];
     if (ex && ex.telegram_chat) {
       stmts.push(queueStmt(env, `ai-rej:${r.id}:${t}`, ex.telegram_chat, `↩️ <b>پشتیبانی تحویلِ کارشناس هوشمند برای درخواست ${esc(r.request_id)} را رد کرد</b>\n\nدلیل: ${esc(reason)}\n\n`
         + "این درخواست حالا کامل دستِ شماست: گفت‌وگوها و خط‌های استعلامِ کارشناس هوشمند هم برایتان باز شد و کار را خودتان ادامه می‌دهید.",

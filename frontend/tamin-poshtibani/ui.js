@@ -358,5 +358,115 @@
     return `<div class="ui-load${page ? " page" : ""}" role="status" aria-live="polite"><span class="ui-load-ring" aria-hidden="true"><i></i><img src="../assets/logo-new.jpg" alt=""></span><span class="ui-load-t">${esc(text || "در حال بارگذاری…")}</span></div>`;
   }
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce, loader };
+  /* ---------- اعلانِ گوشی و مرورگر (Web Push؛ سرور: worker/push.js، سرویس‌ورکر: push-sw.js) ----------
+     push.mount({ role: "expert"|"manager"|"support", who, api(path, body) }) — بعد از ورود، در هر رسم صدا زدنش بی‌خطر است.
+     • آیفون فقط وقتی پنل «Add to Home Screen» شده و از همان‌جا باز شده اعلان می‌گیرد (iOS 16.4+)؛ در Safari معمولی
+       کارتِ راهنمای افزودن به صفحهٔ اصلی می‌آید. کامپیوتر و اندروید: کارتِ «روشن کردن اعلان‌ها».
+     • requestPermission باید مستقیم در کلیک باشد (آیفون بعد از await اجازه نمی‌پرسد)؛ سرویس‌ورکر از قبل ثبت می‌شود.
+     • اجازه از قبل هست ← اشتراک بی‌صدا به همین کاربر بسته می‌شود (هر شش ساعت یک بار، یا با عوض شدنِ کاربر).
+     • push.off() در خروج: این دستگاه دیگر اعلانِ این کاربر را نمی‌گیرد. */
+  const push = (() => {
+    let cfg = null, card = null, regP = null;
+    const ok = () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window && window.isSecureContext;
+    const ios = () => /iP(hone|ad|od)/.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+    const standalone = () => (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+    const mobile = () => ios() || /Android/i.test(navigator.userAgent);
+    const SNOOZE = "tp.push.snooze", BOUND = "tp.push.bound";
+    const snoozed = () => Number(ls.get(SNOOZE) || 0) > Date.now();
+    const b64 = (buf) => btoa(String.fromCharCode(...new Uint8Array(buf))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+    const unb64 = (s) => { const t = s.replace(/-/g, "+").replace(/_/g, "/"); const b = atob(t + "===".slice((t.length + 3) % 4)); return Uint8Array.from(b, (c) => c.charCodeAt(0)); };
+    function reg() {
+      if (!regP) regP = navigator.serviceWorker.register("push-sw.js", { scope: "./" }).then(async (r) => {
+        if (r.active) return r;
+        const w = r.installing || r.waiting;
+        if (w) await new Promise((res) => { const f = () => { if (w.state === "activated") { w.removeEventListener("statechange", f); res(); } }; w.addEventListener("statechange", f); f(); });
+        return r;
+      });
+      return regP;
+    }
+    /** اشتراکِ این مرورگر ← سرور (با نقش و کاربرِ فعلی) */
+    async function bind(force) {
+      const r = await reg();
+      const { key } = await cfg.api("/push/key");
+      let s = await r.pushManager.getSubscription();
+      /* کلیدِ سرور عوض شده؟ اشتراکِ قدیمی دیگر کار نمی‌کند */
+      if (s && s.options && s.options.applicationServerKey && b64(s.options.applicationServerKey) !== key) { await s.unsubscribe().catch(() => {}); s = null; }
+      if (!s) s = await r.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: unb64(key) });
+      const mark = `${cfg.role}:${cfg.who}:${s.endpoint.slice(-24)}`;
+      const was = (ls.get(BOUND) || "").split("|");
+      if (!force && was[0] === mark && Date.now() - Number(was[1] || 0) < 6 * 3600000) return s;
+      await cfg.api("/push/subscribe", { role: cfg.role, sub: s.toJSON() });
+      ls.set(BOUND, `${mark}|${Date.now()}`);
+      return s;
+    }
+    function hide() { if (card) { card.remove(); card = null; } }
+    function show(html, wire) {
+      hide();
+      card = document.createElement("div"); card.className = "tp-pushcard"; card.setAttribute("role", "dialog"); card.setAttribute("aria-label", "اعلان‌ها");
+      card.innerHTML = `<span class="ic" aria-hidden="true">${svg('<path d="M6 8a6 6 0 1 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.9 1.9 0 0 0 3.4 0"/>')}</span><div class="tx">${html}</div>`;
+      document.body.appendChild(card);
+      wire(card);
+    }
+    const later = (days) => { ls.set(SNOOZE, String(Date.now() + days * 86400000)); hide(); };
+    function render() {
+      if (!cfg) return;
+      const p = ok() ? Notification.permission : "na";
+      if (p === "granted") { hide(); bind().catch((e) => console.warn("push bind", e && e.message)); return; }
+      if (snoozed() || p === "denied") return hide();
+      /* آیفون در Safari معمولی: اول افزودن به صفحهٔ اصلی */
+      if (ios() && !standalone()) {
+        if (card && card.dataset.k === "ios") return;
+        show(`<b>اعلان روی آیفون</b><p>پنل را به صفحهٔ اصلی بیفزایید: در Safari دکمهٔ اشتراک‌گذاری (مربع با فلشِ رو به بالا) و بعد «Add to Home Screen» را بزنید؛ سپس پنل را از همان نماد باز کنید تا اعلان‌ها را روشن کنید.</p>
+          <div class="acts"><button type="button" class="tp-btn sm" data-pl="14">باشه</button></div>`, (c) => { c.dataset.k = "ios"; c.querySelector("[data-pl]").onclick = () => later(14); });
+        return;
+      }
+      if (p === "na") return hide();
+      if (card && card.dataset.k === "ask") return;
+      const where = mobile() ? "روی همین گوشی" : "در همین مرورگر، حتی وقتی پنل بسته است";
+      const what = { expert: "ارجاع تازه، پیام تأمین‌کننده، یادآوری مهلت و پرسش‌های کارشناس هوشمند", manager: "درخواست‌های تأیید، تغییر وضعیت، عبور از مهلت و هشدارها",
+        support: "هشدارها، تحویل‌های کارشناس هوشمند و رخدادهای زندهٔ مناقصه" }[cfg.role] || "خبرهای مربوط به شما";
+      show(`<b>اعلان‌ها را روشن کنید</b><p>${what} ${where} خبر داده می‌شود.</p>
+        <div class="acts"><button type="button" class="tp-btn primary sm" data-pon>روشن کردن اعلان‌ها</button><button type="button" class="tp-btn sm" data-pl="3">بعداً</button></div>
+        <p class="err" role="alert" hidden></p>`, (c) => {
+        c.dataset.k = "ask";
+        c.querySelector("[data-pl]").onclick = () => later(3);
+        c.querySelector("[data-pon]").onclick = (ev) => {
+          const b = ev.currentTarget, err = c.querySelector(".err");
+          b.disabled = true;
+          /* مستقیم در همان کلیک (شرطِ آیفون و فایرفاکس) */
+          Notification.requestPermission().then(async (res) => {
+            if (res !== "granted") { err.hidden = false; err.textContent = res === "denied" ? "اجازهٔ اعلان داده نشد. از تنظیمات مرورگر یا گوشی می‌توانید بعداً روشنش کنید." : "اجازه داده نشد."; b.disabled = false; if (res === "denied") setTimeout(hide, 6000); return; }
+            try {
+              await bind(true);
+              await cfg.api("/push/test", { role: cfg.role }).catch(() => {});
+              c.querySelector(".tx").innerHTML = `<b>اعلان‌ها روشن شد ✓</b><p>یک اعلانِ آزمایشی فرستاده شد. از این به بعد هر خبرِ مربوط به شما همین‌جا می‌آید.</p>`;
+              setTimeout(hide, 5000);
+            } catch (e) { err.hidden = false; err.textContent = `روشن نشد: ${e.message || e}`; b.disabled = false; }
+          });
+        };
+      });
+    }
+    return {
+      supported: ok,
+      mount(o) {
+        const same = cfg && cfg.role === o.role && cfg.who === String(o.who);
+        cfg = { role: o.role, who: String(o.who == null ? "" : o.who), api: o.api };
+        if (ok()) reg().catch(() => {});
+        if (!same || !card) render();
+      },
+      /** خروج: این دستگاه دیگر اعلانِ این کاربر را نمی‌گیرد (اشتراکِ مرورگر می‌ماند تا ورودِ بعدی دوباره بسته شود) */
+      async off(api) {
+        hide();
+        const call = api || (cfg && cfg.api); cfg = null;
+        ls.set(BOUND, "");
+        if (!ok() || !call) return;
+        try { const r = await navigator.serviceWorker.getRegistration("./"); const s = r && await r.pushManager.getSubscription(); if (s) await call("/push/unsubscribe", { endpoint: s.endpoint }); } catch (_) { /* بی‌صدا */ }
+      },
+      /** آزمایش از منو */
+      async test() { if (!cfg) return; await bind(true); return cfg.api("/push/test", { role: cfg.role }); },
+      state: () => (ok() ? Notification.permission : ios() && !standalone() ? "ios-tab" : "na"),
+    };
+  })();
+
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce, loader, push };
 })();

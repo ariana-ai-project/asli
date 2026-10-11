@@ -2255,6 +2255,7 @@
   }
 
   /* ---------- رندر ---------- */
+  const PUSH_API = (p, b) => TP.api(p, b === undefined ? {} : { body: b });
   function render() {
     const app = document.getElementById("app");
     if (!S.expert) S.screen = "login";
@@ -2270,13 +2271,15 @@
        هر ستون مال کدام گروه است. */
     const grid = app.querySelector("table.grid"); if (grid) TP.stickHeader(grid);
     restore();
+    /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) — نه در مینی‌اپ تلگرام (آن‌جا خودِ بات خبر می‌دهد) */
+    if (S.expert && S.screen !== "login" && !TP.tg) TP.ui.push.mount({ role: "expert", who: S.expert.id, api: PUSH_API });
   }
 
   /* ---------- اتصال ---------- */
   function wire() {
     const a = document.getElementById("app"), Q = (s) => a.querySelectorAll(s), G = (s) => a.querySelector(s);
     if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); S.expert = r.expert; S.error = ""; S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); await loadTray(); } }); return; }
-    const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
+    const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.ui.push.off(PUSH_API); TP.session.clear(); S.expert = null; S.d = null; S.screen = "login"; render(); };
     const rf = G("[data-refresh]"); if (rf) rf.onclick = () => S.screen === "detail" ? reload() : loadTray();
     const tg = G("[data-tg]"); if (tg) tg.onclick = tgConnect;
     const tgm = G("[data-tgmenu]"); if (tgm) tgm.onclick = tgChooser;

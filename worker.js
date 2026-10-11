@@ -17,6 +17,7 @@ import { runVoiceJobs, VOICE_CRON } from "./worker/voice-core.js";
 import { handler as spVoice } from "./worker/sp-voicemode.js";
 import { handler as vbVoice, ensureVbWebhook } from "./worker/voice-bot.js";
 import { tenderTick, tenderDiscoverTick } from "./worker/tender.js";
+import { drainPush } from "./worker/push.js";
 
 /* وبهوکِ بات مکاتبات تأمین‌کنندگان (و بات ویس) یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
    ثبت نشده، دامنه یا توکن عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار یا ست کردنِ راز کار دستی لازم نیست. */
@@ -58,6 +59,11 @@ export default {
     ctx.waitUntil(ensureSchema(env).then(() => tenderTick(env, ctx)).then(() => tenderDiscoverTick(env)).then(
       (r) => r && console.log("tender discovery ran"),
       (e) => console.error("tender tick failed", e && e.message),
+    ));
+    /* اعلانِ گوشی و مرورگر (worker/push.js): صفِ خودش، هر دقیقه چند تا — مستقل از بات */
+    ctx.waitUntil(ensureSchema(env).then(() => drainPush(env, 5)).then(
+      (r) => r && r.rows && console.log("push drain", JSON.stringify(r)),
+      (e) => console.error("push drain failed", e && e.message),
     ));
     if (!env.TG_BOT_TOKEN) return; /* بات هنوز ست نشده — چیزی برای فرستادن نیست */
     /* طرحِ دیتابیس پیش از Cron: اگر اولین اجرا بعد از استقرار Cron باشد نه یک درخواست، ستون‌های تازه

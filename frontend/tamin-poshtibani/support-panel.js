@@ -41,6 +41,8 @@
       throw e;
     }
   }
+  /** اعلانِ گوشی: مسیرهای /push/* بیرونِ /support اند، با همان نشانهٔ ورود */
+  const pushApi = (p, b) => { const s = sess.get(); return TP.api(p, { ...(b === undefined ? {} : { body: b }), headers: s ? { "X-Support-Token": s.token } : {} }); };
   /** دانلود فایل — لینک مستقیم هدر نشانه را نمی‌فرستد، پس fetch و blob */
   async function download(path, name) {
     const s = sess.get();
@@ -1318,6 +1320,8 @@
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
     if (S.view === "app" && S.tab === "ai" && S.aiEx && window.TP_AI) window.TP_AI.wire(app, S, render);
+    /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) */
+    if (S.view === "app" && sess.get()) TP.ui.push.mount({ role: "support", who: "s", api: pushApi });
   }
 
   /* ---------- رفتارها (یک شنونده برای همه، تا با هر رسم دوباره بسته نشوند) ---------- */
@@ -1332,7 +1336,7 @@
     const d = t.dataset;
     if (d.tab) return setTab(d.tab);
     if (d.refresh !== undefined) { loadExperts().catch(() => {}); return loadTab(true); }
-    if (d.logout !== undefined) { sess.clear(); S.view = "login"; S.err = ""; S.mode = "login"; return loadStatus(); }
+    if (d.logout !== undefined) { TP.ui.push.off(pushApi); sess.clear(); S.view = "login"; S.err = ""; S.mode = "login"; return loadStatus(); }
     if (d.pass !== undefined) return changePass();
     if (d.alarmAck) return alarmAckUi(Number(d.alarmAck));
     if (d.alerts !== undefined) return alertsDialog();

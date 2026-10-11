@@ -18,6 +18,7 @@
 import { esc } from "./telegram.js";
 import { stageColors, fmtFa } from "./time.js";
 import { queueStmt, STAGE_NAMES } from "./queue.js";
+import { pushStmt, EXPERT, MANAGER } from "./push.js";
 
 const now = () => Date.now();
 const FA = "۰۱۲۳۴۵۶۷۸۹";
@@ -92,7 +93,20 @@ export function recipients(row, settings, managerChat, stage) {
   return out;
 }
 /* ستون‌های کارشناس و ارشدش که recipients لازم دارد — در هر کوئریِ اعلان الحاق می‌شوند */
-export const RECIPIENT_COLS = `e.notify_to, s.team_chat, s.team_via, s.alert_stages AS senior_stages`;
+export const RECIPIENT_COLS = `e.notify_to, s.team_chat, s.team_via, s.alert_stages AS senior_stages, s.id AS senior_pid`;
+/**
+ * همان قاعدهٔ recipients برای اعلانِ گوشی (worker/push.js) — مستقل از تلگرام: کارشناس ارشد (اگر هست و آن مرحله
+ * را تیک زده) و مدیر (مگر کارشناس «فقط ارشد» باشد). خروجی: [{who, tag}]
+ */
+export function pushRecipients(row, settings, stage) {
+  const out = [];
+  const seniorOk = stage == null || ticks(row.senior_stages, MGR_DEFAULT)[stage];
+  if (row.senior_pid && seniorOk) out.push({ who: EXPERT(row.senior_pid), tag: "team" });
+  const onlySenior = row.notify_to === "senior" && row.senior_pid;
+  const mgrOk = stage == null || ticks(settings && settings.mgrStages, MGR_DEFAULT)[stage];
+  if (!onlySenior && mgrOk) out.push({ who: MANAGER, tag: "mgr" });
+  return out;
+}
 export const RECIPIENT_JOIN = `LEFT JOIN experts s ON s.id=e.senior_id AND s.active=1 AND s.senior=1`;
 
 /** ارجاع‌هایی که هنوز زنده‌اند، با هر چیزی که برای رنگ‌ها لازم است */
@@ -157,7 +171,12 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
       if (!targets.has(rc.chat)) targets.set(rc.chat, { ...rc, diff: [] });
       targets.get(rc.chat).diff.push(i);
     }
-    if (targets.size) news.push({ row, colors, key, targets: [...targets.values()] });
+    const pushes = new Map();
+    for (const i of changed) for (const p of pushRecipients(row, settings, i)) {
+      if (!pushes.has(p.tag)) pushes.set(p.tag, { ...p, diff: [] });
+      pushes.get(p.tag).diff.push(i);
+    }
+    if (targets.size || pushes.size) news.push({ row, colors, key, targets: [...targets.values()], pushes: [...pushes.values()] });
   }
 
   /* اقلام فقط برای همان‌هایی که عوض شده‌اند خوانده می‌شوند — معمولاً صفر تا دو
@@ -188,6 +207,10 @@ export async function stageWatch(env, settings, managerChat, limit = 40) {
         }), null, rc.bot));
       queued++;
     }
+    for (const p of n.pushes) stmts.push(pushStmt(env, `${p.tag}:${n.row.id}:${n.row.dispatched_at}:${n.key}`, p.who, {
+      title: `🔄 تغییر وضعیت — درخواست ${n.row.request_id}`,
+      body: `${n.row.expert_label || n.row.expert_name}${n.row.party ? ` · ${n.row.party}` : ""} — ${p.diff.map((i) => STAGE_NAMES[i]).join("، ")}`,
+      url: p.tag === "mgr" ? "manager" : "expert", tag: `w${n.row.id}` }));
   }
   if (stmts.length) await env.DB.batch(stmts);
   return { checked: rows.length, changed: news.length, queued };
@@ -214,7 +237,10 @@ export async function notifyClosed(env, aid, managerChat, actor) {
   ).bind(aid).first();
   if (!row || row.live > 0) return { ok: true, queued: 0 };   /* هنوز قلم بازی مانده — خاتمهٔ جزئی */
   const to = recipients(row, null, managerChat);
-  if (!to.length) return { ok: true, queued: 0 };
+  const pushes = pushRecipients(row, null, null).map((p) => pushStmt(env, `closed-${p.tag}:${aid}:${row.dispatched_at}`, p.who, {
+    title: `✅ درخواست ${row.request_id} بسته شد`, body: `${row.expert_label || row.expert_name}${row.party ? ` · ${row.party}` : ""} — ${actor || "کارشناس"} کار را خاتمه داد.`,
+    url: p.tag === "mgr" ? "manager" : "expert" }));
+  if (!to.length) { if (pushes.length) await env.DB.batch(pushes); return { ok: true, queued: 0 }; }
 
   const items = (await env.DB.prepare("SELECT title, qty, unit FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all()).results || [];
   const done = ["done", "done", "done", "done", "done", "done"];
@@ -223,7 +249,7 @@ export async function notifyClosed(env, aid, managerChat, actor) {
 
   await env.DB.batch(to.map((rc) => rc.tag === "mgr"
     ? queueStmt(env, `closed:${aid}:${row.dispatched_at}`, rc.chat, text + "\n<i>تا «مشاهده کردم» را نزنید، در میز کار شما می‌ماند.</i>", [[{ text: "✅ مشاهده کردم", callback_data: `mseen:${aid}` }]])
-    : queueStmt(env, `closed-team:${aid}:${row.dispatched_at}`, rc.chat, text, null, rc.bot)));
+    : queueStmt(env, `closed-team:${aid}:${row.dispatched_at}`, rc.chat, text, null, rc.bot)).concat(pushes));
   return { ok: true, queued: to.length };
 }
 

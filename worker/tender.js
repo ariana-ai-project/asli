@@ -19,6 +19,7 @@ import { HttpError } from "./http.js";
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
 import { sendSms, smsReady, isMobile } from "./sms.js";
 import { queueStmt } from "./queue.js";
+import { pushTo, SUPPORT } from "./push.js";
 import { keyOf, purchaseHeadsOfCode } from "./catalog.js";
 import { raiseAlarm } from "./alarms.js";
 import { telegram } from "./telegram.js";
@@ -37,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tender_jobs (id INTEGER PRIMARY KEY, tender_id INTEGE
 `;
 /** ستون‌های دور دوم (روی جدول‌های موجود تولید با ALTER — api.js:COLUMN_MIGRATIONS) */
 export const TENDER_COLUMNS = [
+  ["tenders", "start_push_at", "INTEGER"],                      /* اعلان «شروع شد» به پشتیبان یک بار */
   ["tenders", "grp", "TEXT"],                                   /* کد گروه مناقصهٔ چندقلمی */
   ["tenders", "lot_no", "INTEGER"],
   ["tenders", "sealed_s", "INTEGER NOT NULL DEFAULT 0"],        /* مدت دور سربسته */
@@ -76,6 +78,19 @@ const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => "۰۱
 const faN = (n) => String(n == null ? "" : n).replace(/\B(?=(\d{3})+(?!\d))/g, "٬").replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]);
 const escH = (s) => String(s == null ? "" : s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 const wait = (ctx, job) => { if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job.catch((e) => console.error("tender job", e && e.message))); else return job.catch(() => {}); return null; };
+/* اعلان گوشی و مرورگر پشتیبان (worker/push.js) — رخدادهای زنده همان لحظه، بی ساعت اداری؛ برچسب هر مناقصه یکی است
+   تا اعلان تازه («پیشنهاد بهتر»، «تمام شد») جای قبلی را بگیرد و صفحهٔ قفل فقط آخرین وضع را نشان دهد */
+const supPush = (env, ctx, t, title, body) => wait(ctx, pushTo(env, SUPPORT, { title, body, url: "support#td", tag: `td${t.id}` }));
+/** بهترین پیشنهاد عوض شد ← پشتیبان (نام، قیمت، زمان مانده) */
+function bestPush(env, ctx, t0, fresh, sealed) {
+  if (!fresh || fresh.best_amount == null || (fresh.best_amount === t0.best_amount && fresh.best_alias === t0.best_alias)) return;
+  wait(ctx, (async () => {
+    const w = await env.DB.prepare("SELECT name FROM tender_invites WHERE tender_id=? AND alias=?").bind(fresh.id, fresh.best_alias).first().catch(() => null);
+    await pushTo(env, SUPPORT, { title: `📉 پیشنهاد بهتر — ${fresh.title}`,
+      body: `${faN(fresh.best_amount)} ریال برای هر ${fresh.unit} · ${w ? w.name : `تأمین‌کنندهٔ ${faN(fresh.best_alias)}`} · ${faN(minsLeft(fresh))} دقیقه مانده${sealed ? " (دور سربسته)" : ""}`,
+      url: "support#td", tag: `td${fresh.id}` });
+  })());
+}
 /** عدد صحیح از ورودی کاربر با هر رقم و جداکننده؛ نامعتبر → NaN */
 export const amountOf = (v) => {
   if (typeof v === "number") return v;
@@ -209,6 +224,8 @@ async function sealedCloseIfDue(env, t, ctx) {
   const jobs = inv.filter((i) => ranks.has(i.alias) && !i.notify_off && fresh.outbid_sms).map((i) => notify(env, i.phone,
     `${COMPANY(env)}\nدور سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دور زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link));
   if (jobs.length) wait(ctx, Promise.all(jobs));
+  supPush(env, ctx, fresh, `🔓 دور سربستهٔ «${fresh.title}» تمام شد`,
+    `${ranks.size ? `${faN(ranks.size)} شرکت‌کننده · ` : ""}دور زنده شروع شد — ${faN(minsLeft(fresh))} دقیقه مانده${fresh.best_amount != null ? ` · بهترین ${faN(fresh.best_amount)} ریال` : ""}`);
   return fresh;
 }
 
@@ -231,6 +248,7 @@ export async function finalizeIfDue(env, t, ctx) {
   const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), "system", "tender_end", null,
     JSON.stringify({ tender_id: t.id, title: fresh.title, winner: win ? win.name : null, amount: fresh.best_amount, bidders: ranks.size }))];
   const sc = await setting(env, "supportChat");
+  supPush(env, ctx, fresh, `🏁 مناقصهٔ «${fresh.title}» تمام شد`, `${line} · ${faN(ranks.size)} شرکت‌کننده · ${faN(fresh.ext_count)} بار تمدید`);
   if (sc) stmts.push(queueStmt(env, `tender:${t.id}:end`, sc, `🏁 <b>مناقصهٔ «${escH(fresh.title)}» تمام شد</b>\n${escH(line)}\n${faN(ranks.size)} شرکت‌کننده · ${faN(fresh.ext_count)} بار تمدید`, null));
   await env.DB.batch(stmts);
   const link = tenderLink(env, fresh.code), co = COMPANY(env), jobs = [];
@@ -247,6 +265,11 @@ export async function finalizeIfDue(env, t, ctx) {
 /** Cron: پایان دور سربسته، مناقصه‌های تمام‌شده و پیشنهادهای خودکار معطل */
 export async function tenderTick(env, ctx) {
   const n = now();
+  /* «شروع شد» به پشتیبان: یک بار برای هر مناقصه (start_push_at اتمی) */
+  const started = (await env.DB.prepare(`UPDATE tenders SET start_push_at=? WHERE state='scheduled' AND start_at<=? AND end_at>? AND start_push_at IS NULL
+      RETURNING id, title, qty, unit, start_at, end_at, sealed_end_at`).bind(n, n, n).all().catch(() => ({ results: [] }))).results || [];
+  for (const t of started) supPush(env, ctx, t, `🟢 مناقصهٔ «${t.title}» شروع شد`,
+    `${faN(t.qty)} ${t.unit} · ${t.sealed_end_at && t.sealed_end_at > n ? `دور سربسته تا ${faN(Math.round((t.sealed_end_at - n) / 60e3))} دقیقه، ` : ""}${faN(minsLeft(t))} دقیقه تا پایان`);
   const due = (await env.DB.prepare("SELECT * FROM tenders WHERE state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) LIMIT 20").bind(n, n).all()
     .catch(() => ({ results: [] }))).results || [];
   let done = 0;
@@ -315,6 +338,7 @@ async function runProxies(env, t, ctx, skip) {
     const before = ranksOf(bids);
     const fresh = await commitBids(env, t, bids, list.map((x) => ({ ...x, auto: true })), now());
     if (fresh) {
+      bestPush(env, ctx, t, fresh, false);
       await notifyDrops(env, fresh, before, ranksOf(await bidsOf(env, t.id)), skip, ctx);
       return fresh;
     }
@@ -1020,6 +1044,7 @@ export async function tenderBid(env, request, code, b, ctx) {
     const before = ranksOf(bids);
     const fresh = await commitBids(env, t, bids, list, n);
     if (fresh) {
+      bestPush(env, ctx, t, fresh, sealed);
       if (!sealed) await notifyDrops(env, fresh, before, ranksOf(await bidsOf(env, t.id)), new Set([inv.alias]), ctx);
       return { ok: true, extended: fresh.ext_count > (t.ext_count || 0), auto: list.length - 1, view: await supplierView(env, fresh, inv) };
     }

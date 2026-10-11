@@ -58,6 +58,7 @@ import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
+import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
@@ -122,6 +123,15 @@ function stageTicks(v) {
   if (!Array.isArray(a) || a.length !== 6) return DEFAULT_STAGES.slice();
   return a.map(Boolean);
 }
+/* اعلانِ گوشی: اشتراک به همان کسی بسته می‌شود که با همان نقش وارد است (کارشناس با شناسه، مدیر و پشتیبان ۰) */
+const PUSH_HOME = { expert: "expert", manager: "manager", support: "support" };
+async function pushWho(request, env, role) {
+  if (role === "expert") { const ex = await requireExpert(request, env); return { role, uid: ex.id, name: ex.label || ex.name }; }
+  if (role === "manager") { await requireManager(request, env); return { role, uid: 0 }; }
+  if (role === "support") { await requireSupport(request, env); return { role, uid: 0 }; }
+  throw new HttpError("نقش نامعتبر است.");
+}
+
 /* مدیر یا کارشناس — برای خواندن‌های مشترک */
 async function requireAny(request, env) {
   if (request.headers.get("X-Manager-Code")) { await requireManager(request, env); return { role: "manager" }; }
@@ -205,6 +215,7 @@ ${USD_DDL.trim()}
 ${CR_DDL.trim()}
 ${ALARM_DDL.trim()}
 ${TENDER_DDL.trim()}
+${PUSH_DDL.trim()}
 ${STRUCT_DDL.trim()}
 `;
 
@@ -1168,6 +1179,9 @@ async function setAiTick(env, body) {
       ? `🤖 <b>درخواست ${esc(a.request_id)} در حالت هوشمند است</b>\n\nمدیر تیکِ «هوشمند» را زد: بعد از نرمال‌سازی، اقلام را به کارشناس هوشمند بسپارید.`
       : `✋ <b>درخواست ${esc(a.request_id)} دستی شد</b>\n\nمدیر تیکِ «هوشمند» را برداشت؛ همهٔ کارهایش با خودِ شماست.${note ? `\n\n<b>توضیحِ مدیر:</b>\n${esc(note)}` : ""}`));
   }
+  if (a.dispatched_at) stmts.push(pushStmt(env, `aitick:${aid}:${t}`, { role: "expert", uid: a.expert_id }, on
+    ? { title: `🤖 درخواست ${a.request_id} هوشمند شد`, body: "مدیر تیکِ «هوشمند» را زد: بعد از نرمال‌سازی، اقلام را به کارشناس هوشمند بسپارید.", url: "expert" }
+    : { title: `✋ درخواست ${a.request_id} دستی شد`, body: `مدیر تیکِ «هوشمند» را برداشت؛ کارها با خودِ شماست.${note ? ` توضیح: ${note}` : ""}`, url: "expert" }));
   await env.DB.batch(stmts);
   return { ok: true, on, changed: true };
 }
@@ -1214,6 +1228,9 @@ async function setSupTick(env, body) {
       ? `👁 <b>درخواست ${esc(a.request_id)} با «حالت تأیید» است</b>\n\nمدیر اجازه داد: در اقلامی که نوعشان مجاز است، کارشناس هوشمند هر کاری را که در «👁 حالت تأیید»ِ حسابتان «با تأیید» گذاشته‌اید، اول به شما پیشنهاد می‌کند — در مکاتبات و همین بات.`
       : `🤖 <b>«حالت تأیید»ِ درخواست ${esc(a.request_id)} خاموش شد</b>\n\nمدیر «👁» را برداشت؛ کارشناس هوشمند از این پس بی تأیید پیش می‌رود و پیشنهادهای معطل کنار رفتند.`));
   }
+  if (a.dispatched_at) stmts.push(pushStmt(env, `aisup:${aid}:${t}`, { role: "expert", uid: a.expert_id }, on
+    ? { title: `👁 درخواست ${a.request_id} با «حالت تأیید»`, body: "کارشناس هوشمند کارهای «با تأیید» را اول به شما پیشنهاد می‌کند.", url: "expert" }
+    : { title: `🤖 «حالت تأیید» درخواست ${a.request_id} خاموش شد`, body: "کارشناس هوشمند از این پس بی تأیید پیش می‌رود.", url: "expert" }));
   await env.DB.batch(stmts);
   return { ok: true, on, changed: true, eligible: ok.length };
 }
@@ -1260,6 +1277,9 @@ async function dispatch(env, body) {
         seenKb(a.id, a.senior && a.team_n > 0)));
       notified++;
     }
+    stmts.push(pushStmt(env, `dispatch:${a.id}:${t}`, { role: "expert", uid: a.expert_id }, {
+      title: `🔔 ارجاع جدید — درخواست ${a.request_id}`,
+      body: `${a.party ? `${a.party} · ` : ""}${(itemsBy.get(a.id) || []).length || a.item_count} قلم · مهلت ${a.days} روز`, url: "expert", tag: `a${a.id}` }));
     stmts.push(ev(env, "manager", "dispatch", a.request_id, null, { assignment_id: a.id, expert_id: a.expert_id, expert: a.name, days: a.days, notify: a.telegram_chat ? "telegram" : "none" }));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -1290,6 +1310,7 @@ async function unassign(env, body) {
    است خبر می‌گیرد (صف پیام؛ روتر بعد از پاسخ flush می‌کند). ارجاعِ ارسال‌نشده پیامی ندارد،
    چون کارشناس هنوز از آن خبر ندارد. notify رویداد همان است که واقعاً به صف رفت و notified
    شمار کارشناسانِ خبرشده — رویدادهای پیش از مهر ۱۴۰۵ بی‌آنکه پیامی برود telegram می‌نوشتند. */
+const STATE_PUSH = { hold: "⏸ تعلیق", stop: "⛔ توقف", closed: "🔒 خاتمه", open: "▶️ بازگشت به جریان" };
 async function setState(env, body, actor) {
   const st = body.state; if (!["open", "hold", "stop", "closed"].includes(st)) throw new HttpError("state نامعتبر است.");
   const t = now(); let cond, args;
@@ -1302,13 +1323,15 @@ async function setState(env, body, actor) {
     cond = (p) => `${p}request_id=? AND ${p}state<>'closed'`; args = [T(body.request_id)];
   } else throw new HttpError("request_id یا assignment_id یا item_ids لازم است.");
   /* پیش از UPDATE: ارجاع‌های ارسال‌شده‌ای که قلمشان واقعاً وضعیت عوض می‌کند (بعدش همه یکی‌اند) */
-  const hit = (await env.DB.prepare(`SELECT a.id AS aid, a.request_id, r.party, e.telegram_chat, COUNT(*) AS n
+  const hit = (await env.DB.prepare(`SELECT a.id AS aid, a.request_id, a.expert_id, r.party, e.telegram_chat, COUNT(*) AS n
       FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
      WHERE ${cond("i.")} AND i.state<>? AND a.dispatched_at IS NOT NULL GROUP BY a.id`).bind(...args, st).all()).results || [];
   const tell = hit.filter((a) => a.telegram_chat);
   const out = await env.DB.batch([
     env.DB.prepare(`UPDATE items SET state=?, state_at=? WHERE ${cond("")}`).bind(st, t, ...args),
     ...tell.map((a) => queueStmt(env, `state:${a.aid}:${st}:${t}`, a.telegram_chat, stateText(st, a, a.n))),
+    ...hit.map((a) => pushStmt(env, `state:${a.aid}:${st}:${t}`, { role: "expert", uid: a.expert_id }, {
+      title: `${STATE_PUSH[st]} — درخواست ${a.request_id}`, body: `${a.party ? `${a.party} · ` : ""}${a.n} قلم`, url: "expert", tag: `a${a.aid}` })),
     ev(env, actor, st, T(body.request_id) || null, null, { assignment_id: body.assignment_id || null, item_ids: body.item_ids || null, notify: tell.length ? "telegram" : "none", notified: tell.length }),
   ]);
   return { ok: true, changed: out[0].meta.changes, notified: tell.length };
@@ -1827,6 +1850,16 @@ async function route(request, env, ctx) {
     }
     /* اجرای دستی چرخهٔ هشدار — برای تست؛ همان کاری که Cron می‌کند */
     if (path === "/tg/tick" && m === "POST") { await requireManager(request, env); return json(await scheduled(env)); }
+
+    /* --- اعلانِ گوشی و مرورگر (worker/push.js): کلید عمومی برای همه؛ ثبت و آزمایش با ورودِ همان نقش --- */
+    if (path === "/push/key" && m === "GET") return json({ key: (await vapidKeys(env)).pub });
+    if (path === "/push/unsubscribe" && m === "POST") { const b = await readJson(request); return json(await pushUnsubscribe(env, b.endpoint)); }
+    if ((path === "/push/subscribe" || path === "/push/test") && m === "POST") {
+      const b = await readJson(request);
+      const who = await pushWho(request, env, b.role);
+      if (path === "/push/subscribe") return json(await pushSubscribe(env, who.role, who.uid, b.sub, request.headers.get("User-Agent")));
+      return json(await pushTo(env, who, { title: "اعلان‌های تدارکات روشن است ✓", body: `${who.name ? `${who.name}، ` : ""}از این به بعد خبرهای مربوط به شما روی همین دستگاه می‌آید.`, url: PUSH_HOME[who.role], tag: "push-test" }));
+    }
 
     /* --- ورود --- */
     /* تب «پشتیبانی» صفحهٔ اول: وضعیت کارت‌ها برای همه خواندنی است، نوشتن با رمز تب */
@@ -2590,7 +2623,10 @@ async function route(request, env, ctx) {
    بیرون از پاسخ اجرا می‌شود، پس اگر تلگرام کند بود مدیر معطل نمی‌ماند؛ اگر هم
    شکست بخورد، Cron دوباره سراغش می‌رود (صف پابرجاست). */
 function flush(env, ctx, when) {
-  if (!when || !ctx || !env.TG_BOT_TOKEN) return;
+  if (!ctx) return;
+  /* اعلانِ گوشی (worker/push.js) مستقل از تلگرام: کارشناسِ بی‌تلگرام هم همان لحظه خبر می‌گیرد */
+  ctx.waitUntil(drainPush(env, 6));
+  if (!when || !env.TG_BOT_TOKEN) return;
   ctx.waitUntil(drainOutbox(env, 20).catch((e) => console.error("outbox flush", e && e.message)));
 }
 
