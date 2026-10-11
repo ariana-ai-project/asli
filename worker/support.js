@@ -207,9 +207,9 @@ export async function supportExpert(env, id) {
 const DUP_KINDS = ["viewed", "hist", "smart", "manual_quote", "proforma"];
 export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual", "ai_sup", "ai_sup_item"] },
-  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "item_terms", "ai_prop_ok", "ai_prop_no", "ai_sup_cfg"] },
+  work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "item_terms", "ai_prop_ok", "ai_prop_no", "ai_sup_cfg", "ai_takeover", "ai_handback"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes", "commission_result"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -237,6 +237,9 @@ const EV_FA = {
   /* فاز ۴ب گام ۴: «👁 حالت تأیید» — تیکِ مدیر، درخواستِ تأییدشدهٔ کارشناس، تنظیماتش و تصمیمش روی پیشنهادهای کارشناس هوشمند */
   ai_sup: "تیکِ «👁 حالت تأیید»ِ ارجاع (مدیر)", ai_sup_item: "«👁 حالت تأیید»ِ اقلام با تأییدِ مدیر", ai_sup_cfg: "👁 تنظیماتِ «حالت تأیید»ِ کارشناس",
   ai_prop_ok: "✅ تأییدِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "❌ ردِ پیشنهادِ کارشناس هوشمند",
+  /* مهر ۱۴۰۵: «🚨 باز کردنِ اضطراری»ِ گفت‌وگوی کارشناس هوشمند و «🏆 نتیجهٔ کمیسیون»ِ پشتیبانی */
+  ai_takeover: "🚨 باز کردنِ اضطراریِ گفت‌وگوی کارشناس هوشمند", ai_handback: "🤖 برگرداندنِ گفت‌وگو به کارشناس هوشمند",
+  commission_result: "🏆 نتیجهٔ کمیسیون و پیامِ تشکر به بقیه",
 };
 const PROP_KIND_FA = { reply: "پاسخ", final: "تأیید نهایی", act: "تصمیمِ بسته" };
 const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
@@ -261,6 +264,8 @@ function evText(r, p) {
   if (r.kind === "ai_handover" && Array.isArray(p.items)) bits.push(`بعد از ${faN(p.hours || 0)} ساعت: ${p.items.map((x) => `${short(x.title, 40)} ${faN(x.have)} از ${faN(x.need)}`).join("، ")}`);
   if (r.kind === "ai_delivery" && p.short) bits.push(`⚠️ ${faN(p.short)} قلم کمتر از حداقلِ استعلام`);
   if (r.kind === "ai_reject" && p.reason) bits.push(`دلیل: ${short(p.reason, 120)}`);
+  if (r.kind === "ai_takeover" && p.reason) bits.push(`علت: ${short(p.reason, 160)}`);
+  if (r.kind === "commission_result" && Array.isArray(p.items)) bits.push(p.items.map((x) => `${short(x.title, 40)} ← ${short(x.winner, 40)}`).join("، "));
   if (["ai_start", "ai_pick_more"].includes(r.kind)) {
     bits.push(`${faN(p.n || 0)} تأمین‌کننده${p.mode && PICK_MODE_FA[p.mode] ? ` (${PICK_MODE_FA[p.mode]})` : ""}`);
     if (Array.isArray(p.off_top) && p.off_top.length) bits.push(`برداشتنِ پنج نفر اول: ${p.off_top.map((x) => `${short(x.name, 40)}${x.why ? ` — ${short(x.why, 80)}` : ""}`).join("؛ ")}`);
@@ -441,7 +446,8 @@ export async function supportThreads(env, url) {
       (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=t.id AND m.meta_json LIKE '%"ai":true%') AS ai_msgs,
       (SELECT m.who FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_who,
       (SELECT m.kind FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_kind,
-      (SELECT substr(m.body, 1, 140) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_body
+      (SELECT substr(m.body, 1, 140) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_body,
+      (SELECT x.state FROM ai_threads x WHERE x.thread_id=t.id) AS ai_state
     FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id JOIN assignments a ON a.id=t.assignment_id JOIN requests r ON r.id=a.request_id
     ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""} ORDER BY t.last_at DESC LIMIT 300`).bind(...args).all()).results || [];
   return { threads: rows.map((r) => ({ ...r, demo: !!r.demo })) };
@@ -454,14 +460,16 @@ export async function supportThreads(env, url) {
 export async function supportThread(env, id) {
   const th = id ? await threadRow(env, id) : null;
   if (!th) throw new HttpError("این گفت‌وگو پیدا نشد.", 404);
-  const [lines, bundles, msgs, files] = await env.DB.batch([
+  const [lines, bundles, msgs, files, ai] = await env.DB.batch([
     env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? ORDER BY id").bind(th.id),
     env.DB.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id").bind(th.id),
     env.DB.prepare("SELECT * FROM (SELECT * FROM sp_msgs WHERE thread_id=? ORDER BY id DESC LIMIT 400) ORDER BY id").bind(th.id),
     env.DB.prepare("SELECT id, line_id, label, note, filename, mime, size, at FROM sp_files WHERE thread_id=? ORDER BY id").bind(th.id),
+    env.DB.prepare("SELECT state FROM ai_threads WHERE thread_id=?").bind(th.id),
   ]);
+  const aiRow = (ai.results || [])[0];
   return {
-    thread: { ...threadOut(th, "e"), expert_id: th.expert_id, created_at: th.created_at, e_seen: th.e_seen, s_seen: th.s_seen },
+    thread: { ...threadOut(th, "e"), expert_id: th.expert_id, created_at: th.created_at, e_seen: th.e_seen, s_seen: th.s_seen, ai_state: aiRow ? aiRow.state : null },
     lines: (lines.results || []).map(lineOut),
     bundles: (bundles.results || []).map((b) => bundleOut(b, "e")),
     msgs: (msgs.results || []).map((m) => msgFor(msgOut(m), "e")),

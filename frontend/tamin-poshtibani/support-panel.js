@@ -53,18 +53,18 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chg", "🧩 تغییرات اقلام"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["chat", "مکاتبات"], ["log", "گزارش رخدادها"], ["cm", "تأیید کمیسیون"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
     tab: tabOfHash() || "req", now: Date.now(),
     experts: [], settings: null,
-    desk: null, deskErr: "", deskLoading: false, rf: { win: "7d", project: "", expert: "", status: "", q: "", id: "" },
-    exId: null, ex: null, exErr: "",
+    desk: null, deskErr: "", deskLoading: false, rf: { win: "7d", project: "", expert: "", status: "", q: "", id: "" }, rfOpen: false, rOpen: {},
+    exId: null, ex: null, exErr: "", exQ: "",
     /* کدهای ورود (فقط پشتیبانی می‌بیند و عوض می‌کند) */
     codes: null, codesOpen: false, codesErr: "",
-    th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null,
-    log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null,
+    th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null, thStick: false,
+    log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null, lfOpen: false,
     cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1,
     /* کارشناس هوشمند (فاز ۲): فهرستِ کارشناسان با تیکِ هوشمند/دستی، و داشبوردِ یک کارشناس (expert-ai.js) */
     ai: null, aiErr: "", aiLoading: false, aiEx: null,
@@ -177,31 +177,36 @@
   }
 
   /* ---------- سرآیند ---------- */
-  /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها (ui.js، مهر ۱۴۰۵) */
+  /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها — مثلِ پنل مدیر: چهار بخشِ روزمره و دو گروهِ ▾ (مهر ۱۴۰۵) */
+  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", log: "رخدادها", chg: "🧩 تغییرات اقلام" };
   function vTop() {
-    return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: `نظارت بر کار کارشناسان و تأیید کمیسیون · ${esc(CFG.company || "")}`,
+    return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
-      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "گیرندگان هشدار", icon: "bell", attrs: "data-alerts" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "گیرندگان هشدار", icon: "bell", attrs: "data-alerts" },
+        { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
       + vTabs();
   }
   function vTabs() {
     const wait = S.experts.reduce((a, e) => a + (e.cm_wait || 0), 0);
-    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${TABS.map(([k, l]) => `<button class="${S.tab === k ? "on" : ""}" data-tab="${k}" role="tab" aria-selected="${S.tab === k ? "true" : "false"}">${l}${k === "cm" && wait ? `<span class="cnt" title="قلم‌هایی که جدول کمیسیونشان ساخته شده و منتظر تأیید پشتیبانی‌اند">${wait}</span>` : ""}${k === "ai" && S.ai && S.ai.asks.length ? `<span class="cnt" title="پرسش‌های بی‌پاسخِ کارشناس هوشمند از کارشناسان">🚨 ${S.ai.asks.length}</span>` : ""}${k === "ai" && S.ai && S.ai.handovers && S.ai.handovers.length ? `<span class="cnt" title="کارهایی که به حداقلِ استعلام نرسیدند و به کارشناس واگذار شدند">⚠️ ${S.ai.handovers.length}</span>` : ""}${k === "dl" && S.ai && S.ai.deliveries && S.ai.deliveries.new ? `<span class="cnt" title="تحویل‌های بررسی‌نشدهٔ کارشناس هوشمند">${S.ai.deliveries.new}</span>` : ""}</button>`).join("")}</div>
-      <span class="spacer"></span>${TP.ui.info(`support.${S.tab}`, "راهنمای این بخش")}</div>`;
+    const dlNew = (S.ai && S.ai.deliveries && S.ai.deliveries.new) || 0;
+    /* پرسش‌های بی‌پاسخِ کارشناس هوشمند و کارهای واگذارشده به کارشناس */
+    const aiN = S.ai ? (S.ai.asks || []).length + (S.ai.handovers || []).length : 0;
+    const chev = TP.ui.ICON.chevron.replace("<svg", '<svg style="width:14px;height:14px;opacity:.7"');
+    const cnt = (n) => (n ? `<span class="cnt">${n}</span>` : "");
+    const tab = (k, n) => `<button class="${S.tab === k ? "on" : ""}" data-tab="${k}" role="tab" aria-selected="${S.tab === k ? "true" : "false"}">${TAB_FA[k]}${cnt(n)}</button>`;
+    const N = { ai: aiN, dl: dlNew };
+    const grp = (label, keys) => TP.ui.menu({ cls: keys.includes(S.tab) ? "on start" : "start",
+      btn: `<button type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${keys.includes(S.tab) ? TAB_FA[S.tab] : label}${cnt(keys.reduce((a, k) => a + (N[k] || 0), 0))}${chev}</button>`,
+      items: keys.map((k) => ({ label: TAB_FA[k], attrs: `data-tab="${k}"`, cnt: N[k] || null })) });
+    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${grp("هوشمند", ["ai", "dl"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
+      <span class="spacer"></span>${TP.ui.info(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
-  /* ---------- مراحل (همان شش باکس میز مدیر) ---------- */
-  function boxes(flags, a, active) {
-    const A = { dispatchedAt: a.dispatched_at, days: a.days, done: flags, active };
-    return TP.STAGES.map((s, i) => {
-      const cnt = i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : "";
-      return `<td class="console"><div class="box sm b-${TP.stageColor(A, i, thr(), S.now)}" title="${s}">${cnt ? `<span class="cnt">${cnt}</span>` : ""}</div></td>`;
-    }).join("");
-  }
-
-  /* ---------- تب «درخواست‌ها» ---------- */
+  /* ---------- تب «درخواست‌ها»: کارت‌های میز مدیر، فقط‌خواندنی (مهر ۱۴۰۵) ---------- */
   const WINDOWS = [["3d", "امروز و دو روز گذشته", 2], ["7d", "هفتهٔ اخیر", 6], ["30d", "ماه اخیر", 29], ["all", "همه تاریخ‌ها", null]];
   const RS = { new: ["ارجاع‌نشده", "st-reg"], ready: ["ارسال‌نشده", "st-hold"], run: ["در جریان", "st-run"], hold: ["معلق", "st-hold"], stop: ["متوقف", "st-stop"], closed: ["بسته", "st-cls"] };
+  const FUNNEL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h17l-6.6 7.6v5.6l-3.8 1.9v-7.5z"/></svg>`;
+  const avOf = (name, label, cls) => `<span class="ex-av ${cls || "sm"}" style="--av:${TP.ui.avColor(name || label)}" aria-hidden="true">${esc(TP.ui.avInitial(label || name))}</span>`;
   function reqStatus(r) {
     const live = r.items.filter((i) => i.state === "open" || i.state === "hold");
     if (!live.length) return r.items.some((i) => i.state === "closed") ? "closed" : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
@@ -219,65 +224,91 @@
       if (w && w[2] != null) qs.set("from", TP.fmtD(Date.now() - w[2] * DAY));
       if (S.rf.status === "closed" || S.rf.status === "stop") qs.set("scope", "all");
     }
-    try { const d = await api("/desk?" + qs); S.desk = d; S.settings = d.settings || S.settings; }
-    catch (e) { S.deskErr = e.message; }
+    /* پاسخِ درخواستِ کهنه‌تر (پیش از عوض شدنِ بازه) جای پاسخِ تازه را نمی‌گیرد */
+    const seq = (S.deskSeq = (S.deskSeq || 0) + 1);
+    try { const d = await api("/desk?" + qs); if (seq !== S.deskSeq) return; S.desk = d; S.settings = d.settings || S.settings; }
+    catch (e) { if (seq !== S.deskSeq) return; S.deskErr = e.message; }
     S.deskLoading = false; render();
   }
-  function reqRows() {
+  function reqRows(noStatus) {
     if (!S.desk) return [];
     const f = S.rf;
     return S.desk.requests.filter((r) => {
       if (f.project && (r.project || "—") !== f.project) return false;
       if (f.expert && !r.assignments.some((a) => String(a.expert_id) === f.expert)) return false;
-      if (f.status && reqStatus(r) !== f.status) return false;
+      if (!noStatus && f.status && reqStatus(r) !== f.status) return false;
       if (f.q && !(TP.hit(r.id, f.q) || TP.hit(r.party, f.q) || r.items.some((i) => TP.hit(i.title, f.q) || TP.hit(i.code, f.q)))) return false;
       return true;
     });
   }
-  function vReq() {
-    const d = S.desk, f = S.rf;
+  /** نوارِ مهلت و شش مرحلهٔ یک ارجاع — همان نوارهای میز مدیر. flags: شش مرحله؛ active: کارِ باز دارد */
+  function stageBars(a, flags, active) {
+    const A = { dispatchedAt: a.dispatched_at, days: a.days, done: flags, active };
+    const segs = TP.STAGES.map((s, i) => ({ label: TP.ui.STAGE_SHORT[i], title: s, cls: `c-${TP.stageColor(A, i, thr(), S.now)}`, done: flags[i],
+      cnt: i === 3 && a.quote_count ? a.quote_count : i === 4 && a.proforma_count ? a.proforma_count : "" }));
+    if (!a.dispatched_at) return { html: TP.ui.bar.progress(segs), lvl: "" };
+    const b = TP.budget(a.dispatched_at, a.days || 1), el = TP.wh(a.dispatched_at, S.now), pct = b ? Math.min(100, el / b * 100) : 0;
+    const lvl = !active ? "" : el >= b ? "over" : pct >= 85 ? "late" : pct >= 60 ? "warn" : "";
+    return { html: TP.ui.bar.deadline(pct, lvl, "مهلت", `${a.days || "—"} روز`) + TP.ui.bar.progress(segs), lvl };
+  }
+  const LV = { warn: 1, late: 2, over: 3 };
+  function supCard(r, i) {
+    const st = reqStatus(r);
+    let lvl = "";
+    const units = r.assignments.map((a) => {
+      const its = r.items.filter((x) => x.assignment_id === a.id), open = its.filter((x) => x.state === "open");
+      const flags = [!!a.viewed_at, its.some((x) => x.hist_done_at), its.some((x) => x.smart_done_at), a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
+      const B = stageBars(a, flags, !!a.dispatched_at && open.length > 0);
+      if ((LV[B.lvl] || 0) > (LV[lvl] || 0)) lvl = B.lvl;
+      const ok = open.filter((x) => x.commission_ok).length;
+      return TP.ui.unitRow({
+        who: `${avOf(a.expert_name, a.expert_label)}<span class="uname" title="${esc(a.expert_name || "")}">${esc(a.expert_label || a.expert_name || "—")}</span>`,
+        days: a.dispatched_at ? `<span title="ارسال ${esc(fmtS(a.dispatched_at))}">${TP.ui.ICON.clock}${esc(TP.fmtD(a.dispatched_at))}</span>` : `<span class="dim">ارسال‌نشده</span>`,
+        bars: B.html,
+        status: `${open.length ? `<span class="chip ${ok === open.length ? "ok" : ""}" title="تأیید کمیسیونِ اقلامِ باز">🏆 ${M(ok)}/${M(open.length)}</span>` : ""}<span class="dim">${M(its.length)} قلم</span>`,
+        acts: `<button class="tp-icon-btn sm" type="button" data-asg="${a.id}" title="جزئیاتِ ارجاع" aria-label="جزئیاتِ ارجاع">${TP.ui.ICON.more}</button>` });
+    });
+    if (!units.length) units.push(`<div class="tp-unit none">بی‌کارشناس</div>`);
+    const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
+    const drawer = `<div class="sv-items">${r.items.map((x) => `<div class="sv-item"><span class="num dim">${x.line_no}</span><b>${esc(x.title)}</b><span class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</span>
+      <span class="st ${(TP.STATES[x.state] || TP.STATES.open).cls}">${(TP.STATES[x.state] || TP.STATES.open).label}</span>${x.commission_ok ? `<span class="chip ok">🏆</span>` : ""}</div>`).join("")}</div>`;
+    return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center,
+      chips: `<span class="st ${RS[st][1]}">${RS[st][0]}</span>`,
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-rtog="${esc(r.id)}" aria-expanded="${S.rOpen[r.id] ? "true" : "false"}"`,
+      drawerOpen: !!S.rOpen[r.id], drawerHtml: drawer, units });
+  }
+  function vReqBar(rows) {
+    const d = S.desk, f = S.rf, win = WINDOWS.find((w) => w[0] === f.win);
+    const act = [];
+    if (f.project) act.push(["پروژه", f.project, "project"]);
+    if (f.expert) act.push(["کارشناس", exName(f.expert), "expert"]);
+    if (f.id) act.push(["درخواست", f.id, "id"]);
+    const all = reqRows(true), counts = {};
+    all.forEach((r) => { const s = reqStatus(r); counts[s] = (counts[s] || 0) + 1; });
+    const pill = (k, l, n) => `<button type="button" class="tp-pill ${f.status === k ? "on" : ""}" data-rst="${k}" aria-pressed="${f.status === k ? "true" : "false"}">${l}${n != null ? ` <span class="n">${M(n)}</span>` : ""}</button>`;
     const projects = d ? [...new Set(d.requests.map((r) => r.project || "—"))].sort((a, b) => a.localeCompare(b, "fa")) : [];
-    const rows = reqRows();
-    let h = `<div class="tp-filters">
-      <span class="lab">بازه</span><select class="tp-select" data-rf="win" ${f.id ? "disabled" : ""}>${WINDOWS.map(([k, l]) => `<option value="${k}" ${f.win === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <span class="lab">پروژه</span><select class="tp-select" data-rf="project"><option value="">همه</option>${projects.map((p) => `<option ${f.project === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
-      <span class="lab">کارشناس</span><select class="tp-select" data-rf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select>
-      <span class="lab">وضعیت</span><select class="tp-select" data-rf="status"><option value="">همه</option>${Object.entries(RS).map(([k, [l]]) => `<option value="${k}" ${f.status === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <input class="tp-input" data-fq="req" value="${esc(f.q)}" placeholder="شماره، طرف مقابل یا قلم…" style="min-width:220px">
-      ${f.id ? `<span class="chip info">فقط درخواست ${esc(f.id)} <button class="tp-btn xs" data-rid-clear>×</button></span>` : ""}
-      <span class="end">${d ? `${rows.length} از ${d.requests.length} درخواست` : ""}${S.deskLoading && d ? " · در حال به‌روزرسانی…" : ""}</span></div>`;
+    return `<div class="mg-bar">
+      <button type="button" class="mg-fbtn ${S.rfOpen ? "on" : ""}" data-rfopen aria-expanded="${S.rfOpen ? "true" : "false"}" title="فیلترها">${FUNNEL}<span>فیلتر</span>${act.length ? `<i class="badge">${M(act.length)}</i>` : ""}</button>
+      <div class="mg-chips">${act.map(([l, v, k]) => `<button type="button" class="mg-chip" data-rdrop="${k}" title="برداشتن این فیلتر">${esc(l)}: <b>${esc(v)}</b> ${TP.ui.ICON.x}</button>`).join("")}</div>
+      <input class="tp-input sv-q" data-fq="req" value="${esc(f.q)}" placeholder="جستجو: شماره، طرف مقابل یا قلم" aria-label="جستجوی درخواست">
+      <span class="spacer"></span><span class="mg-count"><b>${M(rows.length)}</b> از ${M(d ? d.requests.length : 0)} درخواست · ${esc(f.id ? `درخواست ${f.id}` : win ? win[1] : "")}${S.deskLoading && d ? " · …" : ""}</span></div>
+      <div class="tp-pills sv-st">${pill("", "همه", all.length)}${Object.entries(RS).map(([k, [l]]) => counts[k] ? pill(k, l, counts[k]) : "").join("")}</div>
+      ${S.rfOpen ? `<div class="mg-fpanel" data-fpanel-box role="region" aria-label="فیلترهای درخواست‌ها">
+        <div class="mg-frow"><span class="lab">بازه</span><div class="tp-pills">${WINDOWS.map(([k, l]) => `<button type="button" class="tp-pill ${f.win === k ? "on" : ""}" data-rwin="${k}" ${f.id ? "disabled" : ""}>${l}</button>`).join("")}</div></div>
+        <div class="mg-frow"><span class="lab">پروژه</span><select class="tp-select" data-rf="project"><option value="">همه</option>${projects.map((p) => `<option ${f.project === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
+          <span class="lab">کارشناس</span><select class="tp-select" data-rf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select></div>
+        <div class="mg-ffoot"><button class="tp-btn sm" data-rclear>پاک کردن همه</button><span class="spacer"></span><button class="tp-btn primary" data-rfopen>${TP.ui.ICON.check} بستن</button></div></div>` : ""}`;
+  }
+  function vReq() {
+    const d = S.desk, f = S.rf, rows = reqRows();
+    let h = vReqBar(rows);
     if (S.deskErr) h += `<div class="tp-note warn">${esc(S.deskErr)}</div>`;
     if (!d) return h + (S.deskLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
     if (!rows.length) {
       const q = f.q.trim();
-      return h + `<div class="empty"><b>درخواستی با این فیلترها نیست.</b>${q.length >= 4 && !f.id ? `<br><button class="tp-btn" data-lookup="${esc(q)}">جستجوی شمارهٔ «${esc(q)}» در کل سامانه</button>` : ""}</div>`;
+      return h + `<div class="empty"><b>درخواستی با این فیلترها نیست.</b>${f.win !== "all" && !f.id ? `<br><br><button class="tp-btn" data-rwin="all">همهٔ تاریخ‌ها</button>` : ""}${q.length >= 4 && !f.id ? ` <button class="tp-btn" data-lookup="${esc(q)}">جستجوی «${esc(q)}» در کل سامانه</button>` : ""}</div>`;
     }
-    h += `<div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 240px);margin-top:10px"><table class="tp-table" data-stick><thead><tr>
-      <th>شماره</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>پروژه</th><th>اقلام<br><span class="dim">باز / کل</span></th>
-      <th class="sep">کارشناس</th><th>ارسال</th>${TP.STAGES.map((s) => `<th class="console">${s.replace(" ", "<br>")}</th>`).join("")}
-      <th class="sep">تأیید کمیسیون<br><span class="dim">تأیید / باز</span></th><th>وضعیت</th><th></th></tr></thead><tbody>`;
-    for (const r of rows) {
-      const live = r.items.filter((i) => i.state === "open" || i.state === "hold").length;
-      const asg = r.assignments.length ? r.assignments : [null];
-      const st = reqStatus(r), span = asg.length;
-      asg.forEach((a, k) => {
-        const its = a ? r.items.filter((i) => i.assignment_id === a.id) : r.items;
-        h += "<tr>";
-        if (!k) h += `<td rowspan="${span}" class="id num">${esc(r.id)}</td><td rowspan="${span}" class="num">${esc(r.date)}</td><td rowspan="${span}" class="party">${esc(r.party)}</td>
-          <td rowspan="${span}">${esc(r.project || "—")}</td><td rowspan="${span}" class="num">${live} / ${r.items.length}</td>`;
-        if (a) {
-          const open = its.filter((i) => i.state === "open");
-          const flags = [!!a.viewed_at, its.some((i) => i.hist_done_at), its.some((i) => i.smart_done_at), a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-          h += `<td class="sep">${esc(a.expert_label || a.expert_name)}</td>
-            <td class="num" title="${a.dispatched_at ? esc(fmtS(a.dispatched_at)) : ""}">${a.dispatched_at ? TP.fmtD(a.dispatched_at) : `<span class="dim">ارسال‌نشده</span>`}</td>
-            ${boxes(flags, a, !!a.dispatched_at && open.length > 0)}
-            <td class="sep num">${open.filter((i) => i.commission_ok).length} / ${open.length}</td>`;
-        } else h += `<td class="sep dim">بی‌کارشناس</td><td></td>${TP.STAGES.map(() => `<td class="console"></td>`).join("")}<td class="sep"></td>`;
-        if (!k) h += `<td rowspan="${span}"><span class="st ${RS[st][1]}">${RS[st][0]}</span></td>`;
-        h += `<td>${a ? `<button class="tp-btn xs" data-asg="${a.id}">جزئیات</button>` : ""}</td></tr>`;
-      });
-    }
-    return h + "</tbody></table></div>";
+    return h + `<div class="tp-cards wide ${TP.ui.once("sup.req")}">${rows.map(supCard).join("")}</div>`;
   }
 
   /* ---------- جزئیاتِ یک ارجاع (روی صفحه) ---------- */
@@ -304,39 +335,35 @@
   function asgHtml(d) {
     const a = d.assignment, r = d.request || {}, its = d.items || [], qs = d.quotes || [], pfs = d.proformas || [];
     const qOf = (id) => qs.filter((q) => q.item_id === id);
-    const k = (lab, val) => `<div class="k"><b>${lab}</b><span style="font-size:.8rem;font-weight:600">${val}</span></div>`;
-    return `<div class="kpi">${k("طرف مقابل", esc(r.party || "—"))}${k("ارسال برای کارشناس", a.dispatched_at ? fmtS(a.dispatched_at) : "ارسال‌نشده")}
-        ${k("مشاهدهٔ کارشناس", a.viewed_at ? fmtS(a.viewed_at) : "—")}${k("پایان مهلت", a.deadline_at ? fmtS(a.deadline_at) : `${a.days || "—"} روز کاری`)}
-        ${k("جدول کمیسیون", a.commission_no ? `TSA-PS-FO-${a.commission_no}<br>${fmtS(a.commission_at)}` : "ساخته نشده")}</div>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
-        ${a.commission_no ? `<button class="tp-btn sm" data-cmprev="${a.id}">پیش‌نمایش جدول کمیسیون</button><button class="tp-btn sm" data-cmdl="${a.id}" data-rid="${esc(r.id)}">دانلود جدول کمیسیون (اکسل)</button>` : ""}
-        <button class="tp-btn sm primary" data-cres="${a.id}" title="برنده و علتِ هر قلم؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجهٔ کمیسیون</button>
-        <button class="tp-btn sm" data-goto="chat" data-rid="${esc(r.id)}">مکاتبات این درخواست</button>
-        <button class="tp-btn sm" data-goto="log" data-rid="${esc(r.id)}">رخدادهای این درخواست</button></div>
-      ${a.notes ? `<div class="tp-note">توضیحات کارشناس (پای جدول کمیسیون): ${esc(a.notes)}</div>` : ""}
-      <h4 class="sup-h">اقلام (${its.length})</h4>
-      <table class="sup-tbl"><thead><tr><th>#</th><th>قلم</th><th class="c">مقدار</th><th class="c">وضعیت</th><th class="c">بررسی سوابق</th><th class="c">نرمال‌سازی</th><th class="c">استعلام<br>ثبت / خط</th><th class="c">تأیید نهایی</th><th class="c">تأیید کمیسیون</th></tr></thead><tbody>
-      ${its.map((i) => { const q = qOf(i.id); const s = TP.STATES[i.state] || TP.STATES.open; return `<tr><td class="num">${i.line_no}</td>
-        <td>${esc(i.title)}${i.sp_lock ? ` <span class="chip info" title="برای تأمین‌کننده رفته؛ ساختارش قفل است">🔒</span>` : ""}</td>
-        <td class="c num">${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</td><td class="c"><span class="st ${s.cls}">${s.label}</span></td>
-        <td class="c" title="${i.hist_done_at ? esc(fmtS(i.hist_done_at)) : ""}">${i.hist_done_at ? "✓" : "—"}</td>
-        <td class="c" title="${i.norm_at ? esc(fmtS(i.norm_at)) : ""}">${i.norm_at ? "✓" : "—"}</td>
-        <td class="c num">${q.filter((x) => x.saved).length} / ${q.length}</td>
-        <td class="c">${q.filter((x) => x.final).map((x) => esc(x.supplier_name)).join("، ") || "—"}</td>
-        <td class="c">${i.commission_ok ? `<span class="ok-mark">✓</span>` : "—"}</td></tr>`; }).join("")}</tbody></table>
-      <h4 class="sup-h">خط‌های استعلام (${qs.length})</h4>
-      ${qs.length ? `<div style="overflow:auto"><table class="sup-tbl"><thead><tr><th>تأمین‌کننده</th><th>قلم</th><th class="c">مقدار</th><th class="c">قیمت واحد (ریال)</th><th class="c">تحویل</th><th class="c">اعتبار</th><th class="c">فاکتور</th><th class="c">پرداخت</th><th class="c">ثبت موقت</th><th class="c">تأیید نهایی</th><th class="c">از کجا</th><th class="c">افزوده شد</th></tr></thead><tbody>
-        ${qs.map((q) => { const it = its.find((i) => i.id === q.item_id); return `<tr><td>${esc(q.supplier_name)}</td><td>${esc(it ? it.title : "")}</td>
-          <td class="c num">${q.qty == null ? "" : M(q.qty)} ${esc(q.unit || "")}</td><td class="c num">${q.price == null ? "—" : M(q.price)}</td>
-          <td class="c">${esc(q.dtime || "—")}</td><td class="c">${esc(q.valid_days || "—")}</td><td class="c">${esc(q.invoice || "—")}</td><td class="c">${esc(q.pay || "—")}</td>
-          <td class="c">${q.saved ? "✓" : "—"}</td><td class="c" title="${q.final_at ? esc(fmtS(q.final_at)) : ""}">${q.final ? `<span class="ok-mark">✓</span>` : "—"}</td>
-          <td class="c">${esc(ORIGIN[q.origin] || q.origin || "—")}${q.source === "ai" ? " 🤖" : ""}</td><td class="c num" style="font-size:.75rem">${fmtShort(q.created_at)}</td></tr>`; }).join("")}</tbody></table></div>`
-        : `<div class="dim">خط استعلامی ثبت نشده.</div>`}
-      <h4 class="sup-h">پیش‌فاکتورها (${pfs.length})</h4>
-      ${pfs.length ? `<table class="sup-tbl"><thead><tr><th>تأمین‌کننده</th><th>فایل</th><th class="c">بارگذاری</th><th class="c">از</th><th class="c">خواندن هوشمند</th></tr></thead><tbody>
-        ${pfs.map((p) => `<tr><td>${esc(p.supplier_name)}</td><td>${esc(p.filename || "—")}</td><td class="c num" style="font-size:.78rem">${fmtS(p.uploaded_at)}</td>
-          <td class="c">${esc({ panel: "پنل", telegram: "تلگرام", supplier: "پنل تأمین‌کننده" }[p.source] || p.source || "—")}</td><td class="c">${esc({ ok: "✓ خوانده شد", refused: "خوانا نبود", failed: "نشد", pending: "در حال خواندن" }[p.extract_state] || "—")}</td></tr>`).join("")}</tbody></table>`
-        : `<div class="dim">پیش‌فاکتوری نیامده.</div>`}`;
+    const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
+    const late = a.deadline_at && a.deadline_at < S.now && its.some((i) => i.state === "open");
+    const okN = its.filter((i) => i.state === "open" && i.commission_ok).length, openN = its.filter((i) => i.state === "open").length;
+    const qCard = (q) => `<div class="sv-qc ${q.final ? "fin" : ""}"><b>${esc(q.supplier_name)}</b>${q.source === "ai" ? ` <span title="کارشناس هوشمند">🤖</span>` : ""}
+        <span class="num pr">${q.price == null ? "—" : M(q.price)} <small>ریال</small></span>
+        <span class="dim">${[q.dtime ? `تحویل ${esc(q.dtime)}` : "", q.pay ? esc(q.pay) : "", q.invoice ? `فاکتور ${esc(q.invoice)}` : ""].filter(Boolean).join(" · ")}</span>
+        <span class="tags">${q.saved ? `<span class="chip">ثبت‌شده</span>` : `<span class="chip warn">ثبت‌نشده</span>`}${q.final ? `<span class="chip ok" title="${q.final_at ? esc(fmtS(q.final_at)) : ""}">✓ تأیید نهایی</span>` : ""}<span class="dim">${esc(ORIGIN[q.origin] || q.origin || "")}</span></span></div>`;
+    return `<div class="sv-asg">
+      <div class="tp-stats">${stat("طرف مقابل", esc(r.party || "—"), "project")}${stat("ارسال برای کارشناس", a.dispatched_at ? esc(TP.fmtD(a.dispatched_at)) : "ارسال‌نشده", "user", "", a.viewed_at ? `مشاهده ${esc(fmtShort(a.viewed_at))}` : "هنوز ندیده")}
+        ${stat("پایان مهلت", a.deadline_at ? esc(fmtShort(a.deadline_at)) : `${esc(a.days || "—")} روز کاری`, "clock", late ? "bad" : "")}
+        ${stat("جدول کمیسیون", a.commission_no ? `TSA-PS-FO-${esc(a.commission_no)}` : "ساخته نشده", "file", a.commission_no ? "ok" : "", a.commission_at ? esc(fmtShort(a.commission_at)) : "")}
+        ${stat("تأیید کمیسیون", `${M(okN)} / ${M(openN)}`, "check", openN && okN === openN ? "ok" : "")}</div>
+      <div class="sv-acts">
+        <button class="tp-btn primary" data-cres="${a.id}" title="برنده و علتِ هر قلم؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجهٔ کمیسیون</button>
+        ${a.commission_no ? `<button class="tp-btn" data-cmprev="${a.id}">${TP.ui.ICON.search} جدول کمیسیون</button><button class="tp-btn" data-cmdl="${a.id}" data-rid="${esc(r.id)}">${TP.ui.ICON.upload} اکسل</button>` : ""}
+        <button class="tp-btn" data-goto="chat" data-rid="${esc(r.id)}">💬 مکاتبات</button>
+        <button class="tp-btn" data-goto="log" data-rid="${esc(r.id)}">${TP.ui.ICON.clock} رخدادها</button></div>
+      ${a.notes ? `<div class="sv-notes"><b>توضیحات کارشناس</b> (پای جدول کمیسیون)<p>${esc(a.notes)}</p></div>` : ""}
+      <h4 class="sv-h">اقلام <span class="chip">${M(its.length)}</span></h4>
+      <div class="sv-its">${its.map((i) => { const q = qOf(i.id), s = TP.STATES[i.state] || TP.STATES.open;
+        return `<article class="sv-it"><header><span class="num dim">${i.line_no}</span><b>${esc(i.title)}</b>${i.sp_lock ? ` <span title="برای تأمین‌کننده رفته؛ ساختارش قفل است">🔒</span>` : ""}
+            <span class="num">${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</span><span class="st ${s.cls}">${s.label}</span>${i.commission_ok ? `<span class="chip ok">🏆 کمیسیون</span>` : ""}</header>
+          <div class="sv-flags"><span class="${i.norm_at ? "on" : ""}" title="${i.norm_at ? esc(fmtS(i.norm_at)) : ""}">ساختار</span><span class="${i.hist_done_at ? "on" : ""}" title="${i.hist_done_at ? esc(fmtS(i.hist_done_at)) : ""}">سوابق</span>
+            <span class="${q.some((x) => x.saved) ? "on" : ""}">استعلام ${M(q.filter((x) => x.saved).length)}/${M(q.length)}</span><span class="${q.some((x) => x.final) ? "on" : ""}">تأیید نهایی ${M(q.filter((x) => x.final).length)}</span></div>
+          ${q.length ? `<div class="sv-qs">${q.map(qCard).join("")}</div>` : `<div class="dim sv-none">استعلامی ثبت نشده.</div>`}</article>`; }).join("")}</div>
+      ${pfs.length ? `<h4 class="sv-h">پیش‌فاکتورها <span class="chip">${M(pfs.length)}</span></h4><div class="sv-pfs">${pfs.map((p) => `<span class="sv-pf">📄 <b>${esc(p.supplier_name)}</b><span class="dim">${esc(p.filename || "")}</span>
+          <span class="dim">${esc({ panel: "پنل", telegram: "تلگرام", supplier: "پنل تأمین‌کننده", generated: "سامانه" }[p.source] || p.source || "")} · ${esc(fmtShort(p.uploaded_at))}</span>
+          ${p.extract_state ? `<span class="chip ${p.extract_state === "ok" ? "ok" : p.extract_state === "pending" ? "" : "warn"}">${esc({ ok: "خوانده شد", refused: "خوانا نبود", failed: "نشد", pending: "در حال خواندن" }[p.extract_state] || p.extract_state)}</span>` : ""}</span>`).join("")}</div>` : ""}
+    </div>`;
   }
   async function cmPreview(aid) {
     const ov = overlay("پیش‌نمایش جدول کمیسیون", `<div class="empty">در حال ساختن برگه…</div>`);
@@ -349,135 +376,225 @@
     } catch (e) { ov.set("خطا", `<div class="tp-note warn">${esc(e.message)}</div>`); }
   }
 
-  /* ---------- تب «کارشناسان» ---------- */
+  /* ---------- تب «کارشناسان»: کارت‌ها مثلِ تخته‌ی کارشناسانِ پنل مدیر (مهر ۱۴۰۵) ---------- */
   /* کدهای ورود کارشناسان و کد مدیر — تنها جای دیدن و تغییرشان (تصمیم مالک، مهر ۱۴۰۵) */
   function vCodes() {
     const C = S.codes;
     if (S.codesErr) return `<div class="tp-note warn">${esc(S.codesErr)}</div>`;
     if (!C) return `<div class="empty">در حال خواندن کدها…</div>`;
-    const inp = (attrs, v, bad) => `<input class="tp-input ${bad ? "bad" : ""}" ${attrs} value="${esc(v)}" inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="off" title="چهار رقم؛ Enter یا خروج از کادر = ذخیره">`;
-    return `<div class="tp-card tp-codes" style="margin-bottom:12px;padding:14px 16px"><h3 style="margin:0 0 10px">🔑 کدهای ورود <span class="dim" style="font-weight:400;font-size:.8rem">چهار رقم؛ فقط همین‌جا دیده و عوض می‌شوند</span></h3>
-      <div class="tp-row" style="margin-bottom:10px;align-items:center;gap:10px"><b>کد مدیر</b>${inp("data-code-mgr", C.manager, !/^\d{4}$/.test(C.manager))}</div>
-      <div class="tp-scroll" style="max-height:50vh"><table class="tp-table"><thead><tr><th class="rt">کارشناس</th><th>کد ورود</th><th>تلگرام</th></tr></thead><tbody>
-      ${C.experts.map((e) => `<tr><td class="rt">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</td><td>${inp(`data-code-ex="${e.id}"`, e.code, !e.ok)}${e.ok ? "" : ` <span class="chip warn">چهاررقمی نیست</span>`}</td><td>${e.tg ? "✓" : "—"}</td></tr>`).join("")}
-      </tbody></table></div></div>`;
+    const inp = (attrs, v, bad, label) => `<input class="tp-input sv-code ${bad ? "bad" : ""}" ${attrs} value="${esc(v)}" inputmode="numeric" maxlength="4" pattern="[0-9]*" autocomplete="off" dir="ltr" aria-label="${esc(label)}" title="چهار رقم؛ Enter یا خروج از کادر = ذخیره">`;
+    return `<section class="tp-box sv-codes"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.key}</span><h2>کدهای ورود</h2><span class="sub">چهار رقم</span>
+        <span class="end">${TP.ui.info("support.exp", "راهنمای کدها")}</span></div>
+      <div class="sv-codegrid"><label class="sv-codecard mgr"><span class="ex-av" style="--av:#1c3c8c" aria-hidden="true">م</span><b>کد مدیر</b>${inp("data-code-mgr", C.manager, !/^\d{4}$/.test(C.manager), "کد مدیر")}</label>
+        ${C.experts.map((e) => `<label class="sv-codecard">${avOf(e.name, e.label)}<b>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</b>${inp(`data-code-ex="${e.id}"`, e.code, !e.ok, `کد ${e.label || e.name}`)}${e.ok ? "" : `<span class="chip warn">چهاررقمی نیست</span>`}${e.tg ? `<span class="sv-tg" title="تلگرام وصل است">${TP.ui.ICON.telegram}</span>` : ""}</label>`).join("")}</div></section>`;
   }
   async function loadCodes() { S.codesErr = ""; try { S.codes = await api("/codes"); } catch (e) { S.codesErr = e.message; } render(); }
   async function saveCode(body) {
-    try { S.codes = await api("/codes", { method: "PUT", body }); S.codesErr = ""; }
+    try { S.codes = await api("/codes", { method: "PUT", body }); S.codesErr = ""; TP.ui.success("کد ذخیره شد"); }
     catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
     render();
+  }
+  const metric = (label, v, tone) => `<span class="sv-m ${v && tone ? tone : ""}"><b class="num">${M(v || 0)}</b><small>${label}</small></span>`;
+  /* سه عددِ اصلی همیشه؛ دیرکرد، دیده‌نشده و منتظرِ کمیسیون فقط وقتی هستند — کارتِ کارشناسِ بی‌کار کم‌رنگ */
+  function exCard(e, i) {
+    const alerts = [e.overdue ? `<span class="chip bad">${M(e.overdue)} دیرکرد</span>` : "", e.unseen ? `<span class="chip warn">${M(e.unseen)} دیده‌نشده</span>` : "",
+      e.cm_wait ? `<span class="chip info">${M(e.cm_wait)} منتظر کمیسیون</span>` : ""].join("");
+    const idle = !e.open_asg && !e.open_items && !e.threads;
+    return `<article class="sv-ex ${idle ? "idle" : ""} ${e.overdue ? "late" : ""}" data-ex="${e.id}" role="button" tabindex="0" style="--i:${Math.min(i, 14)}" aria-label="${esc(e.label || e.name)}">
+      <header>${avOf(e.name, e.label, "lg")}<div class="t"><b>${e.senior ? `<span class="sv-star" title="کارشناس ارشد">★</span>` : ""}${esc(e.label || e.name)}</b>${e.label && e.label !== e.name ? `<small>${esc(e.name)}</small>` : ""}</div>
+        <span class="tags">${e.ai === "on" ? `<span class="chip ai" title="کارشناس هوشمند روشن">🤖</span>` : ""}${e.tg ? `<span class="sv-tg" title="تلگرام وصل است">${TP.ui.ICON.telegram}</span>` : ""}</span></header>
+      <div class="sv-ms">${metric("ارجاع باز", e.open_asg)}${metric("قلم باز", e.open_items)}${metric("گفت‌وگو", e.threads)}</div>
+      ${alerts ? `<div class="sv-al">${alerts}</div>` : idle ? `<div class="sv-al dim">کارِ بازی ندارد</div>` : ""}</article>`;
   }
   function vExperts() {
     const E = S.experts;
     if (!E.length) return `<div class="empty">در حال بارگذاری…</div>`;
     const sum = (k) => E.reduce((a, e) => a + (e[k] || 0), 0);
-    return `<div class="tp-row" style="margin-bottom:10px"><button class="tp-btn sm ${S.codesOpen ? "primary" : ""}" data-codes aria-expanded="${S.codesOpen ? "true" : "false"}">🔑 کدهای ورود</button></div>${S.codesOpen ? vCodes() : ""}
-      <div class="kpi" style="margin-bottom:12px"><div class="k"><b>کارشناس فعال</b><span>${E.length}</span></div><div class="k"><b>ارجاع باز</b><span>${sum("open_asg")}</span></div>
-        <div class="k"><b>قلم باز</b><span>${sum("open_items")}</span></div><div class="k"><b>از مهلت گذشته</b><span>${sum("overdue")}</span></div>
-        <div class="k"><b>دیده‌نشده</b><span>${sum("unseen")}</span></div><div class="k"><b>منتظر تأیید کمیسیون</b><span>${sum("cm_wait")}</span></div></div>
-      <div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 300px)"><table class="tp-table" data-stick><thead><tr>
-        <th class="rt">کارشناس</th><th>ارجاع باز</th><th>قلم باز</th><th>از مهلت گذشته</th><th>دیده‌نشده</th><th>منتظر تأیید کمیسیون</th><th>گفت‌وگو با تأمین‌کننده</th><th>کارشناس هوشمند</th><th>تلگرام</th><th></th></tr></thead><tbody>
-      ${E.map((e) => `<tr class="rowlink" data-ex="${e.id}"><td class="rt"><b>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</b>${e.label && e.label !== e.name ? `<div class="dim" style="font-size:.75rem">${esc(e.name)}</div>` : ""}</td>
-        <td class="num"><b>${e.open_asg}</b></td><td class="num">${e.open_items}</td>
-        <td class="num">${e.overdue ? `<span class="chip bad">${e.overdue}</span>` : "0"}</td><td class="num">${e.unseen ? `<span class="chip warn">${e.unseen}</span>` : "0"}</td>
-        <td class="num">${e.cm_wait ? `<span class="chip info">${e.cm_wait}</span>` : "0"}</td><td class="num">${e.threads}</td>
-        <td>${e.ai === "on" ? `<span class="chip" style="border-color:rgba(167,139,250,.5)">🤖 روشن</span>` : e.ai ? `<span class="dim">${esc(e.ai)}</span>` : "—"}</td>
-        <td>${e.tg ? "✓" : "—"}</td><td><button class="tp-btn xs" data-ex="${e.id}">جزئیات</button></td></tr>`).join("")}</tbody></table></div>`;
+    const q = (S.exQ || "").trim();
+    /* پرکارها و دیرکردها اول؛ بقیه به همان ترتیبِ سرور */
+    const load = (e) => (e.overdue ? 2 : 0) + (e.open_asg || e.open_items || e.threads ? 1 : 0);
+    const list = E.filter((e) => !q || TP.hit(e.label, q) || TP.hit(e.name, q)).sort((a, b) => load(b) - load(a));
+    const stat = (label, value, icon, tone) => TP.ui.stat({ label, value: M(value), icon, tone });
+    return `<div class="sv-exwrap ${TP.ui.once("sup.exp")}">
+      <div class="tp-stats">${stat("کارشناس فعال", E.length, "users")}${stat("ارجاع باز", sum("open_asg"), "project")}${stat("قلم باز", sum("open_items"), "box")}
+        ${stat("از مهلت گذشته", sum("overdue"), "clock", sum("overdue") ? "bad" : "ok")}${stat("دیده‌نشده", sum("unseen"), "search", sum("unseen") ? "warn" : "")}${stat("منتظر تأیید کمیسیون", sum("cm_wait"), "check", sum("cm_wait") ? "warn" : "")}</div>
+      <div class="mg-bar"><input class="tp-input sv-q" data-fq="ex" value="${esc(S.exQ || "")}" placeholder="جستجوی کارشناس" aria-label="جستجوی کارشناس"><span class="spacer"></span>
+        <button class="tp-btn ${S.codesOpen ? "primary" : ""}" data-codes aria-expanded="${S.codesOpen ? "true" : "false"}">${TP.ui.ICON.key} کدهای ورود</button></div>
+      ${S.codesOpen ? vCodes() : ""}
+      <div class="sv-exgrid">${list.map(exCard).join("") || `<div class="empty">کارشناسی با «${esc(q)}» نیست.</div>`}</div></div>`;
   }
   async function loadExpert(id) {
     S.exId = id; S.ex = null; S.exErr = ""; render();
     try { S.ex = await api(`/experts/${id}`); } catch (e) { S.exErr = e.message; }
     render();
   }
+  function aCard(a, i) {
+    const flags = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
+    const B = stageBars(a, flags, a.open_count > 0);
+    return `<article class="tp-rcard mgr ${B.lvl ? `lvl-${B.lvl}` : ""}" style="--i:${Math.min(i, 12)}">
+      <header><span class="rid">${esc(a.request_id)}</span><span class="rdate">${esc(a.date || "")}</span><span class="chips">${a.ok_count && a.ok_count === a.open_count ? `<span class="chip ok">🏆 کمیسیون</span>` : ""}</span>
+        <button class="tp-icon-btn sm" type="button" data-asg="${a.id}" title="جزئیاتِ ارجاع" aria-label="جزئیاتِ ارجاع">${TP.ui.ICON.more}</button></header>
+      <div class="rproj">${TP.ui.ICON.project}<span>${esc(a.party || "—")}</span></div>
+      <div class="tp-units"><div class="tp-unit"><div class="u-bars">${B.html}</div></div></div>
+      <div class="sv-ms">${metric("قلم باز", a.open_count)}${metric("استعلام", a.quote_count)}${metric("تأیید نهایی", a.final_count)}${metric("کمیسیون", a.ok_count)}${metric("گفت‌وگو", a.threads)}</div></article>`;
+  }
   function vExpert() {
     const back = `<button class="tp-btn sm" data-exback>→ همهٔ کارشناسان</button>`;
     if (S.exErr) return `${back}<div class="tp-note warn">${esc(S.exErr)}</div>`;
     if (!S.ex) return `${back}<div class="empty">در حال بارگذاری…</div>`;
     const e = S.ex.expert, row = S.experts.find((x) => x.id === e.id) || {}, A = S.ex.assignments || [];
-    const k = (lab, v) => `<div class="k"><b>${lab}</b><span>${v}</span></div>`;
-    let h = `<div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:10px">${back}<h2 style="margin:0;font-size:1.15rem">${e.senior ? "★ " : ""}${esc(e.label || e.name)}</h2>
-        <button class="tp-btn xs" data-goto="log" data-ex-log="${e.id}">همهٔ رخدادهای این کارشناس</button><button class="tp-btn xs" data-goto="chat" data-ex-chat="${e.id}">مکاتباتش</button></div>
-      <div class="kpi" style="margin-bottom:12px">${k("ارجاع باز", row.open_asg ?? A.length)}${k("قلم باز", row.open_items ?? "—")}${k("از مهلت گذشته", row.overdue ?? "—")}${k("دیده‌نشده", row.unseen ?? "—")}${k("منتظر تأیید کمیسیون", row.cm_wait ?? "—")}</div>`;
-    h += A.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:46vh"><table class="tp-table" data-stick><thead><tr>
-        <th>درخواست</th><th>تاریخ</th><th class="rt">طرف مقابل</th><th>ارسال</th><th>پایان مهلت</th>${TP.STAGES.map((s) => `<th class="console">${s.replace(" ", "<br>")}</th>`).join("")}
-        <th class="sep">اقلام<br><span class="dim">باز / کل</span></th><th>استعلام<br><span class="dim">ثبت / خط</span></th><th>تأیید نهایی</th><th>تأیید کمیسیون</th><th>مکاتبه</th><th></th></tr></thead><tbody>
-      ${A.map((a) => { const flags = [!!a.viewed_at, a.hist_count > 0, a.smart_count > 0, a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
-        const late = a.deadline_at && a.deadline_at < S.now && a.open_count > 0;
-        return `<tr><td class="id num">${esc(a.request_id)}</td><td class="num">${esc(a.date)}</td><td class="party">${esc(a.party)}</td>
-          <td class="num" title="${esc(fmtS(a.dispatched_at))}">${TP.fmtD(a.dispatched_at)}</td><td class="num ${late ? "" : ""}" title="${a.deadline_at ? esc(fmtS(a.deadline_at)) : ""}">${a.deadline_at ? `${late ? `<span class="chip bad">` : ""}${fmtShort(a.deadline_at)}${late ? "</span>" : ""}` : "—"}</td>
-          ${boxes(flags, a, a.open_count > 0)}
-          <td class="sep num">${a.open_count} / ${a.item_count}</td><td class="num">${a.quote_count} / ${a.quote_lines}</td><td class="num">${a.final_count}</td>
-          <td class="num">${a.ok_count} / ${a.open_count}</td><td class="num">${a.threads}</td><td><button class="tp-btn xs" data-asg="${a.id}">جزئیات</button></td></tr>`; }).join("")}</tbody></table></div>`
-      : `<div class="empty">ارجاعِ بازی ندارد.</div>`;
-    h += `<h3 class="sup-h">آخرین رخدادها</h3>${feedTable(S.ex.activity || [], false)}`;
-    return h;
+    return `<div class="sv-exone">
+      <section class="tp-box sv-exhead">${back}${avOf(e.name, e.label, "lg")}<div class="t"><h2>${e.senior ? `<span class="sv-star">★</span>` : ""}${esc(e.label || e.name)}</h2><small>${esc(e.name)}</small></div>
+        <span class="end"><button class="tp-btn sm" data-goto="chat" data-ex-chat="${e.id}">💬 مکاتباتش</button><button class="tp-btn sm" data-goto="log" data-ex-log="${e.id}">${TP.ui.ICON.clock} رخدادهایش</button></span></section>
+      <div class="sv-ms big">${metric("ارجاع باز", row.open_asg ?? A.length)}${metric("قلم باز", row.open_items)}${metric("دیرکرد", row.overdue, "bad")}${metric("دیده‌نشده", row.unseen, "warn")}${metric("منتظر کمیسیون", row.cm_wait, "info")}</div>
+      <h4 class="sv-h">ارجاع‌های باز <span class="chip">${M(A.length)}</span></h4>
+      ${A.length ? `<div class="tp-cards wide">${A.map(aCard).join("")}</div>` : `<div class="empty">ارجاعِ بازی ندارد.</div>`}
+      <h4 class="sv-h">آخرین رخدادها</h4>${feedTl(S.ex.activity || [], false)}</div>`;
   }
 
-  /* ---------- تب «مکاتبات» (فقط‌خواندنی) ---------- */
+  /* ---------- تب «مکاتبات»: فهرستِ گفت‌وگوها و گوشیِ آیفونِ فقط‌خواندنی — همان صفحهٔ مکاتباتِ کارشناس (مهر ۱۴۰۵) ----------
+     دسکتاپ (۹۶۱ پیکسل به بالا): فهرست | اقلام و مشخصاتِ گفت‌وگو | گوشی. گوشیِ واقعی: فهرست، و با انتخاب، گفت‌وگوی تمام‌صفحه
+     با دکمهٔ برگشت. نگاهِ پشتیبانی پیامی را «خوانده‌شده» نمی‌کند (worker/support.js:supportThread). */
+  const PH = window.PH;
+  const PHONE = window.matchMedia("(min-width: 961px)");
+  let phoneMode = PHONE.matches;
+  const onPhone = () => { if (phoneMode === PHONE.matches) return; phoneMode = PHONE.matches; if (S.view === "app") render(); };
+  if (PHONE.addEventListener) PHONE.addEventListener("change", onPhone); else if (PHONE.addListener) PHONE.addListener(onPhone);
+  /* گفت‌وگوی تمام‌صفحه روی گوشیِ واقعی */
+  const mChat = () => S.view === "app" && S.tab === "chat" && !phoneMode && !!S.thId;
+  const AI_ST = { human: ["✋", "اضطراری دستِ کارشناس", "bad"], ask: ["🚨", "کارشناس هوشمند از کارشناس پرسیده", "warn"], closed: ["🤖", "کارشناس هوشمند — بسته شد", ""] };
+  const aiSt = (st) => (st ? AI_ST[st] || ["🤖", "دستِ کارشناس هوشمند", "info"] : null);
+  /** ساعتِ امروز، روزِ هفته در هفتهٔ اخیر، وگرنه ماه/روز */
+  function whenS(ms) {
+    if (!ms) return "";
+    const d = new Date(ms), n = new Date();
+    if (d.toDateString() === n.toDateString()) return `${p2(d.getHours())}:${p2(d.getMinutes())}`;
+    if (n - d < 6 * DAY) return TP.WD[d.getDay()];
+    const [, m, dd] = jOf(d); return `${p2(m)}/${p2(dd)}`;
+  }
   async function loadThreads() {
     S.thLoading = true; S.thErr = ""; render();
     const qs = new URLSearchParams();
     if (S.thF.expert) qs.set("expert", S.thF.expert);
     if (S.thF.rid) qs.set("rid", S.thF.rid);
-    try { S.th = (await api("/threads?" + qs)).threads || []; } catch (e) { S.thErr = e.message; }
+    const seq = (S.thSeq = (S.thSeq || 0) + 1);
+    try { const r = (await api("/threads?" + qs)).threads || []; if (seq !== S.thSeq) return; S.th = r; } catch (e) { if (seq !== S.thSeq) return; S.thErr = e.message; }
     S.thLoading = false; render();
   }
-  async function openThread(id) {
-    S.thId = id; S.thData = null; render();
-    try { S.thData = await api(`/threads/${id}`); } catch (e) { S.thData = { error: e.message }; }
-    render();
-    const box = app.querySelector("[data-chat]"); if (box) box.scrollTop = box.scrollHeight;
+  async function openThread(id, quiet) {
+    if (!quiet) { S.thId = id; S.thData = null; S.thStick = true; render(); }
+    try { S.thData = await api(`/threads/${id}`); } catch (e) { if (!quiet) S.thData = { error: e.message }; }
+    if (S.thId === id) render();
+  }
+  const thRows = () => (S.th || []).filter((t) => !S.thF.q || TP.hit(t.supplier, S.thF.q) || TP.hit(t.request_id, S.thF.q) || TP.hit(t.party, S.thF.q) || TP.hit(exName(t.expert_id), S.thF.q));
+  function thRow(t) {
+    const st = aiSt(t.ai_state);
+    const who = t.last_who === "e" ? (t.ai_msgs && st ? "🤖 " : "کارشناس: ") : "";
+    const pv = t.last_kind === "voice" ? "🎤 پیام صوتی" : esc(t.last_body || "");
+    return TP.ui.chatRow({ on: t.id === S.thId, cls: t.ai_state === "human" ? "ask" : st ? "watch" : "",
+      attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)} — درخواست ${esc(t.request_id)}"`,
+      av: { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) },
+      title: `${st ? `${st[0]} ` : ""}${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}`, time: whenS(t.last_at),
+      sub: `<span class="sv-pvr">${esc(t.request_id)} · ${esc(exName(t.expert_id))}</span>${pv ? `<br>${who}${pv}` : ""}`,
+      badges: t.finals ? `<span class="sp-badge" title="تأیید نهایی">✓ ${M(t.finals)}</span>` : "" });
+  }
+  function vChatList() {
+    const f = S.thF, list = thRows();
+    const body = S.thErr ? `<div class="tp-note warn">${esc(S.thErr)}</div>` : !S.th ? `<div class="empty">در حال بارگذاری…</div>`
+      : list.length ? list.map(thRow).join("") : `<div class="empty">گفت‌وگویی${f.q ? ` با «${esc(f.q)}»` : ""} نیست.</div>`;
+    return `<aside class="sv-chl"><div class="sv-chh">
+        <select class="tp-select" data-thf="expert" aria-label="کارشناس"><option value="">همهٔ کارشناسان</option>${expertOpts(f.expert)}</select>
+        ${f.rid ? `<button type="button" class="mg-chip" data-thf-clear title="برداشتن این فیلتر">درخواست: <b>${esc(f.rid)}</b> ${TP.ui.ICON.x}</button>` : ""}
+        <span class="sv-chn">${S.th ? `${M(list.length)} گفت‌وگو` : ""}${S.thLoading && S.th ? " · …" : ""}</span></div>
+      <div class="tp-chat-search"><input data-fq="th" value="${esc(f.q)}" placeholder="تأمین‌کننده، درخواست یا کارشناس" aria-label="جستجوی گفت‌وگو" autocomplete="off"></div>
+      <div class="scroll" data-keep-scroll>${body}</div></aside>`;
+  }
+  const TERM_FA = { dtime: "تحویل", pay: "پرداخت", invoice: "فاکتور", vat: "ارزش افزوده", valid_days: "اعتبار" };
+  const termsLine = (t) => Object.keys(TERM_FA).filter((k) => t && String(t[k] ?? "").trim()).map((k) => `${TERM_FA[k]}: ${PH.fa(t[k])}${k === "valid_days" ? " روز" : ""}`).join(" · ");
+  /** مشخصاتِ گفت‌وگو: تأمین‌کننده، درخواست، کارشناس، حالتِ کارشناس هوشمند و اقلام با قیمت */
+  function thInfo(d) {
+    const t = d.thread, lines = d.lines || [], st = aiSt(t.ai_state);
+    const sum = lines.reduce((x, l) => x + (l.total || 0), 0), priced = lines.filter((l) => l.price != null).length;
+    const finals = (d.bundles || []).filter((b) => b.state === "final").length;
+    const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
+    return `<div class="sv-thi">
+      <header class="sv-thh">${avOf(t.supplier, "", "lg")}<div class="t"><h3>${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}</h3>
+          <span class="dim">${t.phone ? `📞 <span dir="ltr">${esc(t.phone)}</span>${t.phone_label ? ` (${esc(t.phone_label)})` : ""}` : "شماره‌ای ثبت نشده"}</span></div></header>
+      <div class="sv-thm"><span>${TP.ui.ICON.project}درخواست <b class="num">${esc(t.request_id)}</b>${t.party ? ` · ${esc(t.party)}` : ""}</span>
+        <span>${avOf(exName(t.expert_id), "")}${esc(exName(t.expert_id))}</span>${st ? `<span class="chip ${st[2]}">${st[0]} ${st[1]}</span>` : ""}</div>
+      <div class="tp-stats">${stat("اقلام", M(lines.length), "box", "", `${M(priced)} با قیمت`)}${stat("پیام", M((d.msgs || []).length), "chat")}
+        ${stat("تأیید نهایی", M(finals), "check", finals ? "ok" : "")}${stat("جمع پیشنهادها", sum ? M(sum) : "—", "file", "", sum ? "ریال" : "")}</div>
+      ${termsLine(t.terms) ? `<div class="sv-terms">🧾 ${esc(termsLine(t.terms))}</div>` : ""}
+      <div class="sv-acts"><button class="tp-btn sm" data-goto="log" data-rid="${esc(t.request_id)}">${TP.ui.ICON.clock} رخدادهای درخواست</button>
+        ${t.assignment_id ? `<button class="tp-btn sm" data-asg="${t.assignment_id}">${TP.ui.ICON.more} جزئیاتِ ارجاع</button>` : ""}</div>
+      <h4 class="sv-h">اقلام <span class="chip">${M(lines.length)}</span></h4>
+      ${lines.length ? `<div class="sv-lns">${lines.map((l) => `<div class="sv-ln"><div class="t">${l.no ? `<span class="sp-code">کد ${PH.fa(l.no)}</span>` : ""}<b>${esc(l.title)}</b><span class="chip">${esc(l.state_fa || l.state)}</span></div>
+          <div class="d num">${l.qty == null ? "—" : M(l.qty)} ${esc(l.unit || l.req_unit || "")}${l.price != null ? ` × ${M(l.price)} = <b>${M(l.total)}</b> ریال` : ""}</div></div>`).join("")}</div>`
+        : `<div class="dim">قلمی در این گفت‌وگو نیست.</div>`}
+      ${(d.files || []).length ? `<h4 class="sv-h">فایل‌ها <span class="chip">${M(d.files.length)}</span></h4><div class="sv-pfs">${d.files.map((x) => `<span class="sv-pf">📎 <b>${esc((d.labels && d.labels[x.label]) || x.label || "فایل")}</b><span class="dim">${esc(x.filename || "")}</span><span class="dim">${esc(fmtShort(x.at))}</span></span>`).join("")}</div>` : ""}</div>`;
+  }
+  /** یادداشتِ درونیِ کارشناس برای پشتیبانی «یادداشت» است، نه «فقط شما می‌بینید» */
+  const supMsgs = (msgs) => (msgs || []).map((m) => (m.kind === "note" ? { ...m, kind: "event", meta: {}, body: `📝 یادداشتِ درونیِ ${m.meta && m.meta.ai ? "کارشناس هوشمند" : "کارشناس"}: ${m.body || ""}` } : m));
+  /** صفحهٔ گوشی: framed = داخلِ قابِ آیفون؛ وگرنه تمام‌صفحه روی گوشیِ واقعی */
+  function thScreen(framed) {
+    const d = S.thData;
+    if (!S.thId || !d || d.error) {
+      return PH.screen({ framed, body: null, void: d && d.error ? `<b>باز نشد</b>${esc(d.error)}` : S.thId ? `<span class="tp-spin"></span>` : `<b>مکاتبات</b>یک گفت‌وگو را از فهرست انتخاب کنید تا این‌جا باز شود.` });
+    }
+    const t = d.thread, I = PH.I;
+    const circ = (attrs, label, icon) => `<button class="ph-glass ph-circ" type="button" ${attrs} aria-label="${label}" title="${label}">${icon}</button>`;
+    return PH.screen({
+      framed, label: `گفت‌وگو با ${t.supplier}`,
+      body: PH.feed(supMsgs(d.msgs), {
+        mine: (m) => m.who === "e", ai: (m) => !!(m.meta && m.meta.ai), transcript: true,
+        rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine }),
+        empty: `<div class="ph-void"><b>هنوز پیامی نیست</b>کارشناس هنوز برای ${esc(t.supplier)} چیزی نفرستاده.</div>` }),
+      nav: {
+        start: framed ? "" : circ("data-thback", "بازگشت به فهرست", I.back),
+        title: `${t.ai_state === "human" ? "✋ " : ""}${t.supplier}`, initial: TP.ui.avInitial(t.supplier),
+        whoAttrs: framed ? "" : "data-thinfo", whoTitle: `${t.supplier} · درخواست ${t.request_id} · ${exName(t.expert_id)}`,
+        acts: `${circ("data-thre", "به‌روزرسانیِ گفت‌وگو", TP.ui.ICON.refresh)}${framed ? "" : circ("data-thinfo", "اقلام و مشخصات", I.box)}`,
+      },
+      composer: { readonly: `<span class="ph-ro-t">👁 <b>فقط دیدن</b> — نگاهِ پشتیبانی پیامی را «خوانده‌شده» نمی‌کند</span>` },
+    });
   }
   function vChat() {
-    const f = S.thF;
-    const list = (S.th || []).filter((t) => !f.q || TP.hit(t.supplier, f.q) || TP.hit(t.request_id, f.q) || TP.hit(t.party, f.q));
-    let h = `<div class="tp-filters"><span class="lab">کارشناس</span><select class="tp-select" data-thf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select>
-      ${f.rid ? `<span class="chip info">درخواست ${esc(f.rid)} <button class="tp-btn xs" data-thf-clear>×</button></span>` : ""}
-      <input class="tp-input" data-fq="th" value="${esc(f.q)}" placeholder="تأمین‌کننده، شمارهٔ درخواست یا طرف مقابل…" style="min-width:240px">
-      <span class="end">${S.th ? `${list.length} گفت‌وگو · ` : ""}فقط‌خواندنی — نگاه پشتیبانی پیامی را «خوانده‌شده» نمی‌کند</span></div>`;
-    if (S.thErr) h += `<div class="tp-note warn">${esc(S.thErr)}</div>`;
-    if (!S.th) return h + (S.thLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
-    h += `<div class="sup-split" style="margin-top:10px"><div class="sup-list">${list.map((t) => `<button class="sup-th ${t.id === S.thId ? "on" : ""}" data-th="${t.id}">
-        <div class="l1"><span>${esc(t.supplier)}${t.demo ? ` <span class="chip mock">دمو</span>` : ""}</span><span class="dim num" style="font-size:.75rem;font-weight:400">${fmtShort(t.last_at)}</span></div>
-        <div class="l2"><span>درخواست <b class="num">${esc(t.request_id)}</b></span><span>${esc(exName(t.expert_id))}</span><span>${t.msgs} پیام</span>${t.ai_msgs ? `<span>🤖 ${t.ai_msgs}</span>` : ""}${t.finals ? `<span class="ok-mark">✓ ${t.finals} تأیید نهایی</span>` : ""}</div>
-        <div class="l3">${t.last_who === "s" ? "تأمین‌کننده: " : t.last_who === "e" ? "کارشناس: " : ""}${esc(t.last_kind === "voice" ? "🎤 پیام صوتی" : t.last_body || "")}</div></button>`).join("") || `<div class="empty">گفت‌وگویی نیست.</div>`}</div>
-      <div>${vThread()}</div></div>`;
-    return h;
-  }
-  function vThread() {
-    if (!S.thId) return `<div class="tp-card" style="padding:18px"><div class="empty">یک گفت‌وگو را از فهرست انتخاب کنید.</div></div>`;
+    if (!phoneMode) return `<div class="sv-chat m">${vChatList()}</div>`;
     const d = S.thData;
-    if (!d) return `<div class="tp-card" style="padding:18px"><div class="empty">در حال بارگذاری…</div></div>`;
-    if (d.error) return `<div class="tp-note warn">${esc(d.error)}</div>`;
-    const t = d.thread, lines = d.lines || [], msgs = d.msgs || [];
-    return `<div class="tp-card" style="padding:14px 16px">
-      <div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b style="font-size:1.02rem">${esc(t.supplier)}</b>${t.demo ? `<span class="chip mock">دمو</span>` : ""}
-        <span class="muted">درخواست <b class="num">${esc(t.request_id)}</b>${t.party ? ` · ${esc(t.party)}` : ""}</span><span class="muted">کارشناس: ${esc(t.expert || "")}</span>
-        <span class="dim num" style="font-size:.8rem" dir="ltr">${esc(t.phone || "")}</span>${t.phone_label ? `<span class="dim" style="font-size:.8rem">${esc(t.phone_label)}</span>` : ""}
-        <span style="margin-inline-start:auto"></span>
-        <button class="tp-btn xs" data-goto="log" data-rid="${esc(t.request_id)}">رخدادهای درخواست</button>
-        ${t.assignment_id ? `<button class="tp-btn xs" data-asg="${t.assignment_id}">جزئیات ارجاع</button>` : ""}</div>
-      ${lines.length ? `<table class="sup-tbl" style="margin-top:8px"><thead><tr><th>کد</th><th>قلم</th><th class="c">مقدار</th><th class="c">قیمت واحد</th><th class="c">جمع</th><th class="c">وضعیت</th></tr></thead><tbody>
-        ${lines.map((l) => `<tr><td class="num">${l.no || ""}</td><td>${esc(l.title)}</td><td class="c num">${l.qty == null ? "—" : M(l.qty)} ${esc(l.unit || l.req_unit || "")}</td>
-          <td class="c num">${l.price == null ? "—" : M(l.price)}</td><td class="c num">${l.total == null ? "—" : M(l.total)}</td><td class="c"><span class="chip">${esc(l.state_fa || l.state)}</span></td></tr>`).join("")}</tbody></table>` : ""}
-      <div class="sup-chat" data-chat style="margin-top:10px">${msgs.map(bubble).join("") || `<div class="empty">پیامی نیست.</div>`}</div></div>`;
+    const info = !S.thId ? `<div class="sv-thnone">${TP.ui.ICON.chat}<b>یک گفت‌وگو را انتخاب کنید</b><span>اقلام و مشخصاتش این‌جا و پیام‌ها در گوشی می‌آیند.</span></div>`
+      : !d ? `<div class="empty">در حال بارگذاری…</div>` : d.error ? `<div class="tp-note warn">${esc(d.error)}</div>` : thInfo(d);
+    return `<div class="sv-chat">${vChatList()}<section class="sv-chm" data-keep-scroll>${info}</section>
+      <section class="ph-stage">${PH.frame(thScreen(true))}</section></div>`;
   }
-  function bubble(m) {
-    const meta = m.meta || {};
-    const at = `<span class="meta num">${fmtS(m.at)}</span>`;
-    if (m.kind === "note") return `<div class="bub note"><b>📝 یادداشت درونی${meta.ai ? " — 🤖 کارشناس هوشمند" : " کارشناس"}</b>\n${esc(m.body)}${at}</div>`;
-    if (m.kind === "event") return `<div class="bub ev">${esc(m.body)}${at}</div>`;
-    const who = m.who === "s" ? "s" : "e";
-    const lab = who === "s" ? "تأمین‌کننده" : meta.ai ? "🤖 کارشناس هوشمند" : "کارشناس";
-    const v = meta.voice || {};
-    const body = m.kind === "voice" ? `🎤 پیام صوتی${v.dur ? ` (${Math.round(v.dur)} ثانیه)` : ""}${m.body ? `\n${esc(m.body)}` : ""}` : esc(m.body);
-    return `<div class="bub ${who}${who === "e" && meta.ai ? " ai" : ""}"><b style="font-size:.75rem">${lab}</b>\n${body}${at}</div>`;
+  /** صدای پیامِ صوتی با نشانهٔ ورودِ پشتیبانی (worker/api.js: /support/msg/:id/voice) */
+  async function loadVoice(id) {
+    const s = sess.get();
+    const r = await fetch(`${BASE()}/msg/${id}/voice`, { headers: s ? { "X-Support-Token": s.token } : {} });
+    if (!r.ok) throw new Error("پخش نشد");
+    return r.blob();
+  }
+  /** پس از هر رسم: صدای پیام‌ها و جای اسکرولِ گفت‌وگو (پایینِ گفت‌وگو در بازکردن؛ همان‌جا در رسم‌های بعدی) */
+  function afterChat(prev) {
+    const c = document.getElementById("chat");
+    if (!c) return;
+    PH.bindVoices(c, loadVoice);
+    if (S.thStick && S.thData) { c.scrollTop = c.scrollHeight; S.thStick = false; }
+    else if (prev && prev.id === S.thId) c.scrollTop = prev.bottom ? c.scrollHeight : prev.top;
+    else c.scrollTop = c.scrollHeight;
+  }
+  function chatPos() {
+    const c = document.getElementById("chat");
+    return c ? { id: S.thId, top: c.scrollTop, bottom: c.scrollHeight - c.scrollTop - c.clientHeight < 60 } : null;
+  }
+  function thInfoSheet() {
+    if (!S.thData || S.thData.error) return;
+    overlay(`گفت‌وگو با ${esc(S.thData.thread.supplier)}`, thInfo(S.thData));
   }
 
-  /* ---------- تب «گزارش رخدادها» ---------- */
+  /* ---------- تب «رخدادها»: خط زمانیِ روزبه‌روز — همان «رویدادهای اخیر»ِ پنل مدیر (مهر ۱۴۰۵) ---------- */
   const GROUPS = [["", "همه"], ["asg", "ارجاع و تصمیم‌های مدیر"], ["work", "کار کارشناسان"], ["chat", "مکاتبات و پیامک"], ["support", "پشتیبانی"]];
   const BY = { manager: "مدیر", expert: "کارشناس", ai: "🤖 کارشناس هوشمند", supplier: "تأمین‌کننده", support: "پشتیبانی", system: "سامانه" };
+  const BY_IC = { manager: "flag", expert: "user", ai: "settings", supplier: "chat", support: "key", system: "data" };
   async function loadLog(more) {
     S.logLoading = true; S.logErr = ""; render();
     const f = S.logF, qs = new URLSearchParams({ limit: "200" });
@@ -488,39 +605,54 @@
     if (f.rid) qs.set("rid", f.rid);
     if (f.g) qs.set("g", f.g);
     if (more && S.logNext) qs.set("before", String(S.logNext));
+    const seq = (S.logSeq = (S.logSeq || 0) + 1);
     try {
       const r = await api("/activity?" + qs);
+      if (seq !== S.logSeq) return;
       if (more && S.log) { const have = new Set(S.log.map((x) => x.key)); S.log = S.log.concat(r.rows.filter((x) => !have.has(x.key))); }
       else S.log = r.rows;
       S.logMore = r.more; S.logNext = r.next;
-    } catch (e) { S.logErr = e.message; }
+    } catch (e) { if (seq !== S.logSeq) return; S.logErr = e.message; }
     S.logLoading = false; render();
   }
-  function feedTable(rows, withExpert) {
-    if (!rows.length) return `<div class="empty">رخدادی نیست.</div>`;
-    return `<div class="tp-scroll sup-feed" data-keep-scroll style="max-height:calc(100vh - 260px)"><table class="tp-table" data-stick><thead><tr>
-      <th>زمان</th><th>کنشگر</th>${withExpert ? "<th>کارشناس</th>" : ""}<th>درخواست</th><th class="rt">شرح</th></tr></thead><tbody>
-      ${rows.map((x) => `<tr><td class="t">${fmtS(x.at)}</td><td><span class="by by-${esc(x.by)}">${BY[x.by] || esc(x.by)}</span></td>
-        ${withExpert ? `<td>${x.expert_id ? esc(exName(x.expert_id)) : "—"}</td>` : ""}
-        <td class="num">${x.request_id ? `<button class="tp-btn xs" data-lrid-set="${esc(x.request_id)}" title="فقط رخدادهای همین درخواست">${esc(x.request_id)}</button>` : "—"}</td>
-        <td class="txt">${esc(x.text)}${x.demo ? ` <span class="chip mock">دمو</span>` : ""}${x.thread_id ? ` <button class="tp-btn xs" data-th-open="${x.thread_id}">گفت‌وگو</button>` : ""}${x.assignment_id ? ` <button class="tp-btn xs" data-asg="${x.assignment_id}">ارجاع</button>` : ""}</td></tr>`).join("")}
-      </tbody></table></div>`;
+  const dayOfS = (ms) => fmtS(ms).split(" — ")[0];
+  const timeOfS = (ms) => fmtS(ms).split(" — ")[1] || "";
+  /** رخدادها روزبه‌روز؛ هر رخداد با کنشگر، درخواست و پیوند به گفت‌وگو یا ارجاعش */
+  function feedTl(rows, withExpert) {
+    if (!rows.length) return `<div class="lg-none">${TP.ui.ICON.clock}<b>رخدادی نیست</b></div>`;
+    const groups = [];
+    rows.forEach((x) => { const d = dayOfS(x.at), g = groups[groups.length - 1]; if (g && g[0] === d) g[1].push(x); else groups.push([d, [x]]); });
+    return `<div class="lg-tl sv-tl" data-keep-scroll>${groups.map(([d, list]) => `<div class="lg-day"><h4>${esc(d)}</h4>${list.map((x) => `<div class="lg-ev sv-by-${esc(x.by)}">
+        <span class="lg-ic" aria-hidden="true">${x.by === "ai" ? "🤖" : TP.ui.ICON[BY_IC[x.by] || "data"]}</span>
+        <div class="lg-eb"><div class="lg-et"><span class="by by-${esc(x.by)}">${BY[x.by] || esc(x.by)}</span>${withExpert && x.expert_id ? `<span class="lg-who">${esc(exName(x.expert_id))}</span>` : ""}
+            ${x.request_id ? `<button type="button" class="chip num sv-rchip" data-lrid-set="${esc(x.request_id)}" title="فقط رخدادهای همین درخواست">${esc(x.request_id)}</button>` : ""}${x.demo ? `<span class="chip mock">دمو</span>` : ""}</div>
+          <div class="lg-ed">${esc(x.text)}</div>
+          ${x.thread_id || x.assignment_id ? `<div class="sv-lacts">${x.thread_id ? `<button class="tp-btn xs" data-th-open="${x.thread_id}">💬 گفت‌وگو</button>` : ""}${x.assignment_id ? `<button class="tp-btn xs" data-asg="${x.assignment_id}">${TP.ui.ICON.more} ارجاع</button>` : ""}</div>` : ""}</div>
+        <time title="${esc(fmtS(x.at))}">${esc(timeOfS(x.at))}</time></div>`).join("")}</div>`).join("")}</div>`;
   }
   function vLog() {
     const f = S.logF;
-    let h = `<div class="tp-filters">
-      <span class="lab">از</span><input class="tp-input date ${f.from ? "on" : ""}" data-ld="from" value="${esc(f.from)}" placeholder="تاریخ" readonly style="width:110px">
-      <span class="lab">تا</span><input class="tp-input date ${f.to ? "on" : ""}" data-ld="to" value="${esc(f.to)}" placeholder="تاریخ" readonly style="width:110px">
-      <span class="lab">کارشناس</span><select class="tp-select" data-lf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select>
-      <span class="lab">درخواست</span><input class="tp-input ${f.rid ? "on" : ""}" data-lrid value="${esc(f.rid)}" placeholder="شمارهٔ درخواست ↵" style="width:150px">
-      <span class="lab">نوع</span><select class="tp-select" data-lf="g">${GROUPS.map(([k, l]) => `<option value="${k}" ${f.g === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <button class="tp-btn sm" data-lclear>پاک کردن فیلترها</button>
-      <span class="end">${S.log ? `${S.log.length} رخداد` : ""}${S.logLoading ? " · در حال بارگذاری…" : ""}</span></div>`;
+    const act = [];
+    if (f.from) act.push(["از", f.from, "from"]);
+    if (f.to) act.push(["تا", f.to, "to"]);
+    if (f.expert) act.push(["کارشناس", exName(f.expert), "expert"]);
+    if (f.rid) act.push(["درخواست", f.rid, "rid"]);
+    let h = `<div class="lg-wrap sv-log ${TP.ui.once("sup.log")}"><section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.clock}</span><h2>رخدادها</h2>
+        <span class="sub">${S.log ? `${M(S.log.length)} رخداد` : ""}${S.logLoading ? " · …" : ""}</span>
+        <span class="end"><button type="button" class="mg-fbtn ${S.lfOpen ? "on" : ""}" data-lfopen aria-expanded="${S.lfOpen ? "true" : "false"}" title="فیلترها">${FUNNEL}<span>فیلتر</span>${act.length ? `<i class="badge">${M(act.length)}</i>` : ""}</button></span></div>
+      ${act.length ? `<div class="mg-chips sv-lchips">${act.map(([l, v, k]) => `<button type="button" class="mg-chip" data-ldrop="${k}" title="برداشتن این فیلتر">${esc(l)}: <b>${esc(v)}</b> ${TP.ui.ICON.x}</button>`).join("")}</div>` : ""}
+      ${S.lfOpen ? `<div class="mg-fpanel" role="region" aria-label="فیلترهای رخدادها">
+        <div class="mg-frow"><span class="lab">از</span><input class="tp-input date ${f.from ? "on" : ""}" data-ld="from" value="${esc(f.from)}" placeholder="تاریخ" readonly style="width:120px">
+          <span class="lab">تا</span><input class="tp-input date ${f.to ? "on" : ""}" data-ld="to" value="${esc(f.to)}" placeholder="تاریخ" readonly style="width:120px"></div>
+        <div class="mg-frow"><span class="lab">کارشناس</span><select class="tp-select" data-lf="expert"><option value="">همه</option>${expertOpts(f.expert)}</select>
+          <span class="lab">درخواست</span><input class="tp-input ${f.rid ? "on" : ""}" data-lrid value="${esc(f.rid)}" placeholder="شمارهٔ درخواست ↵" style="width:160px" dir="ltr"></div>
+        <div class="mg-ffoot"><button class="tp-btn sm" data-lclear>پاک کردن همه</button><span class="spacer"></span><button class="tp-btn primary" data-lfopen>${TP.ui.ICON.check} بستن</button></div></div>` : ""}
+      <div class="tp-pills lg-cats">${GROUPS.map(([k, l]) => `<button type="button" class="tp-pill ${f.g === k ? "on" : ""}" data-lg="${k}" aria-pressed="${f.g === k ? "true" : "false"}">${l}</button>`).join("")}</div>`;
     if (S.logErr) h += `<div class="tp-note warn">${esc(S.logErr)}</div>`;
-    if (!S.log) return h + (S.logLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
-    h += `<div style="margin-top:10px">${feedTable(S.log, true)}</div>`;
-    if (S.logMore) h += `<div style="text-align:center;margin-top:10px"><button class="tp-btn" data-lmore ${S.logLoading ? "disabled" : ""}>رخدادهای قدیمی‌تر</button></div>`;
-    return h;
+    if (!S.log) return h + (S.logLoading ? `<div class="empty">در حال بارگذاری…</div>` : "") + `</section></div>`;
+    h += feedTl(S.log, true);
+    if (S.logMore) h += `<div class="sv-more"><button class="tp-btn" data-lmore ${S.logLoading ? "disabled" : ""}>رخدادهای قدیمی‌تر</button></div>`;
+    return h + `</section></div>`;
   }
 
   /* ---------- تب «تأیید کمیسیون» ---------- */
@@ -528,40 +660,48 @@
     S.cmLoading = true; S.cmErr = ""; render();
     const qs = new URLSearchParams({ scope: S.cmF.scope });
     if (S.cmF.expert) qs.set("expert", S.cmF.expert);
-    try { const r = await api("/commission?" + qs); S.cm = r.items || []; S.cmMin = r.min || 1; }
-    catch (e) { S.cmErr = e.message; }
+    const seq = (S.cmSeq = (S.cmSeq || 0) + 1);
+    try { const r = await api("/commission?" + qs); if (seq !== S.cmSeq) return; S.cm = r.items || []; S.cmMin = r.min || 1; }
+    catch (e) { if (seq !== S.cmSeq) return; S.cmErr = e.message; }
     S.cmSel = new Set([...S.cmSel].filter((id) => (S.cm || []).some((i) => i.id === id)));
     S.cmLoading = false; render();
   }
   const cmRows = () => (S.cm || []).filter((i) => !S.cmF.q || TP.hit(i.request_id, S.cmF.q) || TP.hit(i.title, S.cmF.q) || TP.hit(i.party, S.cmF.q) || TP.hit(i.final_sup, S.cmF.q));
+  /* کارت برای هر ارجاع: اقلامش با برنده، قیمت و وضعیتِ تأیید؛ «🏆 نتیجه و تأیید» یک‌جا برای همان ارجاع (مهر ۱۴۰۵) */
+  const CM_SCOPE = [["ready", "جدول کمیسیون ساخته شده"], ["open", "همهٔ اقلامِ باز"], ["ok", "تأییدشده‌ها"]];
+  function cmCard(g, i) {
+    const its = g.items, a = its[0], okN = its.filter((x) => x.commission_ok).length, allOk = okN === its.length;
+    const picked = its.filter((x) => S.cmSel.has(x.id)).length;
+    return `<article class="sv-cm ${allOk ? "ok" : ""}" style="--i:${Math.min(i, 12)}">
+      <header><label class="sv-chk" title="انتخابِ همهٔ اقلامِ این ارجاع"><input type="checkbox" data-cgrp="${a.aid}" ${picked === its.length ? "checked" : ""} aria-label="انتخابِ همهٔ اقلامِ درخواست ${esc(a.request_id)}"></label>
+        <span class="rid num">${esc(a.request_id)}</span><span class="dim">${esc(a.date || "")}</span>
+        <span class="who">${avOf(exName(a.expert_id), "")}${esc(exName(a.expert_id))}</span>
+        <span class="chip ${allOk ? "ok" : okN ? "info" : ""}" title="تأیید کمیسیون">🏆 ${M(okN)}/${M(its.length)}</span></header>
+      <div class="rproj">${TP.ui.ICON.project}<span>${esc(a.party || "—")}</span>${a.commission_no ? `<button class="chip sv-cmno" data-cmprev="${a.aid}" title="پیش‌نمایشِ جدول کمیسیون — ${esc(fmtS(a.commission_at))}">TSA-PS-FO-${esc(a.commission_no)}</button>` : `<span class="chip">جدول کمیسیون ساخته نشده</span>`}</div>
+      <div class="sv-cmits">${its.map((x) => `<label class="sv-cmit ${x.commission_ok ? "ok" : ""}"><input type="checkbox" data-cpick="${x.id}" ${S.cmSel.has(x.id) ? "checked" : ""} aria-label="انتخابِ ${esc(x.title)}">
+          <span class="t"><b>${esc(x.title)}</b><small class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")} · ${M(x.saved)} استعلام${x.saved < S.cmMin ? ` <span class="chip warn" title="کمتر از حداقل استعلامِ مدیر (${M(S.cmMin)})">کم</span>` : ""}</small></span>
+          <span class="w">${x.cr_winner ? `<b title="برندهٔ ثبت‌شدهٔ کمیسیون">🏆 ${esc(x.cr_winner)}</b><small class="num">${x.cr_price == null ? "—" : M(x.cr_price)} ریال</small>`
+            : x.finals ? `<b>${esc(x.final_sup)}</b><small class="num">${x.final_price == null ? "—" : M(x.final_price)} ریال · تأیید نهایی</small>` : `<span class="chip warn">تأیید نهایی ندارد</span>`}</span>
+          <span class="s">${x.commission_ok ? `<span class="chip ok">✓ تأیید شد</span><button type="button" class="tp-btn xs danger" data-cone="${x.id}" data-ok="0">برداشتن</button>` : `<span class="chip">منتظر</span>`}</span></label>`).join("")}</div>
+      <footer>${allOk ? "" : `<button class="tp-btn primary" data-cres="${a.aid}" title="برنده و علتِ هر قلم؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجه و تأیید</button>`}
+        <button class="tp-btn" data-asg="${a.aid}">${TP.ui.ICON.more} جزئیات</button>${a.commission_no ? `<button class="tp-btn" data-cmdl="${a.aid}" data-rid="${esc(a.request_id)}">${TP.ui.ICON.upload} اکسل</button>` : ""}</footer></article>`;
+  }
   function vCm() {
     const rows = cmRows(), sel = rows.filter((i) => S.cmSel.has(i.id));
     const nOn = sel.filter((i) => !i.commission_ok).length, nOff = sel.filter((i) => i.commission_ok).length;
-    let h = `<div class="tp-filters">
-      <span class="lab">نمایش</span><select class="tp-select" data-cf="scope">${[["ready", "جدول کمیسیونشان ساخته شده"], ["open", "همهٔ اقلامِ باز"], ["ok", "تأییدشده‌ها (منتظر خاتمهٔ کارشناس)"]].map(([k, l]) => `<option value="${k}" ${S.cmF.scope === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <span class="lab">کارشناس</span><select class="tp-select" data-cf="expert"><option value="">همه</option>${expertOpts(S.cmF.expert)}</select>
-      <input class="tp-input" data-fq="cm" value="${esc(S.cmF.q)}" placeholder="شماره، قلم، طرف مقابل یا تأمین‌کننده…" style="min-width:240px">
-      <span class="end">${S.cm ? `${rows.length} قلم` : ""}${S.cmLoading ? " · در حال بارگذاری…" : ""}</span></div>
-      <div class="tp-note">تیکِ «تأیید کمیسیون» فقط در همین پنل زده می‌شود. با هر تأیید، کارشناسِ همان درخواست در تلگرام خبردار می‌شود و «خاتمه»ی همان اقلام را می‌زند؛ برداشتن تأیید هم به او خبر داده می‌شود.</div>`;
+    const groups = []; rows.forEach((x) => { const g = groups.find((y) => y.aid === x.aid); if (g) g.items.push(x); else groups.push({ aid: x.aid, items: [x] }); });
+    let h = `<div class="mg-bar"><div class="tp-pills">${CM_SCOPE.map(([k, l]) => `<button type="button" class="tp-pill ${S.cmF.scope === k ? "on" : ""}" data-cscope="${k}" aria-pressed="${S.cmF.scope === k ? "true" : "false"}">${l}</button>`).join("")}</div>
+        <select class="tp-select" data-cf="expert" aria-label="کارشناس"><option value="">همهٔ کارشناسان</option>${expertOpts(S.cmF.expert)}</select>
+        <input class="tp-input sv-q" data-fq="cm" value="${esc(S.cmF.q)}" placeholder="شماره، قلم، طرف مقابل یا تأمین‌کننده" aria-label="جستجو در اقلام">
+        <span class="spacer"></span><span class="mg-count">${S.cm ? `<b>${M(rows.length)}</b> قلم در ${M(groups.length)} ارجاع` : ""}${S.cmLoading ? " · …" : ""}</span></div>`;
     if (S.cmErr) h += `<div class="tp-note warn">${esc(S.cmErr)}</div>`;
     if (!S.cm) return h + (S.cmLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
-    if (!rows.length) return h + `<div class="empty"><b>قلمی نیست.</b>${S.cmF.scope === "ready" ? "هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده؛ «همهٔ اقلامِ باز» را ببینید." : ""}</div>`;
-    h += `<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0">
-        <button class="tp-btn sm" data-csel="all">انتخاب همه (${rows.length})</button><button class="tp-btn sm" data-csel="none" ${S.cmSel.size ? "" : "disabled"}>لغو انتخاب</button>
-        <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>🏆 نتیجه و تأییدِ ${nOn} قلمِ انتخاب‌شده</button>
-        <button class="tp-btn sm danger" data-cok="0" ${nOff ? "" : "disabled"}>برداشتن تأییدِ ${nOff} قلم</button></div>
-      <div class="tp-scroll" data-keep-scroll style="max-height:calc(100vh - 330px)"><table class="tp-table" data-stick><thead><tr>
-        <th></th><th>درخواست</th><th class="rt">طرف مقابل</th><th>کارشناس</th><th class="rt">قلم</th><th>مقدار</th><th>استعلام ثبت‌شده<br><span class="dim">حداقل ${S.cmMin}</span></th>
-        <th class="rt">برندهٔ تأیید نهایی</th><th>قیمت واحد (ریال)</th><th>جدول کمیسیون</th><th>وضعیت</th><th></th></tr></thead><tbody>
-      ${rows.map((i) => `<tr><td><input type="checkbox" data-cpick="${i.id}" ${S.cmSel.has(i.id) ? "checked" : ""} aria-label="انتخاب"></td>
-        <td class="id num">${esc(i.request_id)}</td><td class="party">${esc(i.party)}</td><td>${esc(exName(i.expert_id))}</td><td class="item">${esc(i.title)}</td>
-        <td class="num">${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</td>
-        <td class="num">${i.saved}${i.saved < S.cmMin ? ` <span class="chip warn" title="کمتر از حداقل استعلامِ مدیر">کم</span>` : ""}</td>
-        <td class="rt">${i.cr_winner ? `<b title="برندهٔ ثبت‌شدهٔ کمیسیون">🏆 ${esc(i.cr_winner)}</b>` : i.finals ? esc(i.final_sup) : `<span class="chip warn">ندارد</span>`}</td><td class="num">${i.cr_winner ? (i.cr_price == null ? "—" : M(i.cr_price)) : i.final_price == null ? "—" : M(i.final_price)}</td>
-        <td>${i.commission_no ? `<button class="tp-btn xs" data-cmprev="${i.aid}" title="${esc(fmtS(i.commission_at))}">TSA-PS-FO-${i.commission_no}</button>` : `<span class="dim">ساخته نشده</span>`}</td>
-        <td>${i.commission_ok ? `<span class="chip ok">✓ تأیید شد</span>` : `<span class="chip">منتظر</span>`}</td>
-        <td>${i.commission_ok ? `<button class="tp-btn xs danger" data-cone="${i.id}" data-ok="0">برداشتن</button>` : `<button class="tp-btn xs primary" data-cres="${i.aid}" title="برنده و علت؛ تأیید کمیسیون و پیامِ تشکر به بقیه">🏆 نتیجه و تأیید</button>`}
-          <button class="tp-btn xs" data-asg="${i.aid}">جزئیات</button></td></tr>`).join("")}</tbody></table></div>`;
+    if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده.</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز</button>` : ""}</div>`;
+    h += `<div class="sv-cmbar ${S.cmSel.size ? "on" : ""}"><button class="tp-btn sm" data-csel="${sel.length === rows.length ? "none" : "all"}">${sel.length === rows.length ? "لغو انتخاب" : `انتخاب همه (${M(rows.length)})`}</button>
+        ${S.cmSel.size ? `<span class="dim">${M(sel.length)} قلم انتخاب شده</span><span class="spacer"></span>
+        <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>🏆 نتیجه و تأییدِ ${M(nOn)} قلم</button>
+        <button class="tp-btn sm danger" data-cok="0" ${nOff ? "" : "disabled"}>برداشتن تأییدِ ${M(nOff)} قلم</button>` : ""}</div>
+      <div class="sv-cms ${TP.ui.once("sup.cm")}">${groups.map(cmCard).join("")}</div>`;
     return h;
   }
   /** «🏆 نتیجهٔ کمیسیون» (cm-result.js): برنده و علتِ هر قلم، تیکِ تأیید و پیامِ تشکر به بقیه */
@@ -606,49 +746,55 @@
       chat: (r) => `<button class="tp-btn sm" data-goto="chat" data-rid="${esc(r.request_id)}">💬 مکاتباتِ این درخواست</button>`,
     });
   }
+  const AI_VIEWS = [["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"], ["md", "🧭 حالت اقلام"], ["sw", "🎛 کلیدها"]];
+  /** راهنمای هر زیرنمای تبِ هوشمند */
+  const aiHelp = () => (S.aiView === "list" || S.aiEx ? "support.ai" : `support.${S.aiView}`);
+  const aiCost = (c) => (c ? `$${Number(c).toFixed(c < 1 ? 4 : 2)}` : "—");
+  function aiCard(e, i) {
+    return `<article class="sv-ai ${e.on ? "on" : ""}" style="--i:${Math.min(i, 14)}">
+      <header>${avOf(e.name, e.label, "lg")}<div class="t"><b>${e.senior ? `<span class="sv-star" title="کارشناس ارشد">★</span>` : ""}${esc(e.label || e.name)}</b>
+          <small>${e.tg ? "تلگرام وصل" : `<span title="تلگرامِ کارشناس وصل نیست؛ پرسش‌ها فقط در پنلش دیده می‌شوند">بی تلگرام</span>`}${e.on && e.on_at ? ` · هوشمند از ${esc(fmtShort(e.on_at))}` : ""}</small></div>
+        <div class="tp-seg sm sv-mode" role="group" aria-label="حالتِ ${esc(e.label || e.name)}">
+          <button type="button" class="${e.on ? "on" : ""}" ${e.on ? "aria-pressed=\"true\"" : `data-aitoggle="${e.id}" data-on="1" aria-pressed="false"`} title="${e.on ? "هوشمند است" : "کلیک: هوشمند شود"}">🤖 هوشمند</button>
+          <button type="button" class="${e.on ? "" : "on"}" ${e.on ? `data-aitoggle="${e.id}" data-on="0" aria-pressed="false"` : "aria-pressed=\"true\""} title="${e.on ? "کلیک: دستی شود" : "دستی است"}">✋ دستی</button></div></header>
+      <div class="sv-ms sv-ms4">${metric("کارِ زنده", e.live)}${metric("همهٔ کارها", e.runs)}${metric("پرسش", e.asks, "warn")}<span class="sv-m"><b class="num" dir="ltr">${aiCost(e.cost)}</b><small>هزینهٔ مدل</small></span></div>
+      <footer><button class="tp-btn sm" data-aiex="${e.id}">${TP.ui.ICON.data} داشبورد</button></footer></article>`;
+  }
   function vAi() {
     if (S.aiEx && window.TP_AI) {
-      return `<div style="display:flex;gap:10px;align-items:center;margin-bottom:6px"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>
-        <span class="muted">${esc(exName(S.aiEx))}</span></div>${window.TP_AI.view(S)}`;
+      return `<div class="sv-aiback"><button class="tp-btn sm" data-aiback>→ همهٔ کارشناسان</button>${avOf(exName(S.aiEx), "")}<b>${esc(exName(S.aiEx))}</b></div>${window.TP_AI.view(S)}`;
     }
-    const sub = `<div class="tp-tabs" style="padding:0 0 10px">${[["list", "👥 کارشناسان و کارها"], ["rules", "⚙️ قواعدِ حداقلِ استعلام"], ["rank", "🏅 رتبه‌بندی و دعوت"], ["usd", "💵 نرخ دلار"], ["md", "🧭 حالت اقلام"], ["sw", "🎛 کلیدها"]].map(([k, l]) => `<button class="tp-tab ${S.aiView === k ? "on" : ""}" data-aiview="${k}">${l}</button>`).join("")}</div>`;
+    const sub = `<div class="sv-aibar"><div class="tp-seg sm sv-aiseg" role="tablist">${AI_VIEWS.map(([k, l]) => `<button type="button" role="tab" class="${S.aiView === k ? "on" : ""}" aria-selected="${S.aiView === k}" data-aiview="${k}">${l}</button>`).join("")}</div>
+</div>`;
     if (S.aiView === "rules") return sub + vRules();
     if (S.aiView === "usd") return sub + vUsd();
     if (S.aiView === "rank") return sub + vRank();
     if (S.aiView === "sw") return sub + vSw();
     if (S.aiView === "md") return sub + vMd();
-    let h = sub + `<div class="tp-note">تیکِ <b>🤖 هوشمند</b>: ارجاع‌های تازهٔ این کارشناس قلم‌به‌قلم پیش می‌روند — کارشناس ساختار را تأیید می‌کند، «بررسی سوابق» را می‌زند و در «🎯 فهرست دعوت»ِ هر قلم
-      (پنج نفر اول به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت» از پیش تیک‌خورده) «🚀 شروع» را می‌زند؛ کارشناس هوشمند فقط همان تیک‌خورده‌ها را دعوت می‌کند و مذاکره، جدول کمیسیون و نامه با اوست
-      (این دو برای کارشناس قفل‌اند). کارشناس هوشمند خودش جستجوی هوشمند نمی‌زند. گفت‌وگوهای کارشناس هوشمند برای کارشناس بسته است، مگر وقتی کارشناس هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست
-      («🚨 پرسش از کارشناس»: تا پاسخِ او باز می‌شود و در تلگرامش هم خبر می‌رود). کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید.
-      <b>✋ دستی</b> همه‌چیز را به خودِ کارشناس برمی‌گرداند. کارشناس هوشمند تا هر قلم به «حداقلِ استعلامِ» خودش نرسد نمی‌بندد؛ اگر در مهلت نرسید، کار به کارشناس واگذار می‌شود (⚙️ قواعد).
-      هر کارِ تمام‌شده در «📥 تحویل‌های هوشمند» برای تأیید یا ردِ کمیسیون می‌آید.</div>`;
+    let h = sub;
     if (S.aiErr) h += `<div class="tp-note warn">${esc(S.aiErr)}</div>`;
     if (!S.ai) return h + (S.aiLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
     const A = S.ai;
+    h += `<div class="sv-aiwrap ${TP.ui.once("sup.ai")}">`;
+    if (!A.sms) h += `<div class="tp-note warn">درگاه پیامک (TextBee) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند.</div>`;
     if (A.asks.length) {
-      h += `<h3 class="sup-h">🚨 پرسش‌های بی‌پاسخ از کارشناسان (${A.asks.length})</h3>
-        <div class="tp-scroll" style="margin-bottom:14px"><table class="tp-table"><thead><tr><th>زمان</th><th>کارشناس</th><th>درخواست</th><th class="rt">تأمین‌کننده</th><th class="rt">پرسش</th><th></th></tr></thead><tbody>
-        ${A.asks.map((x) => `<tr><td class="num" style="font-size:.8rem">${fmtShort(x.at)}</td><td>${esc(exName(x.expert_id))}</td><td class="num">${esc(x.request_id)}</td>
-          <td class="rt">${esc(x.supplier)}</td><td class="rt" style="white-space:normal;max-width:460px">${esc(x.q)}</td><td><button class="tp-btn xs" data-th-open="${x.thread_id}">گفت‌وگو</button></td></tr>`).join("")}</tbody></table></div>`;
+      h += `<h4 class="sv-h">🚨 پرسش‌های بی‌پاسخ از کارشناسان <span class="chip warn">${M(A.asks.length)}</span></h4>
+        <div class="sv-asks">${A.asks.map((x) => `<article class="sv-ask"><header>${avOf(exName(x.expert_id), "")}<b>${esc(exName(x.expert_id))}</b><span class="chip num">${esc(x.request_id)}</span><span class="dim">${esc(fmtShort(x.at))}</span></header>
+          <div class="sv-askq"><span class="dim">${esc(x.supplier)}:</span> ${esc(x.q)}</div>
+          <footer><button class="tp-btn sm" data-th-open="${x.thread_id}">💬 گفت‌وگو</button></footer></article>`).join("")}</div>`;
     }
     if (A.handovers && A.handovers.length) {
-      h += `<h3 class="sup-h">⚠️ واگذار به کارشناس — مهلتِ حداقلِ استعلام گذشت (${A.handovers.length})</h3>
-        <div class="tp-scroll" style="margin-bottom:14px"><table class="tp-table"><thead><tr><th>از کِی</th><th>کارشناس</th><th>درخواست</th><th class="rt">اقلامِ کم</th><th></th></tr></thead><tbody>
-        ${A.handovers.map((x) => `<tr><td class="num" style="font-size:.8rem">${fmtShort(x.at)}</td><td>${esc(exName(x.expert_id))}</td><td class="num">${esc(x.request_id)}</td>
-          <td class="rt" style="white-space:normal;max-width:460px">${x.items.map((i) => `${esc(i.title)} <b>${M(i.have)} از ${M(i.need)}</b>`).join("، ")}</td>
-          <td><button class="tp-btn xs" data-asg="${x.assignment_id}">جزئیات</button> <button class="tp-btn xs" data-aiex="${x.expert_id}">داشبورد</button></td></tr>`).join("")}</tbody></table></div>`;
+      h += `<h4 class="sv-h">⚠️ واگذار به کارشناس — مهلتِ حداقلِ استعلام گذشت <span class="chip warn">${M(A.handovers.length)}</span></h4>
+        <div class="sv-asks">${A.handovers.map((x) => `<article class="sv-ask ho"><header>${avOf(exName(x.expert_id), "")}<b>${esc(exName(x.expert_id))}</b><span class="chip num">${esc(x.request_id)}</span><span class="dim">${esc(fmtShort(x.at))}</span></header>
+          <div class="sv-askq">${x.items.map((i) => `${esc(i.title)} <b>${M(i.have)} از ${M(i.need)}</b>`).join("، ")}</div>
+          <footer><button class="tp-btn sm" data-asg="${x.assignment_id}">${TP.ui.ICON.more} جزئیات</button><button class="tp-btn sm" data-aiex="${x.expert_id}">${TP.ui.ICON.data} داشبورد</button></footer></article>`).join("")}</div>`;
     }
-    h += `<div class="tp-scroll"><table class="tp-table" data-stick><thead><tr><th class="rt">کارشناس</th><th>حالت</th><th>کارِ زنده</th><th>همهٔ کارها</th><th>🚨 پرسش</th><th>هزینهٔ مدل</th><th>از کِی</th><th></th></tr></thead><tbody>
-      ${A.experts.map((e) => `<tr><td class="rt"><b>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</b>${e.tg ? "" : ` <span class="dim" title="تلگرامِ کارشناس وصل نیست؛ پرسش‌ها فقط در پنلش دیده می‌شوند">(بی تلگرام)</span>`}</td>
-        <td><button class="tp-btn xs ${e.on ? "primary" : ""}" data-aitoggle="${e.id}" data-on="${e.on ? 0 : 1}" title="${e.on ? "کلیک: دستی شود" : "کلیک: هوشمند شود"}">${e.on ? "🤖 هوشمند" : "✋ دستی"}</button></td>
-        <td class="num">${e.live || 0}</td><td class="num">${e.runs || 0}</td><td class="num">${e.asks ? `<span class="chip warn">🚨 ${e.asks}</span>` : "—"}</td>
-        <td class="num" dir="ltr">${e.cost ? `$${Number(e.cost).toFixed(e.cost < 1 ? 4 : 2)}` : "—"}</td>
-        <td class="num" style="font-size:.8rem">${e.on && e.on_at ? fmtShort(e.on_at) : "—"}</td>
-        <td><button class="tp-btn xs" data-aiex="${e.id}">داشبورد</button></td></tr>`).join("")}</tbody></table></div>
-      <p class="dim" style="font-size:.82rem;margin-top:8px">«از کِی»: ارجاع‌هایی که بعد از این لحظه برسند خودکار برداشته می‌شوند؛ قدیمی‌ترها از داشبوردِ همان کارشناس با «▶️ شروع». پیامک فقط به شماره‌هایی می‌رود که تیکِ «پنل» دارند (داشبورد ← دفترچهٔ شماره‌ها). ${A.sms ? "" : "درگاه پیامک (TextBee) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند."}</p>`;
+    const on = A.experts.filter((e) => e.on).length;
+    h += `<h4 class="sv-h">کارشناسان <span class="chip">${M(on)} هوشمند از ${M(A.experts.length)}</span></h4>
+      <div class="sv-aigrid">${A.experts.slice().sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0)).map(aiCard).join("")}</div></div>`;
     return h;
   }
+
   /* ---------- «⚙️ قواعدِ حداقلِ استعلام» (فاز ۳) ----------
      بازه‌های قیمت واحد، قیمت کل و مقدار با حداقلِ پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف، و مهلتِ رسیدن به حد — سراسری،
      برای همهٔ کارشناس‌های هوشمند (worker/ai-rules.js). عددها همان‌طور که تایپ شده‌اند می‌روند (رقم فارسی و جداکننده هم). */
@@ -669,9 +815,7 @@
     S.rulesBusy = false; render();
   }
   function vRules() {
-    let h = `<div class="tp-note">کارشناس هوشمند تا هر قلم به این تعداد <b>پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف</b> نرسد، مذاکره را نمی‌بندد و جدول و نامه نمی‌سازد؛
-      استعلام را فقط از خودِ تأمین‌کنندگان می‌گیرد. قیمتِ سنجیدنی بالاترین قیمتی است که برای همان قلم رسیده؛ قیمت کل = همان قیمت واحد × مقدار؛ مقدار = مقدارِ درخواست به واحدِ خودِ قلم.
-      حدِ هر قلم بیشترینِ این‌هاست: حدِ پایه و هر بازه‌ای که قلم در آن می‌افتد. بازه از «از» (خودش هم) تا «تا» (خودش نه)؛ «تا»ی خالی یعنی بی سقف.</div>`;
+    let h = "";
     if (S.rulesErr) h += `<div class="tp-note warn">${esc(S.rulesErr)}</div>`;
     if (!S.rules || !S.rulesDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
     const R = S.rulesDraft;
@@ -716,10 +860,7 @@
       <span class="lab">درخواست</span><input class="tp-input num" data-chgf="rid" value="${esc(f.rid)}" placeholder="شماره" style="width:110px">
       <label class="chkline"><input type="checkbox" data-chgf="changed" ${f.changed ? "checked" : ""}> فقط اقلامِ تغییرکرده</label>
       <label class="chkline"><input type="checkbox" data-chgf="frozen" ${f.frozen ? "checked" : ""}> فقط سپرده‌شده به کارشناس هوشمند</label>
-      <span class="end">${S.chg ? `${M(S.chg.length)} قلم${S.chgMore ? "+" : ""}` : ""}${S.chgLoading ? " · در حال بارگذاری…" : ""}</span></div>
-      <div class="tp-note">نرمال‌سازی اجباری است و اول از همه: کارشناس ساختارِ هر قلم را می‌بیند، اصلاح یا تأیید می‌کند و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 می‌گذارد.
-      برای هر قلم یک پیام می‌آید: ساختارِ تأییدشده دقیقاً در چه با <b>پیشنهادِ سامانه</b> (همان که کارشناس اول دید) فرق دارد. با «بررسی سوابق و سپردن به کارشناس هوشمند»، ساختار منجمد می‌شود (🔒 منجمد).
-      «تاریخچه» هر ذخیره را با کنشگر و زمان نشان می‌دهد.</div>`;
+      <span class="end">${S.chg ? `${M(S.chg.length)} قلم${S.chgMore ? "+" : ""}` : ""}${S.chgLoading ? " · در حال بارگذاری…" : ""}</span></div>`;
     if (S.chgErr) h += `<div class="tp-note warn">${esc(S.chgErr)}</div>`;
     if (!S.chg) return h + (S.chgLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
     if (!S.chg.length) return h + `<div class="empty"><b>قلمی نیست.</b>${f.changed ? "قلمِ تغییرکرده‌ای با این صافی‌ها نیست؛ تیکِ «فقط اقلامِ تغییرکرده» را بردارید تا همهٔ اقلامِ نرمال‌شده بیایند." : ""}</div>`;
@@ -772,9 +913,7 @@
     S.rankBusy = false; render();
   }
   function vRank() {
-    let h = `<div class="tp-note"><b>رتبهٔ نهایی</b> هر تأمین‌کننده در سوابق، میانگینِ وزنیِ رتبه‌های نسبیِ او در چهار ستون است — دفعات خرید، مقدار، امتیاز گشتاوری و
-      <b>ارزش خرید به قیمت روز</b> (با نرخ دلار) — به‌اضافهٔ ردهٔ او (A صد درصد، B شصت‌وشش، C سی‌وسه، بی‌رده صفر). جدول سوابقِ کارشناسان پیش‌فرض با همین مرتب می‌شود
-      و کارشناس هوشمند پیامک‌ها را به همین ترتیب (با «قاعدهٔ دعوت» پایین) می‌فرستد — فقط به شماره‌هایی که تیکِ «پنل» دارند.</div>`;
+    let h = "";
     if (S.rankErr) h += `<div class="tp-note warn">${esc(S.rankErr)}</div>`;
     if (!S.rank || !S.rankDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
     const W = S.rankDraft.weights, D = S.rankDraft.dispatch, fa = S.rank.fa || {}, tf = S.rank.then_fa || {};
@@ -815,7 +954,7 @@
       go, on ? "روشن شود" : "خاموش شود", "انصراف");
   }
   function vSw() {
-    let h = `<div class="tp-note">کلیدهای سراسریِ مسیرِ خرید — برای همهٔ کارشناسان، کارشناس هوشمند، پنل تأمین‌کننده و بات‌ها، همان لحظه (تا یک دقیقه).</div>`;
+    let h = "";
     if (S.swErr) h += `<div class="tp-note warn">${esc(S.swErr)}</div>`;
     if (!S.sw) return h + `<div class="empty">در حال بارگذاری…</div>`;
     const on = !!S.sw.pfRead;
@@ -866,9 +1005,7 @@
     }, 250);
   }
   function vMd() {
-    let h = `<div class="tp-note">هر قلمِ درخواست با حالتِ <b>نوع قلمِ</b> خودش جلو می‌رود و کارشناس کارتِ هر قلم را جدا پیش می‌برد. نوع قلمی که این‌جا نیامده
-      «<b>انتخاب کارشناس</b>» است و حالت تأیید ندارد. «حالت تأیید مجاز» یعنی مدیر می‌تواند به کارشناس اجازه دهد پیام‌ها و تصمیم‌های کارشناس هوشمند پیش از رفتن به تأییدش برسد
-      (یا کارشناس پیش از شروع با توضیح بخواهد).</div>`;
+    let h = "";
     if (S.mdErr) h += `<div class="tp-note warn">${esc(S.mdErr)}</div>`;
     if (!S.md || !S.mdDraft) return h + `<div class="empty">در حال بارگذاری…</div>`;
     const fa = S.md.fa || {};
@@ -903,10 +1040,7 @@
     S.usdLoading = false; render();
   }
   function vUsd() {
-    let h = `<div class="tp-note">«قیمت روز»ِ سوابق خرید با نسبتِ <b>نرخ دلارِ امروز به نرخِ روزِ خرید</b> حساب می‌شود و رتبهٔ «ارزش خرید» هم بر همین پایه است
-      (تیکِ «مرکز آمار» در سوابق، تعدیلِ فصلیِ زمستان ۱۴۰۴ را نشان می‌دهد). نرخ هر روز از کانال عمومی «قیمت لحظه‌ای دلار تهران» خوانده می‌شود:
-      روزی یک بار، ساعت ۶:۰۳ صبح، نرخِ پایانیِ دیروز (عدد «آخرین معامله»ٔ پیام «پایان معاملات»؛ اگر عدد نداشت، آخرین «معامله شد»ِ فردایی پیش از آن)؛ روزی که نشد، صبحِ بعد همراهِ دیروز.
-      روزهای بی‌معامله (جمعه، تعطیل) با درون‌یابیِ خطی بین روزِ قبل و بعد پر می‌شوند.</div>`;
+    let h = "";
     if (S.usdErr) h += `<div class="tp-note warn">${esc(S.usdErr)}</div>`;
     const U = S.usd;
     if (!U) return h + (S.usdLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
@@ -1012,22 +1146,23 @@
     render();
   }
   const REV_CHIP = { new: `<span class="chip warn">🆕 منتظرِ بررسی</span>`, ok: `<span class="chip ok">✓ کمیسیون تأیید شد</span>`, rejected: `<span class="chip bad">✗ رد شد</span>` };
+  const DL_ST = [["new", "منتظرِ بررسی"], ["ok", "تأییدشده"], ["rejected", "ردشده"], ["", "همه"]];
+  function dlCard(x, i) {
+    return `<article class="sv-dl ${x.review.state || ""}" data-dlopen="${x.id}" role="button" tabindex="0" style="--i:${Math.min(i, 12)}" aria-label="تحویلِ درخواست ${esc(x.request_id)}">
+      <header><span class="rid num">${esc(x.request_id)}</span>${REV_CHIP[x.review.state] || ""}${x.short.length ? ` <span class="chip warn" title="${esc(x.short.map((c) => `${c.title}: ${c.have} از ${c.need}`).join("، "))}">⚠️ کمتر از حد</span>` : ""}</header>
+      <div class="rproj">${TP.ui.ICON.project}<span>${esc(x.party || "—")}</span></div>
+      <div class="who">${avOf(exName(x.expert_id), "")}<span>${esc(exName(x.expert_id))}</span><span class="dim">· ${esc(fmtShort(x.review.at || x.finished_at))}</span></div>
+      <div class="sv-ms">${metric("اقلام", x.items)}${metric("پیشنهادِ نهایی", x.finals)}${metric("کمیسیون تأییدشده", x.ok_items, "info")}</div>
+      <footer>${x.commission_no ? `<span class="chip">TSA-PS-FO-${esc(x.commission_no)}</span>` : `<span class="dim">جدول کمیسیون ساخته نشده</span>`}<span class="spacer"></span><span class="tp-btn sm ${x.review.state === "new" ? "primary" : ""}">بررسی ‹</span></footer></article>`;
+  }
   function vDl() {
     if (S.dlId) return vDlOne();
-    let h = `<div class="tp-filters"><span class="lab">نمایش</span><select class="tp-select" data-dlf="state">${[["new", "منتظرِ بررسی"], ["ok", "تأییدشده"], ["rejected", "ردشده"], ["", "همه"]].map(([k, l]) => `<option value="${k}" ${S.dlF.state === k ? "selected" : ""}>${l}</option>`).join("")}</select>
-      <span class="end">${S.dl ? `${S.dl.length} تحویل` : ""}${S.dlLoading ? " · در حال بارگذاری…" : ""}</span></div>
-      <div class="tp-note">هر کاری که کارشناس هوشمند تمام می‌کند — جدول کمیسیون، برگهٔ درخواست خرید و نامه — این‌جا می‌آید. بازش کنید، اسناد را ببینید و کمیسیون را تأیید یا با دلیل رد کنید.
-      تأیید همان تیکِ «تأیید کمیسیون» همهٔ اقلامِ آن درخواست است (کارشناس در تلگرام خبردار می‌شود و «خاتمه» را می‌زند)؛ رد، درخواست را کامل به کارشناس برمی‌گرداند.</div>`;
+    let h = `<div class="mg-bar"><div class="tp-pills">${DL_ST.map(([k, l]) => `<button type="button" class="tp-pill ${S.dlF.state === k ? "on" : ""}" data-dlst="${k}" aria-pressed="${S.dlF.state === k}">${l}</button>`).join("")}</div>
+      <span class="spacer"></span><span class="mg-count">${S.dl ? `<b>${M(S.dl.length)}</b> تحویل` : ""}${S.dlLoading ? " · …" : ""}</span></div>`;
     if (S.dlErr) h += `<div class="tp-note warn">${esc(S.dlErr)}</div>`;
     if (!S.dl) return h + (S.dlLoading ? `<div class="empty">در حال بارگذاری…</div>` : "");
-    if (!S.dl.length) return h + `<div class="empty"><b>تحویلی نیست.</b>${S.dlF.state === "new" ? "تحویلِ بررسی‌نشده‌ای نمانده." : ""}</div>`;
-    h += `<div class="tp-scroll"><table class="tp-table" data-stick><thead><tr><th>وضعیت</th><th>درخواست</th><th class="rt">طرف مقابل</th><th>کارشناس</th><th>اقلام</th><th>پیشنهادِ نهایی</th><th>جدول کمیسیون</th><th>تحویل</th><th></th></tr></thead><tbody>
-      ${S.dl.map((x) => `<tr class="rowlink" data-dlopen="${x.id}"><td>${REV_CHIP[x.review.state] || "—"}${x.short.length ? ` <span class="chip warn" title="${esc(x.short.map((c) => `${c.title}: ${c.have} از ${c.need}`).join("، "))}">⚠️ کمتر از حد</span>` : ""}</td>
-        <td class="id num">${esc(x.request_id)}</td><td class="party">${esc(x.party)}</td><td>${esc(exName(x.expert_id))}</td>
-        <td class="num">${M(x.items)}${x.ok_items ? ` <span class="dim">(${M(x.ok_items)} تأییدشده)</span>` : ""}</td><td class="num">${M(x.finals)}</td>
-        <td class="num">${x.commission_no ? `TSA-PS-FO-${x.commission_no}` : "—"}</td><td class="num" style="font-size:.8rem">${fmtShort(x.review.at || x.finished_at)}</td>
-        <td><button class="tp-btn xs primary" data-dlopen="${x.id}">بررسی</button></td></tr>`).join("")}</tbody></table></div>`;
-    return h;
+    if (!S.dl.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>تحویلی نیست</b>${S.dlF.state === "new" ? "<span>تحویلِ بررسی‌نشده‌ای نمانده.</span>" : ""}</div>`;
+    return h + `<div class="sv-dls ${TP.ui.once("sup.dl")}">${S.dl.map(dlCard).join("")}</div>`;
   }
   function vDlOne() {
     const D = S.dlD;
@@ -1110,7 +1245,8 @@
     S.ai = r;
     const typing = document.activeElement && /INPUT|TEXTAREA|SELECT/.test(document.activeElement.tagName);
     if (S.tab === "ai" && !S.aiEx && S.aiView === "list") { if (!typing) render(); return; }
-    const bar = app.querySelector(".tp-tabs"); if (bar) bar.outerHTML = vTabs();
+    /* شمارِ تب‌ها بی رسمِ کلِ صفحه؛ منوی بازِ «هوشمند» یا «گزارش‌ها» بسته نمی‌شود */
+    const bar = app.querySelector(".tp-subbar"); if (bar && !bar.querySelector(".tp-menu.open")) bar.outerHTML = vTabs();
   }
   setInterval(aiPulse, 45000);
   document.addEventListener("visibilitychange", () => { if (!document.hidden) aiPulse(); });
@@ -1164,11 +1300,17 @@
   }
   function render() {
     S.now = Date.now();
-    const restore = TP.snapScroll();
+    const restore = TP.snapScroll(), pos = chatPos();
+    /* گفت‌وگوی تمام‌صفحه روی گوشیِ واقعی: صفحه ثابت و هم‌قدِ بخشِ دیدنی (ph-chat.js: lockView) */
+    const mc = mChat();
+    app.classList.toggle("sp-app", mc);
+    PH.lockView(mc, mc);
     if (S.view === "boot") app.innerHTML = `<div class="empty">در حال بارگذاری…</div>`;
     else if (S.view === "login") { TP.ui.mountBg("fog"); app.innerHTML = vLogin(); TP.ui.help.set("login.support"); const f = app.querySelector("form[data-login-card]"); if (f) f.onsubmit = (e) => { e.preventDefault(); const b = f.querySelector("[data-do]"); if (b && !b.disabled) b.click(); }; }
-    else { TP.ui.mountBg(""); app.innerHTML = vTop() + TP.ui.alarmBar(S.alarms, (a) => (a.thread_id ? `<button class="tp-btn sm" type="button" data-th-open="${a.thread_id}">گفت‌وگو</button>` : "")) + `<div class="tp-wrap">${vTab()}</div>`; TP.ui.help.set(`support.${S.tab}`); }
+    else if (mChat()) { TP.ui.mountBg(""); app.innerHTML = `<div class="sv-mfull">${thScreen(false)}</div>`; TP.ui.help.set("support.chat", { fab: false }); }
+    else { TP.ui.mountBg(""); app.innerHTML = vTop() + TP.ui.alarmBar(S.alarms, (a) => (a.thread_id ? `<button class="tp-btn sm" type="button" data-th-open="${a.thread_id}">گفت‌وگو</button>` : "")) + `<div class="tp-wrap ${S.tab === "chat" && phoneMode ? "sv-wide" : ""}">${vTab()}</div>`; TP.ui.help.set(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, S.tab === "chat" && phoneMode ? { side: "right" } : undefined); }
     restore();
+    if (S.view === "app" && S.tab === "chat") afterChat(pos);
     app.querySelectorAll("table[data-stick]").forEach((t) => TP.stickHeader(t));
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
     if (S.view === "app" && S.tab === "ai" && S.aiEx && window.TP_AI) window.TP_AI.wire(app, S, render);
@@ -1200,6 +1342,22 @@
     if (d.ex) return loadExpert(Number(d.ex));
     if (d.exback !== undefined) { S.exId = null; S.ex = null; loadExperts().catch(() => {}); return render(); }
     if (d.th) return openThread(Number(d.th));
+    if (d.thback !== undefined) { S.thId = null; S.thData = null; return render(); }
+    if (d.thinfo !== undefined) return thInfoSheet();
+    if (d.thre !== undefined) { if (S.thId) openThread(S.thId, true); return loadThreads(); }
+    /* درخواست‌ها: فیلترِ بازشونده، وضعیت، بازه، کشوی اقلام */
+    if (d.rfopen !== undefined) { S.rfOpen = !S.rfOpen; return render(); }
+    if (d.rst !== undefined) { const was = S.rf.status; S.rf.status = d.rst; return (d.rst === "closed" || d.rst === "stop") !== (was === "closed" || was === "stop") ? loadDesk() : render(); }
+    if (d.rwin) { S.rf.win = d.rwin; S.rf.id = ""; return loadDesk(); }
+    if (d.rdrop) { if (d.rdrop === "id") { S.rf.id = ""; return loadDesk(); } S.rf[d.rdrop] = ""; return render(); }
+    if (d.rclear !== undefined) { const reload = !!S.rf.id || S.rf.win !== "7d"; S.rf = { win: "7d", project: "", expert: "", status: "", q: "", id: "" }; return reload ? loadDesk() : render(); }
+    if (d.rtog) { S.rOpen[d.rtog] = !S.rOpen[d.rtog]; return render(); }
+    /* رخدادها */
+    if (d.lfopen !== undefined) { S.lfOpen = !S.lfOpen; return render(); }
+    if (d.ldrop) { S.logF[d.ldrop] = ""; return loadLog(); }
+    if (d.lg !== undefined) { S.logF.g = d.lg; return loadLog(); }
+    /* تأیید کمیسیون */
+    if (d.cscope) { S.cmF.scope = d.cscope; S.cmSel.clear(); return loadCm(); }
     if (d.thOpen) { S.thF = { expert: "", rid: "", q: "" }; S.th = null; setTab("chat"); return openThread(Number(d.thOpen)); }
     if (d.thfClear !== undefined) { S.thF.rid = ""; return loadThreads(); }
     if (d.ridClear !== undefined) { S.rf.id = ""; return loadDesk(); }
@@ -1238,6 +1396,7 @@
     if (d.rsave !== undefined) return saveRulesUi();
     if (d.rreset !== undefined) { S.rulesDraft = draftOf(S.rules.rules); S.rulesErr = ""; return render(); }
     if (d.dlopen) return loadDl(Number(d.dlopen));
+    if (d.dlst !== undefined) { S.dlF.state = d.dlst; return loadDls(); }
     if (d.dlback !== undefined) { S.dlId = null; S.dlD = null; return loadDls(); }
     if (d.dlok) return dlDecide(Number(d.dlok), true);
     if (d.dlrej) return dlDecide(Number(d.dlrej), false);
@@ -1248,7 +1407,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
@@ -1263,6 +1422,7 @@
     if (d.lrid !== undefined) { S.logF.rid = t.value.trim(); return loadLog(); }
     if (d.cf) { S.cmF[d.cf] = t.value; S.cmSel.clear(); return loadCm(); }
     if (d.cpick) { const id = Number(d.cpick); if (t.checked) S.cmSel.add(id); else S.cmSel.delete(id); return render(); }
+    if (d.cgrp) { cmRows().filter((i) => String(i.aid) === d.cgrp).forEach((i) => (t.checked ? S.cmSel.add(i.id) : S.cmSel.delete(i.id))); return render(); }
     if (d.dlf) { S.dlF[d.dlf] = t.value; return loadDls(); }
     if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
     if (d.rthen && S.rankDraft) { S.rankDraft.dispatch.then = d.rthen; return null; }
@@ -1282,10 +1442,12 @@
     if (t.dataset.rt && S.rankDraft) { S.rankDraft.dispatch.tier[t.dataset.rt] = t.value; return; }
     if (t.dataset.mdq !== undefined) return mdSearch(t.value);
     if (!k) return;
-    if (k === "req") S.rf.q = t.value; else if (k === "th") S.thF.q = t.value; else if (k === "cm") S.cmF.q = t.value;
+    if (k === "req") S.rf.q = t.value; else if (k === "th") S.thF.q = t.value; else if (k === "cm") S.cmF.q = t.value; else if (k === "ex") S.exQ = t.value;
     TP.keepFocus(t, "fq", render);
   });
   app.addEventListener("keydown", (e) => {
+    /* کارتِ کارشناس (role=button) با Enter و فاصله */
+    if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("article[data-ex], article[data-dlopen]")) { e.preventDefault(); return act(e.target); }
     if (e.key !== "Enter") return;
     const t = e.target;
     if (S.view === "login" && t.tagName === "INPUT") { e.preventDefault(); const b = app.querySelector("[data-do]"); if (b && !b.disabled) doAuth(b.dataset.do); }

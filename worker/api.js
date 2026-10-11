@@ -1928,6 +1928,15 @@ async function route(request, env, ctx) {
       if (path === "/support/activity" && m === "GET") return json(await supportActivity(env, url));
       if (path === "/support/threads" && m === "GET") return json(await supportThreads(env, url));
       if ((mm = /^\/support\/threads\/(\d+)$/.exec(path)) && m === "GET") return json(await supportThread(env, int(mm[1])));
+      /* صدای پیامِ صوتی برای گفت‌وگوی قابِ گوشیِ پنل پشتیبانی (فقط‌خواندنی؛ مهر ۱۴۰۵) */
+      if ((mm = /^\/support\/msg\/(\d+)\/voice$/.exec(path)) && m === "GET") {
+        const row = await env.DB.prepare("SELECT meta_json, kind FROM sp_msgs WHERE id=?").bind(int(mm[1])).first();
+        let v = {}; try { v = (JSON.parse((row && row.meta_json) || "{}").voice) || {}; } catch (_) { v = {}; }
+        if (!row || row.kind !== "voice" || !v.key) throw new HttpError("این پیام صوتی پیدا نشد.", 404);
+        const store = storage(env), fl = store ? await store.get(v.key) : null;
+        if (!fl) throw new HttpError("صدای این پیام در انبار پیدا نشد.", 404);
+        return new Response(fl.body, { headers: { "content-type": v.mime || fl.contentType || "audio/webm", "cache-control": "private, max-age=86400" } });
+      }
       if ((mm = /^\/support\/assignments\/(\d+)$/.exec(path)) && m === "GET") return json(await assignmentDetail(env, int(mm[1]), { role: "manager" }));
       if ((mm = /^\/support\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") return sheetOut(env, int(mm[1]), mm[2], url);
       if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));

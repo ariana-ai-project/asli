@@ -76,6 +76,11 @@ test("باز کردنِ اضطراری: علت، هشدار، و گفت‌وگو
   assert.equal(as.data.alarms.length, 1);
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM outbox WHERE target='-100777' AND payload_json LIKE '%اضطراری%'").get(), "تلگرامِ مدیر در صف");
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='ai_takeover'").get());
+  /* پنل پشتیبانی: ✋ در فهرست و گوشیِ مکاتبات، و برچسبِ فارسیِ رخداد با علت */
+  assert.equal((await call("GET", "/support/threads", null, SUP)).data.threads.find((x) => x.id === 1).ai_state, "human");
+  assert.equal((await call("GET", "/support/threads/1", null, SUP)).data.thread.ai_state, "human");
+  const feed = await call("GET", "/support/activity?g=work", null, SUP);
+  assert.ok(feed.data.rows.some((x) => /باز کردنِ اضطراری/.test(x.text) && /تأمین‌کننده تلفنی گفت فوری است/.test(x.text)), JSON.stringify(feed.data.rows.map((x) => x.text)));
   /* «دیدم» جداگانه */
   assert.equal((await call("POST", `/alarms/${am.data.alarms[0].id}/ack`, {}, MGR)).status, 200);
   assert.equal((await call("GET", "/alarms", null, MGR)).data.alarms.length, 0);

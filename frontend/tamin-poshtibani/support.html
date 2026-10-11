@@ -11,28 +11,12 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="panel.css" />
+  <link rel="stylesheet" href="sp.css" />
   <link rel="stylesheet" href="ui.css" />
+  <link rel="stylesheet" href="mgr.css" />
+  <link rel="stylesheet" href="sup.css" />
   <style>
-    /* فقط آنچه پنل پشتیبانی بیش از panel.css لازم دارد: نمای جزئیات، گفت‌وگو و گزارش رخدادها */
-    .sup-split { display: grid; grid-template-columns: minmax(280px, 380px) 1fr; gap: 14px; align-items: start; }
-    @media (max-width: 900px) { .sup-split { grid-template-columns: 1fr; } }
-    .sup-list { display: flex; flex-direction: column; gap: 6px; max-height: calc(100vh - 230px); overflow: auto; padding: 2px; }
-    .sup-th { text-align: right; border: 1px solid var(--tp-line); border-radius: 12px; padding: 8px 10px; background: rgba(3, 8, 20, .35); width: 100%; }
-    .sup-th:hover { border-color: var(--tp-line-2); background: rgba(120, 165, 255, .07); }
-    .sup-th.on { border-color: var(--tp-accent); background: rgba(79, 140, 255, .12); }
-    .sup-th .l1 { display: flex; gap: 8px; align-items: baseline; justify-content: space-between; font-weight: 700; font-size: .92rem; }
-    .sup-th .l2 { color: var(--tp-muted); font-size: .78rem; display: flex; gap: 8px; flex-wrap: wrap; }
-    .sup-th .l3 { color: var(--tp-dim); font-size: .8rem; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .sup-chat { display: flex; flex-direction: column; gap: 8px; padding: 12px; max-height: calc(100vh - 330px); min-height: 240px; overflow: auto; border: 1px solid var(--tp-line); border-radius: 12px; background: rgba(3, 8, 20, .35); }
-    .bub { max-width: 78%; padding: 7px 11px; border-radius: 14px; font-size: .9rem; line-height: 1.75; white-space: pre-wrap; word-break: break-word; }
-    .bub .meta { display: block; font-size: .72rem; color: var(--tp-dim); margin-top: 3px; }
-    .bub.e { align-self: flex-start; background: rgba(47, 111, 228, .28); border: 1px solid rgba(79, 140, 255, .4); border-start-start-radius: 4px; }
-    .bub.ai { background: rgba(124, 58, 237, .22); border-color: rgba(167, 139, 250, .45); }
-    .bub.s { align-self: flex-end; background: rgba(158, 178, 216, .14); border: 1px solid var(--tp-line-2); border-start-end-radius: 4px; }
-    .bub.note { align-self: center; max-width: 92%; background: rgba(242, 194, 48, .08); border: 1px dashed rgba(242, 194, 48, .45); font-size: .82rem; }
-    .bub.ev { align-self: center; max-width: 92%; background: rgba(3, 8, 20, .5); border: 1px solid var(--tp-line); font-size: .8rem; color: var(--tp-muted); }
-    .sup-feed td.txt { text-align: right; white-space: normal; min-width: 320px; max-width: 640px; }
-    .sup-feed td.t { font-variant-numeric: tabular-nums; font-size: .82rem; color: var(--tp-muted); }
+    /* فقط آنچه پنل پشتیبانی بیش از panel.css لازم دارد: پنجرهٔ جزئیات، جدول‌های تب‌های هوشمند و برچسبِ کنشگرِ رخدادها (بقیه در sup.css) */
     .by { display: inline-block; font-size: .74rem; padding: 0 8px; border-radius: 999px; border: 1px solid var(--tp-line-2); white-space: nowrap; }
     .by-manager { background: rgba(255, 140, 66, .14); border-color: rgba(255, 140, 66, .45); color: #ffc49b; }
     .by-expert { background: rgba(79, 140, 255, .14); border-color: rgba(79, 140, 255, .45); color: #bcd6ff; }
@@ -50,15 +34,8 @@
     .sup-tbl th { color: var(--tp-muted); font-weight: 600; font-size: .78rem; white-space: nowrap; }
     .sup-tbl td.c, .sup-tbl th.c { text-align: center; }
     .sup-h { margin: 16px 0 6px; font-size: .95rem; }
-    .sup-login .alt { margin-top: 14px; font-size: .85rem; }
-    .sup-login .alt button { background: none; border: 0; color: var(--tp-accent); text-decoration: underline; padding: 0; }
-    .sup-login input + input { margin-top: 10px; }
     .rowlink { cursor: pointer; }
     .ok-mark { color: var(--tp-ok); font-weight: 800; }
-    :root[data-theme="light"] .bub.e { background: rgba(47, 111, 228, .12); }
-    :root[data-theme="light"] .bub.ai { background: rgba(124, 58, 237, .1); }
-    :root[data-theme="light"] .bub.s { background: #f1f4f9; }
-    :root[data-theme="light"] .bub.ev, :root[data-theme="light"] .sup-chat, :root[data-theme="light"] .sup-th { background: #f7f9fc; }
     :root[data-theme="light"] .sup-ov { background: rgba(15, 27, 51, .35); }
     :root[data-theme="light"] .by-manager { color: #b45309; } :root[data-theme="light"] .by-expert { color: #1d4ed8; }
     :root[data-theme="light"] .by-ai { color: #6d28d9; } :root[data-theme="light"] .by-supplier { color: #047857; }
@@ -72,6 +49,7 @@
 
   <script src="config.js"></script>
   <script src="shared.js"></script>
+  <script src="ph-chat.js"></script>
   <!-- داشبوردِ کارشناس هوشمند (فاز ۲) — همان تبِ قدیمیِ پنل کارشناس، با مسیرهای /support/ai/<کارشناس>/… -->
   <script src="help-content.js"></script>
   <script src="ui.js"></script>
