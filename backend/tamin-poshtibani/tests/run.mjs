@@ -12,7 +12,7 @@
    پس این‌جا یک window ساختگی می‌سازیم و همان فایل‌های تولیدی را
    عیناً اجرا می‌کنیم — نه یک کپی که ممکن است واگرا شود.
    ============================================================ */
-import { readFileSync } from "node:fs";
+import { appendFileSync, readFileSync } from "node:fs";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { dirname, resolve } from "node:path";
 import vm from "node:vm";
@@ -49,10 +49,22 @@ export function loadTP() {
  * D1 خودش SQLite است، پس کوئری‌ها همان‌طور که در تولید اجرا می‌شوند آزموده می‌شوند.
  * اگر Node قدیمی‌تر باشد null برمی‌گرداند و تست‌های وابسته skip می‌شوند.
  */
-export async function sqliteD1() {
+/* opts.plans: نقشهٔ اجرای هر دستورِ متمایز (EXPLAIN QUERY PLAN) در planLog جمع می‌شود — d1-budget.test.mjs با آن
+   خواندنِ کاملِ جدول‌های بزرگ (SCAN) را در مسیرهای پرتکرار پیدا می‌کند تا سقف روزانهٔ خواندنِ D1 هیچ‌وقت پر نشود */
+export async function sqliteD1(opts = {}) {
   let DatabaseSync;
   try { ({ DatabaseSync } = await import("node:sqlite")); } catch (_) { return null; }
   const db = new DatabaseSync(":memory:");
+  /* D1_PLANS_OUT=مسیر: همهٔ تست‌ها نقشه جمع می‌کنند و در پایانِ هر فایلِ تست به آن فایل افزوده می‌شود (بررسیِ دستیِ کل سامانه) */
+  const planLog = opts.plans || process.env.D1_PLANS_OUT ? new Map() : null;
+  if (planLog && process.env.D1_PLANS_OUT && !opts.plans) {
+    const file = process.env.D1_PLANS_OUT, who = (process.argv[1] || "").split(/[\\/]/).pop();
+    process.on("exit", () => { try { appendFileSync(file, [...planLog].map(([sql, rows]) => JSON.stringify({ who, sql, rows })).join("\n") + "\n"); } catch (_) { /* گزارش فرعی است */ } });
+  }
+  const explain = (sql) => {
+    if (!planLog || planLog.has(sql) || !/^\s*(SELECT|WITH|UPDATE|DELETE|INSERT)\b/i.test(sql)) return;
+    try { planLog.set(sql, db.prepare("EXPLAIN QUERY PLAN " + sql).all().map((r) => r.detail)); } catch (e) { planLog.set(sql, [`! ${e.message}`]); }
+  };
   const exec1 = (sql, args) => {
     const st = db.prepare(sql);
     if (/^\s*(SELECT|PRAGMA|WITH)\b/i.test(sql)) return { results: st.all(...args), meta: { changes: 0 } };
@@ -60,6 +72,7 @@ export async function sqliteD1() {
     return { results: [], meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) } };
   };
   const prepare = (sql) => {
+    explain(sql);
     let args = [];
     const s = {
       sql,
@@ -73,6 +86,7 @@ export async function sqliteD1() {
   };
   return {
     raw: db,
+    planLog,
     prepare,
     async batch(list) {
       db.exec("BEGIN");

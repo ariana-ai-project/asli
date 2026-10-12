@@ -60,6 +60,7 @@ import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
+import { guardEnv } from "./d1-guard.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
@@ -363,8 +364,53 @@ const SEED_EXPERTS = [
    عوض می‌کند. isolate تازه (که در سایت کم‌ترافیک زیاد پیش می‌آید) اول فقط همین را از counters
    می‌خواند؛ اگر همان بود طرح از قبل اعمال شده و ~۲۰ رفت‌وبرگشتِ CREATE/PRAGMA به D1 — که هر
    درخواستِ سرد تا حالا می‌پرداخت — لازم نیست. استقرارِ نسخهٔ تازه با طرحِ تازه، یک بار مسیر کامل را می‌رود. */
+/*
+ * نمایه‌های بودجهٔ خواندنِ D1 (مهر ۱۴۰۵): سقفِ رایگان روزی ۵ میلیون ردیف است و هر بار که پر شد علتش کوئریِ پرتکراری بود
+ * که کلِ یک جدولِ بزرگ را می‌خواند. این‌ها حاصلِ backend/tamin-poshtibani/tests/d1-budget.test.mjs و گزارشِ نقشهٔ اجرای کلِ
+ * تست‌هاست: نظرسنجیِ پنل‌ها (میز، کارتابل، هشدارها، مناقصهٔ زنده)، Cronِ هر دقیقه، پیام‌ها و تب «گزارش‌ها»ی پشتیبانی با
+ * نمایه بخوانند. بعد از ستون‌های مهاجرت ساخته می‌شوند (mgr_seen_at، norm_at، src_request، … همان‌جا اضافه شده‌اند) و در
+ * SCHEMA_FP اند، پس روی پایگاهِ موجود فقط یک بار. هر کدام جدا (ستونِ نبود ← بقیه بی‌اثر نمی‌مانند).
+ */
+const READ_INDEXES = [
+  /* میز: «ارسال‌شده در ۳۰ روز و دیده‌نشده» — فقط همان ردیف‌ها، با request_id (پوشا) */
+  "CREATE INDEX IF NOT EXISTS ix_asg_unseen ON assignments(dispatched_at, request_id) WHERE mgr_seen_at IS NULL",
+  "CREATE INDEX IF NOT EXISTS ix_asg_viewed ON assignments(viewed_at)",
+  "CREATE INDEX IF NOT EXISTS ix_dec_asg ON decisions(assignment_id)",
+  "CREATE INDEX IF NOT EXISTS ix_dec_open ON decisions(id) WHERE approved_at IS NULL AND rejected_at IS NULL",
+  "CREATE INDEX IF NOT EXISTS ix_alarms_open_m ON alarms(at) WHERE ack_m IS NULL",
+  "CREATE INDEX IF NOT EXISTS ix_alarms_open_s ON alarms(at) WHERE ack_s IS NULL",
+  "CREATE INDEX IF NOT EXISTS ix_tjobs_tender ON tender_jobs(tender_id, id)",
+  "CREATE INDEX IF NOT EXISTS ix_tjobs_state ON tender_jobs(state, id)",
+  "CREATE INDEX IF NOT EXISTS ix_tenders_grp ON tenders(grp)",
+  "CREATE INDEX IF NOT EXISTS ix_tenders_upd ON tenders(updated_at)",
+  "CREATE INDEX IF NOT EXISTS ix_tenders_src ON tenders(src_request)",
+  "CREATE INDEX IF NOT EXISTS ix_spl_thread ON sp_lines(thread_id)",
+  "CREATE INDEX IF NOT EXISTS ix_spl_item ON sp_lines(item_id)",
+  "CREATE INDEX IF NOT EXISTS ix_spl_bundle ON sp_lines(bundle_id)",
+  "CREATE INDEX IF NOT EXISTS ix_spth_asg ON sp_threads(assignment_id)",
+  "CREATE INDEX IF NOT EXISTS ix_spth_last ON sp_threads(last_at)",
+  "CREATE INDEX IF NOT EXISTS ix_spsms_phone ON sp_sms(phone_id, kind, at)",
+  "CREATE INDEX IF NOT EXISTS ix_spsms_thread ON sp_sms(thread_id)",
+  "CREATE INDEX IF NOT EXISTS ix_spsms_at ON sp_sms(at)",
+  "CREATE INDEX IF NOT EXISTS ix_spf_thread ON sp_files(thread_id)",
+  "CREATE INDEX IF NOT EXISTS ix_sptg_expert ON sp_tg(expert_id)",
+  "CREATE INDEX IF NOT EXISTS ix_sptg_phone ON sp_tg(phone_id)",
+  "CREATE INDEX IF NOT EXISTS ix_splink_expert ON sp_links(expert_id)",
+  "CREATE INDEX IF NOT EXISTS ix_aiprops_run ON ai_props(run_id, state)",
+  "CREATE INDEX IF NOT EXISTS ix_aicalls_run ON ai_calls(run_id)",
+  "CREATE INDEX IF NOT EXISTS ix_letters_expert ON letters(expert_id, id)",
+  "CREATE INDEX IF NOT EXISTS ix_suppliers_name ON suppliers(name)",
+  "CREATE INDEX IF NOT EXISTS ix_alog_at ON assignment_log(at)",
+  "CREATE INDEX IF NOT EXISTS ix_items_hist ON items(hist_done_at)",
+  "CREATE INDEX IF NOT EXISTS ix_items_norm ON items(norm_at)",
+  "CREATE INDEX IF NOT EXISTS ix_smart_at ON smart_searches(created_at)",
+  "CREATE INDEX IF NOT EXISTS ix_quotes_at ON quotes(created_at)",
+  "CREATE INDEX IF NOT EXISTS ix_quotes_final ON quotes(final_at)",
+  "CREATE INDEX IF NOT EXISTS ix_pf_at ON proformas(uploaded_at)",
+  "CREATE INDEX IF NOT EXISTS ix_spm_at ON sp_msgs(at)",
+];
 const SCHEMA_FP = (() => {
-  const s = SCHEMA + JSON.stringify([COLUMN_MIGRATIONS, COLUMN_RENAMES, DROPPED_TABLES]);
+  const s = SCHEMA + JSON.stringify([COLUMN_MIGRATIONS, COLUMN_RENAMES, DROPPED_TABLES, READ_INDEXES]);
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); }
   return (h >>> 0) * 1000 + (s.length % 1000);
@@ -386,6 +432,7 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  for (const sql of READ_INDEXES) await env.DB.exec(sql).catch((e) => console.error("read index", sql.slice(27, 60), e && e.message));
   /* قلم‌های پنل تأمین‌کننده که پیش از ستونِ «no» ساخته شدند، به ترتیب کد می‌گیرند */
   await spBackfill(env).catch((e) => console.error("spBackfill", e && e.message));
   /* جستجوهای پیش از ستون‌های کلید قلم؛ اگر نشد، فقط جستجوهای قبلی دیرتر پیدا می‌شوند */
@@ -791,7 +838,7 @@ async function desk(env, url) {
   /* درخواستِ زنده همیشه هست؛ درخواستِ بسته تا وقتی مدیر «مشاهده کردم» را
      نزده (یا سی روز نگذشته) از میز کار بیرون نمی‌رود. */
   const scopeSql = "r.id IN (SELECT request_id FROM items WHERE state IN ('open','hold')"
-    + " UNION SELECT request_id FROM assignments WHERE dispatched_at > ? AND mgr_seen_at IS NULL)";
+    + " UNION ALL SELECT request_id FROM assignments WHERE dispatched_at > ? AND mgr_seen_at IS NULL)";   /* ALL: بی ادغامِ مرتب، هر طرف با نمایهٔ خودش (IN تکراری را خودش کنار می‌گذارد) */
   if (id) { conds.push("r.id=?"); args.push(id); }
   else {
     if (scope !== "all") { conds.push(scopeSql); args.push(now() - 30 * DAY); }
@@ -1684,6 +1731,7 @@ async function sheetOut(env, aid, kind, url) {
 /* روتر                                                                 */
 /* ------------------------------------------------------------------ */
 async function route(request, env, ctx) {
+  env = guardEnv(env);   /* نگهبانِ بودجهٔ خواندنِ D1 (d1-guard.js) — فقط می‌شمارد، رفتار عوض نمی‌شود */
   const url = new URL(request.url);
   let path = url.pathname.startsWith(PREFIX) ? url.pathname.slice(PREFIX.length) : url.pathname;
   if (!path.startsWith("/")) path = "/" + path;

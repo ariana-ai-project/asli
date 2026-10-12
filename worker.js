@@ -18,6 +18,7 @@ import { handler as spVoice } from "./worker/sp-voicemode.js";
 import { handler as vbVoice, ensureVbWebhook } from "./worker/voice-bot.js";
 import { tenderTick, tenderDiscoverTick } from "./worker/tender.js";
 import { drainPush } from "./worker/push.js";
+import { guardEnv } from "./worker/d1-guard.js";
 
 /* وبهوکِ بات مکاتبات تأمین‌کنندگان (و بات ویس) یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
    ثبت نشده، دامنه یا توکن عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار یا ست کردنِ راز کار دستی لازم نیست. */
@@ -34,6 +35,7 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
+    env = guardEnv(env);   /* Cronِ هر دقیقه هم زیر نگهبانِ بودجهٔ خواندن D1 */
     /* Cronِ جدای ویس (voice-core.js): ویس‌های بلندِ صف در اجرای خودش و با سقفِ CPUِ خودش تبدیل می‌شوند */
     if (event.cron === VOICE_CRON) {
       ctx.waitUntil(ensureSchema(env).then(() => runVoiceJobs(env, voiceBots(env))).then(

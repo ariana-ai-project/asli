@@ -389,9 +389,10 @@ async function codeWhere(env, code) {
   if (!heads || !heads.length || heads.length > 90) return { sql: "item_code=?", args: [code] };
   return { sql: `head IN (${heads.map(() => "?").join(",")}) AND item_code=?`, args: [...heads, code] };
 }
-/* نتیجهٔ سوابق در حافظهٔ isolate (۱۰ دقیقه): سوابق فقط با بارگذاری ماهانه عوض می‌شود */
+/* نتیجهٔ سوابق در حافظهٔ isolate (۶ ساعت): سوابق فقط با بارگذاری ماهانه عوض می‌شود. برای کدِ بیرون از فهرست (شرط تنهای
+   item_code= ← خواندنِ کلِ purchases) این یعنی در مناقصهٔ زنده چند بار در روز، نه هر ده دقیقه (بودجهٔ خواندن D1) */
 const HIST = new Map();
-const HIST_TTL = 10 * 60000;
+const HIST_TTL = 6 * 3600e3;
 async function historyOf(env, t) {
   if (!t.item_code) return null;
   const key = T(t.item_code), hit = HIST.get(key);
@@ -428,22 +429,45 @@ async function historyRead(env, code) {
  * due: مناقصه‌ای که باید همین حالا بسته شود ← مسیر کامل (finalizeIfDue)
  */
 async function listFp(env, n) {
-  const r = await env.DB.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(rev),0) AS r, COALESCE(MAX(updated_at),0) AS u, COALESCE(MAX(id),0) AS m,
+  /* فقط ردیف‌های فعال (draft/scheduled، با نمایهٔ state) و دو بیشینهٔ نمایه‌دار — نه کلِ جدول: این هر ۳ ثانیه می‌خورد.
+     مناقصهٔ تمام‌شده عوض نمی‌شود مگر با updated_at (اصلاح پیشنهاد، لغو، ثبت در درخواست) که MAX(updated_at) می‌بیند */
+  const r = await env.DB.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(rev),0) AS r,
+      (SELECT COALESCE(MAX(updated_at),0) FROM tenders) AS u, (SELECT COALESCE(MAX(id),0) FROM tenders) AS m,
       COALESCE(SUM(CASE WHEN state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) THEN 1 ELSE 0 END),0) AS due,
       COALESCE(SUM(CASE WHEN state='scheduled' AND start_at<=? THEN 1 ELSE 0 END),0) AS started,
-      COALESCE(SUM(CASE WHEN state='scheduled' AND start_at<=? AND sealed_end_at>? THEN 1 ELSE 0 END),0) AS sealedNow FROM tenders`).bind(n, n, n, n, n).first();
+      COALESCE(SUM(CASE WHEN state='scheduled' AND start_at<=? AND sealed_end_at>? THEN 1 ELSE 0 END),0) AS sealedNow
+    FROM tenders WHERE state IN ('draft','scheduled')`).bind(n, n, n, n, n).first();
   /* شروع‌شده‌ها و سربسته‌های همین لحظه هم در اثر انگشت‌اند: رسیدنِ زمانِ شروع ردیف را عوض نمی‌کند ولی برچسبِ فهرست عوض می‌شود */
   return { fp: `${r.c}.${r.r}.${r.u}.${r.m}.${r.started}.${r.sealedNow}`, due: r.due > 0 };
 }
+/* شمارهای هر ردیفِ فهرست (دعوت، پیشنهاد، پیشتاز، قلم‌های گروه) به ازای rev همان ردیف */
+const LIST_AGG = new Map();
 /** GET /support/tenders[?fp=] — با fp همان قبلی و بی کار سررسید ← {same} (بی خواندن فهرست کامل) */
 export async function tenderList(env, ctx, fp) {
   if (fp) { const f = await listFp(env, now()); if (f.fp === fp && !f.due) return { same: true, now: now(), fp: f.fp }; }
-  const rows = (await env.DB.prepare(`SELECT t.*, (SELECT COUNT(*) FROM tender_invites i WHERE i.tender_id=t.id AND i.on_list=1) AS invited,
-      (SELECT COUNT(DISTINCT b.alias) FROM tender_bids b WHERE b.tender_id=t.id AND b.state<>'void') AS bidders,
-      (SELECT COUNT(*) FROM tender_bids b WHERE b.tender_id=t.id AND b.state<>'void') AS bids,
-      (SELECT i.name FROM tender_invites i WHERE i.tender_id=t.id AND i.alias=COALESCE(t.winner_alias, t.best_alias)) AS best_name,
-      (SELECT COUNT(*) FROM tenders g WHERE g.grp=t.grp) AS lots
-    FROM tenders t ORDER BY CASE WHEN t.state='scheduled' THEN 0 WHEN t.state='draft' THEN 1 ELSE 2 END, COALESCE(t.end_at, t.created_at) DESC, t.lot_no LIMIT 200`).all()).results || [];
+  /* فقط فعال‌ها و ۲۰۰ تای آخر (نمایهٔ state و کلید اصلی)؛ شمارِ دعوت و پیشنهاد و نام پیشتاز برای ردیفی که rev ش از
+     دفعهٔ قبل عوض نشده از حافظهٔ همین isolate — در مناقصهٔ زنده با هر پیشنهاد فقط همان یک ردیف دوباره شمرده می‌شود */
+  const base = (await env.DB.prepare(`SELECT t.* FROM tenders t
+      WHERE t.state IN ('draft','scheduled') OR t.id > (SELECT COALESCE(MAX(id),0) - 200 FROM tenders)
+      ORDER BY CASE WHEN t.state='scheduled' THEN 0 WHEN t.state='draft' THEN 1 ELSE 2 END, COALESCE(t.end_at, t.created_at) DESC, t.lot_no LIMIT 200`).all()).results || [];
+  const need = base.filter((r) => { const c = LIST_AGG.get(r.id); return !c || c.rev !== r.rev; }).map((r) => r.id);
+  if (need.length) {
+    const q = need.map(() => "?").join(","), grps = [...new Set(base.filter((r) => r.grp && need.includes(r.id)).map((r) => r.grp))];
+    const [iv, bd, bn, gl] = await env.DB.batch([
+      env.DB.prepare(`SELECT tender_id AS id, COUNT(*) AS n FROM tender_invites WHERE on_list=1 AND tender_id IN (${q}) GROUP BY tender_id`).bind(...need),
+      env.DB.prepare(`SELECT tender_id AS id, COUNT(DISTINCT alias) AS bidders, COUNT(*) AS bids FROM tender_bids WHERE state<>'void' AND tender_id IN (${q}) GROUP BY tender_id`).bind(...need),
+      env.DB.prepare(`SELECT i.tender_id AS id, i.name FROM tender_invites i JOIN tenders t ON t.id=i.tender_id WHERE i.tender_id IN (${q}) AND i.alias=COALESCE(t.winner_alias, t.best_alias)`).bind(...need),
+      grps.length ? env.DB.prepare(`SELECT grp, COUNT(*) AS n FROM tenders WHERE grp IN (${grps.map(() => "?").join(",")}) GROUP BY grp`).bind(...grps) : env.DB.prepare("SELECT NULL AS grp, 0 AS n WHERE 0"),
+    ]);
+    const m = (res, k) => new Map((res.results || []).map((x) => [x[k], x]));
+    const I = m(iv, "id"), B = m(bd, "id"), N = m(bn, "id"), G = m(gl, "grp");
+    for (const r of base) if (need.includes(r.id)) {
+      LIST_AGG.set(r.id, { rev: r.rev, invited: (I.get(r.id) || {}).n || 0, bidders: (B.get(r.id) || {}).bidders || 0, bids: (B.get(r.id) || {}).bids || 0,
+        best_name: (N.get(r.id) || {}).name || null, lots: r.grp ? (G.get(r.grp) || {}).n || 1 : 1 });
+    }
+    if (LIST_AGG.size > 2000) for (const k of [...LIST_AGG.keys()].slice(0, 1000)) LIST_AGG.delete(k);
+  }
+  const rows = base.map((r) => ({ ...r, ...LIST_AGG.get(r.id) }));
   const n = now(), out = [];
   for (const r of rows) {
     const due = r.state === "scheduled" && (r.end_at <= n || (r.sealed_end_at && !r.sealed_done && r.sealed_end_at <= n));
@@ -843,7 +867,7 @@ async function itemsFromCatalog(env, q) {
         SELECT DISTINCT m.code, f.value AS fh FROM m JOIN cat_heads h0 ON h0.head=m.sh AND h0.part=0,
           json_each(COALESCE(json_extract(h0.data, '$.src'), json_array(m.sh))) f)
       SELECT p.item_code, MAX(p.title) AS title, MAX(p.unit) AS unit, MAX(p.head) AS head, COUNT(*) AS n, COUNT(DISTINCT p.supplier_n) AS sups, MAX(p.order_date) AS last
-      FROM s JOIN purchases p ON p.head=s.fh AND p.item_code=s.code
+      FROM s CROSS JOIN purchases p ON p.head=s.fh AND p.item_code=s.code   /* CROSS: ترتیبِ اجبار — اول کدهای پیدا‌شده، بعد purchases با کلید اصلی (نه کلِ ۷۱ هزار ردیف) */
       GROUP BY p.item_code ORDER BY n DESC LIMIT 30`)
     .bind(...ws.map((w) => `%${w}%`), ...ws.flatMap((w) => [`%${w}%`, `${w}%`])).all()).results || [];
   return rows;
@@ -924,7 +948,7 @@ export async function tenderToRequest(env, id, b) {
         VALUES (?,?,?,?,?,?,?,1,?,?,'tender','tender',?,?,?)`).bind(it.assignment_id, it.id, names.get(alias) || aliasLabel(alias), t.unit, t.qty, r.amount,
       `مناقصهٔ ${t.code} — رتبهٔ ${r.rank}`, win ? 1 : 0, win ? n : null, t.id, n, n));
   }
-  stmts.push(env.DB.prepare("UPDATE tenders SET req_aid=?, req_item=?, req_at=?, rev=rev+1 WHERE id=?").bind(it.assignment_id, it.id, n, t.id));
+  stmts.push(env.DB.prepare("UPDATE tenders SET req_aid=?, req_item=?, req_at=?, rev=rev+1, updated_at=? WHERE id=?").bind(it.assignment_id, it.id, n, n, t.id));
   stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(n, "support", "tender_link", it.request_id,
     JSON.stringify({ tender_id: t.id, item_id: it.id, assignment_id: it.assignment_id, lines: ranks.size })));
   await env.DB.batch(stmts);

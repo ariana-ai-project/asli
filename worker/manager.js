@@ -110,7 +110,15 @@ export function pushRecipients(row, settings, stage) {
 export const RECIPIENT_JOIN = `LEFT JOIN experts s ON s.id=e.senior_id AND s.active=1 AND s.senior=1`;
 
 /** ارجاع‌هایی که هنوز زنده‌اند، با هر چیزی که برای رنگ‌ها لازم است */
-const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadline_at, a.viewed_at,
+/* بودجهٔ خواندنِ D1 (مهر ۱۴۰۵): این هر ۵ دقیقه می‌خورد (۲۸۸ بار در روز). قبلاً همهٔ ارجاع‌های ارسال‌شدهٔ تاریخ را می‌پیمود
+   و شمارهای هر ردیف را برای همهٔ زنده‌ها می‌ساخت؛ حالا ارجاع‌های زنده از خودِ اقلامِ باز/معلق (نمایهٔ state) پیدا می‌شوند،
+   LIMIT همان‌جا، و شمارها فقط برای همان چند ارجاعِ این نوبت */
+const WATCH_SQL = `WITH live AS (
+    SELECT a.id FROM assignments a
+     WHERE a.id IN (SELECT assignment_id FROM items WHERE state IN ('open','hold') AND assignment_id IS NOT NULL)
+       AND a.dispatched_at IS NOT NULL
+     ORDER BY COALESCE(a.watch_at, 0), a.deadline_at LIMIT ?)
+  SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadline_at, a.viewed_at,
         a.commission_at, a.thr_snapshot, a.mgr_colors,
         e.name AS expert_name, e.label AS expert_label, r.party, ${RECIPIENT_COLS},
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_count,
@@ -120,10 +128,8 @@ const WATCH_SQL = `SELECT a.id, a.request_id, a.days, a.dispatched_at, a.deadlin
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quotes,
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id) AS lines,
         (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proformas
-   FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN}
-  WHERE a.dispatched_at IS NOT NULL
-    AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold'))
-  ORDER BY COALESCE(a.watch_at, 0), a.deadline_at LIMIT ?`;
+   FROM live JOIN assignments a ON a.id=live.id JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id ${RECIPIENT_JOIN}
+  ORDER BY COALESCE(a.watch_at, 0), a.deadline_at`;
 /* باگ قبلی: «ORDER BY deadline_at LIMIT 40» — با بیش از ۴۰ ارجاعِ باز، ارجاع‌هایی که مهلتشان دیرتر است
    هیچ‌وقت سنجیده نمی‌شدند و اعلان تغییر وضعیتشان (برای مدیر و تلگرام تیمی) نمی‌رفت. حالا هر اجرا
    کم‌تازه‌ترین‌ها را برمی‌دارد و watch_at را می‌زند، پس همه به نوبت سنجیده می‌شوند. */
