@@ -81,6 +81,7 @@
       document.body.classList.add("has-sky");
     }
     $(".tp-sky").classList.toggle("fog", kind === "fog");
+    document.body.classList.toggle("sky-fog", kind === "fog");   /* ui.css (گوشی): رنگِ بومِ زیرِ صفحه = لبهٔ پایینِ مه */
   }
 
   /* ---------- منو ---------- */

@@ -1027,15 +1027,29 @@ body.has-foot .tp-pushcard { bottom: max(76px, env(safe-area-inset-bottom)); }
      (با hidden روی html و body، body ظرفِ اسکرول بود و نوار بالا با اسکرول می‌رفت) */
   html, body.tp-body { overflow-x: hidden; overflow-x: clip; }
   body.tp-body { overflow-y: visible; }
-  /* کشیدن از لبه (iOS) زمینهٔ سفید نشان نمی‌دهد */
-  html { background-color: #060b1c; }
-  html[data-theme="light"] { background-color: #eef2f8; }
+  /* بومِ صفحه (زیرِ همه‌چیز: کشیدن از لبهٔ iOS، و نوارِ پایینِ سافاری که لایه‌های fixed همیشه تا تهِ شیشه نمی‌رسند)
+     = رنگِ لبهٔ پایینِ همان آسمان، تا لبهٔ پایینِ صفحه دورنگ نشود. رنگ روی body (نه html): body‌ِ بی‌رنگ‌پس‌زمینه‌ای که
+     html رنگ داشته باشد، پس‌زمینه‌اش را روی لایه‌های z-index منفی (آسمان و مه) می‌کشد و آن‌ها را می‌پوشاند */
+  body.tp-body.has-sky { background: #070d22; }
+  :root[data-theme="light"] body.tp-body.has-sky { background: #eef2f8; }
+  body.tp-body.has-sky.sky-fog, :root[data-theme="light"] body.tp-body.has-sky.sky-fog { background: #1f2e37; }
   * { -webkit-tap-highlight-color: transparent; }
   button, a, input, select, textarea, label, [role="button"] { touch-action: manipulation; }
 
   /* ۲. زمینهٔ آرام: هاله‌ها و دایره‌ها ثابت (انیمیشنِ دائمیِ لایه‌های بزرگِ تار روی GPUِ گوشی پرهزینه است)، و با جمع شدنِ
      نوار نشانیِ مرورگر نمی‌پرند: اندازه‌ها با ارتفاعِ «بزرگِ» صفحه (lvh) — ثابت، نه vh که با نوار عوض می‌شود */
   .tp-sky, .tp-orbs { bottom: auto; height: 100vh; height: 100lvh; contain: strict; }
+  /* آسمان کمی پایین‌تر از قاب ادامه دارد (زیرِ نوار و نشانگرِ خانهٔ آیفون هم پوشیده است)؛ گرادیان همان اندازهٔ صفحه
+     می‌ماند و ادامه‌اش رنگِ لبهٔ پایین است — لایهٔ fixed اسکرولِ صفحه را بلندتر نمی‌کند */
+  .tp-sky { height: calc(100vh + 200px); height: calc(100lvh + 200px); }
+  .tp-sky, .tp-sky.fog, :root[data-theme="light"] .tp-sky, :root[data-theme="light"] .tp-sky.fog {
+    background-size: 100% 100vh; background-size: 100% 100lvh; background-repeat: no-repeat; }
+  .tp-sky { background-color: #070d22; }
+  :root[data-theme="light"] .tp-sky { background-color: #eef2f8; }
+  .tp-sky.fog, :root[data-theme="light"] .tp-sky.fog { background-color: #1f2e37; }
+  /* نوارهای چسبیده به پایین («تأیید نهایی و ارسال»، کشوی راهنما) هم کمی زیرِ لبه ادامه دارند: اگر سافاریِ آیفون زیرِ نوارِ
+     خودش جایی خالی گذاشت، همان رنگِ نوار دیده شود نه زمینهٔ پشتِ آن */
+  .tp-foot::after, .tp-help-panel::after { content: ""; position: absolute; left: 0; right: 0; top: 100%; height: 200px; background: inherit; pointer-events: none; }
   .tp-sky i, .tp-orbs i { animation: none !important; will-change: auto; }
   .tp-sky .b1 { width: 62lvmax; height: 62lvmax; left: -16lvmax; top: -22lvmax; }
   .tp-sky .b2 { width: 48lvmax; height: 48lvmax; right: -14lvmax; top: 18lvh; }

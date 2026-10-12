@@ -62,7 +62,14 @@
       --lg-rim-key: rgba(255, 255, 255, 0.7);
       --lg-rim-back: rgba(255, 255, 255, 0.34);
     }
-    @media (max-width: 720px) { .tp-grid { grid-template-columns: 1fr; } }
+    @media (max-width: 720px) {
+      .tp-grid { grid-template-columns: 1fr; }
+      /* گوشی: بومِ زیرِ صفحه همرنگِ لبهٔ پایینِ مه (کشیدن از لبه و نوارِ پایینِ سافاری دورنگ نشود)، و مه با ارتفاعِ
+         ثابتِ «بزرگِ» صفحه (lvh) که با جمع شدنِ نوارِ نشانی نپرد؛ کمی پایین‌تر از قاب ادامه دارد با همان رنگِ لبه */
+      body { background: #1f2e37; }
+      .tp-fog { bottom: auto; height: calc(100vh + 200px); height: calc(100lvh + 200px);
+        background-size: 100% 100vh; background-size: 100% 100lvh; background-repeat: no-repeat; background-color: #1f2e37; }
+    }
     /* main.js (که این صفحه بارگذاری نمی‌کند) معمولاً opacity کارت‌ها را با IntersectionObserver به ۱ می‌رساند؛ اینجا مستقیم فعال است */
     .tp-panel-card { min-height: 240px; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; gap: 14px; padding: 40px 24px; opacity: 1 !important; transform: none !important; }
     .tp-panel-card .card-icon { width: 64px; height: 64px; border-radius: 18px; }
