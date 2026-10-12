@@ -59,6 +59,7 @@ import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
+import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
@@ -126,7 +127,7 @@ function stageTicks(v) {
 /* اعلانِ گوشی: اشتراک به همان کسی بسته می‌شود که با همان نقش وارد است (کارشناس با شناسه، مدیر و پشتیبان ۰) */
 const PUSH_HOME = { expert: "expert", manager: "manager", support: "support" };
 async function pushWho(request, env, role) {
-  if (role === "expert") { const ex = await requireExpert(request, env); return { role, uid: ex.id, name: ex.label || ex.name }; }
+  if (role === "expert") { const ex = await requireExpert(request, env); return { role, uid: ex.id, name: ex.label || ex.name, first: ex.name }; }
   if (role === "manager") { await requireManager(request, env); return { role, uid: 0 }; }
   if (role === "support") { await requireSupport(request, env); return { role, uid: 0 }; }
   throw new HttpError("نقش نامعتبر است.");
@@ -216,6 +217,7 @@ ${CR_DDL.trim()}
 ${ALARM_DDL.trim()}
 ${TENDER_DDL.trim()}
 ${PUSH_DDL.trim()}
+${HELP_DDL.trim()}
 ${STRUCT_DDL.trim()}
 `;
 
@@ -1863,6 +1865,16 @@ async function route(request, env, ctx) {
       const who = await pushWho(request, env, b.role);
       if (path === "/push/subscribe") return json(await pushSubscribe(env, who.role, who.uid, b.sub, request.headers.get("User-Agent")));
       return json(await pushTo(env, who, { title: "اعلان‌های تدارکات روشن است ✓", body: `${who.name ? `${who.name}، ` : ""}از این به بعد خبرهای مربوط به شما روی همین دستگاه می‌آید.`, url: PUSH_HOME[who.role], tag: "push-test" }));
+    }
+
+    /* --- «دستیار سامانه» در کشوی راهنما (worker/help-bot.js): فقط کارکنان، هر کس با ورودِ نقشِ خودش --- */
+    if (path === "/help/chat" || path === "/help/chat/clear") {
+      const b = m === "POST" ? await readJson(request) : {};
+      const w = await pushWho(request, env, m === "GET" ? url.searchParams.get("role") : b.role);
+      const who = { role: w.role, uid: w.uid, name: w.first || null };
+      if (path === "/help/chat" && m === "GET") return json(await helpHistory(env, who));
+      if (path === "/help/chat" && m === "POST") return json(await helpAsk(env, who, b));
+      if (path === "/help/chat/clear" && m === "POST") return json(await helpClear(env, who));
     }
 
     /* --- ورود --- */

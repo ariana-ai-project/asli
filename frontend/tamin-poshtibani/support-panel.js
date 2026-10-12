@@ -1321,7 +1321,7 @@
     /* داشبوردِ کارشناس هوشمند شنونده‌های خودش را دارد (data-ai-*) */
     if (S.view === "app" && S.tab === "ai" && S.aiEx && window.TP_AI) window.TP_AI.wire(app, S, render);
     /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) */
-    if (S.view === "app" && sess.get()) TP.ui.push.mount({ role: "support", who: "s", api: pushApi });
+    if (S.view === "app" && sess.get()) { TP.ui.push.mount({ role: "support", who: "s", api: pushApi }); TP.ui.help.assistant({ role: "support", api: pushApi }); }
   }
 
   /* ---------- رفتارها (یک شنونده برای همه، تا با هر رسم دوباره بسته نشوند) ---------- */
@@ -1336,7 +1336,7 @@
     const d = t.dataset;
     if (d.tab) return setTab(d.tab);
     if (d.refresh !== undefined) { loadExperts().catch(() => {}); return loadTab(true); }
-    if (d.logout !== undefined) { TP.ui.push.off(pushApi); sess.clear(); S.view = "login"; S.err = ""; S.mode = "login"; return loadStatus(); }
+    if (d.logout !== undefined) { TP.ui.push.off(pushApi); TP.ui.help.assistant(null); sess.clear(); S.view = "login"; S.err = ""; S.mode = "login"; return loadStatus(); }
     if (d.pass !== undefined) return changePass();
     if (d.alarmAck) return alarmAckUi(Number(d.alarmAck));
     if (d.alerts !== undefined) return alertsDialog();

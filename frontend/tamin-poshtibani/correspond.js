@@ -143,6 +143,7 @@
         onAsks: (k) => { if (k !== S.asks) refreshLists().catch(() => {}); } });
       /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) — همان اشتراکِ پنل کارشناس؛ نه در مینی‌اپ تلگرام */
       if (!inTg && ses && ses.id) TP.ui.push.mount({ role: "expert", who: ses.id, api: (p, b) => TP.api(p, b === undefined ? {} : { body: b }) });
+      TP.ui.help.assistant({ role: "expert", api: (p, b) => api(p, b === undefined ? {} : { body: b }), name: (ses && ses.name) || null });
     } catch (e) {
       if (e.status === 401 && !inTg) { TP.session.clear(); return renderLogin(e.message); }
       app.innerHTML = `${top()}<div class="sp-center"><div class="sp-box"><h2>نشد</h2><p class="sp-err">${esc(e.message)}</p></div></div>`;

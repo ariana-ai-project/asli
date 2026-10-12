@@ -1268,6 +1268,7 @@
     restore();
     /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) */
     TP.ui.push.mount({ role: "manager", who: "m", api: PUSH_API });
+    TP.ui.help.assistant({ role: "manager", api: PUSH_API });
     if (S.fAnim === "in") { S.fAnim = null; const btn = app.querySelector("[data-fpanel]"); if (btn) btn.classList.add("spin"); TP.ui.reveal(app.querySelector("[data-fpanel-box]"), true); }
     if (S.exLand) { const id = S.exLand; S.exLand = null; setTimeout(() => { const c = app.querySelector(`[data-exdrag="${id}"]`); if (c) c.classList.remove("land"); }, 900); }
   }
@@ -1285,7 +1286,7 @@
     Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
     Q("[data-hist-import]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); pickHistory(); }; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickHistory(); } }; });
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
-    const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.ui.push.off(PUSH_API); TP.manager.clear(); render(); };
+    const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.ui.push.off(PUSH_API); TP.ui.help.assistant(null); TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
     const im = G("[data-import]"); if (im) im.onclick = pickAndImport;
     /* رها کردن فایل اکسل روی صفحه = همان بارگذاری. روی body است تا افتادنِ فایل

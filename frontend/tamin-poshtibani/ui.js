@@ -259,6 +259,9 @@
      TP.ui.help.set("expert.tray") در هر رسم؛ TP.ui.help.open(key) از دکمهٔ «؟»؛ محتوا window.TP_HELP */
   const help = (() => {
     let cur = "", panel = null, fab = null, lastFocus = null, q = "";
+    /* «دستیار سامانه» (worker/help-bot.js): فقط وقتی پنلِ کارکنان بعد از ورود assistant({role, api, name}) را داده باشد */
+    let asst = null, mode = "topics";
+    const chat = { msgs: null, busy: false, err: "", sure: false };
     const H = () => window.TP_HELP || { area: {}, topics: {} };
     const topics = () => H().topics || {};
     const areaOf = (k) => String(k || "").split(".")[0];
@@ -291,12 +294,87 @@
       keys.forEach((k) => { const g = areaOf(k); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); });
       return [...groups].map(([g, ks]) => `<h4>${esc(areaName(g))}</h4><div class="grp">${ks.map((k) => `<button type="button" class="${k === key ? "on" : ""}" data-help-go="${esc(k)}">${esc(T[k].title)}</button>`).join("")}</div>`).join("");
     }
+    const ASK_ICON = svg('<path d="M21 12a8.5 8.5 0 0 1-12.4 7.5L3 21l1.5-5.4A8.5 8.5 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 14h4.5"/>');
+    const askCard = () => (asst ? `<button type="button" class="tp-help-ask" data-help-ask><span class="ic" aria-hidden="true">${ASK_ICON}</span>
+      <span class="tx"><b>سؤالت را از دستیار سامانه بپرس</b><small>همکارِ هوشمندی که کلِ سامانه را می‌شناسد</small></span><span class="go" aria-hidden="true">‹</span></button>` : "");
     function paint(key) {
       const body = $(".tp-help-body", panel); if (!body) return;
+      if (mode === "chat" && asst) return paintChat(true);
       const [k, t] = find(key);
-      body.innerHTML = (t && !nrm(q) ? topicHtml(k, t) : "") + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
+      body.innerHTML = (!nrm(q) ? askCard() : "") + (t && !nrm(q) ? topicHtml(k, t) : "") + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
       body.scrollTop = 0;
     }
+    /* ---------- گفت‌وگو با دستیار ---------- */
+    const first = (n) => { const w = String(n || "").replace(/^(آقای|خانم|جناب)\s+/, "").split(/\s+/).filter(Boolean); while (w.length > 1 && /^(سید|سیده|میر|حاج|حاجی)$/.test(w[0])) w.shift(); return w[0] || ""; };
+    const fmt = (t) => esc(t).replace(/\*\*([^*\n]+)\*\*/g, "<b>$1</b>").replace(/\n/g, "<br>");
+    const SUGGEST = {
+      expert: ["این صفحه به چه کاری می‌آید؟", "استعلام را چطور برای تأمین‌کننده بفرستم؟", "جدول کمیسیون را چطور بسازم؟", "کارشناس هوشمند چه کاری انجام می‌دهد؟"],
+      manager: ["فایل روزانهٔ درخواست‌ها را چطور بارگذاری کنم؟", "ارجاع هوشمند چطور کار می‌کند؟", "رنگ کارت‌های میز ارجاع یعنی چه؟", "گزارش عملکرد کارشناسان را کجا ببینم؟"],
+      support: ["مناقصه را چطور بسازم و شروع کنم؟", "تیک «هوشمند» کارشناس یعنی چه؟", "تأیید کمیسیون را کجا بزنم؟", "اعلان‌های گوشی را چطور روشن کنم؟"],
+    };
+    function setMode(m) {
+      mode = m === "chat" && asst ? "chat" : "topics";
+      if (!panel) return;
+      panel.classList.toggle("chat", mode === "chat");
+      const h = $(".tp-help-panel > header", panel);
+      h.innerHTML = mode === "chat"
+        ? `<button class="tp-icon-btn" type="button" data-help-back aria-label="برگشت به راهنما" title="برگشت به راهنما">${svg('<path d="M9 6l6 6-6 6"/>')}</button>
+           <h2 id="tp-help-title">${ASK_ICON} دستیار سامانه</h2><span class="sp"></span>
+           <button class="tp-btn sm ghost" type="button" data-help-new title="پاک کردن این گفت‌وگو">${chat.sure ? "مطمئنی؟ پاک شود" : "گفت‌وگوی تازه"}</button>
+           <button class="tp-icon-btn" type="button" data-help-close aria-label="بستن" title="بستن (Esc)">${ICON.x}</button>`
+        : `<h2 id="tp-help-title">${ICON.help} راهنما</h2><button class="tp-icon-btn" type="button" data-help-close aria-label="بستن راهنما" title="بستن (Esc)">${ICON.x}</button>`;
+      $(".tp-help-search", panel).hidden = mode === "chat";
+      $(".tp-help-compose", panel).hidden = mode !== "chat";
+      if (mode === "chat") { paintChat(true); if (chat.msgs == null) loadChat(); setTimeout(() => { const t = $(".tp-help-compose textarea", panel); if (t && !MOBILE.matches) t.focus(); }, 60); }
+      else paint(cur);
+    }
+    function bubble(m) {
+      const me = m.who === "u";
+      return `<div class="tp-cm ${me ? "me" : "bot"}${m.err ? " err" : ""}">${me ? "" : `<img src="../assets/logo-new.jpg" alt="" aria-hidden="true">`}<div class="b">${fmt(m.text)}${m.retry ? `<button type="button" class="tp-btn xs" data-help-retry>دوباره بفرست</button>` : ""}</div></div>`;
+    }
+    function paintChat(toEnd) {
+      const body = $(".tp-help-body", panel); if (!body) return;
+      const n = first(asst && asst.name);
+      const hello = { who: "a", text: `سلام${n ? ` ${n} جان` : ""}! 👋 من دستیار سامانه‌ام. هر جای سامانه گیر کردی، نمی‌دونستی کاری رو کجا انجام بدی یا فکر کردی چیزی درست کار نمی‌کنه، همین‌جا بپرس؛ کل سامانه رو می‌شناسم.` };
+      const list = chat.msgs || [];
+      const sugg = !list.length && !chat.busy ? `<div class="tp-csugg">${(SUGGEST[asst && asst.role] || SUGGEST.expert).map((x) => `<button type="button" data-help-q="${esc(x)}">${esc(x)}</button>`).join("")}</div>` : "";
+      body.innerHTML = `<div class="tp-chatlog" aria-live="polite">${chat.msgs == null ? `<div class="tp-cload">${loader("")}</div>` : [hello, ...list].map(bubble).join("") + sugg
+        + (chat.busy ? `<div class="tp-cm bot typing"><img src="../assets/logo-new.jpg" alt=""><div class="b"><i></i><i></i><i></i></div></div>` : "")}</div>`;
+      if (toEnd) body.scrollTop = body.scrollHeight;
+    }
+    async function loadChat() {
+      try { const r = await asst.api(`/help/chat?role=${encodeURIComponent(asst.role)}`); chat.msgs = r.messages || []; if (r.name && !asst.name) asst.name = r.name; }
+      catch (e) { chat.msgs = [{ who: "a", text: `گفت‌وگوهای قبلی خوانده نشد: ${e.message || e}`, err: true }]; }
+      if (mode === "chat") paintChat(true);
+    }
+    async function send(text) {
+      const t = String(text || "").trim(); if (!t || chat.busy || !asst) return;
+      if (t.length > 1200) { chat.msgs = [...(chat.msgs || []), { who: "a", text: "پیامت کمی بلند است؛ لطفاً کوتاه‌ترش کن (حداکثر ۱۲۰۰ نویسه).", err: true }]; return paintChat(true); }
+      chat.msgs = (chat.msgs || []).filter((m) => !m.retry);
+      chat.msgs.push({ who: "u", text: t, pending: true }); chat.busy = true; chat.last = t; paintChat(true);
+      try {
+        const r = await asst.api("/help/chat", { role: asst.role, text: t, page: cur });
+        chat.msgs = chat.msgs.filter((m) => !m.pending).concat(r.messages || []);
+      } catch (e) {
+        chat.msgs = chat.msgs.filter((m) => !m.pending);
+        chat.msgs.push({ who: "u", text: t }, { who: "a", text: e.message || "پاسخ نیامد.", err: true, retry: true });
+      }
+      chat.busy = false; paintChat(true);
+    }
+    async function clearChat() {
+      if (!chat.sure) { chat.sure = true; setMode("chat"); setTimeout(() => { if (chat.sure) { chat.sure = false; if (mode === "chat") setMode("chat"); } }, 4000); return; }
+      chat.sure = false;
+      try { await asst.api("/help/chat/clear", { role: asst.role }); chat.msgs = []; } catch (e) { chat.msgs = [...(chat.msgs || []), { who: "a", text: e.message || "پاک نشد.", err: true }]; }
+      setMode("chat");
+    }
+    /* گوشی: کیبورد برگه را نپوشاند — پایین و ارتفاعِ برگه با viewportِ دیدنی */
+    function fitKeyboard() {
+      const vv = window.visualViewport, a = panel && $(".tp-help-panel", panel); if (!a) return;
+      if (!vv || !MOBILE.matches || mode !== "chat" || panel.hidden) { a.style.bottom = ""; a.style.height = ""; return; }
+      const kb = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      a.style.bottom = kb ? `${kb}px` : ""; a.style.height = kb ? `${Math.round(vv.height * 0.96)}px` : "";
+    }
+    if (window.visualViewport) { window.visualViewport.addEventListener("resize", fitKeyboard); window.visualViewport.addEventListener("scroll", fitKeyboard); }
     function open(key) {
       ls.set("tp.help.seen", "1"); if (fab) fab.classList.remove("pulse");
       const k = key || cur || "";
@@ -304,15 +382,31 @@
         panel = document.createElement("div"); panel.className = "tp-help";
         panel.innerHTML = `<div class="tp-help-scrim" data-help-close></div><aside class="tp-help-panel" role="dialog" aria-modal="true" aria-labelledby="tp-help-title">
           <header><h2 id="tp-help-title">${ICON.help} راهنما</h2><button class="tp-icon-btn" type="button" data-help-close aria-label="بستن راهنما" title="بستن (Esc)">${ICON.x}</button></header>
-          <div class="tp-help-search"><input type="search" placeholder="جستجو در راهنما…" aria-label="جستجو در راهنما"></div><div class="tp-help-body"></div></aside>`;
+          <div class="tp-help-search"><input type="search" placeholder="جستجو در راهنما…" aria-label="جستجو در راهنما"></div><div class="tp-help-body"></div>
+          <form class="tp-help-compose" hidden><textarea rows="1" placeholder="سؤالت را بنویس…" aria-label="پیام به دستیار سامانه" maxlength="1200"></textarea>
+            <button class="tp-help-send" type="submit" aria-label="فرستادن">${svg('<path d="M20 4L3 11l7 2 2 7 8-16z"/>')}</button></form></aside>`;
         panel.classList.toggle("right", !!(fab && fab.classList.contains("right")));
         document.body.appendChild(panel);
-        panel.addEventListener("click", (e) => { if (e.target.closest("[data-help-close]")) close(); const g = e.target.closest("[data-help-go]"); if (g) { q = ""; $("input", panel).value = ""; paint(g.dataset.helpGo); } });
+        panel.addEventListener("click", (e) => {
+          if (e.target.closest("[data-help-close]")) return close();
+          const g = e.target.closest("[data-help-go]"); if (g) { q = ""; $("input", panel).value = ""; paint(g.dataset.helpGo); return; }
+          if (e.target.closest("[data-help-ask]")) return setMode("chat");
+          if (e.target.closest("[data-help-back]")) { chat.sure = false; return setMode("topics"); }
+          if (e.target.closest("[data-help-new]")) return clearChat();
+          const sq = e.target.closest("[data-help-q]"); if (sq) return send(sq.dataset.helpQ);
+          if (e.target.closest("[data-help-retry]")) { const t = chat.last; chat.msgs = (chat.msgs || []).filter((m) => !m.retry); if (chat.msgs.length && chat.msgs[chat.msgs.length - 1].who === "u") chat.msgs.pop(); return send(t); }
+        });
+        const form = $(".tp-help-compose", panel), ta = $("textarea", form);
+        const grow = () => { ta.style.height = "auto"; ta.style.height = `${Math.min(ta.scrollHeight, 140)}px`; };
+        ta.addEventListener("input", grow);
+        ta.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); form.requestSubmit ? form.requestSubmit() : form.dispatchEvent(new Event("submit")); } });
+        ta.addEventListener("focus", () => setTimeout(fitKeyboard, 250));
+        form.addEventListener("submit", (e) => { e.preventDefault(); const t = ta.value; if (!t.trim() || chat.busy) return; ta.value = ""; grow(); send(t); });
         $("input", panel).addEventListener("input", (e) => { q = e.target.value; paint(cur); });
         panel.addEventListener("keydown", (e) => {
           if (e.key === "Escape") { e.preventDefault(); close(); return; }
           if (e.key !== "Tab") return;
-          const f = $$("button, input, [href]", panel).filter((x) => !x.disabled && x.offsetParent !== null);
+          const f = $$("button, input, textarea, [href]", panel).filter((x) => !x.disabled && x.offsetParent !== null);
           if (!f.length) return;
           if (e.shiftKey && document.activeElement === f[0]) { e.preventDefault(); f[f.length - 1].focus(); }
           else if (!e.shiftKey && document.activeElement === f[f.length - 1]) { e.preventDefault(); f[0].focus(); }
@@ -320,14 +414,14 @@
       }
       lastFocus = document.activeElement;
       panel.hidden = false; q = ""; $("input", panel).value = "";
-      paint(k);
+      setMode(key ? "topics" : mode);
       if (fab) fab.setAttribute("aria-expanded", "true");
       if (window.matchMedia("(max-width: 640px)").matches) document.body.style.overflow = "hidden";
       setTimeout(() => { const b = $("[data-help-close].tp-icon-btn", panel); if (b) b.focus(); }, 30);
     }
     function close() {
       if (!panel || panel.hidden) return;
-      panel.hidden = true; document.body.style.overflow = "";
+      panel.hidden = true; document.body.style.overflow = ""; chat.sure = false; fitKeyboard();
       if (fab) fab.setAttribute("aria-expanded", "false");
       if (lastFocus && lastFocus.focus) try { lastFocus.focus(); } catch (_) { /* بی‌اهمیت */ }
     }
@@ -339,7 +433,15 @@
       e.preventDefault(); if (panel && !panel.hidden) close(); else open();
     });
     /** set(key, { fab: false (بی دکمهٔ شناور — صفحه دکمهٔ «؟» خودش را دارد)، side: "right" (وقتی گوشی سمت چپ است) }) */
-    return { set(key, o) { cur = key || ""; mountFab(); fab.hidden = !!(o && o.fab === false); const right = !!(o && o.side === "right"); fab.classList.toggle("right", right); if (panel) panel.classList.toggle("right", right); if (panel && !panel.hidden) paint(cur); }, open, close, current: () => cur };
+    /** assistant({role, api(path, body), name}) بعد از ورودِ کارکنان؛ null در خروج */
+    function assistant(o) {
+      const same = asst && o && asst.role === o.role && asst.name === (o.name || null);
+      if (!same) { chat.msgs = null; chat.busy = false; }
+      asst = o ? { role: o.role, api: o.api, name: o.name || null } : null;
+      if (!asst && mode === "chat") mode = "topics";
+      if (panel && !panel.hidden && !same) setMode(mode);
+    }
+    return { set(key, o) { cur = key || ""; mountFab(); fab.hidden = !!(o && o.fab === false); const right = !!(o && o.side === "right"); fab.classList.toggle("right", right); if (panel) panel.classList.toggle("right", right); if (panel && !panel.hidden && mode !== "chat") paint(cur); }, open, close, current: () => cur, assistant };
   })();
   /** دکمهٔ «؟» کنار بخش‌های پیچیده */
   const info = (key, title) => `<button type="button" class="tp-info" data-help="${esc(key)}" title="${esc(title || "راهنما")}" aria-label="${esc(title || "راهنما")}">؟</button>`;

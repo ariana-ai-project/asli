@@ -1095,5 +1095,50 @@ body.has-foot .tp-pushcard { bottom: max(76px, env(safe-area-inset-bottom)); }
 
   /* ۹. برگه‌ها و پنجره‌ها: اسکرولِ داخلشان به صفحهٔ پشت نمی‌رسد، و تا بازند صفحهٔ پشت ثابت می‌ماند */
   .tp-help-panel, .tp-modal, .cmr-ov { overscroll-behavior: contain; }
-  html:has(.tp-help.open), html:has(.tp-modal-bg) { overflow: hidden; }
+  html:has(.tp-help:not([hidden])), html:has(.tp-modal-bg) { overflow: hidden; }
 }
+
+/* ============================================================
+   «دستیار سامانه» در کشوی راهنما (ui.js: TP.ui.help.assistant؛ سرور worker/help-bot.js)
+   ============================================================ */
+.tp-help-ask { width: 100%; display: flex; align-items: center; gap: 12px; margin: 6px 0 14px; padding: 12px 14px; border-radius: 18px; cursor: pointer; text-align: start; font: inherit; color: inherit;
+  border: 1px solid rgba(120, 165, 255, 0.45); background: linear-gradient(135deg, rgba(47, 111, 228, 0.28), rgba(106, 75, 216, 0.18)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18), 0 10px 26px -18px rgba(47, 111, 228, 0.9); transition: transform .2s var(--ui-ease, ease), box-shadow .2s; }
+.tp-help-ask:hover { transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.22), 0 14px 30px -16px rgba(47, 111, 228, 1); }
+:root[data-theme="light"] .tp-help-ask { background: linear-gradient(135deg, rgba(47, 111, 228, 0.14), rgba(106, 75, 216, 0.1)); border-color: rgba(47, 111, 228, 0.35); }
+.tp-help-ask .ic { width: 40px; height: 40px; flex-shrink: 0; border-radius: 13px; display: grid; place-items: center; color: #fff; background: var(--ui-fab-bg); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.4); }
+.tp-help-ask .ic svg { width: 22px; height: 22px; }
+.tp-help-ask .tx { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.tp-help-ask .tx b { font-size: .95rem; line-height: 1.6; }
+.tp-help-ask .tx small { font-size: .78rem; opacity: .78; line-height: 1.6; }
+.tp-help-ask .go { font-size: 1.4rem; opacity: .6; }
+
+.tp-help.chat .tp-help-panel > header h2 { flex: 0 1 auto; min-width: 0; white-space: nowrap; }
+.tp-help.chat .tp-help-panel > header .sp { flex: 1; }
+.tp-help.chat .tp-help-body { padding-bottom: 10px; }
+.tp-chatlog { display: flex; flex-direction: column; gap: 10px; padding: 4px 0 6px; }
+.tp-cload { padding: 30px 0; }
+.tp-cm { display: flex; align-items: flex-end; gap: 8px; max-width: 100%; }
+.tp-cm.me { flex-direction: row-reverse; }
+.tp-cm img { width: 28px; height: 28px; border-radius: 50%; flex-shrink: 0; background: #fff; object-fit: cover; box-shadow: 0 2px 6px -2px rgba(0, 0, 0, 0.5); }
+.tp-cm .b { max-width: 84%; padding: 9px 13px; border-radius: 18px; font-size: .92rem; line-height: 1.85; overflow-wrap: anywhere; }
+.tp-cm.bot .b { background: rgba(255, 255, 255, 0.07); border: 1px solid var(--ui-card-edge); border-end-start-radius: 6px; }
+.tp-cm.me .b { background: linear-gradient(135deg, #2f6fe4, #2456c4); color: #fff; border-end-end-radius: 6px; box-shadow: 0 6px 16px -10px rgba(47, 111, 228, 0.9); }
+:root[data-theme="light"] .tp-cm.bot .b { background: #fff; border-color: rgba(30, 60, 120, 0.12); }
+.tp-cm.err .b { border-color: rgba(229, 72, 77, 0.5); background: rgba(229, 72, 77, 0.1); }
+.tp-cm .b .tp-btn { margin-top: 8px; display: inline-flex; }
+.tp-cm.typing .b { display: inline-flex; gap: 5px; align-items: center; padding: 12px 14px; }
+.tp-cm.typing .b i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; opacity: .35; animation: tpDot 1.2s infinite ease-in-out; }
+.tp-cm.typing .b i:nth-child(2) { animation-delay: .15s; } .tp-cm.typing .b i:nth-child(3) { animation-delay: .3s; }
+@keyframes tpDot { 0%, 80%, 100% { opacity: .25; transform: translateY(0); } 40% { opacity: .9; transform: translateY(-3px); } }
+.tp-csugg { display: flex; flex-wrap: wrap; gap: 8px; margin: 2px 36px 0 0; }
+.tp-csugg button { border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); color: var(--tp-fg); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: .82rem; cursor: pointer; text-align: start; line-height: 1.6; }
+.tp-csugg button:hover { border-color: var(--tp-accent); }
+.tp-help-compose { display: flex; gap: 8px; align-items: flex-end; padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); border-top: 1px solid var(--tp-line); }
+.tp-help-compose[hidden] { display: none; }
+.tp-help-compose textarea { flex: 1; min-height: 44px; max-height: 140px; resize: none; border-radius: 16px; padding: 10px 14px; font: inherit; font-size: .95rem; line-height: 1.6; color: inherit;
+  border: 1px solid var(--tp-line-2); background: rgba(3, 8, 20, 0.35); outline: none; }
+.tp-help-compose textarea:focus { border-color: var(--tp-accent); }
+:root[data-theme="light"] .tp-help-compose textarea { background: #fff; }
+.tp-help-send { width: 44px; height: 44px; flex-shrink: 0; border-radius: 50%; border: 0; display: grid; place-items: center; color: #fff; background: var(--ui-fab-bg); cursor: pointer; box-shadow: 0 8px 18px -10px rgba(47, 111, 228, 0.9); }
+.tp-help-send svg { width: 20px; height: 20px; transform: scaleX(-1); }
+@media (prefers-reduced-motion: reduce) { .tp-cm.typing .b i { animation: none; opacity: .5; } .tp-help-ask { transition: none; } }
