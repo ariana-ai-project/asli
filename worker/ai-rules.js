@@ -12,6 +12,9 @@
  * قیمت کل = همان قیمت واحد × مقدارِ همان پیشنهاد (یا مقدارِ درخواست)، و مقدار = مقدارِ درخواستِ همان قلم به واحدِ خودش.
  * بازه‌ها شاملِ «از» و بی «تا»اند ([از، تا))؛ «تا»ی خالی یعنی بی سقف.
  *
+ * از مهر ۱۴۰۵ (گزارشِ مالک) همین حد نگهبانِ «تولید جدول کمیسیون»ِ کارشناس (پنل و بات، bundle.js:commissionGuard) و
+ * ستونِ «استعلام n/حد»ِ تبِ «تأیید کمیسیون» پشتیبانی هم هست (itemNeeds) — دیگر دو عددِ جدا برای دو مسیر نیست.
+ *
  * ذخیره در جدول settings با کلیدی بیرون از DEFAULTS (settingsFromRows به پنل‌های دیگر نمی‌دهدش).
  */
 import { HttpError } from "./http.js";
@@ -117,6 +120,43 @@ export const ruleText = (d, r) => `${DIM_FA[d]} ${range({ dim: d, from: r.from, 
 
 const skey = (s) => T(s).replace(/\s+/g, " ").toLowerCase();
 
+/** حالتِ پیشنهادهای سنجیدنی در مکاتبات (همان coverOf) */
+const LINE_OK = "l.state IN ('submitted','approved','proforma','final')";
+
+/**
+ * حداقلِ استعلامِ هر قلم برای «تولید جدول کمیسیون» — یک قاعده برای کارشناس (پنل و بات)، کارشناس هوشمند و تبِ «تأیید
+ * کمیسیون»ِ پشتیبانی (مهر ۱۴۰۵، گزارشِ مالک: پنل پشتیبانی حداقلِ استعلام را در مسیرِ جدول کمیسیون نداشت). بیشینهٔ حدِ پایهٔ
+ * مدیر و بازه‌های پشتیبانی؛ وقتی هیچ بازه‌ای نیست کوئری نمی‌زند. items: [{id, qty}] از ارجاع‌های aids.
+ * خروجی Map(itemId → {need, why, ruled}) — ruled یعنی بازه‌ای حد را از پایه بالاتر برده.
+ */
+export async function itemNeeds(env, aids, items, base, rules) {
+  const R = rules || await getRules(env);
+  const b = Math.max(1, Math.round(Number(base) || 1));
+  const out = new Map();
+  if (!ruleCount(R) || !items.length) {
+    for (const i of items) out.set(i.id, { need: b, why: whyText({ base: b }), ruled: false });
+    return out;
+  }
+  const ids = JSON.stringify([...new Set(aids.map(Number).filter(Boolean))]);
+  const [qr, lr] = await env.DB.batch([
+    env.DB.prepare("SELECT item_id, qty, price FROM quotes WHERE assignment_id IN (SELECT value FROM json_each(?)) AND price>0").bind(ids),
+    env.DB.prepare(`SELECT l.item_id, l.qty, l.price FROM sp_threads t JOIN sp_lines l ON l.thread_id=t.id
+      WHERE t.assignment_id IN (SELECT value FROM json_each(?)) AND l.price>0 AND ${LINE_OK}`).bind(ids),
+  ]);
+  const offers = new Map();
+  for (const o of [...(qr.results || []), ...(lr.results || [])]) {
+    if (!offers.has(o.item_id)) offers.set(o.item_id, []);
+    offers.get(o.item_id).push({ price: Number(o.price), qty: o.qty });
+  }
+  for (const i of items) {
+    const n = needFor(R, b, { qty: i.qty, offers: offers.get(i.id) || [] });
+    out.set(i.id, { need: n.need, why: whyText(n), ruled: n.need > b });
+  }
+  return out;
+}
+/** شمارِ بازه‌های قواعد — برای نوارِ «حداقل استعلام» پنل‌ها */
+export function ruleCount(R) { return DIMS.reduce((s, d) => s + ((R && R[d]) || []).length, 0); }
+
 /**
  * پوششِ اقلامِ بازِ یک ارجاع: برای هر قلم حداقلِ لازم (needFor) و شمارِ تأمین‌کنندگانِ مختلف با خطِ «ثبت موقت + تأیید نهایی»
  * (have). پیشنهادهای سنجیدنی: خط‌های استعلامِ قیمت‌دار و اعلام‌های تأمین‌کنندگان در مکاتبات (بی ردشده‌ها و پیش‌نویس‌ها).
@@ -126,7 +166,7 @@ export async function coverOf(env, assignmentId, rules, base) {
     env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no, id").bind(assignmentId),
     env.DB.prepare("SELECT item_id, supplier_name, qty, price, saved, final FROM quotes WHERE assignment_id=?").bind(assignmentId),
     env.DB.prepare(`SELECT l.item_id, l.qty, l.price FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
-      WHERE t.assignment_id=? AND l.price>0 AND l.state IN ('submitted','approved','proforma','final')`).bind(assignmentId),
+      WHERE t.assignment_id=? AND l.price>0 AND ${LINE_OK}`).bind(assignmentId),
   ]);
   const quotes = qr.results || [], lines = lr.results || [];
   return (ir.results || []).map((i) => {

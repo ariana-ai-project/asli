@@ -1785,17 +1785,21 @@
       <div class="tp-field" style="flex:1;min-width:240px"><b>محل پروژه</b><input class="tp-input" data-h="site" value="${esc(r.head_site == null ? r.party : r.head_site)}" style="width:100%"></div>
       <span class="dim" style="font-size:.8rem">این سه فیلد در سرآیند فرم کمیسیون چاپ می‌شوند.</span></div>`;
   }
+  /* حداقلِ استعلامِ هر قلم از سرور (پایهٔ مدیر + قواعدِ پنل پشتیبانی برای اقلامِ گران یا پرمقدار — همان نگهبانِ «تولید جدول») */
   function guardCheck() {
-    const need = settings().minSuppliers || 1, miss = [];
-    openItems().forEach((it) => { const n = S.d.quotes.filter((q) => q.saved && q.item_id === it.id).length; if (n < need) miss.push({ t: it.title, n }); });
-    return { miss, need, fin: S.d.quotes.filter((q) => q.final && q.saved).length };
+    const N = S.d.need || {}, need = N.base || settings().minSuppliers || 1, by = N.items || {}, miss = [];
+    openItems().forEach((it) => {
+      const n = S.d.quotes.filter((q) => q.saved && q.item_id === it.id).length, x = by[it.id] || {}, k = x.need || need;
+      if (n < k) miss.push({ t: it.title, n, k, why: x.ruled ? x.why : "" });
+    });
+    return { miss, need, ruled: Object.values(by).some((x) => x.ruled), fin: S.d.quotes.filter((q) => q.final && q.saved).length };
   }
   function vGuard() {
     const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
     if (aiOwned()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
-      ${g.miss.length ? `<div style="color:#fca5a5">مدیر حداقل <b>${g.need}</b> استعلام برای هر قلم باز را الزامی کرده. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${g.need})`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز حداقل ${g.need} استعلام دارند.</div>`}</div></div>`;
+      ${g.miss.length ? `<div style="color:#fca5a5">هر قلمِ باز باید به حداقل استعلامش برسد: پایهٔ مدیر <b>${g.need}</b>${g.ruled ? "، و برای اقلامِ گران‌تر یا پرمقدارتر بیشتر (قواعدِ پنل پشتیبانی)" : ""}. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
   }
 
   /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ----------

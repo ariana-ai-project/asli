@@ -17,6 +17,7 @@ import { managerCode } from "./settings.js";
 import { queueStmt } from "./queue.js";
 import { pushStmt, EXPERT } from "./push.js";
 import { threadRow, threadOut, lineOut, bundleOut, msgOut, msgFor, FILE_LABELS } from "./sp-core.js";
+import { getRules, itemNeeds, ruleCount } from "./ai-rules.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -506,7 +507,11 @@ export async function commissionList(env, url, settings) {
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=i.request_id
     WHERE ${conds.join(" AND ")}
     ORDER BY (a.commission_at IS NULL), a.commission_at DESC, r.date DESC, i.request_id, i.line_no LIMIT 600`).bind(...args).all()).results || [];
-  return { scope, min: (settings && settings.minSuppliers) || 1, items: rows };
+  /* حداقلِ استعلامِ هر قلم (پایهٔ مدیر + قواعدِ همین پنل) — همان که «تولید جدول کمیسیون»ِ کارشناس را باز می‌کند */
+  const base = Math.max(1, Number(settings && settings.minSuppliers) || 1), rules = await getRules(env);
+  const nd = await itemNeeds(env, rows.map((r) => r.aid), rows, base, rules);
+  for (const r of rows) { const x = nd.get(r.id); r.need = x.need; r.why = x.why; }
+  return { scope, min: base, rules: ruleCount(rules), items: rows };
 }
 
 /**

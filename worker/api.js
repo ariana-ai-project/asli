@@ -24,7 +24,7 @@ import { transcribe, writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings, settingsFromRows, managerCode, managerCodeStmt } from "./settings.js";
-import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
+import { bundleData, readiness, commissionGuard, recordCommission, missingText } from "./bundle.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { historyStatus, itemHistory, supplierBuys, itemSeries, ratesWithShares } from "./history.js";
@@ -50,7 +50,7 @@ import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
-import { getRules, coverOf } from "./ai-rules.js";
+import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
@@ -1503,7 +1503,12 @@ async function assignmentDetail(env, aid, who) {
   }
   /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
   for (const i of items) delete i.pick_json;
-  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings: await settingsFor(env, a.expert_id), ai };
+  const settings = await settingsFor(env, a.expert_id);
+  /* حداقلِ استعلامِ هر قلمِ باز برای «تولید جدول کمیسیون» (پایهٔ مدیر + قواعدِ پشتیبانی؛ همان نگهبانِ سرور) */
+  const base = Math.max(1, Number(settings.minSuppliers) || 1);
+  const nd = await itemNeeds(env, [aid], open, base);
+  const need = { base, items: Object.fromEntries([...nd].map(([id, x]) => [id, x])) };
+  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings, ai, need };
 }
 
 /* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
@@ -1620,7 +1625,7 @@ async function commission(env, ex, aid) {
   /* همان نگهبانی که بات هم دارد (bundle.js) */
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
-  if (g.missing.length) throw new HttpError(`مدیر حداقل ${g.need} استعلام برای هر قلم را الزامی کرده.`, 422, { missing: g.missing, need: g.need });
+  if (g.missing.length) throw new HttpError(`هر قلم باید به حداقل استعلامش برسد؛ کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
   /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود؛ عکسِ جدول هم ثبت می‌شود */
   const no = await recordCommission(env, aid, { expertId: ex.id, channel: "panel" });
   await env.DB.batch([ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid, commission_no: no })]);

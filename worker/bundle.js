@@ -16,6 +16,7 @@ import { commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
 import { jStr, fmtFa } from "./time.js";
 import { commissionRecordStmts } from "./records.js";
+import { itemNeeds } from "./ai-rules.js";
 
 /** همهٔ داده‌های لازم برای برگه‌ها، با یک بار خواندن از دیتابیس */
 export async function bundleData(env, aid, settings, company) {
@@ -78,19 +79,28 @@ export async function buildFiles(d, letterBytes) {
 
 /**
  * نگهبان جدول کمیسیون — یک قاعده برای پنل و بات: دست‌کم یک «تأیید نهایی»، و برای
- * هر قلمِ باز دست‌کم به تعدادِ «حداقل تأمین‌کننده»ی مدیر استعلامِ ثبت‌موقت‌شده.
+ * هر قلمِ باز دست‌کم به تعدادِ «حداقل استعلام»ِ همان قلم استعلامِ ثبت‌موقت‌شده: حدِ پایهٔ مدیر
+ * («حداقل تأمین‌کننده»)، و برای اقلامی که در بازه‌های قواعدِ پشتیبانی می‌افتند بیشتر (ai-rules.js:itemNeeds).
+ * need = حدِ پایه؛ هر قلمِ کم: {title, n, need, why}.
  */
 export async function commissionGuard(env, aid, settings) {
   const need = Math.max(1, Number(settings && settings.minSuppliers) || 1);
   const [items, counts, fin] = await Promise.all([
-    env.DB.prepare("SELECT id, title FROM items WHERE assignment_id=? AND state='open'").bind(aid).all(),
+    env.DB.prepare("SELECT id, title, qty FROM items WHERE assignment_id=? AND state='open'").bind(aid).all(),
     env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 GROUP BY item_id").bind(aid).all(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(aid).first(),
   ]);
   const byItem = new Map((counts.results || []).map((c) => [c.item_id, c.n]));
-  const missing = (items.results || []).filter((i) => (byItem.get(i.id) || 0) < need).map((i) => ({ title: i.title, n: byItem.get(i.id) || 0 }));
+  const its = items.results || [];
+  const needs = await itemNeeds(env, [aid], its, need);
+  const missing = its.map((i) => ({ i, n: byItem.get(i.id) || 0, nd: needs.get(i.id) }))
+    .filter((x) => x.n < x.nd.need).map((x) => ({ title: x.i.title, n: x.n, need: x.nd.need, why: x.nd.why }));
   return { need, missing, finals: (fin && fin.n) || 0 };
 }
+/** «… (۱ از ۳)، …» — اقلامِ کم برای پیام‌های خطا */
+const faD = (n) => String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
+export const missingText = (missing, max = 3) => missing.slice(0, max).map((m) => `${m.title} (${faD(m.n)} از ${faD(m.need)})`).join("، ")
+  + (missing.length > max ? ` و ${faD(missing.length - max)} قلمِ دیگر` : "");
 
 /**
  * ثبتِ «جدول کمیسیون ساخته شد» + شمارهٔ ترتیبی فرم.

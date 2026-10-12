@@ -67,7 +67,7 @@
     codes: null, codesOpen: false, codesErr: "",
     th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null, thStick: false,
     log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null, lfOpen: false,
-    cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1,
+    cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1, cmRuleN: 0, cmRuleOpen: false,
     /* کارشناس هوشمند (فاز ۲): فهرستِ کارشناسان با تیکِ هوشمند/دستی، و داشبوردِ یک کارشناس (expert-ai.js) */
     ai: null, aiErr: "", aiLoading: false, aiEx: null,
     /* فاز ۳: قواعدِ «حداقلِ استعلام» (زیرنمای تبِ کارشناس هوشمند) و تحویل‌های کارشناس هوشمند */
@@ -689,7 +689,7 @@
     const qs = new URLSearchParams({ scope: S.cmF.scope });
     if (S.cmF.expert) qs.set("expert", S.cmF.expert);
     const seq = (S.cmSeq = (S.cmSeq || 0) + 1);
-    try { const r = await api("/commission?" + qs); if (seq !== S.cmSeq) return; S.cm = r.items || []; S.cmMin = r.min || 1; }
+    try { const r = await api("/commission?" + qs); if (seq !== S.cmSeq) return; S.cm = r.items || []; S.cmMin = r.min || 1; S.cmRuleN = r.rules || 0; }
     catch (e) { if (seq !== S.cmSeq) return; S.cmErr = e.message; }
     S.cmSel = new Set([...S.cmSel].filter((id) => (S.cm || []).some((i) => i.id === id)));
     S.cmLoading = false; render();
@@ -697,6 +697,22 @@
   const cmRows = () => (S.cm || []).filter((i) => !S.cmF.q || TP.hit(i.request_id, S.cmF.q) || TP.hit(i.title, S.cmF.q) || TP.hit(i.party, S.cmF.q) || TP.hit(i.final_sup, S.cmF.q));
   /* کارت برای هر ارجاع: اقلامش با برنده، قیمت و وضعیتِ تأیید؛ «🏆 نتیجه و تأیید» یک‌جا برای همان ارجاع (مهر ۱۴۰۵) */
   const CM_SCOPE = [["ready", "جدول کمیسیون ساخته شده"], ["open", "همهٔ اقلامِ باز"], ["ok", "تأییدشده‌ها"]];
+  const needOf = (x) => x.need || S.cmMin || 1;
+  /* مسیرِ جدول کمیسیونِ هر ارجاع: کدام گام انجام شده و قدمِ بعد با کیست */
+  function cmPath(its, a) {
+    const n = its.length, q = its.filter((x) => x.saved >= needOf(x)).length, f = its.filter((x) => x.finals > 0).length, ok = its.filter((x) => x.commission_ok).length;
+    const st = [["استعلام به حد", `${M(q)}/${M(n)}`, q === n], ["تأیید نهایی", `${M(f)}/${M(n)}`, f === n],
+      ["جدول کمیسیون", a.commission_no ? "ساخته شد" : "ساخته نشده", !!a.commission_no], ["نتیجه و تأیید", `${M(ok)}/${M(n)}`, ok === n], ["خاتمه", "کارشناس", false]];
+    const cur = st.findIndex((x) => !x[2]);
+    const next = !a.commission_no
+      ? (q < n ? ["کارشناس", `${M(n - q)} قلم هنوز به حداقل استعلام نرسیده؛ استعلامِ بیشتر از «💬 مکاتبات» یا «استعلامات».`]
+        : !f ? ["کارشناس", "برندهٔ هر قلم را «تأیید نهایی» کند و «تولید جدول کمیسیون» را بزند."]
+        : ["کارشناس", "«تولید جدول کمیسیون» را در تب «استعلامات» بزند (درخواستِ هوشمند را کارشناس هوشمند خودش می‌سازد)."])
+      : ok < n ? ["شما", "«🏆 نتیجه و تأیید»: برنده و علتِ هر قلم را ثبت کنید."]
+      : ["کارشناس", "«خاتمه» از منوی «⋯ اقدام‌ها»؛ با آن اقلام بسته می‌شوند."];
+    return `<ol class="sv-cmpath" aria-label="مسیرِ جدول کمیسیون">${st.map((x, i) => `<li class="${x[2] ? "done" : i === cur ? "cur" : ""}"><i>${x[2] ? "✓" : M(i + 1)}</i><b>${x[0]}</b><small class="num">${x[1]}</small></li>`).join("")}</ol>
+      <div class="sv-cmnext ${next[0] === "شما" ? "me" : ""}"><b>قدمِ بعد · ${next[0]}</b><span>${next[1]}</span></div>`;
+  }
   function cmCard(g, i) {
     const its = g.items, a = its[0], okN = its.filter((x) => x.commission_ok).length, allOk = okN === its.length;
     const picked = its.filter((x) => S.cmSel.has(x.id)).length;
@@ -706,8 +722,9 @@
         <span class="who">${avOf(exName(a.expert_id), "")}${esc(exName(a.expert_id))}</span>
         <span class="chip ${allOk ? "ok" : okN ? "info" : ""}" title="تأیید کمیسیون">🏆 ${M(okN)}/${M(its.length)}</span></header>
       <div class="rproj">${TP.ui.ICON.project}<span>${esc(a.party || "—")}</span>${a.commission_no ? `<button class="chip sv-cmno" data-cmprev="${a.aid}" title="پیش‌نمایشِ جدول کمیسیون — ${esc(fmtS(a.commission_at))}">TSA-PS-FO-${esc(a.commission_no)}</button>` : `<span class="chip">جدول کمیسیون ساخته نشده</span>`}</div>
+      ${cmPath(its, a)}
       <div class="sv-cmits">${its.map((x) => `<label class="sv-cmit ${x.commission_ok ? "ok" : ""}"><input type="checkbox" data-cpick="${x.id}" ${S.cmSel.has(x.id) ? "checked" : ""} aria-label="انتخابِ ${esc(x.title)}">
-          <span class="t"><b>${esc(x.title)}</b><small class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")} · ${M(x.saved)} استعلام${x.saved < S.cmMin ? ` <span class="chip warn" title="کمتر از حداقل استعلامِ مدیر (${M(S.cmMin)})">کم</span>` : ""}</small></span>
+          <span class="t"><b>${esc(x.title)}</b><small class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")} · <span class="chip ${x.saved >= needOf(x) ? "ok" : "warn"}" title="حداقلِ استعلامِ این قلم: ${esc(x.why || `پایهٔ مدیر ← ${M(needOf(x))}`)}">استعلام ${M(x.saved)}/${M(needOf(x))}</span></small></span>
           <span class="w">${x.cr_winner ? `<b title="برندهٔ ثبت‌شدهٔ کمیسیون">🏆 ${esc(x.cr_winner)}</b><small class="num">${x.cr_price == null ? "—" : M(x.cr_price)} ریال</small>`
             : x.finals ? `<b>${esc(x.final_sup)}</b><small class="num">${x.final_price == null ? "—" : M(x.final_price)} ریال · تأیید نهایی</small>` : `<span class="chip warn">تأیید نهایی ندارد</span>`}</span>
           <span class="s">${x.commission_ok ? `<span class="chip ok">✓ تأیید شد</span><button type="button" class="tp-btn xs danger" data-cone="${x.id}" data-ok="0">برداشتن</button>` : `<span class="chip">منتظر</span>`}</span></label>`).join("")}</div>
@@ -722,9 +739,14 @@
         <select class="tp-select" data-cf="expert" aria-label="کارشناس"><option value="">همهٔ کارشناسان</option>${expertOpts(S.cmF.expert)}</select>
         <input class="tp-input sv-q" data-fq="cm" value="${esc(S.cmF.q)}" placeholder="شماره، قلم، طرف مقابل یا تأمین‌کننده" aria-label="جستجو در اقلام">
         <span class="spacer"></span><span class="mg-count">${S.cm ? `<b>${M(rows.length)}</b> قلم در ${M(groups.length)} ارجاع` : ""}${S.cmLoading ? " · …" : ""}</span></div>`;
+    /* حداقلِ استعلام (گزارشِ مالک، مهر ۱۴۰۵): همان حدی که «تولید جدول کمیسیون»ِ کارشناس را باز می‌کند، و قواعدش همین‌جا */
+    h += `<div class="sv-cmrule"><span class="ic" aria-hidden="true">🎯</span><span class="t"><b>حداقل استعلام برای جدول کمیسیون</b>
+        <small>پایهٔ مدیر: <b class="num">${M(S.cmMin)}</b> استعلام برای هر قلم${S.cmRuleN ? ` · <b class="num">${M(S.cmRuleN)}</b> بازهٔ قیمت/مقدار برای اقلامِ گران‌تر` : " · بی بازهٔ قیمت"}</small></span>
+        <button type="button" class="tp-btn sm ${S.cmRuleOpen ? "primary" : ""}" data-cmrules aria-expanded="${S.cmRuleOpen ? "true" : "false"}">${TP.ui.ICON.settings} قواعد حداقل استعلام</button>${TP.ui.info("support.cm", "مسیر جدول کمیسیون")}</div>`;
+    if (S.cmRuleOpen) h += `<section class="tp-box sv-cmrules">${vRules()}</section>`;
     if (S.cmErr) h += `<div class="tp-note warn">${esc(S.cmErr)}</div>`;
     if (!S.cm) return h + (S.cmLoading ? `${TP.ui.loader()}` : "");
-    if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده.</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز</button>` : ""}</div>`;
+    if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده. جدول را کارشناس در تب «استعلامات» می‌سازد، وقتی هر قلم به حداقل استعلامش رسید و برنده‌ها «تأیید نهایی» شدند.</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز — هر درخواست کجای مسیر است؟</button>` : ""}</div>`;
     h += `<div class="sv-cmbar ${S.cmSel.size ? "on" : ""}"><button class="tp-btn sm" data-csel="${sel.length === rows.length ? "none" : "all"}">${sel.length === rows.length ? "لغو انتخاب" : `انتخاب همه (${M(rows.length)})`}</button>
         ${S.cmSel.size ? `<span class="dim">${M(sel.length)} قلم انتخاب شده</span><span class="spacer"></span>
         <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>🏆 نتیجه و تأییدِ ${M(nOn)} قلم</button>
@@ -743,10 +765,10 @@
   function cmResultQueue(aids) { if (aids.length) cmResult(aids[0], () => cmResultQueue(aids.slice(1))); }
   function cmSet(ids, ok) {
     const its = (S.cm || []).filter((i) => ids.includes(i.id));
-    const noFinal = its.filter((i) => !i.finals).length, few = its.filter((i) => i.saved < S.cmMin).length;
+    const noFinal = its.filter((i) => !i.finals).length, few = its.filter((i) => i.saved < needOf(i)).length;
     const body = ok
       ? `کمیسیونِ <b>${ids.length}</b> قلم تأیید شود؟<br>کارشناسِ هر درخواست در تلگرام خبردار می‌شود و می‌تواند «خاتمه» را بزند.`
-        + (noFinal ? `<br><br>⚠️ ${noFinal} قلم هنوز «تأیید نهایی» ندارد.` : "") + (few ? `<br>⚠️ ${few} قلم کمتر از حداقل استعلامِ مدیر (${S.cmMin}) دارد.` : "")
+        + (noFinal ? `<br><br>⚠️ ${noFinal} قلم هنوز «تأیید نهایی» ندارد.` : "") + (few ? `<br>⚠️ ${few} قلم هنوز به حداقل استعلامش نرسیده.` : "")
       : `تأیید کمیسیونِ <b>${ids.length}</b> قلم برداشته شود؟<br>کارشناس خبردار می‌شود و تا تأییدِ دوباره نمی‌تواند این اقلام را خاتمه بزند.`;
     TP.modal(ok ? "تأیید کمیسیون" : "برداشتن تأیید کمیسیون", body, async () => {
       try {
@@ -838,7 +860,8 @@
     try {
       const r = await api("/ai/rules", { method: "PUT", body: S.rulesDraft });
       S.rules.rules = r.rules; S.rulesDraft = draftOf(r.rules);
-      TP.modal("ذخیره شد", "قواعدِ حداقلِ استعلام ذخیره شد؛ کارهای در حالِ مذاکره همین حالا با آن سنجیده می‌شوند.", null, "باشد", "");
+      TP.modal("ذخیره شد", "قواعدِ حداقلِ استعلام ذخیره شد؛ «تولید جدول کمیسیون»ِ کارشناسان و کارهای در حالِ مذاکرهٔ کارشناس هوشمند همین حالا با آن سنجیده می‌شوند.", null, "باشد", "");
+      if (S.tab === "cm") loadCm();
     } catch (e) { S.rulesErr = e.message; }
     S.rulesBusy = false; render();
   }
@@ -848,6 +871,7 @@
     if (!S.rules || !S.rulesDraft) return h + `${TP.ui.loader()}`;
     const R = S.rulesDraft;
     const dims = S.rules.dims || [{ key: "unit", fa: "قیمت واحد", unit: "ریال" }, { key: "total", fa: "قیمت کل", unit: "ریال" }, { key: "qty", fa: "مقدار", unit: "به واحدِ خودِ قلم" }];
+    h += `<p class="dim" style="margin:10px 0 0">حدِ هر قلم بیشترینِ حدِ پایهٔ مدیر و بازه‌ای است که قلم در آن می‌افتد — برای «تولید جدول کمیسیون»ِ همهٔ کارشناسان و برای بستنِ مذاکرهٔ کارشناس هوشمند.</p>`;
     const inp = (d, i, k, w, ph) => `<input class="tp-input num" data-rr="${d}:${i}:${k}" value="${esc(R[d][i][k])}" inputmode="numeric" dir="ltr" style="width:${w}px" ${ph ? `placeholder="${ph}"` : ""}>`;
     h += dims.map((d) => `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">${esc(d.fa)} <span class="dim">(${esc(d.unit)})</span></h3>
       ${R[d.key].length ? `<table class="sup-tbl" style="width:auto"><thead><tr><th>از</th><th>تا</th><th>حداقلِ استعلام</th><th></th></tr></thead><tbody>
@@ -1393,6 +1417,7 @@
     if (d.lg !== undefined) { S.logF.g = d.lg; return loadLog(); }
     /* تأیید کمیسیون */
     if (d.cscope) { S.cmF.scope = d.cscope; S.cmSel.clear(); return loadCm(); }
+    if (d.cmrules !== undefined) { S.cmRuleOpen = !S.cmRuleOpen; if (S.cmRuleOpen && !S.rules) return loadRules(); return render(); }
     if (d.thOpen) { S.thF = { expert: "", rid: "", q: "" }; S.th = null; setTab("chat"); return openThread(Number(d.thOpen)); }
     if (d.thfClear !== undefined) { S.thF.rid = ""; return loadThreads(); }
     if (d.ridClear !== undefined) { S.rf.id = ""; return loadDesk(); }
@@ -1442,7 +1467,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-cmrules],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

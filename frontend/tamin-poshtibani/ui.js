@@ -298,12 +298,123 @@
     const ASK_ICON = svg('<path d="M21 12a8.5 8.5 0 0 1-12.4 7.5L3 21l1.5-5.4A8.5 8.5 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 14h4.5"/>');
     const askCard = () => (asst ? `<button type="button" class="tp-help-ask" data-help-ask><span class="ic" aria-hidden="true">${ASK_ICON}</span>
       <span class="tx"><b>سؤالت را از دستیار سامانه بپرس</b><small>همکارِ هوشمندی که کلِ سامانه را می‌شناسد</small></span><span class="go" aria-hidden="true">‹</span></button>` : "");
+
+    /* ---------- «🗺 نقشهٔ کار» (مهر ۱۴۰۵، خواستهٔ مالک): فلوچارتِ جریانِ کارِ هر صفحه زیرِ کارتِ دستیار ----------
+       داده در help-flows.js (window.TP_FLOWS) و با اولین بازشدنِ راهنما بار می‌شود تا صفحه‌ها سنگین نشوند. کارت یک پیش‌نمایشِ
+       کوچک از همان نمودار است؛ کلیکش نمودار را مثل یک تصویر وسطِ صفحه باز می‌کند (بزرگ‌نمایی، Esc، تمام‌صفحه روی گوشی). */
+    const FL = { data: null, wait: null, lb: null, zoom: 1, back: null, ov: "" };
+    const MAP_ICON = svg('<path d="M9 4 3 6.5V20l6-2.5 6 2.5 6-2.5V4l-6 2.5z"/><path d="M9 4v13.5M15 6.5V20"/>');
+    const EXPAND_ICON = svg('<path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/>');
+    const THUMB_W = 560;
+    function flowLoad() {
+      if (FL.data || FL.wait) return FL.wait || Promise.resolve(FL.data);
+      FL.wait = new Promise((res) => {
+        const sc = document.createElement("script"); sc.src = "help-flows.js?v=1"; sc.async = true;
+        sc.onload = () => { FL.data = window.TP_FLOWS || null; res(FL.data); };
+        sc.onerror = () => { FL.wait = null; sc.remove(); res(null); };
+        document.head.appendChild(sc);
+      });
+      return FL.wait;
+    }
+    /** نمودارِ همین کلید، یا نامِ مستعارش، یا نمودارِ بخشِ بالاتر (expert.terms ← expert.history) */
+    function flowOf(key) {
+      const D = FL.data; if (!D || !key) return null;
+      const F = D.flows || {}, A = D.alias || {}, p = String(key).split(".");
+      while (p.length) { const k = p.join("."); if (F[k]) return [k, F[k]]; if (A[k] && F[A[k]]) return [A[k], F[A[k]]]; p.pop(); }
+      return null;
+    }
+    const isStep = (n) => !n.k && !n.q;
+    function flowHtml(f) {
+      const W = (FL.data && FL.data.who) || {};
+      const main = f.s.filter(isStep), no = new Map(main.map((n, i) => [n, i + 1]));
+      const col = (w) => (w && W[w] ? ` style="--c:${W[w][1]}"` : "");
+      const who = (w) => (w && W[w] ? `<span class="fc-who"${col(w)}>${esc(W[w][0])}</span>` : "");
+      const tx = (n) => `<span class="fc-tx"><b>${esc(n.t)}</b>${n.d ? `<small>${esc(n.d)}</small>` : ""}</span>`;
+      const node = (n, top) => (n.k ? `<div class="fc-n fc-${n.k === "end" ? "end" : "start"}">${tx(n)}</div>`
+        : `<div class="fc-n fc-step"${col(n.w)}>${top && no.has(n) ? `<span class="fc-no">${fa(no.get(n))}</span>` : `<span class="fc-dot" aria-hidden="true"></span>`}${tx(n)}${who(n.w)}</div>`);
+      /* «ادامه»: نامِ همان گره‌ای که بعد از این تصمیم می‌آید — تا خطِ زیرِ تصمیم با شاخهٔ وسط اشتباه نشود */
+      const nextLabel = (x) => (!x ? "ادامه" : x.k === "end" ? `■ ${x.t}` : x.q ? `؟ ${x.q}` : no.has(x) ? `گام ${fa(no.get(x))} · ${x.t}` : x.t);
+      const go = (g, after) => (g === "end" ? `<div class="fc-go end">■ پایان</div>` : g === "next" ? `<div class="fc-go next">↓ ادامه<small>${esc(nextLabel(after))}</small></div>`
+        : typeof g === "number" ? `<div class="fc-go">↩ برو به گام ${fa(g)}<small>${esc((main[g - 1] || {}).t || "")}</small></div>` : `<div class="fc-go end">${esc(g)}</div>`);
+      const A = `<div class="fc-a" aria-hidden="true"></div>`, AD = `<div class="fc-a dash" aria-hidden="true"></div>`;
+      const dec = (n, after) => `<div class="fc-d"><div class="fc-q"><span class="fc-qi" aria-hidden="true">؟</span>${tx({ t: n.q, d: n.d })}</div>${A}
+        <div class="fc-brs" style="--n:${n.b.length}">${n.b.map((b) => `<div class="fc-br"><span class="fc-bl">${esc(b.l)}</span>${(b.s || []).length ? A + seq(b.s, false) : ""}${b.go != null ? A + go(b.go, after) : ""}</div>`).join("")}</div></div>`;
+      const seq = (arr, top) => arr.map((n, i) => (i ? (arr[i - 1].q ? AD : A) : "") + (n.q ? dec(n, arr[i + 1]) : node(n, top))).join("");
+      return `<div class="tp-fc">${seq(f.s, true)}</div>`;
+    }
+    function flowCard(key) {
+      if (!FL.data) return FL.wait ? `<div class="tp-flowcard wait" data-flow-wait aria-hidden="true"><span class="hd"><span class="ic">${MAP_ICON}</span><span class="tx"><b>نقشهٔ کارِ این صفحه</b><small>…</small></span></span><span class="thumb"></span></div>` : "";
+      const r = flowOf(key); if (!r) return "";
+      const [fk, f] = r, here = flowOf(cur), n = f.s.filter(isStep).length;
+      return `<div class="tp-flowcard" role="button" tabindex="0" data-help-flow="${esc(fk)}" aria-label="${esc(`نقشهٔ کار: ${f.t} — باز کردنِ نمودار`)}">
+        <span class="hd"><span class="ic" aria-hidden="true">${MAP_ICON}</span><span class="tx"><b>${here && here[0] === fk ? "نقشهٔ کارِ این صفحه" : "نقشهٔ کارِ این بخش"}</b><small>${esc(f.t)} · ${fa(n)} گام</small></span><span class="go" aria-hidden="true">${EXPAND_ICON}</span></span>
+        <span class="thumb" aria-hidden="true"><span class="in">${flowHtml(f)}</span></span></div>`;
+    }
+    function fitThumbs(root) {
+      root.querySelectorAll(".tp-flowcard .thumb").forEach((t) => { const w = t.clientWidth; if (w) t.style.setProperty("--s", String(Math.min(1, w / THUMB_W))); });
+    }
+    function flowOpen(fk) {
+      const f = FL.data && (FL.data.flows || {})[fk]; if (!f) return;
+      flowClose(true);
+      FL.back = document.activeElement; FL.zoom = 1; FL.ov = document.body.style.overflow;
+      const W = FL.data.who || {}, used = [];
+      const walk = (arr) => arr.forEach((n) => { if (n.w && W[n.w] && !used.includes(n.w)) used.push(n.w); (n.b || []).forEach((b) => walk(b.s || [])); });
+      walk(f.s);
+      const lb = document.createElement("div"); lb.className = "tp-flowlb";
+      lb.innerHTML = `<div class="tp-flowlb-scrim" data-flow-close></div>
+        <figure class="tp-flowlb-sheet" role="dialog" aria-modal="true" aria-labelledby="tp-flowlb-t">
+          <header><span class="ic" aria-hidden="true">${MAP_ICON}</span><div class="tt"><h2 id="tp-flowlb-t">${esc(f.t)}</h2>${f.d ? `<small>${esc(f.d)}</small>` : ""}</div>
+            <div class="zm" role="group" aria-label="بزرگ‌نمایی"><button type="button" data-flow-zoom="-1" aria-label="کوچک‌تر" title="کوچک‌تر">−</button><button type="button" class="pct" data-flow-zoom="0" aria-label="اندازهٔ اصلی" title="اندازهٔ اصلی">${fa(100)}٪</button><button type="button" data-flow-zoom="1" aria-label="بزرگ‌تر" title="بزرگ‌تر">+</button></div>
+            <button type="button" class="tp-icon-btn" data-flow-close aria-label="بستن نمودار" title="بستن (Esc)">${ICON.x}</button></header>
+          <div class="tp-flowlb-body"><div class="tp-fcbox">${flowHtml(f)}</div></div>
+          <figcaption class="tp-flowlb-legend">${used.map((w) => `<span class="fc-who"${` style="--c:${W[w][1]}"`}>${esc(W[w][0])}</span>`).join("")}
+            <span class="lg"><i class="q" aria-hidden="true">؟</i>تصمیم: هر شاخه یک مسیر</span><span class="lg">↩ برگشت به گام</span><span class="lg">■ پایان</span></figcaption></figure>`;
+      document.body.appendChild(lb); FL.lb = lb; document.body.style.overflow = "hidden";
+      lb.addEventListener("click", (e) => {
+        if (e.target.closest("[data-flow-close]")) return flowClose();
+        const z = e.target.closest("[data-flow-zoom]"); if (z) flowZoom(Number(z.dataset.flowZoom));
+      });
+      lb.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); flowClose(); return; }
+        if (e.key === "+" || e.key === "=") { e.preventDefault(); return flowZoom(1); }
+        if (e.key === "-") { e.preventDefault(); return flowZoom(-1); }
+        if (e.key !== "Tab") return;
+        const f2 = $$("button, [tabindex]", lb).filter((x) => !x.disabled && x.offsetParent !== null);
+        if (!f2.length) return;
+        if (e.shiftKey && document.activeElement === f2[0]) { e.preventDefault(); f2[f2.length - 1].focus(); }
+        else if (!e.shiftKey && document.activeElement === f2[f2.length - 1]) { e.preventDefault(); f2[0].focus(); }
+      });
+      setTimeout(() => { const b = $("[data-flow-close].tp-icon-btn", lb); if (b) b.focus(); }, 30);
+    }
+    const ZOOMS = [0.6, 0.75, 0.9, 1, 1.15, 1.3, 1.5, 1.75];
+    function flowZoom(d) {
+      if (!FL.lb) return;
+      const i = ZOOMS.indexOf(FL.zoom);
+      FL.zoom = d === 0 ? 1 : ZOOMS[Math.max(0, Math.min(ZOOMS.length - 1, (i < 0 ? 3 : i) + d))];
+      const box = $(".tp-fcbox", FL.lb); if (box) box.style.zoom = String(FL.zoom);
+      const p = $(".pct", FL.lb); if (p) p.textContent = `${fa(Math.round(FL.zoom * 100))}٪`;
+    }
+    function flowClose(quiet) {
+      if (!FL.lb) return;
+      FL.lb.remove(); FL.lb = null; document.body.style.overflow = FL.ov;
+      if (!quiet && FL.back && FL.back.focus) try { FL.back.focus(); } catch (_) { /* بی‌اهمیت */ }
+    }
     function paint(key) {
       const body = $(".tp-help-body", panel); if (!body) return;
       if (mode === "chat" && asst) return paintChat(true);
       const [k, t] = find(key);
-      body.innerHTML = (!nrm(q) ? askCard() : "") + (t && !nrm(q) ? topicHtml(k, t) : "") + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
+      body.innerHTML = (!nrm(q) ? askCard() + flowCard(k || key) : "") + (t && !nrm(q) ? topicHtml(k, t) : "") + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
+      body.dataset.flowKey = k || key || "";
+      fitThumbs(body);
       body.scrollTop = 0;
+    }
+    /* help-flows.js تازه رسید: فقط جای کارتِ «در حالِ آمدن» عوض می‌شود (اسکرول و بقیهٔ کشو دست نمی‌خورد) */
+    function flowArrived() {
+      const body = panel && $(".tp-help-body", panel), w = body && $("[data-flow-wait]", body);
+      if (!w) return;
+      const h = flowCard(body.dataset.flowKey || cur);
+      if (!h) { w.remove(); return; }
+      w.insertAdjacentHTML("afterend", h); w.remove(); fitThumbs(body);
     }
     /* ---------- گفت‌وگو با دستیار ---------- */
     const first = (n) => { const w = String(n || "").replace(/^(آقای|خانم|جناب)\s+/, "").split(/\s+/).filter(Boolean); while (w.length > 1 && /^(سید|سیده|میر|حاج|حاجی)$/.test(w[0])) w.shift(); return w[0] || ""; };
@@ -313,7 +424,8 @@
       manager: ["فایل روزانهٔ درخواست‌ها را چطور بارگذاری کنم؟", "ارجاع هوشمند چطور کار می‌کند؟", "رنگ کارت‌های میز ارجاع یعنی چه؟", "گزارش عملکرد کارشناسان را کجا ببینم؟"],
       support: ["مناقصه را چطور بسازم و شروع کنم؟", "تیک «هوشمند» کارشناس یعنی چه؟", "تأیید کمیسیون را کجا بزنم؟", "اعلان‌های گوشی را چطور روشن کنم؟"],
     };
-    function setMode(m) {
+    /* k: موضوعی که باید نشان داده شود (دکمهٔ «؟» کنارِ هر بخش)؛ بی آن، موضوعِ همین صفحه */
+    function setMode(m, k) {
       mode = m === "chat" && asst ? "chat" : "topics";
       if (!panel) return;
       panel.classList.toggle("chat", mode === "chat");
@@ -327,7 +439,7 @@
       $(".tp-help-search", panel).hidden = mode === "chat";
       $(".tp-help-compose", panel).hidden = mode !== "chat";
       if (mode === "chat") { paintChat(true); if (chat.msgs == null) loadChat(); setTimeout(() => { const t = $(".tp-help-compose textarea", panel); if (t && !MOBILE.matches) t.focus(); }, 60); }
-      else paint(cur);
+      else paint(k || cur);
     }
     function bubble(m) {
       const me = m.who === "u";
@@ -392,6 +504,7 @@
           if (e.target.closest("[data-help-close]")) return close();
           const g = e.target.closest("[data-help-go]"); if (g) { q = ""; $("input", panel).value = ""; paint(g.dataset.helpGo); return; }
           if (e.target.closest("[data-help-ask]")) return setMode("chat");
+          const fl = e.target.closest("[data-help-flow]"); if (fl) return flowOpen(fl.dataset.helpFlow);
           if (e.target.closest("[data-help-back]")) { chat.sure = false; return setMode("topics"); }
           if (e.target.closest("[data-help-new]")) return clearChat();
           const sq = e.target.closest("[data-help-q]"); if (sq) return send(sq.dataset.helpQ);
@@ -406,6 +519,7 @@
         $("input", panel).addEventListener("input", (e) => { q = e.target.value; paint(cur); });
         panel.addEventListener("keydown", (e) => {
           if (e.key === "Escape") { e.preventDefault(); close(); return; }
+          if ((e.key === "Enter" || e.key === " ") && e.target.matches && e.target.matches("[data-help-flow]")) { e.preventDefault(); flowOpen(e.target.dataset.helpFlow); return; }
           if (e.key !== "Tab") return;
           const f = $$("button, input, textarea, [href]", panel).filter((x) => !x.disabled && x.offsetParent !== null);
           if (!f.length) return;
@@ -415,7 +529,8 @@
       }
       lastFocus = document.activeElement;
       panel.hidden = false; q = ""; $("input", panel).value = "";
-      setMode(key ? "topics" : mode);
+      if (!FL.data) flowLoad().then(flowArrived);
+      setMode(key ? "topics" : mode, k);
       if (fab) fab.setAttribute("aria-expanded", "true");
       if (window.matchMedia("(max-width: 640px)").matches) document.body.style.overflow = "hidden";
       setTimeout(() => { const b = $("[data-help-close].tp-icon-btn", panel); if (b) b.focus(); }, 30);
@@ -431,8 +546,10 @@
     document.addEventListener("keydown", (e) => {
       if (e.key !== "?" || e.ctrlKey || e.metaKey || e.altKey) return;
       const t = e.target; if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+      if (FL.lb) return;
       e.preventDefault(); if (panel && !panel.hidden) close(); else open();
     });
+    window.addEventListener("resize", () => { if (panel && !panel.hidden) fitThumbs(panel); });
     /** set(key, { fab: false (بی دکمهٔ شناور — صفحه دکمهٔ «؟» خودش را دارد)، side: "right" (وقتی گوشی سمت چپ است) }) */
     /** assistant({role, api(path, body), name}) بعد از ورودِ کارکنان؛ null در خروج */
     function assistant(o) {
@@ -455,7 +572,7 @@
     const idle = () => {
       const a = document.activeElement;
       if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return false;
-      if ($(".tp-modal-bg, .tp-menu.open, .tp-help:not([hidden]), .chart-bg, .jdp, .fpop")) return false;
+      if ($(".tp-modal-bg, .tp-menu.open, .tp-help:not([hidden]), .tp-flowlb, .chart-bg, .jdp, .fpop")) return false;
       return true;
     };
     const tick = async () => {

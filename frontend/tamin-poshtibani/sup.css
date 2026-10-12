@@ -179,7 +179,36 @@
 .sv-cm > footer .tp-btn svg { width: 15px; height: 15px; vertical-align: -3px; }
 :root[data-theme="light"] .sv-cmit { background: rgba(255, 255, 255, 0.55); }
 :root[data-theme="light"] .sv-cmit.ok .t b { color: #15803d; }
+/* حداقلِ استعلام و مسیرِ جدول کمیسیون (مهر ۱۴۰۵) */
+.sv-cmrule { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin: 10px 18px 0; padding: 10px 14px; border-radius: 16px; background: var(--ui-card); border: 1px solid var(--ui-card-edge); box-shadow: inset 0 1px 0 var(--ui-card-hl); }
+.sv-cmrule .ic { font-size: 1.25rem; line-height: 1; }
+.sv-cmrule .t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 200px; line-height: 1.45; }
+.sv-cmrule .t small { color: var(--tp-muted); font-size: .8rem; }
+.sv-cmrule .tp-btn svg { width: 15px; height: 15px; vertical-align: -3px; }
+.sv-cmrules { margin: 10px 18px 0; padding: 4px 16px 14px; }
+.sv-cmpath { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }
+.sv-cmpath li { position: relative; display: flex; flex-direction: column; align-items: center; gap: 2px; padding: 6px 2px 4px; text-align: center; min-width: 0; }
+.sv-cmpath li:not(:last-child)::after { content: ""; position: absolute; top: 17px; inset-inline-start: calc(50% + 14px); inset-inline-end: calc(-50% + 14px); height: 2px; border-radius: 2px; background: var(--ui-card-edge); }
+.sv-cmpath li.done:not(:last-child)::after { background: rgba(34, 197, 94, 0.6); }
+.sv-cmpath i { position: relative; z-index: 1; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-style: normal; font-size: .74rem; font-weight: 800; background: rgba(255, 255, 255, 0.06); border: 1.5px solid var(--ui-card-edge); color: var(--tp-muted); }
+.sv-cmpath li.done i { background: rgba(34, 197, 94, 0.18); border-color: rgba(34, 197, 94, 0.7); color: #6ee7b7; }
+.sv-cmpath li.cur i { background: rgba(79, 140, 255, 0.2); border-color: var(--tp-accent); color: #cfe0ff; box-shadow: 0 0 0 4px rgba(79, 140, 255, 0.14); }
+.sv-cmpath b { font-size: .72rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.sv-cmpath small { font-size: .68rem; color: var(--tp-muted); white-space: nowrap; }
+.sv-cmpath li:not(.done):not(.cur) b { color: var(--tp-muted); }
+.sv-cmnext { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; padding: 7px 12px; border-radius: 12px; font-size: .82rem; line-height: 1.55; background: rgba(79, 140, 255, 0.08); border: 1px dashed rgba(120, 170, 255, 0.4); }
+.sv-cmnext b { white-space: nowrap; color: #bcd6ff; }
+.sv-cmnext.me { background: rgba(242, 194, 48, 0.1); border-color: rgba(242, 194, 48, 0.5); }
+.sv-cmnext.me b { color: #fcd34d; }
+:root[data-theme="light"] .sv-cmpath i { background: rgba(255, 255, 255, 0.7); }
+:root[data-theme="light"] .sv-cmpath li.done i { color: #15803d; }
+:root[data-theme="light"] .sv-cmpath li.cur i { color: #1f5fd6; }
+:root[data-theme="light"] .sv-cmnext b { color: #1f5fd6; }
+:root[data-theme="light"] .sv-cmnext.me b { color: #8a6100; }
 @media (max-width: 640px) {
+  .sv-cmrule, .sv-cmrules { margin-inline: 10px; }
+  .sv-cmpath b { font-size: .64rem; white-space: normal; line-height: 1.35; }
+  .sv-cmpath small { font-size: .6rem; }
   .sv-cmit { grid-template-columns: auto minmax(0, 1fr); }
   .sv-cmit .w, .sv-cmit .s { grid-column: 2; justify-content: flex-start; }
   .sv-cms, .sv-cmbar { padding-inline: 10px; }
