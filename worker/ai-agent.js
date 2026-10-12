@@ -65,6 +65,7 @@ import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } fr
 import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary } from "./ai-picks.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { ratesForModel } from "./ai-rates.js";
+import { recordProp } from "./ai-feedback.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -1559,11 +1560,13 @@ export async function propDecide(env, ex, propId, b = {}) {
     if (!(p.due_at && p.due_at <= now() + 3000)) throw new HttpError("هنوز مهلتِ این پیشنهاد نرسیده است.", 409, { state: "pending", due_at: p.due_at });
     const { th, msgs } = await propSend(env, p, ex, "auto", "auto");
     await propDone(env, p, th, msgs, { state: "auto", by: "auto", ev: "ai_prop_auto", logBody: `⏱ کارشناس در مهلت پاسخ نداد و ${where} خودکار رفت.` });
+    await recordProp(env, p, { outcome: "auto" }).catch((e) => console.error("feedback prop", e && e.message));
     return { ok: true, state: "auto", msgs, thread_id: p.thread_id };
   }
   if (action === "ok") {
     const { th, msgs } = await propSend(env, p, ex, "ok", by);
     await propDone(env, p, th, msgs, { state: "ok", by, ev: "ai_prop_ok", logBody: `✅ کارشناس ${where} را فرستاد.` });
+    await recordProp(env, p, { outcome: "ok" }).catch((e) => console.error("feedback prop", e && e.message));
     return { ok: true, state: "ok", msgs, thread_id: p.thread_id };
   }
   if (action !== "no") throw new HttpError("تصمیم نامعتبر: «ارسال» یا «رد».");
@@ -1587,6 +1590,7 @@ export async function propDecide(env, ex, propId, b = {}) {
     + (p.kind === "final" ? ({ return: "؛ بسته با پیامِ کارشناس برگشت", reject: "؛ بسته رد شد", keep: "؛ بسته فعلاً ماند و تصمیمش با کارشناس است" }[r.bundle] || "") : "")
     + (r.text ? (p.kind === "final" && r.bundle !== "keep" ? "" : "؛ پیامِ خودِ کارشناس رفت") : "؛ هیچ پیامی نرفت") + ".";
   await propDone(env, p, th, msgs, { state: "no", by, ev: "ai_prop_no", logBody, extra: { reason: r.reason.slice(0, 300) } });
+  await recordProp(env, p, { outcome: "no", reason: r.reason, own: r.text || null, bundle: r.bundle }).catch((e) => console.error("feedback prop", e && e.message));
   return { ok: true, state: "no", msgs, thread_id: p.thread_id };
 }
 
@@ -1610,6 +1614,7 @@ export async function propsDue(env, { limit = 10 } = {}) {
       const { th, msgs } = await propSend(env, p, ex, "auto", "auto");
       const where = `${PROP_FA[p.kind] || p.kind}${p.bundle_id ? ` (بستهٔ ${faN(p.bundle_id)})` : ""}`;
       await propDone(env, p, th, msgs, { state: "auto", by: "auto", ev: "ai_prop_auto", logBody: `⏱ کارشناس در مهلت پاسخ نداد و ${where} خودکار رفت.` });
+      await recordProp(env, p, { outcome: "auto" }).catch((e) => console.error("feedback prop", e && e.message));
       sent++;
     } catch (e) {
       if (!(e instanceof HttpError && e.status === 409)) console.error("prop due", id, e && e.message);

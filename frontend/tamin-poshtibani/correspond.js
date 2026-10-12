@@ -34,6 +34,7 @@
     const cut = (x) => fa(String(Math.round(x * 10) / 10).replace(".", "٫"));
     if (v >= 1e9) return [cut(n / 1e9), "میلیارد ریال"];
     if (v >= 1e6) return [cut(n / 1e6), "میلیون ریال"];
+    if (v >= 1e4) return [cut(n / 1e3), "هزار ریال"];
     return [money(n), "ریال"];
   };
   const qty = (n) => (n == null ? "—" : fa(String(Math.round(Number(n) * 1000) / 1000)));
@@ -321,7 +322,7 @@
         <span class="sp-muted">📞 <span dir="ltr">${esc(th.phone || "—")}</span>${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست <b>${esc(th.request_id)}</b></span></div>${back}</div>
       <div class="sp-kpis">${TP.ui.stat({ label: "اقلام", value: fa(S.d.lines.length), icon: "box", sub: `${fa(priced)} با قیمت` })}
         ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}
-        ${TP.ui.stat({ label: "جمع پیشنهادها", value: sum ? short(sum)[0] : "—", icon: "file", sub: sum ? short(sum)[1] : "", attrs: sum ? `title="${money(sum)} ریال"` : "" })}</div>
+        ${TP.ui.stat({ label: "جمع پیشنهادها", value: sum ? short(sum)[0] : "—", icon: "file", tone: "sum", sub: sum ? short(sum)[1] : "", attrs: sum ? `title="${money(sum)} ریال"` : "" })}</div>
       ${termsLine(th.terms) ? `<div class="sp-terms">🧾 ${esc(termsLine(th.terms))}</div>` : ""}
       <div class="tp-seg sm sp-panes" role="tablist">${panes().map(([k, l, n]) => `<button type="button" role="tab" class="${pane === k ? "on" : ""}" aria-selected="${pane === k}" data-pane="${k}">${l}${n ? `<span class="cnt">${fa(n)}</span>` : ""}</button>`).join("")}</div>
       <div id="pane">${itemsPane(pane)}</div></div>`;

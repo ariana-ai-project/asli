@@ -309,7 +309,7 @@
     function flowLoad() {
       if (FL.data || FL.wait) return FL.wait || Promise.resolve(FL.data);
       FL.wait = new Promise((res) => {
-        const sc = document.createElement("script"); sc.src = "help-flows.js?v=2"; sc.async = true;
+        const sc = document.createElement("script"); sc.src = "help-flows.js?v=3"; sc.async = true;
         sc.onload = () => { FL.data = window.TP_FLOWS || null; res(FL.data); };
         sc.onerror = () => { FL.wait = null; sc.remove(); res(null); };
         document.head.appendChild(sc);

@@ -11,6 +11,7 @@
  * بی ایمپورت از ai-agent.js و sp-core.js، تا هر دو و api.js و decisions.js بی حلقه بخوانند.
  */
 import { HttpError } from "./http.js";
+import { recordRate } from "./ai-feedback.js";
 
 const now = () => Date.now();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -114,6 +115,8 @@ export async function rate(env, ex, b = {}) {
     env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_rate",
       JSON.stringify({ assignment_id: aid, thread_id: threadId, kind, ref, stars, ...(note ? { note: note.slice(0, 200) } : {}) })),
   ]);
+  /* بایگانیِ بازخورد با عکسِ زمینه — برای تحلیلِ پشتیبانی و آموزشِ مدل (ai-feedback.js)؛ شکستش امتیاز را باطل نمی‌کند */
+  await recordRate(env, { kind, ref, stars, note: note || null }).catch((e) => console.error("feedback rate", e && e.message));
   return { ok: true, kind, ref, stars, note: note || null, what, gaps: await rateGaps(env, aid) };
 }
 

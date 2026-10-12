@@ -58,6 +58,7 @@ import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { RATE_DDL, rateGaps } from "./ai-rates.js";
+import { FB_DDL, feedbackStats, feedbackOne, feedbackExport, feedbackSummary } from "./ai-feedback.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
@@ -217,6 +218,7 @@ ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
 ${CR_DDL.trim()}
 ${RATE_DDL.trim()}
+${FB_DDL.trim()}
 ${ALARM_DDL.trim()}
 ${TENDER_DDL.trim()}
 ${PUSH_DDL.trim()}
@@ -2056,6 +2058,11 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/assignments\/(\d+)\/sheet\/(request|commission)$/.exec(path)) && m === "GET") return sheetOut(env, int(mm[1]), mm[2], url);
       if ((mm = /^\/support\/assignments\/(\d+)\/letter\/file$/.exec(path)) && m === "GET") return letterFileOut(env, int(mm[1]));
       /* کارشناس هوشمند (فاز ۲): تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس و داشبوردِ کارهایش (worker/ai-agent.js:aiAdmin) */
+      /* ⭐ ارزیابیِ کارشناس هوشمند: امتیازها و نظرهای کارشناسان، خروجیِ آموزش و برایند (worker/ai-feedback.js) */
+      if (path === "/support/ai/feedback" && m === "GET") return json(await feedbackStats(env, url));
+      if (path === "/support/ai/feedback/export" && m === "GET") return await feedbackExport(env, url);
+      if (path === "/support/ai/feedback/summary" && m === "POST") return json(await feedbackSummary(env, await readJson(request)));
+      if ((mm = /^\/support\/ai\/feedback\/(\d+)$/.exec(path)) && m === "GET") return json(await feedbackOne(env, int(mm[1])));
       if (path.startsWith("/support/ai/")) return await aiAdmin(request, env, ctx, path.slice("/support/ai".length), m, url, { json, readJson, flush: (k) => flush(env, ctx, k) });
       /* «🧩 تغییرات اقلام» (طرح «خرید هوشمند» فاز ۱): برای هر قلم یک پیام — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه — و تاریخچه‌اش */
       if (path === "/support/changes" && m === "GET") return json(await changesList(env, url));
