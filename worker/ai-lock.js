@@ -19,8 +19,9 @@
  * بیرون از کار یا از نوعِ «مستقیم» برای کارشناس آزاد است (ai-modes.js:aiItemFree؛ جدول و نامه همچنان برای کلِ درخواست).
  * گام ۲: در روالِ تازه (ai_runs.data_json.flow=2، و هر کارِ هنوز ساخته‌نشده) بررسی سوابق، جستجوی هوشمند و ساختارِ قلمِ
  * سپرده‌نشده کارِ خودِ کارشناس است (ai-picks.js)؛ قلمِ سپرده‌شده را انجماد نگه می‌دارد.
- * گام ۴: گفت‌وگوی «👁 با تأیید» (قلمی از آن items.sup_on=1 دارد — worker/ai-supervise.js) برای کارشناس باز و فقط‌خواندنی است:
- * پیشنهادهای کارشناس هوشمند را تأیید یا رد می‌کند و پیام یا تصمیمِ خودش فقط با «❌ رد»ِ پیشنهاد می‌رود (sp-core.js:watchOnly).
+ * «⏱ با مهلت» (مهر ۱۴۰۵، جای «👁 حالت تأیید»؛ worker/ai-supervise.js): کارشناسی که در تنظیماتش «با مهلت» است (پیش‌فرض) گفت‌وگوهای
+ * کارشناس هوشمندش را باز و فقط‌خواندنی می‌بیند: پیشنهادها را «ارسال» یا «رد» می‌کند و پیام یا تصمیمِ خودش فقط با ردِ پیشنهاد می‌رود
+ * (sp-core.js:watchOnly)؛ «🤖 خودکار» یعنی بسته، مگر «🚨 پرسش از کارشناس».
  * بی ایمپورت از ماژول‌های دیگر، تا sp-core.js، sp-push.js، api.js و bot.js بی حلقهٔ ایمپورت بپرسند.
  */
 const now = () => Date.now();
@@ -34,9 +35,13 @@ export const aiRejected = (reviewJson) => (parse(reviewJson, {}) || {}).state ==
 export const AI_REJECTED_SQL = (r) => `COALESCE(json_extract(${r}.review_json,'$.state'),'')='rejected'`;
 
 export const AI_THREAD_MSG = "🤖 این گفت‌وگو دستِ کارشناس هوشمند است و تا وقتی از شما سؤالی نپرسیده بسته است. تیکِ «هوشمند / دستی» در پنل پشتیبانی است.";
-export const AI_WATCH_MSG = "👁 این گفت‌وگو را کارشناس هوشمند با تأییدِ شما پیش می‌برد: پیشنهادهایش را تأیید یا رد کنید؛ پیام یا تصمیمِ خودتان با «❌ رد»ِ همان پیشنهاد می‌رود.";
-/** گفت‌وگوی «👁 با تأیید» (گام ۴): دست‌کم یک قلمش حالت تأیید دارد — tid عبارتِ SQLِ شناسهٔ گفت‌وگو */
-export const AI_SUP_SQL = (tid) => `EXISTS (SELECT 1 FROM sp_lines sl JOIN items si ON si.id=sl.item_id WHERE sl.thread_id=${tid} AND si.sup_on=1)`;
+export const AI_WATCH_MSG = "⏱ این گفت‌وگو را کارشناس هوشمند پیش می‌برد و هر پیامش پیش از رفتن به شما نشان داده می‌شود: «✅ ارسال» همان لحظه می‌فرستد و «✏️ رد» با علت و پیامِ خودتان؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.";
+/**
+ * گفت‌وگوی «⏱ با مهلت»: کارشناسِ فعلیِ ارجاعِ این گفت‌وگو «🤖 خودکار» نیست (بی تنظیم = با مهلت) — tid عبارتِ SQLِ شناسهٔ گفت‌وگو.
+ * سه جست‌وجو با کلیدِ اصلی (گفت‌وگو، ارجاع، کارشناس)؛ در فهرست و نظرسنجیِ مکاتبات هم ارزان است.
+ */
+export const AI_SUP_SQL = (tid) => `EXISTS (SELECT 1 FROM sp_threads st JOIN assignments sa ON sa.id=st.assignment_id JOIN experts se ON se.id=sa.expert_id
+  WHERE st.id=${tid} AND COALESCE(json_extract(se.sup_json,'$.mode'),'timer')<>'auto')`;
 
 /** کارشناس «هوشمند» است؟ */
 export async function aiModeOn(env, expertId) {
@@ -72,7 +77,7 @@ export const aiResearchLocked = (owned) => !!owned && !!owned.run_id && owned.fl
 
 /**
  * گفت‌وگوی کارشناس هوشمند برای کارشناسِ فعلیِ آن: {ai, locked, ask, watch}. ai: کارشناس هوشمند بازش کرده؛ locked: کارشناس «هوشمند»
- * است و سؤالی منتظرِ او نیست؛ ask: {q, at} وقتی کارشناس هوشمند از او پرسیده؛ watch: «👁 با تأیید» — باز ولی فقط‌خواندنی (گام ۴).
+ * است و سؤالی منتظرِ او نیست؛ ask: {q, at} وقتی کارشناس هوشمند از او پرسیده؛ watch: «⏱ با مهلت» — باز ولی فقط‌خواندنی.
  */
 export async function aiThread(env, threadId, expertId) {
   const r = await env.DB.prepare(`SELECT x.state, x.ask_json, x.run_id, run.expert_id AS run_expert, run.review_json, g.mode, ${AI_SUP_SQL("x.thread_id")} AS sup

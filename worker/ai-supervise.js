@@ -1,70 +1,79 @@
 /**
- * «👁 حالت تأیید» — طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب گام ۴ (مهر ۱۴۰۵، پاسخ‌های ۱۹ و ۲۰)
+ * «⏱ مکاتباتِ کارشناس هوشمند با مهلت» — از مهر ۱۴۰۵ (درخواستِ مالک؛ جای «👁 حالت تأیید»ِ فاز ۴ب گام ۴)
  *
- * فقط برای نوع قلمی که پشتیبانی «مجازِ تأیید» کرده (ai-modes.js: supervise):
- *   • مدیر در ارجاع تیکِ «👁» را می‌زند (assignments.sup_on)؛ قلمِ مجاز با «🚀 شروع» حالت تأیید می‌گیرد (items.sup_on)، و قلمی که
- *     پیش‌تر سپرده شده همان لحظه.
- *   • بی اجازهٔ مدیر، کارشناس پیش از «🚀 شروع» با توضیح می‌خواهد (decisions.js: supervise) — همیشه با تأییدِ مدیر.
- *   • مدیر هر وقت خاموشش می‌کند، بی توضیح: پیشنهادهای معطل کنار می‌روند و کارشناس هوشمند همان کار را خودش انجام می‌دهد.
- * گفت‌وگویی که دست‌کم یک قلمِ «با تأیید» دارد (ai-lock.js: AI_SUP_SQL) برای کارشناس باز و فقط‌خواندنی است. کارشناس در تنظیماتش
- * (experts.sup_json) می‌گوید کدام کار تأیید بخواهد — پیامِ چت و تصمیمِ بسته — و همان کار «پیشنهاد» می‌شود (ai_props) و تا تأییدش
- * به تأمین‌کننده نمی‌رسد:
- *   • تأیید هیچ توضیحی نمی‌خواهد؛ پیام یا تصمیم همان لحظه می‌رود.
- *   • رد با توضیح است (به کارشناس هوشمند می‌رسد) و بعدش پیامِ خودِ کارشناس می‌رود یا هیچ؛ در ردِ «تأیید نهایی»، بسته با همان پیام
- *     برمی‌گردد، رد می‌شود یا فعلاً می‌ماند — و تصمیمِ آن بسته از آن پس با خودِ کارشناس است (manualBundles).
- *   • پیامِ تازهٔ تأمین‌کننده پیشنهادِ پاسخِ معطل را کنار می‌گذارد (stale) و کارشناس هوشمند پاسخِ تازه می‌نویسد.
- * دعوت، افزودنِ قلم به گفت‌وگو، یادداشت‌های درونی و «🚨 پرسش از کارشناس» تأیید نمی‌خواهند.
+ * وقتی پشتیبانی کارشناس هوشمندِ کارشناسی را روشن کرده، مکاتباتِ کارِ او قفلِ حالتِ هوشمند است و خودِ کارشناس (فقط او — نه تیکِ
+ * مدیر و نه اجازهٔ پشتیبانی برای نوعِ قلم) در «حساب من» یا صفحهٔ مکاتبات یکی از دو حالت را می‌گذارد (experts.sup_json):
+ *   • «⏱ با مهلت» (پیش‌فرض، ۱۰ دقیقه؛ ۱ تا ۶۰): هر پیامِ چت و هر تصمیمِ بستهٔ کارشناس هوشمند اول «پیشنهاد» می‌شود (ai_props با
+ *     due_at) و با شمارشِ معکوس در مکاتبات، اعلانِ گوشی و بات به کارشناس نشان داده می‌شود:
+ *       – «✅ ارسال» همان لحظه می‌فرستد، بی توضیح؛
+ *       – «✏️ رد» علت می‌خواهد (به کارشناس هوشمند می‌رسد) و پیامِ تازهٔ خودِ کارشناس — همان به‌جای پیشنهاد می‌رود؛ در ردِ «تأیید
+ *         نهایی»، بسته با پیامِ او برمی‌گردد، رد می‌شود یا فعلاً می‌ماند و تصمیمش از آن پس با خودِ اوست (manualBundles)؛
+ *       – بی‌پاسخ تا سرِ مهلت: بی بررسی خودکار می‌رود (state='auto'؛ Cronِ هر دقیقه یا خودِ صفحهٔ باز سرِ صفر — ai-agent.js:propsDue).
+ *   • «🤖 خودکار»: کارشناس هوشمند خودش مذاکره می‌کند و فقط وقتی جوابِ کارشناس لازم است «🚨 پرسش از کارشناس» می‌فرستد.
+ * پیامِ تازهٔ تأمین‌کننده پیشنهادِ پاسخِ معطل را کنار می‌گذارد (stale) و کارشناس هوشمند پاسخِ تازه می‌نویسد. دعوت، افزودنِ قلم به
+ * گفت‌وگو، یادداشت‌های درونی و «🚨 پرسش از کارشناس» پیشنهاد نمی‌شوند؛ «🚨 باز کردنِ اضطراری» (ai-takeover.js) سرِ جایش است.
+ * ستون‌های قدیمیِ assignments.sup_on و items.sup_on و «supervise»ِ نوعِ قلم دیگر خوانده نمی‌شوند.
  * بی ایمپورت از ai-agent.js و sp-core.js، تا sp-core.js، api.js و bot.js بی حلقهٔ ایمپورت بخوانند.
  */
 import { HttpError } from "./http.js";
-import { getModes } from "./ai-modes.js";
 import { AI_SUP_SQL } from "./ai-lock.js";
 
 const now = () => Date.now();
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
+const FA = "۰۱۲۳۴۵۶۷۸۹";
+const faN = (n) => String(n).replace(/\d/g, (d) => FA[+d]);
+const latin = (v) => String(v == null ? "" : v).replace(/[۰-۹]/g, (d) => FA.indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).trim();
 
-export const SUP_DEFAULT = { chat: false, bundle: true };
-export const SUP_FA = { chat: "پیامِ چت به تأمین‌کننده", bundle: "تصمیمِ بسته (تأیید نهایی، برگشت، رد)" };
+export const SUP_MIN = 1, SUP_MAX = 60;
+export const SUP_DEFAULT = { mode: "timer", minutes: 10 };
+export const SUP_MODES = ["timer", "auto"];
+export const SUP_FA = { timer: "⏱ با مهلت", auto: "🤖 خودکار" };
 export const PROP_FA = { reply: "💬 پاسخ", final: "🏁 تأیید نهایی", act: "🧾 تصمیمِ بسته" };
-export const PROP_STATE_FA = { pending: "منتظرِ شما", ok: "✅ تأیید شد", no: "❌ رد شد", stale: "کنار رفت — پیامِ تازهٔ تأمین‌کننده", off: "کنار رفت" };
+export const PROP_STATE_FA = { pending: "منتظرِ شما", ok: "✅ فرستادید", auto: "⏱ بی‌پاسخ ماند و خودکار رفت", no: "✏️ رد کردید", stale: "کنار رفت — پیامِ تازهٔ تأمین‌کننده", off: "کنار رفت" };
 /** ردِ «تأیید نهایی»: بسته با پیامِ کارشناس برمی‌گردد، رد می‌شود یا فعلاً می‌ماند */
 export const BUNDLE_ACTS = ["return", "reject", "keep"];
 
-/** تنظیماتِ «👁 حالت تأیید»ِ یک کارشناس (experts.sup_json) — هر کلیدِ نیامده همان پیش‌فرض */
+/** تنظیماتِ یک کارشناس (experts.sup_json): {mode, minutes} — قالبِ قدیمیِ {chat, bundle} یا هر چیزِ نامعتبر = پیش‌فرض */
 export function supCfg(raw) {
   const s = typeof raw === "string" ? parse(raw, {}) : raw && typeof raw === "object" ? raw : {};
-  return { chat: typeof s.chat === "boolean" ? s.chat : SUP_DEFAULT.chat, bundle: typeof s.bundle === "boolean" ? s.bundle : SUP_DEFAULT.bundle };
+  const m = Number(latin(s && s.minutes));
+  return { mode: SUP_MODES.includes(s && s.mode) ? s.mode : SUP_DEFAULT.mode, minutes: Number.isInteger(m) && m >= SUP_MIN && m <= SUP_MAX ? m : SUP_DEFAULT.minutes };
 }
 export async function getSup(env, expertId) {
   const r = await env.DB.prepare("SELECT sup_json FROM experts WHERE id=?").bind(expertId).first().catch(() => null);
   return supCfg(r && r.sup_json);
 }
+/** ذخیره با سنجش (۴۲۲ برای حالت یا دقیقهٔ نادرست)؛ کارهای پسِ ذخیره (مهلتِ تازهٔ پیشنهادهای معطل، رفتنِ همه با «خودکار») در api.js */
 export async function saveSup(env, expertId, body) {
-  const v = supCfg({ chat: !!(body && body.chat), bundle: !!(body && body.bundle) });
-  const t = now();
+  const mode = String((body && body.mode) || "").trim();
+  if (!SUP_MODES.includes(mode)) throw new HttpError("حالت باید «⏱ با مهلت» یا «🤖 خودکار» باشد.", 422);
+  const cur = await getSup(env, expertId);
+  let minutes = cur.minutes;
+  if (body && body.minutes != null && body.minutes !== "") {
+    minutes = Number(latin(body.minutes));
+    if (!Number.isInteger(minutes) || minutes < SUP_MIN || minutes > SUP_MAX) throw new HttpError(`مهلت عددی صحیح از ${faN(SUP_MIN)} تا ${faN(SUP_MAX)} دقیقه است.`, 422);
+  }
+  const v = { mode, minutes };
   await env.DB.batch([
     env.DB.prepare("UPDATE experts SET sup_json=? WHERE id=?").bind(JSON.stringify(v), expertId),
-    env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, `expert:${expertId}`, "ai_sup_cfg", JSON.stringify(v)),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(now(), `expert:${expertId}`, "ai_sup_cfg", JSON.stringify(v)),
   ]);
   return v;
 }
 
-/** حالتِ تأییدِ یک گفت‌وگو: {on, chat, bundle} — on: دست‌کم یک قلمش «با تأیید» است؛ chat و bundle از تنظیماتِ کارشناسِ فعلیِ ارجاع */
+/**
+ * حالتِ یک گفت‌وگو: {on, chat, bundle, minutes} — on یعنی کارشناسِ فعلیِ ارجاع «با مهلت» است (پیام‌ها و تصمیم‌ها پیشنهاد می‌شوند).
+ * فقط در مسیرهای کارشناس هوشمند صدا زده می‌شود؛ مالکیتِ گفت‌وگو را صدازننده سنجیده است.
+ */
 export async function supOfThread(env, threadId) {
   const r = await env.DB.prepare(`SELECT e.sup_json, ${AI_SUP_SQL("t.id")} AS sup FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id JOIN experts e ON e.id=a.expert_id
       WHERE t.id=?`).bind(threadId).first().catch(() => null);
-  if (!r || !r.sup) return { on: false, chat: false, bundle: false };
-  return { on: true, ...supCfg(r.sup_json) };
-}
-
-/** چند نوع قلم را پشتیبانی «مجازِ تأیید» کرده — بی هیچ، تیکِ «👁» مدیر و درخواستِ کارشناس معنا ندارد */
-export async function supHeads(env) {
-  const m = await getModes(env);
-  return Object.values(m.heads || {}).filter((h) => h && h.supervise).length;
+  if (!r || !r.sup) return { on: false, chat: false, bundle: false, minutes: 0 };
+  return { on: true, chat: true, bundle: true, minutes: supCfg(r.sup_json).minutes };
 }
 
 /**
- * بسته‌هایی از یک گفت‌وگوی «👁 با تأیید» که تصمیمشان با خودِ کارشناس است: کارشناس پیشنهادِ تصمیمِ کارشناس هوشمند را برای آن‌ها رد
+ * بسته‌هایی از یک گفت‌وگوی «⏱ با مهلت» که تصمیمشان با خودِ کارشناس است: کارشناس پیشنهادِ تصمیمِ کارشناس هوشمند را برای آن‌ها رد
  * کرده (ai_props با state='no'؛ بسته در bundle_id یا meta_json.bundles).
  */
 export async function manualBundles(env, threadId) {
@@ -87,14 +96,18 @@ export function propOut(p) {
   const meta = parse(p.meta_json, {}) || {};
   return { id: p.id, kind: p.kind, kind_fa: PROP_FA[p.kind] || p.kind, body: p.body || "", bundle_id: p.bundle_id || null, actions: meta.actions || [], why: meta.why || null,
     state: p.state, state_fa: PROP_STATE_FA[p.state] || p.state, reason: p.reason || null, own: p.own || null, bundle_act: meta.bundle_act || null,
-    created_at: p.created_at, decided_at: p.decided_at || null };
+    created_at: p.created_at, due_at: p.due_at || null, decided_at: p.decided_at || null, decided_by: p.decided_by || null };
 }
 
-/** بدنهٔ «رد»: توضیح اجباری؛ پیامِ خودِ کارشناس اختیاری (برای «↩️ برگشت» همان توضیحِ برگشت و اجباری) */
+/**
+ * بدنهٔ «رد»: علتِ اجباری (به کارشناس هوشمند می‌رسد)، و پیامِ تازهٔ خودِ کارشناس — برای پیشنهادی که پیام دارد (پاسخ، یا تصمیمِ
+ * بسته با پاسخ) اجباری است چون همان به‌جای پیامِ ردشده می‌رود. در «🏁 تأیید نهایی» پیام برای «↩️ برگشت» اجباری است.
+ */
 export function rejectBody(p, b) {
   const reason = String((b && b.reason) || "").trim().slice(0, 1000);
-  if (!reason) throw new HttpError("برای «❌ رد» توضیح بنویسید؛ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.", 422, { need_reason: true });
+  if (!reason) throw new HttpError("برای «✏️ رد» بنویسید چرا پیشنهاد را رد می‌کنید؛ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.", 422, { need_reason: true });
   const text = String((b && b.text) || "").trim().slice(0, 2900);
+  if (p.kind !== "final" && p.body && !text) throw new HttpError("پیامِ خودتان را بنویسید — به‌جای پیامِ ردشدهٔ کارشناس هوشمند همین برای تأمین‌کننده می‌رود.", 422, { need_text: true });
   const bundle = p.kind === "final" ? (BUNDLE_ACTS.includes(b && b.bundle) ? b.bundle : text ? "return" : "keep") : null;
   if (bundle === "return" && !text) throw new HttpError("برای «↩️ برگشت» پیامِ خودتان را بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.", 422, { need_text: true });
   return { reason, text, bundle };

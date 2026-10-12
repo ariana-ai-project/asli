@@ -48,7 +48,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
@@ -57,6 +57,7 @@ import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
+import { RATE_DDL, rateGaps } from "./ai-rates.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
@@ -66,7 +67,7 @@ import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tend
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
-import { getSup, saveSup, supHeads, SUP_FA } from "./ai-supervise.js";
+import { getSup, saveSup, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -215,6 +216,7 @@ ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
 ${USD_DDL.trim()}
 ${CR_DDL.trim()}
+${RATE_DDL.trim()}
 ${ALARM_DDL.trim()}
 ${TENDER_DDL.trim()}
 ${PUSH_DDL.trim()}
@@ -328,6 +330,8 @@ const COLUMN_MIGRATIONS = [
   ["items", "sup_at", "INTEGER"],
   ["items", "sup_by", "TEXT"],
   ["experts", "sup_json", "TEXT"],
+  /* «⏱ با مهلت» (مهر ۱۴۰۵): مهلتِ ارسالِ خودکارِ هر پیشنهاد (worker/ai-agent.js:propsDue) */
+  ["ai_props", "due_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -397,6 +401,8 @@ const READ_INDEXES = [
   "CREATE INDEX IF NOT EXISTS ix_sptg_phone ON sp_tg(phone_id)",
   "CREATE INDEX IF NOT EXISTS ix_splink_expert ON sp_links(expert_id)",
   "CREATE INDEX IF NOT EXISTS ix_aiprops_run ON ai_props(run_id, state)",
+  /* «⏱ با مهلت»: Cronِ هر دقیقه فقط پیشنهادهای معطلِ سررسیده را می‌خواند */
+  "CREATE INDEX IF NOT EXISTS ix_aiprops_due ON ai_props(due_at) WHERE state='pending'",
   "CREATE INDEX IF NOT EXISTS ix_aicalls_run ON ai_calls(run_id)",
   "CREATE INDEX IF NOT EXISTS ix_letters_expert ON letters(expert_id, id)",
   "CREATE INDEX IF NOT EXISTS ix_suppliers_name ON suppliers(name)",
@@ -825,10 +831,6 @@ async function importApply(env, body) {
    id     = جستجوی مستقیم یک شماره درخواست، خارج از بازه و فارغ از باز/بسته
    limit/offset = صفحه‌بندی برای بازه‌های بزرگ؛ total برای نمایش «n از m» برمی‌گردد
    scope  = open (پیش‌فرض: قلم باز دارد یا در ۳۰ روز اخیر ارسال شده) | all */
-const supHeadsOf = (rows) => {
-  const r = (rows || []).find((x) => x.key === "aiModes");
-  try { return Object.values(JSON.parse((r && r.value) || "{}").heads || {}).filter((h) => h && h.supervise === true).length; } catch (_) { return 0; }
-};
 async function desk(env, url) {
   const from = T(url.searchParams.get("from")), id = T(url.searchParams.get("id"));
   const scope = url.searchParams.get("scope") || "open";
@@ -875,8 +877,6 @@ async function desk(env, url) {
     experts: expertRows(expRes.results || []),
     settings: settingsFromRows(setRes.results || []),
     ai_experts: (aiRes.results || []).map((r) => r.expert_id),
-    /* فاز ۴ب گام ۴: نوع قلم‌هایی که پشتیبانی «مجازِ حالت تأیید» کرده — بی هیچ، تیکِ «👁» در میز مدیر نیست */
-    sup_heads: supHeadsOf(setRes.results),
     ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [], alarms: almRes.results || [] } : {}),
   };
   if (!reqs.length) return { requests: [], ...extra };
@@ -1239,55 +1239,6 @@ async function setAiTick(env, body) {
   return { ok: true, on, changed: true };
 }
 
-/**
- * فاز ۴ب گام ۴: تیکِ «👁 حالت تأیید»ِ مدیر روی ارجاع — روشن یا خاموش، بی توضیح (پاسخ ۲۰). روشن فقط وقتی کارشناس هوشمندِ کارشناس روشن
- * است، ارجاع «🤖 هوشمند» است و پشتیبانی دست‌کم یک نوع قلم را «مجازِ تأیید» کرده: قلمِ مجازِ سپرده‌شده همان لحظه حالت تأیید می‌گیرد و
- * بقیه با «🚀 شروع» (ai-agent.js:startItem). خاموش، حالت تأییدِ همهٔ اقلامِ ارجاع را برمی‌دارد — درخواستِ تأییدشدهٔ کارشناس هم —،
- * پیشنهادهای معطل کنار می‌روند و کارشناس هوشمند همان دورها را بی تأیید می‌زند.
- */
-async function setSupTick(env, body) {
-  const aid = int(body.assignment_id); if (!aid) throw new HttpError("assignment_id لازم است.");
-  const on = body.on !== false;
-  const a = await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, a.sup_on, e.telegram_chat, g.mode
-      FROM assignments a JOIN experts e ON e.id=a.expert_id LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?`).bind(aid).first();
-  if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
-  if (on) {
-    if (a.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ «حالت تأیید» معنا ندارد.", 409);
-    if (a.ai_on === 0) throw new HttpError("این ارجاع دستی است؛ اول تیکِ «🤖 هوشمند» را بزنید.", 409);
-    if (a.closed_at) throw new HttpError("این ارجاع بسته است.", 409);
-    if (!(await supHeads(env))) throw new HttpError("پشتیبانی هنوز هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است («🧭 حالت اقلام»ِ پنل پشتیبانی).", 409);
-  }
-  const its = (await env.DB.prepare("SELECT id, code, title, norm_json, ai_start_at, sup_on FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
-  const modes = await itemModes(env, its);
-  const ok = its.filter((i) => (modes.get(i.id) || {}).supervise);
-  const started = ok.filter((i) => i.ai_start_at && Number(i.sup_on) !== 1).map((i) => i.id);
-  const lit = its.filter((i) => Number(i.sup_on) === 1).length;
-  if ((Number(a.sup_on) === 1) === on && (on ? !started.length : !lit)) return { ok: true, on, changed: false, eligible: ok.length };
-  const t = now();
-  const stmts = [env.DB.prepare("UPDATE assignments SET sup_on=?, sup_set_at=? WHERE id=?").bind(on ? 1 : 0, t, aid)];
-  if (on) {
-    if (started.length) stmts.push(env.DB.prepare(`UPDATE items SET sup_on=1, sup_at=?, sup_by='manager' WHERE id IN (${started.map(() => "?").join(",")})`).bind(t, ...started));
-  } else {
-    stmts.push(env.DB.prepare("UPDATE items SET sup_on=0, sup_at=?, sup_by='manager' WHERE assignment_id=? AND sup_on=1").bind(t, aid),
-      /* گفت‌وگوهایی که پیشنهادِ معطل داشتند دوباره دورِ کارشناس هوشمند را می‌خورند — حالا بی تأیید؛ بعد پیشنهادها کنار می‌روند */
-      env.DB.prepare(`UPDATE ai_threads SET retry_at=? WHERE state NOT IN ('closed','ask') AND thread_id IN (SELECT p.thread_id FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id
-        WHERE t.assignment_id=? AND p.state='pending')`).bind(t, aid),
-      env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='manager' WHERE state='pending' AND thread_id IN (SELECT id FROM sp_threads WHERE assignment_id=?)").bind(t, aid),
-      env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE assignment_id=? AND finished_at IS NULL").bind(t, aid));
-  }
-  stmts.push(ev(env, "manager", "ai_sup", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, eligible: ok.length }));
-  if (a.dispatched_at && a.telegram_chat) {
-    stmts.push(queueStmt(env, `aisup:${aid}:${t}`, a.telegram_chat, on
-      ? `👁 <b>درخواست ${esc(a.request_id)} با «حالت تأیید» است</b>\n\nمدیر اجازه داد: در اقلامی که نوعشان مجاز است، کارشناس هوشمند هر کاری را که در «👁 حالت تأیید»ِ حسابتان «با تأیید» گذاشته‌اید، اول به شما پیشنهاد می‌کند — در مکاتبات و همین بات.`
-      : `🤖 <b>«حالت تأیید»ِ درخواست ${esc(a.request_id)} خاموش شد</b>\n\nمدیر «👁» را برداشت؛ کارشناس هوشمند از این پس بی تأیید پیش می‌رود و پیشنهادهای معطل کنار رفتند.`));
-  }
-  if (a.dispatched_at) stmts.push(pushStmt(env, `aisup:${aid}:${t}`, { role: "expert", uid: a.expert_id }, on
-    ? { title: `👁 درخواست ${a.request_id} با «حالت تأیید»`, body: "کارشناس هوشمند کارهای «با تأیید» را اول به شما پیشنهاد می‌کند.", url: "expert" }
-    : { title: `🤖 «حالت تأیید» درخواست ${a.request_id} خاموش شد`, body: "کارشناس هوشمند از این پس بی تأیید پیش می‌رود.", url: "expert" }));
-  await env.DB.batch(stmts);
-  return { ok: true, on, changed: true, eligible: ok.length };
-}
-
 /* ارسال: ساعت‌شمار شروع می‌شود + رویداد اعلان برای هر کارشناس */
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
@@ -1481,12 +1432,14 @@ async function assignmentDetail(env, aid, who) {
   ai.handoff = { total: open.length, ok: open.filter((i) => normConfirmed(i)).length, frozen: open.filter((i) => i.frozen_at).length, pending: !!(owned && !owned.run_id) };
   /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر */
   ai.on = a.ai_on !== 0; ai.note = a.ai_note || null;
-  /* گام ۴: تیکِ «👁»ِ مدیر و تنظیماتِ «حالت تأیید»ِ کارشناس (worker/ai-supervise.js) */
-  if (aiMode) ai.sup = { on: Number(a.sup_on) === 1, cfg: await getSup(env, a.expert_id) };
+  /* «⏱ با مهلت / 🤖 خودکار»ِ مکاتباتِ کارشناس هوشمند (worker/ai-supervise.js) */
+  if (aiMode) ai.sup = { cfg: await getSup(env, a.expert_id) };
+  /* ⭐ امتیازهای مانده به کارِ کارشناس هوشمند — «خاتمه» تا صفرشدنش معلق است (worker/ai-rates.js) */
+  if (aiMode) ai.rates = await rateGaps(env, aid);
   if (aiMode && open.length) {
     const modes = await itemModes(env, open);
     const idsOf = (act) => new Set(decisions.filter((d) => d.action === act).flatMap((d) => { try { return JSON.parse(d.payload_json || "{}").item_ids || []; } catch (_) { return []; } }));
-    const waiting = idsOf("manual"), supWait = idsOf("supervise");
+    const waiting = idsOf("manual");
     const inRun = new Set();
     if (owned && owned.run_id) {
       const r = await env.DB.prepare("SELECT data_json FROM ai_runs WHERE id=?").bind(owned.run_id).first();
@@ -1498,7 +1451,7 @@ async function assignmentDetail(env, aid, who) {
       let pk = null;
       try { const p = i.pick_json ? JSON.parse(i.pick_json) : null; if (p) { const L = p.list || []; pk = { n: L.length, on: L.filter((e) => e.on).length, go: L.filter((e) => e.on && e.go).length }; } } catch (_) { /* بی فهرست */ }
       return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id),
-        started_at: i.ai_start_at || null, pick: pk, sup_on: Number(i.sup_on) === 1, sup_wait: supWait.has(i.id) };
+        started_at: i.ai_start_at || null, pick: pk };
     });
   }
   /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
@@ -1972,11 +1925,14 @@ async function route(request, env, ctx) {
       delete r.code;
       return json(r);
     }
-    /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ کارشناس — کدام کارِ کارشناس هوشمند پیش از رفتن تأییدِ او را بخواهد (worker/ai-supervise.js) */
+    /* «⏱ با مهلت / 🤖 خودکار»ِ مکاتباتِ کارشناس هوشمند — فقط خودِ کارشناس (worker/ai-supervise.js). مهلتِ پیشنهادهای معطل با تنظیمِ
+       تازه از نو حساب می‌شود و «خودکار» همه را همین حالا می‌فرستد (ai-agent.js:propsRetime). */
     if (path === "/me/supervise" && (m === "GET" || m === "PUT")) {
       const ex = await requireExpert(request, env);
-      if (m === "GET") return json({ cfg: await getSup(env, ex.id), fa: SUP_FA, heads: await supHeads(env) });
-      return json({ ok: true, cfg: await saveSup(env, ex.id, await readJson(request)) });
+      if (m === "GET") return json({ cfg: await getSup(env, ex.id), fa: SUP_FA, min: SUP_MIN, max: SUP_MAX });
+      const cfg = await saveSup(env, ex.id, await readJson(request));
+      const sent = await propsRetime(env, ex.id, cfg);
+      return json({ ok: true, cfg, sent });
     }
     /* کارشناس کد ورود خودش را عوض می‌کند (صفحهٔ «حساب من»): کد فعلی لازم است */
     if (path === "/me/code" && m === "PUT") {
@@ -2185,7 +2141,6 @@ async function route(request, env, ctx) {
     if (path === "/assign" && m === "POST") { await requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { await requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/assign/ai" && m === "POST") { await requireManager(request, env); const r = await setAiTick(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
-    if (path === "/assign/sup" && m === "POST") { await requireManager(request, env); const r = await setSupTick(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
     if (path === "/dispatch" && m === "POST") { await requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { await requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { await requireManager(request, env); return json(await unassign(env, await readJson(request))); }
@@ -2278,7 +2233,9 @@ async function route(request, env, ctx) {
       const aid = int(mm[1]); await ownAssignment(env, ex, aid);
       const L = await env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? ORDER BY id DESC LIMIT 1").bind(aid).first();
       if (!L) return json({ letter: null, stt: !!env.ELEVENLABS_API_KEY });
-      return json({ letter: letterView(L), stt: !!env.ELEVENLABS_API_KEY });
+      /* ⭐ نامهٔ کارشناس هوشمند: امتیاز و نظرِ کارشناس (اجباری پیش از «خاتمه» — worker/ai-rates.js) */
+      const rt = await env.DB.prepare("SELECT stars, note FROM ai_rates WHERE kind='letter' AND ref=?").bind(L.id).first().catch(() => null);
+      return json({ letter: { ...letterView(L), rate: rt ? { stars: rt.stars, note: rt.note || null } : null }, stt: !!env.ELEVENLABS_API_KEY });
     }
     /* شروع (یا از نو شروع کردنِ) نامه — همان کاری که /nameh در بات می‌کند:
        نامهٔ نیمه‌کارهٔ قبلی لغو می‌شود تا صوتِ بعدی سراغ دو نامه نرود. */

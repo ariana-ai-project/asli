@@ -32,6 +32,8 @@ export async function takeoverThread(env, ctx, ex, th, reason0) {
     env.DB.prepare("UPDATE ai_threads SET state='human', lock_until=NULL, ask_json=json_set(COALESCE(ask_json,'{}'),'$.takeover',json_object('by',?,'at',?,'reason',?,'from',?)), updated_at=? WHERE thread_id=?")
       .bind(ex.id, t, reason, x.state, t, th.id),
     env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) VALUES (?,?,?,'takeover',?)").bind(x.run_id, th.id, t, `🚨 ${who} گفت‌وگو را اضطراری باز کرد: ${reason}`),
+    /* «⏱ با مهلت»: پیشنهادِ معطلِ همین گفت‌وگو سرِ مهلت نباید برود — گفت‌وگو حالا دستِ خودِ کارشناس است */
+    env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='takeover' WHERE thread_id=? AND state='pending'").bind(t, th.id),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_takeover", th.request_id,
       JSON.stringify({ assignment_id: th.assignment_id, thread_id: th.id, supplier: th.supplier_name, reason })),
   ]);

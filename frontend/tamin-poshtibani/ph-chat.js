@@ -93,6 +93,7 @@
   const GAP = 60 * 60e3, GROUP = 3 * 60e3;
   /**
    * o: { mine(m), rich(m) → html|null، ai(m) → bool (برچسبِ «کارشناس هوشمند» — فقط صفحهٔ کارشناس)، transcript (متنِ صوتی‌ها)،
+   *      rate(m) → {cls, html}|null (⭐ امتیازِ کارشناس به پیامِ متنیِ کارشناس هوشمند — فقط صفحهٔ کارشناس)،
    *      after: {msgId: html} (کارت‌های گذرای بات بعد از همان پیام؛ 0 = پیش از همه)، tail: html (ته فهرست)، empty }
    */
   function feed(list, o) {
@@ -118,7 +119,9 @@
         const body = k === "rich" ? o.rich(m)
           : k === "voice" ? voiceHtml(m, side, last, o)
             : `<div class="ph-b ${side}${ai ? " ai" : ""}${last ? " tail" : ""}${m.pending ? " sending" : ""}" title="${m.pending ? "در حال ارسال…" : hm(m.at)}">${esc(m.body)}</div>`;
-        h += `<div class="ph-row ${side}${first ? " first" : ""}">${cap}${body}${last ? `<div class="ph-meta">${m.pending ? "در حال ارسال…" : hm(m.at)}</div>` : ""}</div>`;
+        /* ⭐ امتیازِ کارشناس به پیامِ کارشناس هوشمند (فقط صفحهٔ مکاتباتِ کارشناس): {cls, html} — ستاره‌ها زیرِ حباب */
+        const rt = k === "text" && o.rate ? o.rate(m) : null;
+        h += `<div class="ph-row ${side}${first ? " first" : ""}${rt ? ` ${rt.cls}` : ""}"${rt ? ` data-rate-row="${m.id}"` : ""}>${cap}${body}${rt ? rt.html : ""}${last ? `<div class="ph-meta">${m.pending ? "در حال ارسال…" : hm(m.at)}</div>` : ""}</div>`;
       }
       if (after[m.id]) h += after[m.id];
     });

@@ -49,7 +49,7 @@ import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTempl
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
 import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone } from "./sp-core.js";
-import { pushMsgs as spPush } from "./sp-push.js";
+import { pushMsgs as spPush, appUrl as spAppUrl } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
 import { aiTick, propDecide } from "./ai-agent.js";
@@ -606,14 +606,15 @@ async function onFlowText(env, api, chat, ex, f, text) {
   if (f.kind === "tpl") return onTemplateText(env, api, chat, ex, f, d, text);
   /* «📨 ارسال» به تأمین‌کننده: شمارهٔ تازه یا برچسبِ شماره */
   if (f.kind === "spsend") return onSpSendText(env, api, chat, ex, f, d, text);
-  /* «👁 حالت تأیید»: ردِ پیشنهادِ کارشناس هوشمند — علت، بعد پیامِ خودِ کارشناس یا «-» */
+  /* «⏱ با مهلت»: ردِ پیشنهادِ کارشناس هوشمند — علت، بعد پیامِ تازهٔ خودِ کارشناس */
   if (f.kind === "prop") return onPropText(env, api, chat, ex, f, d, text);
   return { ok: true };
 }
 
 /**
- * ردِ پیشنهادِ کارشناس هوشمند از کارتِ بات (فاز ۴ب گام ۴): علتِ اجباری (به کارشناس هوشمند می‌رسد)؛ در «🏁 تأیید نهایی» سرنوشتِ بسته
- * با دکمه (pb:)؛ بعد پیامِ خودِ کارشناس برای تأمین‌کننده یا «-» برای هیچ — برای «↩️ برگشت» همان پیام اجباری است.
+ * ردِ پیشنهادِ کارشناس هوشمند از کارتِ بات («⏱ با مهلت»): علتِ اجباری (به کارشناس هوشمند می‌رسد)؛ در «🏁 تأیید نهایی» سرنوشتِ بسته با
+ * دکمه (pb:)؛ بعد پیامِ تازهٔ خودِ کارشناس — برای پیشنهادِ پیام‌دار و «↩️ برگشت» اجباری (همان به‌جای پیامِ ردشده می‌رود)، وگرنه «-»
+ * یعنی هیچ. تا رد ثبت نشده، مهلت جاری است و سرِ مهلت همان پیشنهاد خودکار می‌رود.
  */
 async function onPropText(env, api, chat, ex, f, d, text) {
   if (f.step === "need_reason") {
@@ -625,17 +626,19 @@ async function onPropText(env, api, chat, ex, f, d, text) {
       return { ok: true };
     }
     await spAsk(env, ex, f, d, "need_own");
-    await api.sendMessage(chat, "پیامِ خودتان برای تأمین‌کننده را بنویسید — به‌جای پیشنهادِ کارشناس هوشمند می‌رود — یا «-» برای هیچ پیامی.");
+    await api.sendMessage(chat, d.body ? "✏️ حالا پیامِ تازهٔ خودتان را برای تأمین‌کننده بنویسید — به‌جای پیامِ ردشدهٔ کارشناس هوشمند همین می‌رود."
+      : "پیامِ خودتان برای تأمین‌کننده را بنویسید، یا «-» برای هیچ پیامی.");
     return { ok: true };
   }
   if (f.step !== "need_own") return { ok: true };
   const own = text.trim() === "-" ? "" : text.slice(0, 2900);
   if (d.bundle === "return" && !own) { await api.sendMessage(chat, "برای «↩️ برگشت» پیامِ برگشت لازم است: بنویسید تأمین‌کننده چه چیزی را اصلاح کند."); return { ok: true }; }
+  if (d.body && d.kind !== "final" && !own) { await api.sendMessage(chat, "پیامِ خودتان لازم است — به‌جای پیامِ ردشده همین برای تأمین‌کننده می‌رود. متنش را بنویسید."); return { ok: true }; }
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
   try {
     await propDecide(env, ex, d.prop, { action: "no", reason: d.reason, text: own, bundle: d.bundle });
     const fate = d.kind !== "final" ? "" : { return: " بسته با پیامِ شما برای اصلاح برگشت.", reject: " بسته رد شد.", keep: " بسته فعلاً ماند؛ تصمیمش در مکاتبات با خودِ شماست." }[d.bundle] || "";
-    await api.sendMessage(chat, `❌ <b>پیشنهاد رد شد</b> و توضیحتان به کارشناس هوشمند رسید.${fate}${own && !(d.kind === "final" && d.bundle !== "keep") ? " پیامِ شما برای تأمین‌کننده رفت." : own ? "" : " هیچ پیامی نرفت."}`);
+    await api.sendMessage(chat, `✏️ <b>پیشنهاد رد شد</b> و توضیحتان به کارشناس هوشمند رسید.${fate}${own && !(d.kind === "final" && d.bundle !== "keep") ? " پیامِ شما برای تأمین‌کننده رفت." : own ? "" : " هیچ پیامی نرفت."}`);
   } catch (e) { await api.sendMessage(chat, `ردِ پیشنهاد ثبت نشد: ${esc(e.message)}`); }
   return { ok: true };
 }
@@ -3117,14 +3120,14 @@ async function onCallback(env, cq, apiIn) {
   const num = (i) => parseInt(parts[i], 10);
   const mid = cq.message && cq.message.message_id;
 
-  /* فاز ۴ب گام ۴ («👁 حالت تأیید»): کارتِ پیشنهادِ کارشناس هوشمند — prop:<id>:ok | prop:<id>:no */
+  /* «⏱ با مهلت»: کارتِ پیشنهادِ کارشناس هوشمند — prop:<id>:ok (ارسال همین حالا) | prop:<id>:no (رد و پیامِ خودم) */
   if (action === "prop") {
-    const pid = num(1), card = (cq.message && cq.message.text ? esc(cq.message.text) : "👁 پیشنهادِ کارشناس هوشمند");
+    const pid = num(1), card = (cq.message && cq.message.text ? esc(cq.message.text) : "⏱ پیشنهادِ کارشناس هوشمند");
     if (parts[2] === "ok") {
       try {
         await propDecide(env, ex, pid, { action: "ok" });
-        await ack("تأیید شد و رفت ✅");
-        if (mid) await api.editMessageText(chat, mid, `${card}\n\n<b>✅ تأیید شد و برای تأمین‌کننده رفت.</b>`).catch(() => {});
+        await ack("فرستاده شد ✅");
+        if (mid) await api.editMessageText(chat, mid, `${card}\n\n<b>✅ همین حالا برای تأمین‌کننده رفت.</b>`).catch(() => {});
       } catch (e) {
         await ack(String(e.message || "نشد").slice(0, 180), true);
         if (mid && e.status === 409) await api.editMessageText(chat, mid, `${card}\n\n<i>${esc(e.message)}</i>`).catch(() => {});
@@ -3132,14 +3135,17 @@ async function onCallback(env, cq, apiIn) {
       return { ok: true };
     }
     if (parts[2] === "no") {
-      const p = await env.DB.prepare(`SELECT p.id, p.kind, p.state FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id JOIN assignments a ON a.id=t.assignment_id
+      const p = await env.DB.prepare(`SELECT p.id, p.kind, p.state, p.body, p.due_at FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id JOIN assignments a ON a.id=t.assignment_id
           WHERE p.id=? AND a.expert_id=?`).bind(pid, ex.id).first().catch(() => null);
       if (!p) { await ack("این پیشنهاد پیدا نشد.", true); return { ok: true }; }
       if (p.state !== "pending") { await ack("این پیشنهاد دیگر منتظرِ شما نیست.", true); return { ok: true }; }
       await closeInputs(env, ex.id);
-      await newFlow(env, ex, chat, "prop", "need_reason", null, { prop: pid, kind: p.kind });
+      await newFlow(env, ex, chat, "prop", "need_reason", null, { prop: pid, kind: p.kind, body: !!p.body });
       await ack("علتِ رد را بنویسید");
-      await api.sendMessage(chat, "❌ <b>ردِ پیشنهاد</b>\n\nعلتِ رد را بنویسید — همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.");
+      /* تا نوشتنِ علت و پیام، مهلت دست‌کم سه دقیقهٔ دیگر (ai-agent.js: hold) */
+      const h = await propDecide(env, ex, pid, { action: "hold" }).catch(() => null);
+      const left = h && h.due_at ? Math.max(1, Math.ceil((h.due_at - now()) / 60000)) : 0;
+      await api.sendMessage(chat, `✏️ <b>ردِ پیشنهاد</b>\n\nچرا ردش می‌کنید؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.${left ? `\n\n<i>⏱ برای نوشتن، مهلت تا ${M(left)} دقیقهٔ دیگر تمدید شد؛ اگر علت و پیامتان تا آن موقع نرسد، همان پیشنهاد خودکار می‌رود.</i>` : ""}`);
       return { ok: true };
     }
     await ack();
@@ -3666,7 +3672,18 @@ async function onCallback(env, cq, apiIn) {
     if (step === "end") {
       let res;
       try { res = await expertDecision(env, ex, aid, { action: "end" }); }
-      catch (e) { await ack(String(e.message || "نشد").slice(0, 180), true); return { ok: true }; }
+      catch (e) {
+        /* ⭐ امتیازهای مانده به کارِ کارشناس هوشمند (ai-rates.js): متنِ کامل با دکمهٔ مکاتبات و پنل، نه هشدارِ کوتاه */
+        if (e && e.extra && e.extra.rate_gaps) {
+          await ack("اول امتیازها را بدهید ⭐");
+          await api.sendMessage(chat, `⭐ <b>«خاتمه» معلق است</b>
+
+${esc(e.message)}`, [[{ text: "💬 امتیاز در مکاتبات", web_app: { url: spAppUrl(env, "e") } }],
+            [{ text: "📋 پنل کارشناس (نامهٔ کمیسیون)", web_app: { url: expertAppUrl(env) } }]]);
+          return { ok: true };
+        }
+        await ack(String(e.message || "نشد").slice(0, 180), true); return { ok: true };
+      }
       await ack(res.pending ? "برای تأیید مدیر رفت" : "بسته شد ✅");
       const txt = res.pending
         ? `🟠 <b>خاتمهٔ ${M(res.items)} قلم برای تأیید مدیر فرستاده شد.</b>\nتا تأیید یا ردِ او، درخواست در کارتابل شما می‌ماند و نتیجه همین‌جا می‌آید.`

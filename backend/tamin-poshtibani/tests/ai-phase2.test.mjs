@@ -33,6 +33,8 @@ if (DB) {
   DB.raw.prepare(`INSERT INTO items (id,request_id,item_key,line_no,title,spec,note,qty,unit,state,assignment_id,norm_json) VALUES (41,'R-P2','a',1,'میلگرد ۱۲ آجدار','A3 کارخانهٔ معتبر','تحویل در کارگاه',5,'تن','open',1,?)`)
     .run(JSON.stringify({ v: 2, head: "میلگرد", layers: { "قطر": "12" } }));
   DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 60000, t);
+  /* این آزمون رفتارِ «🤖 خودکار» را می‌سنجد؛ پیش‌فرضِ تازهٔ مکاتباتِ کارشناس هوشمند «⏱ با مهلت» است (worker/ai-supervise.js) */
+  DB.raw.exec(`UPDATE experts SET sup_json='{"mode":"auto","minutes":10}'`);
   const run = DB.raw.prepare("INSERT INTO ai_runs (assignment_id,expert_id,request_id,state,data_json,next_at,created_at,updated_at) VALUES (1,1,'R-P2','work',?,0,?,?)")
     .run(JSON.stringify({ items: [{ id: 41, title: "میلگرد ۱۲ آجدار", qty: 5, unit: "تن", prep: 1, smart: { n: 0 } }], cands: [], how: "auto", invited_at: t }), t, t);
   const runId = Number(run.lastInsertRowid);

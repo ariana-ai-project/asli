@@ -135,18 +135,22 @@
         <div id="acc-msg" style="min-height:22px;font-size:.9rem"></div></div>${aiOn() ? vSupCfg() : ""}</div></div>`;
   }
   /**
-   * فاز ۴ب گام ۴: «👁 حالت تأیید» — در اقلامِ «با تأیید» (اجازهٔ مدیر یا درخواستِ تأییدشدهٔ شما) کدام کارِ کارشناس هوشمند پیش از رفتن
-   * تأییدِ شما را بخواهد (worker/ai-supervise.js). کاری که تیک نخورده خودکار است.
+   * «⏱ با مهلت / 🤖 خودکار» (مهر ۱۴۰۵): حالتِ مکاتباتِ کارشناس هوشمندِ شما — فقط خودتان (worker/ai-supervise.js). با مهلت: هر پیام و
+   * تصمیمش اول به شما نشان داده می‌شود و بی‌پاسخ سرِ مهلت خودکار می‌رود؛ خودکار: خودش مذاکره می‌کند و فقط وقتِ لازم می‌پرسد.
    */
   function vSupCfg() {
     const s = S.sup;
-    if (!s || s === "loading") { if (!s) loadSup(); return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead">در حال خواندن…</p></div>`; }
-    if (s.err) return `<div class="tp-sect"><h3>👁 حالت تأیید</h3><p class="lead" style="color:#fca5a5">${esc(s.err)}</p></div>`;
-    const c = s.cfg || {}, fa = s.fa || {};
-    return `<div class="tp-sect"><h3>👁 حالت تأیید <span>کدام کارِ کارشناس هوشمند اول به شما پیشنهاد شود</span>${TP.ui.info("expert.account", "راهنمای حالت تأیید")}</h3>
-      ${s.heads ? "" : `<p class="lead"><b>فعلاً پشتیبانی هیچ نوع قلمی را «مجازِ حالت تأیید» نکرده است.</b></p>`}
-      <label class="chkline"><input type="checkbox" data-sup="chat" ${c.chat ? "checked" : ""}> ${esc(fa.chat || "پیامِ چت")} — با تأیید</label>
-      <label class="chkline"><input type="checkbox" data-sup="bundle" ${c.bundle ? "checked" : ""}> ${esc(fa.bundle || "تصمیمِ بسته")} — با تأیید</label>
+    if (!s || s === "loading") { if (!s) loadSup(); return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند</h3><p class="lead">در حال خواندن…</p></div>`; }
+    if (s.err) return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند</h3><p class="lead" style="color:#fca5a5">${esc(s.err)}</p></div>`;
+    const c = s.cfg || { mode: "timer", minutes: 10 };
+    return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند <span>هر پیامش پیش از رفتن به شما نشان داده شود یا خودش پیش برود</span>${TP.ui.info("expert.account", "راهنمای مکاتباتِ کارشناس هوشمند")}</h3>
+      <div class="supm" role="radiogroup" aria-label="حالتِ مکاتبات">
+        <label class="supm-o ${c.mode === "timer" ? "on" : ""}"><input type="radio" name="supm" data-supm value="timer" ${c.mode === "timer" ? "checked" : ""}>
+          <b>⏱ با مهلت</b><small>هر پیام و تصمیم اول در «💬 مکاتبات»، اعلان و بات؛ «✅ ارسال» یا «✏️ رد» (با علت و پیامِ خودتان)، و بی‌پاسخ سرِ مهلت خودکار.</small>
+          <span class="supm-min">مهلت <input class="tp-input num" type="text" data-supmin inputmode="numeric" maxlength="3" value="${c.minutes}" dir="ltr" style="width:76px" aria-label="مهلت به دقیقه"> دقیقه</span></label>
+        <label class="supm-o ${c.mode === "auto" ? "on" : ""}"><input type="radio" name="supm" data-supm value="auto" ${c.mode === "auto" ? "checked" : ""}>
+          <b>🤖 خودکار</b><small>کارشناس هوشمند خودش مذاکره می‌کند؛ هر جا جوابِ شما لازم باشد «🚨 پرسش از کارشناس» می‌آید.</small></label>
+      </div>
       <div id="sup-msg" style="min-height:22px;font-size:.9rem"></div></div>`;
   }
   async function loadSup() {
@@ -156,10 +160,14 @@
     render();
   }
   async function saveSupCfg() {
-    const v = {}; document.querySelectorAll("[data-sup]").forEach((c) => { v[c.dataset.sup] = c.checked; });
-    const msg = document.querySelector("#sup-msg");
-    try { const r = await TP.api("/me/supervise", { method: "PUT", body: v }); S.sup = { ...S.sup, cfg: r.cfg }; if (msg) { msg.textContent = "ذخیره شد ✓"; msg.style.color = "#6ee7b7"; } }
-    catch (e) { if (msg) { msg.textContent = e.message; msg.style.color = "#fca5a5"; } }
+    const mode = (document.querySelector("[data-supm]:checked") || {}).value || "timer";
+    const mi = document.querySelector("[data-supmin]"), msg = document.querySelector("#sup-msg");
+    try {
+      const r = await TP.api("/me/supervise", { method: "PUT", body: { mode, minutes: mi ? TP.digits(mi.value) : undefined } });
+      S.sup = { ...S.sup, cfg: r.cfg };
+      document.querySelectorAll(".supm-o").forEach((o) => o.classList.toggle("on", !!o.querySelector("input:checked")));
+      if (msg) { msg.textContent = `ذخیره شد ✓ ${r.cfg.mode === "auto" ? "— خودکار" : `— با مهلتِ ${M(r.cfg.minutes)} دقیقه`}${r.sent ? ` · ${M(r.sent)} پیشنهادِ معطل رفت` : ""}`; msg.style.color = "#6ee7b7"; }
+    } catch (e) { if (msg) { msg.textContent = e.message; msg.style.color = "#fca5a5"; } }
   }
   async function saveCode() {
     const G = (s) => document.querySelector(s), msg = G("#acc-msg");
@@ -409,15 +417,22 @@
   const itemFree = (it) => { const st = iState(it); return st === "manual" || st === "free" || (st === "direct" && !S.pickOpen[it.id]); };
   const PILL = { select: ["warn", "🎯 منتظرِ شروع", "فهرستِ دعوتِ این قلم را ببینید و «🚀 شروع» را بزنید"], direct: ["", "✋ مستقیم", "از نوعِ «مستقیم»: خودتان مکاتبه کنید یا به انتخابِ خودتان بسپارید"],
     manual: ["", "✋ دستی", "«انجام دستی»ِ تأییدشدهٔ مدیر"], waiting: ["warn", "⏳ مدیر", "درخواستِ «انجام دستی» در انتظارِ تصمیمِ مدیر"] };
-  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return (p ? ` <span class="chip ${p[0]}" title="${p[2]}">${p[1]}</span>` : "") + pillSup(x); };
-  /* فاز ۴ب گام ۴: «👁 حالت تأیید»ِ قلم — روشن، یا درخواستش منتظرِ مدیر */
-  const supTip = () => { const c = (S.d && S.d.ai && S.d.ai.sup && S.d.ai.sup.cfg) || {}; return `پیامِ چت: ${c.chat ? "با تأیید" : "خودکار"} · تصمیمِ بسته: ${c.bundle ? "با تأیید" : "خودکار"} (تنظیمش در «حساب من»)`; };
-  const pillSup = (x) => {
-    const m = x.state === "open" && aiOwned() ? aiItem(x) : null;
-    if (!m) return "";
-    if (m.sup_on) return ` <span class="chip info" title="${esc(supTip())}">👁 با تأیید</span>`;
-    return m.sup_wait ? ` <span class="chip warn" title="درخواستِ «👁 حالت تأیید» در انتظارِ تصمیمِ مدیر">⏳ حالت تأیید</span>` : "";
-  };
+  const pillAi = (x) => { const p = x.state === "open" && flow2() ? PILL[iState(x)] : null; return p ? ` <span class="chip ${p[0]}" title="${p[2]}">${p[1]}</span>` : ""; };
+  /* ⭐ امتیازهای مانده به کارِ کارشناس هوشمند — «خاتمه» تا صفرشدنش معلق است (worker/ai-rates.js، تصمیمِ مالک) */
+  const rateGaps = () => (S.d && S.d.ai && S.d.ai.rates) || null;
+  function rateGapText(g) {
+    const parts = [];
+    if (g.msgs) parts.push(`${M(g.msgs)} پیامِ کارشناس هوشمند`);
+    if ((g.threads || []).length) parts.push(`${M(g.threads.length)} مکاتبهٔ کامل (${g.threads.slice(0, 3).map((x) => esc(x.supplier)).join("، ")}${g.threads.length > 3 ? "، …" : ""})`);
+    if (g.letter) parts.push("نامهٔ کمیسیون");
+    return parts.length > 1 ? `${parts.slice(0, -1).join("، ")} و ${parts[parts.length - 1]}` : parts[0] || "";
+  }
+  function vRateBar() {
+    const g = rateGaps();
+    if (!g || !g.total) return "";
+    return `<div class="tp-status warn rate-gap"><b>⭐ پیش از «خاتمه» امتیاز بدهید</b><span class="sp">${rateGapText(g)} هنوز ستاره ندارد.</span>
+      <a class="tp-btn sm" href="correspond">💬 امتیاز در مکاتبات</a>${g.letter ? `<button type="button" class="tp-btn sm" data-goletter>📝 نامهٔ کمیسیون</button>` : ""}${TP.ui.info("expert.ai", "امتیاز به کارشناس هوشمند")}</div>`;
+  }
   /* نوارِ یک‌خطیِ وضعیتِ کارشناس هوشمند: فقط همین لحظه (شمارها، سؤال‌ها، واگذاری)؛ توضیحِ روال در راهنما (expert.ai) */
   function vAiBar() {
     const ai = (S.d && S.d.ai) || {};
@@ -439,6 +454,15 @@
     }
     if (aiHandover()) return `<div class="tp-status warn"><b>⚠️ کار به شما واگذار شد</b><span class="sp chips"><span class="chip" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید — گفت‌وگوهایش ادامه دارند و وقتی حد پر شد، جدول و نامه را خودش می‌سازد">بررسی سوابق و جستجو برایتان باز است</span>${need}${ask}${freeTxt}</span>${H}</div>`;
     return `<div class="tp-status"><b>🤖 دستِ کارشناس هوشمند</b><span class="sp chips"><span class="chip" title="بررسی سوابق، جستجوی هوشمند، مذاکره، جدول کمیسیون و نامه با اوست و برای شما قفل؛ گفت‌وگوهایش بسته‌اند مگر وقتی از شما سؤال دارد">خطِ دستیِ ✋ را در «استعلامات» می‌افزایید</span>${need}${ask}${freeTxt}</span>${H}</div>`;
+  }
+  /* درخواستِ هوشمند: نامه را کارشناس هوشمند می‌نویسد — وقتی نوشت، همین‌جا فقط‌خواندنی با «⭐ امتیاز و نظر»ِ اجباری؛ تا آن موقع قفل */
+  function vAiLetter() {
+    const box = letterFor();
+    if (!box) { loadLetter(); return `<div class="pad"><div class="empty">در حال خواندن وضعیت نامه…</div></div>`; }
+    if (box.loading) return `<div class="pad"><div class="empty">در حال خواندن وضعیت نامه…</div></div>`;
+    const L = box.letter;
+    if (L && L.state === "written" && (L.meta || {}).channel === "ai") return `<div class="pad"><div class="toolrow"><b>نامهٔ پیوست کمیسیون — درخواست <span class="num">${esc(S.d.request.id)}</span></b></div>${vLetterDone(L)}</div>`;
+    return vAiLocked("letter");
   }
   function vAiLocked(tab) {
     const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
@@ -477,7 +501,7 @@
           <span class="spacer"></span>${E.status}${E.menu}${TP.ui.info("expert.detail", "راهنمای این صفحه")}</div>
         <div class="tp-dhead-meta"><span title="پروژه">${TP.ui.ICON.project.replace("<svg", '<svg style="width:15px;height:15px;vertical-align:-3px"')} <b>${esc(proj)}</b>${r.project && r.project !== r.party ? ` <span class="dim">(${esc(r.party)})</span>` : ""}</span><span>اقلام <b>${its.length}</b></span><span>تاریخ ثبت <b class="num">${esc(r.date)}</b></span><span>مهلت تحویل <b>${TP.WD[dd.getDay()]} ${TP.fmtD(dl)}</b></span></div>
         <div class="tp-dhead-bars">${TP.ui.bar.deadline(pct, barLvl, "مهلت", `${a.days} روز · ${Math.round(pct)}٪ سپری شده`)}${TP.ui.bar.progress(segs, true)}</div>
-        ${vAiBar()}
+        ${vAiBar()}${vRateBar()}
       </div>
       <div class="tp-items" role="tablist" aria-label="اقلام">${its.map((x, i) => `<button type="button" class="tp-item ${i === S.itemIdx ? "on" : ""} ${x.state !== "open" ? "closed" : ""}" data-item="${i}" role="tab" aria-selected="${i === S.itemIdx ? "true" : "false"}" title="${esc(x.title)}">
         <span class="t">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
@@ -491,7 +515,7 @@
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
         <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLocked(S.tab) : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLetter() : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
@@ -620,13 +644,6 @@
         ${stCol ? `<td>${e.st !== "off" && (started || e.go || e.st === "human") ? `<span class="chip ${cls}">${lab}</span>` : `<span class="dim">—</span>`}</td>` : ""}</tr>`;
     };
     const fresh = P.fresh || 0;
-    /* فاز ۴ب گام ۴: «👁 حالت تأیید» — نوعِ مجاز (پنل پشتیبانی): با تیکِ مدیر از «شروع» روشن است؛ وگرنه درخواست با توضیح پیش از «شروع» */
-    const mi = aiItem(it) || {}, supA = !!(S.d.ai && S.d.ai.sup && S.d.ai.sup.on);
-    const supBit = mi.sup_on ? `<span class="chip info" title="${esc(supTip())}">👁 با تأیید</span>`
-      : mi.sup_wait ? `<span class="chip warn" title="منتظرِ تصمیمِ مدیر">⏳ حالت تأیید — منتظرِ مدیر</span>`
-        : !mi.supervise || started ? ""
-          : supA ? `<span class="chip info" title="${esc(supTip())}">👁 با «شروع»، با تأیید (اجازهٔ مدیر)</span>`
-            : `<button class="tp-btn sm" data-pksup title="کارشناس هوشمند کارهایی را که در «حساب من» «با تأیید» گذاشته‌اید اول به شما پیشنهاد کند — با توضیح و تأییدِ مدیر">👁 درخواست حالت تأیید</button>`;
     const startBtn = !started
       ? `<button class="tp-btn primary" data-pkstart ${on.length ? "" : "disabled"} title="${on.length ? "ساختارِ همین قلم منجمد و قلم به کارشناس هوشمند سپرده می‌شود" : "دست‌کم یک تأمین‌کننده را تیک بزنید"}">${A_ ? "🤖 سپردن" : "🚀 شروع"}</button>`
       : fresh ? `<button class="tp-btn primary" data-pkstart title="انتخاب‌های تازه به کارشناس هوشمند سپرده می‌شوند">📨 دعوت از انتخاب‌های تازه (${M(fresh)})</button>` : "";
@@ -634,7 +651,7 @@
       <div class="toolrow"><b style="font-size:1.02rem">🎯 فهرست دعوتِ کارشناس هوشمند</b>
         <span class="chip ${A_ ? "info" : ""}" title="حالتِ نوع قلمِ «${esc(P.head || "—")}» در پنل پشتیبانی">${esc(P.mode_fa || "")}</span>
         ${started ? `<span class="chip ok" title="${TP.fmt(P.started_at)}">🚀 سپرده شد</span>` : ""}
-        <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>${supBit}
+        <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
@@ -734,22 +751,6 @@
     }, "به فهرست بیفزا", "انصراف");
   }
 
-  /** «👁 درخواست حالت تأیید» (فاز ۴ب گام ۴): پیش از «🚀 شروع»، با توضیح — همیشه با تأییدِ مدیر (decisions.js: supervise) */
-  function supReqUI(it) {
-    const can = openItems().filter((x) => { const m = aiItem(x); return m && m.supervise && !m.sup_on && !m.sup_wait && !m.manual && !m.started_at; });
-    if (!can.length) return TP.modal("قلمی نیست", "«حالت تأیید» فقط پیش از «🚀 شروع» و برای نوع قلمی است که پشتیبانی مجاز کرده.", null, "باشد", "");
-    const d = TP.modal("👁 درخواست حالت تأیید", `<p>در این اقلام، کارشناس هوشمند هر کاری را که در «حساب من» «با تأیید» گذاشته‌اید (${esc(supTip().replace(/ \(.*\)$/, ""))}) اول به شما پیشنهاد می‌کند. مدیر با توضیحِ شما تصمیم می‌گیرد.</p>
-      <div style="display:flex;flex-direction:column;gap:4px;margin:8px 0">${can.map((x) => `<label class="chkline"><input type="checkbox" data-sitem="${x.id}" ${x.id === it.id ? "checked" : ""}> ${esc(x.title)}</label>`).join("")}</div>
-      <div class="tp-field"><b>توضیح (اجباری)</b><textarea class="tp-input" id="sup-why" rows="3" style="width:100%;margin-top:6px" placeholder="مثلاً خریدِ حساس با تأمین‌کنندهٔ تازه"></textarea></div>`, async () => {
-      const ids = [...d.querySelectorAll("[data-sitem]")].filter((c) => c.checked).map((c) => +c.dataset.sitem);
-      const why = ((d.querySelector("#sup-why") || {}).value || "").trim();
-      if (!ids.length) return TP.modal("قلمی انتخاب نشد", "دست‌کم یک قلم را تیک بزنید.", null, "باشد", "");
-      if (!why) return TP.modal("توضیح لازم است", "برای «حالت تأیید» توضیح بنویسید تا مدیر تصمیم بگیرد.", null, "باشد", "");
-      try { await TP.api(`/assignments/${A().id}/decision`, { body: { action: "supervise", item_ids: ids, reason: why } }); await reload();
-        okTick("برای مدیر رفت"); }
-      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
-    }, "برای مدیر بفرست", "انصراف");
-  }
   /** only: شناسهٔ قلمی که از «🎯 فهرست دعوت»ِ همان قلم آمده — فقط همان از پیش تیک می‌خورد */
   function manualUI(only) {
     const can = openItems().filter((x) => { const m = aiItem(x); return m && !m.manual && !m.waiting && m.mode !== "direct" && !m.in_run && !m.started_at; });
@@ -2139,7 +2140,7 @@
         <span class="dim" style="font-size:.85rem">بر پایهٔ ${M(mt.items || 0)} قلمِ تیک‌خورده و ${M(mt.suppliers || 0)} تأمین‌کننده — همان جدول کمیسیون</span>
         <span style="margin-inline-start:auto"></span>
         <button class="tp-btn sm primary" data-lt-dl ${L.hasFile ? "" : "disabled"}>⬇️ دانلود نامه (Word)</button>
-        <button class="tp-btn sm" data-lt-start>نامهٔ تازه</button></div>
+        ${mt.channel === "ai" ? `<span class="chip info" title="این نامه را کارشناس هوشمند نوشته است">🤖 نوشتهٔ کارشناس هوشمند</span>` : ""}${mt.channel === "ai" && aiOwned() ? "" : `<button class="tp-btn sm" data-lt-start>نامهٔ تازه</button>`}</div>
       ${L.hasFile ? "" : `<div class="tp-note warn">فایل Word این نامه ساخته نشد؛ متنش را از همین‌جا بردارید.</div>`}
       ${warn.length ? `<div class="tp-note warn" style="display:block"><b>⚠️ پیش از پیوست کردن این‌ها را چک کنید:</b><div style="margin-top:6px">${warn.join("<br>")}</div></div>` : ""}
       <div class="letterpaper">
@@ -2150,7 +2151,36 @@
         ${b.closing ? `<p>${esc(b.closing)}</p>` : ""}
         <div class="lt-sign"><b>${esc(b.thanks || "")}</b><br><b>${esc(b.signature || "")}</b></div>
       </div>
-      <div class="dim" style="font-size:.85rem;margin-top:8px">همین متن در فایل Word روی سربرگ شرکت است ${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}</div>`;
+      <div class="dim" style="font-size:.85rem;margin-top:8px">همین متن در فایل Word روی سربرگ شرکت است ${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}</div>
+      ${mt.channel === "ai" ? vLetterRate(L) : ""}`;
+  }
+  /* ⭐ نامه‌ای که کارشناس هوشمند نوشته: ستاره و نظرِ اجباری — «خاتمه» تا آن موقع معلق است */
+  const STAR_SVG = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.75 5.86 6.4.78-4.73 4.4 1.23 6.33L12 17.03l-5.65 3.14 1.23-6.33-4.73-4.4 6.4-.78z"/></svg>`;
+  function vLetterRate(L) {
+    const r = L.rate, edit = S.lrEdit === L.id || !r, v = S.lrStars || (r && r.stars) || 0;
+    const st = (on, live) => `<span class="tp-stars ${live ? "" : "ro"}">${[5, 4, 3, 2, 1].map((n) => live
+      ? `<button type="button" class="tp-star${n <= on ? " on" : ""}" data-lr-star="${n}" aria-label="${M(n)} ستاره">${STAR_SVG}</button>`
+      : `<span class="tp-star${n <= on ? " on" : ""}">${STAR_SVG}</span>`).join("")}</span>`;
+    if (!edit) return `<div class="tp-note lr-box done"><b>⭐ امتیازِ شما به نامهٔ کارشناس هوشمند</b>${st(r.stars, false)}<div class="lr-note">${esc(r.note || "")}</div>
+      <button type="button" class="tp-btn sm" data-lr-edit>✏️ ویرایش</button></div>`;
+    return `<div class="tp-note lr-box"><b>⭐ این نامه را کارشناس هوشمند نوشته — امتیاز و نظرِ شما (اجباری)</b>
+      <span class="dim" style="font-size:.85rem">همین در ارزیابیِ او می‌ماند؛ «خاتمه»ِ درخواست تا آن موقع معلق است.</span>
+      ${st(v, true)}
+      <textarea class="tp-input" data-lr-note rows="3" style="width:100%;margin-top:8px" placeholder="نظرتان دربارهٔ نامه — کامل بود؟ چه چیزی کم داشت یا درست نبود؟">${esc(S.lrNote != null ? S.lrNote : (r && r.note) || "")}</textarea>
+      <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button type="button" class="tp-btn primary sm" data-lr-save ${v ? "" : "disabled"}>ثبتِ امتیاز و نظر</button><span class="lr-err" data-lr-err></span></div></div>`;
+  }
+  async function saveLetterRate(btn) {
+    const L = letterFor() && letterFor().letter; if (!L) return;
+    const note = ((document.querySelector("[data-lr-note]") || {}).value || "").trim(), err = document.querySelector("[data-lr-err]");
+    if (!S.lrStars && !(L.rate && L.rate.stars)) { if (err) err.textContent = "ستاره‌ها را انتخاب کنید."; return; }
+    if (note.length < 3) { if (err) err.textContent = "نظرتان را بنویسید — اجباری است."; return; }
+    if (btn) btn.disabled = true;
+    try {
+      const r = await TP.api("/sp/x/rate", { body: { kind: "letter", letter_id: L.id, stars: S.lrStars || L.rate.stars, note } });
+      L.rate = { stars: r.stars, note: r.note }; S.lrStars = 0; S.lrNote = null; S.lrEdit = 0;
+      if (S.d && S.d.ai) S.d.ai.rates = r.gaps;
+      okTick("امتیازِ نامه ثبت شد ⭐"); render();
+    } catch (e) { if (btn) btn.disabled = false; if (err) err.textContent = e.message; }
   }
 
   /* ---------- قالب‌های پیام (واقعی، ذخیره در D1) ---------- */
@@ -2312,7 +2342,8 @@
     Q("[data-team-link]").forEach((b) => b.onclick = teamLink);
     /* حساب من */
     const acs = G("[data-acc-save]"); if (acs) acs.onclick = saveCode;
-    Q("[data-sup]").forEach((c) => c.onchange = saveSupCfg);
+    Q("[data-supm]").forEach((c) => c.onchange = saveSupCfg);
+    const smin = G("[data-supmin]"); if (smin) smin.onchange = saveSupCfg;
     Q("#acc-cur, #acc-new, #acc-rep").forEach((i) => i.onkeydown = (e) => { if (e.key === "Enter") saveCode(); });
     /* آستانه‌های تیم (کارشناس ارشد) */
     Q("[data-sthr]").forEach((i) => i.oninput = (e) => {
@@ -2434,7 +2465,6 @@
     const pks = G("[data-pkstart]"); if (pks) pks.onclick = () => pkStartUI(item());
     const pkr = G("[data-pkrebuild]"); if (pkr) pkr.onclick = () => pkRebuildUI(item());
     const pkb = G("[data-pkback]"); if (pkb) pkb.onclick = () => manualUI(item().id);
-    const pksu = G("[data-pksup]"); if (pksu) pksu.onclick = () => supReqUI(item());
     const pko = G("[data-pkopen]"); if (pko) pko.onclick = () => { const it = item(); S.pickOpen[it.id] = !S.pickOpen[it.id]; render(); };
     const pkl = G("[data-pkreload]"); if (pkl) pkl.onclick = () => loadPicks(item(), true);
     const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
@@ -2565,6 +2595,11 @@
     const lTyped = G("[data-lt-typed]"); if (lTyped) lTyped.onclick = letterTyped;
     const lWrite = G("[data-lt-write]"); if (lWrite) lWrite.onclick = letterWrite;
     const lDl = G("[data-lt-dl]"); if (lDl) lDl.onclick = downloadLetter;
+    Q("[data-lr-star]").forEach((b) => b.onclick = () => { const t = G("[data-lr-note]"); S.lrNote = t ? t.value : S.lrNote; S.lrStars = +b.dataset.lrStar; render(); });
+    const lrN = G("[data-lr-note]"); if (lrN) lrN.oninput = () => { S.lrNote = lrN.value; };
+    const lrS = G("[data-lr-save]"); if (lrS) lrS.onclick = () => saveLetterRate(lrS);
+    const lrE = G("[data-lr-edit]"); if (lrE) lrE.onclick = () => { const L = letterFor() && letterFor().letter; S.lrEdit = L ? L.id : 0; S.lrStars = (L && L.rate && L.rate.stars) || 0; render(); };
+    const gl = G("[data-goletter]"); if (gl) gl.onclick = () => { S.tab = "letter"; render(); };
     /* اصلاحِ نیمه‌کارهٔ متن نباید با تیک زدنِ اقلامِ موضوع (که بازرندر می‌کند) گم شود */
     const keepDraft = () => { const t = G("[data-lt-text]"), b = letterFor(); if (t && b && b.letter) { S.lt.draft = t.value; S.lt.draftFor = b.letter.id; } };
     const lText = G("[data-lt-text]"); if (lText) lText.oninput = keepDraft;
@@ -2576,7 +2611,15 @@
     });
   }
 
+  /* ⭐ «خاتمه» تا امتیازها کامل نشده معلق است: پیامِ روشن با راهِ رسیدن به همان‌ها */
+  function rateGate(g) {
+    TP.modal("⭐ «خاتمه» معلق است", `<p>پیش از «خاتمه» به کارِ کارشناس هوشمند امتیاز بدهید: <b>${rateGapText(g)}</b> هنوز ستاره ندارد.</p>
+      <p class="dim" style="font-size:.9rem">پیام‌ها و کلِ هر مکاتبه در «💬 مکاتبات» (نشانگر را روی پیامِ 🤖 نگه دارید)؛ نامه در تب «نامهٔ کمیسیون». کمتر از سه ستاره برای پیام، و هر امتیازِ مکاتبه و نامه، نظر می‌خواهد.</p>`,
+      () => { location.href = "correspond"; }, "💬 رفتن به مکاتبات", "بعداً");
+  }
   function doExpertAct(act) {
+    const g = rateGaps();
+    if (act === "end" && g && g.total) return rateGate(g);
     const its = items(), n = its.length, done = its.filter((i) => i.commission_ok && i.state === "open");
     const lbl = { hold: "تعلیق", stop: "توقف", end: "خاتمه" }[act];
     let body = "";
@@ -2588,7 +2631,7 @@
       try { const r = await TP.api(`/assignments/${A().id}/decision`, { body: { action: act, item_ids: act === "end" ? done.map((i) => i.id) : null } });
         if (r.pending) { await reload(); okTick("برای تأیید مدیر رفت"); }
         else { okTick(`${lbl} ثبت شد`); S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); S.d = null; await loadTray(); } }
-      catch (e) { TP.modal("خطا", esc(e.message), null, "باشد", ""); }
+      catch (e) { if (e.data && e.data.rate_gaps) return rateGate(e.data.rate_gaps); TP.modal("خطا", esc(e.message), null, "باشد", ""); }
     }, `تأیید ${lbl}`);
   }
 

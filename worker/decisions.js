@@ -28,7 +28,7 @@ import { notifyClosed, managerCard } from "./manager.js";
 import { esc } from "./telegram.js";
 import { closureStmt } from "./records.js";
 import { aiOwned } from "./ai-lock.js";
-import { itemModes } from "./ai-modes.js";
+import { rateGaps, gapText } from "./ai-rates.js";
 
 const now = () => Date.now();
 const int = (v, d = null) => { const n = parseInt(v, 10); return isNaN(n) ? d : n; };
@@ -70,7 +70,8 @@ export async function expertDecision(env, ex, aid, body) {
   const own = await env.DB.prepare("SELECT id, request_id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
   if (!own) throw new HttpError("ارجاع متعلق به شما نیست.", 403);
   if (action === "manual") return manualRequest(env, ex, own, body);
-  if (action === "supervise") return supRequest(env, ex, own, body);
+  /* «👁 حالت تأیید» دیگر درخواست از مدیر نمی‌خواهد (مهر ۱۴۰۵): «⏱ با مهلت / 🤖 خودکار» را خودِ کارشناس در «حساب من» می‌گذارد */
+  if (action === "supervise") throw new HttpError("«حالت تأیید» دیگر درخواست نمی‌خواهد: حالتِ مکاتباتِ کارشناس هوشمند («⏱ با مهلت» یا «🤖 خودکار») را خودتان در «حساب من» می‌گذارید.", 410);
 
   let itemIds = Array.isArray(body.item_ids) ? body.item_ids.map((x) => int(x)).filter(Boolean) : null;
   if (action === "end") {
@@ -81,6 +82,12 @@ export async function expertDecision(env, ex, aid, body) {
     itemIds = rows.map((r) => r.id);
     /* تیک «تأیید کمیسیون» را حالا فقط پنل پشتیبانی می‌زند (worker/support.js) */
     if (!itemIds.length) throw new HttpError("هنوز پشتیبانی کمیسیونِ هیچ قلمی از این درخواست را تأیید نکرده؛ «خاتمه» فقط برای اقلامِ تأییدشده است.", 422);
+    /* ⭐ تصمیمِ مالک (مهر ۱۴۰۵): تا کارشناس به پیام‌ها، مکاتبه‌ها و نامهٔ کارشناس هوشمند امتیاز نداده، «خاتمه» معلق است (worker/ai-rates.js) */
+    const g = await rateGaps(env, aid);
+    if (g.total) {
+      throw new HttpError(`پیش از «خاتمه» به کارِ کارشناس هوشمند امتیاز بدهید: ${gapText(g)} هنوز ستاره ندارد. پیام‌ها و مکاتبه‌ها در «💬 مکاتبات» و نامه در تب «نامهٔ کمیسیون».`,
+        409, { rate_gaps: g });
+    }
   }
   const payload = { item_ids: itemIds };
 
@@ -142,26 +149,6 @@ async function queueAsk(env, ex, own, action, itemIds, reason) {
     body: `درخواست ${own.request_id} — ${ex.label || ex.name} · ${itemIds.length} قلم${reason ? ` · ${reason}` : ""}`, url: "manager", tag: `dec${id}` }));
   await env.DB.batch(stmts);
   return { ok: true, pending: true, decision_id: id, items: itemIds.length };
-}
-
-/**
- * «👁 درخواست حالت تأیید»: اقلامِ بازی که هنوز سپرده نشده‌اند، دستی نیستند، حالت تأیید ندارند و نوعشان را پشتیبانی «مجازِ تأیید» کرده
- * (ai-modes.js)، با توضیحِ اجباری — تا تصمیمِ مدیر در صف.
- */
-async function supRequest(env, ex, own, body) {
-  const reason = T(body.reason).slice(0, 1000);
-  if (!reason) throw new HttpError("برای «👁 حالت تأیید» توضیح بنویسید تا مدیر تصمیم بگیرد.", 422, { need_reason: true });
-  const o = await aiOwned(env, own.id);
-  if (!o) throw new HttpError("این درخواست در حالت هوشمند نیست؛ کارهایش همین حالا با خودِ شماست.", 409);
-  const want = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : []).map((x) => int(x)).filter(Boolean))];
-  if (!want.length) throw new HttpError("دست‌کم یک قلم را برای «حالت تأیید» انتخاب کنید.");
-  const rows = (await env.DB.prepare(`SELECT id, code, title, norm_json, ai_off, ai_start_at, sup_on FROM items WHERE assignment_id=? AND state='open' AND id IN (${want.map(() => "?").join(",")})`)
-    .bind(own.id, ...want).all()).results || [];
-  const waiting = await waitingItems(env, own.id, "supervise");
-  const modes = await itemModes(env, rows);
-  const itemIds = rows.filter((r) => !r.ai_start_at && Number(r.ai_off) !== 1 && Number(r.sup_on) !== 1 && !waiting.has(r.id) && (modes.get(r.id) || {}).supervise).map((r) => r.id);
-  if (!itemIds.length) throw new HttpError("«حالت تأیید» فقط پیش از «🚀 شروع» و برای نوع قلمی است که پشتیبانی مجاز کرده؛ این اقلام سپرده شده‌اند، دستی‌اند، از قبل «با تأیید»اند یا درخواستشان در انتظارِ مدیر است.", 409);
-  return queueAsk(env, ex, own, "supervise", itemIds, reason);
 }
 
 /** پیام «در انتظار تأیید» برای مدیر، با دو دکمه. `at` لحظهٔ ثبتِ تصمیم است و در کلید یکتایی صف می‌آید */

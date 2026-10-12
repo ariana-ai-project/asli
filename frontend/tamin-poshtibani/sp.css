@@ -398,7 +398,7 @@
 .ph-ask i { display: block; font-style: normal; color: var(--ph-muted); font-size: .9em; margin-top: .35em; }
 :root[data-theme="light"] .ph-sys.note { color: #7a5800; background: rgba(242, 194, 48, 0.2); }
 :root[data-theme="light"] .ph-ask b { color: #7a5800; }
-/* پیشنهادِ کارشناس هوشمند در «👁 حالت تأیید»: کارتِ آبی با «✅ تأیید» و «❌ رد» درست بالای کادرِ پیام */
+/* پیشنهادِ کارشناس هوشمند در «⏱ با مهلت»: کارتِ آبی با شمارشِ معکوس، «✅ ارسال» و «✏️ رد» درست بالای کادرِ پیام */
 .ph-ask.ph-prop { background: rgba(79, 140, 255, 0.13); box-shadow: inset 0 0 0 1px rgba(79, 140, 255, 0.55); white-space: normal; }
 .ph-ask.ph-prop b, .ph-ask.ph-watch b { color: #9cc0ff; }
 .ph-ask.ph-watch { background: rgba(79, 140, 255, 0.08); box-shadow: inset 0 0 0 .5px rgba(79, 140, 255, 0.45); }
@@ -406,6 +406,50 @@
 .ph-prop-acts { display: flex; gap: .5em; flex-wrap: wrap; margin-top: .45em; }
 .ph-prop-acts .tp-btn { flex: 1 1 7em; }
 :root[data-theme="light"] .ph-ask.ph-prop b, :root[data-theme="light"] .ph-ask.ph-watch b { color: #1f5fd6; }
+/* شمارشِ معکوسِ مهلت: نوارِ باریکی که با گذشتِ زمان کوتاه می‌شود؛ دقیقهٔ آخر نارنجی-قرمز */
+.ph-due { display: flex; flex-direction: column; gap: .3em; margin: .35em 0 .15em; }
+.ph-due .bar { display: block; height: 5px; border-radius: 99px; overflow: hidden; background: rgba(255, 255, 255, 0.12); }
+.ph-due .bar i { display: block; height: 100%; width: calc(var(--p, 1) * 100%); border-radius: inherit; background: linear-gradient(90deg, #9cc0ff, #4f8cff); transition: width 1s linear; }
+.ph-due .t { font-size: .92em; color: var(--ph-muted); }
+.ph-due .t b { display: inline; color: inherit; font-weight: 800; }
+.ph-due.soon .bar i { background: linear-gradient(90deg, #fbbf24, #ef4444); }
+.ph-due.soon .t { color: #fdba74; }
+:root[data-theme="light"] .ph-due .bar { background: rgba(30, 60, 120, 0.12); }
+:root[data-theme="light"] .ph-due.soon .t { color: #c2410c; }
+.ph-cfg { display: inline-flex; margin-inline-start: .5em; padding: .05em .6em; border-radius: 99px; border: 1px solid rgba(156, 192, 255, 0.5); background: transparent; color: inherit; font: inherit; font-size: .85em; font-weight: 600; cursor: pointer; vertical-align: 1px; }
+.ph-cfg:hover { background: rgba(79, 140, 255, 0.18); }
+.sp-mode { display: block; line-height: 1.8; margin-top: 8px; }
+
+/* ⭐ امتیازِ کارشناس به پیام‌های کارشناس هوشمند: بی‌امتیازها لبهٔ نقطه‌چینِ کهربایی، امتیازدارها لبهٔ سبز (کمتر از سه: سرخ)؛
+   ستاره‌ها زیرِ حباب — بی‌امتیاز با نگه داشتنِ نشانگر (یا لمس روی گوشی)، امتیازدار همیشه و کوچک‌تر */
+.ph-row.unrated .ph-b.ai { outline: 2px dashed rgba(251, 191, 36, 0.85); outline-offset: 2px; }
+.ph-row.rated .ph-b.ai { outline: 1.5px solid rgba(52, 211, 153, 0.75); outline-offset: 2px; }
+.ph-row.rated.low .ph-b.ai { outline-color: rgba(251, 113, 133, 0.85); }
+.ph-rate { display: flex; align-items: center; gap: .35em; margin-top: .2em; font-size: .78em; color: var(--ph-muted); }
+.ph-rate .stars { display: inline-flex; flex-direction: row-reverse; gap: .05em; }
+.ph-rate .hint { color: #fbbf24; font-weight: 700; }
+.ph-rate .why { cursor: help; }
+.ph-row.unrated .ph-rate { max-height: 0; opacity: 0; overflow: hidden; margin-top: 0; transition: max-height .2s ease, opacity .2s ease, margin .2s ease; }
+.ph-row.unrated:hover .ph-rate, .ph-row.unrated:focus-within .ph-rate, .ph-row.unrated.show-rate .ph-rate { max-height: 3em; opacity: 1; margin-top: .25em; }
+@media (hover: none) { .ph-row.unrated .ph-rate { max-height: 3em; opacity: 1; margin-top: .25em; } }
+.ph-star { display: inline-grid; place-items: center; width: 1.9em; height: 1.9em; padding: 0; border: 0; border-radius: 50%; background: transparent; color: rgba(251, 191, 36, 0.9); cursor: pointer; }
+.ph-star svg { width: 1.35em; height: 1.35em; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; transition: transform .15s ease, filter .15s ease, fill .15s ease; }
+.ph-star:focus-visible { outline: 2px solid #fbbf24; outline-offset: 1px; }
+/* پرشده: طلایی و درخشان */
+.ph-star.on svg { fill: #fbbf24; stroke: #f59e0b; filter: drop-shadow(0 0 .3em rgba(251, 191, 36, 0.85)); }
+.ph-rate:not(.ro) .stars:hover .ph-star svg { fill: none; filter: none; }
+.ph-rate:not(.ro) .stars .ph-star:hover svg, .ph-rate:not(.ro) .stars .ph-star:hover ~ .ph-star svg { fill: #fcd34d; stroke: #f59e0b; filter: drop-shadow(0 0 .35em rgba(251, 191, 36, 0.95)); transform: scale(1.12); }
+.ph-row.rated .ph-rate { font-size: .66em; }
+.ph-rate.big { font-size: 1.15em; margin: .3em 0; }
+.ph-ask.ph-ratehint { background: rgba(251, 191, 36, 0.1); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.5); }
+.ph-ask.ph-trate { background: rgba(251, 191, 36, 0.12); box-shadow: inset 0 0 0 1px rgba(251, 191, 36, 0.6); white-space: normal; }
+.ph-ask.ph-trate.done { background: rgba(52, 211, 153, 0.1); box-shadow: inset 0 0 0 1px rgba(52, 211, 153, 0.5); }
+.ph-ask.ph-trate textarea { width: 100%; margin-top: .3em; }
+.ph-rate.ro .ph-star { cursor: default; }
+:root[data-theme="light"] .ph-star { color: #d97706; }
+:root[data-theme="light"] .ph-rate .hint { color: #b45309; }
+:root[data-theme="light"] .ph-row.unrated .ph-b.ai { outline-color: rgba(217, 119, 6, 0.85); }
+@media (prefers-reduced-motion: reduce) { .ph-star svg, .ph-due .bar i, .ph-row.unrated .ph-rate { transition: none; } }
 .ph-sys[data-goto-b] { cursor: pointer; }
 
 /* --- لایهٔ کارکردیِ شناور: شیشهٔ مایع --- */

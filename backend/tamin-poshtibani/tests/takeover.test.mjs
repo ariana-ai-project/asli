@@ -34,6 +34,8 @@ if (DB) {
   run("INSERT INTO sp_msgs (thread_id,who,kind,body,meta_json,at) VALUES (1,'e','text','سلام، برای دیسک قیمت می‌خواستیم','{\"ai\":true}',?)", T0);
   run("INSERT INTO sp_msgs (thread_id,who,kind,body,at) VALUES (1,'s','text','قیمت ۱۰۰ میلیون',?)", T0 + 1);
   run("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)", T0 - 60000, T0);
+  /* این آزمون رفتارِ «🤖 خودکار» را می‌سنجد؛ پیش‌فرضِ تازهٔ مکاتباتِ کارشناس هوشمند «⏱ با مهلت» است (worker/ai-supervise.js) */
+  run(`UPDATE experts SET sup_json='{"mode":"auto","minutes":10}'`);
   run("INSERT INTO ai_runs (id,assignment_id,expert_id,request_id,state,next_at,created_at,updated_at) VALUES (1,1,1,'R-9','work',?,?,?)", T0 + 3600000, T0, T0);
   run("INSERT INTO ai_threads (thread_id,run_id,state,created_at,updated_at) VALUES (1,1,'active',?,?)", T0, T0);
   run("INSERT INTO settings (key,value,updated_at) VALUES ('managerChat','\"-100777\"',?)", T0);

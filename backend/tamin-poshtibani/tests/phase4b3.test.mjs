@@ -32,6 +32,8 @@ if (DB) {
   DB.raw.exec("DELETE FROM experts");
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'هوشمند','هوشمند','7001',1,1,'701',?), (2,'انسانی','انسانی','7002',1,1,'702',?)").run(t, t);
   DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 60000, t);
+  /* این آزمون رفتارِ «🤖 خودکار» را می‌سنجد؛ پیش‌فرضِ تازهٔ مکاتباتِ کارشناس هوشمند «⏱ با مهلت» است (worker/ai-supervise.js) */
+  DB.raw.exec(`UPDATE experts SET sup_json='{"mode":"auto","minutes":10}'`);
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-H','1405/07/15','پروژهٔ برق'), ('R-A','1405/07/15','پروژهٔ پیچ')").run();
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (1,'R-H',2,5,?,?,?), (2,'R-A',1,5,?,?,?)").run(t, t + 9e8, t, t, t + 9e8, t);
   const ins = DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (?,?,?,?,?,?,?,'open',?,?)");

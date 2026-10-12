@@ -44,6 +44,8 @@ if (DB) {
   DB.raw.prepare("INSERT INTO smart_searches (id,item_id,assignment_id,expert_id,result_json,created_at) VALUES (70,31,1,1,?,?)")
     .run(JSON.stringify({ suppliers: [{ name: "روانکاران نمونه", phones: [{ e164: "+989120000001" }] }] }), t);
   DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 1000, t);
+  /* این آزمون رفتارِ «🤖 خودکار» را می‌سنجد؛ پیش‌فرضِ تازهٔ مکاتباتِ کارشناس هوشمند «⏱ با مهلت» است (worker/ai-supervise.js) */
+  DB.raw.exec(`UPDATE experts SET sup_json='{"mode":"auto","minutes":10}'`);
 }
 
 /* ---------- دنیای بیرونِ بدلی ---------- */

@@ -30,7 +30,8 @@ import { limitsOf, combineLocks, violations, violationError, LIMIT_FA } from "./
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
-import { manualBundles, propsOf } from "./ai-supervise.js";
+import { manualBundles, propsOf, getSup } from "./ai-supervise.js";
+import { threadRates } from "./ai-rates.js";
 import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
 import { storage, storageKey } from "./storage.js";
@@ -602,7 +603,8 @@ export async function spSend(env, ex, b) {
   const msgs = [];
   const mark = b.ai ? { ai: true } : null;
   if (!silent) {
-    if (text) msgs.push(["e", "text", text, mark]);
+    /* متنِ دعوتِ کارشناس هوشمند قالبِ ثابت است — امتیاز نمی‌خواهد (ai-rates.js: meta.tpl) */
+    if (text) msgs.push(["e", "text", text, mark ? { ...mark, tpl: "invite" } : null]);
     msgs.push(["e", "event", evBody, { ev: fresh.length ? "rfq" : "remind", items: evLines.map((l) => itemSnap(l, false)), ...(mark || {}) }]);
   }
   const msgAt = stmts.length;
@@ -730,8 +732,12 @@ export async function threadFull(env, th, side) {
     labels: FILE_LABELS,
     /* pf_read: «خوانش هوشمند پیش‌فاکتور» روشن است (مسیرِ پیشین) یا خاموش — پیش‌فاکتورِ تولیدی و تأیید نهاییِ مستقیم (فاز ۴) */
     pf_read: pfRead,
-    /* گام ۴: «👁 با تأیید» — پیشنهادهای کارشناس هوشمند (معطل و تصمیم‌های آخر) و بسته‌هایی که تصمیمشان با خودِ کارشناس است */
-    ...(side === "e" && th.ai && th.ai.watch ? { watch: { ...(await propsOf(env, th.id)), manual: [...(await manualBundles(env, th.id))] } } : {}),
+    /* «⏱ با مهلت» — پیشنهادهای کارشناس هوشمند (معطل با due_at و تصمیم‌های آخر)، بسته‌هایی که تصمیمشان با خودِ کارشناس است، مهلتِ
+       کارشناس و ساعتِ سرور (شمارشِ معکوسِ صفحه با همین، نه ساعتِ دستگاه) */
+    ...(side === "e" && th.ai && th.ai.watch ? { watch: { ...(await propsOf(env, th.id)), manual: [...(await manualBundles(env, th.id))],
+      minutes: (await getSup(env, th.expert_id)).minutes, now: Date.now() } } : {}),
+    /* ⭐ امتیازِ کارشناس به پیام‌ها و کلِ مکاتبهٔ کارشناس هوشمند (worker/ai-rates.js) */
+    ...(side === "e" && th.ai && th.ai.ai ? { rates: await threadRates(env, th.id) } : {}),
   };
 }
 
@@ -802,7 +808,7 @@ export async function expertThreads(env, ex) {
     if (!aiOn || x.run_expert !== ex.id || aiRejected(x.review_json)) return { ai: "open", ask: null };
     if (x.state === "ask") return { ai: "ask", ask: (parse(x.ask_json, {}) || {}).q || "", props: x.sup ? x.props || 0 : 0 };
     if (x.state === "human") return { ai: "human", ask: null };
-    /* گام ۴: «👁 با تأیید» — باز و فقط‌خواندنی، با شمارِ پیشنهادهای منتظرِ کارشناس */
+    /* «⏱ با مهلت» — باز و فقط‌خواندنی، با شمارِ پیشنهادهای منتظرِ کارشناس */
     return x.sup ? { ai: "watch", ask: null, props: x.props || 0 } : { ai: "locked", ask: null };
   };
   const byA = new Map();
@@ -854,7 +860,7 @@ export async function expertInbox(env, ex, since) {
   return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs, asks: askList.length, ask_list: askList };
 }
 /* گفت‌وگوی بستهٔ کارشناس هوشمند (ai-lock.js) برای کارشناس اعلان و شمرده نمی‌شود — t: sp_threads، a: assignments */
-/* گام ۴: گفت‌وگوی «👁 با تأیید» باز است و اعلان و شمرده می‌شود */
+/* «⏱ با مهلت»: گفت‌وگوی کارشناس هوشمند باز است و اعلان و شمرده می‌شود */
 const AI_SHUT_SQL = `NOT EXISTS (SELECT 1 FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id AND g.mode='on'
   WHERE x.thread_id=t.id AND r.expert_id=a.expert_id AND x.state<>'ask' AND NOT ${AI_REJECTED_SQL("r")} AND NOT ${AI_SUP_SQL("x.thread_id")})`;
 
@@ -1193,7 +1199,7 @@ export async function fileFor(env, who, fileId) {
 }
 
 /**
- * «👁 با تأیید» (فاز ۴ب گام ۴، ai-supervise.js): گفت‌وگو برای کارشناس فقط‌خواندنی است — پیامِ خودش با «❌ رد»ِ پیشنهاد می‌رود (meta.own)
+ * «⏱ با مهلت» (ai-supervise.js): گفت‌وگو برای کارشناس فقط‌خواندنی است — پیامِ خودش با «✏️ رد»ِ پیشنهاد می‌رود (meta.own)
  * یا پاسخِ «🚨 پرسش از کارشناس» است؛ تصمیمِ بسته فقط برای بسته‌ای که پیشنهادِ کارشناس هوشمند را برایش رد کرده.
  */
 function watchMsg(th, side, meta) {

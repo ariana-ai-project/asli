@@ -1021,7 +1021,7 @@
   }
 
   /* ---------- «🧭 حالت اقلام» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب) ----------
-     حالتِ هر نوع قلم برای کارشناس هوشمند — سپردن یا برگشت / انتخاب کارشناس / مستقیم — و «حالت تأیید مجاز»؛ نوع قلمِ نام‌نبرده «انتخاب
+     حالتِ هر نوع قلم برای کارشناس هوشمند — سپردن یا برگشت / انتخاب کارشناس / مستقیم؛ («حالت تأیید مجاز» از مهر ۱۴۰۵ کنار رفت: «⏱ با مهلت / 🤖 خودکار» را خودِ کارشناس می‌گذارد)؛ نوع قلمِ نام‌نبرده «انتخاب
      کارشناس» است. هر قلمِ درخواست با حالتِ نوعِ خودش جلو می‌رود (worker/ai-modes.js). */
   const MD_HELP = {
     handoff: "بعد از بررسی سوابق، کارشناس فقط به کارشناس هوشمند می‌سپارد، یا با توضیح به مدیر برمی‌گرداند تا دستی شود.",
@@ -1069,10 +1069,9 @@
       ${S.mdHits.length ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:8px">${S.mdHits.map((x) => `<button class="tp-btn xs" data-mdadd="${esc(x)}" ${have.has(x) ? "disabled" : ""}>${have.has(x) ? "✓ " : "➕ "}${esc(x)}</button>`).join("")}</div>`
         : S.mdQ.trim() ? `<div class="dim" style="margin-top:6px">نوع قلمی با این نام در فهرست اقلام نیست.</div>` : ""}</div>`;
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">نوع قلم‌های تعیین‌شده (${M(S.mdDraft.length)})</h3>`;
-    h += S.mdDraft.length ? `<div class="tp-scroll"><table class="tp-table"><thead><tr><th class="rt">نوع قلم</th><th>حالت</th><th>حالت تأیید مجاز</th><th></th></tr></thead><tbody>
+    h += S.mdDraft.length ? `<div class="tp-scroll"><table class="tp-table"><thead><tr><th class="rt">نوع قلم</th><th>حالت</th><th></th></tr></thead><tbody>
       ${S.mdDraft.map((x, i) => `<tr><td class="rt">${esc(x.head)}</td>
         <td><select class="tp-select" data-mdmode="${i}">${Object.keys(MD_HELP).map((k) => `<option value="${k}" ${x.mode === k ? "selected" : ""}>${esc(fa[k] || k)}</option>`).join("")}</select></td>
-        <td><label class="chkline"><input type="checkbox" data-mdsup="${i}" ${x.supervise ? "checked" : ""}> مجاز</label></td>
         <td><button class="tp-btn xs danger" data-mddel="${i}" title="برداشتن — همان پیش‌فرض">✕</button></td></tr>`).join("")}</tbody></table></div>`
       : `<div class="dim">هنوز نوع قلمی تعیین نشده — همه «انتخاب کارشناس»اند.</div>`;
     h += `</div><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-mdsave ${S.mdBusy ? "disabled" : ""}>ذخیرهٔ حالتِ اقلام</button>
@@ -1487,7 +1486,6 @@
     if (d.usdfile !== undefined && t.files && t.files[0]) { const file = t.files[0]; t.value = ""; return usdUpload(file); }
     if (d.rthen && S.rankDraft) { S.rankDraft.dispatch.then = d.rthen; return null; }
     if (d.mdmode !== undefined && S.mdDraft) { S.mdDraft[Number(d.mdmode)].mode = t.value; return null; }
-    if (d.mdsup !== undefined && S.mdDraft) { S.mdDraft[Number(d.mdsup)].supervise = t.checked; return null; }
     if (d.chgf) { S.chgF[d.chgf] = t.type === "checkbox" ? (t.checked ? "1" : "") : t.value.trim(); S.chg = null; return loadChg(); }
     return null;
   });

@@ -17,6 +17,7 @@ import { ensureSpWebhook } from "./sp-bot.js";
 import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
 import { aiKick, autoDecide, propDecide } from "./ai-agent.js";
 import { takeoverThread, handbackThread } from "./ai-takeover.js";
+import { rate } from "./ai-rates.js";
 import { runAiCheck } from "./sp-ai.js";
 import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -327,10 +328,12 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const th = await C.threadFor(env, mm[1], who, { read: true });
     return json(await handbackThread(env, ex, th));
   }
-  /* فاز ۴ب گام ۴ («👁 حالت تأیید»): تأیید یا ردِ پیشنهادِ کارشناس هوشمند — {action: ok|no, reason, text, bundle} */
+  /* «⏱ با مهلت»: ارسال، رد یا سرِ مهلتِ پیشنهادِ کارشناس هوشمند — {action: ok|no|due, reason, text, bundle} */
   if ((mm = /^\/sp\/x\/prop\/(\d+)$/.exec(path)) && m === "POST") {
     const r = await propDecide(env, ex, mm[1], await readJson(request));
-    return json({ ok: true, state: r.state, thread_id: r.thread_id });
+    return json({ ok: true, state: r.state, thread_id: r.thread_id, ...(r.due_at ? { due_at: r.due_at } : {}) });
   }
+  /* ⭐ امتیازِ کارشناس به کارِ کارشناس هوشمند — {kind: msg|thread|letter, msg_id|thread_id|letter_id, stars, note} (worker/ai-rates.js) */
+  if (path === "/sp/x/rate" && m === "POST") return json(await rate(env, ex, await readJson(request)));
   throw new HttpError("مسیر پیدا نشد.", 404);
 }

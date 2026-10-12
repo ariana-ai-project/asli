@@ -334,7 +334,7 @@
         { label: "توقف", icon: "x", attrs: `data-act="stop|${a.id}"`, cls: "danger" },
         { label: "خاتمه", icon: "check", attrs: `data-act="closed|${a.id}"` },
       ] });
-    return TP.ui.unitRow({ who, days, ticks: (aiTick(a) + supTick(a)).trim(), bars: unitBars(r, a),
+    return TP.ui.unitRow({ who, days, ticks: aiTick(a).trim(), bars: unitBars(r, a),
       status: `<span><span class="st ${STL.cls}">${live ? "در جریان" : STL.label}</span> <span class="dim">${its.length} قلم</span></span>${sendChip(r, a)}${itemStates(its)}`, acts });
   }
   /* اقلامِ بی‌کارشناس: یک ردیف با انتخابِ خالی — با انتخاب، ارجاعِ تازه فقط برای همین اقلام ساخته می‌شود */
@@ -755,14 +755,14 @@
     return `<div class="dim" style="margin-top:4px">${M((p.item_ids || []).length)} قلم ${d.action === "manual" ? "به‌جای کارشناس هوشمند با خودِ کارشناس" : "با «👁 حالت تأیید»: کارشناس هوشمند اول به کارشناس پیشنهاد می‌کند"}${p.reason ? ` — علت: ${esc(p.reason)}` : ""}</div>`;
   }
   const KIND = { dispatch: "ارسال", reassign: "تغییر کارشناس", hold: "تعلیق", stop: "توقف", closed: "خاتمه", close: "خاتمه", open: "بازگشت به جریان", import: "بارگذاری فایل", commission: "جدول کمیسیون", decision_requested: "درخواست تصمیم کارشناس", ai_tick: "تیکِ هوشمند / دستی", ai_manual: "انجام دستیِ اقلام", ai_modes: "حالتِ اقلامِ کارشناس هوشمند", ai_start: "🚀 شروعِ قلم (کارشناس هوشمند)", ai_pick_more: "📨 دعوت از انتخاب‌های تازه", item_terms: "📋 شرایط خریدِ قلم",
-    ai_sup: "تیکِ «👁 حالت تأیید»", ai_sup_item: "«👁 حالت تأیید»ِ اقلام", ai_prop_ok: "✅ تأییدِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "❌ ردِ پیشنهادِ کارشناس هوشمند",
+    ai_sup: "تیکِ «👁 حالت تأیید»", ai_sup_item: "«👁 حالت تأیید»ِ اقلام", ai_prop_ok: "✅ ارسالِ پیشنهادِ کارشناس هوشمند", ai_prop_no: "✏️ ردِ پیشنهادِ کارشناس هوشمند", ai_prop_auto: "⏱ ارسالِ خودکار سرِ مهلت", ai_rate: "⭐ امتیازِ کارشناس به کارشناس هوشمند",
     decision_rejected: "رد تصمیم کارشناس", unassign: "برداشتن کارشناس", delete: "حذف درخواست", viewed: "مشاهده", hist: "بررسی سوابق", smart: "جستجوی هوشمند",
     manual_quote: "استعلام دستی", quote_saved: "ثبت استعلام", quote_deleted: "حذف استعلام", proforma: "پیش‌فاکتور", extract_applied: "ثبت خوانده‌های پیش‌فاکتور",
     commission_table: "جدول کمیسیون", letter: "نامهٔ کمیسیون", deliver: "ارسال مدارک",
     commission_ok: "تأیید کمیسیون", quote_add: "افزودن استعلام", quote_final: "انتخابِ نهایی استعلام", rfq: "ارسال استعلام به تأمین‌کننده",
     code_reset: "🔑 کد ورود تازه", support_login: "ورود به پنل پشتیبانی", support_pass: "تغییر رمز پشتیبانی",
     ai_ask: "🤖 پرسش از کارشناس", ai_answer: "پاسخ به کارشناس هوشمند", ai_delivery: "📥 تحویلِ کارشناس هوشمند", ai_handover: "🤖 سپردن به کارشناس هوشمند", ai_handoff: "🤖 سپردن به کارشناس هوشمند",
-    ai_reject: "ردِ تحویلِ کارشناس هوشمند", ai_rules: "قواعدِ حداقلِ استعلام", ai_sup_cfg: "تنظیمِ «👁 حالت تأیید»", ai_ranking: "رتبه‌بندی تأمین‌کنندگان", ai_switches: "کلیدهای کارشناس هوشمند",
+    ai_reject: "ردِ تحویلِ کارشناس هوشمند", ai_rules: "قواعدِ حداقلِ استعلام", ai_sup_cfg: "حالتِ مکاتباتِ کارشناس هوشمند (⏱ با مهلت / 🤖 خودکار)", ai_ranking: "رتبه‌بندی تأمین‌کنندگان", ai_switches: "کلیدهای کارشناس هوشمند",
     ai_on: "کارشناس هوشمند روشن شد", ai_off: "کارشناس هوشمند خاموش شد" };
   /* عامل رویداد: manager، system یا expert:<id> — کارشناس با نامش، نه شناسه */
   const actorName = (a) => { if (a === "manager") return "مدیر"; if (a === "system") return "سامانه"; if (a === "support") return "پشتیبانی"; if (a === "ai" || /^ai:/.test(a || "")) return "کارشناس هوشمند";
@@ -1408,7 +1408,6 @@
     Q("[data-unrefer]").forEach((b) => b.onclick = () => unreferTender(b.dataset.unrefer));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
-    Q("[data-suptick]").forEach((b) => b.onclick = () => supTickSet(+b.dataset.suptick, b.dataset.on === "1"));
     /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ هر چهار مقدار از settings() یک‌جا (یک تایمر برای همه) */
     const saveAlerts = () => autoSave("alerts", () => { const s = settings(); return saveQuiet({ thresholds: s.thresholds, dispatchDays: s.dispatchDays, minSuppliers: s.minSuppliers, capacity: s.capacity }); });
     const thrTrack = G("[data-thr-track]");
@@ -1560,20 +1559,6 @@
         if (!why) return TP.modal("علت لازم است", "برای برداشتنِ تیکِ «🤖 هوشمند» علت را بنویسید.", null, "باشد", "");
         await go(why);
       }, "دستی شود");
-  }
-  /* فاز ۴ب گام ۴: تیکِ «👁 حالت تأیید» کنارِ «🤖» — بی توضیح، روشن یا خاموش؛ فقط وقتی پشتیبانی دست‌کم یک نوع قلم را «مجازِ تأیید» کرده.
-     در اقلامِ نوعِ مجاز، کارشناس هوشمند کارهایی را که کارشناس «با تأیید» گذاشته اول به او پیشنهاد می‌کند. */
-  function supTick(a) {
-    if (!aiExpert(a) || a.ai_on === 0 || !(S.data.sup_heads > 0)) return "";
-    const on = a.sup_on === 1;
-    return ` <button class="tp-btn xs ${on ? "primary" : ""}" data-suptick="${a.id}" data-on="${on ? 0 : 1}" title="${on ? "👁 با تأیید کارشناس — برای خاموش کردن بزنید" : "👁 حالت تأیید خاموش — برای اجازه دادن بزنید (اقلامِ نوعِ مجاز)"}">👁</button>`;
-  }
-  async function supTickSet(aid, on) {
-    try {
-      const r = await TP.api("/assign/sup", { body: { assignment_id: aid, on } });
-      await refresh();
-      if (on && r.changed && !r.eligible) TP.modal("👁 حالت تأیید", "اجازه ثبت شد، ولی فعلاً هیچ قلمِ این درخواست از نوعی نیست که پشتیبانی «مجازِ حالت تأیید» کرده؛ اگر بعد از نرمال‌سازی نوعِ مجاز شد، با «🚀 شروع» با تأیید پیش می‌رود.", null, "باشد", "");
-    } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
   }
   /* «🔨 ارجاع به مناقصه» از فهرست کارشناس: اقلامِ همان ردیف (ارجاعِ ارسال‌نشده یا بی‌کارشناس) پیش‌نویسِ مناقصه می‌شوند */
   function referTender(rid, aid, un) {

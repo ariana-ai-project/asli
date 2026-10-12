@@ -196,6 +196,8 @@
   async function loadThread() {
     const d = await api(`/sp/thread/${S.th}`);
     S.d = d; S.rev = d.thread.rev; S.lastMsg = d.msgs.length ? d.msgs[d.msgs.length - 1].id : 0;
+    /* «⏱ با مهلت»: شمارش با ساعتِ سرور، نه ساعتِ دستگاه */
+    S.skew = d.watch && d.watch.now ? d.watch.now - Date.now() : 0;
     if (typeof d.pf_read === "boolean") S.pfRead = d.pf_read;
     const pend = (d.watch && d.watch.pending) || [];
     S.propSig = d.watch ? `${pend.reduce((m, p) => Math.max(m, p.id), 0)}:${pend.length}` : null;
@@ -250,15 +252,15 @@
       const demo = t.demo ? `<span class="sp-tag">فرضی</span>` : "", av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
       if (t.ai === "locked") return TP.ui.chatRow({ on: S.th === t.id, cls: "lock", lock: true, av, attrs: `data-th="${t.id}" title="گفت‌وگوی کارشناس هوشمند — فقط دیدن"`,
         title: `${esc(t.supplier)}${demo}`, time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
-      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 با تأییدِ شما · ${fa(t.lines)} قلم`
+      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `⏱ با مهلت · ${fa(t.lines)} قلم`
         : preview(t) || `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`;
       return TP.ui.chatRow({ on: S.th === t.id, cls: t.ai === "ask" ? "ask" : t.ai === "watch" ? "watch" : "", av, attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)}"`,
-        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "👁 " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
+        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "⏱ " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
         badges: `${propBadge(t.props)}${badge(t.unread)}${badge(t.waiting, "wait")}` });
     }).join("");
   }
-  /* «👁 حالت تأیید»: شمارِ پیشنهادهای کارشناس هوشمند که منتظرِ تأیید یا ردِ شمایند */
-  const propBadge = (n) => (n ? `<span class="sp-badge prop" title="پیشنهادِ کارشناس هوشمند منتظرِ تأیید یا ردِ شما">👁 ${fa(n)}</span>` : "");
+  /* «⏱ با مهلت»: شمارِ پیشنهادهای کارشناس هوشمند که منتظرِ «ارسال» یا «رد»ِ شمایند */
+  const propBadge = (n) => (n ? `<span class="sp-badge prop" title="پیشنهادِ کارشناس هوشمند منتظرِ «ارسال» یا «رد»ِ شما — بی‌پاسخ، سرِ مهلت خودکار می‌رود">⏱ ${fa(n)}</span>` : "");
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
     /* پیش‌نویسِ نیمه‌کارهٔ هر گفت‌وگو با رسمِ دوباره (تغییر پهنا، تصمیم روی بسته) پاک نمی‌شود */
@@ -305,7 +307,7 @@
   const panes = () => {
     const d = S.d, w = watchOf();
     return [["wait", "منتظر تصمیم", d.bundles.filter((b) => OPEN_ST.includes(b.state)).length], ["items", "اقلام", d.lines.length],
-      ["done", "تصمیم‌های قبلی", d.bundles.filter((b) => !OPEN_ST.includes(b.state)).length], ...(w && (w.done || []).length ? [["props", "👁 پیشنهادها", w.done.length]] : [])];
+      ["done", "تصمیم‌های قبلی", d.bundles.filter((b) => !OPEN_ST.includes(b.state)).length], ...(w && (w.done || []).length ? [["props", "⏱ پیشنهادها", w.done.length]] : [])];
   };
   const curPane = () => { const L = panes(); if (S.pane && L.some((p) => p[0] === S.pane)) return S.pane; return L[0][2] ? "wait" : "items"; };
   /** کارت یا بسته‌ای که باید دیده شود در کدام بخش است */
@@ -343,24 +345,62 @@
     const ls = b.line_ids.map((id) => S.d.lines.find((l) => l.id === id)).filter(Boolean);
     return `${ls.map((l) => `• ${esc(l.title)} — ${qty(l.qty)} ${esc(l.unit || "")} × ${money(l.price)} ریال`).join("\n")}\nجمع: <b>${money(ls.reduce((s, l) => s + (l.total || 0), 0))}</b> ریال`;
   }
+  /* --- «⏱ با مهلت» (مهر ۱۴۰۵): پیشنهادِ کارشناس هوشمند با شمارشِ معکوس (ساعتِ سرور) — سرِ صفر خودِ صفحه «سرِ مهلت» را می‌زند --- */
+  const leftMs = (p) => (p && p.due_at ? p.due_at - (Date.now() + (S.skew || 0)) : null);
+  const mmss = (ms) => { const x = Math.max(0, Math.ceil(ms / 1000)); return fa(`${Math.floor(x / 60)}:${String(x % 60).padStart(2, "0")}`); };
+  const dueLabel = (p) => { const l = leftMs(p); return l == null ? "" : l > 0 ? `بی‌پاسخ، خودکار می‌رود تا <b class="num">${mmss(l)}</b>` : "⏳ مهلت تمام شد — در حال ارسالِ خودکار…"; };
+  const duePct = (p) => { const l = leftMs(p), tot = p.due_at && p.created_at ? p.due_at - p.created_at : 0; return tot > 0 ? Math.max(0, Math.min(1, l / tot)).toFixed(3) : 0; };
   function propCard(p) {
-    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>👁 پیشنهادِ کارشناس هوشمند — ${esc(p.kind_fa)}${p.bundle_id ? ` بستهٔ ${fa(p.bundle_id)}` : ""}</b>
+    const what = p.kind === "final" ? `بستهٔ ${fa(p.bundle_id)} را تأیید نهایی کند` : p.kind === "act" ? "این تصمیمِ بسته را بگیرد" : "این پیام را بفرستد";
+    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>⏱ کارشناس هوشمند می‌خواهد ${what}</b>
       ${p.kind === "final" ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
       ${p.kind === "act" ? `<div class="ph-prop-body">${(p.actions || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${fa(a.bundle_id)}${a.comment ? `: «${esc(a.comment)}»` : ""}`).join("\n")}</div>` : ""}
       ${p.body ? `<div class="ph-prop-body">${esc(p.body)}</div>` : ""}
-      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ تأیید</button><button class="tp-btn danger sm" data-prop-no="${p.id}">❌ رد</button></div>
-      <i>تأیید توضیح نمی‌خواهد. «❌ رد» توضیح می‌خواهد و بعدش پیامِ خودتان می‌رود یا هیچ.</i></div>`;
+      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : ""}
+      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger sm" data-prop-no="${p.id}">✏️ رد و نوشتن پیام خودم</button></div>
+      <i>«رد» علت و پیامِ تازهٔ خودتان را می‌خواهد — همان به‌جایش می‌رود.</i></div>`;
   }
+  const cfgBtn = `<button type="button" class="ph-cfg" data-supcfg title="حالتِ مکاتباتِ کارشناس هوشمند: با مهلت یا خودکار">⚙️ تغییر</button>`;
   const propsNote = () => {
     const w = watchOf();
     if (!w) return "";
-    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>👁 با تأییدِ شما</b>کارشناس هوشمند این گفت‌وگو را پیش می‌برد؛ هر پیشنهادش همین‌جا و در بات منتظرِ تأیید یا ردِ شما می‌آید.</div>`;
+    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه ${cfgBtn}</b>کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش اول همین‌جا (و در اعلان و بات) به شما نشان داده می‌شود؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.</div>`;
     return w.pending.map(propCard).join("");
   };
-  const feedHtml = () => msgsHtml() + askNote() + propsNote();
+  /* «🤖 خودکار»: گفت‌وگو بسته است و کارشناس هوشمند خودش مذاکره می‌کند */
+  const autoNote = () => (roOf() ? `<div class="ph-ask ph-watch" role="note"><b>🤖 خودکار ${cfgBtn}</b>کارشناس هوشمند خودش مذاکره می‌کند؛ هر جا جوابِ شما لازم باشد «🚨 پرسش از کارشناس» می‌آید.</div>` : "");
+  const feedHtml = () => msgsHtml() + rateNote() + askNote() + autoNote() + propsNote() + threadRateCard();
+
+  /* --- ⭐ امتیاز به کارِ کارشناس هوشمند (مهر ۱۴۰۵): هر پیامش ۱ تا ۵ ستاره (کمتر از سه با علت)، و کلِ مکاتبه بعد از بسته شدن با نظرِ
+     اجباری. «خاتمه»ِ درخواست تا همهٔ امتیازها داده نشده معلق است (worker/ai-rates.js) --- */
+  const ratesOf = () => (S.d && S.d.rates) || null;
+  const STAR = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.75 5.86 6.4.78-4.73 4.4 1.23 6.33L12 17.03l-5.65 3.14 1.23-6.33-4.73-4.4 6.4-.78z"/></svg>`;
+  /* ستاره‌ها از پنج به یک در DOM؛ با row-reverse یکِ اول سمتِ راست است و «~» ستاره‌های پیش از خودش را هم روشن می‌کند */
+  const stars = (attr, id, on) => [5, 4, 3, 2, 1].map((n) => `<button type="button" class="ph-star${on && n <= on ? " on" : ""}" ${attr}="${id}:${n}" aria-label="${fa(n)} ستاره" title="${fa(n)} از ۵">${STAR}</button>`).join("");
+  const rateOf = (m) => {
+    const R = ratesOf();
+    if (!R || m.who !== "e" || !(m.meta && m.meta.ai) || (m.meta && m.meta.tpl) || m.pending) return null;
+    const r = R.msgs[m.id];
+    return { cls: r ? `rated${r.stars < 3 ? " low" : ""}` : "unrated",
+      html: `<div class="ph-rate${r ? " done" : ""}" role="group" aria-label="امتیاز به این پیامِ کارشناس هوشمند">${r ? "" : `<span class="hint">⭐ امتیاز بدهید</span>`}<span class="stars">${stars("data-rate-star", m.id, r && r.stars)}</span>${r && r.note ? `<span class="why" title="${esc(r.note)}">💬</span>` : ""}</div>` };
+  };
+  const unrated = () => { const R = ratesOf(); return R ? S.d.msgs.filter((m) => rateOf(m) && !R.msgs[m.id]).length : 0; };
+  const rateNote = () => { const n = unrated(); return n ? `<div class="ph-ask ph-ratehint" role="note"><b>⭐ ${fa(n)} پیامِ کارشناس هوشمند منتظرِ امتیازِ شماست</b>نشانگر را روی هر پیامِ 🤖 نگه دارید (روی گوشی زیرِ همان پیام) و یک تا پنج ستاره بدهید؛ کمتر از سه ستاره علت می‌خواهد. «خاتمه»ِ درخواست تا امتیازها کامل نشده باز نمی‌شود.</div>` : ""; };
+  function threadRateCard() {
+    const R = ratesOf();
+    if (!R || !R.rateable || !R.closed) return "";
+    if (R.thread && !S.trateEdit) return `<div class="ph-ask ph-trate done" role="note"><b>⭐ امتیازِ شما به کلِ این مکاتبه</b><span class="ph-rate done big ro" aria-label="${fa(R.thread.stars)} از ۵ ستاره"><span class="stars">${[5, 4, 3, 2, 1].map((n) => `<span class="ph-star${n <= R.thread.stars ? " on" : ""}">${STAR}</span>`).join("")}</span></span><div class="ph-prop-body">${esc(R.thread.note || "")}</div>
+      <div class="ph-prop-acts"><button type="button" class="tp-btn sm" data-trate-edit>✏️ ویرایش</button></div></div>`;
+    const v = S.trate || (R.thread && R.thread.stars) || 0;
+    return `<div class="ph-ask ph-trate" role="note"><b>⭐ به کلِ این مکاتبه امتیاز بدهید</b>مذاکرهٔ کارشناس هوشمند با ${esc(S.d.thread.supplier)} از یک تا پنج ستاره، و نظرتان (اجباری) — همین در ارزیابیِ او می‌ماند و «خاتمه» تا آن موقع معلق است.
+      <span class="ph-rate big"><span class="stars">${stars("data-trate-star", S.th, v)}</span></span>
+      <textarea class="tp-input tp-textarea" data-trate-note style="min-height:64px" placeholder="نظرتان دربارهٔ کلِ این مکاتبه (اجباری)">${esc(S.trateNote != null ? S.trateNote : (R.thread && R.thread.note) || "")}</textarea>
+      <div class="sp-err" data-trate-err></div><div class="ph-prop-acts"><button type="button" class="tp-btn primary sm" data-trate-save ${v ? "" : "disabled"}>ثبتِ امتیاز و نظر</button></div></div>`;
+  }
   const msgsHtml = () => PH.feed(S.d.msgs.concat(PH.outboxMsgs((S.outbox || []).filter((x) => x.th === S.th), S.d.msgs, "e")), {
     mine: (m) => m.who === "e",
     ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
+    rate: rateOf,
     rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine, goLabel: "دیدن در اقلام و تصمیم‌ها" }),
     transcript: true,
     empty: `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`,
@@ -386,7 +426,7 @@
       },
       composer: roOf()
         ? { readonly: `<span class="ph-ro-t">🤖 کارشناس هوشمند این گفت‌وگو را پیش می‌برد — <b>فقط دیدن</b></span><button type="button" class="ph-ro-sos" data-takeover title="گفت‌وگو را خودتان ادامه دهید — مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button>` }
-        : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "👁 پیامِ خودتان — با «❌ رد»ِ پیشنهاد می‌رود" : `پیام به ${th.supplier}`, draft: S.th },
+        : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "✏️ پیامِ خودتان — جای آخرین پیشنهاد می‌رود (با علتِ رد)" : `پیام به ${th.supplier}`, draft: S.th },
     });
   }
   const composerState = PH.grow;
@@ -498,9 +538,9 @@
     const w = watchOf();
     if (!w || (w.manual || []).includes(b.id)) return null;
     const p = (w.pending || []).find((x) => x.bundle_id === b.id || (x.actions || []).some((a) => +a.bundle_id === b.id));
-    return p ? `<div class="sp-watch-box">👁 پیشنهادِ کارشناس هوشمند: <b>${esc(p.kind_fa)}</b> — منتظرِ تأیید یا ردِ شما
-        <div class="sp-actions"><button class="tp-btn primary" data-prop-ok="${p.id}">✅ تأیید</button><button class="tp-btn danger" data-prop-no="${p.id}">❌ رد</button></div></div>`
-      : `<div class="sp-muted" style="margin-top:6px">👁 تصمیمِ این بسته با پیشنهادِ کارشناس هوشمند و تأییدِ شماست.</div>`;
+    return p ? `<div class="sp-watch-box">⏱ پیشنهادِ کارشناس هوشمند: <b>${esc(p.kind_fa)}</b> — منتظرِ «ارسال» یا «رد»ِ شما؛ بی‌پاسخ سرِ مهلت خودکار می‌رود
+        <div class="sp-actions"><button class="tp-btn primary" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger" data-prop-no="${p.id}">✏️ رد و پیام خودم</button></div></div>`
+      : `<div class="sp-muted" style="margin-top:6px">⏱ تصمیمِ این بسته را کارشناس هوشمند پیشنهاد می‌کند و اول به شما نشان داده می‌شود.</div>`;
   }
   function countOpen(b) {
     let n = 0;
@@ -564,6 +604,14 @@
     $$("[data-act]").forEach((b) => { b.onclick = () => act(+b.closest("[data-b]").dataset.b, b.dataset.act); });
     $$("[data-prop-ok]").forEach((b) => { b.onclick = () => propOk(+b.dataset.propOk, b); });
     $$("[data-prop-no]").forEach((b) => { b.onclick = () => propNo(+b.dataset.propNo); });
+    $$("[data-supcfg]").forEach((b) => { b.onclick = () => supCfgDialog(); });
+    $$("[data-rate-star]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const [id, n] = b.dataset.rateStar.split(":").map(Number); rateMsg(id, n); }; });
+    /* گوشی: لمسِ پیامِ بی‌امتیاز ستاره‌ها را نشان می‌دهد (بی نشانگرِ موشواره) */
+    $$("[data-rate-row]").forEach((r) => { r.onclick = () => { $$(".ph-row.show-rate").forEach((x) => { if (x !== r) x.classList.remove("show-rate"); }); r.classList.toggle("show-rate"); }; });
+    $$("[data-trate-star]").forEach((b) => { b.onclick = () => { S.trate = +b.dataset.trateStar.split(":")[1]; const t = $("[data-trate-note]"); S.trateNote = t ? t.value : S.trateNote; repaintChat(); }; });
+    const tn = $("[data-trate-note]"); if (tn) tn.oninput = () => { S.trateNote = tn.value; };
+    const ts = $("[data-trate-save]"); if (ts) ts.onclick = () => rateThread(ts);
+    const te = $("[data-trate-edit]"); if (te) te.onclick = () => { S.trateEdit = true; S.trate = (ratesOf().thread || {}).stars || 0; repaintChat(); };
     $$("[data-acc]").forEach((c) => {
       c.onchange = async () => {
         const bid = +c.closest("[data-b]").dataset.b;
@@ -603,7 +651,7 @@
         if (watchOf()) {
           send.disabled = false;
           const p = (watchOf().pending || []).slice().reverse().find((x) => x.kind !== "final") || (watchOf().pending || []).slice(-1)[0];
-          return p ? propNo(p.id, text) : say("این گفت‌وگو را کارشناس هوشمند با تأییدِ شما پیش می‌برد و الان پیشنهادی منتظرِ شما نیست؛ پیامِ خودتان را با «❌ رد»ِ پیشنهادِ بعدی بفرستید.", "👁 با تأییدِ شما");
+          return p ? propNo(p.id, text) : say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و الان پیشنهادی منتظرِ شما نیست؛ پیامِ خودتان را با «✏️ رد»ِ پیشنهادِ بعدی بفرستید.", "⏱ با مهلت");
         }
         /* حباب همان لحظه می‌آید؛ پاسخِ سرور جایش را با پیامِ واقعی عوض می‌کند (مهر ۱۴۰۵) */
         const th = S.th, p = { at: Date.now(), body: text, th };
@@ -637,7 +685,7 @@
         await shut("پاسخ شما رفت و کارشناس هوشمند مذاکره را ادامه می‌دهد. گزارشِ کارش در «پنل پشتیبانی» است.", "✅ پاسخ فرستاده شد");
       } }, { label: "انصراف" }]);
   }
-  /* --- «👁 حالت تأیید»: تأیید (بی توضیح) و رد (توضیحِ اجباری، بعد پیامِ خودِ کارشناس یا هیچ) --- */
+  /* --- «⏱ با مهلت»: ارسال (بی توضیح) و رد (علتِ اجباری و پیامِ تازهٔ خودِ کارشناس؛ در تأیید نهایی سرنوشتِ بسته) --- */
   const propOf = (id) => ((watchOf() || {}).pending || []).find((p) => p.id === id) || null;
   async function propOk(id, btn) {
     const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
@@ -647,28 +695,97 @@
   }
   function propNo(id, prefill) {
     const p = propOf(id);
-    if (!p) return say("این پیشنهاد دیگر منتظرِ شما نیست؛ صفحه تازه شد.", "👁 پیشنهاد");
-    const fin = p.kind === "final", th = S.d.thread, tid = S.th;
-    const d = dlg("❌ ردِ پیشنهادِ کارشناس هوشمند", `<p>چرا؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد (تأمین‌کننده نمی‌بیند).</p>
+    if (!p) return say("این پیشنهاد دیگر منتظرِ شما نیست؛ صفحه تازه شد.", "⏱ پیشنهاد");
+    const fin = p.kind === "final", th = S.d.thread, tid = S.th, needText = !fin && !!p.body;
+    /* تا نوشتنِ علت و پیام، مهلت دست‌کم سه دقیقه تمدید می‌شود تا وسطِ نوشتن خودکار نرود */
+    api(`/sp/x/prop/${id}`, { body: { action: "hold" } }).then((r) => { if (r && r.due_at) { p.due_at = r.due_at; } }).catch(() => {});
+    const d = dlg("✏️ رد و نوشتن پیام خودم", `<p>چرا ردش می‌کنید؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد (تأمین‌کننده نمی‌بیند).</p>
       <textarea class="tp-input tp-textarea" data-r style="min-height:70px" placeholder="علتِ رد (اجباری)"></textarea>
       ${fin ? `<b style="display:block;margin-top:10px">با بستهٔ ${fa(p.bundle_id)} چه شود؟</b>
         <label class="sp-check"><input type="radio" name="bact" value="return" checked> ↩️ برگشت برای اصلاح، با پیامِ شما</label>
         <label class="sp-check"><input type="radio" name="bact" value="reject"> ❌ ردِ بسته</label>
         <label class="sp-check"><input type="radio" name="bact" value="keep"> ⏸ فعلاً بماند — تصمیمش با خودم</label>` : ""}
-      <b style="display:block;margin-top:10px">پیامِ خودتان برای ${esc(th.supplier)} ${fin ? "(برای «برگشت» اجباری)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
-      <textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea><div class="sp-err" data-err></div>`,
-    [{ label: "❌ رد", cls: "danger", fn: async (dd) => {
+      ${p.body ? `<div class="sp-muted" style="margin-top:10px">پیشنهادِ کارشناس هوشمند: <button type="button" class="tp-btn xs" data-copy-prop>📋 شروع از همین متن</button></div><div class="sp-sms">${esc(p.body)}</div>` : ""}
+      <b style="display:block;margin-top:10px">پیامِ تازهٔ خودتان برای ${esc(th.supplier)} ${needText ? "(اجباری — همین به‌جای پیامِ ردشده می‌رود)" : fin ? "(برای «برگشت» اجباری)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
+      <textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea>
+      <div class="sp-muted" style="margin-top:6px">⏱ برای نوشتن، مهلت تا دست‌کم سه دقیقهٔ دیگر تمدید شد.</div><div class="sp-err" data-err></div>`,
+    [{ label: "✏️ رد و ارسالِ پیامِ من", cls: "danger", fn: async (dd) => {
       const reason = $("[data-r]", dd).value.trim();
       if (!reason) throw new Error("علتِ رد را بنویسید.");
       const text = $("[data-t]", dd).value.trim();
       const bundle = fin ? ($('input[name="bact"]:checked', dd) || {}).value : undefined;
+      if (needText && !text) throw new Error("پیامِ تازهٔ خودتان را بنویسید — به‌جای پیامِ ردشده همین می‌رود.");
       if (bundle === "return" && !text) throw new Error("برای «برگشت» پیامِ برگشت را بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.");
       await api(`/sp/x/prop/${p.id}`, { body: { action: "no", reason, text, ...(bundle ? { bundle } : {}) } });
       S.drafts[tid] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
       await afterDecide();
     } }, { label: "انصراف" }]);
     if (prefill) $("[data-t]", d).value = prefill;
+    const cp = $("[data-copy-prop]", d); if (cp) cp.onclick = () => { const t = $("[data-t]", d); t.value = p.body; t.focus(); };
     setTimeout(() => { const r = $("[data-r]", d); if (r) r.focus(); }, 30);
+  }
+  /* سرِ صفرِ شمارش: خودِ صفحه «سرِ مهلت» را می‌زند (Cron هم هر دقیقه)؛ بعدش گفت‌وگو دوباره خوانده می‌شود */
+  const dueFired = new Set();
+  function dueTick() {
+    const w = watchOf(); if (!w || !(w.pending || []).length) return;
+    for (const el of $$("[data-due]")) {
+      const p = propOf(+el.dataset.due); if (!p) continue;
+      el.style.setProperty("--p", duePct(p));
+      const t = $("[data-due-t]", el); if (t) t.innerHTML = dueLabel(p);
+      el.classList.toggle("soon", (leftMs(p) || 0) < 60000);
+      if (leftMs(p) <= 0 && !dueFired.has(p.id) && !document.querySelector(".tp-modal-bg")) {
+        dueFired.add(p.id);
+        api(`/sp/x/prop/${p.id}`, { body: { action: "due" } }).catch(() => {}).then(() => setTimeout(() => loadThread().catch(() => {}), 600));
+      }
+    }
+  }
+  setInterval(dueTick, 1000);
+  /* «⏱ با مهلت / 🤖 خودکار»: فقط خودِ کارشناس — همین‌جا یا «حساب من» */
+  async function supCfgDialog() {
+    let s; try { s = await api("/me/supervise"); } catch (e) { return say(e.message); }
+    const c = s.cfg || { mode: "timer", minutes: 10 };
+    const d = dlg("⚙️ مکاتباتِ کارشناس هوشمند", `<p class="sp-muted" style="margin-top:0">برای همهٔ گفت‌وگوهای کارشناس هوشمندِ شما.</p>
+      <label class="sp-check sp-mode"><input type="radio" name="supm" value="timer" ${c.mode === "timer" ? "checked" : ""}> <b>⏱ با مهلت</b> — هر پیام و تصمیم اول به شما نشان داده می‌شود؛ «ارسال» یا «رد»، و بی‌پاسخ سرِ مهلت خودکار می‌رود.</label>
+      <div class="sp-row" style="gap:8px;margin:4px 26px 10px"><span>مهلت</span><input class="tp-input num" data-supmin type="text" inputmode="numeric" maxlength="3" value="${c.minutes}" style="width:90px" dir="ltr" aria-label="مهلت به دقیقه"> <span>دقیقه (${fa(s.min || 1)} تا ${fa(s.max || 60)})</span></div>
+      <label class="sp-check sp-mode"><input type="radio" name="supm" value="auto" ${c.mode === "auto" ? "checked" : ""}> <b>🤖 خودکار</b> — کارشناس هوشمند خودش مذاکره می‌کند و فقط وقتی جوابِ شما لازم است اعلان می‌دهد. پیشنهادهای معطل همین حالا می‌روند.</label>
+      <div class="sp-err" data-err></div>`,
+    [{ label: "ذخیره", cls: "primary", fn: async (dd) => {
+      const mode = ($('input[name="supm"]:checked', dd) || {}).value || "timer";
+      const r = await api("/me/supervise", { method: "PUT", body: { mode, minutes: TP.digits($("[data-supmin]", dd).value) } });
+      await loadThread().catch(() => {});
+      if (TP.ui && TP.ui.success) TP.ui.success(r.cfg.mode === "auto" ? `خودکار شد${r.sent ? ` — ${fa(r.sent)} پیشنهاد رفت` : ""}` : `با مهلتِ ${fa(r.cfg.minutes)} دقیقه`);
+    } }, { label: "انصراف" }]);
+    return d;
+  }
+  /* ⭐ امتیازِ یک پیام: سه ستاره و بیشتر همان لحظه؛ کمتر علت می‌خواهد */
+  async function rateMsg(id, n) {
+    const send = async (note) => {
+      const r = await api("/sp/x/rate", { body: { kind: "msg", msg_id: id, stars: n, note } });
+      S.d.rates.msgs[id] = { stars: r.stars, note: r.note };
+      repaintChat();
+      if (TP.ui && TP.ui.success && !unrated()) TP.ui.success("همهٔ پیام‌ها امتیاز گرفتند ⭐");
+    };
+    if (n >= 3) return send("").catch((e) => say(e.message));
+    const d = dlg(`⭐ ${fa(n)} ستاره — چه چیزِ این پیام درست نبود؟`, `<p class="sp-muted" style="margin-top:0">برای کمتر از سه ستاره علت لازم است؛ همین به کارشناس هوشمند می‌رسد تا دفعهٔ بعد بهتر بنویسد.</p>
+      <textarea class="tp-input tp-textarea" data-why style="min-height:70px" placeholder="مثلاً لحنش تند بود، زود تخفیف خواست، پاسخ نداد…"></textarea><div class="sp-err" data-err></div>`,
+    [{ label: "ثبتِ امتیاز", cls: "primary", fn: async (dd) => { const w = $("[data-why]", dd).value.trim(); if (w.length < 3) throw new Error("علت را بنویسید."); await send(w); } }, { label: "انصراف" }]);
+    setTimeout(() => { const t = $("[data-why]", d); if (t) t.focus(); }, 30);
+  }
+  async function rateThread(btn) {
+    const note = ($("[data-trate-note]") || {}).value || "", err = $("[data-trate-err]");
+    if (!S.trate) { if (err) err.textContent = "ستاره‌ها را انتخاب کنید."; return; }
+    if (note.trim().length < 3) { if (err) err.textContent = "نظرتان را بنویسید — اجباری است."; return; }
+    if (btn) btn.disabled = true;
+    try {
+      const r = await api("/sp/x/rate", { body: { kind: "thread", thread_id: S.th, stars: S.trate, note } });
+      S.d.rates.thread = { stars: r.stars, note: r.note }; S.trate = 0; S.trateNote = null; S.trateEdit = false;
+      repaintChat(); if (TP.ui && TP.ui.success) TP.ui.success("امتیازِ مکاتبه ثبت شد ⭐");
+    } catch (e) { if (btn) btn.disabled = false; if (err) err.textContent = e.message; }
+  }
+  /* فقط فهرستِ پیام‌ها دوباره رسم می‌شود، با همان جای اسکرول */
+  function repaintChat() {
+    const c = $("#chat"); if (!c) return render();
+    const top = c.scrollTop; c.innerHTML = feedHtml(); c.scrollTop = top; bind();
   }
   async function act(bid, action) {
     const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
