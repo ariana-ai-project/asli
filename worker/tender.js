@@ -423,8 +423,11 @@ async function historyRead(env, code) {
  */
 async function listFp(env, n) {
   const r = await env.DB.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(rev),0) AS r, COALESCE(MAX(updated_at),0) AS u, COALESCE(MAX(id),0) AS m,
-      COALESCE(SUM(CASE WHEN state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) THEN 1 ELSE 0 END),0) AS due FROM tenders`).bind(n, n).first();
-  return { fp: `${r.c}.${r.r}.${r.u}.${r.m}`, due: r.due > 0 };
+      COALESCE(SUM(CASE WHEN state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) THEN 1 ELSE 0 END),0) AS due,
+      COALESCE(SUM(CASE WHEN state='scheduled' AND start_at<=? THEN 1 ELSE 0 END),0) AS started,
+      COALESCE(SUM(CASE WHEN state='scheduled' AND start_at<=? AND sealed_end_at>? THEN 1 ELSE 0 END),0) AS sealedNow FROM tenders`).bind(n, n, n, n, n).first();
+  /* شروع‌شده‌ها و سربسته‌های همین لحظه هم در اثر انگشت‌اند: رسیدنِ زمانِ شروع ردیف را عوض نمی‌کند ولی برچسبِ فهرست عوض می‌شود */
+  return { fp: `${r.c}.${r.r}.${r.u}.${r.m}.${r.started}.${r.sealedNow}`, due: r.due > 0 };
 }
 /** GET /support/tenders[?fp=] — با fp همان قبلی و بی کار سررسید ← {same} (بی خواندن فهرست کامل) */
 export async function tenderList(env, ctx, fp) {
@@ -458,7 +461,8 @@ async function detailFp(env, t) {
       (SELECT COUNT(*)||':'||COALESCE(MAX(id),0)||':'||COALESCE(SUM(CASE state WHEN 'pending' THEN 1 WHEN 'running' THEN 2 WHEN 'done' THEN 3 ELSE 4 END),0)||':'||COALESCE(MAX(COALESCE(done_at,started_at,at,0)),0)
         FROM tender_jobs WHERE tender_id=?) AS j,
       ${t.grp ? "(SELECT COALESCE(SUM(rev),0) FROM tenders WHERE grp=?)" : "0"} AS g`).bind(t.id, t.id, ...(t.grp ? [t.grp] : [])).first();
-  return `${t.rev}.${t.state}.${t.end_at || 0}.${t.sealed_done || 0}.${t.updated_at || 0}.${fnv(String(r.i))}.${r.j}.${r.g}`;
+  /* tenderState نه t.state: «scheduled» در جدول تا پایان همان می‌ماند و رسیدنِ زمانِ شروع یا پایانِ سربسته فقط از ساعت پیداست */
+  return `${t.rev}.${tenderState(t, now())}.${t.end_at || 0}.${t.sealed_done || 0}.${t.updated_at || 0}.${fnv(String(r.i))}.${r.j}.${r.g}`;
 }
 /** GET /support/tenders/:id[?fp=] — با fp همان قبلی ← {same, now} (نظرسنجی هر ۳ ثانیه بی خواندن همهٔ پیشنهادها) */
 export async function tenderDetail(env, id, ctx, fp) {
@@ -1040,12 +1044,14 @@ async function supplierView(env, t, inv) {
     bidders: sealed ? null : ranks.size, invited: cnt.n, fixes: mineFixed, lots: lotList, now: n, company: COMPANY(env),
   };
 }
-/** GET /tender/:code/state?rev= — نظرسنجی؛ اگر چیزی عوض نشده فقط {same, rev, now} */
+/** GET /tender/:code/state?rev=&st= — نظرسنجی؛ اگر چیزی عوض نشده فقط {same, rev, now}.
+ *  st = وضعیتی که صفحه نشان می‌دهد: رسیدنِ زمانِ شروع یا پایانِ دورِ سربسته ردیف را عوض نمی‌کند (rev همان است)،
+ *  پس بی این، صفحه در «تا شروع» روی ۰۰:۰۰ می‌ماند و شمارشِ «تا پایان» هیچ‌وقت شروع نمی‌شد */
 export async function tenderStateOf(env, request, code, url, ctx) {
   let { t, inv } = await tenderWho(env, request, code);
   t = await finalizeIfDue(env, t, ctx);
-  const rev = int(url.searchParams.get("rev"));
-  if (rev != null && rev === t.rev) return { same: true, rev: t.rev, now: now(), state: tenderState(t, now()), end_at: t.end_at };
+  const rev = int(url.searchParams.get("rev")), st = url.searchParams.get("st"), cur = tenderState(t, now());
+  if (rev != null && rev === t.rev && (!st || st === cur)) return { same: true, rev: t.rev, now: now(), state: cur, end_at: t.end_at };
   return supplierView(env, t, inv);
 }
 /** GET /tender/:code/lots — قلم‌های گروه برای همین شماره */

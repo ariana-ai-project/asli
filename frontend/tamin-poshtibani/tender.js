@@ -100,7 +100,7 @@
   async function poll() {
     if (!S.tok || !S.v || S.busy) return;
     try {
-      const r = await api(`/state?rev=${S.v.tender.rev}`);
+      const r = await api(`/state?rev=${S.v.tender.rev}&st=${encodeURIComponent(S.v.tender.state)}`);
       if (r.same) { S.off = r.now - Date.now(); return; }
       accept(r);
     } catch (e) {

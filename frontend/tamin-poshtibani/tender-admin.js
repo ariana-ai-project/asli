@@ -49,6 +49,8 @@
       if (T.id !== id) return;
       T.off = d.now - Date.now();
       if (d.same) return;
+      /* لحظهٔ شروعِ حلقهٔ «تا شروع»: فقط با مناقصه یا وضعیتِ تازه از نو */
+      if (!T.d || !T.d.tender || T.d.tender.id !== d.tender.id || T.d.tender.state !== d.tender.state) T.dAt = now();
       T.d = d; T.dfp = d.fp || null;
     }
     catch (e) { if (!quiet) T.dErr = e.message; }
@@ -70,6 +72,12 @@
       const t = T.d && T.d.tender; const root = document.getElementById("app");
       if (t && t.state === "live") D.tickRing(root, t.end_at - now(), Math.max(1, t.end_at - (t.sealed_end_at || t.start_at)));
       if (t && t.state === "sealed") D.tickRing(root, t.sealed_end_at - now(), Math.max(1, t.sealed_end_at - t.start_at));
+      /* «تا شروع» هم ثانیه‌ای کم می‌شود (قبلاً فقط زنده و سربسته)؛ کلِ حلقه از لحظهٔ باز شدنِ همین جزئیات */
+      if (t && t.state === "scheduled") D.tickRing(root, t.start_at - now(), Math.max(1, t.start_at - (T.dAt || now())));
+      /* رسیدنِ شروع، پایانِ سربسته یا پایان: همان لحظه جزئیات تازه شود، نه سه ثانیه بعد */
+      if (t && T.id && !T.edgeBusy && ((t.state === "scheduled" && now() >= t.start_at) || (t.state === "sealed" && now() >= t.sealed_end_at) || (t.state === "live" && now() >= t.end_at))) {
+        T.edgeBusy = true; loadOne(T.id, true).finally(() => { T.edgeBusy = false; });
+      }
       document.querySelectorAll("[data-tdleft]").forEach((el) => { const v = Number(el.dataset.tdleft); el.textContent = D.clock(el.hasAttribute("data-tdup") ? now() - v : v - now()); });
     }, 1000);
   }

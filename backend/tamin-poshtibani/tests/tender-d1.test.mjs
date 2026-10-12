@@ -142,6 +142,36 @@ test("نظرسنجی پنل با اثر انگشت: چیزی عوض نشده ←
   assert.equal((await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(d5.data.fp)}`, null, SUP)).data.same, undefined, "کار تازهٔ جستجو");
 });
 
+test("زمان‌شمار: رسیدنِ زمانِ شروع (بی هیچ تغییری در ردیف) هم پنل پشتیبانی هم صفحهٔ تأمین‌کننده را به «زنده» می‌برد", { skip: SKIP }, async () => {
+  const t = await call("POST", "/support/tenders", { title: "مهره M12", qty: 10, unit: "عدد", start_price: "40000", invites: [{ name: "فولاد البرز", phone: "09121111111" }] }, SUP);
+  const id = t.data.tender.id, code = t.data.tender.code;
+  const s = await call("POST", `/support/tenders/${id}/schedule`, { start_in_min: 10, duration_min: 30 }, SUP);
+  assert.equal(s.data.tender.state, "scheduled");
+  const L = await call("GET", "/support/tenders", null, SUP), D = await call("GET", `/support/tenders/${id}`, null, SUP);
+  const pp = await call("POST", `/support/tenders/${id}/invites/${D.data.invites[0].alias}/pass`, {}, SUP);
+  const A = { "X-Tender-Token": (await call("POST", `/tender/${code}/login`, { phone: "09121111111", pass: pp.data.pass })).data.token };
+  const v = (await call("GET", `/tender/${code}/state`, null, A)).data;
+  assert.equal(v.tender.state, "scheduled");
+  assert.equal((await call("GET", `/tender/${code}/state?rev=${v.tender.rev}&st=scheduled`, null, A)).data.same, true, "پیش از شروع: همان");
+  /* گذشتِ زمان: زمانِ شروع و پایانِ دور در گذشته/آینده، بی rev و updated_at (همان چیزی که با گذشتِ ساعت پیش می‌آید) */
+  const n = Date.now();
+  run("UPDATE tenders SET start_at=?, end_at=? WHERE id=?", n - 1000, n + 30 * 60e3, id);
+  const l2 = await call("GET", `/support/tenders?fp=${encodeURIComponent(L.data.fp)}`, null, SUP);
+  assert.equal(l2.data.same, undefined, "فهرست: شروعِ مناقصه دیده می‌شود");
+  assert.equal(l2.data.tenders.find((x) => x.id === id).state, "live");
+  const d2 = await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(D.data.fp)}`, null, SUP);
+  assert.equal(d2.data.same, undefined, "جزئیات: شروعِ مناقصه دیده می‌شود");
+  assert.equal(d2.data.tender.state, "live");
+  const v2 = (await call("GET", `/tender/${code}/state?rev=${v.tender.rev}&st=scheduled`, null, A)).data;
+  assert.equal(v2.same, undefined, "صفحهٔ تأمین‌کننده: نمای کامل با وضعیت زنده، نه «همان»");
+  assert.equal(v2.tender.state, "live");
+  assert.equal((await call("GET", `/tender/${code}/state?rev=${v2.tender.rev}&st=live`, null, A)).data.same, true, "بعدش دوباره «همان»");
+  /* دورِ سربسته تمام شد ← زنده (همین راه) */
+  run("UPDATE tenders SET sealed_end_at=?, sealed_done=1 WHERE id=?", n + 5 * 60e3, id);
+  const v3 = (await call("GET", `/tender/${code}/state?rev=${v2.tender.rev}&st=live`, null, A)).data;
+  assert.equal(v3.tender.state, "sealed", "ورود به دور سربسته هم دیده می‌شود");
+});
+
 test("فهرست خالی: جستجوی قلم با همان راه قبلی", { skip: SKIP }, async () => {
   run("DELETE FROM cat_heads"); run("DELETE FROM cat_codes"); resetCatalogCache();
   const r = await call("GET", "/support/tender-items?q=" + encodeURIComponent("میلگرد"), null, SUP);
