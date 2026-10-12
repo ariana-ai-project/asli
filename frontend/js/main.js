@@ -236,6 +236,9 @@
       land: makeGroup(["1600"].concat((dpr > 1.25 || window.innerWidth > 1920) && !slowNet && fastNet ? ["2560"] : [])),
       port: makeGroup(["p720"].concat(dpr >= 2 && !slowNet && fastNet && memOK ? ["p1080"] : [])),
     };
+    /* نسخهٔ فریم‌های عمودی: با هر بازسازیِ p720/p1080 بالا برود (همین نشانی در index.html و پیش‌کشِ sw.js) —
+       sw فریم‌ها را بی بازبینی از کش می‌دهد، پس نشانیِ تازه تنها راهِ رسیدنِ فریمِ تازه به گوشی‌ای است که قبلاً دیده */
+    GROUPS.port.q = "?v=2";
     const pickGroup = () => GROUPS[compact && window.innerHeight > window.innerWidth ? "port" : "land"];
     let group = pickGroup();
 
@@ -272,7 +275,7 @@
           pump();
         };
         im.onerror = () => { inflight--; pump(); };
-        im.src = `assets/frames/${g.dirs[k]}/logo-${String(i).padStart(3, "0")}.webp`;
+        im.src = `assets/frames/${g.dirs[k]}/logo-${String(i).padStart(3, "0")}.webp${g.q || ""}`;
       }
     }
 

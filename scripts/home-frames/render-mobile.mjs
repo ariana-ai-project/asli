@@ -2,7 +2,8 @@
 // و از فریم HANDOFF به بعد همان فریم‌های عمودیِ قبلی (تحویلِ بی‌درز: دوربین در انتها دقیقاً همان قاب است).
 // node scripts/home-frames/render-mobile.mjs <outRoot> [sizes=1080,720] [q=0.8] [only=0-148]
 // منبع: frontend/assets/frames/2560 (افقی) و فریم‌های عمودیِ ۹:۱۶ قبلی (اینجا SRC_PORT؛ از ۷۴ به بعد و ترکیبِ ۷۰ تا ۷۴).
-// خروجی را در frontend/assets/frames/p1080 و p720 بگذارید. کروم: C:\Program Files\Google\Chrome\Application\chrome.exe
+// خروجی را در frontend/assets/frames/p1080 و p720 بگذارید و نسخهٔ نشانی را بالا ببرید (main.js GROUPS.port.q، index.html، sw.js).
+// کروم: C:\Program Files\Google\Chrome\Application\chrome.exe
 // diffseq.mjs <dir> 0 80 — اختلافِ فریم‌های پیاپی؛ جهش یعنی درز در حرکت
 import { readFileSync, writeFileSync, mkdirSync, copyFileSync } from "node:fs";
 import { chrome } from "./cdp.mjs";
@@ -47,7 +48,8 @@ if (OUT) {
   const [a, b] = ONLY ? ONLY.split("-").map(Number) : [0, FRAMES - 1];
   const lib = readFileSync(new URL("./compose-lib.js", import.meta.url), "utf8");
   const c = await chrome();
-  await c.ev(`${lib}; return 1`);
+  /* پس‌زمینهٔ پژواک از فریم ۰ (بی نشان) — compose-lib.js makePlate */
+  await c.ev(`${lib}; const im = await new Promise((ok) => { const m = new Image(); m.onload = () => ok(m); m.src = "data:image/webp;base64,${readFileSync(`${SRC}/2560/logo-000.webp`).toString("base64")}"; }); makePlate(im); return 1`);
   const b64 = (p) => readFileSync(p).toString("base64");
   for (const W of sizes) {
     const H = Math.round(W * 16 / 9), dir = `${OUT}/p${W}`; mkdirSync(dir, { recursive: true });
@@ -61,7 +63,7 @@ if (OUT) {
         const L = await load(${JSON.stringify(b64(`${SRC}/2560/logo-${n}.webp`))});
         const P = ${cam.mix > 0} ? await load(${JSON.stringify(cam.mix > 0 ? b64(`${SRC_PORT(W)}/logo-${n}.webp`) : "")}) : null;
         const out = document.createElement("canvas"); out.width = ${W}; out.height = ${H};
-        composeFrame(out, L, P, ${JSON.stringify(cam)}, "stretch");
+        composeFrame(out, L, P, ${JSON.stringify(cam)}, "echo");
         const blob = await new Promise((ok) => out.toBlob(ok, "image/webp", ${+Q}));
         const buf = new Uint8Array(await blob.arrayBuffer()); let s = ""; for (let k = 0; k < buf.length; k += 0x8000) s += String.fromCharCode.apply(null, buf.subarray(k, k + 0x8000));
         return btoa(s);`);

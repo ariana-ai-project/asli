@@ -250,7 +250,9 @@
     .letterpaper p { margin: 10px 0 0; text-align: justify; text-indent: 1.6em; }
     .letterpaper .lt-sign { margin-top: 22px; text-align: left; line-height: 1.9; }
     :root[data-theme="light"] .letterpaper { background: #fff; }
-    @media (max-width: 900px) { .two { flex-direction: column; } .two .side { flex: none; width: 100%; } .letterpaper { padding: 16px; } }
+    /* گوشی: ستونِ اصلی هم‌پهنای صفحه (stretch)؛ با flex-start پهنای پهن‌ترین جدول را می‌گرفت، جدول در قابِ اسکرولش
+       جا نمی‌ماند و بیرون‌زدگی‌اش را صفحه می‌بُرید — جدول جستجوی هوشمند چپ‌وراست نمی‌شد */
+    @media (max-width: 900px) { .two { flex-direction: column; align-items: stretch; } .two .main { width: 100%; } .two .side { flex: none; width: 100%; } .letterpaper { padding: 16px; } }
   </style>
 </head>
 <body class="tp-body">
