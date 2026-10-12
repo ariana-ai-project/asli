@@ -10,7 +10,7 @@
    هم‌زمان «?v=» نشانی‌های css/js را در index.html و tamin-poshtibani/index.html هم بالا ببرید:
    ناوبری شبکه‌اول است ولی دارایی‌ها کش‌اول، و بدون نشانی تازه، بازدیدکنندهٔ قبلی اولین بار
    HTML تازه را با main.js کهنهٔ کش‌شده می‌گرفت (صفحهٔ سیاه تا رفرش بعدی). */
-const CACHE_NAME = "ariana-pwa-v11"; /* v11: زمینهٔ یکدستِ پایینِ صفحه روی گوشی (مه و آسمان)؛ v10: لوگوی تازه */
+const CACHE_NAME = "ariana-pwa-v12"; /* v12: نمادِ ۱۸۰ آیفون (apple-touch-icon.png در ریشه)؛ v11: زمینهٔ پایینِ صفحه روی گوشی؛ v10: لوگوی تازه */
 
 /* پوستهٔ اولیهٔ برنامه — از فریم‌های لوگوموشن فقط اولی (بقیه در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -22,6 +22,7 @@ const PRECACHE_URLS = [
   "./js/liquid-glass.js?v=8",
   "./js/support.js?v=9",
   "./assets/logo-new.jpg",
+  "./apple-touch-icon.png",
   "./assets/icon-192.png",
   "./assets/icon-512.png",
   "./assets/icon-maskable-512.png",
