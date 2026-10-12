@@ -1380,12 +1380,37 @@ body.is-pre-play { overflow: hidden; }
   .departments .card .card-status::before { display: none; }
   .departments .card[data-status="active"] .card-status { background: #15803d; }
   .departments .card[data-status="soon"] .card-status { background: #b45309; }
+  /* «به زودی» آرام (مهر ۱۴۰۵): کپسولِ شیشه‌ایِ تیره با متن روشن به‌جای قرمزِ پُر — هفت نشانِ قرمز صفحه را شلوغ و
+     هشدارگونه می‌کرد و چشم را از دو بخشِ فعال می‌گرفت؛ «فعال» سبز می‌ماند تا بخش‌های در دسترس پیدا باشند */
+  .departments .card[data-status="off"] .card-status {
+    color: #d9e1f2;
+    background: rgba(8, 14, 32, 0.8);
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.2), 0 3px 10px -2px rgba(0, 0, 0, 0.55);
+  }
 
+  /* عنوانِ روی کرهٔ زمین: سایهٔ نزدیک‌تر و پررنگ‌تر تا روی ابرها و صحرای روشن هم خوانا بماند */
+  .hero-title {
+    filter: drop-shadow(0 2px 6px rgba(2, 6, 20, 0.72)) drop-shadow(0 8px 30px rgba(2, 6, 20, 0.6));
+  }
+
+  /* دکمهٔ گوشه (مدیریت وضعیت بخش‌ها) روی گوشی فقط چرخ‌دنده است، مثل دکمهٔ تنظیماتِ اپ‌ها: نوشتهٔ «پشتیبانی»
+     کنارِ کاشیِ «پشتیبانی» دو چیزِ هم‌نام روی یک صفحه بود. نام برای صفحه‌خوان همان aria-label می‌ماند */
   .site-admin {
     bottom: calc(12px + env(safe-area-inset-bottom, 0px));
     inset-inline-start: 14px;
-    padding: 7px 12px;
-    font-size: 0.78rem;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+  .site-admin svg { width: 19px; height: 19px; }
+  .site-admin span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
   }
 }
 
