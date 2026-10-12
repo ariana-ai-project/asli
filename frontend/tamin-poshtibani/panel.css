@@ -222,6 +222,7 @@ button.chip:hover { border-color: var(--tp-accent); color: var(--tp-fg); }
 .st-cls  { background: rgba(120,120,140,.14); border-color: rgba(120,120,140,.4); color: #a9b1c6; }
 .st-hold { background: rgba(242,194,48,.14); border-color: rgba(242,194,48,.45); color: #fcd34d; }
 .st-stop { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.45); color: #fca5a5; }
+.st-tender { background: rgba(167,139,250,.16); border-color: rgba(167,139,250,.5); color: #ddd2ff; }
 
 /* ---------- باکس‌های پایش مراحل ---------- */
 .boxes { display: inline-flex; gap: 4px; }
@@ -521,6 +522,7 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 :root[data-theme="light"] .st-cls { color: #52525b; }
 :root[data-theme="light"] .st-hold { color: #7a5a05; }
 :root[data-theme="light"] .st-stop { color: #b91c1c; }
+:root[data-theme="light"] .st-tender { color: #6d28d9; }
 :root[data-theme="light"] .b-idle { background: rgba(47, 111, 228, 0.05); }
 :root[data-theme="light"] .b-empty { background: #fff; border-color: #c7d2e5; }
 :root[data-theme="light"] .b-muted { background: rgba(100, 110, 130, 0.1); }

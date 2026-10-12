@@ -53,6 +53,11 @@ export const TENDER_COLUMNS = [
   ["tenders", "req_aid", "INTEGER"],                            /* ثبت‌شده در درخواست (ارجاع و قلم) */
   ["tenders", "req_item", "INTEGER"],
   ["tenders", "req_at", "INTEGER"],
+  /* منبع: ارجاعِ درخواست به مناقصه از میز مدیر یا پنل پشتیبانی (مهر ۱۴۰۵) — قلمِ همین ردیف و درخواستش */
+  ["tenders", "src_request", "TEXT"],
+  ["tenders", "src_item", "INTEGER"],
+  ["tenders", "src_by", "TEXT"],
+  ["tenders", "src_at", "INTEGER"],
   ["tender_invites", "proxy_min", "INTEGER"],
   ["tender_invites", "proxy_at", "INTEGER"],
   ["tender_invites", "accepted_at", "INTEGER"],
@@ -357,6 +362,7 @@ const pub = (t, n) => ({
   proxy_on: !!t.proxy_on, require_accept: !!t.require_accept, outbid_sms: !!t.outbid_sms, outbid_gap_s: t.outbid_gap_s ?? 120, thanks_sms: !!t.thanks_sms,
   sealed_s: t.sealed_s || 0, sealed_end_at: t.sealed_end_at || null, duration_s: t.duration_s, start_at: t.start_at, end_at: t.end_at, ended_at: t.ended_at,
   state: tenderState(t, n), best_amount: t.best_amount, rev: t.rev, cancel_reason: t.cancel_reason, req_aid: t.req_aid || null, req_item: t.req_item || null, req_at: t.req_at || null,
+  src_request: t.src_request || null, src_item: t.src_item || null, src_by: t.src_by || null, src_at: t.src_at || null,
 });
 /** سری برای نمودار: بهترین قیمت پس از هر پیشنهاد معتبر */
 function seriesOf(bids) {
@@ -509,21 +515,23 @@ function aliasesFor(n, from) {
   for (let i = a.length - 1; i > 0; i--) { const j = crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1); [a[i], a[j]] = [a[j], a[i]]; }
   return a;
 }
-function lotOf(x, i) {
+function lotOf(x, i, draftOk) {
   const title = T(x.title || x.item_title).slice(0, 200);
   if (!title) throw new HttpError(`عنوان قلم ${faN(i + 1)} لازم است.`);
   const qty = Number(latin(x.qty));
   if (!(qty > 0)) throw new HttpError(`مقدار «${title}» را بنویسید.`);
   const unit = T(x.unit).slice(0, 30);
   if (!unit) throw new HttpError(`واحد «${title}» را بنویسید.`);
-  const start = amountOf(x.start_price);
-  if (!(start > 0)) throw new HttpError(`قیمت شروع «${title}» (سقف قیمت واحد، ریال) لازم است.`);
+  let start = amountOf(x.start_price);
+  /* پیش‌نویسِ ارجاع‌شده از درخواست: قیمت شروع را پشتیبان بعداً از «⚙️ قواعد» می‌نویسد (۰ = تعیین نشده؛ پیش از شروع بررسی می‌شود) */
+  if (!(start > 0)) { if (draftOk) start = 0; else throw new HttpError(`قیمت شروع «${title}» (سقف قیمت واحد، ریال) لازم است.`); }
   return { title, qty, unit, start, item_code: T(x.item_code).slice(0, 40) || null, item_title: T(x.item_title).slice(0, 200) || null, spec: T(x.spec).slice(0, 2000) || null };
 }
 
 /** POST /support/tenders — مناقصهٔ تازه (پیش‌نویس) با فهرست دعوت؛ lots: چند قلم در یک گروه */
-export async function tenderCreate(env, b) {
-  const lots = (Array.isArray(b.lots) && b.lots.length ? b.lots : [b]).slice(0, 30).map(lotOf);
+/* src (داخلی، از tenderRefer): {request_id, items:[شناسهٔ قلمِ هر ردیف], by: "manager"|"support"} */
+export async function tenderCreate(env, b, src) {
+  const lots = (Array.isArray(b.lots) && b.lots.length ? b.lots : [b]).slice(0, 30).map((x, i) => lotOf(x, i, !!src));
   const s = cleanRules(b, await defaultsOf(env));
   const terms = T(b.terms).slice(0, 2000) || T((await setting(env, "tenderTerms")) || "") || null;
   const list = (Array.isArray(b.invites) ? b.invites : []).map((x) => ({ name: T(x.name).slice(0, 120), phone: phoneOf(x.phone, x.name), source: T(x.source).slice(0, 20) || "manual",
@@ -534,18 +542,75 @@ export async function tenderCreate(env, b) {
   const ids = [];
   for (let i = 0; i < lots.length; i++) {
     const L = lots[i];
-    const r = await env.DB.prepare(`INSERT INTO tenders (code,grp,lot_no,title,item_code,item_title,spec,terms,qty,unit,start_price,${RULES.join(",")},state,created_by,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,${RULES.map(() => "?").join(",")},'draft','support',?,?)`)
-      .bind(randHex(5), grp, grp ? i + 1 : null, L.title, L.item_code, L.item_title, L.spec, terms, L.qty, L.unit, L.start, ...RULES.map((k) => s[k]), t, t).run();
+    const r = await env.DB.prepare(`INSERT INTO tenders (code,grp,lot_no,title,item_code,item_title,spec,terms,qty,unit,start_price,${RULES.join(",")},state,created_by,created_at,updated_at,src_request,src_item,src_by,src_at)
+        VALUES (?,?,?,?,?,?,?,?,?,?,?,${RULES.map(() => "?").join(",")},'draft',?,?,?,?,?,?,?)`)
+      .bind(randHex(5), grp, grp ? i + 1 : null, L.title, L.item_code, L.item_title, L.spec, terms, L.qty, L.unit, L.start, ...RULES.map((k) => s[k]),
+        src ? src.by : "support", t, t, src ? src.request_id : null, src ? src.items[i] || null : null, src ? src.by : null, src ? t : null).run();
     const id = r.meta.last_row_id;
     ids.push(id);
     const stmts = invites.map((x, j) => env.DB.prepare("INSERT INTO tender_invites (tender_id,alias,name,phone,supplier_id,source,info,on_list) VALUES (?,?,?,?,?,?,?,?)")
       .bind(id, al[j], x.name, x.phone, x.supplier_id, x.source, x.info, x.on));
-    stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, "support", "tender_new", null, JSON.stringify({ tender_id: id, title: L.title, grp, invites: invites.length })));
+    stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, src ? src.by : "support", "tender_new", src ? src.request_id : null, JSON.stringify({ tender_id: id, title: L.title, grp, invites: invites.length, src_item: src ? src.items[i] || null : undefined })));
     await env.DB.batch(stmts);
   }
   for (const x of invites) if (x.phone && x.source === "manual") await keepPhone(env, x.name, x.phone);
   return tenderDetail(env, ids[0]);
+}
+
+/*
+ * ارجاعِ درخواست خرید به مناقصه (مهر ۱۴۰۵، درخواست مالک): مدیر از میز ارجاع («🔨 ارجاع به مناقصه» به‌جای کارشناس) یا پشتیبان
+ * از تب «درخواست‌ها». اقلامِ باز و هنوز ارسال‌نشدهٔ درخواست (یا همان‌هایی که فرستاده شده) پیش‌نویسِ مناقصه می‌شوند — هر قلم یک ردیفِ
+ * گروه با عنوان، کد، مقدار، واحد و مشخصه — و خودِ اقلام «در مناقصه» (state='tender'): از میز ارجاع، کارتابلِ کارشناس، بار کاری
+ * و کارشناس هوشمند بیرون‌اند (همهٔ آن‌ها فقط open/hold را می‌خوانند). قیمت شروع و دعوت‌ها را پشتیبان در تب «مناقصه» می‌گذارد.
+ * بازگشت (tenderUnrefer): اقلام دوباره «باز» روی میز می‌آیند؛ پیش‌نویس یا شروع‌نشده لغو می‌شود. پس از پایانِ مناقصه هم می‌شود
+ * برگرداند و به کارشناس ارجاع داد؛ «ثبت در درخواست» نتیجه را به همان قلم می‌برد.
+ */
+/** POST /tender-refer (مدیر) و /support/tender-refer — {request_id, item_ids?} */
+export async function tenderRefer(env, b, by, ctx) {
+  const rid = T(b && b.request_id).slice(0, 80);
+  if (!rid) throw new HttpError("شمارهٔ درخواست لازم است.");
+  const want = Array.isArray(b.item_ids) ? new Set(b.item_ids.map(int).filter(Boolean)) : null;
+  const rows = (await env.DB.prepare(`SELECT i.id, i.title, i.code, i.spec, i.note, i.qty, i.unit, i.assignment_id FROM items i LEFT JOIN assignments a ON a.id=i.assignment_id
+      WHERE i.request_id=? AND i.state IN ('open','hold') AND (i.assignment_id IS NULL OR a.dispatched_at IS NULL) ORDER BY i.line_no, i.id`).bind(rid).all()).results || [];
+  const its = (want && want.size ? rows.filter((x) => want.has(x.id)) : rows).slice(0, 30);
+  if (!its.length) throw new HttpError("قلمِ بازِ ارسال‌نشده‌ای در این درخواست نیست؛ قلمی که به کارشناس ارسال شده به مناقصه نمی‌رود (اول از میز ارجاع برگردانده شود).");
+  const lots = its.map((x) => ({ title: x.title, item_code: x.code || "", item_title: x.title, qty: Number(x.qty) > 0 ? x.qty : 1, unit: T(x.unit) || "عدد",
+    spec: [T(x.spec), T(x.note)].filter(Boolean).join(" — "), start_price: 0 }));
+  const d = await tenderCreate(env, { lots, invites: [] }, { request_id: rid, items: its.map((x) => x.id), by });
+  const n = now(), ids = its.map((x) => x.id);
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE items SET state='tender', state_at=?, assignment_id=NULL WHERE id IN (${ids.map(() => "?").join(",")}) AND state IN ('open','hold')`).bind(n, ...ids),
+    /* ارجاع‌های ارسال‌نشدهٔ بی‌قلم پاک می‌شوند — همان قاعدهٔ assign */
+    env.DB.prepare("DELETE FROM assignments WHERE request_id=? AND dispatched_at IS NULL AND id NOT IN (SELECT DISTINCT assignment_id FROM items WHERE assignment_id IS NOT NULL)").bind(rid),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(n, by, "tender_refer", rid, JSON.stringify({ tender_id: d.tender.id, items: ids })),
+  ]);
+  if (by !== "support") wait(ctx, pushTo(env, SUPPORT, { title: "🔨 ارجاع به مناقصه", body: `درخواست ${rid} — ${faN(its.length)} قلم از میز ارجاع به بخش مناقصه آمد؛ قیمت شروع و دعوت‌ها مانده.`, url: "support#td", tag: `tref${d.tender.id}` }));
+  return { ok: true, tender_id: d.tender.id, code: d.tender.code, lots: its.length, tender: d.tender };
+}
+/** POST /tender-unrefer (مدیر) {request_id} و /support/tenders/:id/unrefer — اقلام به میز ارجاع برمی‌گردند */
+export async function tenderUnrefer(env, b, by) {
+  let lots;
+  if (b && b.tender_id) {
+    const t = await rowOf(env, int(b.tender_id));
+    if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
+    lots = await lotsOf(env, t);
+  } else {
+    const rid = T(b && b.request_id); if (!rid) throw new HttpError("شمارهٔ درخواست لازم است.");
+    lots = (await env.DB.prepare("SELECT * FROM tenders WHERE src_request=? AND state<>'cancelled'").bind(rid).all()).results || [];
+  }
+  lots = lots.filter((l) => l.src_item);
+  if (!lots.length) throw new HttpError("این مناقصه از ارجاعِ درخواست نیامده است.");
+  const n = now(), busy = lots.find((l) => ["live", "sealed"].includes(tenderState(l, n)) || (l.state === "scheduled" && l.start_at <= n && n < l.end_at));
+  if (busy) throw new HttpError("مناقصه در جریان است؛ اول پایان دهید یا لغو کنید، بعد به میز ارجاع برگردانید.");
+  const back = ((await env.DB.prepare(`SELECT id FROM items WHERE state='tender' AND id IN (${lots.map(() => "?").join(",")})`).bind(...lots.map((l) => l.src_item)).all()).results || []).map((r) => r.id);
+  if (!back.length) throw new HttpError("اقلامِ این مناقصه پیش‌تر به میز ارجاع برگشته‌اند.");
+  const stop = lots.filter((l) => ["draft", "scheduled"].includes(l.state));
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE items SET state='open', state_at=? WHERE state='tender' AND id IN (${back.map(() => "?").join(",")})`).bind(n, ...back),
+    ...stop.map((l) => env.DB.prepare("UPDATE tenders SET state='cancelled', cancel_reason=?, ended_at=?, rev=rev+1, updated_at=? WHERE id=?").bind("بازگشت به میز ارجاع", n, n, l.id)),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(n, by, "tender_unrefer", lots[0].src_request, JSON.stringify({ tenders: lots.map((l) => l.id), items: back })),
+  ]);
+  return { ok: true, items: back.length, cancelled: stop.length, request_id: lots[0].src_request };
 }
 
 /** PUT /support/tenders/:id — قواعد و مشخصات؛ بعد از اولین پیشنهاد قیمت شروع و مقدار ثابت‌اند. قواعد گروه برای همهٔ قلم‌ها */
@@ -583,7 +648,9 @@ export async function tenderSchedule(env, id, b) {
   if (!on) throw new HttpError("دست‌کم یک تأمین‌کننده را در فهرست دعوت تیک بزنید.");
   const startIn = num(b.start_in_min, 0, 0, 30 * 1440), dur = num(b.duration_min, t.duration_s / 60, 1, 7 * 1440), sealed = num(b.sealed_min, (t.sealed_s || 0) / 60, 0, 7 * 1440);
   const start = now() + Math.round(startIn * 60e3), sealedEnd = sealed ? start + Math.round(sealed * 60e3) : null, end = (sealedEnd || start) + Math.round(dur * 60e3);
-  const ids = (await lotsOf(env, t)).filter((l) => l.id === t.id || l.state === "draft").map((l) => l.id);
+  const startLots = (await lotsOf(env, t)).filter((l) => l.id === t.id || l.state === "draft"), ids = startLots.map((l) => l.id);
+  const noPrice = startLots.find((l) => !(Number(l.start_price) > 0));
+  if (noPrice) throw new HttpError(`قیمت شروع «${noPrice.title}» هنوز تعیین نشده؛ اول از «⚙️ قواعد»${startLots.length > 1 ? " همان قلم" : ""} بنویسید.`);
   await env.DB.batch([
     ...ids.map((x) => env.DB.prepare("UPDATE tenders SET state='scheduled', start_at=?, end_at=?, duration_s=?, sealed_s=?, sealed_end_at=?, sealed_done=0, rev=rev+1, updated_at=? WHERE id=?")
       .bind(start, end, Math.round(dur * 60), Math.round(sealed * 60), sealedEnd, now(), x)),
@@ -1035,6 +1102,7 @@ async function supplierView(env, t, inv) {
   }
   return {
     tender: { ...pub(t, n), state: st, range: bidRange(t, mine, sealed), req_aid: undefined, req_item: undefined, req_at: undefined,
+      src_request: undefined, src_item: undefined, src_by: undefined, src_at: undefined,
       winner: t.state === "ended" ? (t.winner_alias === inv.alias ? "you" : t.winner_alias != null ? "other" : null) : null },
     me: { alias: inv.alias, name: inv.name, label: aliasLabel(inv.alias), rank: sealed ? null : me ? me.rank : null, best: mine, lead: !sealed && t.best_alias === inv.alias,
       proxy_min: inv.proxy_min, accepted: !!inv.accepted_at, need_accept: !!t.require_accept && !inv.accepted_at, notify_off: !!inv.notify_off },

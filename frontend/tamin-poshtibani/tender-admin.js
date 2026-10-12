@@ -96,7 +96,8 @@
     return `<article class="td-card td-item" data-tdopen="${t.id}" role="button" tabindex="0" style="--i:${Math.min(i, 12)}" aria-label="مناقصهٔ ${esc(t.title)}">
       <header><b>${esc(t.title)}</b>${t.lots > 1 ? `<span class="chip" title="مناقصهٔ چندقلمی">قلم ${fa(t.lot_no || 1)} از ${fa(t.lots)}</span>` : ""}${D.stChip(t.state)}</header>
       <div class="dim" style="font-size:.82rem;display:flex;gap:6px 14px;flex-wrap:wrap"><span>${fa(t.qty)} ${esc(t.unit)}</span>${timeLine(t)}${t.ext_count ? `<span class="td-ext">⏱ ${fa(t.ext_count)} تمدید</span>` : ""}${t.req_aid ? `<span class="chip ok">ثبت در درخواست</span>` : ""}</div>
-      <div class="px"><div><small>قیمت شروع</small><b>${short(t.start_price)}</b></div><div><small>کمترین</small><b>${t.best_amount ? short(t.best_amount) : "—"}</b></div><div><small>شرکت‌کننده</small><b>${fa(t.bidders)} / ${fa(t.invited)}</b></div></div>
+      ${t.src_request ? `<div class="dim" style="font-size:.8rem">📥 از درخواست <b dir="ltr">${esc(t.src_request)}</b> — ارجاعِ ${t.src_by === "manager" ? "میز مدیر" : "پشتیبانی"}</div>` : ""}
+      <div class="px"><div><small>قیمت شروع</small><b>${t.start_price ? short(t.start_price) : "تعیین نشده"}</b></div><div><small>کمترین</small><b>${t.best_amount ? short(t.best_amount) : "—"}</b></div><div><small>شرکت‌کننده</small><b>${fa(t.bidders)} / ${fa(t.invited)}</b></div></div>
       ${t.best_name ? `<div style="font-size:.84rem">${t.state === "ended" ? "🏆 برنده" : "پیشتاز"}: <b>${esc(t.best_name)}</b></div>` : ""}</article>`;
   }
   function vList() {
@@ -389,6 +390,7 @@
       open ? `<button class="tp-btn" data-tdrules>⚙️ قواعد</button>` : "",
       ["live", "sealed"].includes(t.state) ? `<button class="tp-btn" data-tdend>⏹ پایان همین حالا</button>` : "",
       open ? `<button class="tp-btn danger" data-tdcancel>✖ لغو</button>` : "",
+      t.src_request && t.state !== "cancelled" && !["live", "sealed"].includes(t.state) ? `<button class="tp-btn" data-tdunrefer title="اقلام به میز ارجاع مدیر برمی‌گردند">↩ بازگشت به میز ارجاع</button>` : "",
       `<button class="tp-btn" data-tdcsv>⬇️ اکسل</button><button class="tp-btn" data-tdprint>🖨 گزارش / PDF</button>`,
     ].join("");
     const bestBid = d.bids.filter((x) => x.state !== "void").sort((p, q) => p.amount - q.amount || p.at - q.at)[0];
@@ -404,11 +406,12 @@
     return `<div class="td-wrap" style="padding:0 0 32px">
       ${many ? `<nav class="td-lots" aria-label="قلم‌های این مناقصه">${d.lots.map((l) => `<button type="button" class="${l.id === t.id ? "on" : ""}" data-tdopen="${l.id}">${esc(l.title)}<small>${esc(D.ST[l.state] || "")}</small></button>`).join("")}</nav>` : ""}
       <section class="td-card"><div class="td-head">${back}<span class="ic" aria-hidden="true">${ICON().box}</span>
-        <div class="t"><h1>${esc(t.title)}</h1><div class="meta"><span>${fa(t.qty)} ${esc(t.unit)}</span>${t.item_code ? `<span dir="ltr">${esc(t.item_code)}</span>` : ""}<span>شروع: <b>${money(t.start_price)}</b></span>
+        <div class="t"><h1>${esc(t.title)}</h1><div class="meta"><span>${fa(t.qty)} ${esc(t.unit)}</span>${t.item_code ? `<span dir="ltr">${esc(t.item_code)}</span>` : ""}<span>شروع: <b>${t.start_price ? money(t.start_price) : "تعیین نشده"}</b></span>${t.src_request ? `<span class="chip" title="ارجاعِ ${t.src_by === "manager" ? "میز مدیر" : "پشتیبانی"}">📥 درخواست ${esc(t.src_request)}</span>` : ""}
           ${t.start_at ? `<span>${esc(D.when(t.start_at))} ← ${esc(D.hms(t.end_at))}</span>` : ""}${flags.map((x) => `<span class="chip">${x}</span>`).join("")}</div></div>${D.stChip(t.state)}</div>
+        ${t.state === "draft" && !t.start_price ? `<div class="tp-note warn" style="margin-top:10px">قیمت شروعِ این قلم هنوز تعیین نشده — از «⚙️ قواعد» بنویسید؛ بعد تأمین‌کنندگان و «▶️ شروع».</div>` : ""}
         <div class="td-foot" style="margin-top:12px">${acts}<span class="spacer"></span>${open ? sw(t.show_names, t.show_names ? "نام‌ها پیدا" : "نام‌ها پنهان", "data-tdshow") : ""}</div></section>
       <section class="td-card td-hero ${t.best_amount ? "lead" : ""}">${ring}
-        <div class="td-best"><span class="cap">${t.best_amount ? `کمترین قیمت — هر ${esc(t.unit)}${t.state === "sealed" ? " (سربسته؛ تأمین‌کنندگان نمی‌بینند)" : ""}` : "قیمت شروع"}</span><span class="num">${money(t.best_amount || t.start_price)}<small>ریال</small></span>
+        <div class="td-best"><span class="cap">${t.best_amount ? `کمترین قیمت — هر ${esc(t.unit)}${t.state === "sealed" ? " (سربسته؛ تأمین‌کنندگان نمی‌بینند)" : ""}` : "قیمت شروع"}</span><span class="num">${t.best_amount || t.start_price ? money(t.best_amount || t.start_price) : "—"}<small>${t.best_amount || t.start_price ? "ریال" : "تعیین نشده"}</small></span>
           <span class="sub">${t.best_amount ? `<span>جمع: <b>${short(t.best_amount * t.qty)}</b></span><span><b>${faD(((1 - t.best_amount / t.start_price) * 100).toFixed(1))}٪</b> زیر شروع</span>` : "<span>هنوز پیشنهادی نیست</span>"}
             <span>${fa(new Set(d.bids.filter((b) => b.state !== "void").map((b) => b.alias)).size)} از ${fa(inv.filter((i) => i.on).length)} شرکت کرده‌اند</span>${t.ext_count ? `<span class="td-ext">⏱ ${fa(t.ext_count)} تمدید</span>` : ""}</span>
           ${bestName ? `<span class="td-me lead">${t.state === "ended" ? "🏆 برنده" : "پیشتاز"}: ${esc(bestName)}</span>` : ""}</div></section>
@@ -475,7 +478,7 @@
 
   /* ---------- رفتارها ---------- */
   function onClick(e) {
-    const el = e.target.closest("[data-tdnew],[data-tdf],[data-tdopen],[data-tdback],[data-tdcancelw],[data-tditem],[data-tdfree],[data-tdstep],[data-tdcreate],[data-tdxadd],[data-tdbook],[data-tdstart],[data-tdinvite],[data-tdcopy],[data-tdrules],[data-tdend],[data-tdcancel],[data-tdfix],[data-tdvoid],[data-tdpass],[data-tdresend],[data-tdshow],[data-tdsmartgo],[data-tdsmart],[data-tdcfg],[data-tditdel],[data-tdwsw],[data-tdcsv],[data-tdprint],[data-tdridgo],[data-tdlink],[data-tdcmres],[data-tdmk]");
+    const el = e.target.closest("[data-tdnew],[data-tdf],[data-tdopen],[data-tdback],[data-tdcancelw],[data-tditem],[data-tdfree],[data-tdstep],[data-tdcreate],[data-tdxadd],[data-tdbook],[data-tdstart],[data-tdinvite],[data-tdcopy],[data-tdrules],[data-tdend],[data-tdcancel],[data-tdfix],[data-tdvoid],[data-tdpass],[data-tdresend],[data-tdshow],[data-tdsmartgo],[data-tdsmart],[data-tdcfg],[data-tditdel],[data-tdwsw],[data-tdcsv],[data-tdprint],[data-tdridgo],[data-tdlink],[data-tdcmres],[data-tdmk],[data-tdunrefer]");
     if (!el || el.disabled || !T.on) return;
     const d = el.dataset;
     if (d.tdcfg !== undefined) return settingsDialog();
@@ -512,6 +515,11 @@
     if (d.tdprint !== undefined) return printReport();
     if (d.tdshow !== undefined) return act(() => C.api(`/tenders/${id}`, { method: "PUT", body: { show_names: !T.d.tender.show_names } }));
     if (d.tdstart !== undefined) return startDialog();
+    if (d.tdunrefer !== undefined) {
+      const t = T.d.tender;
+      return TP.modal("بازگشت به میز ارجاع", `اقلامِ این مناقصه (درخواست <b dir="ltr">${esc(t.src_request)}</b>) به میز ارجاع مدیر برمی‌گردند تا به کارشناس ارجاع شوند${t.state === "ended" ? "؛ نتیجهٔ همین مناقصه می‌ماند و بعداً با «ثبت در درخواست» به آن قلم می‌رسد" : " و این پیش‌نویس لغو می‌شود"}.`,
+        () => act(() => C.api(`/tenders/${id}/unrefer`, { body: {} })), "بازگرداندن", "انصراف");
+    }
     if (d.tdinvite !== undefined) return act(async () => { const r = await C.api(`/tenders/${id}/invite`, { body: {} }); inviteReport(r.result); return r; });
     if (d.tdresend) return act(async () => { const r = await C.api(`/tenders/${id}/invite`, { body: { aliases: [Number(d.tdresend)] } }); TP.ui.success(r.result.sent ? "پیامک رفت" : "پیامک نرفت"); return r; });
     if (d.tdrules !== undefined) return rulesDialog();

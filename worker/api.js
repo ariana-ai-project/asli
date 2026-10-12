@@ -61,7 +61,7 @@ import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } fro
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
-  tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf,
+  tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
@@ -1985,6 +1985,9 @@ async function route(request, env, ctx) {
       /* مناقصه (worker/tender.js) */
       if (path === "/support/tenders" && m === "GET") return json(await tenderList(env, ctx, url.searchParams.get("fp")));
       if (path === "/support/tenders" && m === "POST") return json(await tenderCreate(env, await readJson(request)));
+      /* ارجاع درخواست به مناقصه از تب «درخواست‌ها» ی پشتیبانی (همان کارِ گزینهٔ میز مدیر) */
+      if (path === "/support/tender-refer" && m === "POST") return json(await tenderRefer(env, await readJson(request), "support", ctx));
+      if (path === "/support/tender-unrefer" && m === "POST") return json(await tenderUnrefer(env, await readJson(request), "support"));
       if (path === "/support/tender-items" && m === "GET") return json(await tenderItems(env, url.searchParams.get("q")));
       if (path === "/support/tender-suppliers" && m === "GET") return json(await tenderSuppliers(env, url.searchParams.get("code")));
       if (path === "/support/tender-book" && m === "GET") return json(await tenderBook(env, url.searchParams.get("q")));
@@ -1992,11 +1995,12 @@ async function route(request, env, ctx) {
       if (path === "/support/tender-settings" && m === "GET") return json(await tenderSettingsGet(env));
       if (path === "/support/tender-settings" && m === "PUT") return json(await tenderSettingsSave(env, await readJson(request)));
       if (path === "/support/tender-settings/test" && m === "POST") return json(await tenderSmsTest(env, await readJson(request)));
-      if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover|link|csv))?$/.exec(path))) {
+      if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover|link|csv|unrefer))?$/.exec(path))) {
         const tid = mm[1], act = mm[2] || "";
         if (!act && m === "GET") return json(await tenderDetail(env, tid, ctx, url.searchParams.get("fp")));
         if (!act && m === "PUT") return json(await tenderUpdate(env, tid, await readJson(request)));
         if (act === "schedule" && m === "POST") return json(await tenderSchedule(env, tid, await readJson(request)));
+        if (act === "unrefer" && m === "POST") return json(await tenderUnrefer(env, { tender_id: tid }, "support"));
         if (act === "end" && m === "POST") return json(await tenderEnd(env, tid, await readJson(request), ctx));
         if (act === "link" && m === "POST") return json(await tenderToRequest(env, tid, await readJson(request)));
         if (act === "csv" && m === "GET") return await tenderCsv(env, tid);
@@ -2132,6 +2136,9 @@ async function route(request, env, ctx) {
     if (path === "/dispatch" && m === "POST") { await requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { await requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { await requireManager(request, env); return json(await unassign(env, await readJson(request))); }
+    /* میز ارجاع: «🔨 ارجاع به مناقصه» به‌جای کارشناس، و برگرداندنش */
+    if (path === "/tender-refer" && m === "POST") { await requireManager(request, env); return json(await tenderRefer(env, await readJson(request), "manager", ctx)); }
+    if (path === "/tender-unrefer" && m === "POST") { await requireManager(request, env); return json(await tenderUnrefer(env, await readJson(request), "manager")); }
     if (path === "/items/state" && m === "POST") { await requireManager(request, env); const r = await setState(env, await readJson(request), "manager"); flush(env, ctx, r.notified); return json(r); }
     if (path === "/decisions" && m === "GET") { await requireManager(request, env); return json({ decisions: (await env.DB.prepare("SELECT d.*, e.name AS expert_name, a.request_id FROM decisions d JOIN experts e ON e.id=d.expert_id JOIN assignments a ON a.id=d.assignment_id WHERE d.approved_at IS NULL AND d.rejected_at IS NULL ORDER BY d.requested_at").all()).results || [] }); }
     if ((mm = /^\/decisions\/(\d+)\/(approve|reject)$/.exec(path)) && m === "POST") {

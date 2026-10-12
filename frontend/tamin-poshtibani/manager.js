@@ -70,8 +70,8 @@
     const its = itemsOf(r, a);
     return [!!a.viewed_at, its.some((i) => i.hist_done_at), its.some((i) => i.smart_done_at), a.quote_count > 0, a.proforma_count > 0, !!a.commission_at];
   }
-  const reqState = (r) => openItems(r).length ? (r.items.every((i) => i.state === "hold" || i.state === "closed" || i.state === "stop") && r.items.some((i) => i.state === "hold") ? "hold" : "open")
-    : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
+  const reqState = (r) => openItems(r).length ? (r.items.every((i) => i.state === "hold" || i.state === "closed" || i.state === "stop" || i.state === "tender") && r.items.some((i) => i.state === "hold") ? "hold" : "open")
+    : r.items.some((i) => i.state === "tender") ? "tender" : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
   const readyAssignments = () => S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && Number(a.days) > 0 && itemsOf(r, a).length));
 
   const scoreOf = (eid, kind, key) => { const s = S.scores.scores.find((x) => x.expert_id === eid && x.kind === kind && x.key === key); return s ? s.score : 3; };
@@ -112,9 +112,10 @@
   const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
   /* وضعیتِ مؤثر هر قلم: وضعیت سامانه اگر از «باز» بیرون رفته (بسته/متوقف/معلق)، «در جریان» اگر
      ارسال شده، وگرنه وضعیت خامِ فایل (ثبت شده / تایید شده / …). فیلتر وضعیت روی همین است. */
-  const STATUS_ALL = ["ثبت شده", "تایید شده", "در جریان", "بررسی مجدد", "معلق", "متوقف شده", "بسته شده"];
+  const STATUS_ALL = ["ثبت شده", "تایید شده", "در جریان", "بررسی مجدد", "معلق", "در مناقصه", "متوقف شده", "بسته شده"];
   const STATUS_DEFAULT = ["ثبت شده", "تایید شده", "در جریان", "بررسی مجدد", "معلق"];
   const statusOf = (r, i) => {
+    if (i.state === "tender") return "در مناقصه";
     if (i.state === "closed") return "بسته شده";
     if (i.state === "stop") return "متوقف شده";
     if (i.state === "hold") return "معلق";
@@ -123,10 +124,12 @@
     return i.src_status || "ثبت شده";
   };
   const statusSel = () => (S.filter.statuses || STATUS_DEFAULT);
-  const needsAllScope = () => statusSel().some((s) => s === "بسته شده" || s === "متوقف شده");
+  const needsAllScope = () => statusSel().some((s) => s === "بسته شده" || s === "متوقف شده" || s === "در مناقصه");
   /* نام‌های کارشناس‌ها، ارشدها اول — همان ترتیبِ فهرست انتخاب کارشناس */
   const expertsSorted = () => [...S.data.experts.filter((e) => e.active)].sort((a, b) => (b.senior || 0) - (a.senior || 0) || String(a.label || a.name).localeCompare(String(b.label || b.name), "fa"));
   const expertOpts = (sel) => expertsSorted().map((e) => `<option value="${e.id}" ${e.id === sel ? "selected" : ""}>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</option>`).join("");
+  /* به‌جای کارشناس: اقلامِ همین ردیف به بخش مناقصه می‌روند (پیش‌نویسِ مناقصه در پنل پشتیبانی) */
+  const TENDER_OPT = `<option disabled>──────────</option><option value="tender">🔨 ارجاع به مناقصه</option>`;
   function visible() {
     return S.data.requests.filter((r) => {
       if (!TP.hit(r.id, S.q.id)) return false;
@@ -318,7 +321,7 @@
     const lock = a.dispatched_at ? "disabled" : "", its = itemsOf(r, a), live = isActive(r, a);
     const who = a.dispatched_at
       ? `<span class="uname" title="${esc(a.expert_name || "")}">${TP.ui.ICON.user}${esc(a.expert_label || a.expert_name || "—")}</span>${fileExpert(its, a.expert_name)}`
-      : `<select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock} aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}</select>${fileExpert(its, a.expert_name)}`;
+      : `<select class="tp-select" data-assign="${esc(r.id)}" data-aid="${a.id}" ${lock} aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(a.expert_id)}${TENDER_OPT}</select>${fileExpert(its, a.expert_name)}`;
     const days = a.dispatched_at ? `<span title="مهلت (روز کاری)">${TP.ui.ICON.clock}${a.days ? `${esc(a.days)} روز` : "—"}</span>`
       : `<span title="مهلت (روز کاری)">${TP.ui.ICON.clock}</span><input class="tp-input num ${a.days ? "" : "unset"}" data-days="${a.id}" value="${esc(a.days || "")}" inputmode="numeric" placeholder="روز" aria-label="مهلت به روز کاری" ${lock}>`;
     const acts = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="اقدام‌های این ارجاع" title="اقدام‌ها">${TP.ui.ICON.more}</button>`,
@@ -336,10 +339,17 @@
   }
   /* اقلامِ بی‌کارشناس: یک ردیف با انتخابِ خالی — با انتخاب، ارجاعِ تازه فقط برای همین اقلام ساخته می‌شود */
   function unassignedUnit(r, un, STL) {
-    const who = `<select class="tp-select unset" data-assign="${esc(r.id)}" data-un="${un.map((i) => i.id).join(",")}" aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}</select>${fileExpert(un.some((i) => i.src_expert) ? un : r.items, null)}`;
+    const who = `<select class="tp-select unset" data-assign="${esc(r.id)}" data-un="${un.map((i) => i.id).join(",")}" aria-label="کارشناس خرید"><option value="">— انتخاب کارشناس —</option>${expertOpts(null)}${TENDER_OPT}</select>${fileExpert(un.some((i) => i.src_expert) ? un : r.items, null)}`;
     return TP.ui.unitRow({ who, days: `<span title="مهلت پس از انتخاب کارشناس">${TP.ui.ICON.clock}—</span>`,
       bars: TP.ui.bar.progress(TP.STAGES.map((s, i) => ({ label: TP.ui.STAGE_SHORT[i], title: s, cls: "c-idle" }))),
       status: `<span><span class="st ${STL.cls}">${STL.label}</span> <span class="dim">${un.length} قلم</span></span><span class="chip warn" style="font-size:.72rem">بدون کارشناس</span>${sendChip(r, null)}`, acts: "" });
+  }
+  /* اقلامِ ارجاع‌شده به مناقصه: یک ردیفِ فقط‌خواندنی با «بازگرداندن به میز ارجاع» (تا مناقصه شروع نشده یا تمام شده) */
+  function tenderUnit(r, its) {
+    const acts = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="اقدام‌های مناقصه" title="اقدام‌ها">${TP.ui.ICON.more}</button>`,
+      items: [{ label: "بازگرداندن به میز ارجاع", icon: "refresh", attrs: `data-unrefer="${esc(r.id)}"` }] });
+    return TP.ui.unitRow({ who: `<span class="uname" title="پیش‌نویس در تب «مناقصه»ی پنل پشتیبانی">🔨 بخش مناقصه</span>`, days: `<span class="dim">—</span>`, bars: "",
+      status: `<span><span class="st st-tender">در مناقصه</span> <span class="dim">${its.length} قلم</span></span>`, acts });
   }
   function itemsDrawer(r) {
     return `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
@@ -356,6 +366,8 @@
     const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
     const units = r.assignments.map((a) => deskUnit(r, a, STL));
     if (un.length) units.push(unassignedUnit(r, un, STL));
+    const inTender = r.items.filter((x) => x.state === "tender");
+    if (inTender.length) units.push(tenderUnit(r, inTender));
     if (!units.length) units.push(`<div class="tp-unit none">قلم بازی ندارد</div>`);
     let lvl = ""; r.assignments.forEach((a) => { const c = unitLevel(r, a); if ((LVL[c] || 0) > (LVL[lvl] || 0)) lvl = c; });
     const menu = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
@@ -1376,6 +1388,7 @@
     Q("[data-toggle]").forEach((b) => b.onclick = () => { S.open[b.dataset.toggle] = !S.open[b.dataset.toggle]; render(); });
     Q("select[data-assign]").forEach((s) => s.onchange = async (e) => {
       const rid = e.target.dataset.assign, aid = e.target.dataset.aid ? +e.target.dataset.aid : null, eid = +e.target.value || null;
+      if (e.target.value === "tender") { render(); return referTender(rid, aid, e.target.dataset.un); }
       /* «— انتخاب کارشناس —» روی ارجاعِ ارسال‌نشده: کارشناس برداشته می‌شود و با «ارسال» نمی‌رود */
       try {
         if (aid && eid) await TP.api("/reassign", { body: { assignment_id: aid, expert_id: eid } });
@@ -1392,6 +1405,7 @@
     const dp = G("[data-dispatch]"); if (dp) dp.onclick = doDispatch;
     Q("[data-act]").forEach((b) => b.onclick = () => { const [st, aid] = b.dataset.act.split("|"); doAct(st, +aid); });
     Q("[data-open]").forEach((b) => b.onclick = () => openDetail(+b.dataset.open));
+    Q("[data-unrefer]").forEach((b) => b.onclick = () => unreferTender(b.dataset.unrefer));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
     Q("[data-suptick]").forEach((b) => b.onclick = () => supTickSet(+b.dataset.suptick, b.dataset.on === "1"));
@@ -1560,6 +1574,23 @@
       await refresh();
       if (on && r.changed && !r.eligible) TP.modal("👁 حالت تأیید", "اجازه ثبت شد، ولی فعلاً هیچ قلمِ این درخواست از نوعی نیست که پشتیبانی «مجازِ حالت تأیید» کرده؛ اگر بعد از نرمال‌سازی نوعِ مجاز شد، با «🚀 شروع» با تأیید پیش می‌رود.", null, "باشد", "");
     } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+  }
+  /* «🔨 ارجاع به مناقصه» از فهرست کارشناس: اقلامِ همان ردیف (ارجاعِ ارسال‌نشده یا بی‌کارشناس) پیش‌نویسِ مناقصه می‌شوند */
+  function referTender(rid, aid, un) {
+    const r = S.data.requests.find((x) => x.id === rid); if (!r) return;
+    const ids = aid ? itemsOf(r, { id: aid }).filter((i) => i.state === "open" || i.state === "hold").map((i) => i.id) : String(un || "").split(",").map(Number).filter(Boolean);
+    const its = r.items.filter((i) => ids.includes(i.id));
+    if (!its.length) return;
+    TP.modal("ارجاع به مناقصه", `<p style="margin-top:0">${M(its.length)} قلمِ درخواست <b>${esc(rid)}</b> به بخش مناقصه می‌رود و به کارشناس ارجاع نمی‌شود:</p>
+      <ul style="margin:0 0 8px;padding-inline-start:20px">${its.slice(0, 8).map((i) => `<li><bdi>${esc(i.title)}</bdi> <span class="dim">— <bdi>${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</bdi></span></li>`).join("")}${its.length > 8 ? "<li>…</li>" : ""}</ul>
+      <p class="dim" style="font-size:.85rem;margin:0">پشتیبانی قیمت شروع و تأمین‌کنندگان را تعیین و مناقصه را برگزار می‌کند. تا مناقصه شروع نشده، از همین میز برمی‌گردد.</p>`,
+      async () => { try { await TP.api("/tender-refer", { body: { request_id: rid, item_ids: ids } }); TP.ui.success("به بخش مناقصه رفت"); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } await refresh(); },
+      "ارجاع به مناقصه", "انصراف");
+  }
+  function unreferTender(rid) {
+    TP.modal("بازگرداندن به میز ارجاع", `اقلامِ «در مناقصه»ِ درخواست <b>${esc(rid)}</b> دوباره روی میز می‌آیند تا به کارشناس ارجاع شوند. پیش‌نویسِ مناقصه لغو می‌شود (مناقصهٔ در جریان برنمی‌گردد).`,
+      async () => { try { await TP.api("/tender-unrefer", { body: { request_id: rid } }); TP.ui.success("به میز ارجاع برگشت"); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } await refresh(); },
+      "بازگرداندن", "انصراف");
   }
   function doDispatch() {
     const list = readyAssignments(); const by = {};

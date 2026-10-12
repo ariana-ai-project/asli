@@ -207,12 +207,14 @@
 
   /* ---------- تب «درخواست‌ها»: کارت‌های میز مدیر، فقط‌خواندنی (مهر ۱۴۰۵) ---------- */
   const WINDOWS = [["3d", "امروز و دو روز گذشته", 2], ["7d", "هفتهٔ اخیر", 6], ["30d", "ماه اخیر", 29], ["all", "همه تاریخ‌ها", null]];
-  const RS = { new: ["ارجاع‌نشده", "st-reg"], ready: ["ارسال‌نشده", "st-hold"], run: ["در جریان", "st-run"], hold: ["معلق", "st-hold"], stop: ["متوقف", "st-stop"], closed: ["بسته", "st-cls"] };
+  const RS = { new: ["ارجاع‌نشده", "st-reg"], ready: ["ارسال‌نشده", "st-hold"], run: ["در جریان", "st-run"], hold: ["معلق", "st-hold"], tender: ["در مناقصه", "st-tender"], stop: ["متوقف", "st-stop"], closed: ["بسته", "st-cls"] };
+  /* وضعیت‌هایی که درخواست‌شان از میزِ عادی بیرون است و با scope=all خوانده می‌شوند */
+  const ALL_SCOPE = (s) => s === "closed" || s === "stop" || s === "tender";
   const FUNNEL = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3.5 5h17l-6.6 7.6v5.6l-3.8 1.9v-7.5z"/></svg>`;
   const avOf = (name, label, cls) => `<span class="ex-av ${cls || "sm"}" style="--av:${TP.ui.avColor(name || label)}" aria-hidden="true">${esc(TP.ui.avInitial(label || name))}</span>`;
   function reqStatus(r) {
     const live = r.items.filter((i) => i.state === "open" || i.state === "hold");
-    if (!live.length) return r.items.some((i) => i.state === "closed") ? "closed" : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
+    if (!live.length) return r.items.some((i) => i.state === "tender") ? "tender" : r.items.some((i) => i.state === "closed") ? "closed" : r.items.some((i) => i.state === "stop") ? "stop" : "closed";
     if (live.every((i) => i.state === "hold")) return "hold";
     if (live.some((i) => !i.assignment_id)) return "new";
     if (r.assignments.some((a) => !a.dispatched_at && live.some((i) => i.assignment_id === a.id))) return "ready";
@@ -225,7 +227,7 @@
     else {
       const w = WINDOWS.find((x) => x[0] === S.rf.win);
       if (w && w[2] != null) qs.set("from", TP.fmtD(Date.now() - w[2] * DAY));
-      if (S.rf.status === "closed" || S.rf.status === "stop") qs.set("scope", "all");
+      if (ALL_SCOPE(S.rf.status)) qs.set("scope", "all");
     }
     /* پاسخِ درخواستِ کهنه‌تر (پیش از عوض شدنِ بازه) جای پاسخِ تازه را نمی‌گیرد */
     const seq = (S.deskSeq = (S.deskSeq || 0) + 1);
@@ -271,6 +273,13 @@
         status: `${open.length ? `<span class="chip ${ok === open.length ? "ok" : ""}" title="تأیید کمیسیونِ اقلامِ باز">🏆 ${M(ok)}/${M(open.length)}</span>` : ""}<span class="dim">${M(its.length)} قلم</span>`,
         acts: `<button class="tp-icon-btn sm" type="button" data-asg="${a.id}" title="جزئیاتِ ارجاع" aria-label="جزئیاتِ ارجاع">${TP.ui.ICON.more}</button>` });
     });
+    /* ارجاع به مناقصه (مهر ۱۴۰۵): اقلامِ باز و هنوز ارسال‌نشده؛ و اقلامی که در مناقصه‌اند با «بازگرداندن» */
+    const toRefer = referable(r), inTender = r.items.filter((x) => x.state === "tender");
+    if (toRefer.length) units.push(TP.ui.unitRow({ who: `<span class="uname">${r.assignments.length ? "ارسال‌نشده" : "بی‌کارشناس"}</span>`, days: `<span class="dim">—</span>`, bars: "",
+      status: `<span class="dim">${M(toRefer.length)} قلم</span>`, acts: `<button class="tp-btn xs" type="button" data-tref="${esc(r.id)}" title="این اقلام به‌جای کارشناس به مناقصه می‌روند">🔨 ارجاع به مناقصه</button>` }));
+    if (inTender.length) units.push(TP.ui.unitRow({ who: `<span class="uname">🔨 بخش مناقصه</span>`, days: `<span class="dim">—</span>`, bars: "",
+      status: `<span><span class="st st-tender">در مناقصه</span> <span class="dim">${M(inTender.length)} قلم</span></span>`,
+      acts: `<button class="tp-btn xs" type="button" data-tab="td">مناقصه‌ها</button><button class="tp-btn xs" type="button" data-tunref="${esc(r.id)}" title="اقلام به میز ارجاع مدیر برمی‌گردند">بازگرداندن</button>` }));
     if (!units.length) units.push(`<div class="tp-unit none">بی‌کارشناس</div>`);
     const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
     const drawer = `<div class="sv-items">${r.items.map((x) => `<div class="sv-item"><span class="num dim">${x.line_no}</span><b>${esc(x.title)}</b><span class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</span>
@@ -279,6 +288,22 @@
       chips: `<span class="st ${RS[st][1]}">${RS[st][0]}</span>`,
       items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-rtog="${esc(r.id)}" aria-expanded="${S.rOpen[r.id] ? "true" : "false"}"`,
       drawerOpen: !!S.rOpen[r.id], drawerHtml: drawer, units });
+  }
+  /** اقلامی که می‌شود به مناقصه برد: باز یا معلق، بی‌کارشناس یا در ارجاعِ ارسال‌نشده */
+  const referable = (r) => r.items.filter((x) => (x.state === "open" || x.state === "hold") && (!x.assignment_id || r.assignments.some((a) => a.id === x.assignment_id && !a.dispatched_at)));
+  function referTender(rid) {
+    const r = S.desk && S.desk.requests.find((x) => x.id === rid); if (!r) return;
+    const its = referable(r); if (!its.length) return;
+    TP.modal("ارجاع به مناقصه", `<p style="margin-top:0">${M(its.length)} قلمِ درخواست <b>${esc(rid)}</b> به‌جای کارشناس به مناقصه می‌رود و پیش‌نویسش در تب «مناقصه» ساخته می‌شود:</p>
+      <ul style="margin:0 0 8px;padding-inline-start:20px">${its.slice(0, 8).map((i) => `<li><bdi>${esc(i.title)}</bdi> <span class="dim">— <bdi>${i.qty == null ? "" : M(i.qty)} ${esc(i.unit || "")}</bdi></span></li>`).join("")}${its.length > 8 ? "<li>…</li>" : ""}</ul>
+      <p class="dim" style="font-size:.85rem;margin:0">بعد قیمت شروع (از «⚙️ قواعد») و تأمین‌کنندگان را بگذارید و شروع کنید.</p>`,
+      async () => { try { await api("/tender-refer", { body: { request_id: rid, item_ids: its.map((i) => i.id) } }); TP.ui.success("پیش‌نویس مناقصه ساخته شد"); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } loadDesk(); },
+      "ارجاع به مناقصه", "انصراف");
+  }
+  function unreferTender(rid) {
+    TP.modal("بازگرداندن به میز ارجاع", `اقلامِ «در مناقصه»ِ درخواست <b>${esc(rid)}</b> به میز ارجاع مدیر برمی‌گردند و پیش‌نویسِ مناقصه لغو می‌شود (مناقصهٔ در جریان برنمی‌گردد).`,
+      async () => { try { await api("/tender-unrefer", { body: { request_id: rid } }); TP.ui.success("به میز ارجاع برگشت"); } catch (er) { TP.modal("خطا", esc(er.message), null, "باشد", ""); } loadDesk(); },
+      "بازگرداندن", "انصراف");
   }
   function vReqBar(rows) {
     const d = S.desk, f = S.rf, win = WINDOWS.find((w) => w[0] === f.win);
@@ -295,7 +320,7 @@
       <div class="mg-chips">${act.map(([l, v, k]) => `<button type="button" class="mg-chip" data-rdrop="${k}" title="برداشتن این فیلتر">${esc(l)}: <b>${esc(v)}</b> ${TP.ui.ICON.x}</button>`).join("")}</div>
       <input class="tp-input sv-q" data-fq="req" value="${esc(f.q)}" placeholder="جستجو: شماره، طرف مقابل یا قلم" aria-label="جستجوی درخواست">
       <span class="spacer"></span><span class="mg-count"><b>${M(rows.length)}</b> از ${M(d ? d.requests.length : 0)} درخواست · ${esc(f.id ? `درخواست ${f.id}` : win ? win[1] : "")}${S.deskLoading && d ? " · …" : ""}</span></div>
-      <div class="tp-pills sv-st">${pill("", "همه", all.length)}${Object.entries(RS).map(([k, [l]]) => counts[k] ? pill(k, l, counts[k]) : "").join("")}</div>
+      <div class="tp-pills sv-st">${pill("", "همه", all.length)}${Object.entries(RS).map(([k, [l]]) => counts[k] ? pill(k, l, counts[k]) : k === "tender" ? pill(k, l, f.status === "tender" ? 0 : null) : "").join("")}</div>
       ${S.rfOpen ? `<div class="mg-fpanel" data-fpanel-box role="region" aria-label="فیلترهای درخواست‌ها">
         <div class="mg-frow"><span class="lab">بازه</span><div class="tp-pills">${WINDOWS.map(([k, l]) => `<button type="button" class="tp-pill ${f.win === k ? "on" : ""}" data-rwin="${k}" ${f.id ? "disabled" : ""}>${l}</button>`).join("")}</div></div>
         <div class="mg-frow"><span class="lab">پروژه</span><select class="tp-select" data-rf="project"><option value="">همه</option>${projects.map((p) => `<option ${f.project === p ? "selected" : ""}>${esc(p)}</option>`).join("")}</select>
@@ -1355,7 +1380,9 @@
     if (d.thre !== undefined) { if (S.thId) openThread(S.thId, true); return loadThreads(); }
     /* درخواست‌ها: فیلترِ بازشونده، وضعیت، بازه، کشوی اقلام */
     if (d.rfopen !== undefined) { S.rfOpen = !S.rfOpen; return render(); }
-    if (d.rst !== undefined) { const was = S.rf.status; S.rf.status = d.rst; return (d.rst === "closed" || d.rst === "stop") !== (was === "closed" || was === "stop") ? loadDesk() : render(); }
+    if (d.rst !== undefined) { const was = S.rf.status; S.rf.status = d.rst; return ALL_SCOPE(d.rst) !== ALL_SCOPE(was) ? loadDesk() : render(); }
+    if (d.tref) return referTender(d.tref);
+    if (d.tunref) return unreferTender(d.tunref);
     if (d.rwin) { S.rf.win = d.rwin; S.rf.id = ""; return loadDesk(); }
     if (d.rdrop) { if (d.rdrop === "id") { S.rf.id = ""; return loadDesk(); } S.rf[d.rdrop] = ""; return render(); }
     if (d.rclear !== undefined) { const reload = !!S.rf.id || S.rf.win !== "7d"; S.rf = { win: "7d", project: "", expert: "", status: "", q: "", id: "" }; return reload ? loadDesk() : render(); }
@@ -1415,7 +1442,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
