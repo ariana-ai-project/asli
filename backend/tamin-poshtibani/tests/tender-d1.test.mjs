@@ -104,6 +104,44 @@ test("جستجوی نام: جدول‌های کوچک کافی‌اند ← سو
   assert.equal(SCANS.length, 1);
 });
 
+test("نظرسنجی پنل با اثر انگشت: چیزی عوض نشده ← {same} بی خواندن پیشنهادها؛ هر تغییر ← کامل", { skip: SKIP }, async () => {
+  const t = await call("POST", "/support/tenders", { title: "پیچ M10", qty: 5, unit: "عدد", start_price: "50000", invites: [{ name: "آهن‌آلات پارس", phone: "09122222222" }] }, SUP);
+  const id = t.data.tender.id;
+  const L = await call("GET", "/support/tenders", null, SUP);
+  assert.ok(L.data.fp && Array.isArray(L.data.tenders));
+  const D = await call("GET", `/support/tenders/${id}`, null, SUP);
+  assert.ok(D.data.fp && D.data.tender);
+  /* همان اثر انگشت: پاسخ کوتاه و هیچ خواندنی از tender_bids */
+  let bidReads = 0; const prep = DB.prepare;
+  DB.prepare = (sql) => { if (/tender_bids/.test(sql)) bidReads++; return prep(sql); };
+  try {
+    const l2 = await call("GET", `/support/tenders?fp=${encodeURIComponent(L.data.fp)}`, null, SUP);
+    const d2 = await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(D.data.fp)}`, null, SUP);
+    assert.deepEqual([l2.data.same, d2.data.same], [true, true]);
+    assert.equal(l2.data.tenders, undefined);
+    assert.ok(d2.data.now > 0);
+  } finally { DB.prepare = prep; }
+  assert.equal(bidReads, 0, "نظرسنجیِ بی‌تغییر هیچ پیشنهادی نمی‌خواند");
+  /* دعوت تازه: هم فهرست (شمار دعوت‌شده) هم جزئیات عوض می‌شود */
+  await call("POST", `/support/tenders/${id}/invites`, { name: "بازرگانی نو", phone: "09133333334" }, SUP);
+  const l3 = await call("GET", `/support/tenders?fp=${encodeURIComponent(L.data.fp)}`, null, SUP);
+  const d3 = await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(D.data.fp)}`, null, SUP);
+  assert.equal(l3.data.same, undefined, "فهرست تازه");
+  assert.equal(d3.data.invites.length, 2, "جزئیات تازه");
+  /* دیدن لینک توسط تأمین‌کننده (بی تغییر rev): فقط جزئیات عوض می‌شود */
+  run("UPDATE tender_invites SET seen_at=? WHERE tender_id=? AND alias=(SELECT MIN(alias) FROM tender_invites WHERE tender_id=?)", Date.now(), id, id);
+  const l4 = await call("GET", `/support/tenders?fp=${encodeURIComponent(l3.data.fp)}`, null, SUP);
+  const d4 = await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(d3.data.fp)}`, null, SUP);
+  assert.equal(l4.data.same, true);
+  assert.ok(d4.data.invites.some((i) => i.seen_at), "«دید» تازه می‌رسد");
+  /* پیشنهاد (rev) و کار جستجوی هوشمند */
+  run("UPDATE tenders SET rev=rev+1 WHERE id=?", id);
+  assert.equal((await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(d4.data.fp)}`, null, SUP)).data.same, undefined);
+  const d5 = await call("GET", `/support/tenders/${id}`, null, SUP);
+  run("INSERT INTO tender_jobs (tender_id, query, state, at) VALUES (?, 'q', 'pending', ?)", id, Date.now());
+  assert.equal((await call("GET", `/support/tenders/${id}?fp=${encodeURIComponent(d5.data.fp)}`, null, SUP)).data.same, undefined, "کار تازهٔ جستجو");
+});
+
 test("فهرست خالی: جستجوی قلم با همان راه قبلی", { skip: SKIP }, async () => {
   run("DELETE FROM cat_heads"); run("DELETE FROM cat_codes"); resetCatalogCache();
   const r = await call("GET", "/support/tender-items?q=" + encodeURIComponent("میلگرد"), null, SUP);

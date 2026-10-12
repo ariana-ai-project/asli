@@ -95,25 +95,73 @@
       return `<button type="button" class="${it.cls || ""}" ${it.attrs || ""} ${it.disabled ? "disabled" : ""} role="menuitem">${inner}</button>`;
     }).join("");
   }
+  const MOBILE = window.matchMedia ? matchMedia("(max-width: 720px)") : { matches: false, addEventListener() {} };
+  /* نوار بالای گوشی مثل نوارِ اپ‌ها: با اسکرول به پایین کنار می‌رود و با کمی بالا آمدن برمی‌گردد (ui.css: .tp-top.ui.tp-away).
+     بالای صفحه، یا وقتی منوی پروفایلِ داخلش باز است، همیشه پیداست. فقط روی گوشی؛ رویدادِ passive و یک بار در هر فریم. */
+  (() => {
+    let lastY = 0, ticking = false;
+    const run = () => {
+      ticking = false;
+      const bar = document.querySelector(".tp-top.ui"); if (!bar) return;
+      const y = window.scrollY || 0;
+      if (!MOBILE.matches || y < 70 || bar.querySelector(".tp-menu.open, :focus-within")) { bar.classList.remove("tp-away"); lastY = y; return; }
+      if (y > lastY + 8) bar.classList.add("tp-away");
+      else if (y < lastY - 8) bar.classList.remove("tp-away");
+      else return;
+      lastY = y;
+    };
+    window.addEventListener("scroll", () => { if (!ticking) { ticking = true; requestAnimationFrame(run); } }, { passive: true });
+    MOBILE.addEventListener && MOBILE.addEventListener("change", run);
+  })();
   /** menu({ btn: html دکمه (با data-menu-toggle)، items, cls }) */
   const menu = (o) => `<div class="tp-menu ${o.cls || ""}">${o.btn}<div class="tp-menu-list" role="menu">${menuItems(o.items)}</div></div>`;
+  /* گوشی: لمسِ پس‌زمینهٔ تیرهٔ برگه (::afterِ خودِ .tp-menu) فقط منو را می‌بندد — در فازِ capture، پیش از آنکه به کارت یا ردیفِ
+     دربرگیرنده برسد و آن را باز کند؛ فوکوس هم جابه‌جا نمی‌شود */
+  const scrimOf = (e) => (MOBILE.matches && e.target && e.target.classList && e.target.classList.contains("tp-menu") && e.target.classList.contains("open") ? e.target : null);
+  document.addEventListener("pointerdown", (e) => { if (scrimOf(e)) e.preventDefault(); }, true);
+  document.addEventListener("click", (e) => {
+    const m = scrimOf(e); if (!m) return;
+    e.preventDefault(); e.stopPropagation();
+    m.classList.remove("open");
+    const t = m.querySelector("[data-menu-toggle]"); if (t) t.setAttribute("aria-expanded", "false");
+    if (document.activeElement && m.contains(document.activeElement)) document.activeElement.blur();
+    unfree();
+  }, true);
   /* باز و بسته شدن با کلیک (لمس) — روی دسکتاپ با نشستنِ موشواره هم باز می‌شود (CSS) */
   document.addEventListener("click", (e) => {
     const t = e.target.closest("[data-menu-toggle]");
-    $$(".tp-menu.open").forEach((m) => { if (!m.contains(e.target) || e.target.closest(".tp-menu-list")) m.classList.remove("open"); });
+    /* گوشی: منو برگهٔ پایین است و لمسِ پس‌زمینهٔ تیره‌اش (::after همان .tp-menu) می‌بندد */
+    $$(".tp-menu.open").forEach((m) => {
+      if (!m.contains(e.target) || e.target === m || e.target.closest(".tp-menu-list")) {
+        m.classList.remove("open");
+        if (e.target === m && document.activeElement && m.contains(document.activeElement)) document.activeElement.blur();
+      }
+    });
     if (t) { const m = t.closest(".tp-menu"); if (m) { m.classList.toggle("open"); t.setAttribute("aria-expanded", m.classList.contains("open") ? "true" : "false"); if (m.classList.contains("open")) fitMenu(m); } }
+    unfree();
   });
   /* فهرستِ باز از لبهٔ صفحه بیرون نزند (گوشی: دکمهٔ «⋯» وسطِ ردیف است و فهرست از سمتِ راست بیرون می‌رفت) */
+  /* برگهٔ fixed فقط وقتی به خودِ صفحه می‌چسبد که هیچ جدی transform، filter، backdrop-filter، will-change یا contain نداشته باشد
+     (انیمیشنِ ورودِ کارت‌ها با fill-mode: both یک transformِ «هیچ‌کاره» جا می‌گذارد). تا برگه باز است آن جدها بی این‌ها می‌مانند. */
+  const XF = ["transform", "filter", "backdropFilter", "perspective"];
+  function freeFixed(m) {
+    for (let p = m.parentElement; p && p !== document.body; p = p.parentElement) {
+      const c = getComputedStyle(p);
+      if (XF.some((k) => c[k] && c[k] !== "none") || (c.willChange && c.willChange !== "auto") || (c.contain && c.contain !== "none")) p.classList.add("tp-xfree");
+    }
+  }
+  const unfree = () => { if (!document.querySelector(".tp-menu.open")) $$(".tp-xfree").forEach((x) => x.classList.remove("tp-xfree")); };
   function fitMenu(m) {
     const l = m && m.querySelector(":scope > .tp-menu-list"); if (!l) return;
     l.style.left = ""; l.style.right = "";
+    if (MOBILE.matches) { freeFixed(m); return; } /* گوشی: برگهٔ پایینِ صفحه (ui.css)، همیشه داخلِ قاب */
     const vw = document.documentElement.clientWidth, r = l.getBoundingClientRect(), pad = 8;
     const d = r.right > vw - pad ? vw - pad - r.right : r.left < pad ? pad - r.left : 0;
     if (!d) return;
     l.style.right = "auto"; l.style.left = `${l.offsetLeft + d}px`;
   }
   document.addEventListener("pointerover", (e) => { const m = e.pointerType === "mouse" && e.target.closest && e.target.closest(".tp-menu"); if (m && !m.contains(e.relatedTarget)) fitMenu(m); });
-  document.addEventListener("keydown", (e) => { if (e.key === "Escape") $$(".tp-menu.open").forEach((m) => m.classList.remove("open")); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") { $$(".tp-menu.open").forEach((m) => m.classList.remove("open")); unfree(); } });
 
   /* ---------- نوار بالا ----------
      o: { title, sub, home (href برند), nav: html, actions: html (دکمه‌های اصلی)، user: {name, sub, initial, img}, items: [منوی پروفایل], theme (پیش‌فرض بله) } */

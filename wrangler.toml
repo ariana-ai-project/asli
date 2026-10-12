@@ -55,6 +55,12 @@ binding = "ASSETS"
 # فایل‌های ثابت جلوتر از Worker سرو می‌شوند؛ Worker فقط برای مسیرهایی اجرا می‌شود که فایل ندارند
 run_worker_first = false
 
+# Smart Placement (مهر ۱۴۰۵): دیتابیس D1 در شرق آمریکاست (ENAM) و هر درخواست API چند کوئریِ پشت‌سرهم دارد؛ بی این،
+# Worker نزدیکِ کاربر (اروپا برای ایران) اجرا می‌شود و هر کوئری یک بار اقیانوس را رد می‌کند. با smart، Cloudflare خودِ
+# Worker را نزدیکِ دیتابیس می‌برد و هر درخواست فقط یک بار راه دور را می‌رود. فایل‌های ثابت همچنان از نزدیک‌ترین لبه سرو می‌شوند.
+[placement]
+mode = "smart"
+
 [[d1_databases]]
 binding = "DB"
 database_name = "tamin-poshtibani"

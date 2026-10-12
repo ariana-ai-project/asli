@@ -416,7 +416,19 @@ async function historyRead(env, code) {
 /* ------------------------------------------------------------------ */
 /* پنل پشتیبانی                                                         */
 /* ------------------------------------------------------------------ */
-export async function tenderList(env, ctx) {
+/*
+ * اثر انگشت ارزان برای نظرسنجی پنل پشتیبانی (هر ۳ ثانیه): فقط جدول tenders (چند ردیف)، نه شمارش دعوت‌ها و پیشنهادهای همه.
+ * هر تغییری در فهرست rev یا updated_at را جابه‌جا می‌کند (پیشنهاد، اصلاح، زمان‌بندی، دعوت تازه یا حذف از فهرست، پایان).
+ * due: مناقصه‌ای که باید همین حالا بسته شود ← مسیر کامل (finalizeIfDue)
+ */
+async function listFp(env, n) {
+  const r = await env.DB.prepare(`SELECT COUNT(*) AS c, COALESCE(SUM(rev),0) AS r, COALESCE(MAX(updated_at),0) AS u, COALESCE(MAX(id),0) AS m,
+      COALESCE(SUM(CASE WHEN state='scheduled' AND (end_at<=? OR (sealed_end_at IS NOT NULL AND sealed_done=0 AND sealed_end_at<=?)) THEN 1 ELSE 0 END),0) AS due FROM tenders`).bind(n, n).first();
+  return { fp: `${r.c}.${r.r}.${r.u}.${r.m}`, due: r.due > 0 };
+}
+/** GET /support/tenders[?fp=] — با fp همان قبلی و بی کار سررسید ← {same} (بی خواندن فهرست کامل) */
+export async function tenderList(env, ctx, fp) {
+  if (fp) { const f = await listFp(env, now()); if (f.fp === fp && !f.due) return { same: true, now: now(), fp: f.fp }; }
   const rows = (await env.DB.prepare(`SELECT t.*, (SELECT COUNT(*) FROM tender_invites i WHERE i.tender_id=t.id AND i.on_list=1) AS invited,
       (SELECT COUNT(DISTINCT b.alias) FROM tender_bids b WHERE b.tender_id=t.id AND b.state<>'void') AS bidders,
       (SELECT COUNT(*) FROM tender_bids b WHERE b.tender_id=t.id AND b.state<>'void') AS bids,
@@ -429,17 +441,34 @@ export async function tenderList(env, ctx) {
     const f = due ? { ...r, ...(await finalizeIfDue(env, r, ctx)) } : r;
     out.push({ ...pub(f, n), invited: r.invited, bidders: r.bidders, bids: r.bids, best_name: r.best_name, lots: r.grp ? r.lots : 1, created_at: r.created_at });
   }
-  const se = await smsEnv(env);
-  return { tenders: out, now: n, sms: smsReady(se) };
+  const [se, f] = await Promise.all([smsEnv(env), listFp(env, now())]);
+  return { tenders: out, now: n, sms: smsReady(se), fp: f.fp };
 }
 
-export async function tenderDetail(env, id, ctx) {
+/*
+ * اثر انگشت جزئیات: ردیف مناقصه (rev با هر پیشنهاد و تغییر بالا می‌رود) + جمع‌بندی دعوت‌ها (دیدن، پیامک، پذیرش، پیشنهاد خودکار،
+ * قفل، خبر نده) + کارهای جستجوی هوشمند + rev قلم‌های هم‌گروه. خواندنش چند ردیف است، نه همهٔ پیشنهادها.
+ */
+const fnv = (s) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return (h >>> 0).toString(36); };
+async function detailFp(env, t) {
+  const r = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*)||':'||COALESCE(SUM(COALESCE(seen_at,0)+COALESCE(sms_at,0)+COALESCE(accepted_at,0)+COALESCE(proxy_at,0)+COALESCE(proxy_min,0)+COALESCE(outbid_n,0)
+        +COALESCE(lock_until,0)+COALESCE(notify_off,0)+COALESCE(on_list,0)+COALESCE(pass_sent_at,0)),0)||':'||COALESCE(GROUP_CONCAT(COALESCE(sms_state,'')||COALESCE(phone,'')||COALESCE(name,''),'|'),'')
+        FROM tender_invites WHERE tender_id=?) AS i,
+      (SELECT COUNT(*)||':'||COALESCE(MAX(id),0)||':'||COALESCE(SUM(CASE state WHEN 'pending' THEN 1 WHEN 'running' THEN 2 WHEN 'done' THEN 3 ELSE 4 END),0)||':'||COALESCE(MAX(COALESCE(done_at,started_at,at,0)),0)
+        FROM tender_jobs WHERE tender_id=?) AS j,
+      ${t.grp ? "(SELECT COALESCE(SUM(rev),0) FROM tenders WHERE grp=?)" : "0"} AS g`).bind(t.id, t.id, ...(t.grp ? [t.grp] : [])).first();
+  return `${t.rev}.${t.state}.${t.end_at || 0}.${t.sealed_done || 0}.${t.updated_at || 0}.${fnv(String(r.i))}.${r.j}.${r.g}`;
+}
+/** GET /support/tenders/:id[?fp=] — با fp همان قبلی ← {same, now} (نظرسنجی هر ۳ ثانیه بی خواندن همهٔ پیشنهادها) */
+export async function tenderDetail(env, id, ctx, fp) {
   let t = await rowOf(env, int(id));
   if (!t) throw new HttpError("این مناقصه پیدا نشد.", 404);
   t = await finalizeIfDue(env, t, ctx);
-  const [inv, bids, jobs, lots, hist] = await Promise.all([invitesOf(env, t.id), bidsOf(env, t.id),
+  if (fp) { const f = await detailFp(env, t); if (f === fp) return { same: true, now: now(), fp: f }; }
+  const [inv, bids, jobs, lots, hist, dfp] = await Promise.all([invitesOf(env, t.id), bidsOf(env, t.id),
     env.DB.prepare("SELECT id, query, state, result_json, error, at, done_at, params_json, model, cost, searches, fetches, started_at FROM tender_jobs WHERE tender_id=? ORDER BY id DESC LIMIT 3").bind(t.id).all().then((r) => r.results || []),
-    lotsOf(env, t), historyOf(env, t)]);
+    lotsOf(env, t), historyOf(env, t), detailFp(env, t)]);
   const n = now(), ranks = ranksOf(bids), names = new Map(inv.map((i) => [i.alias, i.name]));
   const lastBy = new Map(); for (const b of bids) if (b.state !== "void") lastBy.set(b.alias, b);
   const se = await smsEnv(env);
@@ -454,7 +483,7 @@ export async function tenderDetail(env, id, ctx) {
       fix_reason: b.fix_reason, fix_at: b.fix_at, ext: !!b.ext, auto: !!b.auto, sealed: !!b.sealed })),
     series: seriesOf(bids), hist,
     jobs: jobs.map((j) => ({ ...j, result: parse(j.result_json, null), params: parse(j.params_json, null), result_json: undefined, params_json: undefined })),
-    now: n, sms: smsReady(se), link: tenderLink(env, t.code),
+    now: n, sms: smsReady(se), link: tenderLink(env, t.code), fp: dfp,
   };
 }
 
@@ -600,8 +629,9 @@ export async function tenderInviteAdd(env, id, b) {
   let top = 0;
   for (const l of lots) top = Math.max(top, ((await env.DB.prepare("SELECT MAX(alias) AS m FROM tender_invites WHERE tender_id=?").bind(l.id).first()) || {}).m || 0);
   const alias = top + 1 + Math.floor(Math.random() * 3);
-  await env.DB.batch(lots.map((l) => env.DB.prepare("INSERT OR IGNORE INTO tender_invites (tender_id,alias,name,phone,supplier_id,source,info,on_list) VALUES (?,?,?,?,?,?,?,1)")
-    .bind(l.id, alias, name, phone, int(b.supplier_id), T(b.source).slice(0, 20) || "manual", b.info ? JSON.stringify(b.info).slice(0, 600) : null)));
+  await env.DB.batch([...lots.map((l) => env.DB.prepare("INSERT OR IGNORE INTO tender_invites (tender_id,alias,name,phone,supplier_id,source,info,on_list) VALUES (?,?,?,?,?,?,?,1)")
+    .bind(l.id, alias, name, phone, int(b.supplier_id), T(b.source).slice(0, 20) || "manual", b.info ? JSON.stringify(b.info).slice(0, 600) : null)),
+    ...lots.map((l) => env.DB.prepare("UPDATE tenders SET rev=rev+1, updated_at=? WHERE id=?").bind(now(), l.id))]);
   if (phone) await keepPhone(env, name, phone);
   return tenderDetail(env, t.id);
 }
@@ -620,7 +650,8 @@ export async function tenderInviteSet(env, id, alias, b) {
   }
   if (!Object.keys(set).length) return tenderDetail(env, t.id);
   const lots = await lotsOf(env, t);
-  await env.DB.batch(lots.map((l) => env.DB.prepare(`UPDATE tender_invites SET ${Object.keys(set).map((k) => `${k}=?`).join(",")} WHERE tender_id=? AND alias=?`).bind(...Object.values(set), l.id, inv.alias)));
+  await env.DB.batch([...lots.map((l) => env.DB.prepare(`UPDATE tender_invites SET ${Object.keys(set).map((k) => `${k}=?`).join(",")} WHERE tender_id=? AND alias=?`).bind(...Object.values(set), l.id, inv.alias)),
+    ...(set.on_list !== undefined ? lots.map((l) => env.DB.prepare("UPDATE tenders SET rev=rev+1, updated_at=? WHERE id=?").bind(now(), l.id)) : [])]);
   if (set.phone) await keepPhone(env, inv.name, set.phone);
   if (set.on_list === 0) await env.DB.batch(lots.map((l) => env.DB.prepare("DELETE FROM tender_sessions WHERE tender_id=? AND alias=?").bind(l.id, inv.alias)));
   return tenderDetail(env, t.id);

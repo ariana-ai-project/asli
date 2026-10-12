@@ -30,15 +30,27 @@
 
   /* ---------- بارگذاری ---------- */
   async function loadCfg() { try { T.cfg = await C.api("/tender-settings"); } catch (_) { /* با پیش‌فرض‌های جادوگر */ } }
-  async function loadList() {
-    T.loading = true; T.err = ""; rerender();
-    try { const r = await C.api("/tenders"); T.list = r.tenders || []; T.sms = r.sms; T.off = r.now - Date.now(); } catch (e) { T.err = e.message; }
+  /* نظرسنجی با اثر انگشت (fp): اگر چیزی عوض نشده سرور فقط {same} می‌دهد — نه خواندن دوبارهٔ همه، نه رسم دوباره */
+  async function loadList(quiet) {
+    if (!quiet) { T.loading = true; T.err = ""; rerender(); }
+    try {
+      const r = await C.api(`/tenders${quiet && T.lfp ? `?fp=${encodeURIComponent(T.lfp)}` : ""}`);
+      T.off = r.now - Date.now();
+      if (r.same) return;
+      T.list = r.tenders || []; T.sms = r.sms; T.lfp = r.fp || null;
+    } catch (e) { if (!quiet) T.err = e.message; }
     if (!T.cfg) await loadCfg();
     T.loading = false; rerender();
   }
   async function loadOne(id, quiet) {
-    if (!quiet) { T.id = id; T.d = null; T.dErr = ""; T.req = null; rerender(); }
-    try { const d = await C.api(`/tenders/${id}`); if (T.id !== id) return; T.d = d; T.off = d.now - Date.now(); }
+    if (!quiet) { T.id = id; T.d = null; T.dfp = null; T.dErr = ""; T.req = null; rerender(); }
+    try {
+      const d = await C.api(`/tenders/${id}${quiet && T.dfp ? `?fp=${encodeURIComponent(T.dfp)}` : ""}`);
+      if (T.id !== id) return;
+      T.off = d.now - Date.now();
+      if (d.same) return;
+      T.d = d; T.dfp = d.fp || null;
+    }
     catch (e) { if (!quiet) T.dErr = e.message; }
     rerender();
   }
@@ -51,7 +63,7 @@
       const a = document.activeElement; if (a && /INPUT|TEXTAREA|SELECT/.test(a.tagName)) return;
       const searching = T.d && (T.d.jobs || []).some((j) => ["pending", "running"].includes(j.state));
       if (T.id && T.d && (searching || ["live", "scheduled", "sealed"].includes(T.d.tender.state))) loadOne(T.id, true);
-      else if (!T.id && !T.w && T.list && T.list.some((x) => ["live", "scheduled", "sealed"].includes(x.state))) loadList();
+      else if (!T.id && !T.w && T.list && T.list.some((x) => ["live", "scheduled", "sealed"].includes(x.state))) loadList(true);
     }, 3000);
     T.tick = setInterval(() => {
       if (!T.on) return;
@@ -319,7 +331,7 @@
         d = await C.api(`/tenders/${d.tender.id}/schedule`, { body: { start_in_min: n0(f.start_in_min), duration_min: n0(f.duration_min), sealed_min: n0(f.sealed_min) } });
         d = await C.api(`/tenders/${d.tender.id}/invite`, { body: {} });
       }
-      T.w = null; T.id = d.tender.id; T.d = d; T.list = null;
+      T.w = null; T.id = d.tender.id; T.d = d; T.dfp = d.fp || null; T.list = null;
       b.close(); rerender();
       if (go && d.result) TP.ui.success(d.result.sent ? `دعوت برای ${fa(d.result.sent)} نفر پیامک شد` : "مناقصه شروع شد");
       if (go && d.result && (d.result.off || d.result.error || d.result.nophone)) inviteReport(d.result);
@@ -519,7 +531,7 @@
     return null;
   }
   async function act(fn) {
-    try { const r = await fn(); if (r && r.tender && T.id === r.tender.id) { T.d = r; T.off = r.now - Date.now(); } else if (T.id) await loadOne(T.id, true); rerender(); }
+    try { const r = await fn(); if (r && r.tender && T.id === r.tender.id) { T.d = r; T.dfp = r.fp || null; T.off = r.now - Date.now(); } else if (T.id) { T.dfp = null; await loadOne(T.id, true); } rerender(); }
     catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
   }
   function addSup(s) {

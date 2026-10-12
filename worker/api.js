@@ -376,7 +376,11 @@ async function ensureSchema(env) {
     const fp = await env.DB.prepare("SELECT value FROM counters WHERE key='schema_fp'").first();
     existing = !!fp;
     if (fp && Number(fp.value) === SCHEMA_FP) { schemaReady = true; return; }
-  } catch (_) { /* دیتابیس تازه — جدول counters هنوز ساخته نشده؛ مسیر کامل */ }
+  } catch (e) {
+    /* دیتابیس تازه — جدول counters هنوز ساخته نشده؛ مسیر کامل. هر خطای دیگر (مثل سقف روزانهٔ D1) همان‌جا برمی‌گردد:
+       مهر ۱۴۰۵ در ساعت‌های قفلِ سقف خواندن، هر درخواست ~۱۰۰ دستور CREATE می‌فرستاد (۵۳۷ هزار کوئری در یک روز) */
+    if (!/no such table/i.test(String((e && e.message) || e))) throw e;
+  }
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
@@ -1967,7 +1971,7 @@ async function route(request, env, ctx) {
       await requireSupport(request, env);
       if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));
       /* مناقصه (worker/tender.js) */
-      if (path === "/support/tenders" && m === "GET") return json(await tenderList(env, ctx));
+      if (path === "/support/tenders" && m === "GET") return json(await tenderList(env, ctx, url.searchParams.get("fp")));
       if (path === "/support/tenders" && m === "POST") return json(await tenderCreate(env, await readJson(request)));
       if (path === "/support/tender-items" && m === "GET") return json(await tenderItems(env, url.searchParams.get("q")));
       if (path === "/support/tender-suppliers" && m === "GET") return json(await tenderSuppliers(env, url.searchParams.get("code")));
@@ -1978,7 +1982,7 @@ async function route(request, env, ctx) {
       if (path === "/support/tender-settings/test" && m === "POST") return json(await tenderSmsTest(env, await readJson(request)));
       if ((mm = /^\/support\/tenders\/(\d+)(?:\/(schedule|end|cancel|invite|invites|discover|link|csv))?$/.exec(path))) {
         const tid = mm[1], act = mm[2] || "";
-        if (!act && m === "GET") return json(await tenderDetail(env, tid, ctx));
+        if (!act && m === "GET") return json(await tenderDetail(env, tid, ctx, url.searchParams.get("fp")));
         if (!act && m === "PUT") return json(await tenderUpdate(env, tid, await readJson(request)));
         if (act === "schedule" && m === "POST") return json(await tenderSchedule(env, tid, await readJson(request)));
         if (act === "end" && m === "POST") return json(await tenderEnd(env, tid, await readJson(request), ctx));

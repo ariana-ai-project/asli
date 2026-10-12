@@ -1019,3 +1019,81 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
 body.has-foot .tp-pushcard { bottom: max(76px, env(safe-area-inset-bottom)); }
 @media (prefers-reduced-motion: reduce) { .tp-pushcard { animation: none; } }
 @media (prefers-reduced-transparency: reduce) { .tp-pushcard { -webkit-backdrop-filter: none; backdrop-filter: none; background: #18203c; } :root[data-theme="light"] .tp-pushcard { background: #fff; } }
+/* ============================================================
+   موبایل — استانداردِ اپلیکیشن (مهر ۱۴۰۵). همه فقط زیرِ ۷۲۰px؛ دسکتاپ دست نمی‌خورد.
+   ============================================================ */
+@media (max-width: 720px) {
+  /* ۱. بی تکانِ چپ‌وراست: clip به‌جای hidden — بیرون‌زدگی کشیدنی نیست و body ظرفِ اسکرول نمی‌شود
+     (با hidden روی html و body، body ظرفِ اسکرول بود و نوار بالا با اسکرول می‌رفت) */
+  html, body.tp-body { overflow-x: hidden; overflow-x: clip; }
+  body.tp-body { overflow-y: visible; }
+  /* کشیدن از لبه (iOS) زمینهٔ سفید نشان نمی‌دهد */
+  html { background-color: #060b1c; }
+  html[data-theme="light"] { background-color: #eef2f8; }
+  * { -webkit-tap-highlight-color: transparent; }
+  button, a, input, select, textarea, label, [role="button"] { touch-action: manipulation; }
+
+  /* ۲. زمینهٔ آرام: هاله‌ها و دایره‌ها ثابت (انیمیشنِ دائمیِ لایه‌های بزرگِ تار روی GPUِ گوشی پرهزینه است)، و با جمع شدنِ
+     نوار نشانیِ مرورگر نمی‌پرند: اندازه‌ها با ارتفاعِ «بزرگِ» صفحه (lvh) — ثابت، نه vh که با نوار عوض می‌شود */
+  .tp-sky, .tp-orbs { bottom: auto; height: 100vh; height: 100lvh; contain: strict; }
+  .tp-sky i, .tp-orbs i { animation: none !important; will-change: auto; }
+  .tp-sky .b1 { width: 62lvmax; height: 62lvmax; left: -16lvmax; top: -22lvmax; }
+  .tp-sky .b2 { width: 48lvmax; height: 48lvmax; right: -14lvmax; top: 18lvh; }
+  .tp-sky .b3 { width: 42lvmax; height: 42lvmax; bottom: auto; top: calc(100vh - 18vmax); top: calc(100lvh - 18lvmax); }
+  .tp-orbs i:nth-child(1) { top: 8lvh; } .tp-orbs i:nth-child(2) { top: 62lvh; } .tp-orbs i:nth-child(3) { top: -10lvh; }
+  .tp-orbs i:nth-child(4) { top: 40lvh; } .tp-orbs i:nth-child(5) { top: 70lvh; } .tp-orbs i:nth-child(6) { top: 30lvh; }
+  .tp-orbs i:nth-child(7) { top: 86lvh; } .tp-orbs i:nth-child(8) { top: 78lvh; } .tp-orbs i:nth-child(9) { top: 54lvh; }
+
+  /* ۳. نوار بالا مثل نوارِ اپ: چسبیده به بالا، با اسکرول به پایین کنار می‌رود و با کمی بالا آمدن برمی‌گردد (ui.js) */
+  /* شیشهٔ نوار روی گوشی تخت و تقریباً مات: backdrop-filter و will-change هر منوی fixedِ داخلش (پروفایل) را به خودِ نوار می‌چسباند
+     و روی GPUِ گوشی هم گران است — رنگ همان است */
+  .tp-top.ui { position: sticky; top: 0; z-index: 40; transition: transform .28s var(--ui-ease, ease);
+    -webkit-backdrop-filter: none; backdrop-filter: none; background: rgba(8, 16, 38, 0.96); }
+  html[data-theme="light"] .tp-top.ui { background: rgba(250, 251, 254, 0.97); }
+  .tp-top.ui.tp-away { transform: translateY(calc(-100% - 2px)); }
+
+  /* ۴. منوهای بازشونده (⋯، پروفایل، «تنظیمات ▾») روی گوشی برگهٔ پایینِ صفحه‌اند (Action Sheet):
+     همیشه داخلِ قاب، با پس‌زمینهٔ تیره که لمسش می‌بندد — دیگر بیرون از صفحه نمی‌مانند و صفحه را کشیدنی نمی‌کنند */
+  .tp-menu-list { position: fixed; top: auto; left: 10px; right: 10px; inset-inline-start: 10px; inset-inline-end: 10px;
+    bottom: calc(10px + env(safe-area-inset-bottom)); min-width: 0; max-width: none; width: auto; z-index: 960;
+    max-height: min(72dvh, 560px); overflow-y: auto; overscroll-behavior: contain; border-radius: 22px; padding: 8px; transform: translateY(18px); }
+  .tp-menu.start .tp-menu-list { inset-inline-start: 10px; inset-inline-end: 10px; }
+  .tp-menu-list::before { display: none; }
+  .tp-menu-list > button, .tp-menu-list > a, .tp-menu-list > label { min-height: 46px; font-size: 1rem; }
+  .tp-menu.open::after { content: ""; position: fixed; inset: 0; z-index: 955; background: rgba(3, 8, 20, 0.55); }
+  .tp-xfree { transform: none !important; filter: none !important; -webkit-backdrop-filter: none !important; backdrop-filter: none !important;
+    perspective: none !important; will-change: auto !important; contain: none !important; animation: none !important; }
+  /* هر جدِ این منوها که transform یا backdrop-filter دارد، fixed را به خودش می‌چسباند: روی گوشی بی آن */
+  .tp-rcard:hover, .tp-rcard:active { transform: none; }
+  .mg-fpanel { -webkit-backdrop-filter: none; backdrop-filter: none; background: var(--ui-thick); }
+
+  /* ۵. ردیفِ وضعیت (مثل «🤖 حالتِ هوشمند — هر قلم جدا»): چیپ‌ها خطِ خودشان را می‌گیرند، نه ستونِ باریکِ یک‌کلمه‌ای */
+  .tp-status > b { white-space: normal; }
+  .tp-status .sp { flex-basis: 100%; }
+
+  /* ۶. کاشی‌های آمار دوتایی، نه هر کدام یک ردیفِ کامل */
+  .tp-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tp-stat { padding: 10px 12px; gap: 10px; }
+
+  /* ۷. هدف‌های لمس (حداقلِ اپ‌ها ≈ ۴۴px؛ بی تغییرِ ظاهر، فقط ارتفاع و ناحیهٔ لمس) */
+  .tp-btn.sm { min-height: 36px; }
+  .tp-btn.xs { min-height: 32px; }
+  .tp-info { position: relative; }
+  .tp-info::after { content: ""; position: absolute; inset: -11px; }
+  .chkline { min-height: 36px; }
+  .chkline input[type="checkbox"], .chkline input[type="radio"] { width: 18px; height: 18px; }
+  .tp-step > button, .sm-op > button { min-width: 36px; min-height: 36px; }
+
+  /* ۸. هیچ نوشته‌ای زیرِ ۱۱px (حداقلِ خواناییِ گوشی): برچسب‌ها، چیپ‌ها، و ساعت و برچسبِ پیام‌ها در گفت‌وگوی تمام‌صفحه (مثل iMessage) */
+  .tp-prog-labels span, .tp-item .chip, .tp-help-fab span { font-size: 11px; }
+  .ph-screen.full .ph-meta, .ph-screen.full .sp-code, .ph-screen.full .ph-cap, .ph-screen.full .ph-tr b { font-size: 11px; }
+  .ph-screen.full .ph-dot { font-size: 10.5px; }
+  /* چیپِ بلند (مثل «قاعدهٔ دعوت…») در صفحه می‌شکند، نه بیرون می‌زند */
+  .pk-rule { flex-wrap: wrap; }
+  .pk-rule .chip { white-space: normal; max-width: 100%; }
+  input[type="checkbox"], input[type="radio"] { width: 18px; height: 18px; }
+
+  /* ۹. برگه‌ها و پنجره‌ها: اسکرولِ داخلشان به صفحهٔ پشت نمی‌رسد، و تا بازند صفحهٔ پشت ثابت می‌ماند */
+  .tp-help-panel, .tp-modal, .cmr-ov { overscroll-behavior: contain; }
+  html:has(.tp-help.open), html:has(.tp-modal-bg) { overflow: hidden; }
+}

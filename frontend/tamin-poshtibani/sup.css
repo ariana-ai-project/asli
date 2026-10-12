@@ -191,7 +191,7 @@
 .sv-aibar { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .sv-aibar .spacer { flex: 1; }
 .sv-aiseg { flex-wrap: wrap; }
-@media (max-width: 760px) { .sv-aiseg { flex-wrap: nowrap; overflow-x: auto; max-width: calc(100vw - 80px); scrollbar-width: none; } .sv-aiseg > button { white-space: nowrap; } }
+@media (max-width: 760px) { .sv-aiseg { flex-wrap: nowrap; overflow-x: auto; max-width: 100%; scrollbar-width: none; } .sv-aiseg > button { white-space: nowrap; } }
 .sv-aiback { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
 .sv-aiwrap { display: flex; flex-direction: column; gap: 4px; }
 .sv-aigrid, .sv-asks, .sv-dls { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 14px; }
