@@ -146,7 +146,7 @@ test("ارسال به تأمین‌کنندهٔ فرضی: گفت‌وگو، خط
   assert.equal(r.data.added, 2);
   assert.equal(r.data.supplier.demo, true);
   assert.match(r.data.sms.text, /^سلام، استعلام داریم\./);
-  assert.match(r.data.sms.text, /🔗 پنل تأمین‌کننده: https:\/\/site\.test\/tamin-poshtibani\/supplier\.html#k=[0-9a-f]{12}/);
+  assert.match(r.data.sms.text, /🔗 پنل تأمین‌کننده: https:\/\/site\.test\/tamin-poshtibani\/supplier#k=[0-9a-f]{12}/);
   assert.match(r.data.sms.text, /🔑 رمز ورود: \d{6}/);
   S.demoK = keyOf(r.data.sms.text); S.demoPass = passOf(r.data.sms.text); S.th = r.data.thread_id;
   const sms = DB.raw.prepare("SELECT body FROM sp_sms ORDER BY id DESC LIMIT 1").get();
@@ -379,7 +379,7 @@ test("بات مکاتبات: اتصال کارشناس و تأمین‌کنند�
   let n = calls.length;
   await handleSpUpdate(env, { update_id: 1, message: { message_id: 10, chat: { id: EC, type: "private" }, text: `/start ${token}` } });
   assert.equal(DB.raw.prepare("SELECT role, expert_id FROM sp_tg WHERE chat=?").get(String(EC)).role, "e");
-  assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "setChatMenuButton" && c.body.menu_button.web_app.url === "https://site.test/tamin-poshtibani/correspond.html?tg=1"));
+  assert.ok(since(n).some((c) => c.bot === "sp" && c.method === "setChatMenuButton" && c.body.menu_button.web_app.url === "https://site.test/tamin-poshtibani/correspond?tg=1"));
   const kb = sent(n, "sp", EC)[0].body.reply_markup.keyboard;
   assert.deepEqual(kb[0].map((b) => b.text), ["📋 لیست درخواست‌ها", "🏷 لیست تأمین‌کنندگان"], "منوی ثابت پایین");
   n = calls.length;
@@ -672,11 +672,11 @@ test("«📨 ارسال» از «بررسی سوابق» برای همهٔ کا�
   assert.match(done.text, /همین الان در «بات مکاتبات» برایتان آمد/);
   assert.doesNotMatch(done.text, /رمز ورود/, "متنِ پیامک (با رمز) در بات کارشناسان نمی‌آید");
   assert.equal(btn(done.kb, "بات مکاتبات"), "https://t.me/AriaSupplierBot");
-  assert.equal(btn(done.kb, "صفحهٔ مکاتبات"), "https://site.test/tamin-poshtibani/correspond.html");
+  assert.equal(btn(done.kb, "صفحهٔ مکاتبات"), "https://site.test/tamin-poshtibani/correspond");
   assert.equal(btn(done.kb, "بازگشت به کارت قلم"), `hv:${fid}:11:h:0`);
   const sms = sent(done.n, "sp", 900).find((c) => /پیامک شبیه‌سازی‌شده/.test(c.body.text));
   assert.ok(sms, "پیامکِ شبیه‌سازی‌شده در بات مکاتباتِ همین کارشناس");
-  assert.match(btns(sms).find((b) => /پنل تأمین‌کننده/.test(b.text)).url, /^https:\/\/site\.test\/tamin-poshtibani\/supplier\.html#k=/);
+  assert.match(btns(sms).find((b) => /پنل تأمین‌کننده/.test(b.text)).url, /^https:\/\/site\.test\/tamin-poshtibani\/supplier#k=/);
   assert.match(btns(sms).find((b) => /بات تأمین‌کننده/.test(b.text)).url, /^https:\/\/t\.me\/AriaSupplierBot\?start=s/);
   const latest = /رمز ورود: (\d{6})/.exec(sms.body.text)[1];
   assert.equal((await call("/sp/login", { body: { k: S.demoK, password: latest } })).status, 200, "رمزِ همین پیامک");
@@ -983,7 +983,7 @@ test("پیامکِ واقعی با TextBee: استعلام و «ارسال رم�
     assert.equal(tb[0].headers["x-api-key"], "tbk");
     assert.deepEqual(tb[0].body.recipients, ["+989351112233"], "شماره به قالب بین‌المللی");
     assert.match(tb[0].body.message, /^سلام، استعلام\./);
-    assert.match(tb[0].body.message, /supplier\.html#k=[0-9a-f]{12}/);
+    assert.match(tb[0].body.message, /supplier#k=[0-9a-f]{12}/);
     assert.match(tb[0].body.message, /رمز ورود: \d{6}/);
     assert.equal(r.data.sms.sent, true);
     assert.equal(r.data.sms.text, undefined, "متنِ با رمز به پنل کارشناس برنمی‌گردد");

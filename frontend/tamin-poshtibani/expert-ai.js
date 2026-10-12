@@ -25,7 +25,7 @@
     api: (p, o) => TP.api(p, o),
     download: null,
     active: (S) => S.screen === "list" && S.tab === "ai",
-    chat: () => `<a class="tp-btn sm" href="correspond.html">💬 صفحهٔ مکاتبات</a>`,
+    chat: () => `<a class="tp-btn sm" href="correspond">💬 صفحهٔ مکاتبات</a>`,
   };
   const api = (p, o) => C.api(p, o);
 

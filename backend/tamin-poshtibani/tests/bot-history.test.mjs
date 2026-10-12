@@ -145,7 +145,7 @@ test("منوی ثابت پایین: «بازگشت»، «کارتابل»، «د
   assert.equal(menu.length, 1, "اولین بار منو فرستاده می‌شود");
   const rows = menu[0].body.reply_markup.keyboard;
   assert.deepEqual(rows[0].map((b) => b.text), ["↩️ بازگشت", "📋 کارتابل", "📄 درخواست"]);
-  assert.equal(rows[1][0].web_app.url, "https://arianaai.website/tamin-poshtibani/expert.html?tg=1", "مینی‌اپِ پنل کارشناس");
+  assert.equal(rows[1][0].web_app.url, "https://arianaai.website/tamin-poshtibani/expert?tg=1", "مینی‌اپِ پنل کارشناس");
   assert.equal(menu[0].body.reply_markup.is_persistent, true);
   const btn = first.mine.find((c) => c.method === "setChatMenuButton");
   assert.equal(btn.body.menu_button.type, "web_app", "دکمهٔ مینی‌اپ کنار کادر پیام");
@@ -303,7 +303,7 @@ test("منوی ثابت بی آن‌که کارشناس چیزی بفرستد: C
     const mine = sent.slice(from);
     const def = mine.find((c) => c.method === "setChatMenuButton" && c.body.chat_id === undefined);
     assert.ok(def, "دکمهٔ مینی‌اپ برای همهٔ گفت‌وگوهای بات");
-    assert.equal(def.body.menu_button.web_app.url, "https://arianaai.website/tamin-poshtibani/expert.html?tg=1");
+    assert.equal(def.body.menu_button.web_app.url, "https://arianaai.website/tamin-poshtibani/expert?tg=1");
     const menu = mine.find((c) => c.method === "sendMessage" && String(c.body.chat_id) === "888");
     assert.deepEqual(menu.body.reply_markup.keyboard[0].map((b) => b.text), ["↩️ بازگشت", "📋 کارتابل", "📄 درخواست"], "منو بی آن‌که کارشناس چیزی بفرستد");
     assert.equal(r.navSent, 1);

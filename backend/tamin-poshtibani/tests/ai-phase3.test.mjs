@@ -161,7 +161,7 @@ test("مهلت گذشت: آلارمِ تلگرام و واگذاری — سوا�
   assert.ok(tg, "آلارم در بات کارشناسان");
   assert.match(tg.body.text, /به حداقلِ استعلامِ درخواست R-P3 نرسید/);
   assert.match(tg.body.text, /میلگرد ۱۲ آجدار — ۱ از ۳/);
-  assert.match(tg.body.reply_markup.inline_keyboard[0][0].web_app.url, /expert\.html\?tg=1$/);
+  assert.match(tg.body.reply_markup.inline_keyboard[0][0].web_app.url, /expert\?tg=1$/);
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='ai_handover'").get());
   /* سوابق و جستجو باز؛ جدول و نامه قفل */
   assert.equal((await call("/items/41/progress", { headers: EX, body: { stage: "hist" } })).status, 200);

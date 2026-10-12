@@ -105,7 +105,7 @@ const num = (v, d, lo, hi) => {
 };
 const bool = (v, d) => (v === undefined || v === null || v === "" ? d : v === true || v === 1 || v === "1" || v === "true" ? 1 : 0);
 export const aliasLabel = (a) => `تأمین‌کنندهٔ ${faN(a)}`;
-export const TENDER_PATH = "/tamin-poshtibani/tender.html";
+export const TENDER_PATH = "/tamin-poshtibani/tender";
 export const tenderLink = (env, code) => `${siteOrigin(env)}${TENDER_PATH}#t=${code}`;
 
 const PASS_TTL = 3 * 3600e3, PASS_GAP = 60e3, PASS_DAY = 6, MAX_FAILS = 5, LOCK_MS = 15 * 60e3, SESSION_TTL = 8 * 3600e3;

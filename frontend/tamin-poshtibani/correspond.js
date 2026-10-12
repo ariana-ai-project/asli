@@ -107,15 +107,15 @@
   function top() {
     TP.ui.mountBg("");
     const items = [...(S.me && S.via !== "telegram" ? [{ label: "بات مکاتبات در تلگرام", icon: "telegram", attrs: "data-tg" }] : []),
-      ...(S.me && !spApp ? [{ label: "پنل کارشناس", icon: "user", href: "expert.html" }, { label: "تدارکات", icon: "home", href: "index.html" }] : [])];
-    return TP.ui.topbar({ title: "مکاتبات با تأمین‌کنندگان", sub: S.me ? esc(S.me.label || S.me.name) : "", home: spApp ? "#" : "expert.html", homeTitle: "پنل کارشناس",
+      ...(S.me && !spApp ? [{ label: "پنل کارشناس", icon: "user", href: "expert" }, { label: "تدارکات", icon: "home", href: "./" }] : [])];
+    return TP.ui.topbar({ title: "مکاتبات با تأمین‌کنندگان", sub: S.me ? esc(S.me.label || S.me.name) : "", home: spApp ? "#" : "expert", homeTitle: "پنل کارشناس",
       user: S.me ? { name: S.me.label || S.me.name, sub: "کارشناس خرید" } : null, items });
   }
   function renderLogin(msg) {
     app.classList.remove("sp-app");
     PH.lockView(false);
     TP.ui.mountBg("fog");
-    app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 4, error: msg, back: { href: "expert.html", label: "← پنل کارشناس" } });
+    app.innerHTML = TP.ui.login({ title: "ورود کارشناس", sub: "همان کد ورود پنل کارشناس", len: 4, max: 4, error: msg, back: { href: "expert", label: "← پنل کارشناس" } });
     TP.ui.help.set("login.expert");
     TP.ui.bindLogin(app, { onSubmit: async (c) => { const r = await TP.api("/login", { body: { code: c } }); TP.session.set(r.expert); boot(); } });
   }

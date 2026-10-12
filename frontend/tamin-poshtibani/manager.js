@@ -171,7 +171,7 @@
   /* ---------- ورود مدیر ---------- */
   /* کارتِ ورود با خانه‌های کد (ui.js، مهر ۱۴۰۵) */
   function vLogin() {
-    return TP.ui.login({ title: "ورود مدیر تدارکات", sub: "کد مدیر را رقم‌به‌رقم بنویسید", len: 4, max: 4, secret: true, error: S.error, back: { href: "index.html" }, company: CFG.company });
+    return TP.ui.login({ title: "ورود مدیر تدارکات", sub: "کد مدیر را رقم‌به‌رقم بنویسید", len: 4, max: 4, secret: true, error: S.error, back: { href: "./" }, company: CFG.company });
   }
 
   /* ---------- سرآیند و بخش‌ها ----------
@@ -186,7 +186,7 @@
       items: keys.map((k) => ({ label: TAB_FA[k], icon, attrs: `data-tab="${k}"` })) });
     return TP.ui.topbar({ title: "میز ارجاع خرید", sub, actions: `<button class="tp-btn primary" data-import>${TP.ui.ICON.upload}بارگذاری درخواست‌های روزانه</button>`,
       user: { name: "مدیر تدارکات", sub: esc(CFG.company), initial: "م" },
-      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+      items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
       + `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("desk")}${tab("experts")}${grp("تنظیمات", "settings", ["alerts", "asg", "dl"])}${grp("داده‌ها", "data", ["norm", "hist"])}${tab("reports")}${tab("log")}</div>
       <span class="spacer"></span>
       <label class="chip ${settings().approvalRequired ? "warn" : ""}" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;padding:4px 12px" title="توقف / تعلیق / خاتمه توسط کارشناس منوط به تأیید من باشد"><input type="checkbox" data-approval ${settings().approvalRequired ? "checked" : ""}> تصمیم کارشناس با تأیید من</label>

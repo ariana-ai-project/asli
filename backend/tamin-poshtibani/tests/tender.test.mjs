@@ -110,7 +110,7 @@ test("شروع، پیامک دعوت بی نام کالا، و ورود با ش�
   const inv = await call("POST", `/support/tenders/${TID}/invite`, {}, SUP);
   assert.equal(inv.data.result.off, 3, "درگاه پیامک وصل نیست — ثبت می‌شود");
   assert.ok(!/میلگرد|۲۰|تن/.test(inv.data.text), "پیامک نام کالا و مقدار ندارد");
-  assert.match(inv.data.text, new RegExp(`tender\\.html#t=${CODE}`));
+  assert.match(inv.data.text, new RegExp(`tender#t=${CODE}`));
   assert.equal(inviteText(env, { code: CODE, start_at: Date.now() - 1 }).includes("در جریان"), true);
   const pub = await call("GET", `/tender/${CODE}/info`);
   assert.equal(pub.data.state, "live");

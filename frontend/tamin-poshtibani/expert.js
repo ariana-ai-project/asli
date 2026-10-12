@@ -97,7 +97,7 @@
   /* ---------- ورود و کارتابل ---------- */
   /* کارتِ ورود با چهار خانهٔ کد (کدهای بلندتر خانه می‌افزایند) و دکمهٔ سه‌بعدی — ui.js (مهر ۱۴۰۵) */
   function vLogin() {
-    return TP.ui.login({ title: "ورود کارشناس خرید", sub: "کد ورود را رقم‌به‌رقم بنویسید", len: 4, max: 4, error: S.error, back: { href: "index.html" }, company: COMPANY });
+    return TP.ui.login({ title: "ورود کارشناس خرید", sub: "کد ورود را رقم‌به‌رقم بنویسید", len: 4, max: 4, error: S.error, back: { href: "./" }, company: COMPANY });
   }
   const dateList = () => String(S.q.date || "").split("،").map((s) => s.trim()).filter(Boolean);
   function trayRows() {
@@ -229,10 +229,16 @@
 
   /* ---------- تیم کارشناسی (کارشناس ارشد) ----------
      همان ردیف‌های میز مدیر، فقط برای زیرمجموعه‌های او: کارت هر کارشناس بالا، «همه» هم هست. */
-  async function loadTeam(quiet) {
-    try { const t = await TP.api("/team"); S.team = t; S.now = Date.now(); }
-    catch (e) { if (!quiet) TP.modal("خطا", esc(e.message), null, "باشد", ""); S.team = S.team || { team: [], requests: [] }; }
-    render();
+  /* یک درخواستِ «تیم» در هر لحظه: کارتابل و رندر هم ممکن است هم‌زمان بخواهندش */
+  let teamP = null;
+  function loadTeam(quiet) {
+    if (teamP) return teamP;
+    teamP = (async () => {
+      try { const t = await TP.api("/team"); S.team = t; S.now = Date.now(); }
+      catch (e) { if (!quiet) TP.modal("خطا", esc(e.message), null, "باشد", ""); S.team = S.team || { team: [], requests: [] }; }
+      render();
+    })().finally(() => { teamP = null; });
+    return teamP;
   }
   const teamRows = () => {
     const R = (S.team && S.team.requests) || [];
@@ -422,7 +428,7 @@
       ? `<div class="tp-status warn"><b>↩️ پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b><span class="sp">${ai.review.reason ? `${esc(ai.review.reason)} — ` : ""}این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</span>${H}</div>`
       : ai.on === false ? `<div class="tp-status"><b>✋ ارجاعِ دستیِ مدیر</b><span class="sp">${ai.note ? `${esc(ai.note)} — ` : ""}همهٔ کارهایش با خودِ شماست.</span>${H}</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
-    const ask = k ? `<a class="chip warn" href="correspond.html" title="پاسخ را در همان گفت‌وگو در «💬 مکاتبات» بنویسید">🚨 ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</a>` : "";
+    const ask = k ? `<a class="chip warn" href="correspond" title="پاسخ را در همان گفت‌وگو در «💬 مکاتبات» بنویسید">🚨 ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</a>` : "";
     const need = cv.length ? `<span class="chip" title="حداقلِ استعلامِ هر قلم (پنل پشتیبانی)">حداقلِ استعلام: ${cv.map((c) => `${esc(c.title)} <b>${c.have}/${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join(" · ")}</span>` : "";
     /* فاز ۴ب گام ۲ (روالِ تازه): هر قلم جدا — فهرستِ دعوت و «🚀 شروع» کارِ کارشناس، دعوت و مذاکره کارِ کارشناس هوشمند */
     if (flow2()) {
@@ -2244,7 +2250,7 @@
     const tg = S.tg || {};
     const items = [{ label: "حساب من", icon: "user", attrs: 'data-stab="account"' }];
     if (tg.botConfigured || (isSenior() && tg.teamBotConfigured)) items.push({ label: "تلگرام", icon: "telegram", attrs: "data-tgmenu", cnt: tg.connected || S.expert.team_connected ? "✅ وصل" : "وصل کنید", cntCls: tg.connected || S.expert.team_connected ? "ok" : "warn" });
-    items.push({ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" });
+    items.push({ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" });
     return items;
   }
   /** موضوعِ راهنمای صفحهٔ فعلی (help-content.js) */
@@ -2261,7 +2267,7 @@
     if (!S.expert) S.screen = "login";
     const restore = TP.snapScroll();
     TP.ui.mountBg(S.screen === "login" ? "fog" : "");
-    const nav = S.expert ? `<a class="tp-btn sm ${S.asks ? "warn" : ""}" href="correspond.html" data-corr title="${S.asks ? "کارشناس هوشمند از شما سؤال دارد — پاسخ را در همان گفت‌وگو بنویسید" : "مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی"}">💬 مکاتبات${S.asks ? `<span class="tp-dot-badge" data-asks title="پرسش از کارشناس">${S.asks}</span>` : ""}</a>` : "";
+    const nav = S.expert ? `<a class="tp-btn sm ${S.asks ? "warn" : ""}" href="correspond" data-corr title="${S.asks ? "کارشناس هوشمند از شما سؤال دارد — پاسخ را در همان گفت‌وگو بنویسید" : "مکاتبات با تأمین‌کنندگان: ارسال استعلام، گفت‌وگو، پیش‌فاکتور و تأیید نهایی"}">💬 مکاتبات${S.asks ? `<span class="tp-dot-badge" data-asks title="پرسش از کارشناس">${S.asks}</span>` : ""}</a>` : "";
     const head = S.screen === "login" ? "" : TP.ui.topbar({ title: "پنل کارشناس خرید", sub: esc(COMPANY), nav, user: { name: S.expert.name, sub: isSenior() ? "کارشناس ارشد" : "کارشناس خرید" }, items: profileItems() });
     app.innerHTML = `${head}${S.error && S.screen !== "login" ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : ""}
       ${S.screen === "login" ? vLogin() : S.screen === "list" ? vList() : vDetail()}`;
@@ -2584,7 +2590,8 @@
 
   /* ---------- شروع ---------- */
   /* مینی‌اپ تلگرام: کارشناس با initData همان بات شناخته می‌شود و کد ورود لازم نیست (shared.js: TP.tg) */
-  if (S.expert || TP.tg) { S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); loadTray(); } else render();
+  /* کارشناس ارشد (طبق آخرین ورود): «تیم» هم‌زمان با کارتابل، نه یک رفت‌وبرگشتِ شبکه بعد از آن */
+  if (S.expert || TP.tg) { S.screen = "list"; TP.ui.resetOnce("exp.tray"); TP.ui.resetOnce("exp.team"); loadTray(); if (isSenior()) loadTeam(true); } else render();
   window.addEventListener("tp-theme", render);
   /* اعلانِ پیامِ تازهٔ تأمین‌کننده در گوشهٔ صفحه (مهر ۱۴۰۵) — فقط یک لایهٔ شناور است و صفحه را دوباره نمی‌سازد؛
      کلیکش صفحهٔ مکاتبات را روی همان گفت‌وگو باز می‌کند (shared.js: TP.inbox) */

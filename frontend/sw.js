@@ -11,6 +11,10 @@
    ناوبری شبکه‌اول است ولی دارایی‌ها کش‌اول، و بدون نشانی تازه، بازدیدکنندهٔ قبلی اولین بار
    HTML تازه را با main.js کهنهٔ کش‌شده می‌گرفت (صفحهٔ سیاه تا رفرش بعدی). */
 const CACHE_NAME = "ariana-pwa-v12"; /* v12: نمادِ ۱۸۰ آیفون (apple-touch-icon.png در ریشه)؛ v11: زمینهٔ پایینِ صفحه روی گوشی؛ v10: لوگوی تازه */
+/* فریم‌های لوگوموشن (۱۴۹ تصویر در هر اندازه — روی آیفون حدود ۲۳ مگابایت) کشِ جدا و پایدار دارند: بالا رفتنِ CACHE_NAME
+   نباید همه را پاک کند تا گوشی دوباره همه را بگیرد. محتوای یک نام فریم عوض نمی‌شود؛ اگر روزی عوض شد، این نام را بالا ببرید. */
+const FRAMES_CACHE = "ariana-frames-v1";
+const isFrame = (path) => path.startsWith("/assets/frames/");
 
 /* پوستهٔ اولیهٔ برنامه — از فریم‌های لوگوموشن فقط اولی (بقیه در اولین درخواست کش می‌شوند) */
 const PRECACHE_URLS = [
@@ -56,7 +60,7 @@ self.addEventListener("activate", (event) => {
       .keys()
       .then((keys) =>
         Promise.all(
-          keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+          keys.filter((key) => key !== CACHE_NAME && key !== FRAMES_CACHE).map((key) => caches.delete(key))
         )
       )
       .then(() => self.clients.claim())
@@ -104,11 +108,13 @@ self.addEventListener("fetch", (event) => {
   // دارایی‌ها: کش‌اول با به‌روزرسانی پس‌زمینه (stale-while-revalidate)
   event.respondWith(
     caches.match(request).then((cached) => {
+      /* فریمِ کش‌شده همان است که بود (نامش تغییرناپذیر)؛ بی رفت‌وبرگشتِ بازبینی — وگرنه هر بازدیدِ صفحهٔ اول روی گوشی ~۳۰۰ درخواست */
+      if (cached && isFrame(path)) return cached;
       const network = fetch(request)
         .then((response) => {
           if (response && (response.ok || response.type === "opaque")) {
             const copy = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(request, copy));
+            caches.open(isFrame(path) ? FRAMES_CACHE : CACHE_NAME).then((cache) => cache.put(request, copy));
           }
           return response;
         })

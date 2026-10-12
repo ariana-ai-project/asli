@@ -24,6 +24,8 @@ while ($listener.IsListening) {
     if ($path -eq "/") { $path = "/index.html" }
     $full = Join-Path $root ($path.TrimStart("/"))
     if (Test-Path $full -PathType Container) { $full = Join-Path $full "index.html" }
+    # مثل Cloudflare: نشانیِ بی‌پسوند (/tamin-poshtibani/expert) همان expert.html است
+    elseif (-not (Test-Path $full) -and -not [System.IO.Path]::GetExtension($full) -and (Test-Path "$full.html" -PathType Leaf)) { $full = "$full.html" }
     if (Test-Path $full -PathType Leaf) {
       $ext = [System.IO.Path]::GetExtension($full)
       $ct = $mime[$ext]

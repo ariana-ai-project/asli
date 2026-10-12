@@ -25,7 +25,7 @@
      از نو می‌نویسد، نه ۷۰ هزار ردیف خرید را.
 
    ستون‌ها با «نام» پیدا می‌شوند نه با شماره، تا جابه‌جایی ستون فایل را نشکند.
-   نیاز: window.XLSX (vendor/xlsx.full.min.js)، window.TP (shared.js) و TP.rules — دو ماژول
+   نیاز: window.TP (shared.js؛ XLSX را TP.needXlsx وقتِ خواندن بار می‌کند) و TP.rules — دو ماژول
    catalog-rules.mjs و catalog-head-rules.mjs که صفحه با <script type="module"> رویش می‌گذارد.
    ============================================================ */
 (function () {
@@ -130,8 +130,8 @@
 
   /** یک فایل اکسل → کاربرگ‌ها. حالت dense حافظهٔ فایل ۷۰ هزار سطری را نصف می‌کند. */
   TP.readBook = async function (file) {
-    if (!window.XLSX) throw new Error("کتابخانهٔ خواندن اکسل بارگذاری نشده است (vendor/xlsx.full.min.js).");
     if (!/\.xlsx?$/i.test(file.name || "")) throw new Error(`«${file.name}» اکسل نیست؛ فقط .xlsx پذیرفته می‌شود.`);
+    if (!window.XLSX) await TP.needXlsx();
     return XLSX.read(await file.arrayBuffer(), { type: "array", dense: true, cellDates: false, cellText: false, cellHTML: false, cellNF: false, cellStyles: false });
   };
 

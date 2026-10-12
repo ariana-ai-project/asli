@@ -15,7 +15,7 @@ export const NAV_DDL = "CREATE TABLE IF NOT EXISTS tg_nav (chat TEXT PRIMARY KEY
 export const MENU_V = 1;
 const BACK_TEXTS = new Set(["↩️ بازگشت", "↩️ برگشت"]);
 
-export const expertAppUrl = (env) => `${siteOrigin(env)}/tamin-poshtibani/expert.html?tg=1`;
+export const expertAppUrl = (env) => `${siteOrigin(env)}/tamin-poshtibani/expert?tg=1`;
 export const navKeyboard = (env) => ({
   keyboard: [[{ text: NAV.back }, { text: NAV.kartabl }, { text: NAV.req }], [{ text: NAV.app, web_app: { url: expertAppUrl(env) } }]],
   is_persistent: true, resize_keyboard: true,

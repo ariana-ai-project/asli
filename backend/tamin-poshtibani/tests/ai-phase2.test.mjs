@@ -164,7 +164,7 @@ test("«پرسش از کارشناس»: سؤالِ بیرون از پرونده 
   const tg = since(n).find((c) => c.bot === "main" && c.method === "sendMessage" && String(c.body.chat_id) === String(AI_CHAT));
   assert.ok(tg, "پیامِ تلگرام به کارشناس");
   assert.match(tg.body.text, /سؤال دارد/);
-  assert.match(tg.body.reply_markup.inline_keyboard[0][0].web_app.url, /correspond\.html\?tg=1$/);
+  assert.match(tg.body.reply_markup.inline_keyboard[0][0].web_app.url, /correspond\?tg=1$/);
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='ai_ask'").get(), "در گزارش رخدادها");
 
   /* حالا برای کارشناس باز است و نشانِ 🚨 دارد؛ صفحهٔ مکاتبات سؤال را بالای کادرِ پیام نشان می‌دهد */

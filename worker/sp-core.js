@@ -115,8 +115,8 @@ export const BUNDLE_FA = {
   returned: "برگشت خورد", rejected: "رد شد", final: "تأیید نهایی",
 };
 export const FILE_LABELS = ["گواهی کیفیت", "گواهی آزمایشگاه", "تصویر محصول", "کاتالوگ / برگهٔ مشخصات"];
-export const PANEL_PATH = "/tamin-poshtibani/supplier.html";
-export const CORR_PATH = "/tamin-poshtibani/correspond.html";
+export const PANEL_PATH = "/tamin-poshtibani/supplier";
+export const CORR_PATH = "/tamin-poshtibani/correspond";
 
 /**
  * شرایطِ فاکتورِ اعلامیِ تأمین‌کننده — کادر دومِ کارت هر قلم. همان فیلدهای اجباریِ تب استعلامات که «شرطِ فاکتور»اند

@@ -117,7 +117,7 @@
     return `<div class="tp-auth"><form class="tp-auth-card" data-login-card novalidate>
       <div class="tp-auth-head"><div class="tp-auth-brand"><img src="../assets/logo-new.jpg" alt=""><div><b>${esc(CFG.company || "تونل سد آریانا")}</b><span>پنل پشتیبانی تدارکات</span></div></div>${TP.themeBtn()}</div>
       ${h}<div class="tp-auth-err" role="alert">${esc(S.err)}${locked && !S.err ? `ورود تا ${fmtShort(st.locked_until)} بسته است.` : ""}</div>
-      <div class="tp-auth-foot"><a href="index.html">← بازگشت به تدارکات</a>${alt}</div></form></div>`;
+      <div class="tp-auth-foot"><a href="./">← بازگشت به تدارکات</a>${alt}</div></form></div>`;
   }
   async function doAuth(kind) {
     const v = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
@@ -186,7 +186,7 @@
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
       items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "گیرندگان هشدار", icon: "bell", attrs: "data-alerts" },
-        { label: "تدارکات", icon: "home", href: "index.html" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+        { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
       + vTabs();
   }
   function vTabs() {

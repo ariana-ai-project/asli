@@ -90,7 +90,7 @@ test("رتبه پایین آمد ← پیامک و پیام بات؛ دومی ت
   const a = smsTo(P.A);
   assert.equal(a.length, 1, JSON.stringify(SMS));
   assert.match(a[0].text, /دیگر پیشتاز مناقصه نیستید؛ رتبهٔ شما اکنون ۲ است/);
-  assert.match(a[0].text, new RegExp(`tender\\.html#t=${code}`));
+  assert.match(a[0].text, new RegExp(`tender#t=${code}`));
   assert.ok(!/تیرآهن/.test(a[0].text), "نام کالا در پیامک نیست");
   assert.equal(smsTo(P.B).length, 0, "خود پیشنهاددهنده نه");
   assert.ok(TG.some((x) => x.method === "sendMessage" && x.body.chat_id === "555" && /رتبهٔ شما/.test(x.body.text)), "بات تلگرام تأمین‌کننده هم");

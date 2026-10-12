@@ -14,7 +14,7 @@
               دو نام غیرخالی متفاوت ⇒ تعارض نیازمند تصمیم مدیر (⚠).
    - وضعیت ناشناخته ⇒ «باز» + گزارش در آمار (بی‌صدا حذف نمی‌شود).
 
-   نیاز: window.XLSX (vendor/xlsx.full.min.js) و window.TP (shared.js)
+   نیاز: window.TP (shared.js)؛ window.XLSX (vendor/xlsx.full.min.js) را TP.needXlsx همان وقتِ خواندن بار می‌کند
    ============================================================ */
 (function () {
   "use strict";
@@ -81,11 +81,11 @@
   const MAX_BYTES = 40 * 1024 * 1024;
 
   async function readRows(file, onProgress) {
-    if (!window.XLSX) throw new Error("کتابخانهٔ خواندن اکسل بارگذاری نشده است (vendor/xlsx.full.min.js).");
     if (!/\.xlsx?$/i.test(file.name || "")) throw new Error("فقط فایل اکسل (.xlsx) پذیرفته می‌شود.");
     if (file.size > MAX_BYTES) {
       throw new Error(`حجم فایل ${(file.size / 1048576).toFixed(1)} مگابایت است و از سقف ${MAX_BYTES / 1048576} مگابایت بیشتر است.`);
     }
+    if (!window.XLSX) { onProgress && onProgress("آماده‌سازی خواندن اکسل…"); await TP.needXlsx(); }
     onProgress && onProgress("خواندن فایل…");
     const buf = await file.arrayBuffer();
     onProgress && onProgress("تجزیهٔ کاربرگ…");

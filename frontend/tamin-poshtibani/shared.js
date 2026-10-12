@@ -39,6 +39,19 @@
     "معلق": "st-hold", "متوقف شده": "st-stop", "بسته شده": "st-cls",
   };
 
+  /* کتابخانهٔ خواندنِ اکسل (۹۰۰ کیلوبایت) فقط وقتی فایلی واقعاً خوانده می‌شود، نه با هر باز شدنِ پنل مدیر روی گوشی */
+  let xlsxP = null;
+  TP.needXlsx = () => {
+    if (window.XLSX) return Promise.resolve();
+    if (!xlsxP) xlsxP = new Promise((ok, no) => {
+      const sc = document.createElement("script"); sc.src = "vendor/xlsx.full.min.js"; sc.async = true;
+      sc.onload = () => (window.XLSX ? ok() : no(new Error("کتابخانهٔ خواندن اکسل بار نشد؛ صفحه را تازه کنید.")));
+      sc.onerror = () => { xlsxP = null; sc.remove(); no(new Error("کتابخانهٔ خواندن اکسل بار نشد؛ اینترنت را بررسی و دوباره امتحان کنید.")); };
+      document.head.appendChild(sc);
+    });
+    return xlsxP;
+  };
+
   /* ---------- متن ---------- */
   TP.esc = (s) => String(s == null ? "" : s).replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
   TP.M = (n) => Number(n || 0).toLocaleString("en-US");
@@ -374,7 +387,7 @@
     let askInit = false;
     const ss = { get(k) { try { return sessionStorage.getItem(k) || ""; } catch (_) { return ""; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (_) { /* حالت خصوصی */ } } };
     /** پیش‌فرض (پنل کارشناس): صفحهٔ مکاتبات روی همان گفت‌وگو — correspond.js گفت‌وگوی بازِ تب را از sessionStorage برمی‌دارد */
-    const openDefault = (m) => { if (m && m.thread_id) { ss.set("sp.th.e", String(m.thread_id)); ss.set("sp.aid", String(m.assignment_id || "")); } location.href = "correspond.html"; };
+    const openDefault = (m) => { if (m && m.thread_id) { ss.set("sp.th.e", String(m.thread_id)); ss.set("sp.aid", String(m.assignment_id || "")); } location.href = "correspond"; };
     const host = () => {
       if (!box || !box.isConnected) { box = document.createElement("div"); box.className = "tp-toasts"; box.setAttribute("role", "status"); box.setAttribute("aria-live", "polite"); document.body.appendChild(box); }
       return box;
