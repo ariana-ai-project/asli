@@ -1,0 +1,135 @@
+/* ============================================================
+   «🧭 استراتژی استعلام» در «🎯 فهرست دعوت» (سند طراحی، بخش ۴؛ تصمیم‌های ۲ و ۸)
+   • شمارِ پیش‌تیکِ فهرستِ تازه از استراتژیِ نوع قلم (کلیدِ pretick) — با استثنای پشتیبانی
+   • «استعلام محتاط را بچین»: تیک‌ها با برنامهٔ گیرندگان روی گراف؛ تازه‌ها با منبعِ «استراتژی استعلام» و شمارهٔ دفتر
+   • پس از چیدن، هر تیکِ متفاوت با برنامه پیش از «🚀 شروع» علت می‌خواهد (جعبه، و برای «دیگر» متن)
+   ============================================================ */
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { gunzipSync } from "node:zlib";
+import { fileURLToPath } from "node:url";
+import { dirname, resolve } from "node:path";
+import { loadTP, sqliteD1 } from "./run.mjs";
+import * as W from "../../../worker/catalog.js";
+import { ensureSchema, route } from "../../../worker/api.js";
+import { supKey } from "../../../worker/cr-data.js";
+
+const HERE = dirname(fileURLToPath(import.meta.url));
+const FX = JSON.parse(gunzipSync(readFileSync(resolve(HERE, "fixtures/cr02-parity.json.gz"))).toString("utf8"));
+const TP0 = loadTP();
+const XL = TP0.XLSX;
+const book = (sheets) => { const wb = XL.utils.book_new(); for (const [n, aoa] of Object.entries(sheets)) XL.utils.book_append_sheet(wb, XL.utils.aoa_to_sheet(aoa), n); return wb; };
+const ITEM_HEAD = ["کد قلم", "عنوان قلم", "نوع قلم", "واحد مرجع", "کد خوشه", "کد طبقهٔ اصناف", "باقیماندهٔ متن", "اندازه", "جنس", "ویژگی‌ها (JSON)"];
+const item = (code, title, head, attrs) => [code, title, head, "عدد", "C04", "200", "", attrs["اندازه"] || "", attrs["جنس"] || "", JSON.stringify(attrs)];
+const H = ["شماره", "تاریخ سفارش", "وضعیت", "کارشناس خرید", "کد قلم خریدنی", "عنوان قلم خریدنی", "مقدار", "واحد سنجش", "مبلغ به ارز عملیاتی", "تامین کننده", "کد", "رده", "ماه", "فصل", "سال"];
+let NO = 0;
+const buy = (code, title, qty, supplier, grade, date = "1404/10/01") => { NO++; return [String(NO), date, "بسته شده", "ک", code, title, qty, "عدد", qty * 1000, supplier, grade ? 600 + NO : null, grade, +date.slice(5, 7), "زمستان", date.slice(0, 4)]; };
+const books = () => ({
+  items: book({ items: [ITEM_HEAD, item("1003", "پیچ M10", "پیچ", { "اندازه": "M10" })],
+    item_attributes: [["کد قلم", "نوع قلم", "نام لایهٔ ویژگی", "نام لایه (انگلیسی)", "مقدار لایه"], ["x", "x", "اندازه", "size", "x"]] }),
+  indices: book({ class_index: [["کد سرگروه اصناف", "سرگروه اصناف", "کد طبقهٔ اصناف", "طبقهٔ اصناف", "کد شاخص"], ["20", "قطعات", "200", "اتصالات", "IDX_A"]],
+    index_quarterly: [["کد شاخص", "دوره", "سال", "شمارهٔ فصل", "نام فصل", "شاخص (زمستان ۱۴۰۴ = ۱۰۰)"], ["IDX_A", "1404Q4", 1404, 4, "زمستان", 100]] }),
+  units: book({ head_rates: [["نوع قلم", "واحد ثبت‌شده", "واحد مرجع", "نرخ تبدیل به واحد مرجع", "مبنای نرخ", "اطمینان"]],
+    cluster_rates: [["کد خوشه", "نام خوشه", "نوع قلم", "واحد ثبت‌شده", "واحد مرجع", "نرخ تبدیل به واحد مرجع", "مبنای نرخ", "اطمینان"]],
+    item_rates: [["کد قلم", "عنوان قلم", "نوع قلم", "واحد ثبت‌شده", "واحد مرجع", "نرخ تبدیل به واحد مرجع", "مبنای نرخ", "منشأ"]] }),
+  history: book({ "حداکثر 500000 رکورد": [H,
+    buy("1003", "پیچ M10", 90, "شرکت ج", "A"), buy("1003", "پیچ M10", 80, "شرکت ج", "A"), buy("1003", "پیچ M10", 60, "شرکت د", "C"),
+    buy("1003", "پیچ M10", 50, "شرکت د", "C"), buy("1003", "پیچ M10", 20, "شرکت ه", null), buy("1003", "پیچ M10", 15, "شرکت و", null)] }),
+});
+
+const DB = await sqliteD1();
+const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
+const env = { DB, MANAGER_CODE: "1234", TG_BOT_TOKEN: "tok", TG_SP_BOT_TOKEN: "sptok", TG_WEBHOOK_SECRET: "sec", TG_API_BASE: "https://tg.test/bot",
+  SUPABASE_URL: "https://sb.test", SUPABASE_SERVICE_KEY: "svc", ANTHROPIC_API_KEY: "k", ANTHROPIC_API_BASE: "https://ai.test", SITE_ORIGIN: "https://site.test" };
+const EX = { "X-Expert-Code": "7001" };
+const R = (o, status = 200) => new Response(JSON.stringify(o), { status, headers: { "content-type": "application/json" } });
+globalThis.fetch = async (url, init = {}) => {
+  const u = String(url);
+  if (u.startsWith("https://tg.test/bot")) return R({ ok: true, result: u.endsWith("getMe") ? { id: 77, username: "AriaSupplierBot" } : { message_id: 1 } });
+  if (u.startsWith("https://ai.test/")) throw new Error("مدلی صدا زده نمی‌شود");
+  return R({});
+};
+const pend = [];
+const ctx = { waitUntil: (p) => pend.push(p) };
+async function call(path, { method, body, headers } = {}) {
+  const h = { ...(headers || {}) }; let b;
+  if (body !== undefined) { b = JSON.stringify(body); h["Content-Type"] = "application/json"; }
+  const res = await route(new Request(`https://site.test/tamin-poshtibani/api${path}`, { method: method || (b !== undefined ? "POST" : "GET"), headers: h, body: b }), env, ctx);
+  while (pend.length) await Promise.all(pend.splice(0));
+  const text = await res.text(); let data; try { data = JSON.parse(text); } catch (_) { data = text; }
+  return { status: res.status, data };
+}
+let SUP = {};
+if (DB) {
+  await ensureSchema(env);
+  const out = TP0.TP.buildCatalog(books());
+  W.resetCatalogCache();
+  const beg = await W.catalogBegin(env, { fp: out.fp, meta: out.meta, stats: out.stats, filename: "test" });
+  for (const [t, rows] of Object.entries(out.tables)) for (let i = 0; i < rows.length; i += 50) await W.catalogChunk(env, { import_id: beg.import_id, table: t, rows: JSON.parse(JSON.stringify(rows.slice(i, i + 50))) });
+  await W.catalogFinish(env, { import_id: beg.import_id });
+  const t = Date.now();
+  DB.raw.exec("DELETE FROM experts");
+  DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'هوشمند','هوشمند','7001',1,1,'701',?)").run(t);
+  DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 60000, t);
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-3','1405/07/15','پروژهٔ سه')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (3,'R-3',1,5,?,?,?)").run(t, t + 9e8, t);
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,code,title,qty,unit,state,assignment_id,norm_json) VALUES (61,'R-3','a',1,'1003','پیچ M10',30,'عدد','open',3,?)")
+    .run(JSON.stringify({ v: 2, head: "پیچ", layers: { "اندازه": "M10" }, source: "catalog", code: "1003" }));
+  /* دادهٔ تحقیق: پروفایلِ «پیچ» (قرارداد چارچوب، ردهٔ A) و سه کشف‌شده در دو بازار و یک شهرِ دیگر */
+  const rec = FX.profiles.find((p) => p.item_head === "پیچ").rec;
+  DB.raw.prepare("INSERT INTO cr_heads (head,cluster,ms,rfq_mode,competition_mode,n_wave1,n_max,tier,workflow,rec,version,imported_at) VALUES ('پیچ','C04',?,'FRAMEWORK_CALLOFF','FRAMEWORK_CALLOFF',5,6,'A','ترکیبی',?,'2.0',?)")
+    .run(rec.classification.ms, JSON.stringify({ ...rec, cluster_main: "C04" }), t);
+  const sup = (sid, name, hub, mob) => DB.raw.prepare("INSERT INTO sreg (sid,kind,name,name_n,hub,role,country,verification,phones,mobiles,data,version,imported_at) VALUES (?,?,?,?,?,?,?,1,?,?,'{}','2.0',?)")
+    .run(sid, "new", name, supKey(name), hub, "عمده‌فروش", "ایران", "021-55550000", mob, t);
+  sup("NEW-0101", "پیچ‌فروشی امیرکبیر", "امیرکبیر و ناظم‌الاطبا", "09121110101");
+  sup("NEW-0102", "پیچ و مهرهٔ لاله‌زار", "لاله‌زار و سعدی", "09121110102");
+  sup("NEW-0103", "اتصالات قزوین", "شهر: قزوین", null);
+  DB.raw.prepare("INSERT INTO cr_units (unit_key,head,cluster,cands,unit,imported_at) VALUES ('C04|پیچ','پیچ','C04',?,?,?)")
+    .run(JSON.stringify([["NEW-0101", 1, 1, "رقیب (رتبهٔ ۱۱ تا ۴۰)", 2, 0.5], ["NEW-0102", 1, 2, "رقیب (رتبهٔ ۱۱ تا ۴۰)", 1.9, 0.4], ["NEW-0103", 0, 3, "رقیب (رتبهٔ ۱۱ تا ۴۰)", 1.5, 0.2]]),
+      JSON.stringify({ codes: ["1003"] }), t);
+  SUP = { "X-Support-Token": (await call("/support/setup", { body: { pass: "9753" } })).data.token };
+}
+
+test("کلیدِ «شمار پیش‌تیک از استراتژی»: فهرستِ تازه با استثنای پشتیبانی (۳) پیش‌تیک می‌خورد", { skip: SKIP }, async () => {
+  assert.equal((await call("/support/cr/flags", { method: "PUT", headers: SUP, body: { pretick: true, strategy: true } })).status, 200);
+  assert.equal((await call(`/support/strategy/heads/${encodeURIComponent("پیچ")}`, { method: "PUT", headers: SUP, body: { n: { n_wave1: 3, n_max: 4 }, reason: "بازارِ کوچکِ پیچ" } })).status, 200);
+  const g = await call("/items/61/picks", { headers: EX });
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  assert.equal(g.data.top, 3);
+  assert.deepEqual(g.data.list.map((e) => e.on), [true, true, true, false]);
+  assert.equal(g.data.cr.family, "special");
+  assert.equal(g.data.cr.mode, "FRAMEWORK_CALLOFF");
+});
+
+test("«استعلام محتاط را بچین»: یک تأمین‌کنندهٔ فعلی (معتمد) و دو تازه از دو بازار؛ تازه‌ها با شمارهٔ دفتر", { skip: SKIP }, async () => {
+  const r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { strategy: { cautious: true } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  const on = r.data.list.filter((e) => e.on);
+  assert.equal(on.length, 3);
+  assert.equal(r.data.strategy.mode, "LIMITED_STAGED");
+  assert.equal(r.data.strategy.cautious, true);
+  assert.equal(on.filter((e) => e.incumbent).length, 1, "محدود: یک تأمین‌کنندهٔ فعلی");
+  assert.equal(on.find((e) => e.incumbent).name, "شرکت ج", "ردهٔ A و خریدِ ۱۴۰۴");
+  const fresh = on.filter((e) => e.src === "strategy");
+  assert.equal(fresh.length, 2);
+  assert.equal(new Set(fresh.map((e) => e.hub)).size, 2, "دو بازارِ جدا");
+  assert.ok(fresh.some((e) => (e.found || []).includes("09121110101") || (e.ph || []).includes("09121110101")), "شمارهٔ همراهِ دفتر برای ثبتِ پنل");
+  assert.deepEqual(r.data.deviations, []);
+});
+
+test("تیکِ متفاوت با برنامه پیش از «🚀 شروع» علت می‌خواهد؛ «دیگر» متن هم", { skip: SKIP }, async () => {
+  const L = (await call("/items/61/picks", { headers: EX })).data.list;
+  const off = L.find((e) => !e.on && e.src !== "strategy");
+  let r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { on: { [off.k]: true } } });
+  assert.deepEqual(r.data.deviations, [off.k]);
+  const s1 = await call("/items/61/ai-start", { headers: EX, body: {} });
+  assert.equal(s1.status, 422);
+  assert.deepEqual(s1.data.need_reason, [off.k]);
+  assert.equal((await call("/items/61/picks", { method: "PUT", headers: EX, body: { whybox: { [off.k]: "بی‌ربط" } } })).status, 422, "جعبه از فهرست");
+  r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { whybox: { [off.k]: "دیگر" } } });
+  assert.deepEqual(r.data.deviations, [off.k], "«دیگر» بی متن کافی نیست");
+  r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { why: { [off.k]: "تأمین‌کنندهٔ اصلیِ این پروژه است" } } });
+  assert.deepEqual(r.data.deviations, []);
+  assert.deepEqual(r.data.why_boxes.slice(0, 2), ["معتمد است", "شماره یا فعالیتش نامعتبر است"]);
+});

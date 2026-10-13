@@ -62,7 +62,10 @@ import { NORM_OK_SQL, changeStmt } from "./structure.js";
 import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./ranking.js";
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
 import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } from "./ai-modes.js";
-import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary } from "./ai-picks.js";
+import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary,
+  applyStrategy, strategyDeviations, WHY_BOXES } from "./ai-picks.js";
+import { crFlags } from "./cr-api.js";
+import { headPolicy, recipientPlan } from "./cr-engine.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { ratesForModel } from "./ai-rates.js";
 import { recordProp } from "./ai-feedback.js";
@@ -281,12 +284,26 @@ async function pickCtx(env, ex, itemId) {
 async function picksOut(env, { it, o, m, cfg }, pick) {
   const started = !!it.ai_start_at;
   const list = await pickView(env, it, it.aid, pick);
+  /* «🧭 استراتژی استعلام»: خلاصهٔ سیاستِ نوع قلم برای نشان و پرسشِ «محتاط را بچینم؟» — فقط وقتی کلیدش روشن است */
+  let cr = null;
+  const flags = await crFlags(env);
+  if (flags.strategy && m.head) {
+    const hp = await headPolicy(env, m.head, { itemCode: it.code || null }).catch(() => null);
+    if (hp) cr = { family: hp.family, mode: hp.policy.mode, mode_fa: hp.mode_fa, n_wave1: hp.policy.n_wave1, n_max: hp.policy.n_max, why: hp.policy.why, workflow: hp.workflow };
+  }
   return {
     item_id: it.id, mode: m.mode, mode_fa: MODE_FA[m.mode] || m.mode, head: m.head || null, supervise: !!m.supervise,
-    started_at: it.ai_start_at || null, run_id: o.run_id || null, top: TOP, cap: cfg.maxInvites, built_at: pick ? pick.at : null,
+    started_at: it.ai_start_at || null, run_id: o.run_id || null, top: (pick && pick.top_n) || TOP, cap: cfg.maxInvites, built_at: pick ? pick.at : null,
     rule: pick ? pick.rule || null : null, n: pick ? pick.n || 0 : 0, msg: pick ? pick.msg || null : null, pending: started && !pick,
     list, fresh: list.filter((e) => e.on && !e.go).length,
+    strategy: pick ? pick.strategy || null : null, cr, why_boxes: WHY_BOXES, deviations: pick && pick.strategy ? strategyDeviations(pick).map((e) => e.k) : [],
   };
+}
+/** شمارِ پیش‌تیکِ فهرستِ تازه: شمارِ موج اولِ استراتژیِ نوع قلم (کلیدِ pretick)، وگرنه پنج */
+async function preTickN(env, { it, m }) {
+  if (!m.head || !(await crFlags(env)).pretick) return TOP;
+  const hp = await headPolicy(env, m.head, { itemCode: it.code || null }).catch(() => null);
+  return hp && hp.policy.n_wave1 ? Math.min(hp.policy.n_wave1, 15) : TOP;
 }
 
 /** /items/:id/picks (GET، PUT) و /items/:id/ai-start (POST) — از api.js، با requireExpert */
@@ -301,9 +318,10 @@ export async function picksRoute(request, env, path, m, deps) {
     let pick = pickOf(it);
     const by = `expert:${ex.id}`, t = now();
     if (m === "GET") {
-      /* نخستین دیدن: فهرستِ پیش‌فرض ساخته و نگه داشته می‌شود — «پنج نفر اول» همان است که کارشناس دید */
+      /* نخستین دیدن: فهرستِ پیش‌فرض ساخته و نگه داشته می‌شود — «پنج نفر اول» همان است که کارشناس دید
+         (یا شمارِ موج اولِ استراتژیِ نوع قلم، وقتی کلیدِ «شمار پیش‌تیک از استراتژی» روشن است — تصمیم ۲) */
       if (!pick && !it.ai_start_at) {
-        pick = { ...(await buildDefault(env, it)), by };
+        pick = { ...(await buildDefault(env, it, await preTickN(env, k))), by };
         await env.DB.prepare("UPDATE items SET pick_json=? WHERE id=? AND pick_json IS NULL").bind(JSON.stringify(pick), it.id).run();
       }
       return deps.json(await picksOut(env, k, pick));
@@ -312,7 +330,15 @@ export async function picksRoute(request, env, path, m, deps) {
     if (b.rebuild) {
       if (it.ai_start_at) throw new HttpError("این قلم سپرده شده؛ فهرستش دیگر از نو ساخته نمی‌شود.", 409);
       if (k.m.mode === "handoff" && pick) throw new HttpError(A_MSG, 409);
-      pick = { ...mergeRebuilt(await buildDefault(env, it), pick), by };
+      pick = { ...mergeRebuilt(await buildDefault(env, it, await preTickN(env, k)), pick), by };
+    } else if (b.strategy) {
+      /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): تیک‌ها با برنامهٔ گیرندگانِ موتور چیده می‌شوند؛ cautious = برنامهٔ «محتاط» */
+      if (!(await crFlags(env)).strategy) throw new HttpError("«استراتژی استعلام» هنوز در پنل پشتیبانی روشن نشده است.", 409);
+      if (k.m.mode === "handoff") throw new HttpError(A_MSG, 409);
+      if (!pick) throw new HttpError("اول فهرست را باز کنید.", 409);
+      if (!k.m.head) throw new HttpError("نوعِ این قلم معلوم نیست؛ اول ساختارش را تأیید کنید.", 409);
+      const plan = await recipientPlan(env, k.m.head, { itemCode: it.code || null, cautious: !!b.strategy.cautious });
+      applyStrategy(pick, plan, { by, at: t, cautious: !!b.strategy.cautious });
     } else {
       if (!pick) throw new HttpError(it.ai_start_at ? "فهرستِ این قلم را کارشناس هوشمند همین حالا می‌سازد؛ کمی بعد دوباره ببینید." : "اول فهرست را باز کنید.", 409);
       applyEdits(pick, b, { mode: k.m.mode, by, cap: k.cfg.maxInvites, at: t });

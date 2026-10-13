@@ -26,6 +26,8 @@ const has = (profile, label) => (profile.labels || []).includes(label);
  * گسترده بخواهد، حالت از کارشناس پیروی می‌کند و هشدار می‌آید (R06).
  */
 export function decideMode(profile, runtime) {
+  /* افزودهٔ سامانه (نه موتور مرجع): پشتیبانی نوع قلم را به حالتِ دیگری برده است (cr_head_x، فیلد mode) — با دلیلِ خودش */
+  if (profile.forced_mode && C.RFQ_MODES.includes(profile.forced_mode)) return [profile.forced_mode, [profile.forced_why || "به تصمیم پشتیبانی"]];
   const ms = profile.ms;
   const why = [];
   const tier = spendTier(profile, runtime);
@@ -91,7 +93,7 @@ export function rfqPolicy(profile, runtime) {
   let baseMode = null;
   if (mode === "CONSULT_THEN_COMPETE") {
     /* رقابتِ پس از مشورت از قاعدهٔ بازارِ خود قلم پیروی می‌کند */
-    const p2 = { ...profile, labels: (profile.labels || []).filter((l) => l !== "L3"), ms: profile.ms === "MS-6" ? "MS-2" : profile.ms };
+    const p2 = { ...profile, forced_mode: undefined, labels: (profile.labels || []).filter((l) => l !== "L3"), ms: profile.ms === "MS-6" ? "MS-2" : profile.ms };
     [baseMode] = decideMode(p2, runtime);
     if (baseMode === "CONSULT_THEN_COMPETE") baseMode = "STANDARD";
     [n1, nmax] = C.RFQ_N[baseMode][tier];

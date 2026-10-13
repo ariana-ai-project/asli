@@ -34,7 +34,9 @@ export const TOP = 5;
 const MAX_LIST = 15;
 /** افزوده‌های کارشناس (جستجوی هوشمند و نام‌های دیگر) برای هر قلم */
 const MAX_ADD = 20;
-export const PICK_SRC_FA = { grade: "عین قلم — ردهٔ برگزیده", exact: "عین قلم", type: "نوع قلم", smart: "جستجوی هوشمند", manual: "افزودهٔ کارشناس" };
+export const PICK_SRC_FA = { grade: "عین قلم — ردهٔ برگزیده", exact: "عین قلم", type: "نوع قلم", smart: "جستجوی هوشمند", manual: "افزودهٔ کارشناس", strategy: "استراتژی استعلام" };
+/** علتِ تغییرِ تیک پس از «🧭 استراتژی استعلام» (سند طراحی، بخش ۴) — یکی از این‌ها، و برای «دیگر» متن */
+export const WHY_BOXES = ["معتمد است", "شماره یا فعالیتش نامعتبر است", "یال اشتباه است", "بازار دیگری لازم است", "دیگر"];
 const HIST = new Set(["grade", "exact", "type"]);
 /** منبعِ گفت‌وگو در ai_threads و پروندهٔ مذاکره (ai-md.js:SOURCE_FA) */
 export const threadSrc = (src) => (HIST.has(src) ? "history" : src === "smart" ? "smart" : "manual");
@@ -45,27 +47,28 @@ export const pickOf = (it) => parse(it && it.pick_json, null);
 
 const phonesOf = (s) => [...new Set([...(Array.isArray(s.phones) ? s.phones : []), s.contact && s.contact.phone, s.contact && s.contact.tel2]
   .map((p) => normPhone(p)).filter(Boolean))].slice(0, 3);
-const entryOf = (s, i) => ({
-  k: nkey(s.name), name: nrm(s.name), src: HIST.has(s.tier) ? s.tier : "type", pos: i + 1, top: i < TOP, on: i < TOP, why: null,
+const entryOf = (s, i, topN = TOP) => ({
+  k: nkey(s.name), name: nrm(s.name), src: HIST.has(s.tier) ? s.tier : "type", pos: i + 1, top: i < topN, on: i < topN, why: null,
   grade: s.grade || null, rankF: s.rankF == null ? null : s.rankF, score: s.score == null ? null : s.score, buys: s.n == null ? null : s.n,
   last: s.lastDate || s.last || null, ph: phonesOf(s), go: null,
 });
 
-/** فهرستِ پیش‌فرض از سوابقِ «عین قلم» و «نوع قلم» با قاعدهٔ دعوت (ranking.js:dispatchOrder) — پنج نفر اول تیک‌خورده */
-export function defaultFrom({ exact = [], type = [] }, rule) {
+/** فهرستِ پیش‌فرض از سوابقِ «عین قلم» و «نوع قلم» با قاعدهٔ دعوت (ranking.js:dispatchOrder) — topN نفر اول تیک‌خورده
+ *  (پنج، یا شمارِ موج اولِ استراتژیِ نوع قلم وقتی کلیدِ «شمار پیش‌تیک از استراتژی» روشن است — تصمیم ۲) */
+export function defaultFrom({ exact = [], type = [] }, rule, topN = TOP) {
   const seen = new Set(), out = [];
   for (const s of dispatchOrder({ exact, type }, rule)) {
     const k = nkey(s.name);
     if (!k || seen.has(k)) continue;
     seen.add(k);
-    out.push(entryOf(s, out.length));
+    out.push(entryOf(s, out.length, topN));
     if (out.length >= MAX_LIST) break;
   }
   return out;
 }
 
 /** فهرستِ تازهٔ یک قلم از سوابق — دو بار itemHistory (نوع قلم کامل، عین قلم کوتاه)، همان کارِ آماده‌سازیِ کارشناس هوشمند */
-export async function buildDefault(env, it) {
+export async function buildDefault(env, it, topN = TOP) {
   const rk = await getRanking(env);
   const [h, hx] = await Promise.all([
     itemHistory(env, it, { mode: "head", k: rk.weights.k }).catch((e) => ({ available: false, message: e.message })),
@@ -74,7 +77,7 @@ export async function buildDefault(env, it) {
   const byF = (a, b) => (a.rankF || 1e9) - (b.rankF || 1e9) || (b.qtyM || 0) - (a.qtyM || 0);
   const type = [...(h.suppliers || [])].sort(byF).slice(0, MAX_LIST), exact = [...(hx.suppliers || [])].sort(byF).slice(0, MAX_LIST);
   return { v: 1, at: Date.now(), rule: rk.dispatch, n: (h.suppliers || []).length, msg: h.available === false || (!type.length && h.message) ? h.message || null : null,
-    list: defaultFrom({ exact, type }, rk.dispatch) };
+    top_n: topN, list: defaultFrom({ exact, type }, rk.dispatch, topN) };
 }
 
 /** «بازسازی»: فهرستِ تازهٔ سوابق، با افزوده‌های کارشناس (جستجوی هوشمند و نام‌های دیگر) که در سوابق نیامده‌اند */
@@ -93,9 +96,10 @@ export function applyEdits(pick, body, { mode, by, cap, at = Date.now() }) {
   const b = body && typeof body === "object" ? body : {};
   const on = b.on && typeof b.on === "object" ? b.on : {};
   const why = b.why && typeof b.why === "object" ? b.why : {};
+  const whybox = b.whybox && typeof b.whybox === "object" ? b.whybox : {};
   const add = Array.isArray(b.add) ? b.add : [];
   const remove = Array.isArray(b.remove) ? b.remove : [];
-  if (Object.keys(on).length + Object.keys(why).length + add.length + remove.length === 0) return pick;
+  if (Object.keys(on).length + Object.keys(why).length + Object.keys(whybox).length + add.length + remove.length === 0) return pick;
   if (mode === "handoff") throw new HttpError(A_MSG, 409);
   const L = pick.list;
   const byK = new Map(L.map((e) => [e.k, e]));
@@ -110,6 +114,11 @@ export function applyEdits(pick, body, { mode, by, cap, at = Date.now() }) {
   for (const [k, v] of Object.entries(why)) {
     const e = get(k), t = T(v).slice(0, 300);
     e.why = t || null; e.why_at = t ? at : null; e.why_by = t ? by : null;
+  }
+  for (const [k, v] of Object.entries(whybox)) {
+    const e = get(k), box = T(v);
+    if (box && !WHY_BOXES.includes(box)) throw new HttpError("علتِ تغییرِ تیک را از فهرست انتخاب کنید.", 422);
+    e.why_box = box || null;
   }
   for (const a of add) {
     const name = nrm(a && a.name).slice(0, 120), k = nkey(name);
@@ -162,12 +171,62 @@ export function startCheck(pick, mode, { cap, more = false, need = true } = {}) 
     throw new HttpError(mode === "handoff" && !L.length ? "فهرستِ سوابقِ این قلم خالی است؛ در حالت «سپردن یا برگشت» فقط «↩️ برگرداندن به مدیر» می‌ماند."
       : "دست‌کم یک تأمین‌کننده را تیک بزنید — از سوابق، یا از «جستجوی هوشمند» با «🎯 به فهرست دعوت».", 422);
   }
-  if (mode === "pick") {
+  if (pick && pick.strategy && mode === "pick") {
+    /* «🧭 استراتژی استعلام» چیده شده: هر تیکی که با برنامه فرق دارد (برداشتنِ پیشنهادِ برنامه یا افزودنِ بیرون از آن) علت می‌خواهد */
+    const dev = strategyDeviations(pick);
+    if (dev.length) throw new HttpError(`تیکِ ${list(dev.map((e) => e.name))} با استراتژی استعلام فرق دارد؛ علت را کنار همان نام انتخاب کنید (و برای «دیگر» بنویسید).`, 422, { need_reason: dev.map((e) => e.k) });
+  } else if (mode === "pick") {
     const miss = L.filter((e) => e.top && !e.on && !T(e.why));
     if (miss.length) throw new HttpError(`برداشتنِ تیکِ پنج نفر اول توضیح می‌خواهد: ${list(miss.map((e) => e.name))} — علت را کنار همان نام بنویسید.`, 422, { need_reason: miss.map((e) => e.k) });
   }
   if (cap && on.length > cap) throw new HttpError(`حداکثر ${faN(cap)} تأمین‌کنندهٔ تیک‌خورده برای هر قلم (سقفِ دعوت در پنل پشتیبانی).`, 422, { cap });
   return on;
+}
+
+/** نفراتی که تیکشان با برنامهٔ استراتژی فرق دارد و هنوز علتِ کامل ندارند (جعبه، و برای «دیگر» متن) */
+export function strategyDeviations(pick) {
+  if (!pick || !pick.strategy) return [];
+  return (pick.list || []).filter((e) => !e.go && !!e.on !== !!e.strat && !(e.why_box && (e.why_box !== "دیگر" || T(e.why))));
+}
+
+/**
+ * «🧭 استراتژی استعلام»: تیک‌ها با برنامهٔ گیرندگان (worker/cr-engine.js:recipientPlan) چیده می‌شوند. موج اولِ برنامه تیک می‌خورد
+ * (نامِ تازه با منبعِ «استراتژی استعلام» و شماره‌های دفتر افزوده می‌شود)، بقیه بی‌تیک؛ ذخیره‌ها در فهرست می‌آیند ولی بی‌تیک.
+ * پیش از «شروع»، هر فرقی با برنامه علت می‌خواهد (strategyDeviations). سپرده‌شده‌ها (go) دست نمی‌خورند.
+ */
+export function applyStrategy(pick, plan, { by, at = Date.now(), cautious = false } = {}) {
+  const L = pick.list;
+  const byK = new Map(L.map((e) => [e.k, e]));
+  const w1 = plan.plan.wave1 || [], rs = plan.plan.reserve || [];
+  const want = new Set();
+  const phs = (x) => String([x.mobiles, x.phones].filter(Boolean).join("، ")).split(/[،,;\s]+/).map((p) => normPhone(p)).filter(Boolean).slice(0, 3);
+  const upsert = (x, on) => {
+    const k = nkey(x.name);
+    if (!k) return null;
+    let e = byK.get(k);
+    if (!e) {
+      if (L.filter((y) => !HIST.has(y.src)).length >= MAX_ADD) return null;
+      e = { k, name: nrm(x.name), src: "strategy", pos: null, top: false, on: false, why: null, grade: null, rankF: null, score: null, buys: null, last: null,
+        ph: phs(x), sid: null, add_at: at, add_by: by, go: null };
+      L.push(e); byK.set(k, e);
+    }
+    e.reg = x.id; e.hub = x.hub || null; e.verif = x.verification ?? null; e.incumbent = !!x.incumbent;
+    if (on) want.add(k);
+    return e;
+  };
+  for (const x of w1) upsert(x, true);
+  for (const x of rs.slice(0, 6)) upsert(x, false);
+  for (const e of L) {
+    if (e.go) continue;
+    e.strat = want.has(e.k);
+    e.on = e.strat; e.top = e.strat;
+    e.why = null; e.why_at = null; e.why_by = null; e.why_box = null;
+  }
+  pick.strategy = { at, by, cautious: !!cautious, mode: plan.policy.mode, competition_mode: plan.policy.competition_mode, family: plan.family, mode_fa: plan.mode_fa,
+    n_wave1: plan.policy.n_wave1, n_max: plan.policy.n_max, why: plan.policy.why, notes: [...(plan.notes || []), ...(plan.plan.notes || [])], relaxations: plan.plan.relaxations || [],
+    markets_known: plan.plan.markets_known, dominant_hub: plan.plan.dominant_hub, unit_key: plan.unit_key, wave1: [...want] };
+  pick.top_n = want.size;
+  return pick;
 }
 
 /** تیک‌خورده‌ها سپرده می‌شوند — فقط همین‌ها دعوت می‌شوند */

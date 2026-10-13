@@ -64,6 +64,8 @@ import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush,
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
 import { GUARD_DDL, ipOf, windowOf, failCountStmt, blockedError, recordFail, guardOpen, codeChangeOpen, codeChangeConflict } from "./auth-guard.js";
+import { CR02_DDL } from "./cr-data.js";
+import { crRoute, crSupportRoute } from "./cr-api.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
@@ -151,6 +153,15 @@ async function pushWho(request, env, role) {
   if (role === "manager") { await requireManager(request, env); return { role, uid: 0 }; }
   if (role === "support") { await requireSupport(request, env); return { role, uid: 0 }; }
   throw new HttpError("نقش نامعتبر است.");
+}
+
+/* کارشناس، مدیر یا پشتیبان — دفتر تأمین‌کنندگان و استراتژی (worker/cr-api.js). کارشناس اول، چون پنل کارشناس کد مدیر را هم
+   می‌تواند بفرستد و نویسندهٔ نظر باید خودِ کارشناس باشد */
+async function whoAll(request, env) {
+  if (request.headers.get("X-Support-Token")) { await requireSupport(request, env); return { kind: "support", id: 0, name: "پشتیبانی" }; }
+  if (request.headers.get("X-Expert-Code") || request.headers.get("X-TG-Init")) { const ex = await requireExpert(request, env); return { kind: "expert", id: ex.id, name: ex.label || ex.name }; }
+  if (request.headers.get("X-Manager-Code")) { await requireManager(request, env); return { kind: "manager", id: 0, name: "مدیر خرید" }; }
+  throw new HttpError("وارد نشده‌اید.", 401);
 }
 
 /* مدیر یا کارشناس — برای خواندن‌های مشترک */
@@ -242,6 +253,7 @@ ${PUSH_DDL.trim()}
 ${HELP_DDL.trim()}
 ${STRUCT_DDL.trim()}
 ${GUARD_DDL.trim()}
+${CR02_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -2018,6 +2030,9 @@ async function route(request, env, ctx) {
     if (path === "/alarms" && m === "GET") { await requireManager(request, env); return json(await alarmsList(env, "m", url)); }
     if ((mm = /^\/alarms\/(\d+)\/ack$/.exec(path)) && m === "POST") { await requireManager(request, env); return json(await alarmAck(env, "m", mm[1])); }
 
+    /* --- «درخواست تغییر ۰۲»: دفتر تأمین‌کنندگان، پروفایل، نظرها، گراف و استراتژی استعلام (worker/cr-api.js) --- */
+    if (path.startsWith("/sreg/") || path.startsWith("/cr/")) return await crRoute(request, env, path, m, url, { json, readJson, who: () => whoAll(request, env) });
+
     /* --- پنل «پشتیبانی» (worker/support.js): نظارتِ فقط‌خواندنی + تیک تأیید کمیسیون --- */
     if (path.startsWith("/support/")) {
       if (path === "/support/status" && m === "GET") return json(await supportStatus(env));
@@ -2026,6 +2041,9 @@ async function route(request, env, ctx) {
       /* فراموشیِ رمز: فقط مدیر، با کد مدیر */
       if (path === "/support/reset" && m === "POST") { await requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
       await requireSupport(request, env);
+      if (path.startsWith("/support/cr/") || path.startsWith("/support/sreg/") || path === "/support/graph" || path.startsWith("/support/strategy/")) {
+        return await crSupportRoute(request, env, path, m, url, { json, readJson });
+      }
       if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));
       /* مناقصه (worker/tender.js) */
       if (path === "/support/tenders" && m === "GET") return json(await tenderList(env, ctx, url.searchParams.get("fp")));
