@@ -65,6 +65,7 @@ import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
 import { GUARD_DDL, ipOf, windowOf, failCountStmt, blockedError, recordFail, guardOpen, codeChangeOpen, codeChangeConflict } from "./auth-guard.js";
 import { CR02_DDL } from "./cr-data.js";
+import { FM_DDL } from "./first-msg.js";
 import { crRoute, crSupportRoute } from "./cr-api.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
@@ -254,6 +255,7 @@ ${HELP_DDL.trim()}
 ${STRUCT_DDL.trim()}
 ${GUARD_DDL.trim()}
 ${CR02_DDL.trim()}
+${FM_DDL};
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -2230,7 +2232,7 @@ async function route(request, env, ctx) {
       return json(await aiHandoff(env, a, `expert:${ex.id}`, { include: Array.isArray(b && b.include) ? b.include.map((x) => int(x)).filter(Boolean) : [] }));
     }
     /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (GET، PUT) و «🚀 شروع»ش (worker/ai-agent.js:picksRoute، ai-picks.js) */
-    if (/^\/items\/\d+\/(picks|ai-start)$/.test(path)) {
+    if (/^\/items\/\d+\/(picks|ai-start|first-msg)$/.test(path)) {
       const r = await picksRoute(request, env, path, m, { requireExpert, json, readJson });
       if (r) return r;
     }

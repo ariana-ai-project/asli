@@ -66,6 +66,9 @@ import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuil
   applyStrategy, strategyDeviations, WHY_BOXES } from "./ai-picks.js";
 import { crFlags } from "./cr-api.js";
 import { headPolicy, recipientPlan } from "./cr-engine.js";
+import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
+import { limitsOf, LIMIT_FA } from "./terms-locks.js";
+import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { ratesForModel } from "./ai-rates.js";
 import { recordProp } from "./ai-feedback.js";
@@ -351,7 +354,40 @@ export async function picksRoute(request, env, path, m, deps) {
     const r = await startItem(env, ex, mm[1]);
     return deps.json(r);
   }
+  /* «✉️ پیام اول» (worker/first-msg.js): قالبِ درخواست، قالب یا متنِ هر تأمین‌کننده، و پیش‌نمایش با سنجشِ افشا */
+  if ((mm = /^\/items\/(\d+)\/first-msg$/.exec(path)) && (m === "GET" || m === "PUT")) {
+    const ex = await deps.requireExpert(request, env);
+    if (!(await crFlags(env)).firstmsg) throw new HttpError("«پیام اول با قالب» هنوز در پنل پشتیبانی روشن نشده است.", 409);
+    const k = await pickCtx(env, ex, mm[1]);
+    const pick = pickOf(k.it);
+    if (!pick) throw new HttpError("اول فهرستِ دعوت را باز کنید.", 409);
+    const names = (pick.list || []).map((e) => e.name);
+    const ctx = await fmContext(env, FM_DEPS, [k.it]);
+    if (m === "PUT") {
+      const b = await deps.readJson(request);
+      const nameOf = (kk) => ((pick.list || []).find((e) => e.k === kk) || {}).name;
+      await fmSave(env, { aid: k.it.aid, expert: ex, b, check: (kk, body) => fmCheck(body, { otherNames: names.filter((n) => C.nkey(n) !== kk), family: ctx.family, items: ctx.items, allow: [nameOf(kk), COMPANY(env)] }) });
+    }
+    return deps.json(await fmView(env, ex, k.it, pick, ctx));
+  }
   return null;
+}
+/* وابستگی‌های first-msg.js (تزریق، تا آن پرونده بی حلقه بماند) */
+const FM_DEPS = { lockedLayers: (env, it) => C.lockedLayers(env, it), lineLocks: (it, ly) => C.lineLocks(it, ly), limitsOf, LIMIT_FA, headPolicy, headOf: (env, it) => headGuess(env, it) };
+/** کادرِ «✉️ پیام اول»: قالب‌ها (استاندارد + مشترک + خودِ کارشناس)، انتخاب‌ها و پیش‌نمایشِ پیامِ هر تیک‌خورده */
+async function fmView(env, ex, it, pick, ctx) {
+  const choices = await fmChoices(env, it.aid);
+  const on = (pick.list || []).filter((e) => e.on);
+  const names = (pick.list || []).map((e) => e.name);
+  const rows = [];
+  for (let i = 0; i < on.length; i++) {
+    const e = on[i];
+    const r = await fmTextFor(env, { aid: it.aid, expert: ex, supplier: e.name, k: e.k, items: ctx.items, ctx, choices, otherNames: names.filter((n) => C.nkey(n) !== e.k), idx: i, company: COMPANY(env) });
+    rows.push({ k: e.k, name: e.name, tpl: r.tpl, text: r.text, block: r.block, warn: r.warn, custom: !!(choices.per[e.k] && choices.per[e.k].body), own_tpl: !!(choices.per[e.k] && choices.per[e.k].tpl) });
+  }
+  const db = (await listTemplates(env, ex.id)).map((t) => ({ key: String(t.id), title: t.title, body: t.body, std: false, own: t.expert_id === ex.id }));
+  return { item_id: it.id, family: ctx.family, family_fa: FAMILY_FA[ctx.family], variation: ctx.variation, must: ctx.must, tokens: FM_TOKENS,
+    templates: [...stdList(), ...db], def: choices.def ? choices.def.tpl : null, rows };
 }
 const normConfirmedRow = (it) => { const n = parse(it && it.norm_json, null); return !!(n && T(n.head) && n.source !== "ai"); };
 
@@ -762,14 +798,36 @@ function inviteText(env, sup, items, pfRead = true) {
 }
 const smsIntro = (env, items) => `استعلام قیمت شرکت ${COMPANY(env)}: ${items.length === 1 ? `${items[0].title} (${faN(items[0].qty == null ? "—" : items[0].qty)} ${items[0].unit || ""})`.trim() : `${faN(items.length)} قلم`}. ثبت قیمت و گفت‌وگو با کارشناس خرید:`;
 
+/**
+ * «✉️ پیام اول» (کلیدِ firstmsg): متنِ نخستین پیامِ این تأمین‌کننده از انتخاب‌های کارشناس (fm_choice) یا قالبِ استاندارد؛ اگر
+ * سنجشِ افشا جلویش را گرفت یا کلید خاموش است، null — همان قالبِ پیشینِ دعوت می‌رود (رفتارِ امروز).
+ */
+async function firstText(env, run, ex, inv, items) {
+  if (!(await crFlags(env)).firstmsg) return null;
+  const got = ((await env.DB.prepare(`SELECT * FROM items WHERE id IN (${items.map(() => "?").join(",")})`).bind(...items.map((i) => i.id)).all()).results || []);
+  const rows = items.map((i) => got.find((g) => g.id === i.id)).filter(Boolean);
+  if (!rows.length) return null;
+  const ctx = await fmContext(env, FM_DEPS, rows);
+  const k = C.nkey(inv.name);
+  /* نامِ دیگر گیرندگانِ همین کار — هرگز در پیام (فهرست‌های دعوتِ اقلامِ این ارجاع) */
+  const others = ((await env.DB.prepare("SELECT pick_json FROM items WHERE assignment_id=? AND pick_json IS NOT NULL").bind(run.assignment_id).all()).results || [])
+    .flatMap((r) => ((parse(r.pick_json, {}) || {}).list || []).map((e) => e.name)).filter((n) => C.nkey(n) !== k);
+  /* گونهٔ متن همان پیش‌نمایشِ کادر: جایگاهِ این تأمین‌کننده میانِ تیک‌خورده‌های قلمِ نخست */
+  const on = ((parse(rows[0].pick_json, {}) || {}).list || []).filter((e) => e.on);
+  const idx = Math.max(0, on.findIndex((e) => e.k === k));
+  const r = await fmTextFor(env, { aid: run.assignment_id, expert: ex, supplier: inv.name, k, items: ctx.items, ctx, otherNames: others, idx, company: COMPANY(env) });
+  if (r.block.length) { console.error("first-msg blocked", inv.name, r.block.join(" | ")); return null; }
+  return r.text;
+}
 async function inviteOne(env, run, ex, inv) {
   const items = run.data.items.filter((x) => inv.items.includes(x.id) && !x.skip);
   if (!items.length) return null;
   const [p0, ...more] = inv.phones;
   /* روالِ تازه: قلمِ تازه در گفت‌وگوی موجودِ کارشناس هوشمند با همین تأمین‌کننده (inv.thread_id) — پیامِ کوتاه، یک پیامک */
   const addOn = !!inv.thread_id;
+  const text = addOn ? addOnText(env, inv.name, items) : (await firstText(env, run, ex, inv, items)) || inviteText(env, inv.name, items, await pfReadOn(env));
   const r = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: p0.id,
-    text: addOn ? addOnText(env, inv.name, items) : inviteText(env, inv.name, items, await pfReadOn(env)), sms: smsIntro(env, items), ai: true });
+    text, sms: smsIntro(env, items), ai: true });
   const t = now();
   const top = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS n FROM sp_msgs WHERE thread_id=?").bind(r.thread_id).first();
   await env.DB.batch([

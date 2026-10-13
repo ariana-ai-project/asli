@@ -13,6 +13,8 @@ import { dirname, resolve } from "node:path";
 import { loadTP, sqliteD1 } from "./run.mjs";
 import * as W from "../../../worker/catalog.js";
 import { ensureSchema, route } from "../../../worker/api.js";
+import { aiTick } from "../../../worker/ai-agent.js";
+import { fmCheck } from "../../../worker/first-msg.js";
 import { supKey } from "../../../worker/cr-data.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -60,6 +62,16 @@ async function call(path, { method, body, headers } = {}) {
   const text = await res.text(); let data; try { data = JSON.parse(text); } catch (_) { data = text; }
   return { status: res.status, data };
 }
+/** Cron تا جایی که شرط برقرار شود (هر بار یک گام؛ فقط کارِ همین ارجاع سررسیده) */
+async function tickUntil(pred, max = 12, aid = 3) {
+  for (let i = 0; i < max; i++) {
+    DB.raw.prepare("UPDATE ai_runs SET next_at=CASE WHEN assignment_id=? THEN 0 ELSE ? END WHERE finished_at IS NULL AND state<>'paused'").run(aid, Date.now() + 9e8);
+    await aiTick(env);
+    if (pred()) return true;
+  }
+  return false;
+}
+const threadsOf = (aid) => DB.raw.prepare("SELECT t.id, s.name FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.assignment_id=? ORDER BY t.id").all(aid);
 let SUP = {};
 if (DB) {
   await ensureSchema(env);
@@ -132,4 +144,49 @@ test("تیکِ متفاوت با برنامه پیش از «🚀 شروع» عل
   r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { why: { [off.k]: "تأمین‌کنندهٔ اصلیِ این پروژه است" } } });
   assert.deepEqual(r.data.deviations, []);
   assert.deepEqual(r.data.why_boxes.slice(0, 2), ["معتمد است", "شماره یا فعالیتش نامعتبر است"]);
+});
+
+test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده (محتاط، بی مقدار، گونه‌های متفاوت)؛ متنِ ممنوع ذخیره نمی‌شود؛ دعوتِ کارشناس هوشمند همان متن", { skip: SKIP }, async () => {
+  assert.equal((await call("/items/61/first-msg", { headers: EX })).status, 409, "کلیدِ خاموش");
+  await call("/support/cr/flags", { method: "PUT", headers: SUP, body: { firstmsg: true } });
+  const g = await call("/items/61/first-msg", { headers: EX });
+  assert.equal(g.status, 200, JSON.stringify(g.data));
+  assert.equal(g.data.family, "cautious", "استراتژیِ محتاط روی قلم چیده شده");
+  assert.equal(g.data.variation, true);
+  const rows = g.data.rows;
+  assert.ok(rows.length >= 2);
+  assert.ok(rows.every((x) => /دستیار هوشمند/.test(x.text) && !/۳۰/.test(x.text)), "دستیارِ هوشمند گفته می‌شود و مقدارِ ۳۰ نه");
+  assert.notEqual(rows[0].text, rows[1].text, "دو گیرندهٔ پیاپی متنِ یکسان نمی‌گیرند");
+  assert.ok(rows.every((x) => !x.block.length));
+  assert.ok(g.data.templates.some((t) => t.key === "std:max:1") && g.data.templates.some((t) => t.key === "std:cautious:2"));
+  /* متنِ دستیِ یک تأمین‌کننده با نامِ دیگری ← ۴۲۲ */
+  const other = rows[1].name;
+  const bad = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { per: { [rows[0].k]: { body: `سلام؛ ${other} هم قیمت داده است.` } } } });
+  assert.equal(bad.status, 422);
+  assert.ok(bad.data.block.some((x) => x.includes(other)));
+  /* متنِ دستیِ درست و قالبِ پیش‌فرضِ درخواست */
+  const okp = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { def: "std:max:2", per: { [rows[0].k]: { body: "سلام؛ قیمتِ پیچ M10 را بفرمایید. پاسخ‌ها را دستیار هوشمند خرید ما می‌دهد." } } } });
+  assert.equal(okp.status, 200, JSON.stringify(okp.data));
+  assert.equal(okp.data.def, "std:max:2");
+  assert.equal(okp.data.rows.find((x) => x.k === rows[0].k).custom, true);
+  assert.match(okp.data.rows.find((x) => x.k === rows[0].k).text, /پیچ M10 را بفرمایید/);
+  /* «🚀 شروع»: کارشناس هوشمند به دو تیک‌خوردهٔ با شمارهٔ پنل همان متنِ پیش‌نمایش را می‌فرستد */
+  const want = okp.data.rows.slice(0, 2);
+  for (const [i, x] of want.entries()) assert.equal((await call("/sp/x/phones", { headers: EX, body: { supplier_name: x.name, phone: `0912000020${i}`, label: "فروش", panel: true } })).status, 200);
+  const s = await call("/items/61/ai-start", { headers: EX, body: {} });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  assert.ok(await tickUntil(() => threadsOf(3).length >= 2), JSON.stringify(threadsOf(3)));
+  for (const x of want) {
+    const th = threadsOf(3).find((t) => t.name === x.name);
+    assert.ok(th, x.name);
+    const first = DB.raw.prepare("SELECT body FROM sp_msgs WHERE thread_id=? AND who='e' AND kind='text' ORDER BY id LIMIT 1").get(th.id);
+    assert.equal(first.body, x.text, `متنِ رفته = پیش‌نمایش (${x.name})`);
+  }
+});
+
+test("سنجشِ افشا: نامِ خودِ گیرنده، نامِ شرکت و عنوانِ قلم نامِ «دیگری» شمرده نمی‌شود — مگر بخشی از نامِ دیگری باشد", () => {
+  const items = [{ title: "پیچ M10", qty: 30 }];
+  assert.deepEqual(fmCheck("از تونل سد آریانا؛ قیمتِ پیچ M10 برای آهن الف", { otherNames: ["آریانا", "پیچ M10"], items, allow: ["آهن الف", "تونل سد آریانا"] }).block, []);
+  assert.equal(fmCheck("آریانا هم قیمت داد", { otherNames: ["آریانا"], items, allow: ["تونل سد آریانا"] }).block.length, 1);
+  assert.equal(fmCheck("سلام آهن الف بزرگ", { otherNames: ["آهن الف بزرگ"], items, allow: ["آهن الف"] }).block.length, 1, "نامِ خود بخشی از نامِ دیگری است؛ کنار نمی‌رود");
 });
