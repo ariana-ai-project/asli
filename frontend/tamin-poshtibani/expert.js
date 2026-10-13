@@ -660,6 +660,7 @@
         <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
         ${P.cr && !started && !A_ ? `<button class="tp-btn sm" data-pkstrat title="سیاستِ استعلامِ این نوع قلم و برنامهٔ گیرندگان روی گراف (کمیاب یا گسترده)">🧭 استراتژی استعلام</button>` : ""}
+        ${P.first_msg && on.length && (!started || fresh) ? `<button class="tp-btn sm" data-pkfm title="متنِ نخستین پیامِ هر تیک‌خورده: قالبِ درخواست، یا قالب و متنِ جدا برای هر تأمین‌کننده — با پیش‌نمایش">✉️ پیام اول</button>` : ""}
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
         ${!started && !D_ ? `<button class="tp-btn sm warn" data-pkback title="این قلم را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر</button>` : ""}
@@ -706,6 +707,64 @@
         <div class="dim" style="font-size:.8rem;margin-top:8px">با چیدن، تیک‌های فهرست با همین برنامه عوض می‌شود؛ هر تیکِ دیگر پیش از «🚀 شروع» علت می‌خواهد. کشف‌شده‌ها تا شمارهٔ همراهشان با تیکِ پنل ثبت نشود دعوت نمی‌شوند.</div></div>
         <div class="toolrow" style="margin-top:10px;gap:8px"><button class="tp-btn primary" data-st-apply="0">🧭 چیدن با همین</button>${dc ? `<button class="tp-btn warn" data-st-apply="1">استعلام محتاط را بچین</button>` : ""}</div>`, null, "بستن", "");
     m.querySelectorAll("[data-st-apply]").forEach((x) => x.onclick = () => { m.remove(); pkStratApply(it, x.dataset.stApply === "1"); });
+  }
+  /* «✉️ پیام اول» (سند طراحی، بخش ۱؛ تصمیم‌های ۱ و ۶): قالبِ پیش‌فرضِ درخواست، قالب یا متنِ جدا برای هر تیک‌خورده و پیش‌نمایشِ
+     همان متنی که «🚀 شروع» می‌فرستد؛ متنی که نامِ دیگران یا شمارِ پیشنهادها را لو بدهد ذخیره نمی‌شود (worker/first-msg.js) */
+  async function pkFmUI(it) {
+    const b = TP.busy("✉️ پیام اول", esc(it.title));
+    let d;
+    try { d = await TP.api(`/items/${it.id}/first-msg`); } catch (e) { b.close(); return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    b.close();
+    const ed = {};   /* ردیف‌هایی که متنشان در حالِ ویرایشِ دستی است: k ← متن */
+    const m = TP.modal(`✉️ پیام اول — ${esc(it.title)}`, `<div data-fm></div>`, null, "بستن", "");
+    m.querySelector(".tp-modal").classList.add("fm-modal");
+    const box = m.querySelector("[data-fm]");
+    const opts = (sel) => {
+      const g = (std) => (d.templates || []).filter((t) => !!t.std === std).map((t) => `<option value="${esc(t.key)}" ${sel === t.key ? "selected" : ""}>${esc(t.title)}</option>`).join("");
+      const own = g(false);
+      return `<optgroup label="استاندارد">${g(true)}</optgroup>${own ? `<optgroup label="قالب‌های پیام">${own}</optgroup>` : ""}`;
+    };
+    async function save(body, ok) {
+      try { d = await TP.api(`/items/${it.id}/first-msg`, { method: "PUT", body }); if (ok) ok(); paint(); }
+      catch (e) {
+        const n = box.querySelector("[data-fm-msg]"); if (n) n.innerHTML = `<div class="tp-note warn" style="margin:6px 0">⛔ ${esc(e.message)}</div>`;
+        const k = e.data && e.data.k, row = k && [...box.querySelectorAll("[data-fmk]")].find((x) => x.dataset.fmk === k); if (row) row.classList.add("bad");
+      }
+    }
+    function paint() {
+      box.querySelectorAll("[data-fm-body]").forEach((ta) => { ed[ta.dataset.fmBody] = ta.value; });
+      const rows = d.rows || [];
+      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدارِ کامل گفته نمی‌شود" : ""}${d.variation ? " · هر گیرنده گونهٔ دیگری از متن را می‌گیرد" : ""}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
+        <div class="toolrow" style="margin:8px 0;gap:8px;align-items:center;flex-wrap:wrap"><b>قالبِ این درخواست</b>
+          <select class="tp-input" data-fm-def style="min-width:220px;flex:1"><option value="">خودکار (${esc(d.family_fa || "")})</option>${opts(d.def)}</select></div>
+        <div data-fm-msg></div>
+        <div class="fm-box">${rows.map((r) => {
+          const editing = ed[r.k] != null;
+          return `<div class="fm-row ${r.block.length ? "bad" : ""}" data-fmk="${esc(r.k)}">
+            <div class="toolrow"><b>${esc(r.name)}</b>
+              ${r.custom ? `<span class="chip info">✏️ متنِ دستی</span>` : `<select class="tp-input" data-fm-tpl="${esc(r.k)}" style="min-width:170px"><option value="">مثلِ قالبِ درخواست</option>${opts(r.own_tpl ? r.tpl : null)}</select>`}
+              <span style="margin-inline-start:auto"></span>
+              ${editing ? `<button class="tp-btn xs primary" data-fm-save="${esc(r.k)}">ذخیرهٔ متن</button><button class="tp-btn xs" data-fm-cancel="${esc(r.k)}">انصراف</button>`
+                : `<button class="tp-btn xs" data-fm-edit="${esc(r.k)}">✏️ ویرایشِ متن</button>${r.custom ? `<button class="tp-btn xs" data-fm-reset="${esc(r.k)}" title="متنِ دستی پاک می‌شود و قالبِ درخواست می‌رود">↺ برگشت به قالب</button>` : ""}`}</div>
+            ${r.block.length ? `<div class="chips" style="margin:4px 0">${r.block.map((x) => `<span class="chip bad" title="این متن نمی‌رود؛ دعوتِ پیشین جایش می‌رود">⛔ ${esc(x)}</span>`).join(" ")}</div>` : ""}
+            ${r.warn.length ? `<div class="chips" style="margin:4px 0">${r.warn.map((x) => `<span class="chip warn">⚠️ ${esc(x)}</span>`).join(" ")}</div>` : ""}
+            ${editing ? `<textarea class="tp-input" data-fm-body="${esc(r.k)}" dir="rtl">${esc(ed[r.k])}</textarea>` : `<pre class="fm-text">${esc(r.text)}</pre>`}</div>`;
+        }).join("") || `<div class="empty">هنوز تیک‌خورده‌ای نیست.</div>`}</div>
+        <div class="dim" style="font-size:.8rem;margin-top:8px">«🚀 شروع» همین متن‌ها را می‌فرستد و کارشناس هوشمند گفت‌وگو را ادامه می‌دهد. نامِ تأمین‌کنندهٔ دیگر، شمارِ پیشنهادها و واژه‌های درونی در متن نمی‌رود.</div>`;
+      const Qm = (s) => box.querySelectorAll(s);
+      const defSel = box.querySelector("[data-fm-def]");
+      defSel.onchange = () => save({ def: defSel.value || null });
+      Qm("[data-fm-tpl]").forEach((s) => s.onchange = () => save({ per: { [s.dataset.fmTpl]: s.value ? { tpl: s.value } : null } }));
+      Qm("[data-fm-edit]").forEach((x) => x.onclick = () => { const r = rows.find((y) => y.k === x.dataset.fmEdit); if (r) { ed[r.k] = r.text; paint(); } });
+      Qm("[data-fm-cancel]").forEach((x) => x.onclick = () => { const ta = [...Qm("[data-fm-body]")].find((t) => t.dataset.fmBody === x.dataset.fmCancel); if (ta) ta.remove(); delete ed[x.dataset.fmCancel]; paint(); });
+      Qm("[data-fm-save]").forEach((x) => x.onclick = () => {
+        const k = x.dataset.fmSave, ta = [...Qm("[data-fm-body]")].find((t) => t.dataset.fmBody === k);
+        const v = ta ? ta.value : "";
+        save({ per: { [k]: v.trim() ? { body: v } : null } }, () => { if (ta) ta.remove(); delete ed[k]; });
+      });
+      Qm("[data-fm-reset]").forEach((x) => x.onclick = () => save({ per: { [x.dataset.fmReset]: null } }));
+    }
+    paint();
   }
   function pkPhoneUI(it, k) {
     const P = S.picks[it.id], e = P && P.list && P.list.find((x) => x.k === k); if (!e) return;
@@ -2509,6 +2568,7 @@
     Q("[data-pkbox]").forEach((s) => s.onchange = () => pkEdit(item(), { whybox: { [s.dataset.pkbox]: s.value } }));
     Q("[data-pkstrat]").forEach((b) => b.onclick = () => pkStratUI(item()));
     Q("[data-pkstrat-go]").forEach((b) => b.onclick = () => pkStratApply(item(), true));
+    const pkf = G("[data-pkfm]"); if (pkf) pkf.onclick = () => pkFmUI(item());
     Q("[data-pkdel]").forEach((b) => b.onclick = () => pkEdit(item(), { remove: [b.dataset.pkdel] }));
     Q("[data-pkph]").forEach((b) => b.onclick = () => pkPhoneUI(item(), b.dataset.pkph));
     Q("[data-pkadd-name]").forEach((b) => b.onclick = () => pkEdit(item(), { add: [{ name: b.dataset.pkaddName, src: "manual" }] }));

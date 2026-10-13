@@ -300,6 +300,7 @@ async function picksOut(env, { it, o, m, cfg }, pick) {
     rule: pick ? pick.rule || null : null, n: pick ? pick.n || 0 : 0, msg: pick ? pick.msg || null : null, pending: started && !pick,
     list, fresh: list.filter((e) => e.on && !e.go).length,
     strategy: pick ? pick.strategy || null : null, cr, why_boxes: WHY_BOXES, deviations: pick && pick.strategy ? strategyDeviations(pick).map((e) => e.k) : [],
+    first_msg: !!flags.firstmsg,
   };
 }
 /** شمارِ پیش‌تیکِ فهرستِ تازه: شمارِ موج اولِ استراتژیِ نوع قلم (کلیدِ pretick)، وگرنه پنج */
