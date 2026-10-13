@@ -63,6 +63,7 @@ import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } fro
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
+import { GUARD_DDL, ipOf, windowOf, failCountStmt, blockedError, recordFail, guardOpen, codeChangeOpen, codeChangeConflict } from "./auth-guard.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
@@ -95,17 +96,33 @@ async function readJson(request) {
 /* احراز هویت                                                            */
 /* ------------------------------------------------------------------ */
 async function requireManager(request, env) {
-  /* کد مدیر در دیتابیس است (پنل پشتیبانی)، و تا وقتی نیست env.MANAGER_CODE */
-  const want = await managerCode(env);
+  /* کد مدیر در دیتابیس است (پنل پشتیبانی)، و تا وقتی نیست env.MANAGER_CODE.
+     فاز ۰: از هر شبکه در ۱۵ دقیقه ۲۰ کدِ نادرستِ متفاوت؛ بعد حتی کد درست هم ۴۲۹ (worker/auth-guard.js) */
+  const k = `ip:${ipOf(request)}`, win = windowOf();
+  const [want, f] = await Promise.all([managerCode(env), failCountStmt(env, k, win).first().catch(() => null)]);
   if (!want) throw new HttpError("کد مدیر تعریف نشده (MANAGER_CODE یا پنل پشتیبانی)؛ پنل مدیر تا آن زمان قفل است.", 503);
+  const shut = blockedError((f && f.n) || 0);
+  if (shut) throw shut;
   const code = request.headers.get("X-Manager-Code") || "";
-  if (code !== want) throw new HttpError("کد مدیر نادرست است.", 401);
+  if (code !== want) { await recordFail(env, k, code, { win, what: "کدِ مدیر" }).catch((e) => console.error("auth fail", e && e.message)); throw new HttpError("کد مدیر نادرست است.", 401); }
 }
 async function requireExpert(request, env) {
   const code = T(request.headers.get("X-Expert-Code"));
   let ex = null;
-  if (code) ex = await env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,team_via,alert_stages,alert_thresholds FROM experts WHERE code=?").bind(code).first();
-  else if (request.headers.get("X-TG-Init")) {
+  if (code) {
+    /* همان یک رفت‌وبرگشت: کارشناسِ این کد و شمارِ کدهای نادرستِ این شبکه (worker/auth-guard.js) */
+    const k = `ip:${ipOf(request)}`, win = windowOf();
+    const [er, fr] = await env.DB.batch([
+      env.DB.prepare("SELECT id,name,label,code,active,senior,senior_id,notify_to,team_chat,team_via,alert_stages,alert_thresholds FROM experts WHERE code=?").bind(code),
+      failCountStmt(env, k, win)]);
+    const shut = blockedError(((fr.results || [])[0] || {}).n || 0);
+    if (shut) throw shut;
+    ex = (er.results || [])[0] || null;
+    if (!ex || !ex.active) {
+      await recordFail(env, k, code, { win, what: "کدِ کارشناس" }).catch((e) => console.error("auth fail", e && e.message));
+      throw new HttpError("کد کارشناسی معتبر نیست.", 401);
+    }
+  } else if (request.headers.get("X-TG-Init")) {
     /* مینی‌اپ تلگرام (مهر ۱۴۰۵): پنل کارشناس داخل بات کارشناسان یا بات مکاتبات — initData امضاشدهٔ همان بات
        به‌جای کد ورود؛ کارشناس همانی است که گفت‌وگویش به حسابش گره خورده (worker/tg-auth.js) */
     ex = await expertOfInit(env, request.headers.get("X-TG-Init"));
@@ -224,6 +241,7 @@ ${TENDER_DDL.trim()}
 ${PUSH_DDL.trim()}
 ${HELP_DDL.trim()}
 ${STRUCT_DDL.trim()}
+${GUARD_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -973,10 +991,12 @@ const retiredCode = (id) => `x${id}-${now()}`;
 async function setExpertCode(env, id, raw, { reveal } = {}) {
   const code = asciiDigits(raw);
   if (!CODE_RE.test(code)) throw new HttpError("کد ورود باید ۴ رقم باشد و فقط عدد.");
-  if (code === await managerCode(env)) throw new HttpError("این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.", 409);
+  /* فاز ۰: کدِ مدیر و کدِ کارشناسِ دیگر برای خودِ کارشناس یک پیام دارند (پیش‌تر دو پیام بود و کدِ مدیر را لو می‌داد) */
+  const TAKEN = "این کد قابل استفاده نیست؛ کد دیگری انتخاب کنید.";
+  if (code === await managerCode(env)) throw new HttpError(TAKEN, 409);
   const holder = await env.DB.prepare("SELECT id,name,active FROM experts WHERE code=?").bind(code).first();
   if (holder && holder.id === id) return { ok: true, code, unchanged: true };
-  if (holder && holder.active) throw new HttpError(reveal ? `این کد ورودِ «${holder.name}» است؛ کد دیگری بدهید.` : "این کد را کارشناس دیگری دارد؛ کد دیگری انتخاب کنید.", 409);
+  if (holder && holder.active) throw new HttpError(reveal ? `این کد ورودِ «${holder.name}» است؛ کد دیگری بدهید.` : TAKEN, 409);
   const stmts = [];
   if (holder) stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(retiredCode(holder.id), holder.id));
   stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(code, id));
@@ -1888,10 +1908,19 @@ async function route(request, env, ctx) {
     /* --- ورود --- */
     /* تب «پشتیبانی» صفحهٔ اول: وضعیت کارت‌ها برای همه خواندنی است، نوشتن با رمز تب */
     if (path === "/site" && m === "GET") return json(await siteState(env));
-    if (path === "/site/login" && m === "POST") { const b = await readJson(request); return json(await siteLogin(env, b.code)); }
+    /* رمز تب هم چهاررقمی است (یا کد مدیر): همان نگهبانِ کدهای نادرست (worker/auth-guard.js) */
+    const siteGuarded = async (code, fn) => {
+      const g = await guardOpen(env, request);
+      try { return await fn(); } catch (e) {
+        if (e instanceof HttpError && e.status === 401) await recordFail(env, g.k, code, { win: g.win, what: "رمزِ تب پشتیبانی" }).catch(() => {});
+        throw e;
+      }
+    };
+    if (path === "/site/login" && m === "POST") { const b = await readJson(request); return json(await siteGuarded(b.code, () => siteLogin(env, b.code))); }
     if (path === "/site" && m === "PUT") {
       const b = await readJson(request);
-      return json(await putSite(env, b, request.headers.get("X-Site-Code") || b.code));
+      const code = request.headers.get("X-Site-Code") || b.code;
+      return json(await siteGuarded(code, () => putSite(env, b, code)));
     }
 
     if (path === "/login" && m === "POST") {
@@ -1941,7 +1970,12 @@ async function route(request, env, ctx) {
       const ex = await requireExpert(request, env);
       const b = await readJson(request);
       if (T(b.current) !== String(ex.code)) throw new HttpError("کد فعلی درست نیست.", 403);
-      return json(await setExpertCode(env, ex.id, b.code));
+      /* فاز ۰: کدِ گرفته‌شده (مالِ مدیر یا کارشناس دیگر) یک پیام دارد و روزی ۵ بار — وگرنه این مسیر کدها را لو می‌داد */
+      const g = await codeChangeOpen(env, ex.id);
+      try { return json(await setExpertCode(env, ex.id, b.code)); } catch (e) {
+        if (e instanceof HttpError && e.status === 409) await codeChangeConflict(env, g, asciiDigits(b.code)).catch(() => {});
+        throw e;
+      }
     }
 
     /* خودآزمون سرویس‌های بیرونی — تلگرام، انبار فایل، تبدیل صوت، مدل، دیتابیس */

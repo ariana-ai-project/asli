@@ -1125,7 +1125,8 @@ async function supplierView(env, t, inv) {
     lotList = lots.filter((l) => ok.has(l.id)).map((l) => ({ code: l.code, title: l.title, qty: l.qty, unit: l.unit, state: tenderState(l, n), lot_no: l.lot_no, current: l.id === t.id }));
   }
   return {
-    tender: { ...pub(t, n), state: st, range: bidRange(t, mine, sealed), req_aid: undefined, req_item: undefined, req_at: undefined,
+    /* «فقط رتبه» و دور سربسته: کمترین قیمت در tender هم نه — pub آن را برای پشتیبان دارد (پیش‌تر از همین‌جا به تأمین‌کننده می‌رسید) */
+    tender: { ...pub(t, n), state: st, range: bidRange(t, mine, sealed), best_amount: prices ? t.best_amount : undefined, req_aid: undefined, req_item: undefined, req_at: undefined,
       src_request: undefined, src_item: undefined, src_by: undefined, src_at: undefined,
       winner: t.state === "ended" ? (t.winner_alias === inv.alias ? "you" : t.winner_alias != null ? "other" : null) : null },
     me: { alias: inv.alias, name: inv.name, label: aliasLabel(inv.alias), rank: sealed ? null : me ? me.rank : null, best: mine, lead: !sealed && t.best_alias === inv.alias,
