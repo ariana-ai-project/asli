@@ -737,7 +737,10 @@
     function paint() {
       box.querySelectorAll("[data-fm-body]").forEach((ta) => { ed[ta.dataset.fmBody] = ta.value; });
       const rows = d.rows || [];
-      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدارِ کامل گفته نمی‌شود" : ""}${d.variation ? " · هر گیرنده گونهٔ دیگری از متن را می‌گیرد" : ""}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
+      const vary = d.variation ? (d.var_off
+        ? ` · متنِ یکسان برای همه <span class="dim">(${esc(d.var_off.by || "")}: «${esc(d.var_off.reason || "")}»)</span> <button class="tp-btn xs" data-fm-var="1">گونه‌ها را برگردان</button>`
+        : ` · هر گیرنده گونهٔ دیگری از متن را می‌گیرد <button class="tp-btn xs" data-fm-var="0" title="همه همان یک متن را بگیرند — با دلیل">متنِ یکسان برای همه…</button>`) : "";
+      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدار با بازهٔ متعارف، نه مقدارِ کامل" : ""}${vary}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
         <div class="toolrow" style="margin:8px 0;gap:8px;align-items:center;flex-wrap:wrap"><b>قالبِ این درخواست</b>
           <select class="tp-input" data-fm-def style="min-width:220px;flex:1"><option value="">خودکار (${esc(d.family_fa || "")})</option>${opts(d.def)}</select></div>
         <div data-fm-msg></div>
@@ -766,6 +769,14 @@
         save({ per: { [k]: v.trim() ? { body: v } : null } }, () => { if (ta) ta.remove(); delete ed[k]; });
       });
       Qm("[data-fm-reset]").forEach((x) => x.onclick = () => save({ per: { [x.dataset.fmReset]: null } }));
+      /* گونه‌های متن (تصمیم ۱): خاموش با دلیل، روشن بی دلیل */
+      Qm("[data-fm-var]").forEach((x) => x.onclick = () => {
+        if (x.dataset.fmVar === "1") return save({ variation: true });
+        const n = box.querySelector("[data-fm-msg]");
+        n.innerHTML = `<div class="toolrow" style="gap:6px;margin:6px 0;flex-wrap:wrap"><input class="tp-input" data-fm-varwhy placeholder="چرا همه همان یک متن را بگیرند؟ (اجباری)" style="flex:1;min-width:220px"><button class="tp-btn xs primary" data-fm-varok>ثبت</button></div>`;
+        const inp = n.querySelector("[data-fm-varwhy]"); inp.focus();
+        n.querySelector("[data-fm-varok]").onclick = () => save({ variation: false, reason: inp.value });
+      });
     }
     paint();
   }

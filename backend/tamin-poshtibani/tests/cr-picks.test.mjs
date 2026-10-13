@@ -164,6 +164,15 @@ test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده
   const bad = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { per: { [rows[0].k]: { body: `سلام؛ ${other} هم قیمت داده است.` } } } });
   assert.equal(bad.status, 422);
   assert.ok(bad.data.block.some((x) => x.includes(other)));
+  /* گونه‌های متن (تصمیم ۱): خاموش فقط با دلیل؛ بعد همه همان متن، و برگشت */
+  assert.equal((await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { variation: false } })).status, 422);
+  const vo = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { variation: false, reason: "همه در یک بازار نیستند" } });
+  assert.equal(vo.status, 200, JSON.stringify(vo.data));
+  assert.equal(vo.data.var_off.reason, "همه در یک بازار نیستند");
+  assert.equal(vo.data.rows[0].text, vo.data.rows[1].text, "متنِ یکسان");
+  const von = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { variation: true } });
+  assert.equal(von.data.var_off, null);
+  assert.notEqual(von.data.rows[0].text, von.data.rows[1].text);
   /* متنِ دستیِ درست و قالبِ پیش‌فرضِ درخواست */
   const okp = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { def: "std:max:2", per: { [rows[0].k]: { body: "سلام؛ قیمتِ پیچ M10 را بفرمایید. پاسخ‌ها را دستیار هوشمند خرید ما می‌دهد." } } } });
   assert.equal(okp.status, 200, JSON.stringify(okp.data));

@@ -6,17 +6,18 @@
  * بگذارد یا متن را دستی عوض کند. «🚀 شروع» همین را می‌فرستد و کارشناس هوشمند از آن به بعد ادامه می‌دهد (ai-agent.js:inviteOne).
  *
  * قالب‌های استاندارد (STD) پنج خانواده‌اند — از قاعده‌های نویسندهٔ متن استعلامِ بسته (04_prompts/P2_rfq_composer.md):
- *   گسترده (گسترده، استاندارد، قرارداد چارچوب) · محتاط (محدود و مرحله‌ای، مرحله‌ای با گسترش، مستقیم با آزمون بازار؛ بی مقدار)
+ *   گسترده (گسترده، استاندارد، قرارداد چارچوب) · محتاط (محدود و مرحله‌ای، مرحله‌ای با گسترش، مستقیم با آزمون بازار؛ مقدار با «بازهٔ متعارف»)
  *   · قیمت‌مرجع (قیمت تفکیکی و ساعت اعتبار) · اصلی و معادل (چندکاناله) · مشورت (مرحلهٔ اولِ «مشورت سپس رقابت»)
  * هر خانواده دو سه گونه با اطلاعاتِ یکسان و واژه‌بندیِ دیگر دارد؛ وقتی سیاستِ استعلام «متن متفاوت» می‌خواهد (text_variation)،
- * گیرندگان به نوبت گونه‌های دیگر را می‌گیرند تا هم‌بازارها متنِ یکسان نبینند (تصمیم ۱). همهٔ قالب‌ها جملهٔ «پاسخ‌ها را دستیار هوشمند
+ * گیرندگان به نوبت گونه‌های دیگر را می‌گیرند تا هم‌بازارها متنِ یکسان نبینند (تصمیم ۱)؛ کارشناس می‌بیند و با دلیل خاموشش می‌کند
+ * (fm_choice با k=«~var»). همهٔ قالب‌ها جملهٔ «پاسخ‌ها را دستیار هوشمند
  * خرید ما می‌دهد» را دارند (تصمیم ۶).
  *
  * سنجشِ افشا پیش از ذخیره و پیش از ارسال (fmCheck): نامِ دیگر گیرندگان، شمارِ پیشنهاددهندگان، واژه‌های درونی (حد، قیمت مرجع،
  * بودجه…) ← نمی‌رود؛ فوریت، و مقدارِ کامل در خانوادهٔ محتاط ← هشدار. مقدار ساختگی هرگز.
  *
- * fm_choice (assignment_id, k): k = «*» برای پیش‌فرضِ درخواست، وگرنه کلیدِ نامِ تأمین‌کننده (nkey) — tpl: «std:…» یا شناسهٔ قالبِ
- * جدولِ templates؛ body: متنِ دستیِ همان تأمین‌کننده (بر قالب مقدم است).
+ * fm_choice (assignment_id, k): k = «*» برای پیش‌فرضِ درخواست، «~var» برای خاموش کردنِ گونه‌ها (body = دلیل)، وگرنه کلیدِ نامِ
+ * تأمین‌کننده (nkey) — tpl: «std:…» یا شناسهٔ قالبِ جدولِ templates؛ body: متنِ دستیِ همان تأمین‌کننده (بر قالب مقدم است).
  */
 import { HttpError } from "./http.js";
 import { listTemplates } from "./templates.js";
@@ -45,19 +46,19 @@ export const STD = {
   cautious: [
     "سلام، وقت بخیر. از واحد خرید {شرکت} هستم.\nبرای این اقلام استعلام قیمت داریم:\n{فهرست اقلام}\nمقدار نهایی پس از جمع‌بندی اعلام می‌شه.\nموارد 🔒 ثابت‌اند: {مشخصات ثابت}\nلطفاً بنویسید: {موارد لازم}\n" + TAIL,
     "درود؛ از تدارکات {شرکت} پیام می‌دم. قیمتِ این اقلام رو می‌خواستیم:\n{فهرست اقلام}\nلطفاً {موارد لازم} رو بنویسید؛ مقدارِ نهایی بعد از جمع‌بندی گفته می‌شه.\nمشخصاتِ 🔒 ثابته: {مشخصات ثابت}\nپیشنهادِ نهایی بعد از توافق پیش‌فاکتورِ شما ثبت می‌شه. گفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
-    "سلام. واحد خرید {شرکت} برای این اقلام قیمت می‌گیره:\n{فهرست اقلام}\nموارد لازم در پیشنهاد: {موارد لازم}\nمشخصاتِ ثابت (🔒): {مشخصات ثابت} — مقدار پس از جمع‌بندی اعلام می‌شه.\nدستیار هوشمند خرید ما همین‌جا پاسخ می‌ده؛ تصمیم نهایی با کمیسیون شرکته و پیشنهادِ نهایی پیش‌فاکتور ثبت می‌شه.",
+    "سلام. واحد خرید {شرکت} برای این اقلام قیمت می‌گیره:\n{فهرست اقلام}\nموارد لازم در پیشنهاد: {موارد لازم}\nمشخصاتِ ثابت (🔒): {مشخصات ثابت}؛ مقدار پس از جمع‌بندی اعلام می‌شه.\nدستیار هوشمند خرید ما همین‌جا پاسخ می‌ده؛ تصمیم نهایی با کمیسیون شرکته و پیشنهادِ نهایی پیش‌فاکتور ثبت می‌شه.",
   ],
   index: [
     "سلام. واحد خرید {شرکت}: برای این اقلام قیمت می‌خوایم:\n{فهرست اقلام}\nلطفاً قیمت رو تفکیکی بنویسید (پایه، حاشیه، حمل، برش یا خدمات) و اگه قیمت کارخانه یا بورس مبناست، بفرمایید کدوم؛ ساعتِ اعتبارِ قیمت رو هم بنویسید.\n{موارد لازم}\nموارد 🔒 ثابت‌اند: {مشخصات ثابت}\n" + TAIL,
-    "درود؛ تدارکات {شرکت} هستیم. قیمتِ این اقلام رو با تفکیکِ پایه، حاشیه، حمل و برش و با ساعتِ اعتبار می‌خوایم:\n{فهرست اقلام}\nمبنا (کارخانه یا بورس) و {موارد لازم} رو هم بنویسید. مشخصاتِ 🔒: {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
+    "درود؛ تدارکات {شرکت} هستیم. قیمتِ این اقلام رو با تفکیکِ پایه، حاشیه، حمل و برش و با ساعتِ اعتبار می‌خوایم:\n{فهرست اقلام}\nمبنا (کارخانه یا بورس) و {موارد لازم} رو هم بنویسید؛ مشخصاتِ 🔒: {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
   ],
   oem: [
     "سلام، وقت بخیر. از واحد خرید {شرکت} هستم.\nبرای این اقلام قیمت می‌خوایم:\n{فهرست اقلام}\nاگه هم اصلی دارید و هم معادل، قیمتِ هر کدوم رو جدا با برند، شمارهٔ فنی و کشورِ سازنده بنویسید.\nموارد 🔒 ثابت‌اند: {مشخصات ثابت}\nلطفاً بنویسید: {موارد لازم}\n" + TAIL,
-    "درود؛ تدارکات {شرکت}. قیمتِ اصلی و معادلِ این اقلام رو جدا می‌خوایم (برند، شمارهٔ فنی، کشورِ سازنده):\n{فهرست اقلام}\n{موارد لازم} رو هم بنویسید. مشخصاتِ 🔒: {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
+    "درود؛ تدارکات {شرکت}. قیمتِ اصلی و معادلِ این اقلام رو جدا می‌خوایم (برند، شمارهٔ فنی، کشورِ سازنده):\n{فهرست اقلام}\n{موارد لازم} رو هم بنویسید؛ مشخصاتِ 🔒: {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
   ],
   consult: [
     "سلام، وقت بخیر. از واحد خرید {شرکت} هستم.\nاین پیام مرحلهٔ مشورته و استعلامِ قیمت جدا می‌آد. برای این اقلام می‌خوایم بدونیم چه مشخصاتی پیشنهاد می‌کنید:\n{فهرست اقلام}\nلطفاً برند، رده و مشخصاتِ دقیقِ کالا یا راه‌حلِ پیشنهادی رو بنویسید.\nآنچه 🔒 ثابته: {مشخصات ثابت}\nپاسخ‌ها رو دستیار هوشمند خرید ما می‌ده؛ تصمیم نهایی با کمیسیون شرکته.",
-    "درود؛ تدارکات {شرکت}. پیش از استعلامِ قیمت، نظرِ شما رو دربارهٔ مشخصاتِ مناسبِ این اقلام می‌خوایم:\n{فهرست اقلام}\nبرند، رده و مشخصاتِ پیشنهادی رو بنویسید؛ استعلامِ قیمت جدا می‌آد. ثابت (🔒): {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
+    "درود؛ تدارکات {شرکت}. پیش از استعلامِ قیمت، نظرِ شما رو دربارهٔ مشخصاتِ مناسبِ این اقلام می‌خوایم:\n{فهرست اقلام}\nبرند، رده و مشخصاتِ پیشنهادی رو بنویسید؛ استعلامِ قیمت جدا می‌آد؛ ثابت (🔒): {مشخصات ثابت}\nگفت‌وگو با دستیار هوشمند خرید ماست و تصمیم با کمیسیون شرکت.",
   ],
 };
 export const stdKey = (family, v) => `std:${family}:${v + 1}`;
@@ -68,16 +69,38 @@ const stdOf = (key) => { const m = /^std:(\w+):(\d+)$/.exec(T(key)); return m &&
 /* پر کردن                                                             */
 /* ------------------------------------------------------------------ */
 /**
+ * «بازهٔ متعارف» برای موج اولِ استعلامِ محتاط (تصمیم ۱۲؛ rfq_policy.disclosure.quantity و qty_shown در 04_prompts/context_blocks.md):
+ * بازه‌ای گرد که مقدارِ واقعی همیشه درونش است و خودش گفته نمی‌شود — نیم تا یک‌ونیم برابر، گرد به گام‌های ۱، ۵ یا ۵×۱۰ⁿ. مقدار
+ * ساختگی نه: بی مقدار، null. خروجی {lo, hi}.
+ */
+export function qtyRange(qty) {
+  const q = Number(qty);
+  if (!Number.isFinite(q) || q <= 0) return null;
+  const step = (v) => (v < 10 ? 1 : v < 100 ? 5 : 5 * 10 ** (Math.floor(Math.log10(v)) - 1));
+  let lo = Math.max(1, Math.floor((q * 0.5) / step(q * 0.5)) * step(q * 0.5));
+  let hi = Math.ceil((q * 1.5) / step(q * 1.5)) * step(q * 1.5);
+  if (lo >= q && q > 1) lo = Math.max(1, lo - step(lo));
+  if (hi <= q) hi = q + step(q);
+  return { lo, hi };
+}
+const rangeFa = (i) => { const r = qtyRange(i.qty); return r ? `حدود ${faN(r.lo)} تا ${faN(r.hi)} ${i.unit || ""}`.trimEnd() : ""; };
+
+/**
  * ctx: {company, supplier, expertName, family, items: [{title, qty, unit, spec, fixed: [«ک: م»…], open: [«ک: م»…], due}], must: [...], reply}
- * {فهرست اقلام} در خانوادهٔ محتاط بی مقدار است (افشا: «مقدار نهایی پس از جمع‌بندی»)
+ * {فهرست اقلام} در خانوادهٔ محتاط با «بازهٔ متعارف» است، نه مقدارِ کامل («مقدار نهایی پس از جمع‌بندی»)
  */
 export function fillFm(body, ctx) {
   const it0 = (ctx.items || [])[0] || {};
   const noQty = ctx.family === "cautious";
-  const list = (ctx.items || []).map((i) => `• ${i.title}${noQty ? "" : ` — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trimEnd()}`).join("\n");
+  const list = (ctx.items || []).map((i) => `• ${i.title}${noQty ? (rangeFa(i) ? ` — ${rangeFa(i)}` : "") : ` — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trimEnd()}`).join("\n");
   const join = (k) => [...new Set((ctx.items || []).flatMap((i) => i[k] || []))].join("، ") || "—";
   const due = [...new Set((ctx.items || []).map((i) => i.due).filter(Boolean))].join("، ") || "—";
-  return String(body || "")
+  /* جای‌خالیِ ثابت یا قابل تغییرِ خالی: همان بند (تا «؛» یا پایانِ سطر) نمی‌آید — نه «… در — اگه پیشنهادی دارید» */
+  const empty = [["{مشخصات ثابت}", "fixed"], ["{قابل تغییر}", "open"]].filter(([, k]) => join(k) === "—").map(([tk]) => tk);
+  const pruned = !empty.length ? String(body || "") : String(body || "").split("\n")
+    .map((ln) => { const cl = ln.split("؛ "); const keep = cl.filter((c) => !empty.some((tk) => c.includes(tk))); return keep.length === cl.length ? ln : keep.length ? keep.join("؛ ").replace(/([^.!؟])$/, "$1.") : null; })
+    .filter((ln) => ln !== null).join("\n");
+  return pruned
     .replace(/\{شرکت\}/g, ctx.company || "")
     .replace(/\{فهرست اقلام\}/g, list)
     .replace(/\{مشخصات ثابت\}/g, join("fixed"))
@@ -88,8 +111,8 @@ export function fillFm(body, ctx) {
     /* جای‌خالی‌های قبلیِ قالب‌ها (templates.js:fillTemplate) — قلمِ اول */
     .replace(/\{تامین‌کننده\}/g, ctx.supplier || "")
     .replace(/\{عنوان قلم\}/g, it0.title || "")
-    .replace(/\{مقدار\}/g, noQty ? "مقدار پس از جمع‌بندی" : it0.qty != null ? faN(it0.qty) : "")
-    .replace(/\{واحد\}/g, noQty ? "" : it0.unit || "")
+    .replace(/\{مقدار\}/g, noQty ? (qtyRange(it0.qty) ? `حدود ${faN(qtyRange(it0.qty).lo)} تا ${faN(qtyRange(it0.qty).hi)}` : "مقدار پس از جمع‌بندی") : it0.qty != null ? faN(it0.qty) : "")
+    .replace(/\{واحد\}/g, noQty && !qtyRange(it0.qty) ? "" : it0.unit || "")
     .replace(/\{مشخصات فنی\}/g, it0.spec || "—")
     .replace(/\{نام کارشناس\}/g, ctx.expertName || "");
 }
@@ -165,12 +188,17 @@ export async function fmContext(env, deps, items) {
 /* ------------------------------------------------------------------ */
 /* انتخاب‌ها                                                            */
 /* ------------------------------------------------------------------ */
+const VAR_K = "~var";
 export async function fmChoices(env, aid) {
   const rows = (await env.DB.prepare("SELECT k, tpl, body, by, at FROM fm_choice WHERE assignment_id=?").bind(aid).all()).results || [];
   const per = {};
-  let def = null;
-  for (const r of rows) { if (r.k === "*") def = { tpl: r.tpl, by: r.by, at: r.at }; else per[r.k] = { tpl: r.tpl || null, body: r.body || null, by: r.by, at: r.at }; }
-  return { def, per };
+  let def = null, varOff = null;
+  for (const r of rows) {
+    if (r.k === "*") def = { tpl: r.tpl, by: r.by, at: r.at };
+    else if (r.k === VAR_K) varOff = { reason: r.body || "", by: r.by, at: r.at };
+    else per[r.k] = { tpl: r.tpl || null, body: r.body || null, by: r.by, at: r.at };
+  }
+  return { def, per, varOff };
 }
 /** متنِ قالب (استاندارد یا جدولِ templates) — null اگر پیدا نشد یا مالِ این کارشناس نیست */
 export async function fmBody(env, expertId, key) {
@@ -197,7 +225,7 @@ export async function fmTextFor(env, { aid, expert, supplier, k, items, ctx, cho
     let b = tpl ? await fmBody(env, expert.id, tpl) : null;
     if (!b) { tpl = stdKey(ctx.family, 0); b = await fmBody(env, expert.id, tpl); }
     /* متنِ متفاوت: گونهٔ دیگرِ همان خانوادهٔ استاندارد برای گیرندهٔ بعدی */
-    if (b.std && ctx.variation && !(per && per.tpl)) { const vs = STD[b.family]; const v = (b.v + idx) % vs.length; tpl = stdKey(b.family, v); b = { ...b, body: vs[v] }; }
+    if (b.std && ctx.variation && !c.varOff && !(per && per.tpl)) { const vs = STD[b.family]; const v = (b.v + idx) % vs.length; tpl = stdKey(b.family, v); b = { ...b, body: vs[v] }; }
     if (b.std) fam = b.family === "cautious" || ctx.family === "cautious" ? "cautious" : b.family;
     body = fillFm(b.body, { company, supplier, expertName: expert.label || expert.name, family: fam, items: ctx.items, must: ctx.must });
   }
@@ -205,16 +233,22 @@ export async function fmTextFor(env, { aid, expert, supplier, k, items, ctx, cho
   return { text: body, tpl: per && per.body ? "manual" : tpl, ...chk, family: fam };
 }
 
-/** ذخیرهٔ انتخاب‌ها — {def: tplKey|null, per: {k: {tpl, body} | null}}؛ متنِ دستیِ ممنوع ← ۴۲۲ */
+/** ذخیرهٔ انتخاب‌ها — {def: tplKey|null, per: {k: {tpl, body} | null}, variation: false + reason | true}؛ متنِ دستیِ ممنوع ← ۴۲۲ */
 export async function fmSave(env, { aid, expert, b, check }) {
   const t = Date.now(), by = expert.label || expert.name, stmts = [];
+  /* خاموش کردنِ گونه‌های متن (تصمیم ۱): با دلیل؛ روشن کردن بی دلیل */
+  if (b && b.variation === false) {
+    const why = T(b.reason).slice(0, 300);
+    if (why.length < 3) throw new HttpError("برای متنِ یکسانِ همه دلیل بنویسید.", 422, { need_reason: true });
+    stmts.push(env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,by,at) VALUES (?,?,'off',?,?,?) ON CONFLICT(assignment_id,k) DO UPDATE SET body=excluded.body, by=excluded.by, at=excluded.at").bind(aid, VAR_K, why, by, t));
+  } else if (b && b.variation === true) stmts.push(env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k=?").bind(aid, VAR_K));
   if (b.def !== undefined) {
     if (b.def && !(await fmBody(env, expert.id, b.def))) throw new HttpError("این قالب پیدا نشد.", 422);
     stmts.push(b.def ? env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,by,at) VALUES (?, '*', ?, NULL, ?, ?) ON CONFLICT(assignment_id,k) DO UPDATE SET tpl=excluded.tpl, by=excluded.by, at=excluded.at").bind(aid, b.def, by, t)
       : env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k='*'").bind(aid));
   }
   for (const [k, v] of Object.entries((b && b.per) || {})) {
-    if (!k || k === "*") continue;
+    if (!k || k === "*" || k === VAR_K) continue;
     if (!v || (!v.tpl && !T(v.body))) { stmts.push(env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k=?").bind(aid, k)); continue; }
     if (v.tpl && !(await fmBody(env, expert.id, v.tpl))) throw new HttpError("این قالب پیدا نشد.", 422);
     const body = T(v.body).slice(0, 3000) || null;

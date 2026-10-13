@@ -387,7 +387,7 @@ async function fmView(env, ex, it, pick, ctx) {
     rows.push({ k: e.k, name: e.name, tpl: r.tpl, text: r.text, block: r.block, warn: r.warn, custom: !!(choices.per[e.k] && choices.per[e.k].body), own_tpl: !!(choices.per[e.k] && choices.per[e.k].tpl) });
   }
   const db = (await listTemplates(env, ex.id)).map((t) => ({ key: String(t.id), title: t.title, body: t.body, std: false, own: t.expert_id === ex.id }));
-  return { item_id: it.id, family: ctx.family, family_fa: FAMILY_FA[ctx.family], variation: ctx.variation, must: ctx.must, tokens: FM_TOKENS,
+  return { item_id: it.id, family: ctx.family, family_fa: FAMILY_FA[ctx.family], variation: ctx.variation, var_off: choices.varOff || null, must: ctx.must, tokens: FM_TOKENS,
     templates: [...stdList(), ...db], def: choices.def ? choices.def.tpl : null, rows };
 }
 const normConfirmedRow = (it) => { const n = parse(it && it.norm_json, null); return !!(n && T(n.head) && n.source !== "ai"); };
