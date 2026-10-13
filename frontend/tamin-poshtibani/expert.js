@@ -629,16 +629,22 @@
       ? `<button class="tp-btn xs" data-pkph="${esc(e.k)}" title="${esc(e.phones.filter((p) => p.panel).map((p) => p.phone + (p.label ? ` (${p.label})` : "")).join("، "))}">☑️ ${M(e.panel)} شمارهٔ پنل</button>`
       : `<button class="tp-btn xs ${e.on ? "warn" : ""}" data-pkph="${esc(e.k)}" title="کارشناس هوشمند فقط به شمارهٔ پنلِ تیک‌خورده پیامک می‌دهد">📱 ${e.phones.length ? "تیکِ پنل" : "شماره"}</button>`);
     const stCol = started || L.some((e) => e.go || e.st === "human");
+    /* «🧭 استراتژی استعلام» چیده شده: تیکِ متفاوت با برنامه علت می‌خواهد (جعبه، و برای «دیگر» متن) */
+    const SG = P.strategy || null;
+    if (S.crReg === undefined && TP.supProfile) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
+    const devOf = (e) => !!SG && P.mode === "pick" && !started && !e.go && !!e.on !== !!e.strat;
     const row = (e) => {
       const lock = A_ || !!e.go || e.st === "sent";
       const [cls, lab] = PK_ST[e.st] || ["", ""];
-      const why = P.mode === "pick" && e.top && !e.on && !started;
+      const why = SG ? devOf(e) : P.mode === "pick" && e.top && !e.on && !started;
       return `<tr class="${e.top ? "top" : ""} ${e.on ? "" : "off"} ${why ? "need" : ""}">
         <td><input type="checkbox" data-pk="${esc(e.k)}" ${e.on ? "checked" : ""} ${lock ? "disabled" : ""} title="${e.go ? "به کارشناس هوشمند سپرده شده" : A_ ? "در «سپردن یا برگشت» عوض نمی‌شود" : "دعوت شود؟"}"></td>
         <td class="num">${e.pos ? M(e.pos) : "—"}${e.top ? " ★" : ""}${e.rankF != null && e.rankF !== e.pos ? `<sup class="rk" title="رتبهٔ نهایی در سوابق">${M(e.rankF)}</sup>` : ""}</td>
-        <td class="rt"><b>${esc(e.name)}</b>${(() => { const ph = (e.phones || []).find((p) => p.panel) || (e.phones || [])[0]; return ph ? ` <span class="dim num pk-ph" dir="ltr" title="${ph.panel ? "شمارهٔ پنل" : "شماره (بی تیکِ پنل)"}">${esc(ph.phone)}</span>` : ""; })()}${!e.pos && !e.go && !A_ ? ` <button class="tp-btn xs" data-pkdel="${esc(e.k)}" title="از فهرست برداشته شود">✕</button>` : ""}
-          ${why ? `<div style="margin-top:4px"><input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="علتِ برداشتن (اجباری)" style="width:100%;min-width:200px"></div>`
-            : e.why ? `<div class="dim" style="font-size:.8rem;margin-top:2px;white-space:normal">علت: ${esc(e.why)}</div>` : ""}</td>
+        <td class="rt"><b>${esc(e.name)}</b>${S.crReg && TP.supProfile ? ` ${TP.supProfile.btn(e.name, { sid: e.reg, head: P.head })}` : ""}${e.src === "strategy" || e.hub ? ` <span class="dim" style="font-size:.78rem" title="بازار یا پاساژ">${esc(e.hub || "")}</span>` : ""}${(() => { const ph = (e.phones || []).find((p) => p.panel) || (e.phones || [])[0]; return ph ? ` <span class="dim num pk-ph" dir="ltr" title="${ph.panel ? "شمارهٔ پنل" : "شماره (بی تیکِ پنل)"}">${esc(ph.phone)}</span>` : ""; })()}${!e.pos && !e.go && !A_ ? ` <button class="tp-btn xs" data-pkdel="${esc(e.k)}" title="از فهرست برداشته شود">✕</button>` : ""}
+          ${why && SG ? `<div style="margin-top:4px;display:flex;gap:6px;flex-wrap:wrap"><select class="tp-input" data-pkbox="${esc(e.k)}" style="min-width:170px"><option value="">علت (اجباری)</option>${(P.why_boxes || []).map((b) => `<option ${e.why_box === b ? "selected" : ""}>${esc(b)}</option>`).join("")}</select>
+              <input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="${e.why_box === "دیگر" ? "توضیح (اجباری)" : "توضیح (اختیاری)"}" style="flex:1;min-width:160px"></div>`
+            : why ? `<div style="margin-top:4px"><input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="علتِ برداشتن (اجباری)" style="width:100%;min-width:200px"></div>`
+            : e.why || e.why_box ? `<div class="dim" style="font-size:.8rem;margin-top:2px;white-space:normal">علت: ${esc([e.why_box, e.why].filter(Boolean).join(" — "))}</div>` : ""}</td>
         <td><span class="chip">${esc(e.src_fa || "")}</span>${e.grade ? ` <span class="chip grade g${esc(e.grade)}" title="رده">${esc(e.grade)}</span>` : ""}</td>
         <td>${phCell(e)}</td>
         ${stCol ? `<td>${e.st !== "off" && (started || e.go || e.st === "human") ? `<span class="chip ${cls}">${lab}</span>` : `<span class="dim">—</span>`}</td>` : ""}</tr>`;
@@ -653,16 +659,53 @@
         ${started ? `<span class="chip ok" title="${TP.fmt(P.started_at)}">🚀 سپرده شد</span>` : ""}
         <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
+        ${P.cr && !started && !A_ ? `<button class="tp-btn sm" data-pkstrat title="سیاستِ استعلامِ این نوع قلم و برنامهٔ گیرندگان روی گراف (کمیاب یا گسترده)">🧭 استراتژی استعلام</button>` : ""}
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
         ${!started && !D_ ? `<button class="tp-btn sm warn" data-pkback title="این قلم را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر</button>` : ""}
         ${startBtn}</div>
       <div class="pk-rule"><span class="chip" title="${esc(help)}">${esc(rule)}</span>${P.n ? `<span class="dim">${M(P.n)} تأمین‌کننده در سوابق</span>` : ""}${TP.ui.info("expert.picks", "راهنمای فهرست دعوت")}</div>
+      ${SG ? `<div class="tp-note" style="margin:6px 0">🧭 تیک‌ها با استراتژیِ «${esc(SG.mode_fa || "")}»${SG.cautious ? " (محتاط)" : ""} چیده شد: ${M(SG.n_wave1)} گیرندهٔ موج اول${SG.dominant_hub ? `، بازارِ غالب «${esc(SG.dominant_hub)}»` : ""}. هر تیکِ دیگر علت می‌خواهد.
+          ${(SG.notes || []).concat(SG.relaxations || []).length ? `<div class="dim" style="font-size:.8rem;margin-top:4px">${(SG.notes || []).concat(SG.relaxations || []).map((n) => `• ${esc(n)}`).join("<br>")}</div>` : ""}</div>`
+        : P.cr && P.cr.family === "cautious" && !started && !A_ ? `<div class="tp-note warn" style="margin:6px 0">این قلم کمیاب یا متمرکز است (${esc(P.cr.mode_fa || "")})؛ استعلام محتاط را بچینم؟ <button class="tp-btn xs primary" data-pkstrat-go="1">بچین</button> <button class="tp-btn xs" data-pkstrat>ببینم</button></div>` : ""}
       ${P.msg && !L.length ? `<div class="tp-note warn">${esc(P.msg)}</div>` : ""}
       ${L.length ? `<div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th title="تیک = پیامِ دعوت می‌رود">دعوت</th><th title="★ = پیش‌تیک؛ برداشتنش علت می‌خواهد">#</th><th class="rt">تأمین‌کننده</th><th>از</th><th>شمارهٔ پنل</th>${stCol ? "<th>وضعیت</th>" : ""}</tr></thead>
         <tbody>${L.map(row).join("")}</tbody></table></div>`
         : `<div class="empty">فهرستی از سوابق نیامد${A_ ? " — در «سپردن یا برگشت» فقط «↩️ برگرداندن به مدیر» می‌ماند" : " — از «➕ افزودن» یا «جستجوی هوشمند» تأمین‌کننده بیفزایید"}.</div>`}
       ${miss.length ? `<div class="tp-note warn" style="margin-top:8px">برای «شروع»، علتِ برداشتنِ ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} را کنار همان نام بنویسید.</div>` : ""}</div>`;
+  }
+  /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): سیاستِ نوع قلم و برنامهٔ گیرندگان روی گراف — از worker/cr-engine.js، بی مدل */
+  const VER_FA = { 2: "✔ تأییدشده", 1: "هویت قابل احراز", 0: "هنوز راستی‌آزمایی نشده" };
+  async function pkStratApply(it, cautious) {
+    const b = TP.busy("🧭 چیدن تیک‌ها", cautious ? "برنامهٔ محتاط: کم‌شمار و پخش در بازارها" : "برنامهٔ استراتژیِ این نوع قلم");
+    try { S.picks[it.id] = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body: { strategy: { cautious: !!cautious } } }); b.close(); render(); okTick("تیک‌ها چیده شد"); }
+    catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+  }
+  async function pkStratUI(it) {
+    const P = S.picks[it.id]; if (!P || !P.head) return;
+    const q = (c) => `/cr/plan?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}${c ? "&cautious=1" : ""}`;
+    const b = TP.busy("🧭 استراتژی استعلام", esc(P.head));
+    let d, dc = null;
+    try { d = await TP.api(q(false)); if (d.family !== "cautious") dc = await TP.api(q(true)).catch(() => null); }
+    catch (e) { b.close(); return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    b.close();
+    const pol = d.policy, dist = pol.distribution || {}, dis = pol.disclosure || {};
+    const who = (x) => `<li>${esc(x.name)}${x.incumbent ? ` <span class="chip">${x.trusted ? "فعلیِ معتمد" : "فعلی"}</span>` : ""}${x.hub ? ` <span class="dim">${esc(x.hub)}</span>` : ""}${!x.incumbent && VER_FA[x.verification] ? ` <span class="chip ${x.verification >= 2 ? "ok" : "warn"}">${VER_FA[x.verification]}</span>` : ""}</li>`;
+    const plan = (p) => `<b>موج اول (${M(p.plan.wave1.length)} از ${M(p.policy.n_wave1)})</b><ul style="margin:4px 0 8px;padding-inline-start:20px;line-height:1.9">${p.plan.wave1.map(who).join("") || "<li class='dim'>نامزدی نیست</li>"}</ul>
+      ${p.plan.reserve.length ? `<b class="dim">ذخیره</b><div class="dim" style="font-size:.84rem">${p.plan.reserve.slice(0, 6).map((x) => esc(x.name)).join("، ")}</div>` : ""}
+      ${(p.plan.notes || []).concat(p.plan.relaxations || []).length ? `<div class="tp-note warn" style="margin-top:6px;font-size:.84rem">${(p.plan.notes || []).concat(p.plan.relaxations || []).map((n) => `• ${esc(n)}`).join("<br>")}</div>` : ""}`;
+    const m = TP.modal(`🧭 استراتژی استعلام — ${esc(P.head)}`, `<div style="line-height:1.9">
+        <div><b>${esc(d.mode_fa)}</b>${d.competition_fa && d.competition_fa !== d.mode_fa ? ` ← رقابتِ «${esc(d.competition_fa)}»` : ""} · ردهٔ ${esc(pol.tier)} · ${M(pol.n_wave1)} گیرندهٔ موج اول، سقف ${M(pol.n_max)}${pol.waves > 1 ? ` · موج دوم پس از ${M(pol.wave2_after_days)} روز اگر: ${esc(pol.wave2_trigger || "")}` : ""}</div>
+        <div class="dim" style="font-size:.86rem">${(pol.why || []).map(esc).join("<br>")}</div>
+        <div style="font-size:.86rem;margin-top:6px">پخش: ${dist.max_per_hub ? `حداکثر ${M(dist.max_per_hub)} در هر بازار` : "حداکثر نیمی در یک بازار"} · دست‌کم ${M(dist.min_markets)} بازار${dist.need_outsider ? " · یک گیرنده بیرون از بازارِ غالب" : ""} · حداکثر ${M(dist.max_incumbents)} تأمین‌کنندهٔ فعلی</div>
+        <div style="font-size:.86rem">افشا: مقدار «${esc(dis.quantity || "")}» · فوریت «${esc(dis.urgency || "")}»${dis.text_variation ? " · متنِ متفاوت برای هر گیرنده" : ""}</div>
+        <div style="font-size:.86rem">زمان: ${esc(pol.timing || "")}</div>
+        ${(d.notes || []).length ? `<div class="dim" style="font-size:.82rem">${d.notes.map(esc).join("<br>")}</div>` : ""}
+        <hr style="border:0;border-top:1px solid var(--tp-line);margin:10px 0">${plan(d)}
+        ${dc ? `<hr style="border:0;border-top:1px solid var(--tp-line);margin:10px 0"><b>اگر این قلم کمیاب یا متمرکز است — استعلام محتاط</b><div style="margin-top:4px">${plan(dc)}</div>` : ""}
+        <div class="dim" style="font-size:.8rem;margin-top:8px">با چیدن، تیک‌های فهرست با همین برنامه عوض می‌شود؛ هر تیکِ دیگر پیش از «🚀 شروع» علت می‌خواهد. کشف‌شده‌ها تا شمارهٔ همراهشان با تیکِ پنل ثبت نشود دعوت نمی‌شوند.</div></div>
+        <div class="toolrow" style="margin-top:10px;gap:8px"><button class="tp-btn primary" data-st-apply="0">🧭 چیدن با همین</button>${dc ? `<button class="tp-btn warn" data-st-apply="1">استعلام محتاط را بچین</button>` : ""}</div>`, null, "بستن", "");
+    m.querySelectorAll("[data-st-apply]").forEach((x) => x.onclick = () => { m.remove(); pkStratApply(it, x.dataset.stApply === "1"); });
   }
   function pkPhoneUI(it, k) {
     const P = S.picks[it.id], e = P && P.list && P.list.find((x) => x.k === k); if (!e) return;
@@ -910,6 +953,10 @@
     const f = (lab, val, cls) => `<div class="f"><b>${lab}</b><span class="${cls || ""}">${val == null || val === "" ? "—" : esc(val)}</span></div>`;
     const per = d.item && d.item.unit ? ` · هر ${esc(d.item.unit)}` : "";
     return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.grade ? `<span class="chip grade g${esc(p.grade)}" title="ردهٔ تأمین‌کننده">رده ${esc(p.grade)}</span>` : ""}${p.code ? `<span class="chip num" title="کد تأمین‌کننده">${esc(p.code)}</span>` : ""}
+        ${(() => { /* «👤 پروفایل کامل» (sup-profile.js) — فقط وقتی کلیدِ دفتر تأمین‌کنندگان در پنل پشتیبانی روشن است */
+          if (!TP.supProfile) return "";
+          if (S.crReg === undefined) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
+          return S.crReg ? TP.supProfile.btn(p.name) : ""; })()}
         <button class="tp-btn xs" data-close-prof style="margin-inline-start:auto">بستن</button></div>
       <div class="gridp">
         ${f("دفعات خرید", `${M(p.n)} بار (رتبه ${M(p.rankN)})`, "num")}
@@ -2458,6 +2505,10 @@
     /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ همین قلم و «🚀 شروع» */
     Q("[data-pk]").forEach((c) => c.onchange = () => pkEdit(item(), { on: { [c.dataset.pk]: c.checked } }));
     Q("[data-pkwhy]").forEach((x) => x.onchange = () => pkEdit(item(), { why: { [x.dataset.pkwhy]: x.value } }));
+    /* «🧭 استراتژی استعلام»: علتِ تیکِ متفاوت با برنامه، دیدنِ برنامه و چیدن */
+    Q("[data-pkbox]").forEach((s) => s.onchange = () => pkEdit(item(), { whybox: { [s.dataset.pkbox]: s.value } }));
+    Q("[data-pkstrat]").forEach((b) => b.onclick = () => pkStratUI(item()));
+    Q("[data-pkstrat-go]").forEach((b) => b.onclick = () => pkStratApply(item(), true));
     Q("[data-pkdel]").forEach((b) => b.onclick = () => pkEdit(item(), { remove: [b.dataset.pkdel] }));
     Q("[data-pkph]").forEach((b) => b.onclick = () => pkPhoneUI(item(), b.dataset.pkph));
     Q("[data-pkadd-name]").forEach((b) => b.onclick = () => pkEdit(item(), { add: [{ name: b.dataset.pkaddName, src: "manual" }] }));

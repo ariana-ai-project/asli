@@ -48,20 +48,25 @@ const num = (v) => { if (v == null || v === "") return null; const n = Number(v)
 const nz = (v) => (v == null || v === "" ? null : v);
 const bool = (v) => v === true || v === "True" || v === "true" || v === "1";
 
-/* ---------------- نوشتنِ SQL: چند ردیف در هر دستور، هر دستور کمتر از ۹۰ کیلوبایت ---------------- */
+/* ---------------- نوشتنِ SQL: چند ردیف در هر دستور، هر دستور کمتر از ۹۰ کیلوبایت (بایتِ UTF-8؛ سقفِ D1 صد کیلوبایت است و
+   هر حرفِ فارسی دو بایت — شمردنِ نویسه دستورهای ۱۸۰ کیلوبایتی می‌ساخت و D1 با SQLITE_TOOBIG ردشان می‌کرد) ---------------- */
 const lit = (v) => (v == null ? "NULL" : typeof v === "number" ? (Number.isFinite(v) ? String(v) : "NULL") : `'${String(v).replace(/'/g, "''")}'`);
 const MAX_STMT = 90_000;
+const bytes = (s) => Buffer.byteLength(s, "utf8");
 const FILES = [];
 function sqlFile(name, table, cols, rows, { writesPerRow = 1, mode = "INSERT OR REPLACE" } = {}) {
   const out = [];
   let cur = [], size = 0;
   const head = `${mode} INTO ${table} (${cols.join(",")}) VALUES\n`;
-  const flush = () => { if (cur.length) out.push(head + cur.join(",\n") + ";"); cur = []; size = 0; };
+  const hb = bytes(head);
+  const flush = () => { if (cur.length) out.push(head + cur.join(",\n") + ";"); cur = []; size = hb; };
+  size = hb;
   for (const r of rows) {
     const t = `(${cols.map((c) => lit(r[c])).join(",")})`;
-    if (t.length + head.length > MAX_STMT) throw new Error(`${table}: یک ردیف ${t.length} بایت است`);
-    if (size + t.length > MAX_STMT) flush();
-    cur.push(t); size += t.length + 2;
+    const tb = bytes(t);
+    if (tb + hb > MAX_STMT) throw new Error(`${table}: یک ردیف ${tb} بایت است`);
+    if (size + tb + 2 > MAX_STMT) flush();
+    cur.push(t); size += tb + 2;
   }
   flush();
   writeFileSync(join(OUT, name), out.join("\n") + "\n");

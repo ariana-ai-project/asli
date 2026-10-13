@@ -318,7 +318,9 @@
     const back = phoneMode ? "" : `<button class="tp-btn sm" data-tab="chat" title="برگشت به گفت‌وگو">→ گفت‌وگو${badge(S.unseen)}</button>`;
     const sum = S.d.lines.reduce((x, l) => x + (l.total || 0), 0), priced = S.d.lines.filter((l) => l.price != null).length;
     const av = `<span class="sp-av" style="--av:${TP.ui.avColor(th.supplier)}" aria-hidden="true">${esc(TP.ui.avInitial(th.supplier))}</span>`;
-    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${th.demo ? ` <span class="sp-tag">فرضی</span>` : ""}</h3>
+    /* «👤 پروفایل تأمین‌کننده» (sup-profile.js) — فقط وقتی کلیدِ دفتر تأمین‌کنندگان در پنل پشتیبانی روشن است */
+    if (S.crReg === undefined && TP.supProfile) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
+    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${th.demo ? ` <span class="sp-tag">فرضی</span>` : ""}${S.crReg && !th.demo ? ` ${TP.supProfile.btn(th.supplier)}` : ""}</h3>
         <span class="sp-muted">📞 <span dir="ltr">${esc(th.phone || "—")}</span>${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست <b>${esc(th.request_id)}</b></span></div>${back}</div>
       <div class="sp-kpis">${TP.ui.stat({ label: "اقلام", value: fa(S.d.lines.length), icon: "box", sub: `${fa(priced)} با قیمت` })}
         ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}

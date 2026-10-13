@@ -55,7 +55,7 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["td", "🔨 مناقصه"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["fb", "⭐ ارزیابی ربات"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["td", "🔨 مناقصه"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["fb", "⭐ ارزیابی ربات"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"], ["cr", "🧭 استراتژی و دفتر"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
@@ -143,6 +143,8 @@
     S.view = "app"; render();
     try { await loadExperts(); } catch (_) { return; /* ۴۰۱ → صفحهٔ ورود */ }
     loadAlarms();
+    /* «🧭 استراتژی و دفتر» (cr-admin.js): کلیدها از همان ابتدا، تا دکمهٔ 👤 در مکاتبات بداند روشن است یا نه */
+    if (window.TP_CR) window.TP_CR.boot();
     loadTab();
     if (S.tab !== "ai") aiPulse();
   }
@@ -170,6 +172,7 @@
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
     else if (S.tab === "td" && window.TP_TENDER) window.TP_TENDER.load(force);
     else if (S.tab === "fb" && window.TP_FB) window.TP_FB.load(force);
+    else if (S.tab === "cr" && window.TP_CR) window.TP_CR.load(force);
     else if (S.tab === "ai") { if (force || !S.ai) loadAi(); if (force && S.aiEx && window.TP_AI) window.TP_AI.load(); if (S.aiView === "rules" && (force || !S.rules)) loadRules(); if (S.aiView === "usd" && (force || !S.usd)) loadUsd(); if (S.aiView === "rank" && (force || !S.rank)) loadRank(); if (S.aiView === "sw" && (force || !S.sw)) loadSw(); if (S.aiView === "md" && (force || !S.md)) loadMd(); }
     else if (S.tab === "dl") { if (S.dlId) { if (force || !S.dlD) loadDl(S.dlId); } else if (force || !S.dl) loadDls(); }
     render();
@@ -182,7 +185,7 @@
 
   /* ---------- سرآیند ---------- */
   /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها — مثلِ پنل مدیر: چهار بخشِ روزمره و دو گروهِ ▾ (مهر ۱۴۰۵) */
-  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", td: "🔨 مناقصه", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", fb: "⭐ ارزیابی ربات", log: "رخدادها", chg: "🧩 تغییرات اقلام" };
+  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", td: "🔨 مناقصه", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", fb: "⭐ ارزیابی ربات", log: "رخدادها", chg: "🧩 تغییرات اقلام", cr: "🧭 استراتژی و دفتر" };
   function vTop() {
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
@@ -202,7 +205,7 @@
     const grp = (label, keys) => TP.ui.menu({ cls: keys.includes(S.tab) ? "on start" : "start",
       btn: `<button type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${keys.includes(S.tab) ? TAB_FA[S.tab] : label}${cnt(keys.reduce((a, k) => a + (N[k] || 0), 0))}${chev}</button>`,
       items: keys.map((k) => ({ label: TAB_FA[k], attrs: `data-tab="${k}"`, cnt: N[k] || null })) });
-    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${tab("td", window.TP_TENDER && window.TP_TENDER.live() ? "●" : 0)}${grp("هوشمند", ["ai", "dl", "fb"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
+    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${tab("td", window.TP_TENDER && window.TP_TENDER.live() ? "●" : 0)}${grp("هوشمند", ["ai", "dl", "fb", "cr"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
       <span class="spacer"></span>${TP.ui.info(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
@@ -547,7 +550,7 @@
     const finals = (d.bundles || []).filter((b) => b.state === "final").length;
     const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
     return `<div class="sv-thi">
-      <header class="sv-thh">${avOf(t.supplier, "", "lg")}<div class="t"><h3>${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}</h3>
+      <header class="sv-thh">${avOf(t.supplier, "", "lg")}<div class="t"><h3>${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}${!t.demo && window.TP_CR && window.TP_CR.reg() ? ` ${TP.supProfile.btn(t.supplier)}` : ""}</h3>
           <span class="dim">${t.phone ? `📞 <span dir="ltr">${esc(t.phone)}</span>${t.phone_label ? ` (${esc(t.phone_label)})` : ""}` : "شماره‌ای ثبت نشده"}</span></div></header>
       <div class="sv-thm"><span>${TP.ui.ICON.project}درخواست <b class="num">${esc(t.request_id)}</b>${t.party ? ` · ${esc(t.party)}` : ""}</span>
         <span>${avOf(exName(t.expert_id), "")}${esc(exName(t.expert_id))}</span>${st ? `<span class="chip ${st[2]}">${st[0]} ${st[1]}</span>` : ""}</div>
@@ -1344,6 +1347,7 @@
     if (S.tab === "td") return window.TP_TENDER ? window.TP_TENDER.view() : "";
     /* ⭐ ارزیابیِ کارشناس هوشمند: امتیازها و نظرهای کارشناسان (fb-admin.js) */
     if (S.tab === "fb") return window.TP_FB ? window.TP_FB.view() : "";
+    if (S.tab === "cr") return window.TP_CR ? window.TP_CR.view() : "";
     if (S.tab === "ai") return vAi();
     if (S.tab === "dl") return vDl();
     if (S.tab === "chg") return vChg();
@@ -1519,6 +1523,10 @@
   /* تبِ «🔨 مناقصه» (tender-admin.js): همان api و رسمِ همین پنل */
   if (window.TP_TENDER) { window.TP_TENDER.configure({ api, render, download, cmResult: (aid) => cmResult(aid) }); window.TP_TENDER.mount(app); }
   if (window.TP_FB) { window.TP_FB.configure({ api, render, download }); window.TP_FB.mount(app); }
+  /* دفتر تأمین‌کنندگان و استراتژی (cr-admin.js، sup-profile.js): مسیرهای /sreg/* بیرونِ /support اند، با همان نشانهٔ ورود */
+  const rawApi = (p, o) => { const s = sess.get(); return TP.api(p, { ...(o || {}), headers: { ...((o && o.headers) || {}), ...(s ? { "X-Support-Token": s.token } : {}) } }); };
+  if (TP.supProfile) TP.supProfile.configure({ api: rawApi });
+  if (window.TP_CR) { window.TP_CR.configure({ api, raw: rawApi, render }); window.TP_CR.mount(app); }
 
   /* ---------- شروع ---------- */
   (async function boot() {
