@@ -43,6 +43,13 @@
   }
 
   /* ---------- نماها ---------- */
+  /** «حالت کار»ِ نوع قلم با تغییرِ پشتیبانی و کفِ مکاتبات («⏸ بی‌مهلت» وقتی کلیدِ hold روشن است) */
+  function wfCell(d, h) {
+    const wf = h.wf_over ? h.wf_over.value : h.workflow;
+    const w = (d.workflows || []).find((x) => x.key === wf);
+    const floor = w && w.sup !== "auto" && (S.flags || {}).hold ? ` <span class="chip ${w.sup === "hold" ? "warn" : ""}" title="کفِ حالتِ مکاتباتِ کارشناس هوشمند برای این نوع قلم">${esc(w.sup_fa)}</span>` : "";
+    return `${esc(wf || "")}${floor}${h.wf_over ? `<div class="dim" style="font-size:.76rem">به تصمیم ${esc(h.wf_over.by || "")}: ${esc(h.wf_over.reason || "")}</div>` : ""}`;
+  }
   function vHeads() {
     const d = S.hd;
     if (!d) return TP.ui.loader("");
@@ -51,7 +58,7 @@
     const rows = d.list.map((h) => `<tr><td class="rt"><b>${esc(h.head)}</b> <span class="dim" style="font-size:.78rem">${esc(h.cluster || "")}</span></td>
         <td><span class="chip ${FAM_TONE[h.moved ? "special" : h.family] || ""}">${esc(h.moved ? (d.modes[h.moved.value] || h.moved.value) : h.mode_fa || h.rfq_mode)}</span>${h.moved ? `<div class="dim" style="font-size:.76rem">به تصمیم ${esc(h.moved.by || "")}: ${esc(h.moved.reason || "")}</div>` : ""}</td>
         <td class="num">${h.n_over ? `${fa(h.n_over.value.n_wave1)}/${fa(h.n_over.value.n_max)} <span class="chip warn" title="${esc(h.n_over.reason || "")}">استثنا</span>` : `${fa(h.n_wave1 || "—")}/${fa(h.n_max || "—")}`}</td>
-        <td>${esc(h.tier || "")}</td><td>${esc(h.workflow || "")}</td><td>${esc(h.priority || "")}</td>
+        <td>${esc(h.tier || "")}</td><td>${wfCell(d, h)}</td><td>${esc(h.priority || "")}</td>
         <td><button class="tp-btn xs" data-cr-move="${esc(h.head)}">جابه‌جایی یا استثنا</button></td></tr>`).join("");
     const T = S.rfqnDraft || (S.rfqn && S.rfqn.table) || {};
     const rfq = S.rfqn ? `<details class="tp-card" style="margin-top:12px;padding:10px 14px"><summary><b>جدولِ شمارِ موج اول و سقف</b> <span class="dim">— پیش‌فرض از بسته؛ «۶» همان گسترده در ردهٔ A</span></summary>
@@ -119,6 +126,7 @@
         <div class="toolrow" style="gap:8px"><label class="tp-field"><b>موج اول</b><input class="tp-input num" data-mv-n1 style="width:70px" value="${h && h.n_over ? h.n_over.value.n_wave1 : ""}"></label>
           <label class="tp-field"><b>سقف</b><input class="tp-input num" data-mv-n2 style="width:70px" value="${h && h.n_over ? h.n_over.value.n_max : ""}"></label>
           <label class="chkline"><input type="checkbox" data-mv-nclear> برداشتنِ استثنای شمار</label></div>
+        <label class="tp-field"><b>حالت کار</b><select class="tp-input" data-mv-wf><option value="">بی تغییر (${esc(h ? (h.wf_over ? h.wf_over.value : h.workflow) || "—" : "—")})</option>${(d.workflows || []).map((w) => `<option value="${esc(w.key)}">${esc(w.key)}${w.sup !== "auto" ? ` — مکاتبات دست‌کم ${esc(w.sup_fa)}` : ""}</option>`).join("")}${h && h.wf_over ? `<option value="__clear">برگشت به دادهٔ تحقیق (${esc(h.workflow || "")})</option>` : ""}</select></label>
         <label class="tp-field"><b>دلیل (اجباری)</b><input class="tp-input" data-mv-why style="width:100%" placeholder="چرا این نوع قلم جابه‌جا می‌شود؟"></label>
         <div class="dim" style="font-size:.8rem">تاریخچه می‌ماند و ورودِ دوبارهٔ تحقیق این تصمیم را پاک نمی‌کند.</div></div>`, async () => {
       const g = (k) => m.querySelector(k);
@@ -126,6 +134,8 @@
       const mode = g("[data-mv-mode]").value, clear = [];
       if (mode === "__clear") clear.push("mode"); else if (mode) body.mode = mode;
       if (g("[data-mv-nclear]").checked) clear.push("n");
+      const wf = g("[data-mv-wf]").value;
+      if (wf === "__clear") clear.push("workflow"); else if (wf) body.workflow = wf;
       else if (g("[data-mv-n1]").value && g("[data-mv-n2]").value) body.n = { n_wave1: Number(TP.digits ? TP.digits(g("[data-mv-n1]").value) : g("[data-mv-n1]").value), n_max: Number(TP.digits ? TP.digits(g("[data-mv-n2]").value) : g("[data-mv-n2]").value) };
       if (clear.length) body.clear = clear;
       try { await C.api(`/strategy/heads/${encodeURIComponent(head)}`, { method: "PUT", body }); await load(true); }

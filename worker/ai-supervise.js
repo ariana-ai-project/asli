@@ -10,13 +10,17 @@
  *         نهایی»، بسته با پیامِ او برمی‌گردد، رد می‌شود یا فعلاً می‌ماند و تصمیمش از آن پس با خودِ اوست (manualBundles)؛
  *       – بی‌پاسخ تا سرِ مهلت: بی بررسی خودکار می‌رود (state='auto'؛ Cronِ هر دقیقه یا خودِ صفحهٔ باز سرِ صفر — ai-agent.js:propsDue).
  *   • «🤖 خودکار»: کارشناس هوشمند خودش مذاکره می‌کند و فقط وقتی جوابِ کارشناس لازم است «🚨 پرسش از کارشناس» می‌فرستد.
+ *   • «⏸ بی‌مهلت» (کلیدِ hold پشتیبانی؛ تصمیم ۵ سند «پیام اول، استراتژی‌ها…»): همان پیشنهاد، بی due_at — تا «✅ ارسال» یا «✏️ رد»ِ
+ *     کارشناس نمی‌رود (تأیید پیش از هر پیام).
+ * با کلیدِ hold، «حالت کار»ِ نوع قلمِ اقلامِ گفت‌وگو (cr_heads.workflow، یا تغییرِ پشتیبانی) کفِ حالت است و سخت‌گیرترینِ این دو اجرا
+ * می‌شود: «کاملاً هوش مصنوعی» (با شرط تحویل یا بی آن) بی کف، «ترکیبی» دست‌کم «⏱ با مهلت»، «کارشناس‌محور» همیشه «⏸ بی‌مهلت».
  * پیامِ تازهٔ تأمین‌کننده پیشنهادِ پاسخِ معطل را کنار می‌گذارد (stale) و کارشناس هوشمند پاسخِ تازه می‌نویسد. دعوت، افزودنِ قلم به
  * گفت‌وگو، یادداشت‌های درونی و «🚨 پرسش از کارشناس» پیشنهاد نمی‌شوند؛ «🚨 باز کردنِ اضطراری» (ai-takeover.js) سرِ جایش است.
  * ستون‌های قدیمیِ assignments.sup_on و items.sup_on و «supervise»ِ نوعِ قلم دیگر خوانده نمی‌شوند.
  * بی ایمپورت از ai-agent.js و sp-core.js، تا sp-core.js، api.js و bot.js بی حلقهٔ ایمپورت بخوانند.
  */
 import { HttpError } from "./http.js";
-import { AI_SUP_SQL } from "./ai-lock.js";
+import { AI_SUP_SQL, WF_SQL, LINE_HEAD_SQL } from "./ai-lock.js";
 
 const now = () => Date.now();
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
@@ -26,8 +30,18 @@ const latin = (v) => String(v == null ? "" : v).replace(/[۰-۹]/g, (d) => FA.in
 
 export const SUP_MIN = 1, SUP_MAX = 60;
 export const SUP_DEFAULT = { mode: "timer", minutes: 10 };
-export const SUP_MODES = ["timer", "auto"];
-export const SUP_FA = { timer: "⏱ با مهلت", auto: "🤖 خودکار" };
+export const SUP_MODES = ["timer", "auto", "hold"];
+export const SUP_FA = { timer: "⏱ با مهلت", auto: "🤖 خودکار", hold: "⏸ بی‌مهلت" };
+/** سخت‌گیری: خودکار < با مهلت < بی‌مهلت */
+export const SUP_RANK = { auto: 0, timer: 1, hold: 2 };
+/** «حالت کار»ِ نوع قلم (دادهٔ تحقیق، I-02 §۷) ← کفِ حالت */
+export const WORKFLOW_SUP = { "کاملاً هوش مصنوعی": "auto", "کاملاً هوش مصنوعی (با شرط تحویل)": "auto", "ترکیبی": "timer", "کارشناس‌محور": "hold" };
+export const WORKFLOWS = Object.keys(WORKFLOW_SUP);
+/** کلیدِ «⏸ بی‌مهلت» در پنل پشتیبانی (settings.crFlags.hold؛ همان cr-api.js:crFlags، بی ایمپورت تا حلقه نسازد) */
+export async function holdOn(env) {
+  const r = await env.DB.prepare("SELECT value FROM settings WHERE key='crFlags'").first().catch(() => null);
+  return !!(parse(r && r.value, {}) || {}).hold;
+}
 export const PROP_FA = { reply: "💬 پاسخ", final: "🏁 تأیید نهایی", act: "🧾 تصمیمِ بسته" };
 export const PROP_STATE_FA = { pending: "منتظرِ شما", ok: "✅ فرستادید", auto: "⏱ بی‌پاسخ ماند و خودکار رفت", no: "✏️ رد کردید", stale: "کنار رفت — پیامِ تازهٔ تأمین‌کننده", off: "کنار رفت" };
 /** ردِ «تأیید نهایی»: بسته با پیامِ کارشناس برمی‌گردد، رد می‌شود یا فعلاً می‌ماند */
@@ -46,7 +60,8 @@ export async function getSup(env, expertId) {
 /** ذخیره با سنجش (۴۲۲ برای حالت یا دقیقهٔ نادرست)؛ کارهای پسِ ذخیره (مهلتِ تازهٔ پیشنهادهای معطل، رفتنِ همه با «خودکار») در api.js */
 export async function saveSup(env, expertId, body) {
   const mode = String((body && body.mode) || "").trim();
-  if (!SUP_MODES.includes(mode)) throw new HttpError("حالت باید «⏱ با مهلت» یا «🤖 خودکار» باشد.", 422);
+  const hold = await holdOn(env);
+  if (!SUP_MODES.includes(mode) || (mode === "hold" && !hold)) throw new HttpError(hold ? "حالت باید «⏱ با مهلت»، «⏸ بی‌مهلت» یا «🤖 خودکار» باشد." : "حالت باید «⏱ با مهلت» یا «🤖 خودکار» باشد.", 422);
   const cur = await getSup(env, expertId);
   let minutes = cur.minutes;
   if (body && body.minutes != null && body.minutes !== "") {
@@ -62,14 +77,39 @@ export async function saveSup(env, expertId, body) {
 }
 
 /**
- * حالتِ یک گفت‌وگو: {on, chat, bundle, minutes} — on یعنی کارشناسِ فعلیِ ارجاع «با مهلت» است (پیام‌ها و تصمیم‌ها پیشنهاد می‌شوند).
- * فقط در مسیرهای کارشناس هوشمند صدا زده می‌شود؛ مالکیتِ گفت‌وگو را صدازننده سنجیده است.
+ * کفِ حالتِ یک گفت‌وگو از «حالت کار»ِ نوع قلمِ خط‌هایش: {mode, head, workflow} برای سخت‌گیرترین، یا null (بی دادهٔ تحقیق یا همه
+ * «کاملاً هوش مصنوعی»). فقط با کلیدِ hold معنا دارد؛ صدازننده می‌سنجد.
+ */
+export async function supFloor(env, threadId) {
+  const rows = (await env.DB.prepare(`SELECT ch.head, ${WF_SQL("ch")} AS wf FROM sp_lines sl JOIN cr_heads ch ON ch.head=${LINE_HEAD_SQL("sl")} WHERE sl.thread_id=?`)
+    .bind(threadId).all().catch(() => null)) || {};
+  let floor = null;
+  for (const x of rows.results || []) {
+    const mode = WORKFLOW_SUP[x.wf] || "auto";
+    if (SUP_RANK[mode] > 0 && (!floor || SUP_RANK[mode] > SUP_RANK[floor.mode])) floor = { mode, head: x.head, workflow: x.wf };
+  }
+  return floor;
+}
+/** حالتِ مؤثر: سخت‌گیرترینِ تنظیمِ کارشناس و کفِ نوع قلم؛ بی کلیدِ hold، «بی‌مهلت»ِ ذخیره‌شده همان «با مهلت» است */
+export function supEffective(cfg, floor, hold) {
+  let mode = cfg.mode === "hold" && !hold ? "timer" : cfg.mode;
+  if (hold && floor && SUP_RANK[floor.mode] > SUP_RANK[mode]) mode = floor.mode;
+  return mode;
+}
+
+/**
+ * حالتِ یک گفت‌وگو: {on, chat, bundle, minutes, hold, mode, floor} — on یعنی پیام‌ها و تصمیم‌ها پیشنهاد می‌شوند («با مهلت» یا
+ * «بی‌مهلت»)؛ hold یعنی پیشنهاد بی مهلت است. فقط در مسیرهای کارشناس هوشمند صدا زده می‌شود؛ مالکیتِ گفت‌وگو را صدازننده سنجیده است.
  */
 export async function supOfThread(env, threadId) {
   const r = await env.DB.prepare(`SELECT e.sup_json, ${AI_SUP_SQL("t.id")} AS sup FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id JOIN experts e ON e.id=a.expert_id
       WHERE t.id=?`).bind(threadId).first().catch(() => null);
-  if (!r || !r.sup) return { on: false, chat: false, bundle: false, minutes: 0 };
-  return { on: true, chat: true, bundle: true, minutes: supCfg(r.sup_json).minutes };
+  if (!r || !r.sup) return { on: false, chat: false, bundle: false, minutes: 0, hold: false, mode: "auto", floor: null };
+  const cfg = supCfg(r.sup_json);
+  const hold = await holdOn(env);
+  const floor = hold ? await supFloor(env, threadId) : null;
+  const mode = supEffective(cfg, floor, hold);
+  return { on: mode !== "auto", chat: true, bundle: true, minutes: cfg.minutes, hold: mode === "hold", mode, floor };
 }
 
 /**

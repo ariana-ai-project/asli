@@ -30,7 +30,7 @@ import { limitsOf, combineLocks, violations, violationError, LIMIT_FA } from "./
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
-import { manualBundles, propsOf, getSup } from "./ai-supervise.js";
+import { manualBundles, propsOf, getSup, supOfThread } from "./ai-supervise.js";
 import { threadRates } from "./ai-rates.js";
 import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
@@ -707,6 +707,13 @@ export function bundleOut(b, side, opt = {}) {
 }
 export const lineMissing = (l) => [Number(l.qty) > 0 ? null : "مقدار", T(l.unit) ? null : "واحد", Number(l.price) > 0 ? null : "قیمت واحد"].filter(Boolean);
 
+/** حالتِ مکاتباتِ گفت‌وگوی کارشناس هوشمند برای صفحه: مهلتِ کارشناس، و «⏸ بی‌مهلت» با علتش (تنظیمِ خودش یا «حالت کار»ِ نوع قلم) */
+async function watchMode(env, th) {
+  const s = await supOfThread(env, th.id).catch(() => null);
+  if (!s || !s.on) return { minutes: (await getSup(env, th.expert_id)).minutes, mode: "timer", hold: false };
+  return { minutes: s.minutes, mode: s.mode, hold: s.hold, floor: s.floor ? { head: s.floor.head, workflow: s.floor.workflow, mode: s.floor.mode } : null };
+}
+
 /** همهٔ یک گفت‌وگو: خط‌ها، بسته‌ها، پیوست‌ها و ۲۰۰ پیام آخر (بعد از «پاک کردن» همین طرف) — و خوانده‌شدن */
 export async function threadFull(env, th, side) {
   const [lines, bundles, msgs, files] = await Promise.all([
@@ -735,7 +742,7 @@ export async function threadFull(env, th, side) {
     /* «⏱ با مهلت» — پیشنهادهای کارشناس هوشمند (معطل با due_at و تصمیم‌های آخر)، بسته‌هایی که تصمیمشان با خودِ کارشناس است، مهلتِ
        کارشناس و ساعتِ سرور (شمارشِ معکوسِ صفحه با همین، نه ساعتِ دستگاه) */
     ...(side === "e" && th.ai && th.ai.watch ? { watch: { ...(await propsOf(env, th.id)), manual: [...(await manualBundles(env, th.id))],
-      minutes: (await getSup(env, th.expert_id)).minutes, now: Date.now() } } : {}),
+      ...(await watchMode(env, th)), now: Date.now() } } : {}),
     /* ⭐ امتیازِ کارشناس به پیام‌ها و کلِ مکاتبهٔ کارشناس هوشمند (worker/ai-rates.js) */
     ...(side === "e" && th.ai && th.ai.ai ? { rates: await threadRates(env, th.id) } : {}),
   };

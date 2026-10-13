@@ -36,12 +36,20 @@ export const AI_REJECTED_SQL = (r) => `COALESCE(json_extract(${r}.review_json,'$
 
 export const AI_THREAD_MSG = "🤖 این گفت‌وگو دستِ کارشناس هوشمند است و تا وقتی از شما سؤالی نپرسیده بسته است. تیکِ «هوشمند / دستی» در پنل پشتیبانی است.";
 export const AI_WATCH_MSG = "⏱ این گفت‌وگو را کارشناس هوشمند پیش می‌برد و هر پیامش پیش از رفتن به شما نشان داده می‌شود: «✅ ارسال» همان لحظه می‌فرستد و «✏️ رد» با علت و پیامِ خودتان؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.";
+/* «⏸ بی‌مهلت» (کلیدِ hold، تصمیم ۵ سند «پیام اول…»): «حالت کار»ِ نوع قلمِ اقلامِ گفت‌وگو کفِ حالت است — «ترکیبی» دست‌کم با مهلت،
+   «کارشناس‌محور» بی‌مهلت؛ تغییرِ پشتیبانی (cr_head_x، field='workflow') بر دادهٔ تحقیق مقدم است */
+export const HOLD_ON_SQL = "COALESCE((SELECT json_extract(value,'$.hold') FROM settings WHERE key='crFlags'),0)=1";
+export const WF_SQL = (h) => `COALESCE((SELECT json_extract(x.value,'$') FROM cr_head_x x WHERE x.head=${h}.head AND x.field='workflow' AND x.active=1 ORDER BY x.at DESC LIMIT 1), ${h}.workflow)`;
+/** نوع قلمِ هر خطِ گفت‌وگو: همان که با بسته رفته (sp_lines.head)، وگرنه ساختارِ قلم */
+export const LINE_HEAD_SQL = (l) => `COALESCE(NULLIF(${l}.head,''), (SELECT json_extract(si.norm_json,'$.head') FROM items si WHERE si.id=${l}.item_id))`;
 /**
- * گفت‌وگوی «⏱ با مهلت»: کارشناسِ فعلیِ ارجاعِ این گفت‌وگو «🤖 خودکار» نیست (بی تنظیم = با مهلت) — tid عبارتِ SQLِ شناسهٔ گفت‌وگو.
- * سه جست‌وجو با کلیدِ اصلی (گفت‌وگو، ارجاع، کارشناس)؛ در فهرست و نظرسنجیِ مکاتبات هم ارزان است.
+ * گفت‌وگوی «⏱ با مهلت» یا «⏸ بی‌مهلت»: کارشناسِ فعلیِ ارجاعِ این گفت‌وگو «🤖 خودکار» نیست (بی تنظیم = با مهلت)، یا کلیدِ hold روشن
+ * است و نوع قلمِ یکی از خط‌هایش «ترکیبی» یا «کارشناس‌محور» است — tid عبارتِ SQLِ شناسهٔ گفت‌وگو. جست‌وجوها با کلیدِ اصلی و
+ * نمایه‌اند؛ در فهرست و نظرسنجیِ مکاتبات هم ارزان است.
  */
 export const AI_SUP_SQL = (tid) => `EXISTS (SELECT 1 FROM sp_threads st JOIN assignments sa ON sa.id=st.assignment_id JOIN experts se ON se.id=sa.expert_id
-  WHERE st.id=${tid} AND COALESCE(json_extract(se.sup_json,'$.mode'),'timer')<>'auto')`;
+  WHERE st.id=${tid} AND (COALESCE(json_extract(se.sup_json,'$.mode'),'timer')<>'auto' OR (${HOLD_ON_SQL} AND EXISTS (SELECT 1 FROM sp_lines sl
+    JOIN cr_heads ch ON ch.head=${LINE_HEAD_SQL("sl")} WHERE sl.thread_id=st.id AND ${WF_SQL("ch")} IN ('ترکیبی','کارشناس‌محور')))))`;
 
 /** کارشناس «هوشمند» است؟ */
 export async function aiModeOn(env, expertId) {

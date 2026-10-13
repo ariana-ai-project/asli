@@ -72,7 +72,7 @@ import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tend
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
-import { getSup, saveSup, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
+import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -1974,7 +1974,7 @@ async function route(request, env, ctx) {
        تازه از نو حساب می‌شود و «خودکار» همه را همین حالا می‌فرستد (ai-agent.js:propsRetime). */
     if (path === "/me/supervise" && (m === "GET" || m === "PUT")) {
       const ex = await requireExpert(request, env);
-      if (m === "GET") return json({ cfg: await getSup(env, ex.id), fa: SUP_FA, min: SUP_MIN, max: SUP_MAX });
+      if (m === "GET") return json({ cfg: await getSup(env, ex.id), fa: SUP_FA, min: SUP_MIN, max: SUP_MAX, hold_ok: await holdOn(env) });
       const cfg = await saveSup(env, ex.id, await readJson(request));
       const sent = await propsRetime(env, ex.id, cfg);
       return json({ ok: true, cfg, sent });

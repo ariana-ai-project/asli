@@ -17,6 +17,7 @@ import { HttpError } from "./http.js";
 import { supplierProfile, addOpinion, editOpinion, hideOpinion, addLinks, reviewEdge, egoGraph, searchSuppliers, g4List, g4Decide, fullGraph } from "./sreg.js";
 import { headPolicy, recipientPlan, rfqNTable, MODE_FA, FAMILY } from "./cr-engine.js";
 import * as C from "./strategy/config.js";
+import { WORKFLOWS, WORKFLOW_SUP, SUP_FA } from "./ai-supervise.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -93,7 +94,7 @@ export async function crSupportRoute(request, env, path, m, url, { json, readJso
 async function headList(env, q) {
   const [counts, ch] = await env.DB.batch([
     env.DB.prepare("SELECT rfq_mode AS mode, COUNT(*) AS n FROM cr_heads GROUP BY rfq_mode"),
-    env.DB.prepare("SELECT head, field, value, by_name, reason, at FROM cr_head_x WHERE active=1 AND field IN ('mode','n') ORDER BY at")]);
+    env.DB.prepare("SELECT head, field, value, by_name, reason, at FROM cr_head_x WHERE active=1 AND field IN ('mode','n','workflow') ORDER BY at")]);
   const over = new Map();
   for (const r of ch.results || []) { const o = over.get(r.head) || {}; o[r.field] = { value: parse(r.value, r.value), by: r.by_name, reason: r.reason, at: r.at }; over.set(r.head, o); }
   const mode = T(q.mode), fam = T(q.family), term = T(q.q), page = Math.max(0, int(q.page) || 0), PER = 50;
@@ -113,11 +114,13 @@ async function headList(env, q) {
   const rows = (await env.DB.prepare(sql).bind(...args).all()).results || [];
   return {
     counts: Object.fromEntries((counts.results || []).map((r) => [r.mode, r.n])), modes: MODE_FA, families: { max: "حداکثری", cautious: "محتاط", special: "ویژه" },
-    list: rows.map((r) => { const o = over.get(r.head) || {}; return { ...r, mode_fa: MODE_FA[r.rfq_mode], family: FAMILY(r.rfq_mode), moved: o.mode || null, n_over: o.n || null }; }),
+    list: rows.map((r) => { const o = over.get(r.head) || {}; return { ...r, mode_fa: MODE_FA[r.rfq_mode], family: FAMILY(r.rfq_mode), moved: o.mode || null, n_over: o.n || null, wf_over: o.workflow || null }; }),
     page, per: PER,
+    /* «حالت کار» و کفِ حالتِ مکاتبات («⏸ بی‌مهلت»، کلیدِ hold) */
+    workflows: WORKFLOWS.map((w) => ({ key: w, sup: WORKFLOW_SUP[w], sup_fa: WORKFLOW_SUP[w] === "auto" ? "بی کف" : SUP_FA[WORKFLOW_SUP[w]] })),
   };
 }
-/** تغییرِ پشتیبانی روی یک نوع قلم: {mode?, n?: {n_wave1, n_max}, clear?: ['mode'|'n'], reason} — دلیل لازم است؛ نسخهٔ قبلی غیرفعال می‌ماند */
+/** تغییرِ پشتیبانی روی یک نوع قلم: {mode?, n?: {n_wave1, n_max}, workflow?, clear?: ['mode'|'n'|'workflow'], reason} — دلیل لازم است؛ نسخهٔ قبلی غیرفعال می‌ماند */
 async function headSet(env, w, head, b) {
   if (!(await env.DB.prepare("SELECT 1 FROM cr_heads WHERE head=?").bind(head).first())) throw new HttpError("این نوع قلم در دادهٔ تحقیق نیست.", 404);
   const reason = T(b && b.reason).slice(0, 400);
@@ -137,9 +140,13 @@ async function headSet(env, w, head, b) {
     if (!a || !c || a < 1 || c > 20 || a > c) throw new HttpError("شمار موج اول و سقف باید ۱ تا ۲۰ باشد و موج اول بیش از سقف نه.", 422);
     put("n", { n_wave1: a, n_max: c });
   }
-  for (const f of Array.isArray(b.clear) ? b.clear : []) if (f === "mode" || f === "n") put(f, undefined);
+  if (b.workflow !== undefined) {
+    if (!WORKFLOWS.includes(b.workflow)) throw new HttpError("«حالت کار» نامعتبر است.", 422);
+    put("workflow", b.workflow);
+  }
+  for (const f of Array.isArray(b.clear) ? b.clear : []) if (f === "mode" || f === "n" || f === "workflow") put(f, undefined);
   if (!stmts.length) throw new HttpError("تغییری نیامده است.", 422);
-  stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, "support", "cr_head_set", JSON.stringify({ head, mode: b.mode, n: b.n, clear: b.clear, reason })));
+  stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, "support", "cr_head_set", JSON.stringify({ head, mode: b.mode, n: b.n, workflow: b.workflow, clear: b.clear, reason })));
   await env.DB.batch(stmts);
   return { ok: true };
 }

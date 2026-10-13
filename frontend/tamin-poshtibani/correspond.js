@@ -253,7 +253,7 @@
       const demo = t.demo ? `<span class="sp-tag">فرضی</span>` : "", av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
       if (t.ai === "locked") return TP.ui.chatRow({ on: S.th === t.id, cls: "lock", lock: true, av, attrs: `data-th="${t.id}" title="گفت‌وگوی کارشناس هوشمند — فقط دیدن"`,
         title: `${esc(t.supplier)}${demo}`, time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
-      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `⏱ با مهلت · ${fa(t.lines)} قلم`
+      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 با تأیید شما · ${fa(t.lines)} قلم`
         : preview(t) || `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`;
       return TP.ui.chatRow({ on: S.th === t.id, cls: t.ai === "ask" ? "ask" : t.ai === "watch" ? "watch" : "", av, attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)}"`,
         title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "⏱ " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
@@ -355,19 +355,23 @@
   const duePct = (p) => { const l = leftMs(p), tot = p.due_at && p.created_at ? p.due_at - p.created_at : 0; return tot > 0 ? Math.max(0, Math.min(1, l / tot)).toFixed(3) : 0; };
   function propCard(p) {
     const what = p.kind === "final" ? `بستهٔ ${fa(p.bundle_id)} را تأیید نهایی کند` : p.kind === "act" ? "این تصمیمِ بسته را بگیرد" : "این پیام را بفرستد";
-    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>⏱ کارشناس هوشمند می‌خواهد ${what}</b>
+    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>${p.due_at ? "⏱" : "⏸"} کارشناس هوشمند می‌خواهد ${what}</b>
       ${p.kind === "final" ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
       ${p.kind === "act" ? `<div class="ph-prop-body">${(p.actions || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${fa(a.bundle_id)}${a.comment ? `: «${esc(a.comment)}»` : ""}`).join("\n")}</div>` : ""}
       ${p.body ? `<div class="ph-prop-body">${esc(p.body)}</div>` : ""}
-      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : ""}
+      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : `<div class="ph-due"><span class="t">⏸ بی‌مهلت — تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود</span></div>`}
       <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger sm" data-prop-no="${p.id}">✏️ رد و نوشتن پیام خودم</button></div>
       <i>«رد» علت و پیامِ تازهٔ خودتان را می‌خواهد — همان به‌جایش می‌رود.</i></div>`;
   }
-  const cfgBtn = `<button type="button" class="ph-cfg" data-supcfg title="حالتِ مکاتباتِ کارشناس هوشمند: با مهلت یا خودکار">⚙️ تغییر</button>`;
+  const cfgBtn = `<button type="button" class="ph-cfg" data-supcfg title="حالتِ مکاتباتِ کارشناس هوشمند: با مهلت، بی‌مهلت یا خودکار">⚙️ تغییر</button>`;
+  /** علتِ «⏸ بی‌مهلت»: «حالت کار»ِ نوع قلم یا تنظیمِ خودِ کارشناس */
+  const holdWhy = (w) => (w.floor && w.floor.mode === "hold" ? `نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است؛ ` : "");
   const propsNote = () => {
     const w = watchOf();
     if (!w) return "";
-    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه ${cfgBtn}</b>کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش اول همین‌جا (و در اعلان و بات) به شما نشان داده می‌شود؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.</div>`;
+    if (!(w.pending || []).length) return w.hold
+      ? `<div class="ph-ask ph-watch" role="note"><b>⏸ بی‌مهلت ${cfgBtn}</b>${holdWhy(w)}کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش منتظرِ «✅ ارسال» یا «✏️ رد»ِ شما می‌ماند؛ هیچ‌وقت خودکار نمی‌رود.</div>`
+      : `<div class="ph-ask ph-watch" role="note"><b>⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه ${cfgBtn}</b>${w.floor && w.floor.mode === "timer" ? `نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است و خودکار نمی‌رود؛ ` : ""}کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش اول همین‌جا (و در اعلان و بات) به شما نشان داده می‌شود؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.</div>`;
     return w.pending.map(propCard).join("");
   };
   /* «🤖 خودکار»: گفت‌وگو بسته است و کارشناس هوشمند خودش مذاکره می‌کند */
@@ -750,13 +754,15 @@
     const d = dlg("⚙️ مکاتباتِ کارشناس هوشمند", `<p class="sp-muted" style="margin-top:0">برای همهٔ گفت‌وگوهای کارشناس هوشمندِ شما.</p>
       <label class="sp-check sp-mode"><input type="radio" name="supm" value="timer" ${c.mode === "timer" ? "checked" : ""}> <b>⏱ با مهلت</b> — هر پیام و تصمیم اول به شما نشان داده می‌شود؛ «ارسال» یا «رد»، و بی‌پاسخ سرِ مهلت خودکار می‌رود.</label>
       <div class="sp-row" style="gap:8px;margin:4px 26px 10px"><span>مهلت</span><input class="tp-input num" data-supmin type="text" inputmode="numeric" maxlength="3" value="${c.minutes}" style="width:90px" dir="ltr" aria-label="مهلت به دقیقه"> <span>دقیقه (${fa(s.min || 1)} تا ${fa(s.max || 60)})</span></div>
+      ${s.hold_ok ? `<label class="sp-check sp-mode"><input type="radio" name="supm" value="hold" ${c.mode === "hold" ? "checked" : ""}> <b>⏸ بی‌مهلت</b> — هر پیام و تصمیم منتظرِ «ارسال» یا «رد»ِ شما می‌ماند و هیچ‌وقت خودکار نمی‌رود.</label>` : ""}
       <label class="sp-check sp-mode"><input type="radio" name="supm" value="auto" ${c.mode === "auto" ? "checked" : ""}> <b>🤖 خودکار</b> — کارشناس هوشمند خودش مذاکره می‌کند و فقط وقتی جوابِ شما لازم است اعلان می‌دهد. پیشنهادهای معطل همین حالا می‌روند.</label>
+      ${s.hold_ok ? `<p class="sp-muted" style="font-size:.84rem">«حالت کار»ِ نوع قلم هم اثر دارد و سخت‌گیرترینِ دو تا اجرا می‌شود: «کارشناس‌محور» همیشه بی‌مهلت و «ترکیبی» دست‌کم با مهلت.</p>` : ""}
       <div class="sp-err" data-err></div>`,
     [{ label: "ذخیره", cls: "primary", fn: async (dd) => {
       const mode = ($('input[name="supm"]:checked', dd) || {}).value || "timer";
       const r = await api("/me/supervise", { method: "PUT", body: { mode, minutes: TP.digits($("[data-supmin]", dd).value) } });
       await loadThread().catch(() => {});
-      if (TP.ui && TP.ui.success) TP.ui.success(r.cfg.mode === "auto" ? `خودکار شد${r.sent ? ` — ${fa(r.sent)} پیشنهاد رفت` : ""}` : `با مهلتِ ${fa(r.cfg.minutes)} دقیقه`);
+      if (TP.ui && TP.ui.success) TP.ui.success(r.cfg.mode === "auto" ? `خودکار شد${r.sent ? ` — ${fa(r.sent)} پیشنهاد رفت` : ""}` : r.cfg.mode === "hold" ? "بی‌مهلت شد" : `با مهلتِ ${fa(r.cfg.minutes)} دقیقه`);
     } }, { label: "انصراف" }]);
     return d;
   }

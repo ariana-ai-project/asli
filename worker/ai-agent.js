@@ -1073,7 +1073,7 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     let prop = null;
     if (holdActs || holdReply) {
       prop = await propose(env, { run, ex, th, kind: holdActs ? "act" : "reply", body: T(res.reply).slice(0, 2900) || null, seen: Math.max(maxId || 0, st.seen_msg || 0), minutes: sup.minutes,
-        meta: holdActs ? { actions: acts, bundles: [...new Set(acts.map((a) => int(a.bundle_id)).filter(Boolean))] } : null });
+        hold: sup.hold, why: holdWhy(sup), meta: holdActs ? { actions: acts, bundles: [...new Set(acts.map((a) => int(a.bundle_id)).filter(Boolean))] } : null });
     }
     const out = [], errors = [];
     if (!holdActs) out.push(...(await runActions(env, ex, bundles, acts, errors)));
@@ -1478,7 +1478,7 @@ export async function autoDecide(env, threadId) {
     if (!fresh.length) return null;
     const th = await C.threadRow(env, id);
     const props = [];
-    for (const b of fresh) props.push(await propose(env, { run: { id: row.run_id }, ex, th, kind: "final", bundle_id: b.id, minutes: sup.minutes }));
+    for (const b of fresh) props.push(await propose(env, { run: { id: row.run_id }, ex, th, kind: "final", bundle_id: b.id, minutes: sup.minutes, hold: sup.hold, why: holdWhy(sup) }));
     return { ids: [], msgs: [], thread: th, props };
   }
   const ids = [], msgs = [];
@@ -1512,13 +1512,16 @@ async function bundleBrief(env, bundleId) {
     + (ls.length > 8 ? "\n• …" : "") + `\nجمع: <b>${moneyFa(sum)}</b> ریال`;
 }
 function propCardText(th, p) {
-  return `⏱ <b>کارشناس هوشمند می‌خواهد این را بفرستد</b>\n\nدرخواست <b>${esc(th.request_id)}</b> · تأمین‌کنندهٔ «${esc(th.supplier_name)}»\n\n<b>${esc(p.what)}</b>`
+  return `${p.due ? "⏱" : "⏸"} <b>کارشناس هوشمند می‌خواهد این را بفرستد</b>\n\nدرخواست <b>${esc(th.request_id)}</b> · تأمین‌کنندهٔ «${esc(th.supplier_name)}»\n\n<b>${esc(p.what)}</b>`
     + (p.brief ? `\n${p.brief}` : "")
     + (p.kind === "act" ? `\n${((p.meta && p.meta.actions) || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${faN(a.bundle_id)}${T(a.comment) ? `: «${esc(clip(T(a.comment), 300))}»` : ""}`).join("\n")}` : "")
     + (p.body ? `\n\n«${esc(clip(p.body, 1500))}»` : "")
-    + `\n\n⏱ <b>اگر تا ساعتِ ${clockFa(p.due)} پاسخ ندهید، همین خودکار می‌رود.</b>`
+    + (p.due ? `\n\n⏱ <b>اگر تا ساعتِ ${clockFa(p.due)} پاسخ ندهید، همین خودکار می‌رود.</b>`
+      : `\n\n⏸ <b>بی‌مهلت: تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود.</b>${p.why ? `\n<i>${esc(p.why)}</i>` : ""}`)
     + "\n<i>«✅ ارسال» همین حالا می‌فرستد. «✏️ رد» علت و پیامِ تازهٔ خودتان را می‌خواهد — همان به‌جایش می‌رود.</i>";
 }
+/** چرا «⏸ بی‌مهلت»: کفِ نوع قلم یا تنظیمِ خودِ کارشناس */
+const holdWhy = (sup) => (sup && sup.floor && sup.floor.mode === "hold" ? `نوع قلمِ «${sup.floor.head}» «${sup.floor.workflow}» است.` : "");
 const propKb = (env, id, thId) => [[{ text: "✅ ارسال همین حالا", callback_data: `prop:${id}:ok` }, { text: "✏️ رد و پیامِ خودم", callback_data: `prop:${id}:no` }],
   [{ text: "💬 دیدن در مکاتبات", web_app: { url: `${P.appUrl(env, "e")}&th=${thId}` } }]];
 
@@ -1527,20 +1530,21 @@ const propKb = (env, id, thId) => [[{ text: "✅ ارسال همین حالا", 
  * «✏️ رد» به اعلانِ گوشی و بات کارشناسان می‌رود. seen: آخرین پیامِ گفت‌وگو هنگامِ نوشتن — پیامِ تازه‌ترِ تأمین‌کننده پیشنهادِ پاسخ را
  * کنار می‌گذارد.
  */
-async function propose(env, { run, ex, th, kind, body = null, bundle_id = null, meta = null, seen = 0, minutes = 10 }) {
-  const t = now(), due = t + Math.max(1, Number(minutes) || 10) * 60000;
+async function propose(env, { run, ex, th, kind, body = null, bundle_id = null, meta = null, seen = 0, minutes = 10, hold = false, why = "" }) {
+  /* «⏸ بی‌مهلت»: بی due_at — Cron نمی‌فرستد و فقط «✅ ارسال» یا «✏️ رد»ِ کارشناس */
+  const t = now(), due = hold ? null : t + Math.max(1, Number(minutes) || 10) * 60000;
   const r = await env.DB.prepare("INSERT INTO ai_props (run_id,thread_id,kind,body,bundle_id,meta_json,seen_msg,state,created_at,due_at) VALUES (?,?,?,?,?,?,?,'pending',?,?)")
     .bind(run.id, th.id, kind, body, bundle_id, meta ? JSON.stringify(meta) : null, seen || 0, t, due).run();
   const id = r.meta.last_row_id;
   const what = kind === "final" ? `🏁 تأیید نهاییِ بستهٔ ${faN(bundle_id)}`
     : kind === "act" ? `🧾 تصمیمِ بسته${body ? " با پاسخ" : ""}` : "💬 پاسخ به تأمین‌کننده";
-  const mins = faN(Math.round((due - t) / 60000));
-  const stmts = [logStmt(env, run.id, th.id, "prop", `⏱ ${what} برای «${th.supplier_name}» تا ${mins} دقیقه منتظرِ کارشناس است${body ? `: «${clip(body, 300)}»` : ""}.`, { prop: id, kind, due })];
+  const mins = due ? faN(Math.round((due - t) / 60000)) : "";
+  const stmts = [logStmt(env, run.id, th.id, "prop", `${due ? "⏱" : "⏸"} ${what} برای «${th.supplier_name}» ${due ? `تا ${mins} دقیقه` : "بی‌مهلت"} منتظرِ کارشناس است${body ? `: «${clip(body, 300)}»` : ""}.`, { prop: id, kind, due })];
   if (ex.telegram_chat) {
     const brief = kind === "final" ? await bundleBrief(env, bundle_id).catch(() => "") : "";
-    stmts.push(queueStmt(env, `prop:${id}`, ex.telegram_chat, propCardText(th, { kind, body, meta, what, brief, due }), propKb(env, id, th.id)));
+    stmts.push(queueStmt(env, `prop:${id}`, ex.telegram_chat, propCardText(th, { kind, body, meta, what, brief, due, why }), propKb(env, id, th.id)));
   }
-  stmts.push(pushStmt(env, `prop:${id}`, EXPERT(ex.id), { title: `⏱ کارشناس هوشمند می‌خواهد بفرستد — ${mins} دقیقه مهلت`,
+  stmts.push(pushStmt(env, `prop:${id}`, EXPERT(ex.id), { title: due ? `⏱ کارشناس هوشمند می‌خواهد بفرستد — ${mins} دقیقه مهلت` : "⏸ کارشناس هوشمند منتظرِ تأیید شماست — بی‌مهلت",
     body: `${th.supplier_name} — ${what}${body ? `: «${String(body).slice(0, 160)}»` : ""}`, url: `correspond?th=${th.id}`, tag: `prop${id}` }));
   await env.DB.batch(stmts);
   return id;
@@ -1637,12 +1641,20 @@ export async function propDecide(env, ex, propId, b = {}) {
   const where = `${PROP_FA[p.kind] || p.kind}${p.bundle_id ? ` (بستهٔ ${faN(p.bundle_id)})` : ""}`;
   /* «✏️ رد» باز شد: تا نوشتنِ علت و پیام، مهلت دست‌کم سه دقیقهٔ دیگر — وسطِ نوشتن خودکار نرود (فقط تمدید، نه کوتاه) */
   if (action === "hold") {
+    /* «⏸ بی‌مهلت»: مهلتی نیست که تمدید شود */
+    if (!p.due_at) return { ok: true, state: "pending", due_at: null, msgs: [], thread_id: p.thread_id };
     const due = Math.max(Number(p.due_at) || 0, now() + HOLD_MS);
     await env.DB.prepare("UPDATE ai_props SET due_at=? WHERE id=? AND state='pending'").bind(due, p.id).run();
     return { ok: true, state: "pending", due_at: due, msgs: [], thread_id: p.thread_id };
   }
   if (action === "due") {
-    if (!(p.due_at && p.due_at <= now() + 3000)) throw new HttpError("هنوز مهلتِ این پیشنهاد نرسیده است.", 409, { state: "pending", due_at: p.due_at });
+    if (!p.due_at) throw new HttpError("این پیشنهاد «⏸ بی‌مهلت» است و تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود.", 409, { state: "pending", due_at: null });
+    if (!(p.due_at <= now() + 3000)) throw new HttpError("هنوز مهلتِ این پیشنهاد نرسیده است.", 409, { state: "pending", due_at: p.due_at });
+    /* کلید یا «حالت کار»ِ نوع قلم پس از نوشتنِ پیشنهاد سخت‌تر شد: بی‌مهلت می‌ماند */
+    if ((await supOfThread(env, p.thread_id)).hold) {
+      await env.DB.prepare("UPDATE ai_props SET due_at=NULL WHERE id=? AND state='pending'").bind(p.id).run();
+      throw new HttpError("این گفت‌وگو حالا «⏸ بی‌مهلت» است؛ پیشنهاد تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود.", 409, { state: "pending", due_at: null });
+    }
     const { th, msgs } = await propSend(env, p, ex, "auto", "auto");
     await propDone(env, p, th, msgs, { state: "auto", by: "auto", ev: "ai_prop_auto", logBody: `⏱ کارشناس در مهلت پاسخ نداد و ${where} خودکار رفت.` });
     await recordProp(env, p, { outcome: "auto" }).catch((e) => console.error("feedback prop", e && e.message));
@@ -1694,6 +1706,8 @@ export async function propsDue(env, { limit = 10 } = {}) {
     if (!p || p.state !== "pending") continue;
     try {
       if (!(await propLive(env, p)) || (await propStale(env, p))) continue;
+      /* «⏸ بی‌مهلت» شد (کلید یا «حالت کار»ِ نوع قلم پس از نوشتنِ پیشنهاد): خودکار نمی‌رود */
+      if ((await supOfThread(env, p.thread_id)).hold) { await env.DB.prepare("UPDATE ai_props SET due_at=NULL WHERE id=? AND state='pending'").bind(p.id).run(); continue; }
       const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(p.expert_id).first();
       if (!ex) continue;
       const { th, msgs } = await propSend(env, p, ex, "auto", "auto");
@@ -1710,13 +1724,22 @@ export async function propsDue(env, { limit = 10 } = {}) {
 
 /**
  * تنظیمِ تازهٔ کارشناس روی پیشنهادهای معطلش: مهلتِ هر کدام از نو (از لحظهٔ نوشتنش، با دقیقه‌های تازه)؛ «🤖 خودکار» یعنی همه همین
- * حالا می‌روند. خروجی شمارِ رفته‌ها.
+ * حالا می‌روند و «⏸ بی‌مهلت» یعنی بی مهلت. با کلیدِ hold حالتِ هر گفت‌وگو سخت‌گیرترینِ این تنظیم و «حالت کار»ِ نوع قلمِ آن است
+ * (supOfThread)، پس گفت‌وگوی «کارشناس‌محور» با «خودکار» هم نمی‌رود. خروجی شمارِ رفته‌ها.
  */
 export async function propsRetime(env, expertId, cfg) {
   const t = now();
-  const auto = cfg.mode === "auto";
-  await env.DB.prepare(`UPDATE ai_props SET due_at=${auto ? "?" : "created_at + ?"} WHERE state='pending' AND thread_id IN
-      (SELECT t.id FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=?)`).bind(auto ? t : cfg.minutes * 60000, expertId).run();
+  const ths = ((await env.DB.prepare(`SELECT DISTINCT p.thread_id FROM ai_props p JOIN sp_threads t ON t.id=p.thread_id JOIN assignments a ON a.id=t.assignment_id
+      WHERE p.state='pending' AND a.expert_id=? LIMIT 200`).bind(expertId).all()).results || []).map((r) => r.thread_id);
+  const stmts = [];
+  for (const th of ths) {
+    const s = await supOfThread(env, th);
+    const mode = s.on ? s.mode : "auto";
+    stmts.push(mode === "hold" ? env.DB.prepare("UPDATE ai_props SET due_at=NULL WHERE state='pending' AND thread_id=?").bind(th)
+      : mode === "auto" ? env.DB.prepare("UPDATE ai_props SET due_at=? WHERE state='pending' AND thread_id=?").bind(t, th)
+      : env.DB.prepare("UPDATE ai_props SET due_at=created_at + ? WHERE state='pending' AND thread_id=?").bind(cfg.minutes * 60000, th));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
   return propsDue(env, { limit: 20 });
 }
 

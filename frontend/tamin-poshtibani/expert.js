@@ -148,9 +148,12 @@
         <label class="supm-o ${c.mode === "timer" ? "on" : ""}"><input type="radio" name="supm" data-supm value="timer" ${c.mode === "timer" ? "checked" : ""}>
           <b>⏱ با مهلت</b><small>هر پیام و تصمیم اول در «💬 مکاتبات»، اعلان و بات؛ «✅ ارسال» یا «✏️ رد» (با علت و پیامِ خودتان)، و بی‌پاسخ سرِ مهلت خودکار.</small>
           <span class="supm-min">مهلت <input class="tp-input num" type="text" data-supmin inputmode="numeric" maxlength="3" value="${c.minutes}" dir="ltr" style="width:76px" aria-label="مهلت به دقیقه"> دقیقه</span></label>
+        ${s.hold_ok || c.mode === "hold" ? `<label class="supm-o ${c.mode === "hold" ? "on" : ""}"><input type="radio" name="supm" data-supm value="hold" ${c.mode === "hold" ? "checked" : ""} ${s.hold_ok ? "" : "disabled"}>
+          <b>⏸ بی‌مهلت</b><small>هر پیام و تصمیم منتظرِ «✅ ارسال» یا «✏️ رد»ِ شما می‌ماند و هیچ‌وقت خودکار نمی‌رود.${s.hold_ok ? "" : " (پشتیبانی فعلاً خاموشش کرده؛ مثلِ «با مهلت» کار می‌کند.)"}</small></label>` : ""}
         <label class="supm-o ${c.mode === "auto" ? "on" : ""}"><input type="radio" name="supm" data-supm value="auto" ${c.mode === "auto" ? "checked" : ""}>
           <b>🤖 خودکار</b><small>کارشناس هوشمند خودش مذاکره می‌کند؛ هر جا جوابِ شما لازم باشد «🚨 پرسش از کارشناس» می‌آید.</small></label>
       </div>
+      ${s.hold_ok ? `<div class="dim" style="font-size:.82rem;margin-top:4px">«حالت کار»ِ هر نوع قلم هم اثر دارد و سخت‌گیرترینِ دو تا اجرا می‌شود: نوع قلمِ «کارشناس‌محور» همیشه بی‌مهلت و «ترکیبی» دست‌کم با مهلت است.</div>` : ""}
       <div id="sup-msg" style="min-height:22px;font-size:.9rem"></div></div>`;
   }
   async function loadSup() {
@@ -166,7 +169,7 @@
       const r = await TP.api("/me/supervise", { method: "PUT", body: { mode, minutes: mi ? TP.digits(mi.value) : undefined } });
       S.sup = { ...S.sup, cfg: r.cfg };
       document.querySelectorAll(".supm-o").forEach((o) => o.classList.toggle("on", !!o.querySelector("input:checked")));
-      if (msg) { msg.textContent = `ذخیره شد ✓ ${r.cfg.mode === "auto" ? "— خودکار" : `— با مهلتِ ${M(r.cfg.minutes)} دقیقه`}${r.sent ? ` · ${M(r.sent)} پیشنهادِ معطل رفت` : ""}`; msg.style.color = "#6ee7b7"; }
+      if (msg) { msg.textContent = `ذخیره شد ✓ ${r.cfg.mode === "auto" ? "— خودکار" : r.cfg.mode === "hold" ? "— بی‌مهلت" : `— با مهلتِ ${M(r.cfg.minutes)} دقیقه`}${r.sent ? ` · ${M(r.sent)} پیشنهادِ معطل رفت` : ""}`; msg.style.color = "#6ee7b7"; }
     } catch (e) { if (msg) { msg.textContent = e.message; msg.style.color = "#fca5a5"; } }
   }
   async function saveCode() {
