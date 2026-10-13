@@ -171,7 +171,12 @@
     const av = u ? `<span class="tp-avatar ${u.img ? "img" : ""}">${u.img ? `<img src="${esc(u.img)}" alt="">` : esc((u.initial || String(u.name || "؟").trim()[0] || "؟"))}</span>` : "";
     const prof = u ? menu({ cls: "tp-profile", btn: `<button class="tp-avatar-btn" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" title="${esc(u.name || "")}">${av}<span class="nm">${esc(u.name || "")}</span>${ICON.chevron.replace("<svg", '<svg style="width:14px;height:14px;opacity:.6"')}</button>`,
       items: [{ head: { name: u.name, sub: u.sub } }, ...(o.items || [])] }) : "";
-    return `<header class="tp-top ui"><a class="brand" href="${esc(o.home || "./")}" title="${esc(o.homeTitle || "تدارکات")}"><img src="../assets/logo-new.jpg" alt=""><div><h1>${esc(o.title)}</h1>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></a>
+    /* o.back = { href | attrs, label }: دکمهٔ «بازگشت» پیش از نشان — فقط گوشی و تبلت (ui.css .tp-back)؛ دسکتاپ بی‌تغییر */
+    const bl = esc((o.back && o.back.label) || "بازگشت");
+    const back = !o.back ? "" : o.back.href
+      ? `<a class="tp-back" href="${esc(o.back.href)}" title="${bl}" aria-label="${bl}">${ICON.back}</a>`
+      : `<button type="button" class="tp-back" ${o.back.attrs || ""} title="${bl}" aria-label="${bl}">${ICON.back}</button>`;
+    return `<header class="tp-top ui">${back}<a class="brand" href="${esc(o.home || "./")}" title="${esc(o.homeTitle || "تدارکات")}"><img src="../assets/logo-new.jpg" alt=""><div><h1>${esc(o.title)}</h1>${o.sub ? `<div class="sub">${o.sub}</div>` : ""}</div></a>
       ${o.nav ? `<nav class="tp-nav">${o.nav}</nav>` : ""}<span class="spacer"></span>
       <div class="tp-tools">${o.actions || ""}${o.theme === false ? "" : themeBtn()}${prof}</div></header>`;
   }

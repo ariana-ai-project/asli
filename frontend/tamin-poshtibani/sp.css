@@ -222,7 +222,9 @@
   .sp-cols[data-view="req"] .sp-col.sups, .sp-cols[data-view="req"] .sp-main { display: none; }
   .sp-cols[data-view="sup"] .sp-col.reqs, .sp-cols[data-view="sup"] .sp-main { display: none; }
   .sp-cols[data-view="chat"] .sp-col.reqs, .sp-cols[data-view="chat"] .sp-col.sups { display: none; }
-  .sp-back { display: inline-flex; }
+  /* یک‌ستونه: «بازگشت» فقط در نوار بالاست (correspond.js top → TP.ui.topbar back)، نه در سرِ ستون
+     (.sp-col .sp-back تا بر display ِ .tp-btn بچربد) */
+  .sp-col .sp-back { display: none; }
 }
 @media (max-width: 860px) {
   .sp-grid5 { grid-template-columns: repeat(3, minmax(0, 1fr)); }

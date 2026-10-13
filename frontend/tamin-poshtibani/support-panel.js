@@ -590,7 +590,7 @@
   function vChat() {
     if (!phoneMode) return `<div class="sv-chat m">${vChatList()}</div>`;
     const d = S.thData;
-    const info = !S.thId ? `<div class="sv-thnone">${TP.ui.ICON.chat}<b>یک گفت‌وگو را انتخاب کنید</b><span>اقلام و مشخصاتش این‌جا و پیام‌ها در گوشی می‌آیند.</span></div>`
+    const info = !S.thId ? `<div class="sv-thnone">${TP.ui.ICON.chat}<b>یک گفت‌وگو را انتخاب کنید</b></div>`
       : !d ? `${TP.ui.loader()}` : d.error ? `<div class="tp-note warn">${esc(d.error)}</div>` : thInfo(d);
     return `<div class="sv-chat">${vChatList()}<section class="sv-chm" data-keep-scroll>${info}</section>
       <section class="ph-stage">${PH.frame(thScreen(true))}</section></div>`;
@@ -747,7 +747,7 @@
     if (S.cmRuleOpen) h += `<section class="tp-box sv-cmrules">${vRules()}</section>`;
     if (S.cmErr) h += `<div class="tp-note warn">${esc(S.cmErr)}</div>`;
     if (!S.cm) return h + (S.cmLoading ? `${TP.ui.loader()}` : "");
-    if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده. جدول را کارشناس در تب «استعلامات» می‌سازد، وقتی هر قلم به حداقل استعلامش رسید و برنده‌ها «تأیید نهایی» شدند.</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز — هر درخواست کجای مسیر است؟</button>` : ""}</div>`;
+    if (!rows.length) return h + `<div class="lg-none">${TP.ui.ICON.check}<b>قلمی نیست</b>${S.cmF.scope === "ready" ? `<span>هنوز جدول کمیسیونِ ارجاعِ بازی ساخته نشده. ${TP.ui.info("support.cm", "راهنمای تأیید کمیسیون")}</span><button class="tp-btn" data-cscope="open">همهٔ اقلامِ باز — هر درخواست کجای مسیر است؟</button>` : ""}</div>`;
     h += `<div class="sv-cmbar ${S.cmSel.size ? "on" : ""}"><button class="tp-btn sm" data-csel="${sel.length === rows.length ? "none" : "all"}">${sel.length === rows.length ? "لغو انتخاب" : `انتخاب همه (${M(rows.length)})`}</button>
         ${S.cmSel.size ? `<span class="dim">${M(sel.length)} قلم انتخاب شده</span><span class="spacer"></span>
         <button class="tp-btn sm primary" data-cok="1" ${nOn ? "" : "disabled"}>🏆 نتیجه و تأییدِ ${M(nOn)} قلم</button>
@@ -872,7 +872,7 @@
     if (!S.rules || !S.rulesDraft) return h + `${TP.ui.loader()}`;
     const R = S.rulesDraft;
     const dims = S.rules.dims || [{ key: "unit", fa: "قیمت واحد", unit: "ریال" }, { key: "total", fa: "قیمت کل", unit: "ریال" }, { key: "qty", fa: "مقدار", unit: "به واحدِ خودِ قلم" }];
-    h += `<p class="dim" style="margin:10px 0 0">حدِ هر قلم بیشترینِ حدِ پایهٔ مدیر و بازه‌ای است که قلم در آن می‌افتد — برای «تولید جدول کمیسیون»ِ همهٔ کارشناسان و برای بستنِ مذاکرهٔ کارشناس هوشمند.</p>`;
+    h += `<p class="dim" style="margin:10px 0 0">حدِ هر قلم = بیشترینِ حدِ پایه و بازه‌اش ${TP.ui.info("support.rules", "راهنمای قواعد")}</p>`;
     const inp = (d, i, k, w, ph) => `<input class="tp-input num" data-rr="${d}:${i}:${k}" value="${esc(R[d][i][k])}" inputmode="numeric" dir="ltr" style="width:${w}px" ${ph ? `placeholder="${ph}"` : ""}>`;
     h += dims.map((d) => `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">${esc(d.fa)} <span class="dim">(${esc(d.unit)})</span></h3>
       ${R[d.key].length ? `<table class="sup-tbl" style="width:auto"><thead><tr><th>از</th><th>تا</th><th>حداقلِ استعلام</th><th></th></tr></thead><tbody>
@@ -881,8 +881,8 @@
       <button class="tp-btn xs" data-radd="${d.key}" style="margin-top:8px">➕ بازهٔ تازه</button></div>`).join("");
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <b>مهلتِ رسیدن به حد</b><input class="tp-input num" data-rwait value="${esc(R.waitHours)}" inputmode="numeric" dir="ltr" style="width:90px"> ساعت
-        <span class="dim">— از اولین دعوت. اگر قلمی هنوز به حدش نرسیده بود، کارشناس در تلگرام آلارم می‌گیرد تا در «🎯 فهرست دعوت» تأمین‌کنندهٔ بیشتری تیک بزند یا خطِ دستی بیفزاید (۰ یعنی بی مهلت).</span></div>
-      <p class="dim" style="margin:8px 0 0">حدِ پایه (همهٔ اقلام): <b>${M(S.rules.base)}</b> — همان «حداقل تأمین‌کننده به ازای هر قلم» در تنظیمات مدیر. مدل و تنظیماتِ مذاکرهٔ هر کارشناس: «داشبورد» همان کارشناس ← «تنظیمات».</p></div>
+        <span class="dim">— از اولین دعوت (۰ یعنی بی مهلت)</span></div>
+      <p class="dim" style="margin:8px 0 0">حدِ پایه (همهٔ اقلام): <b>${M(S.rules.base)}</b></p></div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-rsave ${S.rulesBusy ? "disabled" : ""}>ذخیرهٔ قواعد</button>
         <button class="tp-btn" data-rreset>برگرداندنِ تغییرها</button>
         <span class="dim">${S.rules.rules.updated_at ? `آخرین تغییر: ${fmtShort(S.rules.rules.updated_at)}` : "هنوز ذخیره نشده — پیش‌فرض: بی بازه، مهلت ۲۴ ساعت"}</span></div>`;
@@ -973,14 +973,12 @@
     const inp = (attr, v, w = 80) => `<input class="tp-input num" ${attr} value="${esc(v)}" inputmode="decimal" dir="ltr" style="width:${w}px">`;
     h += `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">وزن‌های رتبهٔ نهایی <span class="dim">(۰ تا ۱۰؛ صفر یعنی آن ستون اثری ندارد)</span></h3>
       <table class="sup-tbl" style="width:auto"><tbody>${Object.keys(fa).map((k) => `<tr><td>${esc(fa[k])}</td><td>${inp(`data-rw="${k}"`, W[k])}</td></tr>`).join("")}
-        <tr><td>ضریب گشتاور <span class="dim">(۱ تا ۱۰ — ۱: گذشتهٔ دور تقریباً هم‌وزنِ امروز، ۱۰: فقط خریدهای تازه)</span></td><td>${inp(`data-rw="k"`, W.k, 60)}</td></tr></tbody></table></div>
-      <div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">قاعدهٔ دعوت</h3>
+        <tr><td>ضریب گشتاور <span class="dim">(۱ تا ۱۰)</span></td><td>${inp(`data-rw="k"`, W.k, 60)}</td></tr></tbody></table></div>
+      <div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">قاعدهٔ دعوت ${TP.ui.info("support.rank", "راهنمای رتبه‌بندی و دعوت")}</h3>
       <p style="margin:0 0 6px"><b>۱.</b> از سوابقِ <b>«عین قلم»</b>، جدا از رتبهٔ نهایی، این رده‌ها اول دعوت می‌شوند (درونِ هر رده به ترتیبِ رتبهٔ نهایی؛ ۰ یعنی آن رده جدا نمی‌آید):</p>
       <div style="display:flex;gap:16px;flex-wrap:wrap;margin:0 0 10px">${["A", "B", "C"].map((g) => `<label>ردهٔ <b>${g}</b> تا ${inp(`data-rt="${g}"`, D.tier[g], 60)} نفر</label>`).join("")}</div>
       <p style="margin:0 0 6px"><b>۲.</b> بعد از آن:</p>
-      ${Object.entries(tf).map(([k, l]) => `<label class="chkline" style="display:flex;margin:3px 0"><input type="radio" name="rthen" data-rthen="${k}" ${D.then === k ? "checked" : ""}> ${esc(l)}</label>`).join("")}
-      <p class="dim" style="margin:8px 0 0"><b>۳.</b> پنج نفر اولِ این ترتیب در «🎯 فهرست دعوت»ِ هر قلم از پیش تیک می‌خورند؛ کارشناس (بسته به حالتِ نوع قلم در «🧭 حالت اقلام») کم و زیادشان می‌کند و از «جستجوی هوشمند» فقط با انتخابِ خودش می‌افزاید.
-        سقفِ تیکِ هر قلم و مدلِ مذاکره: داشبوردِ همان کارشناس ← «تنظیمات». قاعدهٔ تازه برای فهرست‌هایی است که از این پس ساخته می‌شوند («↻ بازسازی» فهرستِ سپرده‌نشده را تازه می‌کند).</p></div>
+      ${Object.entries(tf).map(([k, l]) => `<label class="chkline" style="display:flex;margin:3px 0"><input type="radio" name="rthen" data-rthen="${k}" ${D.then === k ? "checked" : ""}> ${esc(l)}</label>`).join("")}</div>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap"><button class="tp-btn primary" data-rksave ${S.rankBusy ? "disabled" : ""}>ذخیرهٔ وزن‌ها و قاعده</button>
         <button class="tp-btn" data-rkreset>برگرداندنِ تغییرها</button>
         <span class="dim">${S.rank.updated_at ? `آخرین تغییر: ${fmtShort(S.rank.updated_at)}` : "هنوز ذخیره نشده — پیش‌فرض: دفعات ۱، مقدار ۰، گشتاور ۱، ارزش ۱، رده ۱، ضریب گشتاور ۵؛ ردهٔ A عین قلم تا ۵ نفر، بعد نوع قلم"}</span></div>`;
@@ -1253,8 +1251,7 @@
     h += `<div class="tp-card" style="padding:12px 16px;margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <b>تصمیمِ کمیسیون:</b>
       <button class="tp-btn primary" data-dlok="${D.run.id}" ${rv.state === "ok" ? "disabled" : ""}>✓ تأیید کمیسیون</button>
-      <button class="tp-btn danger" data-dlrej="${D.run.id}" ${rv.state === "rejected" ? "disabled" : ""}>✗ رد</button>
-      <span class="dim">تأیید: تیکِ «تأیید کمیسیون» همهٔ اقلامِ بازِ این درخواست و پیامِ «🔒 خاتمه» به کارشناس. رد: درخواست با دلیلِ شما کامل به کارشناس برمی‌گردد.</span></div>`;
+      <button class="tp-btn danger" data-dlrej="${D.run.id}" ${rv.state === "rejected" ? "disabled" : ""}>✗ رد</button>${TP.ui.info("support.dl", "راهنمای تحویل‌ها")}</div>`;
     return h;
   }
   function dlDecide(id, ok) {
