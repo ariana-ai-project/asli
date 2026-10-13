@@ -335,7 +335,7 @@
     /* فریم i و، اگر هر دو موجود باشند، فریم بعدی با شفافیت frac رویش — ترکیب نرم بین دو فریم.
        ترکیب یعنی دو بار کشیدن؛ اگر روی این دستگاه کشیدن کند باشد (میانگین متحرک بالای ۱۸ms)،
        ترکیب خاموش می‌شود و فقط نزدیک‌ترین فریم کشیده می‌شود تا اسکرول لَخت نشود. */
-    let paintAvg = 0, blendOK = true;
+    let paintAvg = 0, blendOK = true, firstPaint = false;
     function paintFrames(i, frac) {
       const a = nearestLoaded(i);
       if (a < 0) return;
@@ -347,6 +347,12 @@
       drawCover(ia, 1);
       if (ib) drawCover(ib, frac);
       drawnKey = key;
+      if (!firstPaint) {
+        firstPaint = true;
+        /* صفحهٔ «در حال بارگذاری» گوشی کنار می‌رود (index.html، tools/build-boot-splash.mjs)؛ سرویس‌ورکر کمی بعد ثبت می‌شود */
+        if (window.__bootDone) window.__bootDone();
+        setTimeout(startSW, 3000);
+      }
       paintAvg = paintAvg * 0.8 + (performance.now() - t0) * 0.2;
       if (paintAvg > 18) blendOK = false;
       // فریم‌های همسایه را از قبل رمزگشایی کن تا اسکرول بعدی بی‌مکث باشد
@@ -541,12 +547,15 @@
 
   /* ============================================================
      ثبت سرویس‌ورکر PWA — فقط روی http/https (نه file://)
+     سه ثانیه پس از اولین فریم (یا load، هر کدام زودتر). load تا رسیدنِ همهٔ فریم‌ها (روی گوشی ۹ تا ۲۳ مگابایت)
+     نمی‌آمد و روی اینترنتِ کند سرویس‌ورکر عملاً ثبت نمی‌شد؛ بی آن، هر بازدید همهٔ فریم‌ها را دوباره بازبینی می‌کرد.
      ============================================================ */
-  if ("serviceWorker" in navigator && location.protocol.indexOf("http") === 0) {
-    window.addEventListener("load", () => {
-      navigator.serviceWorker.register("sw.js").catch(() => {
-        /* ثبت ناموفق — سایت بدون قابلیت آفلاین ادامه می‌دهد */
-      });
+  function startSW() {
+    if (startSW.done || !("serviceWorker" in navigator) || location.protocol.indexOf("http") !== 0) return;
+    startSW.done = true;
+    navigator.serviceWorker.register("sw.js").catch(() => {
+      /* ثبت ناموفق — سایت بدون قابلیت آفلاین ادامه می‌دهد */
     });
   }
+  window.addEventListener("load", startSW);
 })();
