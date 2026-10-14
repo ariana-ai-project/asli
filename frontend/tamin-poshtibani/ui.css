@@ -1327,3 +1327,44 @@ body.has-foot .tp-pushcard { bottom: max(76px, env(safe-area-inset-bottom)); }
 .tp-status.rate-gap { flex-wrap: wrap; gap: 8px; }
 :root[data-theme="light"] .lr-err { color: #b91c1c; }
 @media (prefers-reduced-motion: reduce) { .tp-star svg { transition: none; } }
+
+/* ============================================================
+   حرکت (مهر ۱۴۰۵، DESIGN_STACK: GSAP + الگوهای React Bits، بومی) — مکمل‌های CSSِ ui-motion.js و چند حرکتِ کوچکِ تازه.
+   همه فقط ظاهرند؛ با «حرکت کمتر» خاموش می‌شوند (پایین).
+   ============================================================ */
+/* نشانگرِ لغزانِ تب‌ها (PillNav، ui-motion.js): حباب زیرِ متنِ تب‌ها؛ تبِ تازه تا رسیدنِ حباب پس‌زمینه‌اش را پنهان می‌کند */
+.mo-tab-ind { position: absolute; z-index: 0; margin: 0; padding: 0; pointer-events: none; box-sizing: border-box; }
+.mo-tabs { isolation: isolate; }
+.mo-tabs > :not(.mo-tab-ind) { position: relative; z-index: 1; }
+.mo-tab-on { background: transparent !important; box-shadow: none !important; border-color: transparent !important; transition: none !important; }
+
+/* پنجره‌ها: پس‌زمینه محو می‌آید و خودِ پنجره با فنرِ کوتاه بالا می‌آید (قبلاً یک‌باره ظاهر می‌شد) */
+.tp-modal-bg { animation: uiFade var(--ui-fast) ease-out both; }
+.tp-modal-bg > .tp-modal { animation: uiModalIn var(--ui-base) var(--ui-spring) both; }
+@keyframes uiModalIn { from { opacity: 0; transform: translateY(14px) scale(.97); } }
+
+/* درخششِ شیشه (GlareHover): نواری از نور در جهتِ خواندن (راست به چپ) روی کارت‌های کلیک‌خور — فقط با موشواره.
+   z-index 0 تا منوی ⋯ِ بازِ کارت (z-index بالاتر) زیرش نرود */
+@media (hover: hover) and (pointer: fine) {
+  button.tp-stat { position: relative; }
+  .tp-rcard::after, button.tp-stat::after {
+    content: ""; position: absolute; inset: 0; z-index: 0; border-radius: inherit; pointer-events: none;
+    background: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.1) 50%, transparent 62%) no-repeat;
+    background-size: 260% 100%; background-position: 135% 0; opacity: 0;
+    transition: background-position .8s var(--ui-ease), opacity .35s ease;
+  }
+  .tp-rcard:hover::after, button.tp-stat:hover::after { opacity: 1; background-position: -35% 0; }
+  :root[data-theme="light"] .tp-rcard::after, :root[data-theme="light"] button.tp-stat::after {
+    background-image: linear-gradient(105deg, transparent 38%, rgba(255, 255, 255, 0.55) 50%, transparent 62%); }
+}
+
+/* جابه‌جایی بین صفحه‌ها (پنل ← پنل، صفحهٔ اول ← تدارکات): محوِ نرمِ مرورگر به‌جای پرشِ سفید (View Transitions؛ بی پشتیبانی همان قبلی) */
+@view-transition { navigation: auto; }
+/* شب و روز (ui-motion.js): پوستهٔ تازه دایره‌وار از جای دکمه پهن می‌شود؛ محوِ پیش‌فرض خاموش */
+html.mo-vt-theme::view-transition-old(root), html.mo-vt-theme::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tp-modal-bg, .tp-modal-bg > .tp-modal { animation: none; }
+  .tp-rcard::after, button.tp-stat::after { display: none; }
+  @view-transition { navigation: none; }
+}
