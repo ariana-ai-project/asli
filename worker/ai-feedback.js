@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS ai_feedback (id INTEGER PRIMARY KEY, kind TEXT NOT NU
 CREATE INDEX IF NOT EXISTS ix_aifb_at ON ai_feedback(at);
 CREATE INDEX IF NOT EXISTS ix_aifb_exp ON ai_feedback(expert_id, at);
 `;
-export const FB_KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد" };
+export const FB_KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد", guard: "ردِ اعتبارسنج (مذاکرهٔ دوگامی)" };
 export const FB_OUT_FA = { ok: "✅ فرستاد", no: "✏️ رد کرد", auto: "⏱ خودکار رفت" };
 
 /* ---------- عکسِ زمینه ---------- */
@@ -115,6 +115,13 @@ export async function recordProp(env, p, { outcome, reason = null, own = null, b
   return upsert(env, { kind: "prop", ref: p.id, outcome, note: reason, human_text: own, boxes, ...h, thread_id: p.thread_id,
     ai_text: [what, T(p.body)].filter(Boolean).join("\n") || null, model: await modelOf(env, h.run_id, p.thread_id, p.created_at),
     context: { transcript: await msgsBefore(env, p.thread_id, (p.seen_msg || 0) + 1, 14), prop_kind: p.kind, bundle_act: bundle, created_at: p.created_at, due_at: p.due_at || null } });
+}
+
+/** پیامِ مذاکرهٔ دوگامی که دو بار از اعتبارسنج نگذشت و نرفت (turn-engine.js) — با جعبه‌های نقدِ همان قاعده‌ها */
+export async function recordGuard(env, { th, run, text, violations = [], boxes = [], model = null, context = null }) {
+  return upsert(env, { kind: "guard", ref: now(), outcome: "no", note: violations.join("؛ ").slice(0, 800), ai_text: text || null, boxes, model, context,
+    expert_id: th.expert_id, expert_name: th.expert_label || th.expert_name, assignment_id: run ? run.assignment_id : th.assignment_id, request_id: th.request_id,
+    thread_id: th.id, supplier: th.supplier_name });
 }
 
 /* ---------- پنل پشتیبانی: /support/ai/feedback ---------- */

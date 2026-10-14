@@ -39,10 +39,12 @@ export class AiError extends Error {
  * refusal (مدل رد کرد)، max_tokens (پاسخ نیمه‌کاره)، bad_json، و خطای HTTP.
  * model: یکی از AGENT_MODELS (تنظیمِ تب)؛ env.AI_AGENT_MODEL فقط اگر تب چیزی نگفته باشد.
  */
-export async function callModel(env, { system, user, schema, model, effort = "medium", maxTokens = 16000, timeoutMs }) {
+export async function callModel(env, { system, user, schema, model, effort = "medium", maxTokens = 16000, timeoutMs, caps }) {
   if (!env.ANTHROPIC_API_KEY) throw new AiError("کلید مدل روی این پروژه ست نشده است.", 503, "off");
-  const m = modelOk(model) ? model : modelOk(env.AI_AGENT_MODEL) ? env.AI_AGENT_MODEL : AGENT_MODEL;
-  const cap = AGENT_MODELS[m];
+  /* caps: مدلی بیرون از فهرستِ تب (مثلاً طبقه‌بندِ مذاکرهٔ دوگامی، turn-engine.js) با توانایی‌های داده‌شده — قیمتش در فهرست نیست */
+  const extra = caps && /^claude-[a-z0-9-]+$/.test(String(model || "")) && !modelOk(model);
+  const m = extra ? model : modelOk(model) ? model : modelOk(env.AI_AGENT_MODEL) ? env.AI_AGENT_MODEL : AGENT_MODEL;
+  const cap = extra ? caps : AGENT_MODELS[m];
   const body = {
     model: m,
     max_tokens: maxTokens,

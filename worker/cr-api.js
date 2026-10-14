@@ -11,7 +11,7 @@
  *   GET/PUT /support/cr/flags      GET /support/cr/status
  *   GET /support/sreg/g4?state=    POST /support/sreg/g4/:alias      GET /support/graph?head=&hub=&limit=
  *   GET /support/strategy/heads?mode=&family=&q=&page=   PUT /support/strategy/heads/:head
- *   GET/PUT /support/strategy/rfqn      GET/PUT /support/cr/panel (تنظیم‌های قیمتِ مؤثر، مدلِ سند و پیشرفتِ پیش‌ساخت)
+ *   GET/PUT /support/strategy/rfqn      GET/PUT /support/cr/panel (تنظیم‌های قیمتِ مؤثر، مدلِ سند، مدل‌های مذاکرهٔ دوگامی و پیشرفتِ پیش‌ساخت)
  * هر بخش پشتِ کلیدِ settings.crFlags است و تا روشن نشده رابطِ کاربری چیزی نشان نمی‌دهد (آزمون‌ها و پشتیبانی همیشه می‌بینند).
  */
 import { HttpError } from "./http.js";
@@ -21,6 +21,7 @@ import * as C from "./strategy/config.js";
 import { WORKFLOWS, WORKFLOW_SUP, SUP_FA } from "./ai-supervise.js";
 import { docView, enqueueDoc, reviewDoc, docOut, docStates, docProgress, panelSettings, savePanel, docModel } from "./strategy-doc.js";
 import { AGENT_MODELS } from "./ai-prompts.js";
+import { turnModels, saveTurnModels, TURN_MODEL_OPTS } from "./turn-engine.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -100,8 +101,13 @@ export async function crSupportRoute(request, env, path, m, url, { json, readJso
   if (path === "/support/strategy/rfqn" && m === "PUT") return json(await rfqNSave(env, await readJson(request)));
   /* «📘 سند راهبرد»: تنظیم‌های قیمتِ مؤثر (نرخِ ماهانهٔ پنل، مالیات…)، مدلِ سند و پیشرفتِ پیش‌ساختِ ۱۳۸ نوع قلم */
   if (path === "/support/cr/panel" && m === "GET") return json({ panel: await panelSettings(env), model: await docModel(env),
-    models: Object.fromEntries(Object.entries(AGENT_MODELS).map(([k, v]) => [k, v.fa])), progress: await docProgress(env) });
-  if (path === "/support/cr/panel" && m === "PUT") return json(await savePanel(env, await readJson(request)));
+    models: Object.fromEntries(Object.entries(AGENT_MODELS).map(([k, v]) => [k, v.fa])), progress: await docProgress(env), turn: await turnModels(env), turn_opts: TURN_MODEL_OPTS });
+  if (path === "/support/cr/panel" && m === "PUT") {
+    const b = await readJson(request);
+    /* مدل‌های «مذاکرهٔ دوگامی» (فاز ۴، تصمیم ۴): طبقه‌بند و مذاکره‌گر */
+    const out = await savePanel(env, b || {});
+    return json({ ...out, turn: b && b.turn ? await saveTurnModels(env, b.turn) : await turnModels(env) });
+  }
   throw new HttpError("مسیر پیدا نشد.", 404);
 }
 

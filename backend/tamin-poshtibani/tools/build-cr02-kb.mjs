@@ -43,14 +43,19 @@ for (const s of cat.states) { const { name_en, ...rest } = s; STATES[s.id] = res
 const strip = (s) => s.replace(/<!--[\s\S]*?-->/g, "").replace(/\n{3,}/g, "\n\n").trim();
 const P0 = strip(read("04_prompts", "P0_system_core.md"));
 const P1 = strip(read("04_prompts", "P1_planner.md"));
+const P3 = strip(read("04_prompts", "P3_state_classifier.md"));
+const P4 = strip(read("04_prompts", "P4_negotiator.md"));
+const CLASSIFIER_SCHEMA = JSON.parse(read("04_prompts", "schemas", "classifier.schema.json"));
+const TURN_SCHEMA = JSON.parse(read("04_prompts", "schemas", "turn.schema.json"));
 const PLAN_SCHEMA = JSON.parse(read("04_prompts", "schemas", "plan.schema.json"));
 const MOVES = JSON.parse(read("02_catalogue", "moves.json"));
 const pm = JSON.parse(read("03_data", "MANIFEST.json"));
 
+/* نسخه فقط از آنچه سندِ راهبرد (P1) می‌خواند — افزودنِ P3 و P4 سندها را دوباره نمی‌سازد */
 const payload = JSON.stringify({ KB, STATES, P0, P1, PLAN_SCHEMA, MOVES });
 const sha = createHash("sha256").update(payload).digest("hex").slice(0, 16);
 const out = `/* ساخته‌شده با backend/tamin-poshtibani/tools/build-cr02-kb.mjs از بستهٔ «درخواست تغییر ۰۲» — دستی ویرایش نشود.
-   کارت‌های دانش (${Object.keys(KB).length})، کارتِ وضعیت‌ها (${Object.keys(STATES).length})، پرامپت‌های P0 و P1 و طرح‌وارهٔ خروجیِ P1. */
+   کارت‌های دانش (${Object.keys(KB).length})، کارتِ وضعیت‌ها (${Object.keys(STATES).length})، پرامپت‌های P0، P1، P3 و P4 و طرح‌واره‌های خروجیِ P1، P3 و P4. */
 export const KB_VERSION = ${JSON.stringify(`${pm.version || ""}+${sha}`)};
 export const KB = ${JSON.stringify(KB)};
 export const STATES = ${JSON.stringify(STATES)};
@@ -58,6 +63,10 @@ export const MOVES = ${JSON.stringify(MOVES)};
 export const P0 = ${JSON.stringify(P0)};
 export const P1 = ${JSON.stringify(P1)};
 export const PLAN_SCHEMA = ${JSON.stringify(PLAN_SCHEMA)};
+export const P3 = ${JSON.stringify(P3)};
+export const P4 = ${JSON.stringify(P4)};
+export const CLASSIFIER_SCHEMA = ${JSON.stringify(CLASSIFIER_SCHEMA)};
+export const TURN_SCHEMA = ${JSON.stringify(TURN_SCHEMA)};
 `;
 writeFileSync(OUT, out);
 console.log(`kb-data.js: ${Object.keys(KB).length} کارت، ${Object.keys(STATES).length} وضعیت، ${Math.round(Buffer.byteLength(out) / 1024)} KB، نسخه ${pm.version || "?"}+${sha}`);

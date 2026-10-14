@@ -126,6 +126,9 @@
         <label class="tp-field"><b>مبنای تنزیل</b><select class="tp-input" data-pn-basis>${[["max", "بیشینهٔ نرخ پنل و دلار"], ["panel", "نرخ پنل"], ["fx", "رشد دلار"]].map(([k, v]) => `<option value="${k}" ${k === p.basis ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
       <label class="chkline"><input type="checkbox" data-pn-flag="vat_creditable" ${p.vat_creditable ? "checked" : ""}> ارزش افزوده قابلِ استرداد است</label>
       <label class="chkline"><input type="checkbox" data-pn-flag="say_panel_rate" ${p.say_panel_rate ? "checked" : ""}> کارشناس هوشمند خودِ نرخِ پنل را بگوید (وگرنه از نیمهٔ آن شروع می‌کند)</label>
+      ${pn.turn_opts ? `<div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end;margin-top:6px"><b style="font-size:.9rem">مذاکرهٔ دوگامی:</b>
+        <label class="tp-field"><b>طبقه‌بندِ وضعیت</b><select class="tp-input" data-pn-turn="p3">${Object.entries(pn.turn_opts.p3).map(([k, v]) => `<option value="${k}" ${k === (pn.turn || {}).p3 ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
+        <label class="tp-field"><b>مذاکره‌گر</b><select class="tp-input" data-pn-turn="p4">${Object.entries(pn.turn_opts.p4).map(([k, v]) => `<option value="${k}" ${k === (pn.turn || {}).p4 ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label></div>` : ""}
       <div class="toolrow" style="margin-top:6px"><button class="tp-btn primary sm" data-pn-save>ذخیره</button></div>
       <div class="dim" style="font-size:.84rem;margin-top:8px">پیش‌ساختِ ${fa(pr.target || 0)} نوع قلمِ پرهزینه: تأییدشده ${fa(bs.approved || 0)} · منتظرِ بازبینی ${fa(bs.draft || 0)} · در صف ${fa((bs.queued || 0) + (bs.building || 0))} · ناموفق ${fa(bs.failed || 0)} — ${fa(pr.built || 0)} سند، حدود ${fa(Math.round((pr.cost_usd || 0) * 100) / 100)} دلار</div></div>`;
   }
@@ -187,8 +190,9 @@
       const g = (k) => { const x = document.querySelector(`[data-pn="${k}"]`); const v = x ? TP.digits(x.value).trim() : ""; return v === "" ? null : Number(v) / 100; };
       const fl = (k) => { const x = document.querySelector(`[data-pn-flag="${k}"]`); return !!(x && x.checked); };
       const body = { panel_rate: g("panel_rate"), fx_growth: g("fx_growth"), vat_rate: g("vat_rate"), no_invoice_premium: g("no_invoice_premium"), vat_creditable: fl("vat_creditable"),
-        say_panel_rate: fl("say_panel_rate"), basis: (document.querySelector("[data-pn-basis]") || {}).value, model: (document.querySelector("[data-pn-model]") || {}).value };
-      try { const r = await C.api("/cr/panel", { method: "PUT", body }); S.panel = { ...S.panel, panel: r.panel, model: r.model }; TP.ui && TP.ui.success && TP.ui.success("ذخیره شد"); C.render(); }
+        say_panel_rate: fl("say_panel_rate"), basis: (document.querySelector("[data-pn-basis]") || {}).value, model: (document.querySelector("[data-pn-model]") || {}).value,
+        turn: { p3: (document.querySelector('[data-pn-turn="p3"]') || {}).value, p4: (document.querySelector('[data-pn-turn="p4"]') || {}).value } };
+      try { const r = await C.api("/cr/panel", { method: "PUT", body }); S.panel = { ...S.panel, panel: r.panel, model: r.model, turn: r.turn }; TP.ui && TP.ui.success && TP.ui.success("ذخیره شد"); C.render(); }
       catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); }
       return;
     }

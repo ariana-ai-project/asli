@@ -479,6 +479,18 @@ export async function docView(env, head, { itemCode = null, urgent = false, enqu
     states: DOC_STATE_FA, model: await docModel(env) };
 }
 
+/** قاعده‌های سندِ تأییدشدهٔ قلم برای مذاکرهٔ دوگامی (turn-engine.js): درصدهای هدف و حد، آهنگ و دورها، پارامترهای سازنده و قیدهای سخت */
+export async function docRules(env, head, itemCode) {
+  if (!(await docOn(env)) || !T(head)) return null;
+  const hp = await headPolicy(env, head, { itemCode }).catch(() => null);
+  if (!hp) return null;
+  const ok = await approvedDoc(env, hp.head, variantOf(hp.code));
+  const d = ok ? parse(ok.final_json, null) : null;
+  if (!d) return null;
+  const n = d.negotiation || {};
+  return { rules: n.rules_pct || null, builder: d.builder || null, hard: n.hard_constraints || [], version: ok.version };
+}
+
 /** «🚀 شروع» با کلیدِ doc: سندِ تأییدشده برای نوع قلمِ این قلم لازم است (نوع قلمِ بیرون از دادهٔ تحقیق آزاد است) */
 export async function docGate(env, head, itemCode) {
   if (!(await docOn(env)) || !T(head)) return { ok: true };

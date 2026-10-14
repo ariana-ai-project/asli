@@ -72,6 +72,7 @@ import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { boxesOn, boxesFa } from "./critique.js";
 import { docGate, docBlock } from "./strategy-doc.js";
+import { turnOn, turnReply } from "./turn-engine.js";
 import { ratesForModel } from "./ai-rates.js";
 import { recordProp } from "./ai-feedback.js";
 
@@ -112,7 +113,8 @@ const THREAD_LOCK = 3 * 60000;
 /* هر دعوت حدود ۲۵ زیردرخواست دارد (ارسال، پیامک، پخش، ثبت) — یکی در هر اجرا تا زیر سقفِ ۵۰ بماند */
 const INVITES_PER_TICK = 1;
 const STATE_FA = { prep: "آماده‌سازی و بررسی سوابق", search: "جستجوی هوشمند", work: "دعوت و مذاکره", closing: "جدول کمیسیون و نامه", done: "پایان‌یافته", paused: "متوقف", ended: "بسته شد" };
-const PURPOSE_FA = { normalize: "تفکیک قلم (نوع و لایه‌ها)", smart: "جستجوی هوشمند", proforma: "خوانش پیش‌فاکتور", negotiate: "مذاکره", closing: "شرح فرایند و معیارها", letter: "نگارش نامه", compare: "مقایسهٔ مدل (بی اجرا)" };
+const PURPOSE_FA = { normalize: "تفکیک قلم (نوع و لایه‌ها)", smart: "جستجوی هوشمند", proforma: "خوانش پیش‌فاکتور", negotiate: "مذاکره", closing: "شرح فرایند و معیارها", letter: "نگارش نامه", compare: "مقایسهٔ مدل (بی اجرا)",
+  classify: "طبقه‌بندِ وضعیت (مذاکرهٔ دوگامی)", turn: "مذاکره‌گر (مذاکرهٔ دوگامی)" };
 
 export function cfgOf(row) {
   const c = { ...AI_DEFAULTS, ...parse(row && row.config_json, {}) };
@@ -1062,10 +1064,28 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
         return { wait: wait.id };
       }
     }
-    const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead, chat, sup });
-    rec.purpose = "negotiate";
-    /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
-    const res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead, chat })).out;
+    /* «مذاکرهٔ دوگامی» (فاز ۴ طرح «پیام اول، استراتژی‌ها، پروفایل و گراف»؛ کلیدِ turn): پاسخِ چت با طبقه‌بند، کد و مذاکره‌گر —
+       وقتی تصمیمِ بسته‌ها با سامانه است (chat) یا بسته‌ای تصمیم نمی‌خواهد. null یعنی این گفت‌وگو جایش نیست؛ خطا در Cron ← همان مذاکرهٔ همیشگی */
+    let res = null;
+    if (await turnOn(env)) {
+      const due = bundles.some((b) => b.state === "pending" || (!pfRead && ["approved", "proforma"].includes(b.state)) || (b.state === "proforma" && aiUsable(parse(b.ai_json, null))));
+      if (chat || !due) {
+        try {
+          res = await turnReply(env, rec, { run, th, st, lines, msgs, fast, company: COMPANY(env) });
+        } catch (e) {
+          if (fast) throw e;
+          await log(env, run.id, threadId, "error", `مذاکرهٔ دوگامی نشد؛ همین دور با مذاکرهٔ همیشگی: ${String((e && e.message) || e).slice(0, 300)}`);
+          res = null;
+        }
+        if (res && res.defer) return toCron(env, run, threadId, res.defer);
+      }
+    }
+    if (!res) {
+      const context = await buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRead, chat, sup });
+      rec.purpose = "negotiate";
+      /* گامِ فوری (waitUntil، زیر ۳۰ ثانیه) با عمقِ فکرِ کم؛ Cron با همان که در تب انتخاب شده */
+      res = (await negotiate(rec.env, { company: COMPANY(env), context, model: cfg.model, effort: fast ? "low" : cfg.effort, timeoutMs: fast ? 24000 : undefined, pfRead, chat })).out;
+    }
     /* گام ۳: کاری که مدل روی بسته نوشته اجرا نمی‌شود — تصمیمِ بسته با سامانه است */
     if (chat) res.actions = [];
     /* دورِ کم‌عمق تصمیمی روی بسته گرفت (مثلاً ردِ بسته پس از پیامِ تأمین‌کننده): نه تصمیم اجرا می‌شود نه پاسخ می‌رود */
@@ -1104,8 +1124,8 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       env.DB.prepare(`UPDATE ai_threads SET seen_msg=?, memo=?, errors_json=?, turns=turns+1, state=?, last_ai_at=?, lock_until=NULL, retry_at=NULL, fails=0, updated_at=?${ask ? ", ask_json=?" : ""} WHERE thread_id=?`)
         .bind(Math.max(maxId || 0, st.seen_msg || 0), clip(T(res.memo), 2000), errors.length ? JSON.stringify(errors.slice(0, 6)) : null, state, now(), now(),
           ...(ask ? [JSON.stringify({ q: ask, at: now(), note: askNote ? askNote.id : null })] : []), threadId),
-      logStmt(env, run.id, threadId, "turn", `دورِ ${faN((st.turns || 0) + 1)} با «${th.supplier_name}»: ${(res.actions || []).map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ") || "بی تصمیم"}${holdActs ? " (👁 پیشنهاد — اجرا نشد)" : ""}${T(res.reply) ? (holdReply ? " · 👁 پاسخ به تأییدِ کارشناس رفت" : " · پاسخ رفت") : ""}${errors.length ? ` · ${faN(errors.length)} خطا` : ""}${T(res.note) ? ` — ${T(res.note)}` : ""}`,
-        { actions: res.actions, status: res.thread_status, errors, ms: now() - t0, fast, ...(prop ? { prop } : {}) }),
+      logStmt(env, run.id, threadId, "turn", `دورِ ${faN((st.turns || 0) + 1)} با «${th.supplier_name}»: ${res._turn ? `🧭 ${res._turn.states.join("، ")} ← ${res._turn.move}${res._turn.held ? " (ردِ اعتبارسنج؛ نرفت)" : res._turn.rewritten ? " (بازنویسی‌شده)" : ""}` : (res.actions || []).map((a) => `${a.type} بستهٔ ${a.bundle_id}`).join("، ") || "بی تصمیم"}${holdActs ? " (👁 پیشنهاد — اجرا نشد)" : ""}${T(res.reply) ? (holdReply ? " · 👁 پاسخ به تأییدِ کارشناس رفت" : " · پاسخ رفت") : ""}${errors.length ? ` · ${faN(errors.length)} خطا` : ""}${T(res.note) ? ` — ${T(res.note)}` : ""}`,
+        { actions: res.actions, status: res.thread_status, errors, ms: now() - t0, fast, ...(prop ? { prop } : {}), ...(res._turn ? { turn: res._turn } : {}) }),
       ...(ask ? [logStmt(env, run.id, threadId, "ask", `🚨 پرسش از کارشناس: ${ask} — گفت‌وگو تا پاسخِ او برایش باز است و کارشناس هوشمند منتظر می‌ماند.`),
         env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), `expert:${ex.id}`, "ai_ask", th.request_id,
           JSON.stringify({ assignment_id: run.assignment_id, thread_id: threadId, supplier: th.supplier_name, q: ask, channel: "ai" }))] : []),

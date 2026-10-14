@@ -19,7 +19,7 @@
   let C = { api: null, render: () => {}, download: null };
   const S = { f: { win: "30d", expert: "", kind: "", low: false, q: "", box: "" }, d: null, items: [], loading: false, err: "", more: false, sum: {}, sumBusy: false, sumErr: "", seq: 0, experts: [] };
   const WINS = [["7d", "۷ روز"], ["30d", "۳۰ روز"], ["90d", "۹۰ روز"], ["365d", "یک سال"], ["all", "همه"]];
-  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد" };
+  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد", guard: "ردِ اعتبارسنج (مذاکرهٔ دوگامی)" };
   /* نامِ فارسیِ جعبه‌ها از همان پاسخِ سرور */
   const boxFa = (c) => { const b = ((S.d && S.d.boxes && S.d.boxes.list) || []).find((x) => x.code === c); return b ? b.fa : c; };
   const boxChips = (codes) => ((codes || []).length ? `<span class="sv-fbbx">${codes.map((c) => `<span class="chip warn">📦 ${esc(boxFa(c))}</span>`).join("")}</span>` : "");
