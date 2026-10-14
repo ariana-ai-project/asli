@@ -617,5 +617,16 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .fm-text { white-space: pre-wrap; font: inherit; font-size: .86rem; line-height: 1.85; margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(79,140,255,.07); max-height: 30vh; overflow: auto; }
 .fm-row textarea { width: 100%; min-height: 10em; font: inherit; font-size: .86rem; line-height: 1.8; resize: vertical; box-sizing: border-box; }
 :root[data-theme="light"] .fm-text { background: rgba(47,111,228,.06); }
+/* «📘 سند راهبرد» (expert.js:pkDocUI) */
+.doc-sec { border-top: 1px solid var(--tp-line); padding: 8px 0; font-size: .88rem; line-height: 1.85; }
+.doc-sec > b { display: block; margin-bottom: 2px; }
+.doc-sec ul { margin: 2px 0; padding-inline-start: 20px; }
+.doc-st { margin: 4px 0; }
+.doc-rev, .doc-edit, .doc-builder { border: 1px solid var(--tp-line); border-radius: 10px; padding: 10px 12px; margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.sp-cboxes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: .84rem; }
+.sp-cboxes > b { width: 100%; font-size: .84rem; }
+.sp-cbox { display: inline-flex; gap: 5px; align-items: center; padding: 4px 10px; border: 1px solid var(--tp-line-2); border-radius: 999px; cursor: pointer; user-select: none; }
+.sp-cbox:has(input:checked) { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.55); }
+.sp-cbox input { margin: 0; }
 /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ هر قلم (expert.js:vTerms) */
 .terms-box { border: 1px dashed var(--tp-line); border-radius: 12px; padding: 8px 12px; margin: 10px 0; }

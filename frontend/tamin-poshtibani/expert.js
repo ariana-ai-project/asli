@@ -662,6 +662,7 @@
         <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
         ${P.cr && !started && !A_ ? `<button class="tp-btn sm" data-pkstrat title="سیاستِ استعلامِ این نوع قلم و برنامهٔ گیرندگان روی گراف (کمیاب یا گسترده)">🧭 استراتژی استعلام</button>` : ""}
+        ${P.doc && P.head && !started ? `<button class="tp-btn sm" data-pkdoc title="سندِ راهبردِ این نوع قلم — پیش از «🚀 شروع» بازبینی و تأیید می‌شود">📘 سند راهبرد</button>` : ""}
         ${P.first_msg && on.length && (!started || fresh) ? `<button class="tp-btn sm" data-pkfm title="متنِ نخستین پیامِ هر تیک‌خورده: قالبِ درخواست، یا قالب و متنِ جدا برای هر تأمین‌کننده — با پیش‌نمایش">✉️ پیام اول</button>` : ""}
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
@@ -799,6 +800,135 @@
       catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); }
     });
   }
+  /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc): سندِ نوع قلم پیش از «🚀 شروع» — دیدن، امتیاز (۱ تا ۳ با توضیح و جعبهٔ
+     راهبرد)، تأیید، ویرایش یا سازندهٔ پارامتری؛ عددهای درونیِ همین قلم (هدف، حد، پیشنهادِ هر دور) فقط برای شما */
+  const MV_FA = { "M-ANCHOR": "لنگر", "M-COUNTER": "پیشنهادِ متقابل", "M-PACKAGE": "بستهٔ معاوضه", "M-FACT": "بیانِ واقعیت", "M-ASK": "پرسش", "M-PAUSE": "مکث",
+    "M-SPLIT": "تقسیمِ سفارش", "M-CLOSE": "جمع‌بندی", "M-WALK": "ترکِ مؤدبانه", "M-ESCALATE": "ارجاع به کارشناس" };
+  const rial = (n) => (n == null ? "—" : M(Math.round(n)));
+  async function pkDocUI(it, then) {
+    const P = S.picks[it.id]; if (!P || !P.head) return;
+    const q = `/cr/doc?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}&enqueue=1`;
+    let d;
+    try { d = await TP.api(q); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    if (!d.available) return TP.modal("📘 سند راهبرد", "این نوع قلم در دادهٔ تحقیق نیست؛ سند ندارد.", null, "باشد", "");
+    const m = TP.modal(`📘 سند راهبرد — ${esc(d.head)}`, `<div data-doc></div>`, null, "بستن", "");
+    m.querySelector(".tp-modal").classList.add("fm-modal");
+    const box = m.querySelector("[data-doc]");
+    const st = { mode: "view", score: 0, note: "", boxes: [] };
+    const msg = (t) => { const n = box.querySelector("[data-docmsg]"); if (n) n.innerHTML = t ? `<div class="tp-note warn" style="margin:6px 0">⛔ ${esc(t)}</div>` : ""; };
+    const reload = async () => { try { d = await TP.api(q); } catch (e) { return msg(e.message); } paint(); };
+    async function review(body) {
+      const L = d.latest;
+      try {
+        await TP.api(`/cr/doc/${L.id}/review`, { body });
+        st.mode = "view"; await reload(); await loadPicks(it, true);
+        okTick("سندِ راهبرد تأیید شد");
+        if (then) { m.remove(); then(); }
+      } catch (e) { msg(e.message); }
+    }
+    const rv = () => (st.score ? { score: st.score, note: st.note, boxes: st.boxes } : {});
+    function docHtml(x, nums) {
+      const sec = (t, h) => (h ? `<div class="doc-sec"><b>${t}</b>${h}</div>` : "");
+      const ul = (a) => (a && a.length ? `<ul>${a.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : "");
+      const n = x.negotiation || {}, r = x.rfq || {}, mv = x.market_view || {};
+      return `<pre class="fm-text">${esc(x.summary_fa || "")}</pre>
+        ${sec("بازار", `<div class="dim">${esc(mv.ms || "")} · ${esc((mv.labels || []).join(" "))} · اطمینان ${esc(mv.confidence_band || "—")}</div>${ul(mv.key_facts)}`)}
+        ${sec("استعلام", `<div class="dim">${esc(r.mode || "")} · موج اول ${M(r.n_wave1 || 0)} از ${M(r.n_max || 0)}${r.waves > 1 ? " · دو موج" : ""}</div>${ul([...(r.why || []), ...(r.distribution_explained || []), ...(r.anti_leak_measures || [])])}`)}
+        ${sec("مذاکره", `<div>${esc(n.anchor_rule || "")}</div><div>${esc(n.reservation_rule || "")}</div><div class="dim">آهنگ c=${esc(n.concession_c)} · ${M(n.rounds || 0)} دور${n.parallel_with ? ` · هم‌زمان با ${M(n.parallel_with)} تأمین‌کننده` : ""}</div>
+          ${(n.packages || []).length ? `<div>بسته‌های معاوضه: ${n.packages.map((p) => `<span class="chip ok">${esc(p.description_fa)}${p.effect_pct != null ? ` (${esc(String(p.effect_pct))}٪)` : ""}</span>`).join(" ")}</div>` : ""}
+          ${(n.hard_constraints || []).length ? `<div>قیدهای سخت: ${n.hard_constraints.map(esc).join("، ")}</div>` : ""}`)}
+        ${nums && nums.status === "OK" ? sec("🔒 عددهای همین قلم — درونی، به تأمین‌کننده گفته نمی‌شود", `<div>قیمت مرجع ${rial(nums.ref)} · هدف ${rial(nums.target)} · حد ${rial(nums.reservation)} ریال${nums.unit ? ` (${esc(nums.unit)})` : ""}</div><div class="dim">پیشنهادِ ما در هر دور: ${nums.offers.map(rial).join(" ← ")}</div>`)
+          : nums && nums.status ? sec("🔒 عددهای همین قلم", `<div class="dim">قیمت مرجع ندارد — ${esc(nums.action || "")}</div>`) : ""}
+        ${sec("وضعیت‌های محتمل و پاسخِ آماده", (x.anticipated_states || []).map((s) => `<div class="doc-st"><b>${esc(s.name || s.state_id)}</b> <span class="chip">${esc(MV_FA[s.move] || s.move)}</span>${s.blocked ? ` <span class="chip bad" title="${esc(s.blocked.join("؛ "))}">⛔ افشاگر — نمی‌رود</span>` : ""}<div class="dim">«${esc(s.prepared_reply_fa)}»</div></div>`).join(""))}
+        ${sec("ریسک‌ها", (x.risks || []).length ? `<ul>${x.risks.map((k) => `<li>${esc(k.risk)} — <span class="dim">${esc(k.control)}</span></li>`).join("")}</ul>` : "")}
+        ${sec("آنچه تأییدِ شما را می‌خواهد", ul(x.needs_approval))}
+        ${x.builder ? sec("سازندهٔ پارامتری", `<div class="dim">وزن‌ها: ${Object.entries(x.builder.weights).map(([k, v]) => `${esc(d.builder.weights[k] || k)} ${M(v)}`).join("، ")} · آهنگِ ${esc(d.builder.pace[x.builder.pace] || "")} · پیشنهادِ دیگران: ${esc(d.builder.others[x.builder.others] || "")}${x.builder.split_ok ? " · تقسیمِ سفارش مجاز" : ""}</div>`) : ""}`;
+    }
+    function reviewHtml(noActions) {
+      const low = st.score && st.score <= 3;
+      return `<div class="doc-rev" data-drev><b>امتیازِ شما به این سند</b>
+        <div class="toolrow" style="gap:6px;flex-wrap:wrap">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="tp-btn sm ${st.score === n ? "primary" : ""}" data-dscore="${n}">${M(n)}</button>`).join("")}</div>
+        ${low ? `<textarea class="tp-input" data-dnote style="width:100%;min-height:60px;margin-top:6px" placeholder="چه چیزِ این سند درست نبود؟ (اجباری)">${esc(st.note)}</textarea>
+          <div class="sp-cboxes" role="group" aria-label="جعبه‌های نقدِ راهبرد"><b>کدام بخش؟ (دست‌کم یکی)</b>${d.builder.boxes.map((b) => `<label class="sp-cbox"><input type="checkbox" data-dbox="${b.code}" ${st.boxes.includes(b.code) ? "checked" : ""}> ${esc(b.fa)}</label>`).join("")}</div>` : ""}
+        ${noActions ? "" : `<div class="toolrow" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button type="button" class="tp-btn primary" data-dok>✅ تأیید</button><button type="button" class="tp-btn" data-dedit>✏️ ویرایش</button><button type="button" class="tp-btn" data-dbuild>🧱 سازندهٔ پارامتری</button></div>`}</div>`;
+    }
+    function editHtml(x) {
+      const n = x.negotiation || {};
+      return `<div class="doc-edit"><label class="tp-field"><b>خلاصه</b><textarea class="tp-input" data-esum style="width:100%;min-height:90px">${esc(x.summary_fa || "")}</textarea></label>
+        <label class="tp-field"><b>قاعدهٔ لنگر و هدف</b><input class="tp-input" data-eanchor style="width:100%" value="${esc(n.anchor_rule || "")}"></label>
+        <label class="tp-field"><b>قاعدهٔ حد</b><input class="tp-input" data-eres style="width:100%" value="${esc(n.reservation_rule || "")}"></label>
+        ${(x.anticipated_states || []).map((s) => `<label class="tp-field"><b>${esc(s.name || s.state_id)} — ${esc(MV_FA[s.move] || s.move)}</b><textarea class="tp-input" data-erep="${esc(s.state_id)}" style="width:100%;min-height:50px">${esc(s.prepared_reply_fa)}</textarea></label>`).join("")}
+        ${reviewHtml(true)}
+        <div class="toolrow" style="gap:8px;margin-top:8px"><button type="button" class="tp-btn primary" data-esave>ذخیره و تأیید</button><button type="button" class="tp-btn" data-ecancel>انصراف</button></div></div>`;
+    }
+    function builderHtml() {
+      const B = d.builder, df = B.defaults || {}, w = df.weights || {};
+      const pc = (v) => (v == null ? "" : String(Math.round(v * 1000) / 10));
+      return `<div class="doc-builder"><b>🧱 سازندهٔ پارامتری</b>
+        <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">${Object.entries(B.weights).map(([k, fa]) => `<label class="tp-field"><b>${esc(fa)}</b><input class="tp-input num" data-bw="${k}" value="${w[k] ?? 20}" style="width:64px" dir="ltr" inputmode="numeric"></label>`).join("")}<span class="dim">جمعِ وزن‌ها ۱۰۰</span></div>
+        <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">
+          <label class="tp-field"><b>هدف نسبت به مرجع (٪)</b><input class="tp-input num" data-bp="target_vs_ref" value="${pc(df.target_vs_ref)}" style="width:80px" dir="ltr"></label>
+          <label class="tp-field"><b>تحملِ حد (٪)</b><input class="tp-input num" data-bp="rv_tol" value="${pc(df.rv_tol)}" style="width:80px" dir="ltr"></label>
+          <label class="tp-field"><b>شمارِ دور</b><input class="tp-input num" data-bp="rounds" value="${df.rounds || 3}" style="width:60px" dir="ltr"></label>
+          <label class="tp-field"><b>حداکثر ماهِ تعویقِ پرداخت</b><input class="tp-input num" data-bp="max_pay_months" value="${df.max_pay_months ?? 3}" style="width:60px" dir="ltr"></label>
+          <label class="tp-field"><b>نرخِ ماهانهٔ پنل (٪، اختیاری)</b><input class="tp-input num" data-bp="panel_rate" value="" style="width:80px" dir="ltr"></label></div>
+        <div style="margin-top:6px"><b>آهنگِ امتیازدهی</b> ${Object.entries(B.pace).map(([k, fa]) => `<label class="chkline"><input type="radio" name="bpace" value="${k}" ${k === (df.pace || "balanced") ? "checked" : ""}> ${esc(fa)}</label>`).join(" ")}</div>
+        <div><b>استفاده از پیشنهادِ دیگران</b> ${Object.entries(B.others).map(([k, fa]) => `<label class="chkline"><input type="radio" name="bothers" value="${k}" ${k === (df.others || "better_only") ? "checked" : ""}> ${esc(fa)}</label>`).join(" ")}</div>
+        ${B.tradeable_issues.length ? `<div><b>موضوع‌های قابلِ معامله</b><div class="sp-cboxes">${B.tradeable_issues.map((t) => `<label class="sp-cbox"><input type="checkbox" data-btrade="${esc(t)}" checked> ${esc(t)}</label>`).join("")}</div></div>` : ""}
+        <label class="tp-field" style="margin-top:6px"><b>قیدهای سخت (هر خط یکی)</b><textarea class="tp-input" data-bhard style="width:100%;min-height:50px">${esc((df.hard_constraints || []).join("\n"))}</textarea></label>
+        <label class="chkline"><input type="checkbox" data-bsplit> تقسیمِ سفارش مجاز است</label>
+        <label class="tp-field"><b>یادداشت (اختیاری)</b><input class="tp-input" data-bnote style="width:100%"></label>
+        ${d.latest && d.latest.doc ? reviewHtml(true) : ""}
+        <div class="toolrow" style="gap:8px;margin-top:8px"><button type="button" class="tp-btn primary" data-bsave>ساخت و تأیید</button><button type="button" class="tp-btn" data-bcancel>انصراف</button></div></div>`;
+    }
+    function paint() {
+      const L = d.latest, x = L && (L.final || L.doc);
+      const tone = L ? (L.state === "approved" ? "ok" : L.state === "failed" ? "bad" : L.state === "draft" ? "warn" : "") : "";
+      let h = `<div class="dim" style="font-size:.86rem">${TP.ui.info("expert.picks", "راهنمای سند راهبرد")} ${L ? `نسخهٔ ${M(L.version)} · <span class="chip ${tone}">${esc(L.state_fa)}</span>${L.source === "builder" ? " · سازندهٔ پارامتری" : L.model ? ` · <span dir="ltr">${esc(L.model)}</span>` : ""}${L.review && L.review.score ? ` · امتیازِ ${esc(L.review.by || "")}: ${M(L.review.score)}` : ""}` : "هنوز سندی نیست"}</div><div data-docmsg></div>`;
+      if (st.mode === "builder") h += builderHtml();
+      else if (st.mode === "edit" && x) h += editHtml(x);
+      else if (!L || ["queued", "building"].includes(L.state)) h += `<div class="tp-note" style="margin:8px 0">⏳ سند در صفِ ساخت است (یکی دو دقیقه). <button type="button" class="tp-btn xs" data-dreload>↻ تازه کن</button></div><div class="toolrow"><button type="button" class="tp-btn" data-dbuild>🧱 همین حالا با سازندهٔ پارامتری</button></div>`;
+      else if (L.state === "failed") h += `<div class="tp-note warn">ساخت نشد: ${esc(L.error || "")}</div><div class="toolrow" style="gap:8px"><button type="button" class="tp-btn primary" data-drebuild>↻ دوباره بساز</button><button type="button" class="tp-btn" data-dbuild>🧱 سازندهٔ پارامتری</button></div>`;
+      else h += docHtml(x, d.numbers) + reviewHtml(false);
+      box.innerHTML = h;
+      bind();
+    }
+    function keep() {
+      const nt = box.querySelector("[data-dnote]"); if (nt) st.note = nt.value;
+      const bx = [...box.querySelectorAll("[data-dbox]")]; if (bx.length) st.boxes = bx.filter((c) => c.checked).map((c) => c.dataset.dbox);
+    }
+    function bind() {
+      const Qd = (s) => box.querySelectorAll(s), G1 = (s) => box.querySelector(s);
+      Qd("[data-dscore]").forEach((b) => b.onclick = () => { keep(); st.score = +b.dataset.dscore; const el = G1("[data-drev]"); if (!el) return paint(); el.outerHTML = reviewHtml(st.mode !== "view"); bind(); });
+      const dok = G1("[data-dok]"); if (dok) dok.onclick = () => { keep(); if (!st.score) return msg("امتیازِ ۱ تا ۵ را بزنید."); review({ action: "approve", ...rv() }); };
+      const ded = G1("[data-dedit]"); if (ded) ded.onclick = () => { keep(); st.mode = "edit"; paint(); };
+      Qd("[data-dbuild]").forEach((b) => b.onclick = () => { keep(); st.mode = "builder"; paint(); });
+      const drl = G1("[data-dreload]"); if (drl) drl.onclick = reload;
+      const drb = G1("[data-drebuild]"); if (drb) drb.onclick = async () => { try { await TP.api("/cr/doc/build", { body: { head: d.head, code: it.code || null, force: true } }); await reload(); } catch (e) { msg(e.message); } };
+      const ec = G1("[data-ecancel]"); if (ec) ec.onclick = () => { keep(); st.mode = "view"; paint(); };
+      const es = G1("[data-esave]"); if (es) es.onclick = () => {
+        keep();
+        if (!st.score) return msg("امتیازِ ۱ تا ۵ را بزنید.");
+        review({ action: "edit", ...rv(), edit: { summary_fa: G1("[data-esum]").value, anchor_rule: G1("[data-eanchor]").value, reservation_rule: G1("[data-eres]").value,
+          replies: [...Qd("[data-erep]")].map((t) => ({ state_id: t.dataset.erep, prepared_reply_fa: t.value })) } });
+      };
+      const bc = G1("[data-bcancel]"); if (bc) bc.onclick = () => { keep(); st.mode = "view"; paint(); };
+      const bs = G1("[data-bsave]"); if (bs) bs.onclick = () => {
+        keep();
+        if (d.latest && d.latest.doc && !st.score) return msg("پیش از سازنده به سندِ مدل امتیاز بدهید.");
+        const v = (k) => G1(`[data-bp="${k}"]`).value.trim();
+        const pct = (s) => (s === "" ? null : Number(TP.digits(s)) / 100);
+        const params = { weights: Object.fromEntries([...Qd("[data-bw]")].map((x) => [x.dataset.bw, Number(TP.digits(x.value))])),
+          target_vs_ref: pct(v("target_vs_ref")), rv_tol: pct(v("rv_tol")), rounds: Number(TP.digits(v("rounds"))), max_pay_months: Number(TP.digits(v("max_pay_months"))), panel_rate: pct(v("panel_rate")),
+          pace: (box.querySelector('input[name="bpace"]:checked') || {}).value, others: (box.querySelector('input[name="bothers"]:checked') || {}).value,
+          tradeables: [...Qd("[data-btrade]:checked")].map((x) => x.dataset.btrade), hard_constraints: G1("[data-bhard]").value.split("\n").map((s) => s.trim()).filter(Boolean),
+          split_ok: G1("[data-bsplit]").checked, note: G1("[data-bnote]").value };
+        if (!d.latest) return msg("سند هنوز در صف نیست؛ ↻ تازه کنید.");
+        review({ action: "builder", ...rv(), params });
+      };
+    }
+    paint();
+  }
   async function pkStartUI(it) {
     if (!S.picks[it.id] || !S.picks[it.id].list) return;
     if (normDirty(it)) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(it.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
@@ -815,7 +945,7 @@
       ${noPh ? `<div class="dim">${M(noPh)} نفر هنوز شمارهٔ پنلِ تیک‌خورده ندارند؛ هر وقت شماره‌شان را با تیکِ پنل بزنید، دعوت می‌شوند.</div>` : ""}`, async () => {
       const b = TP.busy(title, esc(it.title));
       try { const r = await TP.api(`/items/${it.id}/ai-start`, { body: {} }); b.close(); await reload(); S.picks[it.id] = r; render(); okTick(started ? "دعوت شد" : "سپرده شد"); }
-      catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true); }
+      catch (e) { b.close(); if (e.data && e.data.need_doc) return pkDocUI(it, () => pkStartUI(it)); TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true); }
     }, started ? "دعوت کن" : P.mode === "handoff" ? "بسپار" : "شروع", "انصراف");
   }
   function pkAddUI(it) {
@@ -2577,6 +2707,7 @@
     Q("[data-pkstrat]").forEach((b) => b.onclick = () => pkStratUI(item()));
     Q("[data-pkstrat-go]").forEach((b) => b.onclick = () => pkStratApply(item(), true));
     const pkf = G("[data-pkfm]"); if (pkf) pkf.onclick = () => pkFmUI(item());
+    const pkd = G("[data-pkdoc]"); if (pkd) pkd.onclick = () => pkDocUI(item());
     Q("[data-pkdel]").forEach((b) => b.onclick = () => pkEdit(item(), { remove: [b.dataset.pkdel] }));
     Q("[data-pkph]").forEach((b) => b.onclick = () => pkPhoneUI(item(), b.dataset.pkph));
     Q("[data-pkadd-name]").forEach((b) => b.onclick = () => pkEdit(item(), { add: [{ name: b.dataset.pkaddName, src: "manual" }] }));

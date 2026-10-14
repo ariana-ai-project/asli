@@ -19,7 +19,7 @@
   let C = { api: null, render: () => {}, download: null };
   const S = { f: { win: "30d", expert: "", kind: "", low: false, q: "", box: "" }, d: null, items: [], loading: false, err: "", more: false, sum: {}, sumBusy: false, sumErr: "", seq: 0, experts: [] };
   const WINS = [["7d", "۷ روز"], ["30d", "۳۰ روز"], ["90d", "۹۰ روز"], ["365d", "یک سال"], ["all", "همه"]];
-  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست" };
+  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد" };
   /* نامِ فارسیِ جعبه‌ها از همان پاسخِ سرور */
   const boxFa = (c) => { const b = ((S.d && S.d.boxes && S.d.boxes.list) || []).find((x) => x.code === c); return b ? b.fa : c; };
   const boxChips = (codes) => ((codes || []).length ? `<span class="sv-fbbx">${codes.map((c) => `<span class="chip warn">📦 ${esc(boxFa(c))}</span>`).join("")}</span>` : "");
@@ -146,7 +146,7 @@
     if (!any) return h + `<div class="lg-none">⭐<b>هنوز بازخوردی در این بازه نیست</b>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}</div></div>`;
     h += `<div class="sv-fbgrid">${distBox(d)}${trendBox(d)}</div>${aiBox()}<div class="sv-fbgrid">${wordsBox(d)}${boxesBox(d)}</div>${expertsBox(d)}`;
     h += `<section class="tp-box"><div class="tp-box-h"><h2>نظرها و امتیازها</h2><span class="sub">${M(d.total)} مورد</span></div>
-      <div class="sv-fbf"><div class="tp-seg sm">${[["", "همه"], ["msg", "پیام"], ["thread", "مکاتبه"], ["letter", "نامه"], ["prop", "پیشنهاد"], ["request", "درخواست"]].map(([k, l]) => `<button type="button" class="${f.kind === k ? "on" : ""}" data-fbkind="${k}">${l}</button>`).join("")}</div>
+      <div class="sv-fbf"><div class="tp-seg sm">${[["", "همه"], ["msg", "پیام"], ["thread", "مکاتبه"], ["letter", "نامه"], ["prop", "پیشنهاد"], ["request", "درخواست"], ["doc", "سند"]].map(([k, l]) => `<button type="button" class="${f.kind === k ? "on" : ""}" data-fbkind="${k}">${l}</button>`).join("")}</div>
         <label class="chkline"><input type="checkbox" data-fblow ${f.low ? "checked" : ""}> فقط کم‌امتیازها و ردها</label>
         ${f.box ? `<button type="button" class="chip warn" data-fbbox="" title="برداشتنِ فیلترِ جعبه">📦 ${esc(boxFa(f.box))} ✕</button>` : ""}
         <input class="tp-input" data-fbq value="${esc(f.q)}" placeholder="جستجو در نظر، متنِ ربات، درخواست یا تأمین‌کننده ↵" style="flex:1;min-width:200px"></div>

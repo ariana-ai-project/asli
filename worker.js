@@ -19,6 +19,7 @@ import { handler as vbVoice, ensureVbWebhook } from "./worker/voice-bot.js";
 import { tenderTick, tenderDiscoverTick } from "./worker/tender.js";
 import { drainPush } from "./worker/push.js";
 import { guardEnv } from "./worker/d1-guard.js";
+import { crDocTick } from "./worker/strategy-doc.js";
 
 /* وبهوکِ بات مکاتبات تأمین‌کنندگان (و بات ویس) یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
    ثبت نشده، دامنه یا توکن عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار یا ست کردنِ راز کار دستی لازم نیست. */
@@ -66,6 +67,12 @@ export default {
     ctx.waitUntil(ensureSchema(env).then(() => drainPush(env, 5)).then(
       (r) => r && r.rows && console.log("push drain", JSON.stringify(r)),
       (e) => console.error("push drain failed", e && e.message),
+    ));
+    /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc): یک سند در هر دقیقه — صفِ درخواست‌ها، بعد پیش‌ساختِ ۱۳۸ نوع قلمِ پرهزینه.
+       فراخوانِ مدل بیش از مهلتِ waitUntilِ یک درخواست طول می‌کشد؛ Cron تا ۱۵ دقیقه وقت دارد */
+    ctx.waitUntil(ensureSchema(env).then(() => crDocTick(env, { company: env.COMPANY })).then(
+      (r) => r && (r.state || r.skipped) && console.log("cr doc", JSON.stringify(r)),
+      (e) => console.error("cr doc tick failed", e && e.message),
     ));
     if (!env.TG_BOT_TOKEN) return; /* بات هنوز ست نشده — چیزی برای فرستادن نیست */
     /* طرحِ دیتابیس پیش از Cron: اگر اولین اجرا بعد از استقرار Cron باشد نه یک درخواست، ستون‌های تازه

@@ -15,7 +15,7 @@
  */
 import { HttpError } from "./http.js";
 import { callModel } from "./ai-prompts.js";
-import { BOXES, BOX_FA, boxesOf, boxesFa } from "./critique.js";
+import { BOXES, STRAT_BOXES, BOX_FA, boxesOf, boxesFa } from "./critique.js";
 import { tehranParts } from "./time.js";
 
 const now = () => Date.now();
@@ -30,7 +30,7 @@ CREATE TABLE IF NOT EXISTS ai_feedback (id INTEGER PRIMARY KEY, kind TEXT NOT NU
 CREATE INDEX IF NOT EXISTS ix_aifb_at ON ai_feedback(at);
 CREATE INDEX IF NOT EXISTS ix_aifb_exp ON ai_feedback(expert_id, at);
 `;
-export const FB_KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست" };
+export const FB_KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست", doc: "سند راهبرد" };
 export const FB_OUT_FA = { ok: "✅ فرستاد", no: "✏️ رد کرد", auto: "⏱ خودکار رفت" };
 
 /* ---------- عکسِ زمینه ---------- */
@@ -187,7 +187,7 @@ export async function feedbackStats(env, url) {
       (byModel[md] ||= {})[c] = (byModel[md][c] || 0) + 1;
     }
   }
-  const boxes = { list: BOXES.map(({ code, fa, stage, part }) => ({ code, fa, stage, part, n: total[code] || 0 })).sort((a, b) => b.n - a.n), months: byMonth, models: byModel, n: (br.results || []).length };
+  const boxes = { list: [...BOXES, ...STRAT_BOXES.map((b) => ({ ...b, stage: "راهبرد", part: "سند راهبرد (P1)" }))].map(({ code, fa, stage, part }) => ({ code, fa, stage, part, n: total[code] || 0 })).sort((a, b) => b.n - a.n), months: byMonth, models: byModel, n: (br.results || []).length };
   return {
     win: f.win, from: f.from, bucket: bucket === DAY ? "day" : "week", boxes,
     kinds: byKind, experts: [...ex.values()].sort((a, b) => b.n - a.n), dist,

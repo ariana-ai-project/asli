@@ -6,11 +6,12 @@
  *   POST /sreg/opinions   PUT /sreg/opinions/:id   POST /sreg/opinions/:id/hide
  *   POST /sreg/links      POST /sreg/edges/:id/review
  *   GET  /cr/flags        GET /cr/head?head=&code=       GET /cr/plan?head=&code=&cautious=1
+ *   GET  /cr/doc?head=&code=&enqueue=1   POST /cr/doc/build   POST /cr/doc/:id/review     («📘 سند راهبرد»، کلیدِ doc)
  * پشتیبانی:
  *   GET/PUT /support/cr/flags      GET /support/cr/status
  *   GET /support/sreg/g4?state=    POST /support/sreg/g4/:alias      GET /support/graph?head=&hub=&limit=
  *   GET /support/strategy/heads?mode=&family=&q=&page=   PUT /support/strategy/heads/:head
- *   GET/PUT /support/strategy/rfqn
+ *   GET/PUT /support/strategy/rfqn      GET/PUT /support/cr/panel (تنظیم‌های قیمتِ مؤثر، مدلِ سند و پیشرفتِ پیش‌ساخت)
  * هر بخش پشتِ کلیدِ settings.crFlags است و تا روشن نشده رابطِ کاربری چیزی نشان نمی‌دهد (آزمون‌ها و پشتیبانی همیشه می‌بینند).
  */
 import { HttpError } from "./http.js";
@@ -18,6 +19,8 @@ import { supplierProfile, addOpinion, editOpinion, hideOpinion, addLinks, review
 import { headPolicy, recipientPlan, rfqNTable, MODE_FA, FAMILY } from "./cr-engine.js";
 import * as C from "./strategy/config.js";
 import { WORKFLOWS, WORKFLOW_SUP, SUP_FA } from "./ai-supervise.js";
+import { docView, enqueueDoc, reviewDoc, docOut, docStates, docProgress, panelSettings, savePanel, docModel } from "./strategy-doc.js";
+import { AGENT_MODELS } from "./ai-prompts.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -61,6 +64,17 @@ export async function crRoute(request, env, path, m, url, { json, readJson, who 
       disclosure: p.disclosure, quote_must_include: p.quote_must_include, timing: p.timing, ms: hp.profile.ms, labels: hp.profile.labels });
   }
   if (path === "/cr/plan" && m === "GET") return json(await recipientPlan(env, T(q.head), { itemCode: T(q.code) || null, cautious: q.cautious === "1" }));
+  /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc) */
+  if (path === "/cr/doc" || path.startsWith("/cr/doc/")) {
+    if (!(await crFlags(env)).doc) throw new HttpError("«سند راهبرد» هنوز در پنل پشتیبانی روشن نشده است.", 409);
+    if (path === "/cr/doc" && m === "GET") return json(await docView(env, T(q.head), { itemCode: T(q.code) || null, urgent: q.urgent === "1", enqueue: q.enqueue === "1", by: w.name }));
+    if (path === "/cr/doc/build" && m === "POST") {
+      const b = await readJson(request);
+      const r = await enqueueDoc(env, T(b.head), { itemCode: T(b.code) || null, prio: 2, by: w.name, force: !!b.force });
+      return json({ queued: r.queued, doc: docOut(r.row) });
+    }
+    if ((mm = /^\/cr\/doc\/(\d+)\/review$/.exec(path)) && m === "POST") return json(await reviewDoc(env, w, int(mm[1]), await readJson(request)));
+  }
   throw new HttpError("مسیر پیدا نشد.", 404);
 }
 
@@ -84,6 +98,10 @@ export async function crSupportRoute(request, env, path, m, url, { json, readJso
   if ((mm = /^\/support\/strategy\/heads\/(.+)$/.exec(path)) && m === "PUT") return json(await headSet(env, w, decodeURIComponent(mm[1]), await readJson(request)));
   if (path === "/support/strategy/rfqn" && m === "GET") return json({ table: await rfqNTable(env), defaults: C.RFQ_N, modes: MODE_FA });
   if (path === "/support/strategy/rfqn" && m === "PUT") return json(await rfqNSave(env, await readJson(request)));
+  /* «📘 سند راهبرد»: تنظیم‌های قیمتِ مؤثر (نرخِ ماهانهٔ پنل، مالیات…)، مدلِ سند و پیشرفتِ پیش‌ساختِ ۱۳۸ نوع قلم */
+  if (path === "/support/cr/panel" && m === "GET") return json({ panel: await panelSettings(env), model: await docModel(env),
+    models: Object.fromEntries(Object.entries(AGENT_MODELS).map(([k, v]) => [k, v.fa])), progress: await docProgress(env) });
+  if (path === "/support/cr/panel" && m === "PUT") return json(await savePanel(env, await readJson(request)));
   throw new HttpError("مسیر پیدا نشد.", 404);
 }
 
@@ -113,6 +131,7 @@ async function headList(env, q) {
   const sql = `SELECT head, cluster, ms, tier, rfq_mode, competition_mode, n_wave1, n_max, workflow, priority, confidence, spend_bn, spend_rank FROM cr_heads${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY spend_rank IS NULL, spend_rank, head LIMIT ${PER} OFFSET ${page * PER}`;
   const rows = (await env.DB.prepare(sql).bind(...args).all()).results || [];
   return {
+    docs: await docStates(env, rows.map((r) => r.head)).catch(() => ({})),
     counts: Object.fromEntries((counts.results || []).map((r) => [r.mode, r.n])), modes: MODE_FA, families: { max: "حداکثری", cautious: "محتاط", special: "ویژه" },
     list: rows.map((r) => { const o = over.get(r.head) || {}; return { ...r, mode_fa: MODE_FA[r.rfq_mode], family: FAMILY(r.rfq_mode), moved: o.mode || null, n_over: o.n || null, wf_over: o.workflow || null }; }),
     page, per: PER,

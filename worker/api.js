@@ -66,6 +66,7 @@ import { guardEnv } from "./d1-guard.js";
 import { GUARD_DDL, ipOf, windowOf, failCountStmt, blockedError, recordFail, guardOpen, codeChangeOpen, codeChangeConflict } from "./auth-guard.js";
 import { CR02_DDL } from "./cr-data.js";
 import { FM_DDL } from "./first-msg.js";
+import { DOC_DDL } from "./strategy-doc.js";
 import { crRoute, crSupportRoute } from "./cr-api.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
@@ -256,6 +257,7 @@ ${STRUCT_DDL.trim()}
 ${GUARD_DDL.trim()}
 ${CR02_DDL.trim()}
 ${FM_DDL};
+${DOC_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.

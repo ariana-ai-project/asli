@@ -71,6 +71,7 @@ import { limitsOf, LIMIT_FA } from "./terms-locks.js";
 import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { boxesOn, boxesFa } from "./critique.js";
+import { docGate, docBlock } from "./strategy-doc.js";
 import { ratesForModel } from "./ai-rates.js";
 import { recordProp } from "./ai-feedback.js";
 
@@ -301,7 +302,7 @@ async function picksOut(env, { it, o, m, cfg }, pick) {
     rule: pick ? pick.rule || null : null, n: pick ? pick.n || 0 : 0, msg: pick ? pick.msg || null : null, pending: started && !pick,
     list, fresh: list.filter((e) => e.on && !e.go).length,
     strategy: pick ? pick.strategy || null : null, cr, why_boxes: WHY_BOXES, deviations: pick && pick.strategy ? strategyDeviations(pick).map((e) => e.k) : [],
-    first_msg: !!flags.firstmsg,
+    first_msg: !!flags.firstmsg, doc: !!flags.doc,
   };
 }
 /** شمارِ پیش‌تیکِ فهرستِ تازه: شمارِ موج اولِ استراتژیِ نوع قلم (کلیدِ pretick)، وگرنه پنج */
@@ -403,6 +404,11 @@ export async function startItem(env, ex, itemId) {
   const by = `expert:${ex.id}`;
   if (!it.dispatched_at || it.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
   if (!normConfirmedRow(it)) throw new HttpError("نرمال‌سازی اجباری است: اول ساختارِ این قلم را تأیید کنید.", 409, { need_norm: true });
+  /* «📘 سند راهبرد» (کلیدِ doc؛ worker/strategy-doc.js): سندِ تأییدشدهٔ نوع قلم پیش از «🚀 شروع» — بازبینیِ کارشناس پیش از مذاکره */
+  if (!it.ai_start_at) {
+    const g = await docGate(env, k.m.head, it.code || null);
+    if (!g.ok) throw new HttpError(g.msg, 409, { need_doc: true, doc_state: g.state, head: g.head });
+  }
   const run = await env.DB.prepare("SELECT id, state, finished_at, data_json FROM ai_runs WHERE assignment_id=?").bind(it.aid).first();
   if (run && (run.finished_at || RUN_BUSY[run.state])) throw new HttpError(`${RUN_BUSY[run.state] || RUN_BUSY.ended}؛ قلمِ تازه به آن سپرده نمی‌شود.`, 409);
   let pick = pickOf(it);
@@ -1217,7 +1223,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   const ids = [...new Set(lineOut.map((l) => l.item_id))];
   /* تاریخِ نیاز و «توضیحاتِ خودِ درخواست» (مشخصات، توضیح و مصرف‌کنندهٔ فایلِ درخواست) — هر سؤالی که جوابش این‌جا و در
      لایه‌ها نیست، «پرسش از کارشناس» می‌شود (ai-prompts.js) */
-  const rowsOf = ids.length ? ((await env.DB.prepare(`SELECT id, need_date, spec, note, consumer FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || []) : [];
+  const rowsOf = ids.length ? ((await env.DB.prepare(`SELECT id, need_date, spec, note, consumer, code, title, norm_json FROM items WHERE id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || []) : [];
   const needOf = new Map(rowsOf.map((r) => [r.id, T(r.need_date) || null]));
   const descOf = new Map(rowsOf.map((r) => [r.id, [T(r.spec), T(r.note), T(r.consumer) ? `مصرف‌کننده: ${T(r.consumer)}` : ""].filter(Boolean).join(" · ") || null]));
   /* حداقلِ استعلامِ هر قلم (قواعدِ پنل پشتیبانی) و آنچه تا حالا رسیده — مدل می‌داند هنوز چند پیشنهادِ کامل لازم است */
@@ -1237,7 +1243,7 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   const props = sup && sup.on ? ((await env.DB.prepare("SELECT kind, body, bundle_id, state, reason, own, meta_json FROM ai_props WHERE thread_id=? AND state IN ('ok','auto','no') ORDER BY id DESC LIMIT 6")
     .bind(th.id).all()).results || []).reverse().map((p) => ({ kind: p.kind, body: p.body, bundle_id: p.bundle_id, state: p.state, reason: p.reason, own: p.own,
     bundle_act: (parse(p.meta_json, {}) || {}).bundle_act || null })) : [];
-  return negotiationContext({
+  const text = negotiationContext({
     company: COMPANY(env), request: { id: th.request_id, party: th.party }, now: fmtFa(now()), deadline: asg && asg.deadline_at ? fmtFa(asg.deadline_at) : null,
     turn: (st.turns || 0) + 1, maxTurns: cfg.maxTurns, supplier: { name: th.supplier_name, source: supplierSrc },
     lines: lineOut.map((l) => ({ ...l, need: needOf.get(l.item_id) || null, desc: descOf.get(l.item_id) || null, min: minOf.get(l.item_id) || null, limits: lim.get(l.item_id) || null })),
@@ -1247,6 +1253,11 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
     /* ⭐ امتیازِ کارشناس به پیام‌های همین گفت‌وگو (کم‌ها با علت اول) — worker/ai-rates.js */
     rates: await ratesForModel(env, th.id),
   });
+  /* «📘 سند راهبرد» (کلیدِ doc؛ worker/strategy-doc.js): سندِ تأییدشدهٔ نوع قلمِ اقلامِ این گفت‌وگو و عددهای درونیِ هر کدام —
+     بی سند یا با کلیدِ خاموش، همان پروندهٔ امروز */
+  const doc = await docBlock(env, rowsOf.map((r) => ({ head: (parse(r.norm_json, {}) || {}).head || null, code: r.code || null, title: r.title })))
+    .catch((e) => { console.error("doc block", e && e.message); return ""; });
+  return doc ? `${text}\n\n${doc}` : text;
 }
 
 /* ------------------------------------------------------------------ */

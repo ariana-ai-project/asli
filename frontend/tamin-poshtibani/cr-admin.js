@@ -37,7 +37,7 @@
         S.hd = hd; S.rfqn = rq;
       } else if (S.view === "g4") { const r = await C.api(`/sreg/g4?state=${encodeURIComponent(S.g4F)}`); if (seq !== S.seq) return; S.g4 = r; }
       else if (S.view === "graph") { const q = new URLSearchParams(Object.entries(S.grF).filter(([, v]) => v)); const r = await C.api(`/graph?${q}`); if (seq !== S.seq) return; S.gr = r; }
-      else if (S.view === "flags") { const r = await C.api("/cr/status"); if (seq !== S.seq) return; S.status = r; }
+      else if (S.view === "flags") { const [r, pn] = await Promise.all([C.api("/cr/status"), C.api("/cr/panel").catch(() => null)]); if (seq !== S.seq) return; S.status = r; S.panel = pn; }
     } catch (e) { if (seq === S.seq) S.err = e.message; }
     if (seq === S.seq) { S.loading = false; C.render(); }
   }
@@ -50,6 +50,13 @@
     const floor = w && w.sup !== "auto" && (S.flags || {}).hold ? ` <span class="chip ${w.sup === "hold" ? "warn" : ""}" title="کفِ حالتِ مکاتباتِ کارشناس هوشمند برای این نوع قلم">${esc(w.sup_fa)}</span>` : "";
     return `${esc(wf || "")}${floor}${h.wf_over ? `<div class="dim" style="font-size:.76rem">به تصمیم ${esc(h.wf_over.by || "")}: ${esc(h.wf_over.reason || "")}</div>` : ""}`;
   }
+  /** وضعیتِ «📘 سند راهبرد»ِ نوع قلم (آخرین نسخه) */
+  function docCell(d, h) {
+    const x = (d.docs || {})[h.head];
+    if (!x) return `<span class="dim">—</span>`;
+    const tone = x.state === "approved" ? "ok" : x.state === "failed" ? "bad" : x.state === "draft" ? "warn" : "";
+    return `<span class="chip ${tone}" title="نسخهٔ ${fa(x.version)}">${esc(x.state_fa || x.state)}</span>`;
+  }
   function vHeads() {
     const d = S.hd;
     if (!d) return TP.ui.loader("");
@@ -58,7 +65,7 @@
     const rows = d.list.map((h) => `<tr><td class="rt"><b>${esc(h.head)}</b> <span class="dim" style="font-size:.78rem">${esc(h.cluster || "")}</span></td>
         <td><span class="chip ${FAM_TONE[h.moved ? "special" : h.family] || ""}">${esc(h.moved ? (d.modes[h.moved.value] || h.moved.value) : h.mode_fa || h.rfq_mode)}</span>${h.moved ? `<div class="dim" style="font-size:.76rem">به تصمیم ${esc(h.moved.by || "")}: ${esc(h.moved.reason || "")}</div>` : ""}</td>
         <td class="num">${h.n_over ? `${fa(h.n_over.value.n_wave1)}/${fa(h.n_over.value.n_max)} <span class="chip warn" title="${esc(h.n_over.reason || "")}">استثنا</span>` : `${fa(h.n_wave1 || "—")}/${fa(h.n_max || "—")}`}</td>
-        <td>${esc(h.tier || "")}</td><td>${wfCell(d, h)}</td><td>${esc(h.priority || "")}</td>
+        <td>${esc(h.tier || "")}</td><td>${wfCell(d, h)}</td><td>${esc(h.priority || "")}</td><td>${docCell(d, h)}</td>
         <td><button class="tp-btn xs" data-cr-move="${esc(h.head)}">جابه‌جایی یا استثنا</button></td></tr>`).join("");
     const T = S.rfqnDraft || (S.rfqn && S.rfqn.table) || {};
     const rfq = S.rfqn ? `<details class="tp-card" style="margin-top:12px;padding:10px 14px"><summary><b>جدولِ شمارِ موج اول و سقف</b> <span class="dim">— پیش‌فرض از بسته؛ «۶» همان گسترده در ردهٔ A</span></summary>
@@ -69,8 +76,8 @@
         <div class="tp-seg">${fam("", "همه")}${fam("max", "حداکثری")}${fam("cautious", "محتاط")}${fam("special", "ویژه")}</div>
         <select class="tp-input" data-cr-mode><option value="">هر حالت</option>${modes.map(([k, v]) => `<option value="${k}" ${S.hF.mode === k ? "selected" : ""}>${esc(v)} (${fa((d.counts || {})[k] || 0)})</option>`).join("")}</select>
         <input class="tp-input" data-cr-q placeholder="نوع قلم…" value="${esc(S.hF.q)}" style="min-width:160px"></div>
-      <div class="tp-scroll" style="margin-top:8px"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">نوع قلم</th><th>حالت استعلام</th><th title="موج اول / سقف">شمار</th><th>رده</th><th>حالت کار</th><th>اولویت پرسش</th><th></th></tr></thead>
-        <tbody>${rows || `<tr><td colspan="7" class="dim">نوع قلمی نیست — دادهٔ تحقیق هنوز وارد نشده؟</td></tr>`}</tbody></table></div>
+      <div class="tp-scroll" style="margin-top:8px"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">نوع قلم</th><th>حالت استعلام</th><th title="موج اول / سقف">شمار</th><th>رده</th><th>حالت کار</th><th>اولویت پرسش</th><th>📘 سند</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="8" class="dim">نوع قلمی نیست — دادهٔ تحقیق هنوز وارد نشده؟</td></tr>`}</tbody></table></div>
       <div class="toolrow" style="margin-top:6px">${S.hF.page > 0 ? `<button class="tp-btn sm" data-cr-page="-1">قبلی</button>` : ""}${d.list.length === d.per ? `<button class="tp-btn sm" data-cr-page="1">بعدی</button>` : ""}</div>${rfq}`;
   }
   function vG4() {
@@ -102,7 +109,25 @@
       <div class="tp-card" style="padding:12px 16px;margin-top:12px"><h4 style="margin:0 0 6px">دادهٔ تحقیق</h4>${!st ? TP.ui.loader("") : `<div class="spp-kv" style="display:grid;grid-template-columns:max-content 1fr;gap:4px 12px">
         <b>نوع قلم</b><span>${fa(st.heads)}</span><b>واحدِ کشف</b><span>${fa(st.units)}</span><b>تأمین‌کننده در دفتر</b><span>${fa(st.suppliers)}</span><b>یال</b><span>${fa(st.edges)}</span>
         <b>نظر</b><span>${fa(st.opinions)}</span><b>نام دیگر و ادغام</b><span>${fa(st.aliases)}</span><b>نسخه</b><span>${esc(st.version || "—")}</span></div>
-        ${!st.heads ? `<div class="tp-note warn" style="margin-top:8px">دادهٔ تحقیق هنوز وارد نشده است (ابزارِ tools/cr02-import.mjs).</div>` : ""}`}</div>`;
+        ${!st.heads ? `<div class="tp-note warn" style="margin-top:8px">دادهٔ تحقیق هنوز وارد نشده است (ابزارِ tools/cr02-import.mjs).</div>` : ""}`}</div>
+      ${vPanel()}`;
+  }
+  /** «📘 سند راهبرد»: مدلِ سند، تنظیم‌های قیمتِ مؤثر (نرخِ ماهانهٔ پنل…) و پیشرفتِ پیش‌ساختِ نوع قلم‌های پرهزینه */
+  function vPanel() {
+    const pn = S.panel;
+    if (!pn) return "";
+    const p = pn.panel, pr = pn.progress || {}, bs = pr.by_state || {};
+    const pc = (v) => (v == null ? "" : String(Math.round(v * 1000) / 10));
+    const inp = (k, label, v, hint) => `<label class="tp-field"><b>${label}</b><input class="tp-input num" data-pn="${k}" value="${v}" style="width:90px" dir="ltr" placeholder="${hint || ""}"></label>`;
+    return `<div class="tp-card" style="padding:12px 16px;margin-top:12px"><h4 style="margin:0 0 6px">📘 سند راهبرد و قیمتِ مؤثر ${TP.ui.info("support.cr", "راهنمای استراتژی و دفتر")}</h4>
+      <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">
+        <label class="tp-field"><b>مدلِ سند</b><select class="tp-input" data-pn-model>${Object.entries(pn.models || {}).map(([k, v]) => `<option value="${k}" ${k === pn.model ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
+        ${inp("panel_rate", "نرخِ ماهانهٔ پنل (٪)", pc(p.panel_rate), "مثلاً ۳")}${inp("fx_growth", "رشدِ ماهانهٔ دلار (٪)", pc(p.fx_growth), "اختیاری")}${inp("vat_rate", "ارزش افزوده (٪)", pc(p.vat_rate))}${inp("no_invoice_premium", "ریسکِ بی صورتحساب (٪)", pc(p.no_invoice_premium))}
+        <label class="tp-field"><b>مبنای تنزیل</b><select class="tp-input" data-pn-basis>${[["max", "بیشینهٔ نرخ پنل و دلار"], ["panel", "نرخ پنل"], ["fx", "رشد دلار"]].map(([k, v]) => `<option value="${k}" ${k === p.basis ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
+      <label class="chkline"><input type="checkbox" data-pn-flag="vat_creditable" ${p.vat_creditable ? "checked" : ""}> ارزش افزوده قابلِ استرداد است</label>
+      <label class="chkline"><input type="checkbox" data-pn-flag="say_panel_rate" ${p.say_panel_rate ? "checked" : ""}> کارشناس هوشمند خودِ نرخِ پنل را بگوید (وگرنه از نیمهٔ آن شروع می‌کند)</label>
+      <div class="toolrow" style="margin-top:6px"><button class="tp-btn primary sm" data-pn-save>ذخیره</button></div>
+      <div class="dim" style="font-size:.84rem;margin-top:8px">پیش‌ساختِ ${fa(pr.target || 0)} نوع قلمِ پرهزینه: تأییدشده ${fa(bs.approved || 0)} · منتظرِ بازبینی ${fa(bs.draft || 0)} · در صف ${fa((bs.queued || 0) + (bs.building || 0))} · ناموفق ${fa(bs.failed || 0)} — ${fa(pr.built || 0)} سند، حدود ${fa(Math.round((pr.cost_usd || 0) * 100) / 100)} دلار</div></div>`;
   }
   function view() {
     const sub = VIEWS.map(([k, l]) => `<button class="${S.view === k ? "on" : ""}" data-cr-view="${k}">${l}</button>`).join("");
@@ -143,7 +168,7 @@
     }, "ثبت");
   }
   async function onClick(e) {
-    const t = e.target.closest("[data-cr-view],[data-cr-fam],[data-cr-page],[data-cr-move],[data-cr-rqsave],[data-cr-rqreset],[data-cr-g4f],[data-cr-g4ok],[data-cr-g4no],[data-cr-gload]");
+    const t = e.target.closest("[data-cr-view],[data-cr-fam],[data-cr-page],[data-cr-move],[data-cr-rqsave],[data-cr-rqreset],[data-cr-g4f],[data-cr-g4ok],[data-cr-g4no],[data-cr-gload],[data-pn-save]");
     if (!t) return;
     const d = t.dataset;
     if (d.crView) { S.view = d.crView; S.err = ""; return load(); }
@@ -158,6 +183,15 @@
       return;
     }
     if (d.crRqreset !== undefined) { try { S.rfqn = { ...S.rfqn, table: (await C.api("/strategy/rfqn", { method: "PUT", body: { table: {} } })).table }; C.render(); } catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); } return; }
+    if (d.pnSave !== undefined) {
+      const g = (k) => { const x = document.querySelector(`[data-pn="${k}"]`); const v = x ? TP.digits(x.value).trim() : ""; return v === "" ? null : Number(v) / 100; };
+      const fl = (k) => { const x = document.querySelector(`[data-pn-flag="${k}"]`); return !!(x && x.checked); };
+      const body = { panel_rate: g("panel_rate"), fx_growth: g("fx_growth"), vat_rate: g("vat_rate"), no_invoice_premium: g("no_invoice_premium"), vat_creditable: fl("vat_creditable"),
+        say_panel_rate: fl("say_panel_rate"), basis: (document.querySelector("[data-pn-basis]") || {}).value, model: (document.querySelector("[data-pn-model]") || {}).value };
+      try { const r = await C.api("/cr/panel", { method: "PUT", body }); S.panel = { ...S.panel, panel: r.panel, model: r.model }; TP.ui && TP.ui.success && TP.ui.success("ذخیره شد"); C.render(); }
+      catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); }
+      return;
+    }
     if (d.crG4f) { S.g4F = d.crG4f; return load(); }
     if (d.crG4ok) {
       const m = TP.modal("یکی است", `<label class="tp-field"><b>شناسهٔ تأمین‌کنندهٔ سوابق</b><input class="tp-input" data-g4-sid value="${esc(d.sid || "")}" dir="ltr" style="width:100%"></label><input class="tp-input" data-g4-note placeholder="یادداشت (اختیاری)" style="width:100%;margin-top:8px">`, async () => {
