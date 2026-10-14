@@ -1423,3 +1423,19 @@ body.is-pre-play { overflow: hidden; }
   .departments .card { gap: 4px; }
   .departments .card .card-icon { border-radius: 16px; }
 }
+
+/* ============================================================
+   Lenis (vendor/lenis-1.3.26.min.js، MIT — js/main.js روشنش می‌کند، فقط دسکتاپ و بی «حرکت کمتر»)
+   همان lenis.css رسمی؛ به‌اضافهٔ خاموش کردنِ scroll-behavior نرمِ مرورگر وقتی Lenis خودش نرم می‌کند،
+   وگرنه هر گامِ Lenis را مرورگر دوباره نرم می‌کرد و اسکرول کش می‌آمد.
+   ============================================================ */
+html.lenis, html.lenis body { height: auto; }
+.lenis:not(.lenis-autoToggle).lenis-stopped { overflow: clip; }
+.lenis [data-lenis-prevent], .lenis [data-lenis-prevent-wheel], .lenis [data-lenis-prevent-touch],
+.lenis [data-lenis-prevent-vertical], .lenis [data-lenis-prevent-horizontal] { overscroll-behavior: contain; }
+.lenis.lenis-smooth iframe { pointer-events: none; }
+html.lenis { scroll-behavior: auto !important; }
+
+/* جابه‌جایی بین صفحه‌ها (صفحهٔ اول ← بخش‌ها): محوِ نرمِ مرورگر (View Transitions)؛ همتای همین قاعده در tamin-poshtibani/ui.css */
+@view-transition { navigation: auto; }
+@media (prefers-reduced-motion: reduce) { @view-transition { navigation: none; } }

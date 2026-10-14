@@ -25,7 +25,7 @@
   <!-- فونت بی‌انتظار: اگر گوگل کند یا بسته باشد (گوشی، اینترنت ایران)، صفحه با فونت سیستم باز می‌شود و Vazirmatn بعداً می‌رسد -->
   <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
   <noscript><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;700;900&display=swap" rel="stylesheet" /></noscript>
-  <link rel="stylesheet" href="css/styles.css?v=9" />
+  <link rel="stylesheet" href="css/styles.css?v=10" />
   <!-- boot:css (tools/build-boot-splash.mjs) -->
   <style>#boot{display:none}
 @media (max-width: 720px), (pointer: coarse) and (max-height: 520px){
@@ -302,7 +302,9 @@ ok=busy?0:ok+1;if(ok>1)return done();setTimeout(p,80)})()}})();</script>
   </button>
 
   <script src="js/liquid-glass.js?v=8"></script>
-  <script src="js/main.js?v=11"></script>
+  <!-- حرکت (مهر ۱۴۰۵، DESIGN_STACK): GSAP + ScrollTrigger + Lenis را خودِ js/main.js بعد از اولین فریم بار می‌کند (vendor/)،
+       تا اولین تصویر منتظرشان نماند؛ تا رسیدنشان همان نرمیِ دستیِ قبلی -->
+  <script src="js/main.js?v=12"></script>
   <script src="js/support.js?v=9"></script>
 </body>
 </html>

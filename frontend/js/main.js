@@ -39,13 +39,27 @@
      و کارت‌ها را به‌صورت عرضی می‌لرزاند
      ============================================================ */
   const finePointer = window.matchMedia("(hover: hover) and (pointer: fine)").matches;
+  /* GSAP (vendor/gsap-*.min.js، مهر ۱۴۰۵) بعد از اولین فریم و بی مسدود کردنِ چیزی بار می‌شود (loadMotion پایین)؛ از آن به بعد چرخش و
+     بلند شدن با gsap.quickTo نرم و پیوسته دنبالِ نشانگر می‌روند و با رفتنِ نشانگر نرم به صفر برمی‌گردند (قبلاً هر pointermove مستقیم
+     transform می‌نوشت و خروج یک‌باره می‌پرید). تا رسیدنش، یا اگر نرسید، همان رفتارِ قبلی. */
+  let G = window.gsap || null;
+  let storyUpgrade = null;
 
   if (!reduceMotion && finePointer) {
     const MAX_TILT = 7; // درجه
+    const quick = (card) => {
+      const q = { duration: 0.55, ease: "power3.out" };
+      /* quickTo فقط یک ویژگیِ تک می‌گیرد؛ scale نامِ مستعارِ دو ویژگی است، پس scaleX و scaleY جدا */
+      const sx = G.quickTo(card, "scaleX", q), sy = G.quickTo(card, "scaleY", q);
+      return { rx: G.quickTo(card, "rotationX", q), ry: G.quickTo(card, "rotationY", q), y: G.quickTo(card, "y", q), s: (v) => { sx(v); sy(v); } };
+    };
 
     cards.forEach((card) => {
+      let to = null;
+
       card.addEventListener("pointermove", (e) => {
         if (e.pointerType !== "mouse" || mqCompact.matches) return;
+        if (!to && G) to = quick(card);
 
         const rect = card.getBoundingClientRect();
         const px = (e.clientX - rect.left) / rect.width;   // 0..1
@@ -54,13 +68,19 @@
         const rotY = (px - 0.5) * MAX_TILT * 2 * -1;
         const rotX = (py - 0.5) * MAX_TILT * 2;
 
-        card.style.transform = `translateY(-8px) scale(1.02) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        if (to) {
+          to.rx(rotX); to.ry(rotY); to.y(-8); to.s(1.02);
+        } else {
+          card.style.transform = `translateY(-8px) scale(1.02) rotateX(${rotX.toFixed(2)}deg) rotateY(${rotY.toFixed(2)}deg)`;
+        }
         card.style.setProperty("--mx", `${(px * 100).toFixed(1)}%`);
         card.style.setProperty("--my", `${(py * 100).toFixed(1)}%`);
       });
 
+      /* برگشت با همان quickTo به صفر (همان «none»ِ CSS)؛ clearProps وسطِ این tweenها کشِ GSAP را می‌پراند و کارت نیمه‌راه می‌ماند */
       card.addEventListener("pointerleave", () => {
-        card.style.transform = "";
+        if (!to) { card.style.transform = ""; return; }
+        to.rx(0); to.ry(0); to.y(0); to.s(1);
       });
     });
   }
@@ -352,6 +372,8 @@
         /* صفحهٔ «در حال بارگذاری» گوشی کنار می‌رود (index.html، tools/build-boot-splash.mjs)؛ سرویس‌ورکر کمی بعد ثبت می‌شود */
         if (window.__bootDone) window.__bootDone();
         setTimeout(startSW, 3000);
+        /* کتابخانه‌های حرکت حالا، نه پیش از اولین فریم (روی گوشیِ کند اولین تصویر را ثانیه‌ها عقب می‌انداختند) */
+        loadMotion();
       }
       paintAvg = paintAvg * 0.8 + (performance.now() - t0) * 0.2;
       if (paintAvg > 18) blendOK = false;
@@ -485,6 +507,13 @@
        اسکرولِ مرورگر نرم است؛ نرمیِ کمتر (۳۵٪) تا انگشت و تصویر از هم جدا نیفتند. */
     let target = 0, current = 0, raf = 0;
     const ease = coarse ? 0.35 : 0.22;
+    /* موتورِ اسکرول (مهر ۱۴۰۵، DESIGN_STACK): GSAP ScrollTrigger — یک ماشهٔ scrub روی کلِ مسیر — و Lenis برای نرمیِ چرخ موس و
+       لمس‌پد در دسکتاپ، به همان الگوی رسمیِ README لنیس (lenis.on("scroll", ScrollTrigger.update) و raf از تیکرِ GSAP).
+       در لمس، اسکرولِ خودِ مرورگر می‌ماند (Lenis خاموش، syncTouch پیش‌فرض) و scrubِ کوتاه تا انگشت و تصویر از هم جدا نیفتند.
+       render() و پرده‌ها دست‌نخورده‌اند؛ فقط این‌که «کجای مسیریم» از کجا می‌آید. صفحه با همان نرمیِ دستیِ قبلی شروع می‌کند و وقتی
+       کتابخانه‌ها (بعد از اولین فریم، loadMotion) رسیدند، upgrade() بی پرش موتور را عوض می‌کند. نرسیدند یا «حرکت کمتر» ← همان قبلی. */
+    let GS = false;
+    let lenis = null;
 
     function tick() {
       const d = target - current;
@@ -499,11 +528,66 @@
       raf = requestAnimationFrame(tick);
     }
 
-    function schedule() { if (!raf) raf = requestAnimationFrame(tick); }
+    /* رسمِ دوباره در همان جای مسیر (فریمِ تازه رسید، اندازه عوض شد)؛ با GSAP جای مسیر را خودِ ماشه می‌دهد */
+    function schedule() {
+      if (GS) { if (!raf) raf = requestAnimationFrame(() => { raf = 0; render(current); }); return; }
+      if (!raf) raf = requestAnimationFrame(tick);
+    }
 
     function onScroll() {
       target = reduceMotion ? seg.total : Math.min(Math.max(window.scrollY, 0), seg.total);
       schedule();
+    }
+
+    function startEngine() {
+      const ST = window.ScrollTrigger;
+      G.registerPlugin(ST);
+      /* نوار آدرسِ گوشی که جمع و باز می‌شود مسیر را از نو نمی‌سازد (همان قاعدهٔ resize پایین) */
+      ST.config({ ignoreMobileResize: true });
+      if (!coarse && window.Lenis) {
+        lenis = new window.Lenis({
+          lerp: 0.12,
+          smoothWheel: true,
+          /* پنجرهٔ وضعیتِ بخش‌ها (js/support.js) اسکرولِ خودش را دارد؛ چرخِ موس روی آن نباید صفحه را ببرد */
+          prevent: (n) => !!(n && n.classList && (n.classList.contains("sp-bg") || n.classList.contains("sp-box"))),
+        });
+        lenis.on("scroll", ST.update);
+        G.ticker.add((t) => { lenis.raf(t * 1000); });
+        G.ticker.lagSmoothing(0);
+        smoothKeys();
+      }
+      const story = { p: 0 };
+      G.to(story, {
+        p: 1,
+        ease: "none",
+        /* بی رسمِ تنبل: پرشِ اسکرول (کلیدِ End، نوار اسکرول، پیش از اولین تیک) همان لحظه رسم شود، نه در تیکِ بعد */
+        lazy: false,
+        scrollTrigger: { start: 0, end: () => seg.total, scrub: lenis ? true : 0.12, invalidateOnRefresh: true },
+        onUpdate: () => { current = story.p * seg.total; render(current); },
+      });
+      /* refresh (رویدادِ load، تغییرِ اندازه) پیشرفت را بی رویداد عوض می‌کند — onUpdate صدا نمی‌خورد؛ این‌جا همان را رسم می‌کنیم */
+      ST.addEventListener("refresh", () => { current = story.p * seg.total; render(current); });
+    }
+
+    /* کلیدها (پیکان، Page Up/Down، فاصله، Home/End) با Lenis نرم می‌روند — مثل نرمیِ دستیِ قبلی که کلید را هم نرم می‌کرد */
+    function smoothKeys() {
+      const STEP = { ArrowDown: 80, ArrowUp: -80 };
+      window.addEventListener("keydown", (e) => {
+        if (e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey) return;
+        const t = e.target;
+        if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT|BUTTON)$/.test(t.tagName))) return;
+        if (document.querySelector(".sp-bg")) return;
+        const H = window.innerHeight, cur = lenis.targetScroll;
+        let to = null;
+        if (e.key in STEP) to = cur + STEP[e.key];
+        else if (e.key === "PageDown" || (e.key === " " && !e.shiftKey)) to = cur + H * 0.9;
+        else if (e.key === "PageUp" || (e.key === " " && e.shiftKey)) to = cur - H * 0.9;
+        else if (e.key === "Home") to = 0;
+        else if (e.key === "End") to = lenis.limit;
+        if (to === null) return;
+        e.preventDefault();
+        lenis.scrollTo(Math.max(0, Math.min(to, lenis.limit)), { duration: 0.7 });
+      });
     }
 
     /* ---------- راه‌اندازی ---------- */
@@ -517,6 +601,17 @@
 
     window.addEventListener("scroll", onScroll, { passive: true });
     onScroll();
+
+    /* کتابخانه‌ها رسیدند: موتورِ دستی کنار می‌رود و ScrollTrigger (+ Lenis در دسکتاپ) از همان جای اسکرول ادامه می‌دهد */
+    storyUpgrade = () => {
+      if (GS || reduceMotion || !window.gsap || !window.ScrollTrigger) return;
+      G = window.gsap;
+      window.removeEventListener("scroll", onScroll);
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      GS = true;
+      startEngine();
+    };
+    if (window.gsap && window.ScrollTrigger) storyUpgrade();
 
     /* فونت که برسد، جای نهایی کارت‌ها و تصاویر کمی جابه‌جا می‌شود */
     if (document.fonts && document.fonts.ready) {
@@ -539,7 +634,7 @@
         sizeCanvas();
         resizeSky();
         measure();
-        onScroll();
+        if (GS) window.ScrollTrigger.refresh(); else onScroll();
         render(current);
       }, 150);
     }, { passive: true });
@@ -558,4 +653,29 @@
     });
   }
   window.addEventListener("load", startSW);
+
+  /* ============================================================
+     کتابخانه‌های حرکت (vendor/، DESIGN_STACK): GSAP، ScrollTrigger و Lenis — بعد از اولین فریم (یا load)، بی مسدود کردنِ پارسر؛
+     async=false یعنی به همان ترتیب اجرا می‌شوند (ScrollTrigger بعد از GSAP). «حرکت کمتر» ← اصلاً بار نمی‌شوند.
+     ============================================================ */
+  function loadMotion() {
+    if (loadMotion.done || reduceMotion) return;
+    loadMotion.done = true;
+    const srcs = ["vendor/gsap-3.15.0.min.js", "vendor/ScrollTrigger-3.15.0.min.js", "vendor/lenis-1.3.26.min.js"];
+    let left = srcs.length;
+    const ready = () => {
+      if (--left) return;
+      G = window.gsap || null;
+      if (storyUpgrade) storyUpgrade();
+    };
+    srcs.forEach((src) => {
+      const s = document.createElement("script");
+      s.src = src;
+      s.async = false;
+      s.onload = ready;
+      s.onerror = ready;
+      document.head.appendChild(s);
+    });
+  }
+  window.addEventListener("load", loadMotion);
 })();
