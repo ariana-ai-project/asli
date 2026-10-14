@@ -352,3 +352,12 @@ test("«⏱ با مهلت»: پاسخِ مذاکرهٔ دوگامی هم اول 
   const pr = DB.raw.prepare("SELECT kind, state, body FROM ai_props WHERE thread_id=? ORDER BY id DESC LIMIT 1").get(TH);
   assert.deepEqual([pr.kind, pr.state, pr.body], ["reply", "pending", "ممنون؛ اعتبارِ پیش‌فاکتور چند روز است؟"]);
 });
+
+test("حذفِ درخواست: نوبت و یادداشتِ مشترکِ گفت‌وگوهایش هم می‌روند (شناسهٔ گفت‌وگو دوباره داده می‌شود)", { skip: SKIP }, async () => {
+  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM cr_turns WHERE thread_id=?").get(TH) && DB.raw.prepare("SELECT 1 AS x FROM cr_facts WHERE thread_id=?").get(TH));
+  const d = await call("/requests/delete", { headers: { "X-Manager-Code": "1234" }, body: { ids: ["R-T"] } });
+  assert.equal(d.status, 200, JSON.stringify(d.data));
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM cr_turns").get().n, 0);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM cr_facts").get().n, 0);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_feedback WHERE kind='guard'").get().n, 1, "بازخورد برای آموزش می‌ماند");
+});

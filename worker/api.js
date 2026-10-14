@@ -638,7 +638,8 @@ async function purgeThreads(env, thr, runs) {
     for (const sql of [`DELETE FROM ai_props WHERE thread_id IN (${q})`, `DELETE FROM ai_threads WHERE thread_id IN (${q})`, `UPDATE ai_calls SET thread_id=NULL WHERE thread_id IN (${q})`,
       `DELETE FROM ai_log WHERE thread_id IN (${q})`, `DELETE FROM sp_files WHERE thread_id IN (${q})`, `DELETE FROM sp_msgs WHERE thread_id IN (${q})`,
       `DELETE FROM sp_bundles WHERE thread_id IN (${q})`, `DELETE FROM sp_lines WHERE thread_id IN (${q})`, `UPDATE sp_sms SET thread_id=NULL WHERE thread_id IN (${q})`,
-      `UPDATE sp_tg SET focus=NULL, flow_json=NULL WHERE focus IN (${q})`, `DELETE FROM sp_threads WHERE id IN (${q})`]) stmts.push(env.DB.prepare(sql).bind(...p));
+      `UPDATE sp_tg SET focus=NULL, flow_json=NULL WHERE focus IN (${q})`, `DELETE FROM cr_turns WHERE thread_id IN (${q})`, `DELETE FROM cr_facts WHERE thread_id IN (${q})`,
+      `DELETE FROM sp_threads WHERE id IN (${q})`]) stmts.push(env.DB.prepare(sql).bind(...p));
   }
   for (let i = 0; i < runs.length; i += 80) {
     const p = runs.slice(i, i + 80), q = p.map(() => "?").join(",");
