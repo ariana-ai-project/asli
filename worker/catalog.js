@@ -457,6 +457,13 @@ async function headTop(env, h) {
   return cache.part0.get(h);
 }
 
+/** نوع قلم‌های فایل (ستونِ head سوابق و دادهٔ تحقیق) برای یک نوع قلمِ استاندارد — «ورق آهنی» ← [«ورق»]؛ فقط سرِ بخش ۰، بی بارِ اقلام */
+export async function headSrc(env, head) {
+  const h = CANON.canonHead(nameOf(head)); if (!h) return [];
+  const t = await headTop(env, h);
+  return t ? t.src || [h] : [];
+}
+
 /**
  * یک نوع قلم در فهرستِ بارگذاری‌شده، بی ویرایشِ کارشناس — بخش‌ها سر هم.
  * items: [کد، عنوان، خوشه، طبقهٔ اصناف، لایه‌ها، باقیماندهٔ متن، نرخ ویژهٔ قلم]

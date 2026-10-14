@@ -12,6 +12,7 @@ import { engineProfile } from "./strategy/profile.js";
 import { rfqPolicy, selectRecipients } from "./strategy/rfq.js";
 import * as C from "./strategy/config.js";
 import { crShard, supKey } from "./cr-data.js";
+import { headSrc } from "./catalog.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -46,9 +47,34 @@ function expertUpdates(ch) {
   return Object.keys(e).length ? e : null;
 }
 
-/** ردیفِ تحقیقِ نوع قلم (با rec کامل) — یا null اگر این نوع قلم در بسته نیست */
-export async function headRow(env, head) {
-  const r = await env.DB.prepare("SELECT * FROM cr_heads WHERE head=?").bind(T(head)).first().catch(() => null);
+/**
+ * نامِ نوع قلم در دادهٔ تحقیق. ساختارِ تأییدشدهٔ کارشناس نامِ استانداردِ کاتالوگ است («ورق آهنی»، «میلگرد آهنی») و دادهٔ تحقیق
+ * و سوابقِ خرید نامِ خامِ فایل («ورق»، «میلگرد»)؛ مقایسهٔ حرف‌به‌حرف این اقلام را بی‌صدا از استراتژی، سند و مذاکرهٔ دوگامی بیرون
+ * می‌گذاشت. به ترتیب: خودِ نام، نوع قلمِ همین کدِ قلم در دادهٔ تحقیق، نوع قلم‌های فایلِ همین نوع قلم در کاتالوگ، شکلِ نیم‌فاصله‌ای
+ * («لپ تاپ» ← «لپ‌تاپ»)، و بی صفتِ جنس در پایانِ نام. null یعنی در دادهٔ تحقیق نیست. ده دقیقه در حافظهٔ isolate.
+ */
+const RH = new Map();
+const MATERIAL_END = /\s+(آهنی|فولادی|لاستیکی|پلاستیکی|مسی|برنجی|آلومینیومی|چدنی|گالوانیزه|استیل)$/;
+export async function researchHead(env, head, itemCode) {
+  const h = T(head), code = T(itemCode);
+  if (!h && !code) return null;
+  const key = `${h}|${code}`, hit = RH.get(key);
+  if (hit && now() - hit.at < 600e3) return hit.v;
+  const has = async (x) => !!(T(x) && await env.DB.prepare("SELECT 1 AS x FROM cr_heads WHERE head=?").bind(T(x)).first().catch(() => null));
+  let v = (await has(h)) ? h : null;
+  if (!v && code) { const c = await codeRow(env, code).catch(() => null); if (c && c.h && await has(c.h)) v = T(c.h); }
+  if (!v && h) for (const s of await headSrc(env, h).catch(() => [])) if (s !== h && await has(s)) { v = T(s); break; }
+  if (!v && /\s/.test(h)) { const z = h.replace(/\s+/g, "‌"); if (await has(z)) v = z; }
+  if (!v && MATERIAL_END.test(h)) { const b = h.replace(MATERIAL_END, ""); if (await has(b)) v = b; }
+  if (RH.size > 800) RH.clear();
+  RH.set(key, { v, at: now() });
+  return v;
+}
+
+/** ردیفِ تحقیقِ نوع قلم (با rec کامل) — یا null اگر این نوع قلم در بسته نیست. itemCode برای یافتنِ نامِ تحقیقیِ نوع قلم (researchHead) */
+export async function headRow(env, head, itemCode) {
+  const exact = await env.DB.prepare("SELECT * FROM cr_heads WHERE head=?").bind(T(head)).first().catch(() => null);
+  const r = exact || await (async () => { const h = await researchHead(env, head, itemCode); return h ? env.DB.prepare("SELECT * FROM cr_heads WHERE head=?").bind(h).first().catch(() => null) : null; })();
   return r ? { ...r, rec: parse(r.rec, {}) } : null;
 }
 /** ردیفِ کد قلم از تکه‌ها: {h, c, u, r, i, ms?, la?, why?} */
@@ -61,7 +87,7 @@ export async function codeRow(env, code) {
 
 /** پروفایلِ موتور برای یک نوع قلم و (اختیاری) یک کد قلم */
 export async function headProfile(env, head, itemCode) {
-  const row = await headRow(env, head);
+  const row = await headRow(env, head, itemCode);
   if (!row) return null;
   const [ch, cr] = await Promise.all([headChanges(env, row.head), itemCode ? codeRow(env, itemCode) : null]);
   const itemRow = cr && (cr.ms || cr.la) ? { item_ms_override: cr.ms || null, item_labels_add: cr.la || "" } : null;
