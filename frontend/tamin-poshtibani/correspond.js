@@ -383,6 +383,12 @@
   /* --- ⭐ امتیاز به کارِ کارشناس هوشمند (مهر ۱۴۰۵): هر پیامش ۱ تا ۵ ستاره (کمتر از سه با علت)، و کلِ مکاتبه بعد از بسته شدن با نظرِ
      اجباری. «خاتمه»ِ درخواست تا همهٔ امتیازها داده نشده معلق است (worker/ai-rates.js) --- */
   const ratesOf = () => (S.d && S.d.rates) || null;
+  /* «جعبه‌های نقد» (worker/critique.js، کلیدِ boxes پشتیبانی): کدام جزءِ کارِ کارشناس هوشمند درست نبود — برای ستارهٔ کم و «✏️ رد»
+     اجباری، برای کلِ مکاتبه اختیاری */
+  const critique = () => (S.d && S.d.critique) || null;
+  const boxPicker = (sel = [], label = "کدام جزء درست نبود؟") => (critique() ? `<div class="sp-cboxes" role="group" aria-label="جعبه‌های نقد"><b>${label}</b>
+      ${critique().map((b) => `<label class="sp-cbox" title="${esc(b.desc)}"><input type="checkbox" data-box="${b.code}" ${sel.includes(b.code) ? "checked" : ""}> ${esc(b.fa)}</label>`).join("")}</div>` : "");
+  const boxesFrom = (root) => [...root.querySelectorAll("[data-box]:checked")].map((x) => x.dataset.box);
   const STAR = `<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 2.8l2.75 5.86 6.4.78-4.73 4.4 1.23 6.33L12 17.03l-5.65 3.14 1.23-6.33-4.73-4.4 6.4-.78z"/></svg>`;
   /* ستاره‌ها از پنج به یک در DOM؛ با row-reverse یکِ اول سمتِ راست است و «~» ستاره‌های پیش از خودش را هم روشن می‌کند */
   const stars = (attr, id, on) => [5, 4, 3, 2, 1].map((n) => `<button type="button" class="ph-star${on && n <= on ? " on" : ""}" ${attr}="${id}:${n}" aria-label="${fa(n)} ستاره" title="${fa(n)} از ۵">${STAR}</button>`).join("");
@@ -404,6 +410,7 @@
     return `<div class="ph-ask ph-trate" role="note"><b>⭐ به کلِ این مکاتبه امتیاز بدهید</b>مذاکرهٔ کارشناس هوشمند با ${esc(S.d.thread.supplier)} از یک تا پنج ستاره، و نظرتان (اجباری) — همین در ارزیابیِ او می‌ماند و «خاتمه» تا آن موقع معلق است.
       <span class="ph-rate big"><span class="stars">${stars("data-trate-star", S.th, v)}</span></span>
       <textarea class="tp-input tp-textarea" data-trate-note style="min-height:64px" placeholder="نظرتان دربارهٔ کلِ این مکاتبه (اجباری)">${esc(S.trateNote != null ? S.trateNote : (R.thread && R.thread.note) || "")}</textarea>
+      ${boxPicker(S.tboxes || (R.thread && R.thread.boxes) || [], "جعبه‌های نقد (اختیاری)")}
       <div class="sp-err" data-trate-err></div><div class="ph-prop-acts"><button type="button" class="tp-btn primary sm" data-trate-save ${v ? "" : "disabled"}>ثبتِ امتیاز و نظر</button></div></div>`;
   }
   const msgsHtml = () => PH.feed(S.d.msgs.concat(PH.outboxMsgs((S.outbox || []).filter((x) => x.th === S.th), S.d.msgs, "e")), {
@@ -618,7 +625,7 @@
     $$("[data-rate-star]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const [id, n] = b.dataset.rateStar.split(":").map(Number); rateMsg(id, n); }; });
     /* گوشی: لمسِ پیامِ بی‌امتیاز ستاره‌ها را نشان می‌دهد (بی نشانگرِ موشواره) */
     $$("[data-rate-row]").forEach((r) => { r.onclick = () => { $$(".ph-row.show-rate").forEach((x) => { if (x !== r) x.classList.remove("show-rate"); }); r.classList.toggle("show-rate"); }; });
-    $$("[data-trate-star]").forEach((b) => { b.onclick = () => { S.trate = +b.dataset.trateStar.split(":")[1]; const t = $("[data-trate-note]"); S.trateNote = t ? t.value : S.trateNote; repaintChat(); }; });
+    $$("[data-trate-star]").forEach((b) => { b.onclick = () => { S.trate = +b.dataset.trateStar.split(":")[1]; const t = $("[data-trate-note]"); S.trateNote = t ? t.value : S.trateNote; const c = b.closest(".ph-trate"); if (c && critique()) S.tboxes = boxesFrom(c); repaintChat(); }; });
     const tn = $("[data-trate-note]"); if (tn) tn.oninput = () => { S.trateNote = tn.value; };
     const ts = $("[data-trate-save]"); if (ts) ts.onclick = () => rateThread(ts);
     const te = $("[data-trate-edit]"); if (te) te.onclick = () => { S.trateEdit = true; S.trate = (ratesOf().thread || {}).stars || 0; repaintChat(); };
@@ -711,6 +718,7 @@
     api(`/sp/x/prop/${id}`, { body: { action: "hold" } }).then((r) => { if (r && r.due_at) { p.due_at = r.due_at; } }).catch(() => {});
     const d = dlg("✏️ رد و نوشتن پیام خودم", `<p>چرا ردش می‌کنید؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد (تأمین‌کننده نمی‌بیند).</p>
       <textarea class="tp-input tp-textarea" data-r style="min-height:70px" placeholder="علتِ رد (اجباری)"></textarea>
+      ${boxPicker([], "کدام جزء درست نبود؟ (دست‌کم یکی)")}
       ${fin ? `<b style="display:block;margin-top:10px">با بستهٔ ${fa(p.bundle_id)} چه شود؟</b>
         <label class="sp-check"><input type="radio" name="bact" value="return" checked> ↩️ برگشت برای اصلاح، با پیامِ شما</label>
         <label class="sp-check"><input type="radio" name="bact" value="reject"> ❌ ردِ بسته</label>
@@ -718,15 +726,17 @@
       ${p.body ? `<div class="sp-muted" style="margin-top:10px">پیشنهادِ کارشناس هوشمند: <button type="button" class="tp-btn xs" data-copy-prop>📋 شروع از همین متن</button></div><div class="sp-sms">${esc(p.body)}</div>` : ""}
       <b style="display:block;margin-top:10px">پیامِ تازهٔ خودتان برای ${esc(th.supplier)} ${needText ? "(اجباری — همین به‌جای پیامِ ردشده می‌رود)" : fin ? "(برای «برگشت» اجباری)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
       <textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea>
-      <div class="sp-muted" style="margin-top:6px">⏱ برای نوشتن، مهلت تا دست‌کم سه دقیقهٔ دیگر تمدید شد.</div><div class="sp-err" data-err></div>`,
+      ${p.due_at ? `<div class="sp-muted" style="margin-top:6px">⏱ برای نوشتن، مهلت تا دست‌کم سه دقیقهٔ دیگر تمدید شد.</div>` : ""}<div class="sp-err" data-err></div>`,
     [{ label: "✏️ رد و ارسالِ پیامِ من", cls: "danger", fn: async (dd) => {
       const reason = $("[data-r]", dd).value.trim();
       if (!reason) throw new Error("علتِ رد را بنویسید.");
+      const boxes = boxesFrom(dd);
+      if (critique() && !boxes.length) throw new Error("دست‌کم یک جعبهٔ نقد بزنید — کدام جزءِ کارِ کارشناس هوشمند درست نبود؟");
       const text = $("[data-t]", dd).value.trim();
       const bundle = fin ? ($('input[name="bact"]:checked', dd) || {}).value : undefined;
       if (needText && !text) throw new Error("پیامِ تازهٔ خودتان را بنویسید — به‌جای پیامِ ردشده همین می‌رود.");
       if (bundle === "return" && !text) throw new Error("برای «برگشت» پیامِ برگشت را بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.");
-      await api(`/sp/x/prop/${p.id}`, { body: { action: "no", reason, text, ...(bundle ? { bundle } : {}) } });
+      await api(`/sp/x/prop/${p.id}`, { body: { action: "no", reason, text, ...(bundle ? { bundle } : {}), ...(critique() ? { boxes } : {}) } });
       S.drafts[tid] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
       await afterDecide();
     } }, { label: "انصراف" }]);
@@ -771,16 +781,20 @@
   }
   /* ⭐ امتیازِ یک پیام: سه ستاره و بیشتر همان لحظه؛ کمتر علت می‌خواهد */
   async function rateMsg(id, n) {
-    const send = async (note) => {
-      const r = await api("/sp/x/rate", { body: { kind: "msg", msg_id: id, stars: n, note } });
-      S.d.rates.msgs[id] = { stars: r.stars, note: r.note };
+    const send = async (note, boxes) => {
+      const r = await api("/sp/x/rate", { body: { kind: "msg", msg_id: id, stars: n, note, ...(boxes ? { boxes } : {}) } });
+      S.d.rates.msgs[id] = { stars: r.stars, note: r.note, boxes: r.boxes || [] };
       repaintChat();
       if (TP.ui && TP.ui.success && !unrated()) TP.ui.success("همهٔ پیام‌ها امتیاز گرفتند ⭐");
     };
     if (n >= 3) return send("").catch((e) => say(e.message));
     const d = dlg(`⭐ ${fa(n)} ستاره — چه چیزِ این پیام درست نبود؟`, `<p class="sp-muted" style="margin-top:0">برای کمتر از سه ستاره علت لازم است؛ همین به کارشناس هوشمند می‌رسد تا دفعهٔ بعد بهتر بنویسد.</p>
-      <textarea class="tp-input tp-textarea" data-why style="min-height:70px" placeholder="مثلاً لحنش تند بود، زود تخفیف خواست، پاسخ نداد…"></textarea><div class="sp-err" data-err></div>`,
-    [{ label: "ثبتِ امتیاز", cls: "primary", fn: async (dd) => { const w = $("[data-why]", dd).value.trim(); if (w.length < 3) throw new Error("علت را بنویسید."); await send(w); } }, { label: "انصراف" }]);
+      <textarea class="tp-input tp-textarea" data-why style="min-height:70px" placeholder="مثلاً لحنش تند بود، زود تخفیف خواست، پاسخ نداد…"></textarea>${boxPicker([], "کدام جزء درست نبود؟ (دست‌کم یکی)")}<div class="sp-err" data-err></div>`,
+    [{ label: "ثبتِ امتیاز", cls: "primary", fn: async (dd) => {
+      const w = $("[data-why]", dd).value.trim(); if (w.length < 3) throw new Error("علت را بنویسید.");
+      const boxes = boxesFrom(dd); if (critique() && !boxes.length) throw new Error("دست‌کم یک جعبهٔ نقد بزنید.");
+      await send(w, critique() ? boxes : null);
+    } }, { label: "انصراف" }]);
     setTimeout(() => { const t = $("[data-why]", d); if (t) t.focus(); }, 30);
   }
   async function rateThread(btn) {
@@ -789,8 +803,9 @@
     if (note.trim().length < 3) { if (err) err.textContent = "نظرتان را بنویسید — اجباری است."; return; }
     if (btn) btn.disabled = true;
     try {
-      const r = await api("/sp/x/rate", { body: { kind: "thread", thread_id: S.th, stars: S.trate, note } });
-      S.d.rates.thread = { stars: r.stars, note: r.note }; S.trate = 0; S.trateNote = null; S.trateEdit = false;
+      const card = btn ? btn.closest(".ph-trate") : null, boxes = card ? boxesFrom(card) : [];
+      const r = await api("/sp/x/rate", { body: { kind: "thread", thread_id: S.th, stars: S.trate, note, ...(critique() ? { boxes } : {}) } });
+      S.d.rates.thread = { stars: r.stars, note: r.note, boxes: r.boxes || [] }; S.trate = 0; S.trateNote = null; S.trateEdit = false; S.tboxes = null;
       repaintChat(); if (TP.ui && TP.ui.success) TP.ui.success("امتیازِ مکاتبه ثبت شد ⭐");
     } catch (e) { if (btn) btn.disabled = false; if (err) err.textContent = e.message; }
   }

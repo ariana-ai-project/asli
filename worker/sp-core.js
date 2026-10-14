@@ -31,6 +31,7 @@ import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
 import { manualBundles, propsOf, getSup, supOfThread } from "./ai-supervise.js";
+import { BOXES, boxesOn } from "./critique.js";
 import { threadRates } from "./ai-rates.js";
 import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
@@ -745,6 +746,8 @@ export async function threadFull(env, th, side) {
       ...(await watchMode(env, th)), now: Date.now() } } : {}),
     /* ⭐ امتیازِ کارشناس به پیام‌ها و کلِ مکاتبهٔ کارشناس هوشمند (worker/ai-rates.js) */
     ...(side === "e" && th.ai && th.ai.ai ? { rates: await threadRates(env, th.id) } : {}),
+    /* «جعبه‌های نقد» (worker/critique.js، کلیدِ boxes): برای ستارهٔ کم و ردِ پیشنهاد */
+    ...(side === "e" && th.ai && th.ai.ai && (await boxesOn(env)) ? { critique: BOXES.map(({ code, fa, stage, desc }) => ({ code, fa, stage, desc })) } : {}),
   };
 }
 

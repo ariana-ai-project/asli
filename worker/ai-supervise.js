@@ -21,6 +21,7 @@
  */
 import { HttpError } from "./http.js";
 import { AI_SUP_SQL, WF_SQL, LINE_HEAD_SQL } from "./ai-lock.js";
+import { boxesIn, boxesOf } from "./critique.js";
 
 const now = () => Date.now();
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
@@ -136,14 +137,19 @@ export function propOut(p) {
   const meta = parse(p.meta_json, {}) || {};
   return { id: p.id, kind: p.kind, kind_fa: PROP_FA[p.kind] || p.kind, body: p.body || "", bundle_id: p.bundle_id || null, actions: meta.actions || [], why: meta.why || null,
     state: p.state, state_fa: PROP_STATE_FA[p.state] || p.state, reason: p.reason || null, own: p.own || null, bundle_act: meta.bundle_act || null,
-    created_at: p.created_at, due_at: p.due_at || null, decided_at: p.decided_at || null, decided_by: p.decided_by || null };
+    boxes: boxesOf(p.boxes), created_at: p.created_at, due_at: p.due_at || null, decided_at: p.decided_at || null, decided_by: p.decided_by || null };
 }
 
 /**
  * بدنهٔ «رد»: علتِ اجباری (به کارشناس هوشمند می‌رسد)، و پیامِ تازهٔ خودِ کارشناس — برای پیشنهادی که پیام دارد (پاسخ، یا تصمیمِ
  * بسته با پاسخ) اجباری است چون همان به‌جای پیامِ ردشده می‌رود. در «🏁 تأیید نهایی» پیام برای «↩️ برگشت» اجباری است.
+ * opt.boxes (کلیدِ «جعبه‌های نقد»): دست‌کم یک جعبه هم لازم است و در خروجی می‌آید (boxes).
  */
-export function rejectBody(p, b) {
+export function rejectBody(p, b, opt = {}) {
+  const boxes = opt.boxes ? boxesIn(b && b.boxes, { need: true, what: "برای «✏️ رد»" }) : null;
+  return { ...rejectCore(p, b), ...(boxes ? { boxes } : {}) };
+}
+function rejectCore(p, b) {
   const reason = String((b && b.reason) || "").trim().slice(0, 1000);
   if (!reason) throw new HttpError("برای «✏️ رد» بنویسید چرا پیشنهاد را رد می‌کنید؛ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد.", 422, { need_reason: true });
   const text = String((b && b.text) || "").trim().slice(0, 2900);

@@ -366,6 +366,10 @@ const COLUMN_MIGRATIONS = [
   ["experts", "sup_json", "TEXT"],
   /* «⏱ با مهلت» (مهر ۱۴۰۵): مهلتِ ارسالِ خودکارِ هر پیشنهاد (worker/ai-agent.js:propsDue) */
   ["ai_props", "due_at", "INTEGER"],
+  /* «جعبه‌های نقد» (worker/critique.js): کدهای جعبه، آرایهٔ JSON — شمردنی در «⭐ ارزیابی ربات» */
+  ["ai_rates", "boxes", "TEXT"],
+  ["ai_props", "boxes", "TEXT"],
+  ["ai_feedback", "boxes", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛

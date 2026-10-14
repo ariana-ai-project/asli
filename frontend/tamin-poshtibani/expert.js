@@ -427,13 +427,14 @@
     if (g.msgs) parts.push(`${M(g.msgs)} پیامِ کارشناس هوشمند`);
     if ((g.threads || []).length) parts.push(`${M(g.threads.length)} مکاتبهٔ کامل (${g.threads.slice(0, 3).map((x) => esc(x.supplier)).join("، ")}${g.threads.length > 3 ? "، …" : ""})`);
     if (g.letter) parts.push("نامهٔ کمیسیون");
+    if (g.request) parts.push("نظرِ کلی دربارهٔ کلِ مذاکره");
     return parts.length > 1 ? `${parts.slice(0, -1).join("، ")} و ${parts[parts.length - 1]}` : parts[0] || "";
   }
   function vRateBar() {
     const g = rateGaps();
     if (!g || !g.total) return "";
     return `<div class="tp-status warn rate-gap"><b>⭐ پیش از «خاتمه» امتیاز بدهید</b><span class="sp">${rateGapText(g)} هنوز ستاره ندارد.</span>
-      <a class="tp-btn sm" href="correspond">💬 امتیاز در مکاتبات</a>${g.letter ? `<button type="button" class="tp-btn sm" data-goletter>📝 نامهٔ کمیسیون</button>` : ""}${TP.ui.info("expert.ai", "امتیاز به کارشناس هوشمند")}</div>`;
+      ${g.total > (g.request ? 1 : 0) ? `<a class="tp-btn sm" href="correspond">💬 امتیاز در مکاتبات</a>` : ""}${g.letter ? `<button type="button" class="tp-btn sm" data-goletter>📝 نامهٔ کمیسیون</button>` : ""}${g.request ? `<button type="button" class="tp-btn sm" data-rqcomment>✍️ نظرِ کلی</button>` : ""}${TP.ui.info("expert.ai", "امتیاز به کارشناس هوشمند")}</div>`;
   }
   /* نوارِ یک‌خطیِ وضعیتِ کارشناس هوشمند: فقط همین لحظه (شمارها، سؤال‌ها، واگذاری)؛ توضیحِ روال در راهنما (expert.ai) */
   function vAiBar() {
@@ -2718,6 +2719,7 @@
     const lrS = G("[data-lr-save]"); if (lrS) lrS.onclick = () => saveLetterRate(lrS);
     const lrE = G("[data-lr-edit]"); if (lrE) lrE.onclick = () => { const L = letterFor() && letterFor().letter; S.lrEdit = L ? L.id : 0; S.lrStars = (L && L.rate && L.rate.stars) || 0; render(); };
     const gl = G("[data-goletter]"); if (gl) gl.onclick = () => { S.tab = "letter"; render(); };
+    const rqc = G("[data-rqcomment]"); if (rqc) rqc.onclick = () => reqCommentUI();
     /* اصلاحِ نیمه‌کارهٔ متن نباید با تیک زدنِ اقلامِ موضوع (که بازرندر می‌کند) گم شود */
     const keepDraft = () => { const t = G("[data-lt-text]"), b = letterFor(); if (t && b && b.letter) { S.lt.draft = t.value; S.lt.draftFor = b.letter.id; } };
     const lText = G("[data-lt-text]"); if (lText) lText.oninput = keepDraft;
@@ -2729,8 +2731,31 @@
     });
   }
 
+  /* «نظرِ کلی دربارهٔ کلِ مذاکرهٔ این درخواست» (تصمیم ۷؛ کلیدِ «جعبه‌های نقد»): ستاره و نظرِ کوتاهِ اجباری پیش از «خاتمه» (ai-rates.js) */
+  function reqCommentUI(then) {
+    let v = 0;
+    const d = TP.modal("✍️ نظرِ کلی دربارهٔ کلِ مذاکره", `<p style="margin-top:0">کارشناس هوشمند در کلِ این درخواست چطور مذاکره کرد؟</p>
+      <div class="toolrow" style="gap:6px;flex-wrap:wrap">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="tp-btn sm" data-rqs="${n}" aria-label="${M(n)} ستاره">${"⭐".repeat(n)}</button>`).join("")}</div>
+      <textarea class="tp-input" data-rqn style="width:100%;min-height:80px;margin-top:8px" maxlength="400" placeholder="نظرِ کوتاهِ شما (اجباری)"></textarea>
+      <div data-rqerr style="color:#fca5a5;min-height:1.2em;font-size:.88rem"></div>
+      <div class="toolrow" style="margin-top:6px"><button type="button" class="tp-btn primary" data-rqsave>ثبتِ نظر</button>${TP.ui.info("expert.ai", "امتیاز به کارشناس هوشمند")}</div>`, null, "انصراف", "");
+    d.querySelectorAll("[data-rqs]").forEach((b) => b.onclick = () => { v = +b.dataset.rqs; d.querySelectorAll("[data-rqs]").forEach((x) => x.classList.toggle("primary", +x.dataset.rqs === v)); });
+    d.querySelector("[data-rqsave]").onclick = async () => {
+      const note = d.querySelector("[data-rqn]").value.trim(), err = d.querySelector("[data-rqerr]");
+      if (!v) { err.textContent = "ستاره‌ها را انتخاب کنید."; return; }
+      if (note.length < 3) { err.textContent = "نظرتان را بنویسید — کوتاه و اجباری."; return; }
+      try {
+        await TP.api("/sp/x/rate", { body: { kind: "request", assignment_id: A().id, stars: v, note } });
+        d.remove(); await reload(); okTick("نظرِ کلی ثبت شد");
+        if (then) then();
+      } catch (e) { err.textContent = e.message; }
+    };
+    setTimeout(() => { const t = d.querySelector("[data-rqn]"); if (t) t.focus(); }, 30);
+  }
   /* ⭐ «خاتمه» تا امتیازها کامل نشده معلق است: پیامِ روشن با راهِ رسیدن به همان‌ها */
   function rateGate(g) {
+    /* فقط «نظرِ کلی» مانده: همان‌جا بنویسد و «خاتمه» ادامه یابد */
+    if (g.request && g.total === 1) return reqCommentUI(() => doExpertAct("end"));
     TP.modal("⭐ «خاتمه» معلق است", `<p>پیش از «خاتمه» به کارِ کارشناس هوشمند امتیاز بدهید: <b>${rateGapText(g)}</b> هنوز ستاره ندارد.</p>
       <p class="dim" style="font-size:.9rem">پیام‌ها و کلِ هر مکاتبه در «💬 مکاتبات» (نشانگر را روی پیامِ 🤖 نگه دارید)؛ نامه در تب «نامهٔ کمیسیون». کمتر از سه ستاره برای پیام، و هر امتیازِ مکاتبه و نامه، نظر می‌خواهد.</p>`,
       () => { location.href = "correspond"; }, "💬 رفتن به مکاتبات", "بعداً");

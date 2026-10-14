@@ -7,11 +7,15 @@
  * هوشمند نوشته هم ستاره و نظرِ اجباری. «خاتمه»ِ کارشناس تا همهٔ این‌ها داده نشده معلق است (decisions.js — تصمیمِ مالک) تا کارشناسان
  * در این ارزیابی شرکت کنند. امتیازهای کم با علتشان در پروندهٔ دورِ بعدِ مذاکره به خودِ کارشناس هوشمند می‌رسد (ai-agent.js).
  *
- * ai_rates: (kind, ref) یکتا — msg: شناسهٔ پیام (sp_msgs)، thread: شناسهٔ گفت‌وگو، letter: شناسهٔ نامه (letters). امتیاز عوض‌شدنی است.
+ * ai_rates: (kind, ref) یکتا — msg: شناسهٔ پیام (sp_msgs)، thread: شناسهٔ گفت‌وگو، letter: شناسهٔ نامه (letters)، request: شناسهٔ ارجاع
+ * («نظرِ کلی دربارهٔ کلِ مذاکرهٔ این درخواست» در «خاتمه» — تصمیم ۷). امتیاز عوض‌شدنی است.
+ * «جعبه‌های نقد» (worker/critique.js، کلیدِ boxes): ستونِ boxes با کدهای جعبه — برای کمتر از سه ستارهٔ پیام دست‌کم یکی اجباری،
+ * برای کلِ مکاتبه و ستاره‌های بالاتر اختیاری؛ «نظرِ کلی»ِ درخواست هم فقط با همین کلید خواسته می‌شود.
  * بی ایمپورت از ai-agent.js و sp-core.js، تا هر دو و api.js و decisions.js بی حلقه بخوانند.
  */
 import { HttpError } from "./http.js";
 import { recordRate } from "./ai-feedback.js";
+import { boxesOn, boxesIn, boxesOf } from "./critique.js";
 
 const now = () => Date.now();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -40,7 +44,7 @@ const LOW = 3;
  */
 export async function threadRates(env, threadId) {
   const [rr, xr, mr] = await env.DB.batch([
-    env.DB.prepare("SELECT kind, ref, stars, note, at FROM ai_rates WHERE thread_id=?").bind(threadId),
+    env.DB.prepare("SELECT kind, ref, stars, note, boxes, at FROM ai_rates WHERE thread_id=?").bind(threadId),
     /* بسته، یا کارِ ارجاعش به کمیسیون رسیده (قلمِ تأییدشده دارد) — همان قاعدهٔ rate() و «خاتمه» */
     env.DB.prepare(`SELECT ${CLOSED_SQL} AS closed, EXISTS (SELECT 1 FROM sp_threads t JOIN items i ON i.assignment_id=t.assignment_id WHERE t.id=x.thread_id AND i.commission_ok=1) AS ending
       FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id WHERE x.thread_id=?`).bind(threadId),
@@ -49,9 +53,11 @@ export async function threadRates(env, threadId) {
   const rows = rr.results || [];
   const msgs = {};
   let thread = null;
+  /* جعبه‌ها فقط وقتی هست (شکلِ پیشینِ پاسخ بی کلیدِ boxes دست نخورد) */
+  const bx = (r) => { const b = boxesOf(r.boxes); return b.length ? { boxes: b } : {}; };
   for (const r of rows) {
-    if (r.kind === "msg") msgs[r.ref] = { stars: r.stars, note: r.note || null };
-    else if (r.kind === "thread" && r.ref === threadId) thread = { stars: r.stars, note: r.note || null, at: r.at };
+    if (r.kind === "msg") msgs[r.ref] = { stars: r.stars, note: r.note || null, ...bx(r) };
+    else if (r.kind === "thread" && r.ref === threadId) thread = { stars: r.stars, note: r.note || null, ...bx(r), at: r.at };
   }
   const ids = (mr.results || []).map((x) => x.id);
   const xs = (xr.results || [])[0] || {};
@@ -72,11 +78,15 @@ function starsOf(v) {
  *   msg: پیامِ کارشناس هوشمند در گفت‌وگوی خودِ کارشناس؛ کمتر از سه ستاره علت می‌خواهد.
  *   thread: کلِ مکاتبه، بعد از بسته شدنش (یا وقتی کارِ ارجاع به کمیسیون رسیده)؛ نظر همیشه اجباری.
  *   letter: نامهٔ کمیسیونی که کارشناس هوشمند نوشته؛ نظر همیشه اجباری.
+ *   request: «نظرِ کلی دربارهٔ کلِ مذاکرهٔ این درخواست» (assignment_id) — فقط با کلیدِ boxes؛ کوتاه و اجباری.
+ * boxes: کدهای «جعبه‌های نقد» (کلیدِ boxes): پیامِ کمتر از سه ستاره دست‌کم یکی می‌خواهد؛ بقیه اختیاری.
  */
 export async function rate(env, ex, b = {}) {
   const kind = T(b.kind);
   const stars = starsOf(b.stars);
   const note = T(b.note).slice(0, 800);
+  const on = await boxesOn(env);
+  const boxes = on && kind !== "letter" ? boxesIn(b.boxes) : [];
   let ref, aid, threadId = null, what;
   if (kind === "msg") {
     const m = await env.DB.prepare(`SELECT m.id, m.thread_id, m.who, m.kind, m.meta_json, a.id AS aid, a.expert_id FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id
@@ -86,6 +96,7 @@ export async function rate(env, ex, b = {}) {
     let meta = null; try { meta = m.meta_json ? JSON.parse(m.meta_json) : null; } catch (_) { meta = null; }
     if (!rateable({ who: m.who, kind: m.kind, meta })) throw new HttpError("فقط پیام‌هایی که کارشناس هوشمند برای تأمین‌کننده نوشته امتیاز می‌گیرند.", 409);
     if (stars < LOW && note.length < 3) throw new HttpError("برای کمتر از سه ستاره بنویسید چه چیزِ این پیام درست نبود.", 422, { need_note: true });
+    if (on && stars < LOW && !boxes.length) boxesIn([], { need: true, what: "برای کمتر از سه ستاره" });
     ref = m.id; aid = m.aid; threadId = m.thread_id; what = "پیام";
   } else if (kind === "thread") {
     const x = await env.DB.prepare(`SELECT t.id, a.id AS aid, a.expert_id, ${CLOSED_SQL} AS closed,
@@ -106,26 +117,36 @@ export async function rate(env, ex, b = {}) {
     if (L.ch !== "ai" || L.state !== "written") throw new HttpError("فقط نامه‌ای که کارشناس هوشمند نوشته امتیاز می‌گیرد.", 409);
     if (note.length < 3) throw new HttpError("نظرتان دربارهٔ نامه را بنویسید — اجباری است.", 422, { need_note: true });
     ref = L.id; aid = L.aid; what = "نامهٔ کمیسیون";
+  } else if (kind === "request") {
+    if (!on) throw new HttpError("«نظرِ کلی»ِ درخواست هنوز در پنل پشتیبانی روشن نشده است.", 409);
+    const a = await env.DB.prepare(`SELECT a.id, a.expert_id, EXISTS (SELECT 1 FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id WHERE t.assignment_id=a.id
+        AND EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=t.id AND ${RATE_MSG_SQL("m")})) AS ai FROM assignments a WHERE a.id=?`).bind(int(b.assignment_id) || 0).first();
+    if (!a) throw new HttpError("این ارجاع پیدا نشد.", 404);
+    if (a.expert_id !== ex.id) throw new HttpError("این ارجاع مالِ شما نیست.", 403);
+    if (!a.ai) throw new HttpError("کارشناس هوشمند در این درخواست مذاکره‌ای نکرده است.", 409);
+    if (note.length < 3) throw new HttpError("نظرِ کلی‌تان دربارهٔ کلِ مذاکرهٔ این درخواست را بنویسید — کوتاه و اجباری.", 422, { need_note: true });
+    ref = a.id; aid = a.id; what = "کلِ مذاکرهٔ درخواست";
   } else throw new HttpError("نوعِ امتیاز نامعتبر است.");
   const t = now();
   await env.DB.batch([
-    env.DB.prepare(`INSERT INTO ai_rates (kind,ref,assignment_id,thread_id,expert_id,stars,note,at) VALUES (?,?,?,?,?,?,?,?)
-        ON CONFLICT(kind, ref) DO UPDATE SET stars=excluded.stars, note=excluded.note, expert_id=excluded.expert_id, at=excluded.at`)
-      .bind(kind, ref, aid, threadId, ex.id, stars, note || null, t),
+    env.DB.prepare(`INSERT INTO ai_rates (kind,ref,assignment_id,thread_id,expert_id,stars,note,boxes,at) VALUES (?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(kind, ref) DO UPDATE SET stars=excluded.stars, note=excluded.note, boxes=excluded.boxes, expert_id=excluded.expert_id, at=excluded.at`)
+      .bind(kind, ref, aid, threadId, ex.id, stars, note || null, boxes.length ? JSON.stringify(boxes) : null, t),
     env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_rate",
-      JSON.stringify({ assignment_id: aid, thread_id: threadId, kind, ref, stars, ...(note ? { note: note.slice(0, 200) } : {}) })),
+      JSON.stringify({ assignment_id: aid, thread_id: threadId, kind, ref, stars, ...(note ? { note: note.slice(0, 200) } : {}), ...(boxes.length ? { boxes } : {}) })),
   ]);
   /* بایگانیِ بازخورد با عکسِ زمینه — برای تحلیلِ پشتیبانی و آموزشِ مدل (ai-feedback.js)؛ شکستش امتیاز را باطل نمی‌کند */
-  await recordRate(env, { kind, ref, stars, note: note || null }).catch((e) => console.error("feedback rate", e && e.message));
-  return { ok: true, kind, ref, stars, note: note || null, what, gaps: await rateGaps(env, aid) };
+  await recordRate(env, { kind, ref, stars, note: note || null, boxes }).catch((e) => console.error("feedback rate", e && e.message));
+  return { ok: true, kind, ref, stars, note: note || null, ...(boxes.length ? { boxes } : {}), what, gaps: await rateGaps(env, aid) };
 }
 
 /**
- * آنچه پیش از «خاتمه» باید امتیاز بگیرد: {msgs: شمارِ پیام‌های بی‌امتیاز، threads: [{id, supplier}]، letter: شناسهٔ نامهٔ بی‌امتیاز یا null، total}.
+ * آنچه پیش از «خاتمه» باید امتیاز بگیرد: {msgs: شمارِ پیام‌های بی‌امتیاز، threads: [{id, supplier}]، letter: شناسهٔ نامهٔ بی‌امتیاز یا null،
+ * request: «نظرِ کلی»ِ درخواست هنوز نیامده (فقط با کلیدِ boxes و وقتی کارشناس هوشمند در این درخواست مذاکره کرده)، total}.
  * گفت‌وگویی حساب است که کارشناس هوشمند در آن دست‌کم یک پیامِ امتیازی نوشته؛ نامه فقط آخرین نامهٔ نوشتهٔ کارشناس هوشمند.
  */
 export async function rateGaps(env, aid) {
-  const [mr, tr, lr] = await env.DB.batch([
+  const [mr, tr, lr, qr] = await env.DB.batch([
     env.DB.prepare(`SELECT COUNT(*) AS n FROM sp_threads t JOIN sp_msgs m ON m.thread_id=t.id WHERE t.assignment_id=? AND ${RATE_MSG_SQL("m")}
         AND NOT EXISTS (SELECT 1 FROM ai_rates q WHERE q.kind='msg' AND q.ref=m.id)`).bind(aid),
     env.DB.prepare(`SELECT t.id, s.name AS supplier FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id
@@ -133,11 +154,15 @@ export async function rateGaps(env, aid) {
         AND NOT EXISTS (SELECT 1 FROM ai_rates q WHERE q.kind='thread' AND q.ref=t.id) ORDER BY t.id`).bind(aid),
     env.DB.prepare(`SELECT l.id FROM letters l WHERE l.assignment_id=? AND l.state='written' AND json_extract(l.meta_json,'$.channel')='ai'
         AND NOT EXISTS (SELECT 1 FROM ai_rates q WHERE q.kind='letter' AND q.ref=l.id) ORDER BY l.id DESC LIMIT 1`).bind(aid),
+    env.DB.prepare(`SELECT EXISTS (SELECT 1 FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id WHERE t.assignment_id=? AND EXISTS (SELECT 1 FROM sp_msgs m
+        WHERE m.thread_id=t.id AND ${RATE_MSG_SQL("m")})) AS ai, EXISTS (SELECT 1 FROM ai_rates q WHERE q.kind='request' AND q.ref=?) AS done`).bind(aid, aid),
   ]);
   const msgs = ((mr.results || [])[0] || {}).n || 0;
   const threads = tr.results || [];
   const letter = ((lr.results || [])[0] || {}).id || null;
-  return { msgs, threads, letter, total: msgs + threads.length + (letter ? 1 : 0) };
+  const rq = (qr.results || [])[0] || {};
+  const request = !!rq.ai && !rq.done && (await boxesOn(env));
+  return { msgs, threads, letter, request, total: msgs + threads.length + (letter ? 1 : 0) + (request ? 1 : 0) };
 }
 
 /** «۳ پیام، ۱ مکاتبه (پیچ‌سازان) و نامهٔ کمیسیون» — برای پیامِ خطای «خاتمه» و بات */
@@ -146,6 +171,7 @@ export function gapText(g) {
   if (g.msgs) parts.push(`${faN(g.msgs)} پیامِ کارشناس هوشمند`);
   if (g.threads.length) parts.push(`${faN(g.threads.length)} مکاتبهٔ کامل (${g.threads.slice(0, 3).map((x) => x.supplier).join("، ")}${g.threads.length > 3 ? "، …" : ""})`);
   if (g.letter) parts.push("نامهٔ کمیسیون");
+  if (g.request) parts.push("نظرِ کلی دربارهٔ کلِ مذاکرهٔ این درخواست");
   return parts.length > 1 ? `${parts.slice(0, -1).join("، ")} و ${parts[parts.length - 1]}` : parts[0] || "";
 }
 

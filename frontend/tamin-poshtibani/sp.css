@@ -622,3 +622,9 @@ html.sp-lock .ph-scroll { overscroll-behavior-y: contain; -webkit-overflow-scrol
 .ph-ro-sos:hover { filter: brightness(1.08); }
 .ph-ro-sos:active { transform: scale(.97); }
 .ph-ro-sos:focus-visible { outline: 2px solid #fecaca; outline-offset: 2px; }
+/* «جعبه‌های نقد» (correspond.js:boxPicker) — کدام جزءِ کارِ کارشناس هوشمند درست نبود */
+.sp-cboxes { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 10px; font-size: .84rem; }
+.sp-cboxes > b { width: 100%; font-size: .84rem; }
+.sp-cbox { display: inline-flex; gap: 5px; align-items: center; padding: 4px 10px; border: 1px solid var(--tp-line-2); border-radius: 999px; cursor: pointer; user-select: none; }
+.sp-cbox:has(input:checked) { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.55); }
+.sp-cbox input { margin: 0; }

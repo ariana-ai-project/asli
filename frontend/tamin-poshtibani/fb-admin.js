@@ -4,6 +4,8 @@
      · میانگینِ امتیازِ پیام‌ها، مکاتبه‌ها و نامه‌ها، و سرنوشتِ پیشنهادهای «⏱ با مهلت» (فرستاد / رد / خودکار)
      · پخشِ ستاره‌ها، روندِ میانگین، جدولِ کارشناسان، واژه‌های پرتکرارِ علت‌های امتیازِ کم و رد
      · «🤖 برایند» با مدل (فقط با کلیک)، فهرستِ همهٔ نظرها با فیلتر و «🔎 زمینه»ٔ هر کدام
+     · «📦 جعبه‌های نقد» (worker/critique.js): شمارِ هر جعبه — پرتکرارترین یعنی جزئی که اول باید اصلاح شود — به تفکیکِ مدل و ماه؛
+       با زدنِ هر جعبه فهرست همان‌ها را نشان می‌دهد
      · خروجیِ اکسل (CSV) و دادهٔ آموزشِ مدل (JSONL — هر خط یک بازخورد با زمینه؛ ردها جفتِ «ردشده/برگزیده»)
    window.TP_FB: configure({api, render, download}) · mount(root) · view() · load(force)
    ============================================================ */
@@ -15,9 +17,12 @@
   const fa = (x) => (TP.ui && TP.ui.fa ? TP.ui.fa(x) : String(x));
   const M = (n) => fa(Number(n || 0).toLocaleString("en-US")).replace(/,/g, "٬");
   let C = { api: null, render: () => {}, download: null };
-  const S = { f: { win: "30d", expert: "", kind: "", low: false, q: "" }, d: null, items: [], loading: false, err: "", more: false, sum: {}, sumBusy: false, sumErr: "", seq: 0, experts: [] };
+  const S = { f: { win: "30d", expert: "", kind: "", low: false, q: "", box: "" }, d: null, items: [], loading: false, err: "", more: false, sum: {}, sumBusy: false, sumErr: "", seq: 0, experts: [] };
   const WINS = [["7d", "۷ روز"], ["30d", "۳۰ روز"], ["90d", "۹۰ روز"], ["365d", "یک سال"], ["all", "همه"]];
-  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت" };
+  const KIND_FA = { msg: "پیام", thread: "کلِ مکاتبه", letter: "نامهٔ کمیسیون", prop: "پیشنهادِ با مهلت", request: "کلِ مذاکرهٔ درخواست" };
+  /* نامِ فارسیِ جعبه‌ها از همان پاسخِ سرور */
+  const boxFa = (c) => { const b = ((S.d && S.d.boxes && S.d.boxes.list) || []).find((x) => x.code === c); return b ? b.fa : c; };
+  const boxChips = (codes) => ((codes || []).length ? `<span class="sv-fbbx">${codes.map((c) => `<span class="chip warn">📦 ${esc(boxFa(c))}</span>`).join("")}</span>` : "");
   const OUT_FA = { ok: "✅ فرستاد", no: "✏️ رد کرد", auto: "⏱ خودکار رفت" };
   const fa1 = (n) => (n == null ? "—" : fa(String(Math.round(n * 10) / 10).replace(".", "٫")));
   const pct = (a, b) => (b ? `${fa(Math.round((a / b) * 100))}٪` : "—");
@@ -28,7 +33,7 @@
   const sumKey = () => `${S.f.win}|${S.f.expert}`;
 
   function qs(extra) {
-    const q = new URLSearchParams({ win: S.f.win, ...(S.f.expert ? { expert: S.f.expert } : {}), ...(S.f.kind ? { kind: S.f.kind } : {}), ...(S.f.low ? { low: "1" } : {}), ...(S.f.q ? { q: S.f.q } : {}), ...(extra || {}) });
+    const q = new URLSearchParams({ win: S.f.win, ...(S.f.expert ? { expert: S.f.expert } : {}), ...(S.f.kind ? { kind: S.f.kind } : {}), ...(S.f.low ? { low: "1" } : {}), ...(S.f.q ? { q: S.f.q } : {}), ...(S.f.box ? { box: S.f.box } : {}), ...(extra || {}) });
     return q.toString();
   }
   async function load(force, more) {
@@ -95,6 +100,17 @@
     return `<section class="tp-box sv-fbbox"><div class="tp-box-h"><h2>پرتکرار در علت‌های امتیازِ کم و رد</h2></div>
       ${W.length ? `<div class="sv-fbw">${W.map((w) => `<button type="button" class="chip" data-fbword="${esc(w.w)}">${esc(w.w)} <b>${M(w.n)}</b></button>`).join("")}</div>` : `<div class="dim">هنوز علتی تکرار نشده.</div>`}</section>`;
   }
+  function boxesBox(d) {
+    const B = d.boxes;
+    if (!B || !B.n) return "";
+    const L = B.list.filter((b) => b.n), max = Math.max(1, ...L.map((b) => b.n));
+    const models = Object.entries(B.models || {}).map(([m, o]) => [m, Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, 3)]);
+    const months = Object.keys(B.months || {}).sort().slice(-4);
+    return `<section class="tp-box sv-fbbox"><div class="tp-box-h"><h2>📦 جعبه‌های نقد</h2><span class="sub">${M(B.n)} بازخورد با جعبه</span>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}</div>
+      <div class="sv-fbdist bx">${L.map((b, i) => `<div class="r ${i === 0 ? "low" : ""}"><button type="button" class="linkish s" data-fbbox="${b.code}" title="${esc(b.stage)} — ${esc(b.part)}">${esc(b.fa)}</button><span class="bar"><i style="width:${(b.n / max) * 100}%"></i></span><span class="n">${M(b.n)}</span></div>`).join("")}</div>
+      ${models.length ? `<div class="dim" style="font-size:.82rem;margin-top:8px">${models.map(([m, top]) => `<div><span dir="ltr">${esc(m)}</span>: ${top.map(([c, n]) => `${esc(boxFa(c))} ${M(n)}`).join("، ")}</div>`).join("")}</div>` : ""}
+      ${months.length > 1 ? `<div class="dim" style="font-size:.82rem;margin-top:6px">${months.map((mo) => { const o = B.months[mo]; const top = Object.entries(o).sort((a, b) => b[1] - a[1])[0]; return `${fa(mo)}: ${esc(boxFa(top[0]))} ${M(top[1])}`; }).join(" · ")}</div>` : ""}</section>`;
+  }
   function expertsBox(d) {
     const E = d.experts || [];
     if (!E.length) return "";
@@ -111,7 +127,7 @@
       <header><span class="chip">${KIND_FA[x.kind] || x.kind}</span>${stars(x.stars)}${x.outcome ? `<span class="chip ${x.outcome === "no" ? "warn" : x.outcome === "ok" ? "ok" : ""}">${OUT_FA[x.outcome] || x.outcome}</span>` : ""}
         <span class="who">${esc(x.expert_name || "—")}</span><span class="dim">${when(x.at)}</span></header>
       <div class="meta dim">درخواست <b>${esc(x.request_id || "—")}</b>${x.supplier ? ` · ${esc(x.supplier)}` : ""}${x.model ? ` · <span dir="ltr">${esc(x.model)}</span>` : ""}</div>
-      ${x.note ? `<div class="note">💬 ${esc(x.note)}</div>` : ""}
+      ${x.note ? `<div class="note">💬 ${esc(x.note)}</div>` : ""}${boxChips(x.boxes)}
       ${x.ai_text ? `<div class="txt ai"><small>🤖 متنِ ربات</small>${esc(x.ai_text)}</div>` : ""}
       ${x.human_text ? `<div class="txt hu"><small>✏️ جایگزینِ کارشناس</small>${esc(x.human_text)}</div>` : ""}
       <footer><button type="button" class="tp-btn xs" data-fbctx="${x.id}">🔎 زمینه</button>${x.thread_id ? `<button type="button" class="tp-btn xs" data-th-open="${x.thread_id}">💬 گفت‌وگو</button>` : ""}</footer></article>`;
@@ -128,10 +144,11 @@
     const any = Object.keys(d.kinds || {}).length;
     h += kpis(d);
     if (!any) return h + `<div class="lg-none">⭐<b>هنوز بازخوردی در این بازه نیست</b>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}</div></div>`;
-    h += `<div class="sv-fbgrid">${distBox(d)}${trendBox(d)}</div>${aiBox()}<div class="sv-fbgrid">${wordsBox(d)}</div>${expertsBox(d)}`;
+    h += `<div class="sv-fbgrid">${distBox(d)}${trendBox(d)}</div>${aiBox()}<div class="sv-fbgrid">${wordsBox(d)}${boxesBox(d)}</div>${expertsBox(d)}`;
     h += `<section class="tp-box"><div class="tp-box-h"><h2>نظرها و امتیازها</h2><span class="sub">${M(d.total)} مورد</span></div>
-      <div class="sv-fbf"><div class="tp-seg sm">${[["", "همه"], ["msg", "پیام"], ["thread", "مکاتبه"], ["letter", "نامه"], ["prop", "پیشنهاد"]].map(([k, l]) => `<button type="button" class="${f.kind === k ? "on" : ""}" data-fbkind="${k}">${l}</button>`).join("")}</div>
+      <div class="sv-fbf"><div class="tp-seg sm">${[["", "همه"], ["msg", "پیام"], ["thread", "مکاتبه"], ["letter", "نامه"], ["prop", "پیشنهاد"], ["request", "درخواست"]].map(([k, l]) => `<button type="button" class="${f.kind === k ? "on" : ""}" data-fbkind="${k}">${l}</button>`).join("")}</div>
         <label class="chkline"><input type="checkbox" data-fblow ${f.low ? "checked" : ""}> فقط کم‌امتیازها و ردها</label>
+        ${f.box ? `<button type="button" class="chip warn" data-fbbox="" title="برداشتنِ فیلترِ جعبه">📦 ${esc(boxFa(f.box))} ✕</button>` : ""}
         <input class="tp-input" data-fbq value="${esc(f.q)}" placeholder="جستجو در نظر، متنِ ربات، درخواست یا تأمین‌کننده ↵" style="flex:1;min-width:200px"></div>
       ${S.items.length ? `<div class="sv-fbits">${S.items.map(item).join("")}</div>` : `<div class="dim" style="padding:10px 0">چیزی با این فیلترها نیست.</div>`}
       ${S.more ? `<div class="sv-more"><button type="button" class="tp-btn" data-fbmore ${S.loading ? "disabled" : ""}>بیشتر</button></div>` : ""}</section>`;
@@ -150,7 +167,7 @@
         ${tr.length ? `<div class="tr">${tr.map((m) => `<div class="m ${m.who}"><small>${who[m.who] || m.who}${m.kind === "note" ? " · یادداشت" : ""}</small>${esc(m.text)}</div>`).join("")}</div>` : ""}
         ${r.ai_text ? `<div class="m ai focus"><small>🤖 ${r.kind === "prop" ? "پیشنهادِ ربات" : r.kind === "letter" ? "نامهٔ ربات" : "همین پیام"}</small>${esc(r.ai_text)}</div>` : ""}
         ${r.human_text ? `<div class="m expert focus"><small>✏️ جایگزینِ کارشناس</small>${esc(r.human_text)}</div>` : ""}
-        ${r.stars != null || r.note ? `<div class="verdict">${stars(r.stars)} ${r.note ? `<b>💬 ${esc(r.note)}</b>` : ""}</div>` : ""}</div>`, null, "بستن", "");
+        ${r.stars != null || r.note ? `<div class="verdict">${stars(r.stars)} ${r.note ? `<b>💬 ${esc(r.note)}</b>` : ""}</div>` : ""}${boxChips(r.boxes)}</div>`, null, "بستن", "");
   }
   async function runSum() {
     S.sumBusy = true; S.sumErr = ""; C.render();
@@ -159,7 +176,7 @@
     S.sumBusy = false; C.render();
   }
   function onClick(e) {
-    const t = e.target.closest("[data-fbwin],[data-fbkind],[data-fbmore],[data-fbsum],[data-fbctx],[data-fbdl],[data-fbword],[data-fbexp-id]");
+    const t = e.target.closest("[data-fbwin],[data-fbkind],[data-fbmore],[data-fbsum],[data-fbctx],[data-fbdl],[data-fbword],[data-fbexp-id],[data-fbbox]");
     if (!t) return;
     const d = t.dataset;
     if (d.fbwin) { S.f.win = d.fbwin; S.sumErr = ""; return load(true); }
@@ -169,6 +186,7 @@
     if (d.fbctx) return showCtx(+d.fbctx);
     if (d.fbword) { S.f.q = d.fbword; S.f.low = true; return load(true); }
     if (d.fbexpId) { S.f.expert = d.fbexpId; S.sumErr = ""; return load(true); }
+    if (d.fbbox !== undefined) { S.f.box = d.fbbox; return load(true); }
     if (d.fbdl) {
       const fmt = d.fbdl, q = new URLSearchParams({ win: S.f.win, format: fmt, ...(S.f.expert ? { expert: S.f.expert } : {}) });
       return C.download(`/ai/feedback/export?${q}`, `ai-feedback-${S.f.win}.${fmt}`).catch((er) => TP.modal("نشد", esc(er.message), null, "باشد", ""));

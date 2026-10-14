@@ -57,6 +57,7 @@ import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus, expertAppUrl } from "./tg-nav.js";
 import { normConfirmed } from "./structure.js";
+import { BOXES, BOX_FA, boxesOn } from "./critique.js";
 export { dispatchText, seenKb } from "./assign.js";
 
 const now = () => Date.now();
@@ -619,24 +620,44 @@ async function onFlowText(env, api, chat, ex, f, text) {
 async function onPropText(env, api, chat, ex, f, d, text) {
   if (f.step === "need_reason") {
     d.reason = text.slice(0, 1000);
-    if (d.kind === "final") {
-      await saveFlow(env, f.id, d, "need_bact");
-      await api.sendMessage(chat, "با همین بسته چه شود؟", [[{ text: "↩️ برگشت با پیامِ شما", callback_data: `pb:${f.id}:r` }],
-        [{ text: "❌ ردِ بسته", callback_data: `pb:${f.id}:x` }], [{ text: "⏸ فعلاً بماند (تصمیم با خودم)", callback_data: `pb:${f.id}:k` }]]);
+    /* «جعبه‌های نقد» (کلیدِ boxes): کدام جزءِ کارِ کارشناس هوشمند درست نبود؟ یک دکمه — pbx:<flowId>:<کد> */
+    if (await boxesOn(env)) {
+      await saveFlow(env, f.id, d, "need_box");
+      await api.sendMessage(chat, "کدام جزءِ کارِ کارشناس هوشمند درست نبود؟ یک جعبه بزنید:", boxKb(f.id));
       return { ok: true };
     }
-    await spAsk(env, ex, f, d, "need_own");
-    await api.sendMessage(chat, d.body ? "✏️ حالا پیامِ تازهٔ خودتان را برای تأمین‌کننده بنویسید — به‌جای پیامِ ردشدهٔ کارشناس هوشمند همین می‌رود."
-      : "پیامِ خودتان برای تأمین‌کننده را بنویسید، یا «-» برای هیچ پیامی.");
-    return { ok: true };
+    return propAfterReason(env, api, chat, ex, f, d);
   }
   if (f.step !== "need_own") return { ok: true };
+  return propOwn(env, api, chat, ex, f, d, text);
+}
+/** دکمه‌های «جعبه‌های نقد» برای ردِ پیشنهاد، دوتا دوتا */
+function boxKb(fid) {
+  const rows = [];
+  for (let i = 0; i < BOXES.length; i += 2) rows.push(BOXES.slice(i, i + 2).map((b) => ({ text: b.fa, callback_data: `pbx:${fid}:${b.code}` })));
+  return rows;
+}
+/** پس از علت (و جعبه): سرنوشتِ بسته در «🏁 تأیید نهایی»، وگرنه پیامِ تازهٔ خودِ کارشناس */
+async function propAfterReason(env, api, chat, ex, f, d) {
+  if (d.kind === "final") {
+    await saveFlow(env, f.id, d, "need_bact");
+    await api.sendMessage(chat, "با همین بسته چه شود؟", [[{ text: "↩️ برگشت با پیامِ شما", callback_data: `pb:${f.id}:r` }],
+      [{ text: "❌ ردِ بسته", callback_data: `pb:${f.id}:x` }], [{ text: "⏸ فعلاً بماند (تصمیم با خودم)", callback_data: `pb:${f.id}:k` }]]);
+    return { ok: true };
+  }
+  await spAsk(env, ex, f, d, "need_own");
+  await api.sendMessage(chat, d.body ? "✏️ حالا پیامِ تازهٔ خودتان را برای تأمین‌کننده بنویسید — به‌جای پیامِ ردشدهٔ کارشناس هوشمند همین می‌رود."
+    : "پیامِ خودتان برای تأمین‌کننده را بنویسید، یا «-» برای هیچ پیامی.");
+  return { ok: true };
+}
+/** پیامِ تازهٔ خودِ کارشناس — و ثبتِ رد */
+async function propOwn(env, api, chat, ex, f, d, text) {
   const own = text.trim() === "-" ? "" : text.slice(0, 2900);
   if (d.bundle === "return" && !own) { await api.sendMessage(chat, "برای «↩️ برگشت» پیامِ برگشت لازم است: بنویسید تأمین‌کننده چه چیزی را اصلاح کند."); return { ok: true }; }
   if (d.body && d.kind !== "final" && !own) { await api.sendMessage(chat, "پیامِ خودتان لازم است — به‌جای پیامِ ردشده همین برای تأمین‌کننده می‌رود. متنش را بنویسید."); return { ok: true }; }
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
   try {
-    await propDecide(env, ex, d.prop, { action: "no", reason: d.reason, text: own, bundle: d.bundle });
+    await propDecide(env, ex, d.prop, { action: "no", reason: d.reason, text: own, bundle: d.bundle, ...(d.boxes ? { boxes: d.boxes } : {}) });
     const fate = d.kind !== "final" ? "" : { return: " بسته با پیامِ شما برای اصلاح برگشت.", reject: " بسته رد شد.", keep: " بسته فعلاً ماند؛ تصمیمش در مکاتبات با خودِ شماست." }[d.bundle] || "";
     await api.sendMessage(chat, `✏️ <b>پیشنهاد رد شد</b> و توضیحتان به کارشناس هوشمند رسید.${fate}${own && !(d.kind === "final" && d.bundle !== "keep") ? " پیامِ شما برای تأمین‌کننده رفت." : own ? "" : " هیچ پیامی نرفت."}`);
   } catch (e) { await api.sendMessage(chat, `ردِ پیشنهاد ثبت نشد: ${esc(e.message)}`); }
@@ -3150,6 +3171,17 @@ async function onCallback(env, cq, apiIn) {
     }
     await ack();
     return { ok: true };
+  }
+  /* «جعبه‌های نقد» در ردِ پیشنهاد — pbx:<flowId>:<کدِ جعبه>؛ بعد همان سرنوشتِ بسته یا پیامِ تازه */
+  if (action === "pbx") {
+    const f = await ownFlow(env, ex, num(1), "prop");
+    if (!f || f.done_at || f.step !== "need_box") { await ack("این گفت‌وگو تمام شده است.", true); return { ok: true }; }
+    const code = parts[2];
+    if (!BOX_FA[code]) { await ack("این جعبه شناخته نیست.", true); return { ok: true }; }
+    const d = flowData(f);
+    d.boxes = [code];
+    await ack(`✔ ${BOX_FA[code]}`);
+    return propAfterReason(env, api, chat, ex, f, d);
   }
   /* ردِ «🏁 تأیید نهایی»: بسته برگردد، رد شود یا بماند — pb:<flowId>:r|x|k */
   if (action === "pb") {

@@ -343,3 +343,6 @@
   .sv-fbbar .spacer { display: none; }
   .sv-fbbar [data-fbdl] { flex: 1 1 0; justify-content: center; }
 }
+/* «📦 جعبه‌های نقد» (fb-admin.js:boxesBox): ستونِ نامِ جعبه پهن‌تر و بی شکستن */
+.sv-fbdist.bx .r { grid-template-columns: minmax(7.5em, max-content) 1fr 38px; }
+.sv-fbdist.bx .s { white-space: nowrap; text-align: start; color: inherit; font-weight: 600; }

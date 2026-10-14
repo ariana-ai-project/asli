@@ -70,6 +70,7 @@ import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplate
 import { limitsOf, LIMIT_FA } from "./terms-locks.js";
 import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
+import { boxesOn, boxesFa } from "./critique.js";
 import { ratesForModel } from "./ai-rates.js";
 import { recordProp } from "./ai-feedback.js";
 
@@ -1667,10 +1668,12 @@ export async function propDecide(env, ex, propId, b = {}) {
     return { ok: true, state: "ok", msgs, thread_id: p.thread_id };
   }
   if (action !== "no") throw new HttpError("تصمیم نامعتبر: «ارسال» یا «رد».");
-  const r = rejectBody(p, b);
+  /* «جعبه‌های نقد» (کلیدِ boxes): ردِ پیشنهاد دست‌کم یک جعبه هم می‌خواهد */
+  const r = rejectBody(p, b, { boxes: await boxesOn(env) });
+  const boxes = r.boxes || [];
   /* اول ادعا، بعد کار: سرِ مهلت هم Cron همین پیشنهاد را می‌خواهد بفرستد */
-  const claim = await env.DB.prepare("UPDATE ai_props SET state='no', reason=?, own=?, decided_at=?, decided_by=? WHERE id=? AND state='pending'")
-    .bind(r.reason, r.text || null, now(), by, p.id).run();
+  const claim = await env.DB.prepare("UPDATE ai_props SET state='no', reason=?, own=?, boxes=?, decided_at=?, decided_by=? WHERE id=? AND state='pending'")
+    .bind(r.reason, r.text || null, boxes.length ? JSON.stringify(boxes) : null, now(), by, p.id).run();
   if (!claim.meta.changes) throw new HttpError("این پیشنهاد همین حالا رفت یا کنار رفت.", 409, { state: "gone" });
   const th = await C.threadRow(env, p.thread_id);
   const meta = parse(p.meta_json, {}) || {};
@@ -1679,15 +1682,15 @@ export async function propDecide(env, ex, propId, b = {}) {
     if (p.kind === "final" && r.bundle !== "keep") msgs = (await C.decide(env, ex, p.bundle_id, r.bundle, { comment: r.text, sup: true })).msgs;
     else if (r.text) msgs = (await C.postMsg(env, th, "e", r.text, { own: p.id })).msgs;
   } catch (e) {
-    await env.DB.prepare("UPDATE ai_props SET state='pending', reason=NULL, own=NULL, decided_at=NULL, decided_by=NULL WHERE id=? AND state='no'").bind(p.id).run();
+    await env.DB.prepare("UPDATE ai_props SET state='pending', reason=NULL, own=NULL, boxes=NULL, decided_at=NULL, decided_by=NULL WHERE id=? AND state='no'").bind(p.id).run();
     throw e;
   }
   if (r.bundle) await env.DB.prepare("UPDATE ai_props SET meta_json=? WHERE id=?").bind(JSON.stringify({ ...meta, bundle_act: r.bundle }), p.id).run();
-  const logBody = `✏️ کارشناس ${where} را رد کرد — علت: «${clip(r.reason, 400)}»`
+  const logBody = `✏️ کارشناس ${where} را رد کرد — علت: «${clip(r.reason, 400)}»${boxes.length ? ` (جعبه‌ها: ${boxesFa(boxes)})` : ""}`
     + (p.kind === "final" ? ({ return: "؛ بسته با پیامِ کارشناس برگشت", reject: "؛ بسته رد شد", keep: "؛ بسته فعلاً ماند و تصمیمش با کارشناس است" }[r.bundle] || "") : "")
     + (r.text ? (p.kind === "final" && r.bundle !== "keep" ? "" : "؛ پیامِ خودِ کارشناس رفت") : "؛ هیچ پیامی نرفت") + ".";
-  await propDone(env, p, th, msgs, { state: "no", by, ev: "ai_prop_no", logBody, extra: { reason: r.reason.slice(0, 300) } });
-  await recordProp(env, p, { outcome: "no", reason: r.reason, own: r.text || null, bundle: r.bundle }).catch((e) => console.error("feedback prop", e && e.message));
+  await propDone(env, p, th, msgs, { state: "no", by, ev: "ai_prop_no", logBody, extra: { reason: r.reason.slice(0, 300), ...(boxes.length ? { boxes } : {}) } });
+  await recordProp(env, p, { outcome: "no", reason: r.reason, own: r.text || null, bundle: r.bundle, boxes }).catch((e) => console.error("feedback prop", e && e.message));
   return { ok: true, state: "no", msgs, thread_id: p.thread_id };
 }
 
