@@ -109,8 +109,12 @@
     TP.ui.mountBg("");
     const items = [...(S.me && S.via !== "telegram" ? [{ label: "بات مکاتبات در تلگرام", icon: "telegram", attrs: "data-tg" }] : []),
       ...(S.me && !spApp ? [{ label: "پنل کارشناس", icon: "user", href: "expert" }, { label: "تدارکات", icon: "home", href: "./" }] : [])];
+    /* «بازگشت» در گوشی و تبلت (یک‌ستونه): یک پله بالا — گفت‌وگو ← تأمین‌کنندگان ← درخواست‌ها ← پنل کارشناس.
+       در دسکتاپ (ستون‌ها کنار هم) پنهان است؛ مینی‌اپ تلگرام دکمهٔ بازگشتِ خودش را دارد */
+    const back = spApp ? null : S.view === "chat" && S.th ? { attrs: 'data-back="sup"', label: "بازگشت به تأمین‌کنندگان" }
+      : S.view === "sup" ? { attrs: 'data-back="req"', label: "بازگشت به درخواست‌ها" } : { href: "expert", label: "بازگشت به پنل کارشناس" };
     return TP.ui.topbar({ title: "مکاتبات با تأمین‌کنندگان", sub: S.me ? esc(S.me.label || S.me.name) : "", home: spApp ? "#" : "expert", homeTitle: "پنل کارشناس",
-      user: S.me ? { name: S.me.label || S.me.name, sub: "کارشناس خرید" } : null, items });
+      back, user: S.me ? { name: S.me.label || S.me.name, sub: "کارشناس خرید" } : null, items });
   }
   function renderLogin(msg) {
     app.classList.remove("sp-app");
@@ -268,7 +272,7 @@
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     const on = !!(S.th && S.d);
     const screenInMain = !phoneMode && on && S.tab !== "items";
-    const main = !on ? `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.<br><span class="sp-muted">${phoneMode ? "گفت‌وگو در گوشیِ کنار صفحه و اقلام و تصمیم‌ها همین‌جا می‌آیند." : "پیام‌ها، اقلام و تصمیم‌ها این‌جا می‌آیند."}</span></div>`
+    const main = !on ? `<div class="sp-empty" style="margin-top:12vh">یک تأمین‌کننده را انتخاب کنید.</div>`
       : screenInMain ? screen(false) : convo();
     app.classList.add("sp-app");
     PH.lockView(!phoneMode, screenInMain);
@@ -283,8 +287,9 @@
       ${phoneMode ? `<section class="ph-stage"><div class="ph"><img class="ph-frame" src="phone-frame.svg" alt="" draggable="false">${screen(true)}</div></section>` : ""}
     </div></div>`;
     bind();
-    /* راهنما: در دسکتاپ گوشی سمت چپ است، پس دکمهٔ «؟» سمت راست؛ در گوشیِ واقعی «؟» داخلِ نوارِ گفت‌وگوست */
-    TP.ui.help.set("corr.main", phoneMode ? { side: "right" } : { fab: false });
+    /* راهنما: در دسکتاپ گوشی سمت چپ است، پس دکمهٔ «؟» سمت راست؛ در گوشیِ واقعی، گفت‌وگوی تمام‌صفحه «؟» را در نوارِ خودش دارد
+       و فهرست‌ها (درخواست‌ها، تأمین‌کنندگان) دکمهٔ شناور را */
+    TP.ui.help.set("corr.main", phoneMode ? { side: "right" } : screenInMain && S.view === "chat" ? { fab: false } : {});
     const inp = $("#msgIn"); if (inp && S.drafts[S.th]) { inp.value = S.drafts[S.th]; composerState(inp); }
     const c = $("#chat"); if (c) c.scrollTop = S.chatPos != null ? S.chatPos : c.scrollHeight;
     S.chatPos = null;
@@ -335,7 +340,7 @@
      متن را نمی‌بیند)؛ رخدادِ بسته و قلم کارتی است که کلیکش به همان بسته یا قلم در «اقلام و تصمیم‌ها» می‌رود --- */
   /** «🚨 پرسش از کارشناس»: سؤال و راهنما در انتهای گفت‌وگو، درست بالای کادرِ پیام */
   const askOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.ask) || null;
-  const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید؛ برای ${esc(S.d.thread.supplier)} هم فرستاده می‌شود و بعدش گفت‌وگو دوباره دستِ کارشناس هوشمند است.</i></div>` : ""; };
+  const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید.</i></div>` : ""; };
   /* «👁 با تأیید» (فاز ۴ب گام ۴): پیشنهادهای معطلِ کارشناس هوشمند در انتهای گفت‌وگو، درست بالای کادرِ پیام */
   const watchOf = () => (S.d && S.d.watch) || null;
   /* گفت‌وگوی کارشناس هوشمند: فقط دیدن (locked) یا «🚨 اضطراری» بازشده و دستِ کارشناس (human) */
@@ -355,27 +360,24 @@
   const duePct = (p) => { const l = leftMs(p), tot = p.due_at && p.created_at ? p.due_at - p.created_at : 0; return tot > 0 ? Math.max(0, Math.min(1, l / tot)).toFixed(3) : 0; };
   function propCard(p) {
     const what = p.kind === "final" ? `بستهٔ ${fa(p.bundle_id)} را تأیید نهایی کند` : p.kind === "act" ? "این تصمیمِ بسته را بگیرد" : "این پیام را بفرستد";
-    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>${p.due_at ? "⏱" : "⏸"} کارشناس هوشمند می‌خواهد ${what}</b>
+    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>${p.due_at ? "⏱" : "⏸"} کارشناس هوشمند می‌خواهد ${what} ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>
       ${p.kind === "final" ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
       ${p.kind === "act" ? `<div class="ph-prop-body">${(p.actions || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${fa(a.bundle_id)}${a.comment ? `: «${esc(a.comment)}»` : ""}`).join("\n")}</div>` : ""}
       ${p.body ? `<div class="ph-prop-body">${esc(p.body)}</div>` : ""}
-      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : `<div class="ph-due"><span class="t">⏸ بی‌مهلت — تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود</span></div>`}
-      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger sm" data-prop-no="${p.id}">✏️ رد و نوشتن پیام خودم</button></div>
-      <i>«رد» علت و پیامِ تازهٔ خودتان را می‌خواهد — همان به‌جایش می‌رود.</i></div>`;
+      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : `<div class="ph-due"><span class="t">⏸ بی‌مهلت — منتظرِ شما</span></div>`}
+      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger sm" data-prop-no="${p.id}">✏️ رد و نوشتن پیام خودم</button></div></div>`;
   }
   const cfgBtn = `<button type="button" class="ph-cfg" data-supcfg title="حالتِ مکاتباتِ کارشناس هوشمند: با مهلت، بی‌مهلت یا خودکار">⚙️ تغییر</button>`;
-  /** علتِ «⏸ بی‌مهلت»: «حالت کار»ِ نوع قلم یا تنظیمِ خودِ کارشناس */
-  const holdWhy = (w) => (w.floor && w.floor.mode === "hold" ? `نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است؛ ` : "");
+  /** کفِ حالت از «حالت کار»ِ نوع قلم — فقط وضعیت؛ توضیح در راهنما */
+  const floorNote = (w) => (w.floor ? `<span class="sp-muted">نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است</span>` : "");
   const propsNote = () => {
     const w = watchOf();
     if (!w) return "";
-    if (!(w.pending || []).length) return w.hold
-      ? `<div class="ph-ask ph-watch" role="note"><b>⏸ بی‌مهلت ${cfgBtn}</b>${holdWhy(w)}کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش منتظرِ «✅ ارسال» یا «✏️ رد»ِ شما می‌ماند؛ هیچ‌وقت خودکار نمی‌رود.</div>`
-      : `<div class="ph-ask ph-watch" role="note"><b>⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه ${cfgBtn}</b>${w.floor && w.floor.mode === "timer" ? `نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است و خودکار نمی‌رود؛ ` : ""}کارشناس هوشمند این گفت‌وگو را پیش می‌برد و هر پیام و تصمیمش اول همین‌جا (و در اعلان و بات) به شما نشان داده می‌شود؛ بی‌پاسخ، سرِ مهلت خودکار می‌رود.</div>`;
+    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>${w.hold ? "⏸ بی‌مهلت" : `⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه`} ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${floorNote(w)}</div>`;
     return w.pending.map(propCard).join("");
   };
   /* «🤖 خودکار»: گفت‌وگو بسته است و کارشناس هوشمند خودش مذاکره می‌کند */
-  const autoNote = () => (roOf() ? `<div class="ph-ask ph-watch" role="note"><b>🤖 خودکار ${cfgBtn}</b>کارشناس هوشمند خودش مذاکره می‌کند؛ هر جا جوابِ شما لازم باشد «🚨 پرسش از کارشناس» می‌آید.</div>` : "");
+  const autoNote = () => (roOf() ? `<div class="ph-ask ph-watch" role="note"><b>🤖 خودکار ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b></div>` : "");
   const feedHtml = () => msgsHtml() + rateNote() + askNote() + autoNote() + propsNote() + threadRateCard();
 
   /* --- ⭐ امتیاز به کارِ کارشناس هوشمند (مهر ۱۴۰۵): هر پیامش ۱ تا ۵ ستاره (کمتر از سه با علت)، و کلِ مکاتبه بعد از بسته شدن با نظرِ
@@ -392,7 +394,7 @@
       html: `<div class="ph-rate${r ? " done" : ""}" role="group" aria-label="امتیاز به این پیامِ کارشناس هوشمند">${r ? "" : `<span class="hint">⭐ امتیاز بدهید</span>`}<span class="stars">${stars("data-rate-star", m.id, r && r.stars)}</span>${r && r.note ? `<span class="why" title="${esc(r.note)}">💬</span>` : ""}</div>` };
   };
   const unrated = () => { const R = ratesOf(); return R ? S.d.msgs.filter((m) => rateOf(m) && !R.msgs[m.id]).length : 0; };
-  const rateNote = () => { const n = unrated(); return n ? `<div class="ph-ask ph-ratehint" role="note"><b>⭐ ${fa(n)} پیامِ کارشناس هوشمند منتظرِ امتیازِ شماست</b>نشانگر را روی هر پیامِ 🤖 نگه دارید (روی گوشی زیرِ همان پیام) و یک تا پنج ستاره بدهید؛ کمتر از سه ستاره علت می‌خواهد. «خاتمه»ِ درخواست تا امتیازها کامل نشده باز نمی‌شود.</div>` : ""; };
+  const rateNote = () => { const n = unrated(); return n ? `<div class="ph-ask ph-ratehint" role="note"><b>⭐ ${fa(n)} پیامِ کارشناس هوشمند منتظرِ امتیازِ شماست ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b></div>` : ""; };
   function threadRateCard() {
     const R = ratesOf();
     if (!R || !R.rateable || !R.closed) return "";
@@ -425,7 +427,8 @@
     return PH.screen({
       framed, body: feedHtml(), label: `گفت‌وگو با ${th.supplier}`,
       nav: {
-        start: framed ? "" : `<button class="ph-glass ph-circ" data-back="sup" aria-label="بازگشت به تأمین‌کنندگان" title="بازگشت به تأمین‌کنندگان">${I.back}</button>`,
+        /* در گوشی «بازگشت به تأمین‌کنندگان» در نوار بالای صفحه است (top())؛ دو دکمهٔ هم‌کار روی هم نمی‌آید */
+        start: "",
         title: `${humanOf() ? "✋ " : ""}${th.supplier}`, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
         whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
         acts: `${humanOf() ? `<button class="ph-glass ph-circ" type="button" data-handback aria-label="برگرداندن به کارشناس هوشمند" title="✋ اضطراری دستِ شماست — برگرداندن به کارشناس هوشمند">🤖</button>` : ""}${framed ? "" : `<button class="ph-glass ph-circ" type="button" data-help="corr.main" aria-label="راهنما" title="راهنما">${TP.ui.ICON.help}</button>`}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
@@ -516,7 +519,7 @@
         ${open > 1 ? `<button class="tp-btn" data-act="acceptall">☑️ تیکِ همهٔ غیرسبزها (${fa(open)})</button>` : ""}
         <button class="tp-btn ${b.ready ? "primary" : ""}" data-act="final" ${b.ai ? "" : "title=\"اول خوانش هوشمند\""}>🏁 تأیید نهایی</button>
         <button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>
-        ${b.ai ? "" : `<div class="sp-muted">برای پر شدنِ همهٔ فیلدهای اجباری از پیش‌فاکتور و جدول تطابق، «خوانش هوشمند» را بزنید — تأیید نهایی بدون آن ممکن نیست.</div>`}`;
+        ${b.ai ? "" : `<div class="sp-muted">تأیید نهایی بدون «خوانش هوشمند» ممکن نیست ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</div>`}`;
     }
     return h + `</div>`;
   }

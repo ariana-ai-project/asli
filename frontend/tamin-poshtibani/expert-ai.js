@@ -63,12 +63,8 @@
     return `<div class="tp-card tp-pane"><div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
         <h2 style="margin:0">🤖 کارشناس هوشمند${A.st.expert ? ` — ${esc(A.st.expert.label || A.st.expert.name)}` : ""}</h2>
         <span class="chip ${g.on ? "ok" : ""}">${g.on ? "🤖 هوشمند" : "✋ دستی"}</span>
-        <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "✋ دستی کن" : "🤖 هوشمند کن"}</button>
+        <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "✋ دستی کن" : "🤖 هوشمند کن"}</button>${TP.ui.info("support.ai", "راهنمای هوشمند و دستی")}
         <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
-      <p class="lead" style="margin-top:10px"><b>🤖 هوشمند:</b> هر ارجاعی که از این لحظه به این کارشناس برسد خودکار پیش می‌رود — بررسی سوابق و جستجوی هوشمند، دعوت با قالب استاندارد،
-        مذاکره و تصمیم (تأیید، برگشت، رد، تأیید نهایی)، و در پایان جدول کمیسیون و نامه — و همین کارها برای خودِ کارشناس قفل می‌شود؛ گفت‌وگوهای کارشناس هوشمند هم برایش بسته است
-        مگر وقتی «🚨 پرسش از کارشناس» دارد. کارشناس فقط خطِ استعلامِ دستیِ خودش را می‌تواند بیفزاید. <b>پیامک فقط به شماره‌ای می‌رود که تیکِ «پنل» خورده باشد</b> — تیک را فقط انسان می‌زند.
-        <b>✋ دستی:</b> همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شود و قفل‌ها برداشته می‌شوند.</p>
       <div class="kpi"><div class="k"><b>کارها</b><span>${M(A.st.runs.length)}</span></div><div class="k"><b>فراخوانیِ مدل</b><span>${M(A.st.totals.n)}</span></div>
         <div class="k"><b>تخمینِ کلِ هزینه</b><span dir="ltr">${usd(A.st.totals.cost)}</span></div>
         ${g.on_at ? `<div class="k"><b>روشن از</b><span style="font-size:.9rem">${when(g.on_at)}</span></div>` : ""}</div>
@@ -83,7 +79,7 @@
     const rows = st.runs.map((r) => `<tr data-ai-run="${r.id}" style="cursor:pointer;${A.runId === r.id ? "background:rgba(79,140,255,.12)" : ""}">
         <td class="num">${esc(r.request_id)}</td><td class="party">${esc(r.party || "")}</td><td><span class="chip ${ST_CHIP[r.state] || ""}">${esc(r.state_fa)}</span>${r.error ? ` <span class="chip bad" title="${esc(r.error)}">خطا</span>` : ""}</td>
         <td class="num">${M(r.items)}</td><td class="num">${M(r.invited)} / ${M(r.engaged)} / ${M(r.finals)}</td><td class="num" dir="ltr">${usd(r.cost)}</td><td class="num">${when(r.updated_at)}</td></tr>`).join("");
-    const open = st.open.length ? `<div class="tp-sect"><h3>ارجاع‌های بی کار <span>پیش از روشن شدن رسیده‌اند؛ خودکار برداشته نمی‌شوند</span></h3>
+    const open = st.open.length ? `<div class="tp-sect"><h3>ارجاع‌های بی کار ${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")}</h3>
         ${st.open.map((a) => `<div style="display:flex;gap:8px;align-items:center;margin:4px 0"><span class="num">${esc(a.request_id)}</span><span class="muted">${esc(a.party || "")} · ${M(a.items)} قلم</span>
           <button class="tp-btn xs primary" data-ai-start="${a.id}">▶️ شروع</button></div>`).join("")}</div>` : "";
     return `<div class="tp-card tp-pane"><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th>درخواست</th><th class="rt">طرف مقابل</th><th>مرحله</th><th>اقلام</th>
@@ -133,10 +129,9 @@
       ${r.closing && r.closing.short && r.closing.short.length ? `<div class="tp-note warn">⚠️ با کمتر از حداقلِ استعلام بسته شد: ${r.closing.short.map((x) => `${esc(x.title)} ${M(x.have)} از ${M(x.need)}`).join("، ")}</div>` : ""}
       <div style="margin:10px 0;display:flex;gap:6px;flex-wrap:wrap">${acts}</div>
       <div class="tp-sect"><h3>اقلام</h3><div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">قلم</th><th>مقدار</th><th class="rt">ساختار</th><th>سوابق</th><th title="${r.flow === 2 ? "«🎯 فهرست دعوت»ِ کارشناس: سپرده‌شده‌ها، انتخاب‌های تازه و برداشتنِ پنج نفر اول (با علت)" : ""}">${r.flow === 2 ? "فهرستِ دعوت" : "جستجو"}</th><th title="پیشنهادهای تأییدنهایی از تأمین‌کنندگانِ مختلف / حداقلِ استعلامِ قلم (قواعدِ پنل پشتیبانی)">پیشنهادِ نهایی / حداقل</th></tr></thead><tbody>${items}</tbody></table></div></div>
-      <div class="tp-sect"><h3>تأمین‌کنندگانِ نامزد <span>${r.flow === 2 ? `تیک‌خورده‌های سپرده‌شدهٔ «🎯 فهرست دعوت»ِ کارشناس — کارشناس هوشمند خودش جستجو نمی‌کند؛ دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ تیکِ هر قلم: ${M(A.st.agent.cfg.maxInvites)}`
-          : `دعوت فقط برای شماره‌ای که تیکِ «پنل» دارد؛ سقفِ دعوت: ${M(A.st.agent.cfg.maxInvites)}`}</span></h3>
+      <div class="tp-sect"><h3>تأمین‌کنندگانِ نامزد <span>${r.flow === 2 ? "سقفِ تیکِ هر قلم" : "سقفِ دعوت"}: ${M(A.st.agent.cfg.maxInvites)}</span>${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")}</h3>
         <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">تأمین‌کننده</th><th>منبع</th><th class="rt">شماره‌ها (☑️ = پنل)</th></tr></thead>
-          <tbody>${cands || `<tr><td colspan="3"><div class="empty">${r.flow === 2 ? "هنوز تیک‌خورده‌ای سپرده نشده (کارشناس در «🎯 فهرست دعوت»ِ هر قلم «🚀 شروع» می‌زند)." : "هنوز نامزدی نیست (بعد از سوابق و جستجو)."}</div></td></tr>`}</tbody></table></div>
+          <tbody>${cands || `<tr><td colspan="3"><div class="empty">${r.flow === 2 ? "هنوز تیک‌خورده‌ای سپرده نشده." : "هنوز نامزدی نیست (بعد از سوابق و جستجو)."}</div></td></tr>`}</tbody></table></div>
         ${r.finished_at ? "" : `<div class="tp-fields3" style="margin-top:10px;align-items:end">
           <div class="tp-field"><b>تأمین‌کنندهٔ دیگر (مثلاً شمارهٔ آزمایشیِ خودتان)</b><input class="tp-input" id="ai-ms-name" placeholder="نام تأمین‌کننده"></div>
           <div class="tp-field"><b>شمارهٔ همراه</b><input class="tp-input" id="ai-ms-phone" dir="ltr" inputmode="tel" placeholder="09…"></div>
@@ -153,8 +148,7 @@
     const rows = (A.calls || []).map((c) => `<tr data-ai-call="${c.id}" style="cursor:pointer"><td class="num">${when(c.at)}</td><td>${esc(c.purpose_fa)}</td><td dir="ltr">${esc(c.model || "—")}</td>
         <td>${esc(c.effort || "—")}</td><td class="num" dir="ltr">${tok(c)}</td><td class="num" dir="ltr">${usd(c.cost_usd)}</td><td class="num">${c.ms ? `${M(Math.round(c.ms / 100) / 10)} ث` : "—"}</td>
         <td>${c.error ? `<span class="chip bad" title="${esc(c.error)}">خطا</span>` : esc(c.status || "")}</td></tr>`).join("");
-    return `<div class="tp-card tp-pane"><p class="lead">هر بار که سامانه برای کارشناس هوشمند به مدل زبانی پیام داده، با پرامپتِ دقیق (سیستم و پیام)، پاسخ، توکن‌ها و تخمینِ هزینه (دلار، با قیمتِ رسمی هر مدل) این‌جاست.
-        روی هر ردیف بزنید.${A.runId ? ` <b>فقط کارِ درخواست ${esc((A.run && A.run.run.request_id) || "")}</b> — <button class="tp-btn xs" data-ai-allcalls>همه</button>` : ""}</p>
+    return `<div class="tp-card tp-pane"><p class="lead">روی هر ردیف بزنید ${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")}${A.runId ? ` <b>فقط کارِ درخواست ${esc((A.run && A.run.run.request_id) || "")}</b> — <button class="tp-btn xs" data-ai-allcalls>همه</button>` : ""}</p>
       <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th>زمان</th><th>کار</th><th>مدل</th><th>تلاش</th><th>ورودی / خروجی</th><th>هزینه</th><th>زمان پاسخ</th><th>وضعیت</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8"><div class="empty">هنوز فراخوانی‌ای نیست.</div></td></tr>`}</tbody></table></div></div>`;
   }
@@ -163,7 +157,7 @@
     const rows = s.sms.map((m) => `<tr><td class="num">${when(m.at)}</td><td class="rt">${esc(m.supplier)}</td><td dir="ltr">${esc(m.phone)}</td><td>${m.panel ? "☑️" : "—"}</td>
         <td>${m.kind === "pass" ? "رمز تازه" : "استعلام"}</td><td>${esc(VIA_FA[m.via] || m.via || "قدیمی")}</td><td class="rt" style="white-space:normal;max-width:240px">${esc(m.error || "")}</td>
         <td class="rt" style="white-space:pre-wrap;max-width:420px;font-size:.82rem">${esc(m.body)}</td></tr>`).join("");
-    return `<div class="tp-card tp-pane"><p class="lead">پیامک‌های گفت‌وگوهای همین کارشناس: رفت یا نه، از چه راهی و چرا. رمزِ ورود در متن پوشیده است. ${s.ready ? "" : "<b>درگاه TextBee وصل نیست؛ پیامک‌ها شبیه‌سازی می‌شوند.</b>"}</p>
+    return `<div class="tp-card tp-pane"><p class="lead">${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")} ${s.ready ? "" : "<b>درگاه TextBee وصل نیست؛ پیامک‌ها شبیه‌سازی می‌شوند.</b>"}</p>
       <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th>زمان</th><th class="rt">تأمین‌کننده</th><th>شماره</th><th>پنل</th><th>نوع</th><th>نتیجه</th><th class="rt">دلیل</th><th class="rt">متن</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8"><div class="empty">هنوز پیامکی نیست.</div></td></tr>`}</tbody></table></div></div>`;
   }
@@ -171,8 +165,7 @@
     const list = (A.phones || []).map((s) => `<tr><td class="rt"><b>${esc(s.name)}</b></td><td class="rt" style="white-space:normal">${s.phones.map((p) => `<label class="sp-check" style="display:inline-flex;gap:4px;margin-inline-end:12px">
         <input type="checkbox" data-ai-panel="${p.id}" ${p.panel ? "checked" : ""} ${p.mobile ? "" : "disabled"}> <span dir="ltr">${esc(p.phone)}</span> <span class="muted">${esc(p.label || "")}</span></label>`).join("") || `<span class="muted">شماره‌ای نیست</span>`}
         <button class="tp-btn xs" data-ai-addphone="${esc(s.name)}" data-sid="${s.id}">➕ شماره</button></td></tr>`).join("");
-    return `<div class="tp-card tp-pane"><p class="lead">هر شماره مالِ یک تأمین‌کننده است و یک تأمین‌کننده می‌تواند چند شماره داشته باشد. تیکِ <b>«پنل»</b> یعنی پنلِ این تأمین‌کننده به این شماره وابسته است
-        و کارشناس هوشمند می‌تواند به آن پیامک بدهد؛ بی تیک، هیچ پیامکی به آن شماره نمی‌رود. شمارهٔ ثابت پیامک نمی‌گیرد.</p>
+    return `<div class="tp-card tp-pane"><p class="lead">تیکِ <b>«پنل»</b> یعنی پیامک به همین شماره ${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")}</p>
       <div style="display:flex;gap:8px;margin-bottom:10px"><input class="tp-input" id="ai-q" placeholder="جستجوی نام یا شماره" value="${esc(A.q)}" style="max-width:280px"><button class="tp-btn sm" data-ai-q>جستجو</button></div>
       <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">تأمین‌کننده</th><th class="rt">شماره‌ها (☑️ = پنل)</th></tr></thead>
         <tbody>${list || `<tr><td colspan="2"><div class="empty">چیزی پیدا نشد.</div></td></tr>`}</tbody></table></div>
@@ -188,19 +181,17 @@
     const c = A.st.agent.cfg, mk = A.st.markets;
     const f = (k, lab, hint) => `<div class="tp-field"><b>${lab}</b><input class="tp-input" data-ai-cfg="${k}" inputmode="numeric" value="${esc(c[k])}"><span class="dim" style="font-size:.78rem">${hint}</span></div>`;
     return `<div class="tp-card tp-pane">
-      <div class="tp-sect" style="margin-top:0"><h3>مدلِ مذاکره و شرحِ پایانی <span>خوانشِ پیش‌فاکتور، تفکیکِ قلم، جستجو و نامه مدلِ خودشان را دارند</span></h3>
+      <div class="tp-sect" style="margin-top:0"><h3>مدلِ مذاکره و شرحِ پایانی ${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")}</h3>
         <div class="tp-fields3"><div class="tp-field" style="min-width:min(520px,100%)"><b>مدل</b><select class="tp-select tp-input" data-ai-model>${modelOpts(c.model)}</select></div>
-          <div class="tp-field"><b>عمقِ فکر (effort)</b><select class="tp-select tp-input" data-ai-effort>${effortOpts(c.effort)}</select></div></div>
-        <p class="dim" style="font-size:.8rem;margin:6px 0 0">گامِ فوریِ بعد از پیامِ تأمین‌کننده فقط به پیام جواب می‌دهد، با عمقِ «کم» و زیرِ ۳۰ ثانیه. هر تصمیم روی بسته (تأیید، برگشت، رد، تأیید نهایی) در Cron و با همین انتخاب گرفته می‌شود، حداکثر حدود یک دقیقه بعد. Haiku «عمقِ فکر» را نمی‌پذیرد.
-          برای سنجیدنِ تفاوتِ مدل‌ها روی گفت‌وگوهای خودتان: «فراخوانی‌های مدل» ← یک دورِ مذاکره ← «🔬 مقایسه با مدلِ دیگر».</p></div>
+          <div class="tp-field"><b>عمقِ فکر (effort)</b><select class="tp-select tp-input" data-ai-effort>${effortOpts(c.effort)}</select></div></div></div>
       <div class="tp-fields3">
         ${f("minInvites", "حداقلِ دعوت (هدف)", "بی شمارهٔ پنل دعوتی نمی‌رود؛ کمتر از این، چالش در نامه گفته می‌شود")}
         ${f("maxInvites", "سقفِ تیکِ هر قلم در «🎯 فهرست دعوت»", "کارشناس برای هر قلم بیشتر از این تیک نمی‌زند (روالِ پیشین: سقفِ دعوتِ هر درخواست)")}
         ${f("quietMin", "پایانِ مذاکره بعد از سکوت (دقیقه)", "وقتی هر قلم پیشنهادِ نهایی دارد و این‌قدر پیامِ تازه‌ای نیامده")}
         ${f("maxTurns", "سقفِ دورِ مذاکره در هر گفت‌وگو", "")}
         ${f("maxItems", "سقفِ اقلامِ هر درخواست", "بیشتر از این، فقط همین تعداد اول")}
-        ${f("reuseDays", "(روالِ پیشین) جستجوی هوشمندِ تازه‌تر از (روز) دوباره خرج نشود", "۰ = همیشه جستجوی تازه؛ در روالِ تازه کارشناس هوشمند خودش جستجو نمی‌کند")}</div>
-      <div class="tp-sect"><h3>بازارهای جستجوی هوشمند <span>حداکثر ${M(A.st.maxMarkets)} — فقط کارهای روالِ پیشین؛ از فاز ۴ب گام ۲ جستجو کارِ خودِ کارشناس است</span></h3>
+        ${f("reuseDays", "(روالِ پیشین) جستجوی هوشمندِ تازه‌تر از (روز) دوباره خرج نشود", "۰ = همیشه جستجوی تازه")}</div>
+      <div class="tp-sect"><h3>بازارهای جستجوی هوشمند <span>حداکثر ${M(A.st.maxMarkets)} — روالِ پیشین</span></h3>
         ${mk.map((m) => `<label class="sp-check" style="display:inline-flex;gap:4px;margin-inline-end:12px"><input type="checkbox" data-ai-mk="${m.key}" ${c.markets.includes(m.key) ? "checked" : ""}> ${esc(m.fa)}</label>`).join("")}</div>
       <div style="margin-top:12px"><button class="tp-btn primary" data-ai-savecfg>ذخیرهٔ تنظیمات</button> <span id="ai-cfg-msg" class="muted"></span></div></div>`;
   }

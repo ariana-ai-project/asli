@@ -451,7 +451,7 @@
       <div class="ex-teams">${teams.filter(showTeam).map(([s, m], i) => exTeam(s, m.filter((x) => !S.exQ || exHit(s) || exHit(x)), i)).join("")}
         <section class="ex-team pool" data-drop-team="0" aria-label="بی‌سرپرست"><header><span class="ex-av lg pool" aria-hidden="true">${TP.ui.ICON.user}</span><div class="ex-th"><b class="big">بی‌سرپرست</b><small>${M(pool.length)} کارشناس · اعلان‌هایشان برای شما می‌آید</small></div></header>
           <div class="ex-members">${pool.filter(exHit).map((e) => exChip(e, false)).join("") || `<div class="ex-empty">${S.exQ ? "کسی با این نام نیست" : "همه در تیم‌اند"}</div>`}</div></section></div>
-      ${seniors.length ? "" : `<div class="ex-hint">${TP.ui.ICON.users} برای ساختن تیم، از منوی ⋯ یک کارشناس «کارشناس ارشد شود» را بزنید.</div>`}</div>`;
+      ${seniors.length ? "" : `<div class="ex-hint">${TP.ui.ICON.users} هنوز تیمی ساخته نشده ${TP.ui.info("manager.experts", "راهنمای تیم‌ها")}</div>`}</div>`;
   }
   async function expertPatch(id, body) {
     try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); return true; }
@@ -611,7 +611,7 @@
   function vFoot() {
     const n = readyAssignments().length;
     return `<div class="tp-foot"><button class="tp-btn primary" data-dispatch ${n ? "" : "disabled"}>تأیید نهایی و ارسال (${n})</button>
-      <span class="hint">${n ? "ارسال، ساعت‌شمار مهلت کارشناس را شروع می‌کند و اعلان می‌رود." : "برای ارسال، کارشناس و مهلت را کامل کنید."}</span>
+      <span class="hint">${n ? "" : "برای ارسال، کارشناس و مهلت را کامل کنید."}</span>
       <span class="legend"><span><i class="b-empty"></i>در مهلت</span><span><i class="b-warn"></i>از آستانه گذشت</span><span><i class="b-late"></i>از آستانه بعدی هم گذشت</span><span><i class="b-over"></i>مهلت تمام شد</span><span><i class="b-done"></i>انجام شد</span><span><i class="b-muted"></i>هشدار خاموش</span><span><i class="b-idle"></i>ارسال‌نشده</span></span></div>`;
   }
 

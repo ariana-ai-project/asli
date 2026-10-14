@@ -873,7 +873,7 @@
     const opt = (f) => `<option value="">—</option>${(S.enums[f] || []).filter((v) => !allowOf(f) || allowOf(f).includes(v)).map((v) => `<option ${t[f] === v ? "selected" : ""}>${esc(v)}</option>`).join("")}`;
     const ro = ed ? "" : "disabled";
     const req = (f) => (TERM_REQUIRED.includes(f) ? " <i class=\"sp-req\">*</i>" : "");
-    return `<div class="sp-box3 terms"><b class="sp-bt">🧾 شرایط فاکتور <span class="sp-muted">(برای همهٔ اقلامِ این استعلام یکی است)</span></b>
+    return `<div class="sp-box3 terms"><b class="sp-bt">🧾 شرایط فاکتور</b>
       <div class="sp-grid5">
         <div class="sp-field sp-dtl">${termFa("dtime")}${req("dtime")}${limHint("dtime", l)}${dtimeBox(t.dtime, ed)}</div>
         <label>${termFa("pay")}${req("pay")}${limHint("pay", l)}<select class="tp-select" data-t="pay" ${ro}>${opt("pay")}</select></label>
@@ -941,10 +941,10 @@
     const cnt = `${ready.length ? `${fa(ready.length)} قلمِ آماده${where === "spec" ? "" : " (تیک‌خورده‌های جدول)"}` : "هنوز قلمی «آمادهٔ ارسال» نیست"}`;
     if (!S.pfRead) {
       return `<div class="sp-sendbox">
-        <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${cnt} — پیش‌فاکتور را سامانه از همین فیلدها می‌سازد؛ پیش از ارسال پیش‌نمایشش را می‌بینید.</span></div>
+        <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${cnt}</span>${UI.info("sup.panel", "راهنما")}</div>
         <div class="sp-row" style="margin-top:8px">
           <label class="tp-btn sm sp-pfplus">📎 پیش‌فاکتورِ خودم<input type="file" data-pf-pick accept=".pdf,image/*" hidden></label>
-          ${S.pfFile ? `<span class="sp-pfname">📎 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری — فقط پیوستِ همین ارسال می‌شود.</span>`}
+          ${S.pfFile ? `<span class="sp-pfname">📎 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری</span>`}
           <span class="sp-grow"></span><button class="tp-btn" data-preview="${where}">👁 پیش‌نمایش پیش‌فاکتور</button>
           <button class="tp-btn primary" data-send-box="${where}" ${ready.length ? "" : "disabled"}>📤 ارسال…</button>
         </div></div>`;
@@ -953,7 +953,7 @@
       <div class="sp-row"><b>📤 ارسال برای کارشناس</b><span class="sp-muted">${cnt} — مشخصات به‌شکل کارت در گفت‌وگو هم می‌نشیند.</span></div>
       <div class="sp-row" style="margin-top:8px">
         <label class="tp-btn sm sp-pfplus">📄 پیش‌فاکتور +<input type="file" data-pf-pick accept=".pdf,image/*" hidden></label>
-        ${S.pfFile ? `<span class="sp-pfname">📄 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری — اگر پیش‌فاکتور دارید همین‌جا اضافه کنید تا با مشخصات یک‌جا برود.</span>`}
+        ${S.pfFile ? `<span class="sp-pfname">📄 ${esc(S.pfFile.name)} <button class="tp-btn xs" data-pf-clear title="برداشتن">✕</button></span>` : `<span class="sp-muted">اختیاری</span>`}
         <span class="sp-grow"></span><button class="tp-btn primary" data-send-box="${where}" ${ready.length ? "" : "disabled"}>📤 ارسال${S.pfFile ? " با پیش‌فاکتور" : ""}</button>
       </div></div>`;
   }
@@ -964,7 +964,7 @@
     const locked = d.lines.some((l) => !lockOf(l).legacy);
     return `${ret ? `<div class="tp-note warn">↩️ کارشناس برگرداند: ${esc(ret.comment)}</div>` : ""}
       ${sendBox("spec")}
-      <p class="sp-muted">${locked ? "🔒 ثابت · 🔓 قابل تغییر — " : ""}هر قلم را با «📝 پر کردن اطلاعات» (در گوشی) یا «ویرایش جزئی» کامل کنید؛ بعد «✓ آمادهٔ ارسال» و «📤 ارسال». ${UI.info("sup.panel", "راهنما")}</p>
+      <p class="sp-muted">${locked ? "🔒 ثابت · 🔓 قابل تغییر — " : ""}${UI.info("sup.panel", "راهنما")}</p>
       ${lines.map(formCard).join("")}`;
   }
   /** کارتِ خلاصهٔ هر قلم در فرمِ راست (دسکتاپ): چیپ‌های مشخصات، یک خطِ مقدار و قیمت، مانده‌ها و سه دکمه (مهر ۱۴۰۵) */
@@ -992,7 +992,7 @@
       ${ready.map((l) => `<tr><td><input type="checkbox" data-pick="${l.id}" checked></td><td class="t">${code(l)}${esc(l.s_title || l.title)}</td><td>${qty(l.qty)}</td><td>${esc(l.unit || "")}</td><td><b>${money(l.price)}</b></td><td><b>${money(l.total)}</b></td></tr>`).join("")}
       </tbody><tfoot><tr><td></td><td class="t">جمع</td><td colspan="3"></td><td>${money(sum)}</td></tr></tfoot></table></div>
       <div class="sp-muted" style="margin-top:6px">🧾 شرایط فاکتور: ${esc(termsLine(S.termsDraft)) || "—"}</div>`
-      : `<p class="sp-muted">هنوز قلمی «آمادهٔ ارسال» نیست. در «مشخصات اقلام» هر قلم را کامل کنید و «آمادهٔ ارسال» بزنید.</p>`;
+      : `<p class="sp-muted">هنوز قلمی «آمادهٔ ارسال» نیست. ${UI.info("sup.panel", "راهنما")}</p>`;
     h += `${sendBox("ready")}</div>`;
     const bundles = d.bundles.slice().reverse();
     if (bundles.length) h += `<h3 style="margin:18px 0 0;font-size:1rem">ارسال‌های شما</h3>`;
@@ -1009,7 +1009,7 @@
         ${termsLine(b.terms) ? `<div class="sp-muted">🧾 ${esc(termsLine(b.terms))}</div>` : ""}
         ${b.comment ? `<div class="sp-comment">${esc(b.comment)}</div>` : ""}
         ${gen}
-        ${S.pfRead && b.state === "approved" ? `<div class="tp-note">مشخصات تأیید شد. پیش‌فاکتورِ همین ${fa(ls.length)} قلم را بارگذاری کنید — لایه‌ها، مقدار، واحد و قیمت واحدِ هر قلم و شرایط فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده) باید صریح در آن آمده باشد.</div>
+        ${S.pfRead && b.state === "approved" ? `<div class="tp-note">مشخصات تأیید شد. پیش‌فاکتورِ همین ${fa(ls.length)} قلم را بارگذاری کنید. ${UI.info("sup.panel", "راهنما")}</div>
           <div class="sp-row"><input class="tp-input sp-grow" type="file" data-pf-file="${b.id}" accept=".pdf,image/*"><button class="tp-btn primary sm" data-pf="${b.id}">بارگذاری پیش‌فاکتور</button></div>` : ""}
         ${S.pfRead && b.state === "proforma" ? `<div class="sp-row"><span>📄 ${esc(b.pf ? b.pf.name : "")}</span><button class="tp-btn xs" data-open-pf="${b.id}">👁 دیدن</button>
           <span class="sp-grow"></span><input class="tp-input" type="file" data-pf-file="${b.id}" accept=".pdf,image/*" style="max-width:220px"><button class="tp-btn xs" data-pf="${b.id}">عوض کردن</button></div>

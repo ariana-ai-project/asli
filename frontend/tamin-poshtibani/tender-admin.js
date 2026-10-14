@@ -195,7 +195,7 @@
   }
   const hitsHtml = () => {
     const w = T.w;
-    if (!w.hits) return `<div class="dim" style="font-size:.84rem;margin-top:8px">دست‌کم دو حرف از نام یا کد کالا. برای مناقصهٔ چندقلمی چند قلم را یکی‌یکی بیفزایید.</div>`;
+    if (!w.hits) return `<div class="dim" style="font-size:.84rem;margin-top:8px">دست‌کم دو حرف از نام یا کد کالا.</div>`;
     if (!w.hits.length) return `<div class="dim" style="font-size:.84rem;margin-top:8px">در سوابق خرید پیدا نشد؛ «قلم بی‌سابقه» را بزنید.</div>`;
     return `<div class="td-hits">${w.hits.map((x) => { const on = w.items.some((i) => i.item_code === x.item_code);
       return `<button type="button" class="td-hit ${on ? "on" : ""}" data-tditem="${esc(x.item_code)}" ${on ? "disabled" : ""}>
@@ -281,7 +281,7 @@
           <button class="tp-btn primary" data-tdstep="1" ${w.items.length ? "" : "disabled"}>تأمین‌کنندگان ←</button></div>`;
     } else if (w.step === 1) {
       const S = w.sups;
-      body = `<div class="dim" style="font-size:.86rem;margin-bottom:8px">تأمین‌کنندگان سوابق ${w.items.length > 1 ? `${fa(w.items.length)} قلم` : `«${esc(w.items[0].title)}»`} — تیک‌خورده‌ها دعوت می‌شوند؛ شمارهٔ هر کدام را می‌شود عوض کرد یا گذاشت.</div>
+      body = `<div class="dim" style="font-size:.86rem;margin-bottom:8px">تأمین‌کنندگان سوابق ${w.items.length > 1 ? `${fa(w.items.length)} قلم` : `«${esc(w.items[0].title)}»`} ${TP.ui.info("support.td", "راهنمای مناقصه")}</div>
         ${w.loading ? `<div class="empty">در حال خواندن سوابق…</div>` : S.length ? `<div class="td-sups">${S.map((s, i) => supRow(s, i, "w")).join("")}</div>` : `<div class="dim">کسی در سوابق نیست؛ دستی یا از دفترچه بیفزایید.</div>`}
         ${addBox("w")}
         <div class="td-foot"><button class="tp-btn" data-tdstep="0">→ اقلام</button><span class="spacer"></span><span class="dim">${fa(S.filter((s) => s.on).length)} نفر تیک خورده</span><button class="tp-btn primary" data-tdstep="2">قیمت‌ها و قواعد ←</button></div>`;
@@ -304,8 +304,7 @@
             <li>• تمدید: پیشنهاد در <b>${faD(f.ext_window_min)}</b> دقیقهٔ آخر ← <b>${faD(f.ext_min)}</b> دقیقه بعد${Number(n0(f.ext_max)) ? ` (حداکثر ${fa(f.ext_max)} بار)` : " — هر بار"}</li>
             <li>• نام‌ها: <b>${f.show_names ? "پیدا" : "پنهان"}</b> · قیمت‌ها: <b>${f.show_prices ? "پیدا" : "فقط رتبه"}</b> · خودکار: <b>${f.proxy_on ? "مجاز" : "بسته"}</b>${f.require_accept ? " · <b>پذیرش شرایط لازم</b>" : ""}</li>
             <li>• پیامک «رتبهٔ شما پایین آمد»: <b>${f.outbid_sms ? `روشن (هر ${faD(f.outbid_gap_min)} دقیقه حداکثر یکی)` : "خاموش"}</b> · پیام تشکر پایان: <b>${f.thanks_sms ? "روشن" : "خاموش"}</b></li>
-            <li>• دعوت: <b>${fa(on.length)}</b> نفر${noPh.length ? ` — <span style="color:#fcd34d">${fa(noPh.length)} نفر شماره ندارند (پیامک نمی‌گیرند)</span>` : ""}</li></ul>
-          <div class="tp-note" style="margin-top:10px">متن پیامک دعوت فقط لینک و زمان است — نام کالا و مقدار در آن نمی‌آید.</div></div>
+            <li>• دعوت: <b>${fa(on.length)}</b> نفر${noPh.length ? ` — <span style="color:#fcd34d">${fa(noPh.length)} نفر شماره ندارند (پیامک نمی‌گیرند)</span>` : ""}</li></ul></div>
         <div class="td-foot"><button class="tp-btn" data-tdstep="2">→ قیمت‌ها و قواعد</button><span class="spacer"></span>
           <button class="tp-btn" data-tdcreate="draft">ذخیرهٔ پیش‌نویس</button><button class="tp-btn primary" data-tdcreate="go">🚀 ساخت، شروع و ارسال دعوت</button></div>`;
     }
@@ -366,7 +365,7 @@
     const t = d.tender;
     if (t.state !== "ended" || !t.best_amount) return "";
     const R = T.req;
-    return `<section class="td-card"><h3>ثبت در درخواست <span class="sub">پیشنهاد هر شرکت‌کننده یک خط استعلام ثبت‌شده؛ برنده «تأیید نهایی»</span></h3>
+    return `<section class="td-card"><h3>ثبت در درخواست ${TP.ui.info("support.td", "راهنمای مناقصه")}</h3>
       ${t.req_aid ? `<div class="tp-note">${esc(D.when(t.req_at))} در درخواست ثبت شد.</div><div class="td-foot"><button class="tp-btn primary" data-tdcmres="${t.req_aid}">🏆 نتیجهٔ کمیسیون</button></div>` : ""}
       <div class="td-form"><label class="td-f"><span class="l">شمارهٔ درخواست</span><input class="tp-input" data-tdrid dir="ltr" value="${esc(R && R.rid || "")}" placeholder="مثلاً 1405-123"><small class="h"></small></label></div>
       <div class="td-foot"><button class="tp-btn" data-tdridgo>اقلام باز درخواست</button></div>
@@ -418,7 +417,7 @@
       <div class="td-grid"><div class="td-col">
           <section class="td-card"><h3>روند قیمت${ref ? ` <span class="sub">خط سبز: میانهٔ سوابق</span>` : ""}</h3>${D.chart({ series: d.series, start: t.start_price, floor: t.range.floor, from: t.start_at, to: ["live", "sealed"].includes(t.state) ? n : t.ended_at || t.end_at, ref })}</section>
           ${histHtml(d.hist, t)}${linkHtml(d)}
-          <section class="td-card"><h3>پیشنهادها <span class="sub">${fa(d.bids.length)} پیشنهاد · اصلاح و ابطال با علت، در رخدادها می‌ماند</span></h3>${bids ? `<div class="td-bids" style="max-height:520px">${bids}</div>` : `<div class="td-empty">هنوز پیشنهادی نیست.</div>`}</section></div>
+          <section class="td-card"><h3>پیشنهادها <span class="sub">${fa(d.bids.length)} پیشنهاد</span></h3>${bids ? `<div class="td-bids" style="max-height:520px">${bids}</div>` : `<div class="td-empty">هنوز پیشنهادی نیست.</div>`}</section></div>
         <div class="td-col">
           <section class="td-card"><h3>دعوت‌شده‌ها <span class="sub">${fa(inv.filter((i) => i.on).length)} نفر${many ? " — برای همهٔ قلم‌ها" : ""}</span></h3><div class="td-sups">${inv.map((s) => supRow(s, 0, "d")).join("")}</div>${open ? addBox("d") : ""}</section>
           ${open ? smartCard(t, job, jobHtml) : ""}</div></div></div>`;

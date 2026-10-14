@@ -143,17 +143,16 @@
     if (!s || s === "loading") { if (!s) loadSup(); return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند</h3><p class="lead">در حال خواندن…</p></div>`; }
     if (s.err) return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند</h3><p class="lead" style="color:#fca5a5">${esc(s.err)}</p></div>`;
     const c = s.cfg || { mode: "timer", minutes: 10 };
-    return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند <span>هر پیامش پیش از رفتن به شما نشان داده شود یا خودش پیش برود</span>${TP.ui.info("expert.account", "راهنمای مکاتباتِ کارشناس هوشمند")}</h3>
+    return `<div class="tp-sect"><h3>⏱ مکاتباتِ کارشناس هوشمند ${TP.ui.info("expert.account", "راهنمای مکاتباتِ کارشناس هوشمند")}</h3>
       <div class="supm" role="radiogroup" aria-label="حالتِ مکاتبات">
         <label class="supm-o ${c.mode === "timer" ? "on" : ""}"><input type="radio" name="supm" data-supm value="timer" ${c.mode === "timer" ? "checked" : ""}>
-          <b>⏱ با مهلت</b><small>هر پیام و تصمیم اول در «💬 مکاتبات»، اعلان و بات؛ «✅ ارسال» یا «✏️ رد» (با علت و پیامِ خودتان)، و بی‌پاسخ سرِ مهلت خودکار.</small>
+          <b>⏱ با مهلت</b><small>اول به شما نشان داده می‌شود؛ بی‌پاسخ، سرِ مهلت می‌رود.</small>
           <span class="supm-min">مهلت <input class="tp-input num" type="text" data-supmin inputmode="numeric" maxlength="3" value="${c.minutes}" dir="ltr" style="width:76px" aria-label="مهلت به دقیقه"> دقیقه</span></label>
         ${s.hold_ok || c.mode === "hold" ? `<label class="supm-o ${c.mode === "hold" ? "on" : ""}"><input type="radio" name="supm" data-supm value="hold" ${c.mode === "hold" ? "checked" : ""} ${s.hold_ok ? "" : "disabled"}>
-          <b>⏸ بی‌مهلت</b><small>هر پیام و تصمیم منتظرِ «✅ ارسال» یا «✏️ رد»ِ شما می‌ماند و هیچ‌وقت خودکار نمی‌رود.${s.hold_ok ? "" : " (پشتیبانی فعلاً خاموشش کرده؛ مثلِ «با مهلت» کار می‌کند.)"}</small></label>` : ""}
+          <b>⏸ بی‌مهلت</b><small>تا «✅ ارسال» یا «✏️ رد»ِ شما نمی‌رود.${s.hold_ok ? "" : " (فعلاً خاموش است؛ مثلِ «با مهلت».)"}</small></label>` : ""}
         <label class="supm-o ${c.mode === "auto" ? "on" : ""}"><input type="radio" name="supm" data-supm value="auto" ${c.mode === "auto" ? "checked" : ""}>
-          <b>🤖 خودکار</b><small>کارشناس هوشمند خودش مذاکره می‌کند؛ هر جا جوابِ شما لازم باشد «🚨 پرسش از کارشناس» می‌آید.</small></label>
+          <b>🤖 خودکار</b><small>خودش مذاکره می‌کند؛ هر جا لازم باشد از شما می‌پرسد.</small></label>
       </div>
-      ${s.hold_ok ? `<div class="dim" style="font-size:.82rem;margin-top:4px">«حالت کار»ِ هر نوع قلم هم اثر دارد و سخت‌گیرترینِ دو تا اجرا می‌شود: نوع قلمِ «کارشناس‌محور» همیشه بی‌مهلت و «ترکیبی» دست‌کم با مهلت است.</div>` : ""}
       <div id="sup-msg" style="min-height:22px;font-size:.9rem"></div></div>`;
   }
   async function loadSup() {
@@ -205,7 +204,7 @@
         <span class="spacer"></span><span class="dim" style="font-size:.85rem">${rows.length} از ${S.tray.length} درخواست</span>
         ${aiOn() ? `<span class="chip info" title="تیکِ شما در پنل پشتیبانی روی «هوشمند» است">🤖 هوشمند</span>` : ""}${TP.ui.info(aiOn() ? "expert.ai" : "expert.tray", "راهنمای کارتابل")}</div>
       ${rows.length ? `<div class="tp-cards ${TP.ui.once("exp.tray")}">${rows.map(trayCard).join("")}</div>`
-        : `<div class="tp-wrap"><div class="tp-card"><div class="empty"><b>درخواستی در کارتابل شما نیست.</b>وقتی مدیر درخواستی ارجاع و ارسال کند، این‌جا کارت می‌شود.</div></div></div>`}`;
+        : `<div class="tp-wrap"><div class="tp-card"><div class="empty"><b>درخواستی در کارتابل شما نیست.</b>${TP.ui.info("expert.tray", "راهنمای کارتابل")}</div></div></div>`}`;
   }
   /* بدترین رنگِ شش مرحله (همان TP.stageColor باکس‌های پایش) برای رنگِ کلِ کارت: زرد، نارنجی، قرمز */
   const LVL = { warn: 1, late: 2, over: 3 };
@@ -300,7 +299,7 @@
   function vTeam() {
     if (!S.team) { loadTeam(); return `<div class="tp-wrap"><div class="empty">در حال خواندن تیم…</div></div>`; }
     const team = S.team.team || [], R = S.team.requests || [];
-    if (!team.length) return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تیم کارشناسی</h2><p class="lead">هنوز کارشناسی زیر نظر شما نیست. مدیر در تب «کارشناسان» پنل خودش، کارشناسان تیم شما را تیک می‌زند.</p></div></div>`;
+    if (!team.length) return `<div class="tp-wrap"><div class="tp-card tp-pane"><h2>تیم کارشناسی</h2><p class="lead">هنوز کارشناسی زیر نظر شما نیست. ${TP.ui.info("expert.team", "راهنمای تیم کارشناسی")}</p></div></div>`;
     const cnt = (eid) => R.reduce((n, r) => n + r.assignments.filter((a) => eid === "all" || a.expert_id === eid).length, 0);
     const seg = [["all", "همه"], ...team.map((e) => [e.id, e.label || e.name])].map(([k, l]) => { const on = String(S.teamCard) === String(k);
       return `<button type="button" class="${on ? "on" : ""}" data-tcard="${k}" role="tab" aria-selected="${on ? "true" : "false"}">${esc(l)}<span class="cnt">${M(cnt(k === "all" ? "all" : +k))}</span></button>`; }).join("");
@@ -469,8 +468,7 @@
   }
   function vAiLocked(tab) {
     const what = { history: "بررسی سوابق", smart: "جستجوی هوشمند", letter: "نامهٔ کمیسیون" }[tab] || "این بخش";
-    return `<div class="pad"><div class="empty"><b>🔒 ${what} دستِ کارشناس هوشمند است.</b>تا وقتی تیکِ این کارشناس در پنل پشتیبانی «🤖 هوشمند» است، این کار را خودش انجام می‌دهد
-      و نتیجه در جدول‌ها و گزارش‌ها می‌آید. برای کارِ دستی، پشتیبانی باید تیکِ شما را «✋ دستی» کند.</div></div>`;
+    return `<div class="pad"><div class="empty"><b>🔒 ${what} دستِ کارشناس هوشمند است.</b>${TP.ui.info("expert.ai", "راهنمای کارشناس هوشمند")}</div></div>`;
   }
   /* اقدام‌های درخواست در یک منو (قالب‌ها، تعلیق، توقف، خاتمه) و یک خطِ وضعیت — به‌جای نوارِ پُردکمه (مهر ۱۴۰۵) */
   function endMenu() {
@@ -740,7 +738,7 @@
       const vary = d.variation ? (d.var_off
         ? ` · متنِ یکسان برای همه <span class="dim">(${esc(d.var_off.by || "")}: «${esc(d.var_off.reason || "")}»)</span> <button class="tp-btn xs" data-fm-var="1">گونه‌ها را برگردان</button>`
         : ` · هر گیرنده گونهٔ دیگری از متن را می‌گیرد <button class="tp-btn xs" data-fm-var="0" title="همه همان یک متن را بگیرند — با دلیل">متنِ یکسان برای همه…</button>`) : "";
-      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدار با بازهٔ متعارف، نه مقدارِ کامل" : ""}${vary}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
+      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">${TP.ui.info("expert.picks", "راهنمای پیام اول")} خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدار با بازهٔ متعارف، نه مقدارِ کامل" : ""}${vary}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
         <div class="toolrow" style="margin:8px 0;gap:8px;align-items:center;flex-wrap:wrap"><b>قالبِ این درخواست</b>
           <select class="tp-input" data-fm-def style="min-width:220px;flex:1"><option value="">خودکار (${esc(d.family_fa || "")})</option>${opts(d.def)}</select></div>
         <div data-fm-msg></div>
@@ -755,8 +753,7 @@
             ${r.block.length ? `<div class="chips" style="margin:4px 0">${r.block.map((x) => `<span class="chip bad" title="این متن نمی‌رود؛ دعوتِ پیشین جایش می‌رود">⛔ ${esc(x)}</span>`).join(" ")}</div>` : ""}
             ${r.warn.length ? `<div class="chips" style="margin:4px 0">${r.warn.map((x) => `<span class="chip warn">⚠️ ${esc(x)}</span>`).join(" ")}</div>` : ""}
             ${editing ? `<textarea class="tp-input" data-fm-body="${esc(r.k)}" dir="rtl">${esc(ed[r.k])}</textarea>` : `<pre class="fm-text">${esc(r.text)}</pre>`}</div>`;
-        }).join("") || `<div class="empty">هنوز تیک‌خورده‌ای نیست.</div>`}</div>
-        <div class="dim" style="font-size:.8rem;margin-top:8px">«🚀 شروع» همین متن‌ها را می‌فرستد و کارشناس هوشمند گفت‌وگو را ادامه می‌دهد. نامِ تأمین‌کنندهٔ دیگر، شمارِ پیشنهادها و واژه‌های درونی در متن نمی‌رود.</div>`;
+        }).join("") || `<div class="empty">هنوز تیک‌خورده‌ای نیست.</div>`}</div>`;
       const Qm = (s) => box.querySelectorAll(s);
       const defSel = box.querySelector("[data-fm-def]");
       defSel.onchange = () => save({ def: defSel.value || null });
@@ -843,7 +840,7 @@
     if (!flow2() || !it || it.state !== "open" || !pkOn(it)) return "";
     const P = S.picks[it.id];
     if (P === undefined && normOk(it)) loadPicks(it);
-    if (P && P.mode === "handoff") return `<div class="tp-status"><b>🎯 سپردن یا برگشت</b><span class="sp">فهرستِ دعوت همان رتبه‌بندیِ سوابق است و از جستجوی هوشمند چیزی به آن افزوده نمی‌شود.</span>${TP.ui.info("expert.picks")}</div>`;
+    if (P && P.mode === "handoff") return `<div class="tp-status"><b>🎯 سپردن یا برگشت</b>${TP.ui.info("expert.picks")}</div>`;
     const n = P && P.list ? P.list.filter((e) => e.src === "smart").length : 0;
     return `<div class="tp-status"><b>🎯 فهرست دعوت</b><span class="sp chips"><span class="chip" title="کارشناس هوشمند خودش جستجو نمی‌کند و از این نتایج فقط آن‌هایی را دعوت می‌کند که شما با «🎯 به فهرست دعوت» انتخاب کنید و شمارهٔ پنلِ تیک‌خورده دارند؛ نفرستادن توضیح نمی‌خواهد">${n ? `${M(n)} انتخاب از جستجو در فهرست است` : "با «🎯 به فهرست دعوت» کنار هر نتیجه بیفزایید"}</span>
       <span class="chip">${P && P.started_at ? (P.fresh ? "بعد «📨 دعوت از انتخاب‌های تازه» در «بررسی سوابق»" : "دعوت‌شده") : "بعد «🚀 شروع» در «بررسی سوابق»"}</span></span>
@@ -1186,8 +1183,7 @@
     if (!n || n.loading) return `<div class="normbox"><div class="dim">در حال یافتن ساختار قلم در دیتابیس (با کد، بعد با عنوان)…</div></div>`;
     if (n.error) return `<div class="normbox"><div class="tp-note warn" style="margin:0 0 8px">${esc(n.error)}</div><button class="tp-btn sm" data-norm-retry>تلاش دوباره</button></div>`;
     if (n.data && n.data.needsModel) {
-      return `<div class="normbox"><div class="toolrow" style="margin-bottom:6px"><b>نرمال‌سازی اقلام</b><span class="chip warn">در دیتابیس نیست</span></div>
-        <div style="font-size:.9rem">کد و عنوانِ این قلم در دیتابیس نیست؛ برای یافتنِ نوع قلم و لایه‌هایش باید عنوان به مدل زبانی داده شود — پیش از آن از شما می‌پرسم.</div>
+      return `<div class="normbox"><div class="toolrow" style="margin-bottom:6px"><b>نرمال‌سازی اقلام</b><span class="chip warn">در دیتابیس نیست</span>${TP.ui.info("expert.history", "راهنمای ساختار قلم")}</div>
         <div class="toolrow" style="margin-top:8px"><button class="tp-btn primary" data-norm-model>تفکیک با مدل…</button></div></div>`;
     }
     loadHeads();
@@ -1749,15 +1745,14 @@
     const sm = smOf(it);
     const markets = `<div class="grp"><b>بازار تأمین کالا <span class="dim" style="font-weight:400">(حداکثر ${"۰۱۲۳۴۵۶۷۸۹"[S.maxMarkets || 3] || S.maxMarkets})</span></b>${(S.marketsMeta || []).map((x) =>
       `<label><input type="checkbox" data-smk="${x.key}" ${sm.markets.includes(x.key) ? "checked" : ""}> ${esc(x.fa)}</label>`).join("")}</div>`;
-    const side = `<div class="side"><h4>قیدهای جستجو</h4><div class="dim" style="font-size:.8rem">این‌ها عیناً به مدل داده می‌شوند؛ بازار تأمین کالا قید سخت است. مشخصات فنی و ملاحظات از فایل درخواست پر شده‌اند و قابل ویرایش‌اند.</div>
+    const side = `<div class="side"><h4>قیدهای جستجو ${TP.ui.info("expert.smart", "راهنمای جستجوی هوشمند")}</h4>
       ${markets}
       <div class="grp"><b>برند موردنظر <span class="dim" style="font-weight:400">(اختیاری)</span></b>
         <input class="tp-input" data-sm="brand" value="${esc(sm.brand)}" placeholder="مثلاً Komatsu" style="width:100%"></div>
       <div class="grp"><b>مشخصات فنی <span class="dim" style="font-weight:400">(از ستون «مشخصه فنی» فایل)</span></b>
         <textarea class="tp-textarea" data-sm="specs" style="min-height:64px" placeholder="استاندارد، سایز، گرید…">${esc(sm.specs)}</textarea></div>
       <div class="grp"><b>ملاحظات <span class="dim" style="font-weight:400">(از ستون «توضیحات» فایل)</span></b>
-        <textarea class="tp-textarea" data-sm="notes" style="min-height:64px" placeholder="مثلاً: ترجیحاً تولیدکننده نه واسطه">${esc(sm.notes)}</textarea></div>
-      <div class="grp dim" style="font-size:.78rem">نتیجه در پایگاه داده می‌ماند و با «افزودن»، تأمین‌کننده وارد تب استعلامات می‌شود؛ قیمت تازه‌اش از پیش‌فاکتور یا ورود دستی می‌آید.</div></div>`;
+        <textarea class="tp-textarea" data-sm="notes" style="min-height:64px" placeholder="مثلاً: ترجیحاً تولیدکننده نه واسطه">${esc(sm.notes)}</textarea></div></div>`;
 
     return `<div class="pad">${head}${smPickNote(it)}<div class="two"><div class="main">${main}</div>${side}</div></div>`;
   }
@@ -1880,7 +1875,7 @@
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
-        <span class="dim" style="font-size:.85rem">مقدارها از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آیند؛ خانهٔ قرمز یعنی هنوز خالی است ${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
+        <span class="dim" style="font-size:.85rem">${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
       ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => `<tr>
@@ -1903,8 +1898,7 @@
     return `<div class="endbar" style="margin:16px 0 0;align-items:flex-end">
       <div class="tp-field"><b>نوع درخواست</b><select class="tp-select" data-h="req_type">${REQT.map((x) => `<option ${(r.head_req_type || "عادی") === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
       <div class="tp-field"><b>نوع معامله</b><select class="tp-select" data-h="deal_type">${DEALT.map((x) => `<option ${(r.head_deal_type || "خرید") === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
-      <div class="tp-field" style="flex:1;min-width:240px"><b>محل پروژه</b><input class="tp-input" data-h="site" value="${esc(r.head_site == null ? r.party : r.head_site)}" style="width:100%"></div>
-      <span class="dim" style="font-size:.8rem">این سه فیلد در سرآیند فرم کمیسیون چاپ می‌شوند.</span></div>`;
+      <div class="tp-field" style="flex:1;min-width:240px"><b>محل پروژه</b><input class="tp-input" data-h="site" value="${esc(r.head_site == null ? r.party : r.head_site)}" style="width:100%"></div></div>`;
   }
   /* حداقلِ استعلامِ هر قلم از سرور (پایهٔ مدیر + قواعدِ پنل پشتیبانی برای اقلامِ گران یا پرمقدار — همان نگهبانِ «تولید جدول») */
   function guardCheck() {
@@ -1920,7 +1914,7 @@
     if (aiOwned()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
-      ${g.miss.length ? `<div style="color:#fca5a5">هر قلمِ باز باید به حداقل استعلامش برسد: پایهٔ مدیر <b>${g.need}</b>${g.ruled ? "، و برای اقلامِ گران‌تر یا پرمقدارتر بیشتر (قواعدِ پنل پشتیبانی)" : ""}. این اقلام کم دارند:</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
+      ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلام نرسیده‌اند (پایه <b>${g.need}</b>) ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
   }
 
   /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ----------
@@ -2207,7 +2201,7 @@
   }
   function vLetterIntro(L) {
     return `<div class="tp-note" style="display:block">
-      <b>نامه را با حرف زدن بسازید.</b> <span class="dim" style="font-size:.85rem">بگویید در این خرید چه گذشت؛ متنِ رسمی را سامانه می‌نویسد.</span>${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}
+      <b>نامه را با حرف زدن بسازید.</b> ${TP.ui.info("expert.letter", "راهنمای نامهٔ کمیسیون")}
       <div style="margin-top:12px"><button class="tp-btn primary" data-lt-start>${L ? "شروع دوبارهٔ نامه" : "شروع نامه"}</button></div></div>`;
   }
   function vLetterAsk(L, box) {
@@ -2283,8 +2277,7 @@
       : `<span class="tp-star${n <= on ? " on" : ""}">${STAR_SVG}</span>`).join("")}</span>`;
     if (!edit) return `<div class="tp-note lr-box done"><b>⭐ امتیازِ شما به نامهٔ کارشناس هوشمند</b>${st(r.stars, false)}<div class="lr-note">${esc(r.note || "")}</div>
       <button type="button" class="tp-btn sm" data-lr-edit>✏️ ویرایش</button></div>`;
-    return `<div class="tp-note lr-box"><b>⭐ این نامه را کارشناس هوشمند نوشته — امتیاز و نظرِ شما (اجباری)</b>
-      <span class="dim" style="font-size:.85rem">همین در ارزیابیِ او می‌ماند؛ «خاتمه»ِ درخواست تا آن موقع معلق است.</span>
+    return `<div class="tp-note lr-box"><b>⭐ این نامه را کارشناس هوشمند نوشته — امتیاز و نظرِ شما (اجباری) ${TP.ui.info("expert.letter", "راهنمای امتیاز به نامه")}</b>
       ${st(v, true)}
       <textarea class="tp-input" data-lr-note rows="3" style="width:100%;margin-top:8px" placeholder="نظرتان دربارهٔ نامه — کامل بود؟ چه چیزی کم داشت یا درست نبود؟">${esc(S.lrNote != null ? S.lrNote : (r && r.note) || "")}</textarea>
       <div style="display:flex;gap:8px;align-items:center;margin-top:8px"><button type="button" class="tp-btn primary sm" data-lr-save ${v ? "" : "disabled"}>ثبتِ امتیاز و نظر</button><span class="lr-err" data-lr-err></span></div></div>`;

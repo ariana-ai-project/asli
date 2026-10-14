@@ -202,7 +202,7 @@
     const body = me.proxy_min
       ? `<div class="on">🤖 <span>فعال تا <b>${money(me.proxy_min)}</b> ریال</span><span class="spacer" style="flex:1"></span><button type="button" class="tp-btn sm" data-proxyoff>خاموش</button></div>`
       : `<div class="row"><input class="tp-input" data-proxyin inputmode="numeric" placeholder="کف قیمت شما (ریال)" aria-label="کف پیشنهاد خودکار"><button type="button" class="tp-btn primary" data-proxy>فعال کن</button></div>
-        <div class="td-words" data-proxywords><span class="dim">تا این کف، هر بار کسی پایین‌تر رفت، سامانه یک گام زیر او برای شما پیشنهاد می‌دهد؛ کف شما را کسی نمی‌بیند.</span></div>`;
+        <div class="td-words" data-proxywords><span class="dim">کفِ شما را کسی نمی‌بیند ${UI.info("tender.page", "راهنمای پیشنهاد خودکار")}</span></div>`;
     return `<section class="td-card td-proxy"><h3>🤖 پیشنهاد خودکار <span class="sub">${t.state === "sealed" ? "از شروع دور زنده" : "حتی وقتی صفحه بسته است"}</span></h3>${body}</section>`;
   }
   /** خط حروف و هشدار بازه زیر کادر مبلغ */

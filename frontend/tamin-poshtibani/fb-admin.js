@@ -80,10 +80,10 @@
   }
   function aiBox() {
     const s = S.sum[sumKey()];
-    const head = `<div class="tp-box-h"><h2>🤖 برایندِ نظرها</h2><span class="sub">جمع‌بندیِ نظرها و علت‌های همین بازه با هوش مصنوعی</span>
+    const head = `<div class="tp-box-h"><h2>🤖 برایندِ نظرها</h2>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}
       <span class="end"><button type="button" class="tp-btn sm ${s ? "" : "primary"}" data-fbsum ${S.sumBusy ? "disabled" : ""}>${S.sumBusy ? "در حال تحلیل…" : s ? "↻ تحلیلِ دوباره" : "تحلیل کن"}</button></span></div>`;
     if (S.sumErr) return `<section class="tp-box sv-fbai">${head}<div class="tp-note warn">${esc(S.sumErr)}</div></section>`;
-    if (!s) return `<section class="tp-box sv-fbai">${head}<div class="dim">مشکلاتِ پرتکرار، نقطه‌های قوت و پیشنهادهای عملی برای اصلاحِ ربات — از روی نظرهای کارشناسان؛ هزینهٔ هر بار کمتر از یک سنت.</div></section>`;
+    if (!s) return `<section class="tp-box sv-fbai">${head}<div class="dim">برای این بازه «تحلیل کن» را بزنید.</div></section>`;
     return `<section class="tp-box sv-fbai">${head}<p class="sum">${esc(s.summary)}</p>
       ${(s.problems || []).length ? `<h3>⚠️ ایرادهای پرتکرار</h3><ul>${s.problems.map((p) => `<li><b>${esc(p.title)}</b>${p.share ? ` <span class="chip">${esc(p.share)}</span>` : ""}<div class="dim">${esc(p.detail)}</div></li>`).join("")}</ul>` : ""}
       ${(s.strengths || []).length ? `<h3>✅ نقطه‌های قوت</h3><ul>${s.strengths.map((x) => `<li>${esc(x)}</li>`).join("")}</ul>` : ""}
@@ -92,14 +92,14 @@
   }
   function wordsBox(d) {
     const W = d.words || [];
-    return `<section class="tp-box sv-fbbox"><div class="tp-box-h"><h2>پرتکرار در علت‌های امتیازِ کم و رد</h2><span class="sub">بزنید تا همان‌ها بیاید</span></div>
+    return `<section class="tp-box sv-fbbox"><div class="tp-box-h"><h2>پرتکرار در علت‌های امتیازِ کم و رد</h2></div>
       ${W.length ? `<div class="sv-fbw">${W.map((w) => `<button type="button" class="chip" data-fbword="${esc(w.w)}">${esc(w.w)} <b>${M(w.n)}</b></button>`).join("")}</div>` : `<div class="dim">هنوز علتی تکرار نشده.</div>`}</section>`;
   }
   function expertsBox(d) {
     const E = d.experts || [];
     if (!E.length) return "";
     const c = (o) => (o && o.n ? `${fa1(o.avg)} <span class="dim">(${M(o.n)})</span>` : "—");
-    return `<section class="tp-box"><div class="tp-box-h"><h2>کارشناسان</h2><span class="sub">نامِ هر کدام را بزنید تا فقط بازخوردهای او بیاید</span></div>
+    return `<section class="tp-box"><div class="tp-box-h"><h2>کارشناسان</h2>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}</div>
       <div class="tp-scroll"><table class="tp-table sv-fbt"><thead><tr><th class="rt">کارشناس</th><th>بازخورد</th><th>پیام‌ها</th><th>زیرِ سه</th><th>مکاتبه‌ها</th><th>نامه‌ها</th><th>پیشنهادها ✅/✏️/⏱</th><th>رد</th></tr></thead><tbody>
       ${E.map((e) => { const p = e.prop || {}, dec = (p.ok || 0) + (p.no || 0) + (p.auto || 0);
         return `<tr><td class="rt"><button type="button" class="linkish" data-fbexp-id="${e.expert_id}">${esc(e.name)}</button></td><td>${M(e.n)}</td><td>${c(e.msg)}</td><td>${e.msg ? M(e.msg.low) : "—"}</td><td>${c(e.thread)}</td><td>${c(e.letter)}</td>
@@ -127,7 +127,7 @@
     if (!d) return h + (S.loading ? TP.ui.loader() : "") + `</div>`;
     const any = Object.keys(d.kinds || {}).length;
     h += kpis(d);
-    if (!any) return h + `<div class="lg-none">⭐<b>هنوز بازخوردی در این بازه نیست</b><span>کارشناسان در «💬 مکاتبات» به پیام‌ها و مکاتبه‌های کارشناس هوشمند و در تب «نامهٔ کمیسیون» به نامه‌اش امتیاز می‌دهند.</span></div></div>`;
+    if (!any) return h + `<div class="lg-none">⭐<b>هنوز بازخوردی در این بازه نیست</b>${TP.ui.info("support.fb", "راهنمای ارزیابی ربات")}</div></div>`;
     h += `<div class="sv-fbgrid">${distBox(d)}${trendBox(d)}</div>${aiBox()}<div class="sv-fbgrid">${wordsBox(d)}</div>${expertsBox(d)}`;
     h += `<section class="tp-box"><div class="tp-box-h"><h2>نظرها و امتیازها</h2><span class="sub">${M(d.total)} مورد</span></div>
       <div class="sv-fbf"><div class="tp-seg sm">${[["", "همه"], ["msg", "پیام"], ["thread", "مکاتبه"], ["letter", "نامه"], ["prop", "پیشنهاد"]].map(([k, l]) => `<button type="button" class="${f.kind === k ? "on" : ""}" data-fbkind="${k}">${l}</button>`).join("")}</div>
