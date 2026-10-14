@@ -529,49 +529,89 @@
      تأمین‌کننده بیرونش نمی‌پذیرند و سرور هم می‌سنجد؛ 🔓 فقط خواستهٔ شرکت است. با اولین ارسال به تأمین‌کننده یا «🚀 شروع» ثابت
      می‌شود. در کارِ کارشناس هوشمند، بسته‌ای که در چارچوبِ همین‌ها باشد همان لحظه تأیید نهایی می‌شود. */
   const TERM_ENUM = { pay: PAYS, invoice: INVT, vat: VATS };
-  const TERM_LAB = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل" };
+  const TERM_ONE = { place: PLACES, deal: DEALS };
+  const TERM_LAB = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل", place: "محل تحویل", deal: "محل معامله", ship: "روش حمل", valid: "اعتبار پیش‌فاکتور" };
+  /* ترتیبِ جدولِ کمیسیون: تسویه، تحویل (زمان و محل)، فاکتور، ارزش افزوده، محل معامله، حمل، اعتبار */
+  const TERM_ORDER = ["pay", "dtime", "place", "invoice", "vat", "deal", "ship", "valid"];
+  /* 🔒 در فیلدهایی که تأمین‌کننده خودش می‌زند یعنی «بیرونش پذیرفته نیست»؛ در شرطِ شرکت (محل، معامله، حمل) یعنی «الزامی»، که پیش‌فاکتور با همان ساخته می‌شود */
+  const TERM_LOCK_TIP = { pay: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند", invoice: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند", vat: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند",
+    dtime: "🔒: تحویلِ بیرون از بازه پذیرفته نیست", place: "🔒: الزامی — پیش‌فاکتور با همین محل ساخته می‌شود", deal: "🔒: الزامی", ship: "🔒: الزامی", valid: "🔒: اعتبارِ کمتر پذیرفته نیست" };
   const termsOfItem = (it) => { try { const x = it && it.terms_json ? JSON.parse(it.terms_json) : null; return x && Object.keys(x).length ? x : null; } catch (_) { return null; } };
   const termsDraftOf = (it) => S.termsEd[it.id] || (S.termsEd[it.id] = JSON.parse(JSON.stringify(termsOfItem(it) || {})));
   const termsFixed = (it) => !!(it.sp_lock || frozen(it));
   const jRange = (d) => (d.from && d.to ? `بین ${d.from} و ${d.to}` : d.to ? `حداکثر تا ${d.to}` : d.from ? `از ${d.from} به بعد` : "");
+  /** مقدارِ یک شرط (بی برچسب) — خالی یعنی بی قید */
+  function termVal(f, v) {
+    if (!v) return "";
+    if (TERM_ENUM[f]) return (v.opts || []).join(" / ");
+    if (f === "dtime") return jRange(v);
+    if (TERM_ONE[f]) return v.opt ? `${v.opt}${v.note ? ` — ${v.note}` : ""}` : "";
+    if (f === "ship") return String(v.text || "").trim();
+    if (f === "valid") return v.min ? `دست‌کم ${M(v.min)} روز` : "";
+    return "";
+  }
   function termsSummary(L) {
     if (!L) return "";
-    return [...["pay", "invoice", "vat"].filter((f) => L[f]).map((f) => `${TERM_LAB[f]} ${L[f].lock ? "🔒" : "🔓"} ${L[f].opts.join(" / ")}`),
-      ...(L.dtime && (L.dtime.from || L.dtime.to) ? [`${TERM_LAB.dtime} ${L.dtime.lock ? "🔒" : "🔓"} ${jRange(L.dtime)}`] : [])].join(" · ");
+    return TERM_ORDER.filter((f) => termVal(f, L[f])).map((f) => `${TERM_LAB[f]} ${L[f].lock ? "🔒" : "🔓"} ${termVal(f, L[f])}`).join(" · ");
   }
+  /** پیش‌نویس، هم‌شکلِ سرور (terms-locks.js:cleanLimits) — برای «ذخیره نشده» */
+  function termsNorm(D) {
+    const lat = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).trim();
+    const out = [];
+    for (const f of TERM_ORDER) {
+      const v = D && D[f];
+      if (!termVal(f, v)) continue;
+      const lock = !!v.lock;
+      out.push([f, TERM_ENUM[f] ? { opts: v.opts, lock } : f === "dtime" ? { from: v.from || "", to: v.to || "", lock } : TERM_ONE[f] ? { opt: v.opt, note: String(v.note || "").trim(), lock }
+        : f === "ship" ? { text: String(v.text).trim(), lock } : { min: Number(lat(v.min)), lock }]);
+    }
+    return JSON.stringify(out);
+  }
+  const termsDirty = (it) => !!(it && S.termsEd[it.id]) && termsNorm(S.termsEd[it.id]) !== termsNorm(termsOfItem(it) || {});
   function vTerms(it) {
     if (!it || it.state !== "open") return "";
     const L = termsOfItem(it), ro = termsFixed(it), open = !!S.termsOpen[it.id] && !ro;
-    const sum = termsSummary(L);
+    const set = TERM_ORDER.filter((f) => L && termVal(f, L[f]));
+    const dirty = termsDirty(it);
+    const why = it.sp_lock ? "این قلم برای تأمین‌کننده رفته؛ شرایطش مثلِ ساختارش ثابت است تا همه عینِ همان را بگیرند" : "این قلم به کارشناس هوشمند سپرده شده و منجمد است";
     /* 🔒/🔓ِ عنوان و مقدار برای تأمین‌کننده — کنارِ بقیهٔ قفل‌ها (مهر ۱۴۰۵؛ پیش‌تر در «نرمال‌سازی اقلام»)؛ کلیک همان لحظه ذخیره می‌شود */
     const tq = tqOf(it), tqDis = ro ? "disabled" : "";
     const tqBtn = (k, on, label, tip) => `<button class="tp-btn xs lockbtn ${on ? "on" : ""}" data-tq-lock="${k}" ${tqDis} title="${esc(tip)}">${on ? "🔒" : "🔓"} ${label}</button>`;
     const head = `<div class="toolrow" style="margin:0"><b>📋 شرایط خرید</b>
-      ${sum ? `<span class="chip info" title="🔒 را پنل و بات تأمین‌کننده بیرونش نمی‌پذیرند؛ 🔓 فقط خواستهٔ شرکت است">${esc(sum)}</span>` : `<span class="dim" style="font-size:.85rem">بی قید</span>`}
+      ${set.length ? `<span class="chip info">${M(set.length)} شرط</span>` : `<span class="dim" style="font-size:.85rem">${ro ? "بی قید فرستاده شد" : "هنوز شرطی نگذاشته‌اید — تأمین‌کننده هر شرطی را می‌تواند بدهد"}</span>`}
+      ${dirty && !open ? `<span class="chip warn">ذخیره نشده</span>` : ""}
       ${tqBtn("title", tq.title, "عنوان", tq.title ? "🔒 تأمین‌کننده عنوان را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند عنوان را اصلاح کند — کلیک: قفل")}
       ${tqBtn("qty", tq.qty, `مقدار${it.qty != null ? ` (${M(it.qty)} ${esc(it.unit || "")})` : ""}`, tq.qty ? "🔒 کلِ مقدار لازم است — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد — کلیک: قفل")}
       <span style="margin-inline-start:auto"></span>
-      ${ro ? `<span class="chip" title="${it.sp_lock ? "قلم برای تأمین‌کننده رفته؛ شرایطش مثلِ ساختارش ثابت است" : "قلم سپرده شده و منجمد است"}">🔒 ثابت</span>`
-        : `<button class="tp-btn sm" data-terms-open>${open ? "بستن" : "✏️ تعیینِ شرایط"}</button>`}</div>`;
-    if (!open) return `<div class="terms-box">${head}</div>`;
+      ${ro ? `<span class="chip" title="${esc(why)}">🔒 ثابت — ${it.sp_lock ? "فرستاده شده" : "سپرده شده"}</span>`
+        : `<button class="tp-btn sm ${set.length ? "" : "primary"}" data-terms-open>${open ? "بستن" : set.length ? "✏️ ویرایشِ شرایط" : "✏️ تعیینِ شرایط"}</button>`}</div>`;
+    /* بسته یا ثابت: همان شرط‌ها، فقط‌خواندنی */
+    if (!open) {
+      return `<div class="terms-box">${head}${set.length ? `<div class="tp-scroll"><table class="tp-table terms-ro" style="width:auto;margin-top:6px"><tbody>
+        ${set.map((f) => `<tr><td class="rt"><b>${TERM_LAB[f]}</b></td><td class="rt">${esc(termVal(f, L[f]))}</td><td title="${esc(TERM_LOCK_TIP[f])}">${L[f].lock ? "🔒 الزامی" : "🔓 خواستهٔ شرکت"}</td></tr>`).join("")}
+        </tbody></table></div>` : ""}${ro ? `<div class="dim" style="font-size:.8rem;margin-top:4px">${esc(why)}.</div>` : ""}</div>`;
+    }
     const D = termsDraftOf(it);
-    const enumRow = (f) => {
-      const x = D[f] || { opts: [], lock: false };
-      return `<tr><td class="rt"><b>${TERM_LAB[f]}</b></td>
-        <td class="rt">${TERM_ENUM[f].map((o) => `<label class="chkline" style="margin-inline-end:10px"><input type="checkbox" data-tm-opt="${f}" value="${esc(o)}" ${(x.opts || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("")}</td>
-        <td><button class="tp-btn xs ${x.lock ? "primary" : ""}" data-tm-lock="${f}" title="🔒: تأمین‌کننده فقط همین‌ها را می‌تواند بزند · 🔓: فقط خواستهٔ شرکت">${x.lock ? "🔒" : "🔓"}</button></td></tr>`;
+    const lockBtn = (f) => { const x = D[f] || {}; return `<td><button class="tp-btn xs ${x.lock ? "primary" : ""}" data-tm-lock="${f}" title="${esc(TERM_LOCK_TIP[f])} · 🔓: فقط خواستهٔ شرکت">${x.lock ? "🔒 الزامی" : "🔓 خواسته"}</button></td>`; };
+    const row = (f) => {
+      const x = D[f] || {};
+      let cell;
+      if (TERM_ENUM[f]) cell = TERM_ENUM[f].map((o) => `<label class="chkline" style="margin-inline-end:10px"><input type="checkbox" data-tm-opt="${f}" value="${esc(o)}" ${(x.opts || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("");
+      else if (f === "dtime") {
+        cell = `از <input class="tp-input num" data-tm-dt="from" value="${esc(x.from || "")}" placeholder="اختیاری" style="width:120px" readonly>
+          تا <input class="tp-input num" data-tm-dt="to" value="${esc(x.to || "")}" placeholder="📅 انتخاب تاریخ" style="width:130px" readonly>
+          <button class="tp-btn xs" data-tm-dtclr title="بازهٔ تحویل پاک شود">پاک</button>`;
+      } else if (TERM_ONE[f]) {
+        cell = `<select class="tp-input" data-tm-one="${f}" style="min-width:140px"><option value="">— بی قید —</option>${TERM_ONE[f].map((o) => `<option ${x.opt === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>
+          ${f === "place" ? `<input class="tp-input" data-tm-note value="${esc(x.note || "")}" placeholder="نشانی یا توضیح (برای «سایر» لازم)" style="min-width:220px;flex:1">` : ""}`;
+      } else if (f === "ship") cell = `<input class="tp-input" data-tm-ship value="${esc(x.text || "")}" placeholder="مثلاً حمل با فروشنده تا محل پروژه" style="min-width:260px;width:100%">`;
+      else cell = `دست‌کم <input class="tp-input num" data-tm-valid value="${esc(x.min == null ? "" : x.min)}" inputmode="numeric" placeholder="۷" style="width:70px"> روز`;
+      return `<tr><td class="rt"><b>${TERM_LAB[f]}</b></td><td class="rt"><div class="terms-cell">${cell}</div></td>${lockBtn(f)}</tr>`;
     };
-    const d = D.dtime || { lock: false };
     return `<div class="terms-box">${head}
-      <div class="tp-scroll"><table class="tp-table" style="width:auto;margin-top:8px"><tbody>
-        ${["pay", "invoice", "vat"].map(enumRow).join("")}
-        <tr><td class="rt"><b>${TERM_LAB.dtime}</b></td><td class="rt">از <input class="tp-input num" data-tm-dt="from" value="${esc(d.from || "")}" placeholder="اختیاری" style="width:120px" readonly>
-          تا <input class="tp-input num" data-tm-dt="to" value="${esc(d.to || "")}" placeholder="۱۴۰۵/۰۸/۲۰" style="width:120px" readonly>
-          <button class="tp-btn xs" data-tm-dtclr title="بازهٔ تحویل پاک شود">پاک</button></td>
-          <td><button class="tp-btn xs ${d.lock ? "primary" : ""}" data-tm-lock="dtime" title="🔒: تحویلِ بیرون از بازه پذیرفته نیست · 🔓: فقط خواستهٔ شرکت">${d.lock ? "🔒" : "🔓"}</button></td></tr>
-      </tbody></table></div>
-      <div class="dim" style="font-size:.8rem;margin:6px 0">بی تیک = بی قید · 🔒 الزامی · 🔓 خواستهٔ شرکت ${TP.ui.info("expert.terms", "راهنمای شرایط خرید")}</div>
-      <div class="toolrow" style="margin:0"><button class="tp-btn primary sm" data-terms-save>ذخیرهٔ شرایط</button><button class="tp-btn sm" data-terms-reset>برگرداندن</button></div></div>`;
+      <div class="tp-scroll"><table class="tp-table" style="width:auto;margin-top:8px"><tbody>${TERM_ORDER.map(row).join("")}</tbody></table></div>
+      <div class="dim" style="font-size:.8rem;margin:6px 0">خالی = بی قید · 🔒 الزامی · 🔓 خواستهٔ شرکت. همهٔ این‌ها زیرِ هر قلمِ پیامِ استعلام برای تأمین‌کننده می‌رود و پیش‌فاکتورِ سامانه محل تحویل، محل معامله و روش حمل را از همین‌جا می‌گیرد. ${TP.ui.info("expert.terms", "راهنمای شرایط خرید")}</div>
+      <div class="toolrow" style="margin:0"><button class="tp-btn primary sm" data-terms-save>💾 ذخیرهٔ شرایط</button><button class="tp-btn sm" data-terms-reset>برگرداندن</button>${dirty ? `<span class="chip warn">ذخیره نشده</span>` : ""}</div></div>`;
   }
   /* قفلِ عنوان و مقدار: ساختارِ تأییدشده (norm_json.locks)، وگرنه پیش‌نویسِ ویرایشگر (با «تأیید» می‌رود)؛ پیش‌فرض 🔒 */
   function tqOf(it) {
@@ -603,7 +643,7 @@
       okTick(v ? "قفل شد" : "باز شد");
     } catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
   }
-  async function saveTermsUI(it) {
+  async function saveTermsUI(it, then) {
     const D = termsDraftOf(it);
     try {
       const r = await TP.api(`/items/${it.id}/terms`, { method: "PUT", body: D });
@@ -611,6 +651,7 @@
       delete S.termsEd[it.id]; S.termsOpen[it.id] = false;
       render();
       okTick("شرایط ذخیره شد");
+      if (then) then();
     } catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
   }
 
@@ -691,8 +732,16 @@
     };
     const fresh = P.fresh || 0;
     const startBtn = !started
-      ? `<button class="tp-btn primary" data-pkstart ${on.length ? "" : "disabled"} title="${on.length ? "ساختارِ همین قلم منجمد و قلم به کارشناس هوشمند سپرده می‌شود" : "دست‌کم یک تأمین‌کننده را تیک بزنید"}">${A_ ? "🤖 سپردن" : "🚀 شروع"}</button>`
-      : fresh ? `<button class="tp-btn primary" data-pkstart title="انتخاب‌های تازه به کارشناس هوشمند سپرده می‌شوند">📨 دعوت از انتخاب‌های تازه (${M(fresh)})</button>` : "";
+      ? `<button class="tp-btn primary" data-pkstart ${on.length ? "" : "disabled"} title="${on.length ? "پیش‌نمایشِ پیام و شرایط را می‌بینید و با «تأیید» ساختارِ همین قلم منجمد و قلم به کارشناس هوشمند سپرده می‌شود" : "دست‌کم یک تأمین‌کننده را تیک بزنید"}">${A_ ? "🤖 سپردن…" : "🚀 شروعِ دعوت…"}</button>`
+      : fresh ? `<button class="tp-btn primary" data-pkstart title="انتخاب‌های تازه به کارشناس هوشمند سپرده می‌شوند">📨 دعوت از انتخاب‌های تازه (${M(fresh)})…</button>` : "";
+    /* گام‌های پیش از شروع، پایینِ فهرست — کارشناس می‌بیند چه مانده و دکمهٔ آخر همان‌جاست */
+    const TL_ = termsOfItem(it), nT = TERM_ORDER.filter((f) => TL_ && termVal(f, TL_[f])).length;
+    const steps = !started && !A_ ? `<div class="pk-steps">
+        <span class="pk-st ok">① 🧩 ساختار ✓</span>
+        <button type="button" class="pk-st ${termsDirty(it) ? "warn" : nT ? "ok" : ""}" data-pkterms title="شرایطِ خرید زیرِ هر قلمِ پیامِ استعلام برای همه می‌رود">② 📋 شرایط خرید: ${termsDirty(it) ? "ذخیره نشده" : nT ? `${M(nT)} شرط ✓` : "بی قید — تعیین؟"}</button>
+        <span class="pk-st ${on.length ? "ok" : "warn"}">③ 🎯 ${M(on.length)} تیک‌خورده${miss.length ? " — علت لازم" : ""}</span>
+        ${P.first_msg && on.length ? `<button type="button" class="pk-st" data-pkfm title="متنِ نخستین پیامِ هر گیرنده">④ ✉️ دیدنِ پیام اول</button>` : `<span class="pk-st">④ ✉️ پیام دعوت: قالبِ استاندارد</span>`}
+        <span style="margin-inline-start:auto"></span>${startBtn}</div>` : started && fresh ? `<div class="pk-steps"><span style="margin-inline-start:auto"></span>${startBtn}</div>` : "";
     return `<div class="picks">
       <div class="toolrow"><b style="font-size:1.02rem">🎯 فهرست دعوتِ کارشناس هوشمند</b>
         <span class="chip ${A_ ? "info" : ""}" title="حالتِ نوع قلمِ «${esc(P.head || "—")}» در پنل پشتیبانی">${esc(P.mode_fa || "")}</span>
@@ -714,7 +763,8 @@
       ${L.length ? `<div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th title="تیک = پیامِ دعوت می‌رود">دعوت</th><th title="★ = پیش‌تیک؛ برداشتنش علت می‌خواهد">#</th><th class="rt">تأمین‌کننده</th><th>از</th><th>شمارهٔ پنل</th>${stCol ? "<th>وضعیت</th>" : ""}</tr></thead>
         <tbody>${L.map(row).join("")}</tbody></table></div>`
         : `<div class="empty">فهرستی از سوابق نیامد${A_ ? " — در «سپردن یا برگشت» فقط «↩️ برگرداندن به مدیر» می‌ماند" : " — از «➕ افزودن» یا «جستجوی هوشمند» تأمین‌کننده بیفزایید"}.</div>`}
-      ${miss.length ? `<div class="tp-note warn" style="margin-top:8px">برای «شروع»، علتِ برداشتنِ ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} را کنار همان نام بنویسید.</div>` : ""}</div>`;
+      ${miss.length ? `<div class="tp-note warn" style="margin-top:8px">برای «شروع»، علتِ برداشتنِ ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} را کنار همان نام بنویسید.</div>` : ""}
+      ${steps}</div>`;
   }
   /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): سیاستِ نوع قلم و برنامهٔ گیرندگان روی گراف — از worker/cr-engine.js، بی مدل */
   const VER_FA = { 2: "✔ تأییدشده", 1: "هویت قابل احراز", 0: "هنوز راستی‌آزمایی نشده" };
@@ -757,9 +807,18 @@
     try { d = await TP.api(`/items/${it.id}/first-msg`); } catch (e) { b.close(); return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     b.close();
     const ed = {};   /* ردیف‌هایی که متنشان در حالِ ویرایشِ دستی است: k ← متن */
-    const m = TP.modal(`✉️ پیام اول — ${esc(it.title)}`, `<div data-fm></div>`, null, "بستن", "");
+    /* دکمهٔ اصلی همین‌جاست: «✅ تأیید پیام و 🚀 شروع» همان کادرِ شروع را با پیش‌نمایش باز می‌کند (پیش از شروع یا با انتخابِ تازه) */
+    const P0 = S.picks[it.id], canGo = !!(P0 && P0.list && (!P0.started_at || P0.fresh));
+    const m = TP.modal(`✉️ پیام اول — ${esc(it.title)}`, `<div data-fm></div>`, canGo ? () => pkStartUI(it) : null,
+      canGo ? (P0.started_at ? "✅ تأیید پیام‌ها و دعوت…" : "✅ تأیید پیام و 🚀 شروع…") : "بستن", canGo ? "بستن" : "");
     m.querySelector(".tp-modal").classList.add("fm-modal");
     const box = m.querySelector("[data-fm]");
+    /* متنی که در حالِ ویرایش است و ذخیره نشده، با «تأیید» گم نمی‌شود */
+    const yes = m.querySelector("[data-y]");
+    if (canGo && yes) yes.onclick = () => {
+      if (box.querySelector("[data-fm-body]")) { const n = box.querySelector("[data-fm-msg]"); if (n) n.innerHTML = `<div class="tp-note warn" style="margin:6px 0">متنی در حالِ ویرایش است؛ اول «ذخیرهٔ متن» یا «انصراف» را بزنید.</div>`; return; }
+      m.remove(); pkStartUI(it);
+    };
     const opts = (sel) => {
       const g = (std) => (d.templates || []).filter((t) => !!t.std === std).map((t) => `<option value="${esc(t.key)}" ${sel === t.key ? "selected" : ""}>${esc(t.title)}</option>`).join("");
       const own = g(false);
@@ -967,9 +1026,21 @@
     }
     paint();
   }
+  /** ویرایشگرِ «📋 شرایط خرید» باز و پیش چشم (از گام‌های شروع و کادرِ شروع) */
+  function termsGo(it) {
+    if (!it || termsFixed(it)) return;
+    S.termsOpen[it.id] = true; if (S.tab !== "history") S.tab = "history";
+    render();
+    const el = document.querySelector(".terms-box"); if (el) { el.scrollIntoView({ block: "center", behavior: "smooth" }); el.classList.add("tp-flash"); setTimeout(() => el.classList.remove("tp-flash"), 1600); }
+  }
   async function pkStartUI(it) {
     if (!S.picks[it.id] || !S.picks[it.id].list) return;
     if (normDirty(it)) return TP.modal("تغییرات ذخیره نشده", `ساختارِ «${esc(it.title)}» را عوض کرده‌اید ولی تأیید نکرده‌اید؛ اول «تأیید» را بزنید.`, null, "باشد", "");
+    /* شرایطِ خریدِ ذخیره‌نشده: همین شرایط برای همه می‌رود و بعد از شروع ثابت است */
+    if (termsDirty(it)) {
+      return TP.modal("📋 شرایط خرید ذخیره نشده", `شرایطِ خریدِ «${esc(it.title)}» را عوض کرده‌اید ولی ذخیره نکرده‌اید. همین شرایط زیرِ پیامِ استعلام برای همهٔ تأمین‌کنندگان می‌رود و بعد از شروع عوض نمی‌شود.`,
+        () => saveTermsUI(it, () => pkStartUI(it)), "💾 ذخیره و ادامه", "انصراف");
+    }
     try { await pkFlushWhy(it); } catch (e) { return TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
     const P = S.picks[it.id], started = !!P.started_at;
     const go = P.list.filter((e) => e.on && (!started || !e.go));
@@ -977,14 +1048,29 @@
     if (miss.length) { render(); return TP.modal("توضیح لازم است", `برداشتنِ تیکِ نفراتِ پیش‌تیک (★) توضیح می‌خواهد: ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} — علت را کنار همان نام بنویسید.`, null, "باشد", ""); }
     if (!go.length) return TP.modal("تیکی نیست", started ? "انتخابِ تازه‌ای برای دعوت نیست." : "دست‌کم یک تأمین‌کننده را تیک بزنید.", null, "باشد", "");
     const noPh = go.filter((e) => !e.panel).length;
-    const title = started ? "📨 دعوت از انتخاب‌های تازه" : P.mode === "handoff" ? "🤖 سپردن به کارشناس هوشمند" : "🚀 شروع";
-    TP.modal(title, `${started ? "" : `ساختارِ «${esc(it.title)}» منجمد می‌شود و این قلم به کارشناس هوشمند می‌رود. `}کارشناس هوشمند از این ${M(go.length)} تأمین‌کننده دعوت می‌کند و مذاکره را پیش می‌برد:
-      <div style="margin:8px 0;max-height:34vh;overflow:auto">${go.map((e) => `• ${esc(e.name)}${e.panel ? "" : ` <span class="chip warn">بی شمارهٔ پنل — منتظر می‌ماند</span>`}`).join("<br>")}</div>
-      ${noPh ? `<div class="dim">${M(noPh)} نفر هنوز شمارهٔ پنلِ تیک‌خورده ندارند؛ هر وقت شماره‌شان را با تیکِ پنل بزنید، دعوت می‌شوند.</div>` : ""}`, async () => {
+    const title = started ? "📨 دعوت از انتخاب‌های تازه" : P.mode === "handoff" ? "🤖 سپردن به کارشناس هوشمند" : "🚀 شروعِ دعوت و مذاکره";
+    /* پیش‌نمایش: همان متنی که برای هر گیرنده می‌رود، و شرایطِ خرید */
+    let pv = null;
+    const b0 = TP.busy(title, "پیش‌نمایشِ پیام…");
+    try { pv = await TP.api(`/items/${it.id}/invite-preview`); } catch (_) { pv = null; }
+    b0.close();
+    const L = termsOfItem(it), rows = (pv && pv.rows) || [];
+    const termsHtml = L ? `<div class="tp-note" style="margin:8px 0">📋 <b>شرایط خرید</b> — زیرِ هر قلمِ پیامِ استعلام برای همه می‌رود:<br>${esc(termsSummary(L))}</div>`
+      : `<div class="tp-note warn" style="margin:8px 0">📋 شرطِ خریدی نگذاشته‌اید — تأمین‌کننده هر شرطی را می‌تواند بدهد. <button class="tp-btn xs" data-st-terms>✏️ تعیینِ شرایط</button></div>`;
+    const msgHtml = rows.length ? `<div style="margin:8px 0"><b>✉️ پیامی که می‌رود</b>${rows.length > 1 ? ` <span class="dim">(نمونهٔ «${esc(rows[0].name)}»${pv.first_msg ? "؛ هر گیرنده متنِ خودش را می‌گیرد" : ""})</span>` : ""}
+        <pre class="fm-text" style="max-height:26vh;overflow:auto;margin:4px 0">${esc(rows[0].text)}</pre>
+        ${pv.first_msg ? `<button class="tp-btn xs" data-st-fm>✏️ دیدن و ویرایشِ پیامِ هر گیرنده</button>` : ""}</div>` : "";
+    const d = TP.modal(title, `${started ? "" : `ساختار و شرایطِ «${esc(it.title)}» منجمد می‌شود و این قلم به کارشناس هوشمند می‌رود. `}کارشناس هوشمند از این ${M(go.length)} تأمین‌کننده دعوت می‌کند و مذاکره را پیش می‌برد:
+      <div style="margin:8px 0;max-height:22vh;overflow:auto">${go.map((e) => `• ${esc(e.name)}${e.panel ? "" : ` <span class="chip warn">بی شمارهٔ پنل — منتظر می‌ماند</span>`}`).join("<br>")}</div>
+      ${noPh ? `<div class="dim">${M(noPh)} نفر هنوز شمارهٔ پنلِ تیک‌خورده ندارند؛ هر وقت شماره‌شان را با تیکِ پنل بزنید، دعوت می‌شوند.</div>` : ""}
+      ${termsHtml}${msgHtml}
+      <div class="dim" style="font-size:.84rem">⏱ دعوت‌ها یکی‌یکی می‌روند (حدوداً هر دقیقه ${M((pv && pv.per_tick) || 1)})؛ زیرِ هر پیام کارتِ استعلام با مشخصات و شرایطِ خرید می‌آید. پاسخ‌ها را در «مکاتبات» می‌بینید.</div>`, async () => {
       const b = TP.busy(title, esc(it.title));
       try { const r = await TP.api(`/items/${it.id}/ai-start`, { body: {} }); b.close(); await reload(); S.picks[it.id] = r; render(); okTick(started ? "دعوت شد" : "سپرده شد"); }
       catch (e) { b.close(); if (e.data && e.data.need_doc) return pkDocUI(it, () => pkStartUI(it)); TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true); }
-    }, started ? "دعوت کن" : P.mode === "handoff" ? "بسپار" : "شروع", "انصراف");
+    }, started ? "✅ تأیید و دعوت" : P.mode === "handoff" ? "✅ تأیید و سپردن" : "✅ تأیید و 🚀 شروع", "انصراف");
+    const st = d.querySelector("[data-st-terms]"); if (st) st.onclick = () => { d.remove(); termsGo(it); };
+    const sf = d.querySelector("[data-st-fm]"); if (sf) sf.onclick = () => { d.remove(); pkFmUI(it); };
   }
   function pkAddUI(it) {
     const hist = (S.hist[it.id] && S.hist[it.id].suppliers) || [];
@@ -2688,13 +2774,15 @@
     Q("[data-pkbox]").forEach((s) => s.onchange = () => pkEdit(item(), { whybox: { [s.dataset.pkbox]: s.value } }));
     Q("[data-pkstrat]").forEach((b) => b.onclick = () => pkStratUI(item()));
     Q("[data-pkstrat-go]").forEach((b) => b.onclick = () => pkStratApply(item(), true));
-    const pkf = G("[data-pkfm]"); if (pkf) pkf.onclick = () => pkFmUI(item());
+    Q("[data-pkfm]").forEach((b) => b.onclick = () => pkFmUI(item()));
+    /* «② 📋 شرایط خرید» در گام‌های شروع: ویرایشگر باز و همان‌جا */
+    Q("[data-pkterms]").forEach((b) => b.onclick = () => termsGo(item()));
     const pkd = G("[data-pkdoc]"); if (pkd) pkd.onclick = () => pkDocUI(item());
     Q("[data-pkdel]").forEach((b) => b.onclick = () => pkEdit(item(), { remove: [b.dataset.pkdel] }));
     Q("[data-pkph]").forEach((b) => b.onclick = () => pkPhoneUI(item(), b.dataset.pkph));
     Q("[data-pkadd-name]").forEach((b) => b.onclick = () => pkEdit(item(), { add: [{ name: b.dataset.pkaddName, src: "manual" }] }));
     const pka = G("[data-pkadd]"); if (pka) pka.onclick = () => pkAddUI(item());
-    const pks = G("[data-pkstart]"); if (pks) pks.onclick = () => pkStartUI(item());
+    Q("[data-pkstart]").forEach((b) => b.onclick = () => pkStartUI(item()));
     const pkr = G("[data-pkrebuild]"); if (pkr) pkr.onclick = () => pkRebuildUI(item());
     const pkb = G("[data-pkback]"); if (pkb) pkb.onclick = () => manualUI(item().id);
     const pko = G("[data-pkopen]"); if (pko) pko.onclick = () => { const it = item(); S.pickOpen[it.id] = !S.pickOpen[it.id]; render(); };
@@ -2702,7 +2790,8 @@
     const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
     /* فاز ۴ب گام ۳: «📋 شرایط خرید» — پیش‌نویس بی بازرندر (جز دکمه‌های 🔒/🔓 و تاریخ) */
     Q("[data-tq-lock]").forEach((b) => b.onclick = () => tqToggle(item(), b.dataset.tqLock));
-    const tmo = G("[data-terms-open]"); if (tmo) tmo.onclick = () => { const it = item(); S.termsOpen[it.id] = !S.termsOpen[it.id]; delete S.termsEd[it.id]; render(); };
+    /* بستن پیش‌نویس را دور نمی‌ریزد: «ذخیره نشده» کنار عنوان می‌ماند و «🚀 شروع» پیش از رفتن می‌پرسد؛ «برگرداندن» دور می‌ریزد */
+    const tmo = G("[data-terms-open]"); if (tmo) tmo.onclick = () => { const it = item(); S.termsOpen[it.id] = !S.termsOpen[it.id]; render(); };
     Q("[data-tm-opt]").forEach((c) => c.onchange = () => {
       const it = item(), D = termsDraftOf(it), f = c.dataset.tmOpt;
       D[f] = D[f] || { opts: [], lock: false };
@@ -2711,9 +2800,13 @@
     });
     Q("[data-tm-lock]").forEach((b) => b.onclick = () => {
       const it = item(), D = termsDraftOf(it), f = b.dataset.tmLock;
-      D[f] = D[f] || (f === "dtime" ? {} : { opts: [] });
+      D[f] = D[f] || (TERM_ENUM[f] ? { opts: [] } : {});
       D[f].lock = !D[f].lock; render();
     });
+    Q("[data-tm-one]").forEach((s) => s.onchange = () => { const D = termsDraftOf(item()), f = s.dataset.tmOne; D[f] = { ...(D[f] || {}), opt: s.value }; });
+    const tmn = G("[data-tm-note]"); if (tmn) tmn.oninput = () => { const D = termsDraftOf(item()); D.place = { ...(D.place || {}), note: tmn.value }; };
+    const tmsh = G("[data-tm-ship]"); if (tmsh) tmsh.oninput = () => { const D = termsDraftOf(item()); D.ship = { ...(D.ship || {}), text: tmsh.value }; };
+    const tmv = G("[data-tm-valid]"); if (tmv) tmv.oninput = () => { const D = termsDraftOf(item()); D.valid = { ...(D.valid || {}), min: tmv.value.trim() }; };
     Q("[data-tm-dt]").forEach((x) => x.onclick = () => TP.openDatePicker(x, (v) => {
       const it = item(), D = termsDraftOf(it);
       D.dtime = { ...(D.dtime || {}), [x.dataset.tmDt]: String(v || "").split("،")[0].trim() }; render();

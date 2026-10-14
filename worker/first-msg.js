@@ -145,7 +145,7 @@ export function fmCheck(text, { otherNames = [], family, items = [], allow = [] 
 /* زمینهٔ یک درخواست                                                    */
 /* ------------------------------------------------------------------ */
 /**
- * deps: {lockedLayers, lineLocks, limitsOf, LIMIT_FA, headPolicy, headOf} — تزریق از ai-agent.js تا این پرونده بی حلقه بماند.
+ * deps: {lockedLayers, lineLocks, limitsOf, LIMIT_FA, fieldTxt, headPolicy, headOf} — تزریق از ai-agent.js تا این پرونده بی حلقه بماند.
  * items: ردیف‌های items (code, title, spec, qty, unit, need_date, norm_json, terms_json).
  */
 export async function fmContext(env, deps, items) {
@@ -158,7 +158,7 @@ export async function fmContext(env, deps, items) {
     for (const x of ll.layers) (lk.layers[x.k] !== false ? fixed : open).push(`${x.k}: ${x.v}`);
     const lim = deps.limitsOf(it) || {};
     for (const [f, v] of Object.entries(lim)) {
-      const txt = f === "dtime" ? [v.from, v.to].filter(Boolean).join(" تا ") : (v.opts || []).join(" یا ");
+      const txt = deps.fieldTxt ? deps.fieldTxt(f, v) : f === "dtime" ? [v.from, v.to].filter(Boolean).join(" تا ") : (v.opts || []).join(" یا ");
       if (!txt) continue;
       (v.lock ? fixed : open).push(`${deps.LIMIT_FA[f] || f}: ${txt}`);
     }

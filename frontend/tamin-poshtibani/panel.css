@@ -613,6 +613,14 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .picks { border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: rgba(79,140,255,.05); }
 .picks .toolrow { margin: 0; }
 .picks table tr.top td { background: rgba(79,140,255,.08); }
+/* گام‌های پیش از «🚀 شروع» پایینِ فهرست (expert.js:vPicks) */
+.picks .pk-steps { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--tp-line); }
+.picks .pk-st { font: inherit; font-size: .84rem; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--tp-line); background: transparent; color: inherit; }
+.picks button.pk-st { cursor: pointer; }
+.picks .pk-st.ok { border-color: rgba(52,168,83,.5); background: rgba(52,168,83,.08); }
+.picks .pk-st.warn { border-color: rgba(234,134,0,.6); background: rgba(234,134,0,.08); }
+.tp-flash { animation: tpflash 1.6s ease-out; }
+@keyframes tpflash { 0% { box-shadow: 0 0 0 3px rgba(79,140,255,.6); } 100% { box-shadow: 0 0 0 0 rgba(79,140,255,0); } }
 .picks table tr.off td { opacity: .62; }
 .picks table tr.off td:first-child, .picks table tr.off td:last-child { opacity: 1; }
 .picks table tr.off.need td { opacity: 1; }
@@ -640,3 +648,5 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .sp-cbox input { margin: 0; }
 /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ هر قلم (expert.js:vTerms) */
 .terms-box { border: 1px dashed var(--tp-line); border-radius: 12px; padding: 8px 12px; margin: 10px 0; }
+.terms-box .terms-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.terms-box .terms-ro td { padding: 4px 10px; }

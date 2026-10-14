@@ -59,7 +59,7 @@
       const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}${y.u ? ` ${esc(y.u)}` : ""}`).join(" · ");
       const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
       return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}" role="button" tabindex="0"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
-        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}</div>`;
+        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}${x.lim ? `<div class="evs">📋 شرایط خرید: ${esc(x.lim)}</div>` : ""}</div>`;
     }).join("");
     /* gen (فاز ۴): پیش‌فاکتور را سامانه ساخته؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است */
     const foot = [meta.pf && meta.ev === "submit" ? (meta.gen ? `📎 پیوست: پیش‌فاکتورِ خودِ تأمین‌کننده «${esc(meta.pf)}»` : `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»`) : "",

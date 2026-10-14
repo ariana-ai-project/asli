@@ -465,7 +465,7 @@
       return card(`${top}<div class="ph-bot-t">🧾 <b>${esc(termFa(f))}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${limHint(f, l) ? `<br>${limHint(f, l)}` : ""}</div>`, kb);
     }
     S.flow = { step: "term", line: l.id, k, hint: `${TERM_PROMPT[k].replace(/<[^>]+>/g, "")}`, ph: k === "d" ? "۱۰ روز کاری یا ۱۴۰۵/۰۸/۰۱" : "شمار روز…" };
-    const id = card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}${f === "dtime" && limHint(f, l) ? `<br>${limHint(f, l)}` : ""}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [...(extraKb || []), [{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
+    const id = card(`${top}<div class="ph-bot-t">${TERM_PROMPT[k]}${(f === "dtime" || f === "valid_days") && limHint(f, l) ? `<br>${limHint(f, l)}` : ""}<br><i>(برای همهٔ اقلامِ این استعلام)</i></div>`, [...(extraKb || []), [{ t: "✖️ انصراف", d: `si:${l.id}` }]]);
     focusComposer();
     return id;
   }
@@ -820,8 +820,13 @@
   const allowOf = (f) => { const t = TL(); return t.conflict.includes(f) ? null : t.lock[f] && t.lock[f].length ? t.lock[f] : null; };
   const rangeFa = (d) => (d.from && d.to ? `بین ${fa(d.from)} و ${fa(d.to)}` : d.to ? `حداکثر تا ${fa(d.to)}` : `از ${fa(d.from)} به بعد`);
   function limHint(f, l) {
-    const t = TL(), L = l && l.limits && l.limits[f];
+    const t = TL(), L = l && l.limits && l.limits[f === "valid_days" ? "valid" : f];
     if (t.conflict.includes(f)) return `<i class="sp-lim warn">⚠️ اقلامِ این استعلام شرطِ متفاوت دارند؛ هر بار اقلامِ هم‌شرط را با هم بفرستید</i>`;
+    /* کمینهٔ اعتبار پیش‌فاکتور (روز) */
+    if (f === "valid_days") {
+      if (t.lock.valid) return `<i class="sp-lim">🔒 دست‌کم ${fa(t.lock.valid)} روز</i>`;
+      return L && L.min ? `<i class="sp-lim open">🔓 خواستهٔ شرکت: دست‌کم ${fa(L.min)} روز</i>` : "";
+    }
     if (f === "dtime") {
       const d = t.lock.dtime;
       if (d && (d.from || d.to)) return `<i class="sp-lim">🔒 ${esc(rangeFa(d))}</i>`;
@@ -879,8 +884,18 @@
         <label>${termFa("pay")}${req("pay")}${limHint("pay", l)}<select class="tp-select" data-t="pay" ${ro}>${opt("pay")}</select></label>
         <label>${termFa("invoice")}${req("invoice")}${limHint("invoice", l)}<select class="tp-select" data-t="invoice" ${ro}>${opt("invoice")}</select></label>
         <label>${termFa("vat")}${req("vat")}${limHint("vat", l)}<select class="tp-select" data-t="vat" ${ro}>${opt("vat")}</select></label>
-        <label>${termFa("valid_days")}${req("valid_days")}<input class="tp-input" data-t="valid_days" inputmode="numeric" placeholder="مثلاً ۷" value="${esc(t.valid_days ?? "")}" ${ed ? "" : "readonly"}></label>
-      </div></div>`;
+        <label>${termFa("valid_days")}${req("valid_days")}${limHint("valid_days", l)}<input class="tp-input" data-t="valid_days" inputmode="numeric" placeholder="مثلاً ۷" value="${esc(t.valid_days ?? "")}" ${ed ? "" : "readonly"}></label>
+      </div>${companyBox(l)}</div>`;
+  }
+  /* «📋 شرطِ شرکت» که تأمین‌کننده وارد نمی‌کند: محل تحویل، محل معامله و روش حمل — پیش‌فاکتورِ سامانه از همین‌ها پر می‌شود */
+  const CO_FA = { place: "محل تحویل", deal: "محل معامله", ship: "روش حمل" };
+  function companyBox(l) {
+    const L = (l && l.limits) || {};
+    const rows = ["place", "deal", "ship"].filter((f) => L[f]).map((f) => {
+      const v = f === "ship" ? L[f].text : `${L[f].opt}${L[f].note ? ` — ${L[f].note}` : ""}`;
+      return `<span class="sp-co"><b>${CO_FA[f]}:</b> ${esc(v)} <i class="sp-lim ${L[f].lock ? "" : "open"}">${L[f].lock ? "🔒 الزامی" : "🔓 خواستهٔ شرکت"}</i></span>`;
+    });
+    return rows.length ? `<div class="sp-cobox">📋 <b>شرطِ شرکت</b> <i class="dim">(پیش‌فاکتور با همین‌ها ساخته می‌شود؛ اگر نمی‌توانید، زیرِ همین قلم بنویسید)</i><div>${rows.join("")}</div></div>` : "";
   }
   /*
    * کارت هر قلم. فاز ۴ (طرح «خرید هوشمند، کارشناس ناظر»): 🔒 فقط‌خواندنی، 🔓 قابل تغییر — عنوانِ 🔓 و هر لایهٔ 🔓 کادرِ خودش را
@@ -977,6 +992,7 @@
       <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map((x) => `<span class="sp-chip ${x.lock === false ? "add" : "lock"}">${x.lock === false ? "🔓" : "🔒"} <i>${esc(x.k)}:</i> ${esc(x.s || x.v)}</span>`).join("")}${extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`).join("")}</div>
       <div class="sp-row" style="margin-top:8px"><b>${qty(l.qty)} ${esc(l.unit || "")}</b> × <b>${money(l.price)}</b> = <b>${money(l.total)}</b> ریال <span class="sp-muted">(درخواست${lk.legacy ? "" : lk.qty ? " 🔒" : " 🔓"}: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
       <div class="sp-muted">🧾 ${esc(termsLine(tm)) || "شرایط فاکتور: —"}</div>
+      ${l.limits_txt ? `<div class="sp-limline">📋 <b>شرایط خریدِ شرکت:</b> ${esc(l.limits_txt)} <i class="sp-muted">(🔒 الزامی · 🔓 خواستهٔ شرکت)</i></div>` : ""}
       ${l.note ? `<div class="sp-muted">📝 ${esc(l.note)}</div>` : ""}${files.length ? `<div class="sp-muted">📎 ${files.map((f) => esc(f.label)).join("، ")}</div>` : ""}
       ${miss.length ? `<div class="sp-muted" style="margin-top:6px">مانده: <b>${esc(miss.join("، "))}</b></div>` : `<div class="sp-ok">همه‌چیز پر است؛ «✓ آمادهٔ ارسال» را بزنید.</div>`}
       <div class="sp-actions"><button class="tp-btn ${miss.length ? "primary" : ""}" data-wz="${l.id}">📝 پر کردن اطلاعات</button><button class="tp-btn" data-form-open="${l.id}">✏️ ویرایش جزئی</button><button class="tp-btn ${miss.length ? "" : "primary"}" data-ready-sum="1" ${miss.length ? "disabled" : ""}>✓ آمادهٔ ارسال</button></div>

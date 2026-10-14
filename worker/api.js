@@ -2274,7 +2274,7 @@ async function route(request, env, ctx) {
       return json(await aiHandoff(env, a, `expert:${ex.id}`, { include: Array.isArray(b && b.include) ? b.include.map((x) => int(x)).filter(Boolean) : [] }));
     }
     /* فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (GET، PUT) و «🚀 شروع»ش (worker/ai-agent.js:picksRoute، ai-picks.js) */
-    if (/^\/items\/\d+\/(picks|ai-start|first-msg)$/.test(path)) {
+    if (/^\/items\/\d+\/(picks|ai-start|first-msg|invite-preview)$/.test(path)) {
       const r = await picksRoute(request, env, path, m, { requireExpert, json, readJson });
       if (r) return r;
     }

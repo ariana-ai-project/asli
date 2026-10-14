@@ -68,7 +68,7 @@ import { getSizeRules, SIZE_FA } from "./size.js";
 import { crFlags } from "./cr-api.js";
 import { headPolicy, recipientPlan } from "./cr-engine.js";
 import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
-import { limitsOf, LIMIT_FA } from "./terms-locks.js";
+import { limitsOf, LIMIT_FA, fieldTxt, limitsTxt } from "./terms-locks.js";
 import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { boxesOn, boxesFa } from "./critique.js";
@@ -381,10 +381,27 @@ export async function picksRoute(request, env, path, m, deps) {
     }
     return deps.json(await fmView(env, ex, k.it, pick, ctx));
   }
+  /* کادرِ «🚀 شروع»: همان متنی که برای هر تیک‌خورده می‌رود («✉️ پیام اول» یا قالبِ دعوت)، شرایطِ خرید و آهنگِ دعوت */
+  if ((mm = /^\/items\/(\d+)\/invite-preview$/.exec(path)) && m === "GET") {
+    const ex = await deps.requireExpert(request, env);
+    const k = await pickCtx(env, ex, mm[1]);
+    const pick = pickOf(k.it);
+    const on = ((pick && pick.list) || []).filter((e) => e.on && !e.go);
+    const items = [{ id: k.it.id, title: k.it.title, qty: k.it.qty, unit: k.it.unit }];
+    const L = limitsOf(k.it), pfRead = await pfReadOn(env);
+    const fm = !!(await crFlags(env)).firstmsg;
+    const std = (name) => inviteText(env, name, items, pfRead, !!L);
+    let rows;
+    if (fm && on.length) {
+      const v = await fmView(env, ex, k.it, pick, await fmContext(env, FM_DEPS, [k.it]));
+      rows = on.map((e) => { const r = v.rows.find((x) => x.k === e.k); return { name: e.name, text: r && !r.block.length ? r.text : std(e.name), std: !r || !!r.block.length }; });
+    } else rows = on.map((e) => ({ name: e.name, text: std(e.name), std: true }));
+    return deps.json({ rows: rows.slice(0, 20), n: on.length, terms: limitsTxt(L) || null, first_msg: fm, per_tick: INVITES_PER_TICK });
+  }
   return null;
 }
 /* وابستگی‌های first-msg.js (تزریق، تا آن پرونده بی حلقه بماند) */
-const FM_DEPS = { lockedLayers: (env, it) => C.lockedLayers(env, it), lineLocks: (it, ly) => C.lineLocks(it, ly), limitsOf, LIMIT_FA, headPolicy, headOf: (env, it) => headGuess(env, it) };
+const FM_DEPS = { lockedLayers: (env, it) => C.lockedLayers(env, it), lineLocks: (it, ly) => C.lineLocks(it, ly), limitsOf, LIMIT_FA, fieldTxt, headPolicy, headOf: (env, it) => headGuess(env, it) };
 /** کادرِ «✉️ پیام اول»: قالب‌ها (استاندارد + مشترک + خودِ کارشناس)، انتخاب‌ها و پیش‌نمایشِ پیامِ هر تیک‌خورده */
 async function fmView(env, ex, it, pick, ctx) {
   const choices = await fmChoices(env, it.aid);
@@ -860,10 +877,13 @@ async function invitable2(env, run) {
   return out.sort((a, b) => (a.src === "manual" ? -1 : 0) - (b.src === "manual" ? -1 : 0) || (a.thread_id ? 1 : 0) - (b.thread_id ? 1 : 0) || a.rank - b.rank);
 }
 
+/* «📋 شرایط خرید»ِ شرکت زیرِ هر قلمِ کارتِ استعلام می‌آید (sp-core.js:spSend)؛ متنِ دعوت فقط به آن اشاره می‌کند */
+const TERMS_NOTE = "شرایطِ خریدِ ما (تسویه، تحویل و …) زیرِ هر قلم اومده؛ 🔒 یعنی الزامی و 🔓 یعنی ترجیحِ ما.\n";
 /** قلمِ تازه در گفت‌وگوی موجود — همان لحن، کوتاه */
-function addOnText(env, sup, items) {
+function addOnText(env, sup, items, terms = false) {
   const list = items.map((i) => `• ${i.title} — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trim()).join("\n");
   return `برای همین درخواست ${items.length === 1 ? "یه قلم دیگه هم" : "چند قلم دیگه هم"} لازم داریم:\n${list}\n`
+    + (terms ? TERMS_NOTE : "")
     + "مثل قبل همین‌جا توی پنل قیمت و شرایط رو بنویسید و «ارسال» رو بزنید.";
 }
 
@@ -871,7 +891,7 @@ function addOnText(env, sup, items) {
  * قالبِ دعوت — اولین پیامِ گفت‌وگو، با همان لحنِ محاوره‌ایِ مذاکره (درخواست کاربر، مهر ۱۴۰۵)؛ پیامک کوتاه‌ترش را می‌برد.
  * یک جمله می‌گوید پیام‌ها را دستیارِ هوشمند جواب می‌دهد — مدل هم اگر صادقانه پرسیده شود انکار نمی‌کند (ai-prompts.js).
  */
-function inviteText(env, sup, items, pfRead = true) {
+function inviteText(env, sup, items, pfRead = true, terms = false) {
   const list = items.map((i) => `• ${i.title} — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trim()).join("\n");
   /* فاز ۴: پیش‌فاکتور را خودِ سامانه از همین فیلدها می‌سازد — تأمین‌کننده فقط پر می‌کند، پیش‌نمایش را می‌بیند و «ارسال» می‌زند */
   const ask = pfRead
@@ -879,6 +899,7 @@ function inviteText(env, sup, items, pfRead = true) {
     : "اگه لطف کنید قیمت واحد (بدون ارزش افزوده)، اعتبار پیش‌فاکتور، زمان تحویل، شرایط تسویه، نوع فاکتور و ارزش افزوده رو همین‌جا توی پنل ثبت کنید، "
       + "پیش‌نمایش پیش‌فاکتور رو ببینید و «ارسال» رو بزنید، ممنون می‌شم؛ پیش‌فاکتور رو خودِ سامانه از همین‌ها می‌سازه. اگه توضیحی دارید، زیر همون قلم بنویسید.\n";
   return `سلام، وقتتون بخیر\nاز واحد تدارکات شرکت ${COMPANY(env)} پیام می‌دم؛ برای ${items.length === 1 ? "این قلم" : "این اقلام"} از ${sup} قیمت می‌خواستیم:\n${list}\n`
+    + (terms ? TERMS_NOTE : "")
     + ask
     + "سؤالی بود همین‌جا بپرسید؛ دستیارِ هوشمندِ خریدِ ما جواب می‌ده و تصمیمِ نهایی با کمیسیون معاملات شرکته.";
 }
@@ -911,7 +932,8 @@ async function inviteOne(env, run, ex, inv) {
   const [p0, ...more] = inv.phones;
   /* روالِ تازه: قلمِ تازه در گفت‌وگوی موجودِ کارشناس هوشمند با همین تأمین‌کننده (inv.thread_id) — پیامِ کوتاه، یک پیامک */
   const addOn = !!inv.thread_id;
-  const text = addOn ? addOnText(env, inv.name, items) : (await firstText(env, run, ex, inv, items)) || inviteText(env, inv.name, items, await pfReadOn(env));
+  const terms = (await C.limitsOfLines(env, items.map((i) => ({ item_id: i.id })))).size > 0;
+  const text = addOn ? addOnText(env, inv.name, items, terms) : (await firstText(env, run, ex, inv, items)) || inviteText(env, inv.name, items, await pfReadOn(env), terms);
   const r = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: p0.id,
     text, sms: smsIntro(env, items), ai: true });
   const t = now();

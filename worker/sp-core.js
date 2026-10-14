@@ -26,7 +26,7 @@ import { telegram } from "./telegram.js";
 import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
-import { limitsOf, combineLocks, violations, violationError, LIMIT_FA } from "./terms-locks.js";
+import { limitsOf, combineLocks, violations, violationError, LIMIT_FA, limitsTxt, withCompany } from "./terms-locks.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
@@ -255,12 +255,15 @@ const itemSnap = (l, withPrice) => ({
   no: l.no || null, title: lineTitle(l), head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
   ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: lineLayers(l), extra: extraOf(l),
   ...(withPrice && T(l.note) ? { note: T(l.note).slice(0, 300) } : {}),
+  /* «📋 شرایط خرید»ِ شرکت (فقط کارتِ استعلام و یادآوری) — terms-locks.js:limitsTxt */
+  ...(!withPrice && T(l.lim) ? { lim: T(l.lim) } : {}),
 });
-/** یک قلم در متنِ پیام: سطرِ اول کد و عنوان، زیرش مقدار (و قیمت) و مشخصات اصلی */
+/** یک قلم در متنِ پیام: سطرِ اول کد و عنوان، زیرش مقدار (و قیمت)، مشخصات اصلی و شرایطِ خریدِ شرکت */
 const itemBlock = (l, withPrice) => {
   const amount = withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
   const spec = specTxt(l);
-  return `▫️ ${codeTxt(l.no)}${lineTitle(l)}\n    ${amount}${spec ? `\n    ${spec}` : ""}${withPrice && T(l.note) ? `\n    📝 ${T(l.note).slice(0, 300)}` : ""}`;
+  return `▫️ ${codeTxt(l.no)}${lineTitle(l)}\n    ${amount}${spec ? `\n    ${spec}` : ""}${withPrice && T(l.note) ? `\n    📝 ${T(l.note).slice(0, 300)}` : ""}`
+    + `${!withPrice && T(l.lim) ? `\n    📋 شرایط خرید: ${T(l.lim)}` : ""}`;
 };
 const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${faN(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -527,7 +530,7 @@ export async function spSend(env, ex, b) {
   if (!asg || asg.expert_id !== ex.id) throw new HttpError("این درخواست متعلق به شما نیست.", 403);
   const want = [...new Set((Array.isArray(b.item_ids) ? b.item_ids : []).map(int).filter(Boolean))].slice(0, 40);
   if (!want.length) throw new HttpError("دست‌کم یک قلم را انتخاب کنید.");
-  const its = ((await env.DB.prepare(`SELECT id, title, qty, unit, spec, code, norm_json, state FROM items WHERE assignment_id=? AND id IN (${want.map(() => "?").join(",")}) ORDER BY line_no`)
+  const its = ((await env.DB.prepare(`SELECT id, title, qty, unit, spec, code, norm_json, terms_json, state FROM items WHERE assignment_id=? AND id IN (${want.map(() => "?").join(",")}) ORDER BY line_no`)
     .bind(aid, ...want).all()).results || []).filter((i) => i.state === "open");
   if (!its.length) throw new HttpError("این اقلام دیگر باز نیستند.", 409);
 
@@ -593,12 +596,13 @@ export async function spSend(env, ex, b) {
     : env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
 
   const text = T(b.text).slice(0, 3000);
-  /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته و لایه‌های قفل — عکسش در meta برای کارتِ پیام */
+  /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته، لایه‌های قفل و «📋 شرایط خرید»ِ شرکت — عکسش در meta برای کارتِ پیام */
   const evLines = (fresh.length ? fresh : its).map((i) => {
     const o = oldById.get(i.id), p = pack[fresh.indexOf(i)];
-    if (p) return { no: nos.get(i.id), title: p.title, head: p.head, qty: p.qty, unit: p.unit, layers: p.layers, extra: [] };
+    const lim = limitsTxt(limitsOf(i)) || null;
+    if (p) return { no: nos.get(i.id), title: p.title, head: p.head, qty: p.qty, unit: p.unit, layers: p.layers, extra: [], lim };
     return { no: nos.get(i.id), title: (o && o.title) || nrm(i.title), head: o && o.head, qty: o ? o.req_qty : i.qty, unit: o ? o.req_unit : T(i.unit) || null,
-      layers: parse(o && o.layers_json, []), extra: [] };
+      layers: parse(o && o.layers_json, []), extra: [], lim };
   });
   const evBody = `${fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم:` : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
   const msgs = [];
@@ -731,7 +735,7 @@ export async function threadFull(env, th, side) {
   const lim = await limitsOfLines(env, ls);
   return {
     thread: threadOut(th, side),
-    lines: ls.map((l) => ({ ...lineOut(l), limits: lim.get(l.item_id) || null })),
+    lines: ls.map((l) => ({ ...lineOut(l), limits: lim.get(l.item_id) || null, limits_txt: limitsTxt(lim.get(l.item_id)) || null })),
     terms_lock: lockOfLines(ls.filter((l) => LINE_EDITABLE.includes(l.state)), lim),
     revise: side === "s" && ls.some((l) => l.state === "final") ? await revisable(env, th.id) : false,
     bundles: (bundles.results || []).map((b) => bundleOut(b, side, { pfRead, lines: lines.results || [] })),
@@ -1315,13 +1319,21 @@ export async function previewTarget(env, sup, thId, lineIds) {
   let lines = want ? all.filter((l) => want.has(l.id)) : all.filter((l) => l.state === "ready");
   if (!lines.length) lines = all.filter((l) => LINE_EDITABLE.includes(l.state));
   if (!lines.length) throw new HttpError("قلمی برای پیش‌نمایش نیست.", 422);
-  const terms = termsOf(th);
+  const terms = await companyTerms(env, lines, termsOf(th));
   return { th, lines, terms, missing: proformaMissing(lines, terms) };
+}
+/** «📋 شرایط خرید»: محل تحویل، محل معامله و روش حمل از شرطِ شرکتِ نخستین قلمی که دارد، جایی که تأمین‌کننده خالی گذاشته */
+async function companyTerms(env, lines, terms) {
+  const lim = await limitsOfLines(env, lines);
+  let t = { ...(terms || {}) };
+  for (const l of lines) t = withCompany(t, lim.get(l.item_id));
+  return t;
 }
 /** پیش‌فاکتورِ یک بستهٔ فرستاده‌شده — همان خط‌ها و عکسِ شرایطِ همان بسته؛ کارشناسِ گفت‌وگو یا خودِ تأمین‌کننده */
 export async function bundleProforma(env, who, bundleId) {
   const { b, th } = await bundleFor(env, who, bundleId);
-  return { b, th, lines: await bundleLines(env, b.id), terms: termsOf(b) };
+  const lines = await bundleLines(env, b.id);
+  return { b, th, lines, terms: await companyTerms(env, lines, termsOf(b)) };
 }
 /**
  * Word پیش‌فاکتورِ تولیدیِ یک تأمین‌کننده در این درخواست، برای تب استعلامات و کمیسیون: همهٔ اقلامِ تأییدنهایی‌شدهٔ همین گفت‌وگو
@@ -1333,7 +1345,7 @@ async function genProforma(env, th, b, lines) {
   const done = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND state='final' ORDER BY id").bind(th.id).all()).results || [])
     .filter((l) => !lines.some((x) => x.id === l.id));
   const all = [...done, ...lines].sort((x, y) => (x.no || 0) - (y.no || 0) || x.id - y.id);
-  const blob = await renderProformaDoc(proformaInput(env, th, all, termsOf(b), { no: b.id, at: b.created_at || now() }));
+  const blob = await renderProformaDoc(proformaInput(env, th, all, await companyTerms(env, all, termsOf(b)), { no: b.id, at: b.created_at || now() }));
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const key = storageKey(th.assignment_id, `sp-gen-${b.id}.docx`);
   await store.put(key, bytes, { contentType: DOCX_MIME, size: bytes.length });
@@ -1466,22 +1478,24 @@ async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
   const have = new Map(((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
     .map((r) => [r.item_id, r.id]));
   const byLine = new Map(res.lines.map((x) => [x.line_id, x.values]));
-  const tm = res.terms;
+  /* «📋 شرایط خرید»: محل تحویل، محل معامله و روش حمل را تأمین‌کننده وارد نمی‌کند — از شرطِ شرکتِ همان قلم (terms-locks.js:withCompany) */
+  const lim = await limitsOfLines(env, lines);
   const stmts = [];
   for (const l of lines) {
+    const tm = withCompany(res.terms, lim.get(l.item_id));
     const v = byLine.get(l.id) || {};
     const spec = [l.head ? `نوع قلم: ${l.head}` : null, ...(v.spec || []).map((x) => `${x.k}: ${x.v}`)].filter(Boolean).join("، ").slice(0, 500) || null;
     const q = { unit: v.unit || null, qty: v.qty ?? null, price: v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
     const ok = canSave(q) ? 1 : 0;
     const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
-      tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
+      tm.deal || null, tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
     if (have.has(l.item_id)) {
-      stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, place=?, place_other=?, saved=?,
+      stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, deal=?, place=?, place_other=?, saved=?,
           final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, updated_at=? WHERE id=?`)
         .bind(...vals, b.id, t, have.get(l.item_id)));
     } else {
-      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?)`)
+      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?)`)
         .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, t, t));
     }
   }

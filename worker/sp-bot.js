@@ -531,7 +531,8 @@ async function askTerm(env, row, l, k, head, opt) {
     return { ok: true };
   }
   P.setFlow(row, { step: "term", line: l.id, k, ...(wz ? { wz } : {}) });
-  const dl = f === "dtime" && lk.dtime && (lk.dtime.from || lk.dtime.to) ? `\n<i>🔒 شرطِ شرکت: زمان تحویل ${esc(rangeTxt(lk.dtime))}</i>` : "";
+  const dl = f === "dtime" && lk.dtime && (lk.dtime.from || lk.dtime.to) ? `\n<i>🔒 شرطِ شرکت: زمان تحویل ${esc(rangeTxt(lk.dtime))}</i>`
+    : f === "valid_days" && lk.valid ? `\n<i>🔒 شرطِ شرکت: دست‌کم ${fa(lk.valid)} روز</i>` : "";
   const r = await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
   if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
