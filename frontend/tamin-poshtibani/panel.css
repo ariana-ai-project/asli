@@ -236,9 +236,6 @@ button.chip:hover { border-color: var(--tp-accent); color: var(--tp-fg); }
 .b-over  { background: var(--tp-over); border-color: #9e1f11; color: #fff; }
 .b-done  { background: var(--tp-ok); border-color: #15803d; color: #fff; }
 .b-muted { background: rgba(120,120,140,.15); border-style: dashed; }
-.legend { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-inline-start: auto; }
-.legend span { display: flex; align-items: center; gap: 5px; font-size: .78rem; color: var(--tp-muted); }
-.legend i { width: 14px; height: 12px; border: 1px solid var(--tp-line-2); border-radius: 3px; display: inline-block; }
 
 /* ---------- پابرگ چسبان ---------- */
 .tp-foot {

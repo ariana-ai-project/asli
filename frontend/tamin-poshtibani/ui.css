@@ -508,7 +508,7 @@ body.has-sky .sp-main .sp-sticky { background: transparent; }
 body.has-foot .tp-help-fab { bottom: max(68px, env(safe-area-inset-bottom)); }
 /* نوار ثابتِ «تأیید نهایی و ارسال» روی محتوا نمی‌افتد؛ در گوشی فقط دکمه می‌ماند (راهنمای رنگ‌ها در «؟ راهنما») */
 body.has-foot .tp-cards, body.has-foot .tp-wrap { padding-bottom: 96px; }
-@media (max-width: 640px) { .tp-foot .legend, .tp-foot .hint { display: none; } body.has-foot .tp-cards, body.has-foot .tp-wrap { padding-bottom: 80px; } }
+@media (max-width: 640px) { .tp-foot .hint { display: none; } body.has-foot .tp-cards, body.has-foot .tp-wrap { padding-bottom: 80px; } }
 /* وقتی گوشی سمت چپِ صفحه است (مکاتبات، پنل تأمین‌کننده)، دکمه و کشو سمت راست می‌روند تا روی گوشی نیفتند */
 .tp-help-fab.right { left: auto; right: max(var(--ui-help-fab), env(safe-area-inset-right)); }
 .tp-help.right .tp-help-panel { left: auto; right: 0; border-inline-end: 0; border-inline-start: 1px solid var(--ui-edge); animation-name: uiSlideInR; }
@@ -844,8 +844,6 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
 .hx-none b { color: var(--tp-fg); }
 .hx-basis { padding: 0 4px; }
 .hx-basis .dim { font-size: .8rem; line-height: 1.9; padding-top: 6px; }
-.normrates-box { margin-top: 10px; }
-.normrates-box > div { padding-top: 6px; }
 .pk-rule { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 4px 0 8px; font-size: .84rem; }
 .pk-ph { font-size: .8rem; margin-inline-start: 4px; }
 .why-lines { margin: 4px 0 10px; padding-inline-start: 20px; line-height: 1.9; color: var(--tp-fg); }

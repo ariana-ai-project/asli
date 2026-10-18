@@ -15,7 +15,7 @@
   const S = {
     tab: "desk", now: Date.now(),
     data: { requests: [], experts: [], settings: null }, scores: { scores: [], weights: [] },
-    decisions: [], events: [], hist: null,
+    decisions: [], events: [],
     /* فیلتر کارشناس و وضعیت چندانتخابی‌اند (تصمیم مدیر). وضعیت پیش‌فرض: هرچه بسته/متوقف نیست. */
     filter: { experts: [], expertText: "", statuses: null, state: "", window: CFG.defaults.window || "3d" },
     pop: null,                                   // فیلتر بازشده: "expert" | "status"
@@ -26,7 +26,6 @@
     fOpen: false, fAnim: null,                   // کادرِ «فیلتر» میز و حرکتِ بازشدنش
     exQ: "", exPick: null, exPickQ: "", exLand: null,   // تخته‌ی کارشناسان: جستجو، انتخابگرِ عضو، تراشهٔ تازه‌نشسته
     smEx: null, smKind: "guild", dlTab: "speed", dlMore: false,   // ارجاع و مهلت هوشمند
-    nm: { q: "", g: "*", sort: "n", limit: 120 },                 // اقلام و کدها
     evCat: "",                                                     // دستهٔ رویدادها
     loading: false, error: "",
   };
@@ -49,7 +48,6 @@
   }
   const GROUPS = () => (AX && AX.groups) || [];
   const PROJECTS = () => (AX && AX.projects) || [];
-  const groupName = (code) => { const g = GROUPS().find((x) => x.code === code); return g ? g.name : "متفرقه"; };
   const PL = () => TP.plan;                                    /* assign-rules.mjs */
   const Wt = () => PL().tables(S.scores.scores, S.scores.weights);
   const guildsOf = (its) => its.map((i) => i.g || PL().MISC_GUILD);
@@ -178,8 +176,9 @@
   }
 
   /* ---------- سرآیند و بخش‌ها ----------
-     نُه تب در یک کپسول: چهار تبِ پرکاربرد مستقیم، سه تبِ تنظیمات زیرِ «تنظیمات ▾» و دو تبِ داده زیرِ «داده‌ها ▾» (مهر ۱۴۰۵) */
-  const TAB_FA = { desk: "میز ارجاع", experts: "کارشناسان", alerts: "تنظیم اعلانات", asg: "ارجاع هوشمند", dl: "مهلت هوشمند", norm: "اقلام و کدها", hist: "سوابق تأمین", reports: "گزارش‌ها", log: "تصمیم‌ها و رویدادها" };
+     هفت تب در یک کپسول: چهار تبِ پرکاربرد مستقیم و سه تبِ تنظیمات زیرِ «تنظیمات ▾» (مهر ۱۴۰۵)؛
+     «اقلام و کدها» و «سوابق تأمین» به خواستِ مدیر (مهر ۱۴۰۵) برداشته شدند — بارگذاریِ چهار فایلِ مرجع با scripts/import-catalog.mjs */
+  const TAB_FA = { desk: "میز ارجاع", experts: "کارشناسان", alerts: "تنظیم اعلانات", asg: "ارجاع هوشمند", dl: "مهلت هوشمند", reports: "گزارش‌ها", log: "تصمیم‌ها و رویدادها" };
   function vTop() {
     const R = S.data.requests, items = R.reduce((a, r) => a + r.items.length, 0);
     const sub = `${S.page.total > R.length ? `${M(S.page.total)} درخواست در بازه · ${R.length} بارگذاری‌شده` : `${R.length} درخواست`} · ${M(items)} قلم · ${esc(CFG.company)}`;
@@ -190,7 +189,7 @@
     return TP.ui.topbar({ title: "میز ارجاع خرید", sub, actions: `<button class="tp-btn primary" data-import>${TP.ui.ICON.upload}بارگذاری درخواست‌های روزانه</button>`,
       user: { name: "مدیر تدارکات", sub: esc(CFG.company), initial: "م" },
       items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
-      + `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("desk")}${tab("experts")}${grp("تنظیمات", "settings", ["alerts", "asg", "dl"])}${grp("داده‌ها", "data", ["norm", "hist"])}${tab("reports")}${tab("log")}</div>
+      + `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("desk")}${tab("experts")}${grp("تنظیمات", "settings", ["alerts", "asg", "dl"])}${tab("reports")}${tab("log")}</div>
       <span class="spacer"></span>
       <label class="chip ${settings().approvalRequired ? "warn" : ""}" style="display:inline-flex;gap:6px;align-items:center;cursor:pointer;padding:4px 12px" title="توقف / تعلیق / خاتمه توسط کارشناس منوط به تأیید من باشد"><input type="checkbox" data-approval ${settings().approvalRequired ? "checked" : ""}> تصمیم کارشناس با تأیید من</label>
       ${TP.ui.info(`manager.${S.tab}`, "راهنمای این بخش")}</div>`;
@@ -457,6 +456,19 @@
     try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); return true; }
     catch (e) { S.exLand = null; TP.modal("خطا", esc(e.message), null, "باشد", ""); return false; }
   }
+  /* جابه‌جایی میانِ تیم‌ها (کشیدن، «افزودن عضو»، «انتقال به تیمِ…») و زنگوله همان لحظه روی تخته می‌نشیند و درخواست
+     پشتِ صحنه می‌رود — senior_id و notify_to در سرور اثرِ جانبی ندارند (worker/api.js:updateExpert)، پس خواندنِ دوبارهٔ
+     فهرست لازم نیست. خطا = برگشت به حالتِ قبل. درخواست‌های هر کارشناس پشتِ هم می‌روند تا ترتیبشان به‌هم نخورد. */
+  const exQueue = new Map();
+  function expertMove(id, body) {
+    const e = S.data.experts.find((x) => x.id === id); if (!e) return;
+    const prev = {}; for (const k of Object.keys(body)) prev[k] = e[k];
+    Object.assign(e, body); render();
+    const run = (exQueue.get(id) || Promise.resolve()).then(() => TP.api(`/experts/${id}`, { method: "PUT", body }))
+      .catch((er) => { Object.assign(e, prev); S.exLand = null; render(); TP.modal("خطا", esc(er.message), null, "باشد", ""); })
+      .finally(() => { if (exQueue.get(id) === run) exQueue.delete(id); });
+    exQueue.set(id, run);
+  }
   function addExpertDialog() {
     const d = TP.modal("کارشناس جدید", `<div class="tp-field"><b>نام و نام خانوادگی</b><input class="tp-input" id="ne-name" style="width:100%"></div>
       <div class="tp-field" style="margin-top:8px"><b>نام کوتاه (مثلاً «آقای بهمنی») — اختیاری</b><input class="tp-input" id="ne-label" style="width:100%"></div>
@@ -467,152 +479,10 @@
       }, "افزودن");
   }
 
-  /* ---------- سوابق خرید و فهرست اقلام ----------
-     چهار فایل مرجع با هم: اقلام (نرمال‌سازی)، شاخص تعدیل، نرخ تبدیل واحد، سوابق خرید.
-     در همین مرورگر خوانده و به هم وصل می‌شوند (catalog-import.js) و فقط نتیجه دسته‌دسته
-     فرستاده می‌شود. کارشناس در تب «بررسی سوابق» از همین‌ها «عین قلم» و «نوع قلم» را می‌بیند. */
-  /* ym = سال×۱۲ + ماه — همان چیزی که سرور برای فاصلهٔ ماهانه نگه می‌دارد */
-  const ymFa = (v) => { if (!v) return "—"; const y = Math.floor((v - 1) / 12); return `${TP.JM[v - y * 12 - 1]} ${y}`; };
-  /* سقف نوشتنِ روزانهٔ D1 در پلن رایگان Cloudflare — برای هشدار پیش از بارگذاری */
-  const DAILY_WRITES = 100000;
-  const PLAN_FA = { skip: "بی‌تغییر — نوشته نمی‌شود", append: "فقط ردیف‌های تازه", replace: "از نو ساخته می‌شود" };
-  const GROUP_FA = { catalog: "فهرست اقلام، نرخ‌ها و شاخص‌ها", grades: "کد و ردهٔ تأمین‌کنندگان", purchases: "ردیف‌های خرید" };
-
-  /* سوابق تأمین (مهر ۱۴۰۵): کارت‌برگ‌ها، فایل‌ها و جای رها کردنِ فایل؛ جزئیاتِ بارگذاری جمع‌شده و توضیح‌ها در راهنما */
-  function vHist() {
-    const h = S.hist, c = h && h.current, v2 = h && h.format === 2;
-    const fs = (c && c.file) || {};
-    const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
-    const state = !h ? ["", "در حال خواندن…"] : h.loading && h.loading.fp ? ["warn", "بارگذاری نیمه‌کاره"] : c && v2 ? ["ok", "به‌روز"] : c ? ["warn", "قالب قدیمی"] : ["bad", "بارگذاری نشده"];
-    const files = (c && c.files) || {};
-    /* کلیدها همان catalog-import.js: items، indices، units، history */
-    const SLOTS = [["items", "اقلام", "box"], ["indices", "شاخص تعدیل", "data"], ["units", "نرخ تبدیل واحد", "settings"], ["history", "سوابق خرید", "file"]];
-    const details = [fs.noIndex ? `${M(fs.noIndex)} خرید (${Object.keys(fs.noIndexYears || {}).map((y) => M(y)).join("، ")}) شاخص تعدیل ندارند و با ضریب ۱ آمده‌اند.` : "",
-      fs.skipped ? `${M(fs.skipped)} ردیفِ بی‌تأمین‌کننده کنار گذاشته شد.` : "", fs.norm ? normLine(fs.norm) : "",
-      h && h.loading && h.loading.fp ? `بارگذاری نیمه‌کاره از ${TP.fmt(h.loading.imported_at)}؛ همان چهار فایل را دوباره بارگذاری کنید تا از همان‌جا ادامه یابد.` : "",
-      c && !v2 ? `سوابق فعلی با قالب قدیمی است (${M(c.rows)} ردیف از «${esc(c.filename || "—")}»).` : ""].filter(Boolean);
-    return `<div class="hs-wrap ${TP.ui.once("mgr.hist")}">
-      ${hero("data", "سوابق تأمین", c ? `آخرین بارگذاری ${esc(TP.fmt(c.finished_at || c.imported_at))}` : "چهار فایل مرجع را بارگذاری کنید",
-        `<span class="chip ${state[0]}">${state[1]}</span>${TP.ui.info("manager.hist", "راهنمای سوابق تأمین")}<button class="tp-btn primary" data-hist-import>${TP.ui.ICON.upload} بارگذاری چهار فایل</button>`)}
-      ${c && v2 ? `<div class="tp-stats">${stat("ردیف خرید", M(c.rows), "file")}${stat("تأمین‌کننده", M(c.suppliers), "users")}${stat("با کد و رده", M(fs.graded || 0), "check", "ok")}${stat("کد قلم", M(c.codes), "box")}
-          ${stat("بازهٔ سوابق", `${ymFa(c.minYm)} – ${ymFa(c.maxYm)}`, "clock", "info")}${stat("فهرست اقلام", `${M(fs.items || 0)} قلم`, "data", "", `${M(fs.heads || 0)} نوع`)}${stat("مبنای قیمت", esc(h.base.priceLabel), "flag")}</div>`
-        : c ? `<div class="tp-stats">${stat("ردیف", M(c.rows), "file", "warn")}${stat("فایل", esc(c.filename || "—"), "data")}</div>` : ""}
-      <section class="tp-box hs-drop" data-hist-import role="button" tabindex="0" aria-label="بارگذاری چهار فایل مرجع">
-        <div class="hs-slots">${SLOTS.map(([k, n, ic]) => { const f = files[k]; return `<div class="hs-slot ${f ? "on" : ""}"><span class="bi">${TP.ui.ICON[ic]}</span><b>${n}</b><small title="${esc(f || "")}">${f ? esc(f) : "—"}</small></div>`; }).join("")}</div>
-        <div class="hs-cta">${TP.ui.ICON.upload}<b>چهار فایل را این‌جا رها کنید</b><span>یا بزنید و انتخاب کنید (.xlsx)</span></div></section>
-      ${details.length ? `<details class="tp-more hs-more"><summary>جزئیاتِ آخرین بارگذاری</summary><div>${details.map((d) => `<p>${d}</p>`).join("")}</div></details>` : ""}</div>`;
-  }
-
-  /* یکسان‌سازی فهرست اقلام (catalog-rules.mjs): لایهٔ کمّی عدد + واحدِ استاندارد، و جنسِ گفته‌نشده با عرفِ نوع قلم */
-  const normLine = (n) => {
-    const q = n.qty || {}, m = n.mat || {};
-    return `<b>یکسان‌سازی لایه‌ها:</b> مقدارهای کمّی — ${M(q.explicit || 0)} با واحدِ گفته‌شده، ${M(q.implicit || 0)} با واحدِ ضمنی (عرفِ همان ویژگی در همان نوع قلم)، `
-      + `${M(q.unknown || 0)} بی‌واحد (عرفی نبود؛ حدس زده نشد)${q.text ? `، ${M(q.text)} غیرعددی` : ""}. `
-      + `جنس در ${M(n.ruleItems || 0)} قلمِ نوع‌هایی که جنس برایشان مهم است — ${M(m.layer || 0)} از لایه، ${M(m.title || 0)} از عنوان، ${M(m.implied || 0)} ضمنی (عرفِ پذیرفته‌شده، مثل ورقِ بی‌جنس ← آهنی)، ${M(m.none || 0)} نامعلوم. `
-      + `${M(n.splitItems || 0)} قلم به نوع قلمِ جنس‌دار رفتند («ورق» ← «ورق آهنی»، «ورق گالوانیزه» …).`;
-  };
-
-  async function loadHist() { try { S.hist = await TP.api("/history/status"); } catch (e) { S.hist = { ready: false, error: e.message }; } render(); }
-
-  function pickHistory() {
-    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx"; inp.multiple = true;
-    inp.onchange = () => { if (inp.files && inp.files.length) askCatalogImport(inp.files); };
-    inp.click();
-  }
-
-  /* همان قاعدهٔ worker/catalog.js:catalogBegin — فقط برای برآورد پیش از پرسیدن. تصمیم نهایی با سرور است. */
-  function previewPlan(fp) {
-    const c = S.hist && S.hist.format === 2 && S.hist.current, prev = c && c.fp;
-    return {
-      catalog: prev && prev.cat === fp.cat ? "skip" : "replace",
-      grades: prev && prev.grades === fp.grades ? "skip" : "replace",
-      purchases: prev && prev.rows === fp.rows && prev.adj === fp.adj ? "skip" : prev && prev.adj === fp.adj ? "append" : "replace",
-    };
-  }
-
-  /* فایل‌ها پیش از هر پرسشی خوانده می‌شوند تا اثرانگشتشان را داشته باشیم: اگر همان
-     فایل‌های بارگذاری‌شده باشند، اصلاً نباید چیزی از مدیر پرسیده شود. */
-  async function askCatalogImport(fileList) {
-    const list = [...fileList].filter((f) => /\.xlsx$/i.test(f.name || ""));
-    if (!list.length) return TP.modal("فایل نامناسب", "فقط فایل اکسل (.xlsx) پذیرفته می‌شود.", null, "باشد", "");
-    const busy = TP.busy("خواندن فایل‌ها…", list.map((f) => esc(f.name)).join("<br>"));
-    const books = {}, names = {}, unknown = [];
-    let out;
-    try {
-      for (const f of list) {
-        busy.set(`خواندن «${esc(f.name)}» — ${(f.size / 1048576).toFixed(1)} مگابایت…`);
-        const wb = await TP.readBook(f);
-        const kind = TP.catalogKind(wb);
-        if (!kind) { unknown.push(f.name); continue; }
-        if (books[kind]) throw new Error(`دو فایل «${TP.catalogKindFa[kind]}» انتخاب شده: «${names[kind]}» و «${f.name}».`);
-        books[kind] = wb; names[kind] = f.name;
-      }
-      const missing = Object.keys(TP.catalogKindFa).filter((k) => !books[k]);
-      if (missing.length) {
-        throw new Error(`این فایل‌ها کم است: ${missing.map((k) => `«${TP.catalogKindFa[k]}»`).join("، ")}.`
-          + (unknown.length ? `\nشناخته نشد: ${unknown.join("، ")}` : "") + "\n\nهر چهار فایل را با هم انتخاب کنید.");
-      }
-      busy.set("اتصال فایل‌ها به هم…");
-      await new Promise((r) => setTimeout(r, 30));   /* تا پیام پیش از کار سنگینِ همگام نقش ببندد */
-      out = TP.buildCatalog(books, (t) => busy.set(esc(t)));
-    } catch (e) { busy.close(); return TP.modal("فایل‌ها خوانده نشدند", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); }
-    busy.close();
-
-    const plan = previewPlan(out.fp), st = out.stats;
-    if (Object.values(plan).every((p) => p === "skip")) {
-      return TP.modal("همین فایل‌ها از قبل بارگذاری شده‌اند", "هیچ چیزی عوض نشده است؛ چیزی نوشته نشد و سهمیهٔ دیتابیس هم مصرف نشد.", null, "باشد", "");
-    }
-    const rowsOf = (g) => TP.catalogGroups[g].reduce((n, t) => n + out.tables[t].length, 0);
-    const est = Object.entries(plan).reduce((n, [g, p]) => n + (p === "skip" ? 0 : rowsOf(g)), 0);
-    const line = (g) => `<tr><td class="rt">${GROUP_FA[g]}</td><td>${PLAN_FA[plan[g]]}</td><td class="num">${plan[g] === "skip" ? "—" : (plan[g] === "append" ? "حداکثر " : "") + M(rowsOf(g))}</td></tr>`;
-    TP.modal("بارگذاری سوابق و فهرست اقلام", `
-      <table class="tp-mx" style="width:100%;margin-bottom:10px"><thead><tr><th class="rt">بخش</th><th>وضعیت</th><th>نوشتن</th></tr></thead>
-        <tbody>${Object.keys(plan).map(line).join("")}</tbody></table>
-      ${M(st.rows)} ردیف خرید · ${M(st.suppliers)} تأمین‌کننده (${M(st.graded)} با کد و رده) · ${M(st.items)} قلم در ${M(st.heads)} نوع · ${M(st.layers)} لایهٔ ویژگی
-      ${st.skipped ? `<br><span class="dim">${M(st.skipped)} ردیف بی‌تأمین‌کننده کنار گذاشته می‌شود.</span>` : ""}
-      ${st.noHead ? `<br><span style="color:#fcd34d">${M(st.noHead)} ردیف کدی دارند که در فهرست اقلام نیست؛ در «عین قلم» و «نوع قلم» نمی‌آیند.</span>` : ""}
-      ${st.norm ? `<br><br><span class="dim" style="font-size:.88rem">${normLine(st.norm)}</span>` : ""}
-      ${est > DAILY_WRITES * 0.9 ? `<br><br><span style="color:#fcd34d"><b>حدود ${M(est)} نوشتن</b> — نزدیک یا بیش از سقف روزانهٔ دیتابیس (${M(DAILY_WRITES)}). اگر وسط کار تمام شد، فردا همین فایل‌ها را دوباره بارگذاری کنید تا ادامه یابد.</span>` : ""}
-      <br><br>ارسال چند دقیقه طول می‌کشد و در این مدت پنجره را نبندید. تا پایان کار، سوابق قبلی سر جایش است.`,
-    () => importCatalog(out, names), "بارگذاری کن");
-  }
-
-  async function importCatalog(out, names) {
-    const busy = TP.busy("بارگذاری سوابق و فهرست اقلام…", "شروع…");
-    let written = 0, ignored = 0;
-    try {
-      const beg = await TP.api("/catalog/begin", { body: { fp: out.fp, meta: out.meta, stats: out.stats, files: names, filename: names.history } });
-      if (beg.skipped) { busy.close(); await loadHist(); return TP.modal("چیزی برای نوشتن نبود", "این فایل‌ها دقیقاً همان داده‌های موجودند.", null, "باشد", ""); }
-      for (const [g, tables] of Object.entries(TP.catalogGroups)) {
-        if (beg.plan[g] === "skip") continue;
-        for (const t of tables) {
-          let sent = 0;
-          for (const part of TP.chunkRows(out.tables[t])) {
-            const r = await TP.api("/catalog/chunk", { body: { import_id: beg.import_id, table: t, rows: part } });
-            written += r.inserted || 0; ignored += r.ignored || 0; sent += part.length;
-            busy.set(`${TP.catalogTableFa[t]}: ${M(sent)} از ${M(out.tables[t].length)}<br><span class="dim">${M(written)} ردیف نوشته شد${ignored ? ` · ${M(ignored)} از قبل بود` : ""}</span>`);
-          }
-        }
-      }
-      busy.set("جابه‌جایی جدول‌ها و آمار مرجع…");
-      const fin = await TP.api("/catalog/finish", { body: { import_id: beg.import_id, writes: written } });
-      busy.close();
-      await loadHist();
-      TP.modal("سوابق و فهرست اقلام بارگذاری شد", `<b>${M(written)}</b> ردیف نوشته شد${ignored ? ` و <b>${M(ignored)}</b> ردیف چون از قبل بود دوباره نوشته نشد` : ""}${beg.resumed ? " (ادامهٔ بارگذاری نیمه‌کارهٔ قبلی)" : ""}.
-        <br>اکنون <b>${M(fin.stats.rows)}</b> ردیف خرید · <b>${M(fin.stats.suppliers)}</b> تأمین‌کننده · <b>${M(fin.stats.codes)}</b> کد قلم · بازه ${ymFa(fin.stats.minYm)} تا ${ymFa(fin.stats.maxYm)}.`, null, "باشد", "");
-    } catch (e) {
-      busy.close(); await loadHist();
-      TP.modal("بارگذاری کامل نشد", `${esc(e.message).replace(/\n/g, "<br>")}<br><br>${M(written)} ردیف تا این‌جا نوشته شد و سوابق قبلی هنوز سر جایش است.
-        اگر سهمیهٔ روزانهٔ دیتابیس تمام شده، فردا همین چهار فایل را دوباره بارگذاری کنید؛ از همان‌جا ادامه می‌یابد.`, null, "باشد", "");
-    }
-  }
-
-
   function vFoot() {
     const n = readyAssignments().length;
     return `<div class="tp-foot"><button class="tp-btn primary" data-dispatch ${n ? "" : "disabled"}>تأیید نهایی و ارسال (${n})</button>
-      <span class="hint">${n ? "" : "برای ارسال، کارشناس و مهلت را کامل کنید."}</span>
-      <span class="legend"><span><i class="b-empty"></i>در مهلت</span><span><i class="b-warn"></i>از آستانه گذشت</span><span><i class="b-late"></i>از آستانه بعدی هم گذشت</span><span><i class="b-over"></i>مهلت تمام شد</span><span><i class="b-done"></i>انجام شد</span><span><i class="b-muted"></i>هشدار خاموش</span><span><i class="b-idle"></i>ارسال‌نشده</span></span></div>`;
+      <span class="hint">${n ? "" : "برای ارسال، کارشناس و مهلت را کامل کنید."}</span></div>`;
   }
 
   /* ---------- تنظیم اعلانات (مهر ۱۴۰۵): نوارِ آستانه‌ها با دستگیره‌های کشیدنی، کلیدها و دایره‌های چرخان ----------
@@ -633,7 +503,7 @@
             ${TP.ui.switchEl({ attrs: `data-thr-on="${i}"`, on: p.value != null, label: "هشدار مهلت" })}
             ${TP.ui.switchEl({ attrs: `data-mstage="${i}"`, on: !!ticks[i], label: "اعلان تلگرام به من" })}</div>`).join("")}</div></section>
       <section class="tp-box al-rules"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h2>قواعدِ کار</h2><span class="sub">دایره را بچرخانید یا − و + بزنید</span></div>
-        <div class="al-knobs">${knob("dispatchDays", "مهلتِ ارسال توسط مدیر", "روز کاری", 0, 10)}${knob("minSuppliers", "حداقل تأمین‌کننده برای هر قلم", "تأمین‌کننده", 1, 10)}${knob("capacity", "ظرفیتِ درخواستِ باز هر کارشناس", "درخواست", 1, 40)}</div></section></div>`;
+        <div class="al-knobs">${knob("dispatchDays", "یادآوری مدیر توسط مدیر", "روز کاری", 0, 10)}${knob("minSuppliers", "حداقل تأمین‌کننده برای هر قلم", "تأمین‌کننده", 1, 10)}${knob("capacity", "ظرفیتِ درخواستِ باز هر کارشناس", "درخواست", 1, 40)}</div></section></div>`;
   }
 
   /* ---------- ارجاع و مهلت هوشمند (مهر ۱۴۰۵): کارتی، با لغزنده، دایره، شمارنده و امتیازِ نقطه‌ای ---------- */
@@ -681,7 +551,7 @@
           <span class="end"><div class="tp-seg sm" role="tablist">${[["guild", "گروه اصناف"], ["project", "پروژه"]].map(([k2, l]) => `<button type="button" role="tab" class="${kind === k2 ? "on" : ""}" aria-selected="${kind === k2}" data-sm-kind="${k2}">${l}</button>`).join("")}</div></span></div>
         ${ex ? `<div class="sm-expick" data-ghost-group>${E.map((e) => `<button type="button" class="sm-exb ${e.id === ex.id ? "on" : ""}" aria-pressed="${e.id === ex.id}" data-sm-ex="${e.id}">${avOf(e)}<span>${esc(e.label || e.name)}</span></button>`).join("")}</div>
         <div class="sm-keys">${keys.map((k2) => `<div class="sm-key"><span title="${esc(k2.title || k2.name)}">${esc(k2.name)}</span>${TP.ui.rating({ attrs: `data-score="${esc(rk(k2))}"`, value: scoreOf(ex.id, kind, k2.key), label: `${ex.label || ex.name} — ${k2.name}` })}</div>`).join("")
-          || `<div class="chip warn">${kind === "guild" ? "فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در «سوابق تأمین» بارگذاری کنید." : "پروژه‌ای تعریف نشده است."}</div>`}</div>`
+          || `<div class="chip warn">${kind === "guild" ? "فهرست اصناف در دیتابیس نیست." : "پروژه‌ای تعریف نشده است."}</div>`}</div>`
           : `<div class="dim">کارشناس فعالی نیست.</div>`}</section></div>`;
   }
 
@@ -691,9 +561,6 @@
     const list = S.data.requests.flatMap((r) => r.assignments.filter((a) => !a.dispatched_at && !(Number(a.days) > 0)).map((a) => ({ r, a })));
     needWorkload(); needAxes();
     const plans = WL && AX ? planDeadlines(list) : [];
-    const x0 = plans[0];
-    const term = (k, label, step, unit) => `<div class="dl-term"><small>${label}</small>${TP.ui.stepper({ attrs: `data-dl="${k}"`, value: +D[k] || 0, min: 0, max: Math.max(60, +D[k] || 0), step, unit, label })}</div>`;
-    const OPS = ["×", "÷", "+", "−"];
     const tab = S.dlTab || "speed";
     const coef = tab === "speed" ? E.map((x) => ({ attrs: `data-sp="${x.id}"`, v: +x.speed || 1, max: 3, name: x.label || x.name, av: avOf(x) }))
       : tab === "guild" ? GROUPS().map((g) => ({ attrs: `data-cw="${esc(g.code)}"`, v: weightOf("guild", g.code), max: 5, name: g.name, sub: `کد ${g.code}` }))
@@ -707,43 +574,11 @@
     return `<div class="sm-wrap ${TP.ui.once("mgr.dl")}">
       ${hero("clock", "مهلت هوشمند", list.length ? `${M(list.length)} ارجاعِ ارسال‌نشدهٔ بی‌مهلت` : "همهٔ ارجاع‌های ارسال‌نشده مهلت دارند",
         `${SAVED}${TP.ui.info("manager.dl", "راهنمای مهلت هوشمند")}<button class="tp-btn primary" data-apply-dl ${list.length && WL && AX ? "" : "disabled"}>${TP.ui.ICON.check} اعمال روی ${M(list.length)} ارجاع</button>`)}
-      <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h3>فرمولِ مهلت</h3><span class="sub">− و + را بزنید یا نگه دارید</span></div>
-        <div class="dl-formula"><span class="eq">مهلت =</span>${term("base", "پایه", 0.5, "روز")}${opSeg("dl-op", "op1", D.op1, OPS)}${term("we", "ضریب کارشناس", 0.1)}${opSeg("dl-op", "op2", D.op2, OPS)}${term("wp", "ضریب پروژه", 0.1)}${opSeg("dl-op", "op3", D.op3, OPS)}${term("wi", "ضریب گروه اصناف", 0.1)}<span class="eq">× √اقلام × اشغال</span></div>
-        ${x0 ? `<div class="dl-sample">نمونه — <b class="num">${esc(x0.r.id)}</b> · ${esc(x0.e.label || x0.e.name)}: ${x0.base.toFixed(2)} × ${x0.size.toFixed(2)} × ${x0.busy.toFixed(2)} ⇒ <b>${M(x0.days)} روز کاری</b></div>` : ""}</section>
       <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.clock}</span><h3>پیش‌نمایش مهلت‌ها</h3></div>${preview}</section>
       <section class="tp-box"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.data}</span><h3>ضریب‌ها</h3>
           <span class="end"><div class="tp-seg sm" role="tablist">${[["speed", "سرعت کارشناسان"], ["guild", "گروه‌های اصناف"], ["project", "پروژه‌ها"]].map(([k, l]) => `<button type="button" role="tab" class="${tab === k ? "on" : ""}" aria-selected="${tab === k}" data-dl-tab="${k}">${l}</button>`).join("")}</div></span></div>
         <div class="dl-coefs">${coef.map((c) => `<div class="dl-c">${c.av || ""}${TP.ui.range({ attrs: c.attrs, value: c.v, min: 0.1, max: Math.max(c.max, c.v), step: 0.1, label: c.name })}${c.sub ? `<small>${esc(c.sub)}</small>` : ""}</div>`).join("")
-          || `<div class="chip warn">فهرست اصناف در دیتابیس نیست؛ فایل‌های مرجع را در «سوابق تأمین» بارگذاری کنید.</div>`}</div></section></div>`;
-  }
-
-  /* ---------- اقلام و کدها (کد واقعی راهکاران) — کارتی، با جستجو و گروه ---------- */
-  function vNorm() {
-    needAxes();
-    const st = S.nm;
-    const seen = new Map();
-    S.data.requests.forEach((r) => r.items.forEach((it) => { const k = it.code || it.title; if (!seen.has(k)) seen.set(k, { code: it.code, title: it.title, unit: it.unit, n: 0, g: it.g || "" }); seen.get(k).n++; }));
-    const list = [...seen.values()];
-    const isMisc = (x) => !x.g || x.g === PL().MISC_GUILD;
-    const known = list.filter((x) => !isMisc(x)).length, pct = list.length ? Math.round(100 * known / list.length) : 0;
-    const byG = new Map(); list.forEach((x) => { const g = isMisc(x) ? "" : x.g; byG.set(g, (byG.get(g) || 0) + 1); });
-    const gs = [...byG].filter(([g]) => g).sort((a, b) => b[1] - a[1]);
-    const shown = list.filter((x) => (!st.q || TP.hit(x.title, st.q) || TP.hit(x.code || "", st.q)) && (st.g === "*" ? true : st.g === "" ? isMisc(x) : !st.g || x.g === st.g))
-      .sort(st.sort === "code" ? (a, b) => String(a.code || "").localeCompare(String(b.code || "")) : st.sort === "title" ? (a, b) => a.title.localeCompare(b.title, "fa") : (a, b) => b.n - a.n);
-    const ring = `<svg class="nm-ring" viewBox="0 0 36 36" aria-hidden="true"><circle cx="18" cy="18" r="15.9" class="bg"/><circle cx="18" cy="18" r="15.9" class="fg" style="--p:${pct}"/></svg>`;
-    const pill = (g, label, n) => `<button type="button" class="tp-pill ${st.g === g ? "on" : ""}" data-nmg="${esc(g)}">${esc(label)} <span class="n">${M(n)}</span></button>`;
-    return `<div class="nm-wrap ${TP.ui.once("mgr.norm")}">
-      <section class="tp-box nm-hero"><div class="nm-rw">${ring}<b>${M(pct)}٪</b></div><div class="sm-ht"><h2>اقلام و کدها</h2><span class="sub">${M(known)} از ${M(list.length)} قلمِ میز در فهرست اصناف پیدا شد</span></div>
-        <div class="tp-stats nm-st">${TP.ui.stat({ label: "قلمِ یکتا", value: M(list.length), icon: "box" })}${TP.ui.stat({ label: "در فهرست اصناف", value: M(known), icon: "check", tone: "ok" })}${TP.ui.stat({ label: "متفرقه", value: M(list.length - known), icon: "flag", tone: list.length - known ? "warn" : "ok" })}${TP.ui.stat({ label: "گروه اصناف", value: M(gs.length), icon: "data", tone: "info" })}</div>
-        <span class="end">${TP.ui.info("manager.norm", "راهنمای اقلام و کدها")}</span></section>
-      <section class="tp-box"><div class="nm-tools"><label class="ex-search">${TP.ui.ICON.search}<input class="tp-input" data-nmq value="${esc(st.q)}" placeholder="عنوان یا کد قلم…" aria-label="جستجوی قلم"></label>
-          <div class="tp-seg sm" role="tablist">${[["n", "پرتکرار"], ["code", "کد"], ["title", "عنوان"]].map(([k, l]) => `<button type="button" role="tab" class="${st.sort === k ? "on" : ""}" aria-selected="${st.sort === k}" data-nmsort="${k}">${l}</button>`).join("")}</div>
-          <span class="dim">${M(shown.length)} قلم</span></div>
-        <div class="tp-pills nm-groups">${pill("*", "همه", list.length)}${gs.map(([g, n]) => pill(g, groupName(g), n)).join("")}${byG.get("") ? pill("", "متفرقه", byG.get("")) : ""}</div>
-        <div class="nm-grid">${shown.slice(0, st.limit).map((x, i) => `<div class="nm-card ${isMisc(x) ? "misc" : ""}" style="--i:${Math.min(i, 16)}"><div class="nm-ch"><span class="nm-code">${esc(x.code || "—")}</span><span class="nm-n" title="تکرار در میز">×${M(x.n)}</span></div>
-            <div class="nm-tt" title="${esc(x.title)}">${esc(x.title)}</div><div class="nm-cf">${x.unit ? `<span class="chip">${esc(x.unit)}</span>` : ""}<span class="chip ${isMisc(x) ? "warn" : "info"}" title="${esc(x.g || "")}">${esc(groupName(x.g))}</span></div></div>`).join("")
-          || `<div class="dim">قلمی با این جستجو نیست.</div>`}</div>
-        ${shown.length > st.limit ? `<button class="tp-btn sm" data-nm-more style="margin-top:12px">${M(Math.min(120, shown.length - st.limit))} قلم بیشتر</button>` : ""}</section></div>`;
+          || `<div class="chip warn">فهرست اصناف در دیتابیس نیست.</div>`}</div></section></div>`;
   }
 
   /* ---------- تصمیم‌ها و رویدادها ---------- */
@@ -1273,7 +1108,7 @@
     app.innerHTML = vTop() + TP.ui.alarmBar(S.data.alarms) + (S.error ? `<div class="tp-note warn" style="margin:10px 18px">${esc(S.error)}</div>` : "") +
       (S.loading && !S.data.requests.length ? TP.ui.loader("", true) :
         S.tab === "desk" ? vFilters() + `<div class="tp-wrap">${vDesk()}</div>` + vFoot()
-        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "norm" ? vNorm() : S.tab === "hist" ? vHist() : S.tab === "reports" ? vReports() : vLog()}</div>`);
+        : `<div class="tp-wrap">${S.tab === "alerts" ? vAlerts() : S.tab === "experts" ? vExperts() : S.tab === "asg" ? vAssign() : S.tab === "dl" ? vDeadline() : S.tab === "reports" ? vReports() : vLog()}</div>`);
     wire();
     TP.ui.paintAll(app);
     TP.stickHeader(app.querySelector("table.tp-table"));
@@ -1295,8 +1130,7 @@
       catch (e) { b.disabled = false; TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     });
     if (G("[data-login-card]")) { TP.ui.bindLogin(a, { onSubmit: async (c) => { TP.manager.set(c); try { await TP.api("/login", { body: { role: "manager", code: c } }); S.error = ""; await refresh(); } catch (e) { TP.manager.clear(); throw e; } } }); return; }
-    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); if (S.tab === "hist") loadHist(); render(); });
-    Q("[data-hist-import]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); pickHistory(); }; b.onkeydown = (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pickHistory(); } }; });
+    Q("[data-tab]").forEach((b) => b.onclick = () => { S.tab = b.dataset.tab; if (S.tab === "desk") TP.ui.resetOnce("mgr.desk"); if (S.tab === "log") loadEvents(); render(); });
     const rf = G("[data-refresh]"); if (rf) rf.onclick = refresh;
     const lo = G("[data-logout]"); if (lo) lo.onclick = () => { TP.ui.push.off(PUSH_API); TP.ui.help.assistant(null); TP.manager.clear(); render(); };
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
@@ -1308,8 +1142,6 @@
     body.ondragleave = (e) => { if (!e.relatedTarget || e.relatedTarget === document.documentElement) body.classList.remove("tp-drop-over"); };
     body.ondrop = (e) => {
       e.preventDefault(); body.classList.remove("tp-drop-over");
-      /* روی تب سوابق، فایل‌های رهاشده همان چهار فایل مرجع‌اند نه درخواست‌های روزانه */
-      if (S.tab === "hist" && e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { askCatalogImport(e.dataTransfer.files); return; }
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
       if (!/\.xlsx$/i.test(f.name)) { TP.modal("فایل نامناسب", `فقط فایل اکسل (.xlsx) پذیرفته می‌شود؛ «${esc(f.name)}» نیست.`, null, "باشد", ""); return; }
       importFile(f);
@@ -1352,8 +1184,8 @@
     Q("[data-estar]").forEach((b) => b.onclick = async () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); if (await expertPatch(e.id, { senior: !e.senior })) TP.ui.success(e.senior ? "ارشدی برداشته شد" : "کارشناس ارشد شد"); });
     Q("[data-edel]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.edel);
       TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, async () => { if (await expertPatch(e.id, { active: false })) TP.ui.success("کارشناس حذف شد"); }, "حذف"); });
-    Q("[data-eteam]").forEach((b) => b.onclick = async () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); S.exPick = null; S.exLand = eid; await expertPatch(eid, { senior_id: e.senior_id === sid ? null : sid }); });
-    Q("[data-ebell]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.ebell); expertPatch(e.id, { notify_to: e.notify_to === "senior" ? "manager" : "senior" }); });
+    Q("[data-eteam]").forEach((b) => b.onclick = async () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); S.exPick = null; S.exLand = eid; expertMove(eid, { senior_id: e.senior_id === sid ? null : sid }); });
+    Q("[data-ebell]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.ebell); expertMove(e.id, { notify_to: e.notify_to === "senior" ? "manager" : "senior" }); });
     Q("[data-eadd-to]").forEach((b) => b.onclick = () => { const id = +b.dataset.eaddTo; S.exPick = S.exPick === id ? null : id; S.exPickQ = ""; render(); const i = G("[data-epickq]"); if (i) i.focus(); });
     const epq = G("[data-epickq]"); if (epq) epq.oninput = (e) => { S.exPickQ = e.target.value; TP.keepFocus(e.target, "epickq", render); };
     Q("[data-epick-close]").forEach((b) => b.onclick = () => { S.exPick = null; render(); });
@@ -1371,7 +1203,9 @@
         e.preventDefault(); e.stopPropagation(); t.classList.remove("over");
         const sid = +t.dataset.dropTeam || null, ex = S.data.experts.find((x) => x.id === id);
         if (!ex || ex.id === sid || (ex.senior_id || null) === sid) return;
-        S.exLand = id; expertPatch(id, { senior_id: sid });
+        /* بازرندرِ فوری تراشهٔ کشیده‌شده را برمی‌دارد و dragend شاید دیگر نرسد — حالتِ کشیدن همین‌جا پاک می‌شود */
+        a.classList.remove("ex-dragging");
+        S.exLand = id; expertMove(id, { senior_id: sid });
       };
     });
     const wa = G("[data-win-all]"); if (wa) wa.onclick = () => { S.filter.window = "all"; S.page.offset = 0; refresh(); };
@@ -1436,8 +1270,6 @@
     Q("input[data-asg]").forEach((i) => { i.oninput = (e) => { settings().assign[e.target.dataset.asg] = +e.target.value; mix(); saveCoef(); }; i.onchange = () => render(); });
     Q("[data-asg-op]").forEach((b) => b.onclick = () => { settings().assign[b.dataset.asgOp] = b.dataset.v; saveCoef(); render(); });
     Q("[data-asg-knob]").forEach((k) => k.addEventListener("tp-change", (e) => { if (+settings().assign[k.dataset.asgKnob] === e.detail.value) return; settings().assign[k.dataset.asgKnob] = e.detail.value; saveCoef(); render(); }));
-    Q(".tp-step[data-dl]").forEach((st) => { st.addEventListener("tp-input", (e) => { settings().deadline[st.dataset.dl] = e.detail.value; saveCoef(); }); st.addEventListener("tp-change", () => render()); });
-    Q("[data-dl-op]").forEach((b) => b.onclick = () => { settings().deadline[b.dataset.dlOp] = b.dataset.v; saveCoef(); render(); });
     Q("[data-dl-tab]").forEach((b) => b.onclick = () => { S.dlTab = b.dataset.dlTab; render(); });
     const dlm = G("[data-dl-more]"); if (dlm) dlm.onclick = () => { S.dlMore = true; render(); };
     Q("[data-sm-kind]").forEach((b) => b.onclick = () => { S.smKind = b.dataset.smKind; render(); });
@@ -1456,11 +1288,6 @@
       autoSave(`cw:${e.target.dataset.cw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "guild", key: e.target.dataset.cw, w }] } })); }; i.onchange = () => render(); });
     Q("input[data-pw]").forEach((i) => { i.oninput = (e) => { const w = setW("project", e.target.dataset.pw, e.target.value);
       autoSave(`pw:${e.target.dataset.pw}`, () => TP.api("/scores", { method: "PUT", body: { weights: [{ kind: "project", key: e.target.dataset.pw, w }] } })); }; i.onchange = () => render(); });
-    /* اقلام و کدها */
-    const nmq = G("[data-nmq]"); if (nmq) nmq.oninput = (e) => { S.nm.q = e.target.value; S.nm.limit = 120; TP.keepFocus(e.target, "nmq", render); };
-    Q("[data-nmg]").forEach((b) => b.onclick = () => { S.nm.g = b.dataset.nmg; S.nm.limit = 120; render(); });
-    Q("[data-nmsort]").forEach((b) => b.onclick = () => { S.nm.sort = b.dataset.nmsort; render(); });
-    const nmm = G("[data-nm-more]"); if (nmm) nmm.onclick = () => { S.nm.limit += 120; render(); };
     /* رویدادها: دسته‌ها */
     Q("[data-evcat]").forEach((b) => b.onclick = () => { S.evCat = b.dataset.evcat; render(); });
     const aa = G("[data-apply-asg]"); if (aa) aa.onclick = applyAssignAll;

@@ -1016,7 +1016,7 @@
      دو حالت (Task.txt، مهر ۱۴۰۵): «عین قلم» — همان نوع قلم با دقیقاً همان لایه‌های
      ویژگی — و «نوع قلم» — همهٔ اقلام همان نوع. ساختار قلم (نوع و لایه‌ها) یا از فهرست
      اقلام می‌آید (کد راهکاران)، یا با تیک «نرمال‌سازی اقلام» پیشنهاد و با تأیید
-     کارشناس ثبت می‌شود؛ نرخ‌های تبدیل واحد همان‌جا قابل ویرایش‌اند.
+     کارشناس ثبت می‌شود. جدولِ نرخ‌های تبدیلِ واحد به خواستِ مدیر (مهر ۱۴۰۵) از ویرایشگر برداشته شد.
      مبنای مقایسهٔ تأمین‌کنندگان (تصمیم مدیر) سه ستون است، نه قیمت: دفعات خرید، جمع
      مقدار (به واحد مرجع) و «گشتاور» — همان جمع مقدار وقتی خریدِ تازه‌تر سنگین‌تر
      شمرده شود (شیب از نوار ۱..۱۰). در امتیاز برابر، ردهٔ بالاتر (A، B، C) جلوتر است.
@@ -1043,7 +1043,6 @@
     bucket: "نام تجمیعی فایل مرجع است، نه یک تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
     employer: "مصالحِ تحویلیِ کارفرما است با قیمت اسمی، نه خرید از تأمین‌کننده؛ در سهم‌ها و رتبه‌ها حساب نشده",
   };
-  const CONF_CLS = { "قطعی": "ok", "بالا": "ok", "متوسط": "info", "پایین": "warn", "کارشناس": "info", "فرمول": "ok" };
   /* ساختار قلم از کجا آمده: سه تای اول خودِ دیتابیس‌اند (کد یا عنوانِ عیناً همان) و مدل صدا زده نمی‌شود */
   const SRC_FA = { catalog: "از دیتابیس — همین کد", title: "از دیتابیس — همین عنوان", edit: "از دیتابیس — ویرایش کارشناس",
     cache: "پیشنهاد مدل (همین عنوان قبلاً تفکیک شده)", model: "پیشنهاد مدل", manual: "ویرایش کارشناس" };
@@ -1055,12 +1054,6 @@
     const x = r == null || r === "" ? NaN : Number(r);
     return Number.isFinite(x) ? x.toLocaleString("en-US", { maximumFractionDigits: rateDigits(x), useGrouping: grp }) : grp ? "—" : "";
   };
-  /* عدد تایپ‌شده با کیبورد فارسی: «۰٫۵» و «0.5» یکی‌اند؛ خالی = null */
-  const numIn = (v) => {
-    const s = String(v == null ? "" : v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d))
-      .replace(/[,٬]/g, "").replace(/٫/g, ".").trim();
-    return s === "" ? null : Number(s);
-  };
   /* قواعد یکسان‌سازی (catalog-rules.mjs، از <script type="module"> صفحه): لایهٔ کمّی عدد و
      واحدِ جدا، و نمایش «ضمنی». اگر ماژول نرسیده باشد پنل با فیلد متنی ساده کار می‌کند. */
   const RL = () => (window.TP && TP.rules) || null;
@@ -1069,53 +1062,7 @@
   /* واحدهای هم‌بُعدِ یک لایهٔ کمّی (ضخامت: میلی‌متر، سانتی‌متر، اینچ …) */
   const unitsFor = (k) => { const R = RL(); if (!R || !R.QUANT[k]) return []; const d = R.QUANT[k]; return R.UNIT_NAMES.filter((u) => d.includes("*") || d.includes(R.UNITS[u].dim)); };
 
-  /* ---------- تبدیلِ ایستا/پویا (catalog-units.mjs، از راه TP.units) ----------
-     کادرِ نرخ‌ها برای هر واحد می‌گوید تبدیلش ایستاست — ضریب از خودِ دو واحد، برای همهٔ اقلام یکی (۱ تن =
-     ۱۰۰۰ کیلوگرم) — یا پویا: ضریب به اندازهٔ همین قلم بسته است (۱ ورق = مساحت × ضخامت × چگالی کیلوگرم) و
-     فرمول‌هایش (فرمول ۱، ۲، …) با لایه‌های همین پیش‌نویس حساب می‌شوند؛ لایه‌ای که کارشناس می‌افزاید یا اصلاح
-     می‌کند همان لحظه در فرمول می‌نشیند. بی ماژول، همان فرمول‌هایی که سرور با لایه‌های ذخیره‌شده حساب کرده. */
-  const UX = () => (window.TP && TP.units) || null;
-  const KIND_FA = { static: "ایستا", dynamic: "پویا", ref: "مرجع", unknown: "" };
-  const KIND_TIP = {
-    static: "ایستا: ضریب از خودِ دو واحد می‌آید و برای همهٔ اقلامِ این نوع یکی است (مثل ۱ تن = ۱۰۰۰ کیلوگرم)",
-    dynamic: "پویا: ضریب به اندازهٔ خودِ قلم بسته است (مساحت و ضخامتِ ورق، قطر و طولِ شاخه، شمارِ یک دست) و برای هر قلم با فرمول از لایه‌هایش حساب می‌شود",
-    unknown: "این واحد در جدولِ واحدها نیست؛ نرخِ فایل به کار می‌رود",
-  };
-  /** لایه‌های پیش‌نویس به شکلِ استاندارد، همان که «ذخیره» می‌فرستد و سرور یکسان می‌کند */
-  function draftLayers(dr) {
-    const R = RL(), L = {};
-    for (const l of dr.layers || []) {
-      if (!l.k || !String(l.t || "").trim()) continue;
-      if (isQuant(l.k)) { const q = R && R.quantWith(l.k, l.t, l.u || null, l.i); if (q) L[l.k] = q; }
-      else L[l.k] = l.i ? { v: l.t, i: 1 } : l.t;
-    }
-    return window.TP.canon ? TP.canon.canonLayers(dr.head, L) : L;
-  }
-  /** تبدیلِ یک واحد با لایه‌های پیش‌نویس؛ null اگر ماژول نیست یا نوع قلم در پیش‌نویس عوض شده (واحد مرجعِ تازه بعد از ذخیره) */
-  function liveConv(n, unit) {
-    const U = UX(), rv = (n.data && n.data.rates) || {};
-    if (!U || !rv.ref || String(n.draft.head || "").trim() !== String(n.data.head || "").trim()) return null;
-    try { return U.convert({ head: n.draft.head, layers: draftLayers(n.draft) }, unit, rv.ref); } catch (_) { return null; }
-  }
-  /** نرخی که ردیف نشان می‌دهد: نرخِ دستیِ پیش‌نویس، وگرنه فرمولِ پویا با لایه‌های پیش‌نویس، وگرنه نرخ سرور */
-  function rateShown(n, u, cv) {
-    if (n.draft.rates[u.unit] != null) return n.draft.rates[u.unit];
-    if (u.src !== "user" && cv && cv.type === "dynamic" && cv.rate != null) return cv.rate;
-    return u.rate;
-  }
-  /** خانهٔ «فرمول / مبنا» یک واحد */
-  function fxHtml(n, u, cv) {
-    const c = cv || { type: u.kind, formulas: u.formulas || [], used: u.used == null ? -1 : u.used, basis: u.staticBasis || "" };
-    const user = u.src === "user" || n.draft.rates[u.unit] != null;
-    const userNote = user ? `<div class="dim" style="font-size:.78rem">نرخِ دستیِ کارشناس بر ${c.type === "dynamic" ? "فرمول" : "ضریب"} مقدم است.</div>` : "";
-    if (c.type === "static") return `${esc(c.basis || u.staticBasis || u.basis)}${userNote}`;
-    if (c.type !== "dynamic") return `${esc(u.basis)}${userNote}`;
-    const li = (c.formulas || []).map((f, i) => `<li class="${i === c.used ? "used" : f.value != null ? "ok" : "miss"}"><b>فرمول ${M(i + 1)}:</b> ${esc(f.label)}
-      <div class="fxv">${f.value != null ? `${esc(f.expr)}${i === c.used && !user ? " — به کار رفت ✓" : ""}` : `لایهٔ ${(f.missing || []).map((x) => `«${esc(x)}»`).join(" و ")} را ندارد`}</div></li>`).join("");
-    const none = c.used < 0 ? `<div class="fxw">هیچ فرمولی لایه‌هایش را ندارد؛ ${!user && u.rate != null && u.src !== "formula" ? `نرخِ ثابتِ فایل (${fmtRate(u.rate)}) — یک عدد برای همهٔ اقلامِ این نوع — به کار می‌رود` : !user ? "خریدِ این واحد بی‌نرخ می‌ماند" : "نرخِ دستی به کار می‌رود"}. لایهٔ لازم را در «لایه‌های ویژگی» بالا بیفزایید.</div>` : "";
-    return `${li ? `<ol class="fxl">${li}</ol>` : ""}${none}${userNote}`;
-  }
-  /* «قلم انتخابی» هر قلم: لایه‌های تیک‌خورده، و واحدهای تیک‌خورده (null = همه) */
+  /* «قلم انتخابی» هر قلم: لایه‌های تیک‌خورده (واحدها null = همه؛ تیکِ واحدها با جدولِ نرخ‌ها رفت) */
   const pickOf = (it) => S.pick[it.id] || (S.pick[it.id] = { layers: [], units: null });
   /* پارامترهای جستجو. جستجو همیشه بر ساختارِ نرمال‌سازی است (ذخیره‌شده، یا دیتابیس با کد/عنوان)؛ پیشنهادِ
      ذخیره‌نشدهٔ مدل همراهِ درخواست می‌رود و فقط خوانده می‌شود. تیکِ «نرمال‌سازی اقلام» فقط کادرِ لایه‌ها را
@@ -1304,7 +1251,7 @@
     }).catch(() => { S.heads = undefined; });
   }
 
-  /* پنل «نرمال‌سازی اقلام»: نوع قلم، لایه‌ها و نرخ‌های تبدیل — همه قابل ویرایش. ساختار اول با کد و
+  /* پنل «نرمال‌سازی اقلام»: نوع قلم و لایه‌ها — قابل ویرایش. ساختار اول با کد و
      بعد با عنوانِ عیناً همان از دیتابیس می‌آید (بی مدل) و جستجو بی درنگ بر آن انجام می‌شود؛ فقط قلمِ
      تازه به مدل می‌رود و تا «ذخیره» نشود جستجو بر آن نه. «ذخیره» روی همین قلم و در دیتابیس اصلی
      برای کدش می‌نشیند (worker/normalize.js:confirmNorm). ویرایش‌ها بی‌بازرندر در draft می‌نشینند
@@ -1318,15 +1265,11 @@
         <div class="toolrow" style="margin-top:8px"><button class="tp-btn primary" data-norm-model>تفکیک با مدل…</button></div></div>`;
     }
     loadHeads();
-    const d = n.data, dr = n.draft, rv = d.rates || { ref: null, units: [] };
+    const d = n.data, dr = n.draft;
     const pickMode = S.hmode === "pick", pk = pickOf(it);
     /* نام‌های پنهان («نمره») در فهرستِ انتخاب نمی‌آیند، مگر همین لایه همان باشد */
     const names = d.layerNames || [];
     const opt = (sel) => [...new Set([...names, ...(sel && !names.includes(sel) ? [sel] : [])])].map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
-    /* «قلم انتخابی»: تیکِ هر نرخ = خریدهای همان واحد در جستجو می‌آیند (پیش‌فرض همه) */
-    const allUnits = [rv.refRow ? rv.refRow.unit : rv.ref, ...(rv.units || []).map((u) => u.unit)].filter(Boolean);
-    const unitOn = (u) => !pk.units || pk.units.includes(u);
-    const shareTip = (u) => (u.rows ? `${(u.share || 0).toFixed(1)}٪ از کلِ خریدِ این نوع قلم · ${M(u.rows)} خرید · ${M(RQ(u.qty))} ${u.unit}` : "در سوابق نیست");
     const cands = [...new Set([d.head, ...(d.candidates || [])].filter(Boolean))];
     const fromDb = DB_SRC.has(d.source);
     const where = it.code ? `کد ${it.code}` : "عنوانِ همین قلم";
@@ -1337,7 +1280,7 @@
     /* 🔒/🔓 برای تأمین‌کننده (طرح «خرید هوشمند» فاز ۱): پیش‌فرض همه 🔒؛ قلمی که رفته یا منجمد است عوض نمی‌شود */
     const ldis = lk || fz ? "disabled" : "";
     const lockBtn = (key, on, label, tip) => `<button class="tp-btn xs lockbtn ${on ? "on" : ""}" data-norm-lock="${key}" ${ldis} title="${esc(tip)}">${on ? "🔒" : "🔓"}${label ? ` ${label}` : ""}</button>`;
-    const lockNote = lk ? `<div class="hx-lock" title="${esc(`${lk.title}${lk.head ? ` — ${lk.head}` : ""}${(lk.layers || []).length ? ` · ${lk.layers.map((x) => `${x.k}: ${x.v}`).join(" · ")}` : ""}`)}">🔒 <b>فرستاده‌شده به تأمین‌کننده</b> — نوع قلم و لایه‌ها ثابت‌اند؛ فقط نرخ‌های تبدیل عوض می‌شوند.</div>` : "";
+    const lockNote = lk ? `<div class="hx-lock" title="${esc(`${lk.title}${lk.head ? ` — ${lk.head}` : ""}${(lk.layers || []).length ? ` · ${lk.layers.map((x) => `${x.k}: ${x.v}`).join(" · ")}` : ""}`)}">🔒 <b>فرستاده‌شده به تأمین‌کننده</b> — نوع قلم و لایه‌ها ثابت‌اند.</div>` : "";
     const fzNote = fz ? `<div class="hx-lock">🔒 <b>منجمد و سپرده به کارشناس هوشمند</b> — ${TP.fmt(it.frozen_at)}</div>` : "";
     return `<div class="normbox">${fzNote}${lockNote}
       <div class="toolrow" style="margin-bottom:8px"><b>نرمال‌سازی اقلام</b>
@@ -1369,19 +1312,7 @@
 </div>
       </div>
       ${d.residual ? `<div class="dim" style="font-size:.85rem;margin-top:6px">بخشی از عنوان که به هیچ لایه‌ای نخورد: <b>${esc(d.residual)}</b></div>` : ""}
-      ${rv.ref ? `<details class="tp-more normrates-box" ${pickMode || (rv.units || []).some((u) => u.conf === "پایین") ? "open" : ""}><summary>نرخ‌های تبدیل به «${esc(rv.ref)}» · ${M((rv.units || []).length + (rv.refRow ? 1 : 0))} واحد</summary><div>
-        ${pickMode ? `<div class="dim" style="font-size:.8rem;margin:2px 0 4px">☑️ واحدهایی که خریدهایشان در جستجو بیایند</div>` : ""}
-        <table class="tp-mx normrates" style="width:auto"><thead><tr>${pickMode ? "<th>در جستجو</th>" : ""}<th>واحد</th>
-          <th title="ایستا: ضریب از خودِ دو واحد، برای همهٔ اقلام یکی — پویا: ضریب به اندازهٔ هر قلم بسته است و با فرمول از لایه‌هایش حساب می‌شود">نوع</th>
-          <th title="برای همین قلم؛ در تبدیلِ پویا حاصلِ فرمول با لایه‌های همین قلم">نرخ</th><th>فرمول / مبنا</th><th>اطمینان</th></tr></thead><tbody>
-          ${rv.refRow ? `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(rv.refRow.unit)}" ${unitOn(rv.refRow.unit) ? "checked" : ""}></td>` : ""}<td title="${esc(shareTip(rv.refRow))}"><b>${esc(rv.refRow.unit)}</b></td><td><span class="chip">مرجع</span></td><td class="num">۱</td><td class="rt">واحد مرجع</td><td><span class="chip ok">قطعی</span></td></tr>` : ""}
-          ${(rv.units || []).map((u) => { const cv = liveConv(n, u.unit), kind = (cv && cv.type) || u.kind; return `<tr>${pickMode ? `<td><input type="checkbox" data-pick-u="${esc(u.unit)}" ${unitOn(u.unit) ? "checked" : ""}></td>` : ""}<td title="${esc(shareTip(u))}">${esc(u.unit)}${u.unconverted ? ` <span class="chip warn" title="خریدهایی با این واحد که نرخ ندارند">${M(u.unconverted)}</span>` : ""}</td>
-            <td>${KIND_FA[kind] ? `<span class="chip ${kind === "dynamic" ? "info" : "ok"}" title="${esc(KIND_TIP[kind] || "")}">${KIND_FA[kind]}</span>` : `<span class="dim" title="${esc(KIND_TIP.unknown)}">—</span>`}</td>
-            <td><input class="tp-input num" data-norm-rate="${esc(u.unit)}" value="${esc(fmtRate(rateShown(n, u, cv), false))}" inputmode="decimal" style="width:110px" ${fz ? "disabled" : ""} title="${kind === "dynamic" ? "حاصلِ فرمول برای همین قلم؛ عددی که بنویسید نرخِ دستیِ همین قلم می‌شود و بر فرمول مقدم است" : "نرخی که بنویسید بر نرخ فایل مقدم است"}"></td>
-            <td class="rt fxcell" data-norm-fx="${esc(u.unit)}">${fxHtml(n, u, cv)}</td><td><span class="chip ${CONF_CLS[u.conf] || ""}">${esc(u.conf)}</span></td></tr>`; }).join("")}
-        </tbody></table>
-        ${pickMode && allUnits.length && pk.units && !pk.units.length ? `<div class="chip warn" style="margin-top:6px">هیچ واحدی تیک نخورده؛ جستجو خالی می‌شود.</div>` : ""}</div></details>` : ""}
-      ${fz ? "" : `<div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها، نرخ‌های تبدیل و قفل‌ها؛ هر تغییر برای پشتیبانی ثبت می‌شود">${d.confirmed ? "ذخیره" : "✓ تأییدِ ساختار"}</button>
+      ${fz ? "" : `<div class="toolrow" style="margin-top:10px"><button class="tp-btn primary" data-norm-confirm title="روی همین قلم، و اگر با دیتابیس فرق دارد در دیتابیس اصلی برای ${esc(where)}، ذخیره می‌شود — نوع قلم، لایه‌ها و قفل‌ها؛ هر تغییر برای پشتیبانی ثبت می‌شود">${d.confirmed ? "ذخیره" : "✓ تأییدِ ساختار"}</button>
         ${d.confirmed ? "" : `<span class="chip warn" title="نرمال‌سازی اجباری است: بی تأیید، سوابقِ این قلم خوانده نمی‌شود">هنوز تأیید نشده</span>`}
         ${fromDb || lk ? "" : `<button class="tp-btn" data-norm-redo title="عنوان دوباره به مدل داده شود — پیش از آن از شما می‌پرسم">تفکیک دوباره با مدل…</button>`}
         ${lk ? "" : d.edit ? `<button class="tp-btn" data-norm-revert title="ساختاری که کارشناس برای این قلم در دیتابیس اصلی ذخیره کرده پاک می‌شود و ساختارِ فهرست اقلام (یا اگر قلم در فهرست نیست، پیشنهاد مدل) برمی‌گردد">حذف ویرایش از دیتابیس</button>`
@@ -2636,40 +2567,20 @@
       p.layers = c.checked ? [...new Set([...p.layers, k])] : p.layers.filter((x) => x !== k);
       if (S.hist[it.id]) runHist(); else render();
     });
-    Q("[data-pick-u]").forEach((c) => c.onchange = () => {
-      const it = item(); if (!it) return;
-      const n = S.norm[it.id], rv = (n && n.data && n.data.rates) || {};
-      const all = [rv.refRow ? rv.refRow.unit : rv.ref, ...(rv.units || []).map((u) => u.unit)].filter(Boolean);
-      const p = pickOf(it), cur = new Set(p.units || all);
-      if (c.checked) cur.add(c.dataset.pickU); else cur.delete(c.dataset.pickU);
-      p.units = all.every((u) => cur.has(u)) ? null : all.filter((u) => cur.has(u));
-      if (S.hist[it.id]) runHist(); else render();
-    });
     /* ویرایش پیش‌نویس بی‌بازرندر، تا فوکوس و مکان‌نما نپرند */
     const nd = () => { const it = item(); return it && S.norm[it.id] && S.norm[it.id].draft; };
-    /* فرمول‌ها و نرخِ ردیف‌های پویا با لایه‌های تازهٔ پیش‌نویس، همان لحظه و بی بازرندر */
-    const paintFx = () => {
-      const it = item(), n = it && S.norm[it.id]; if (!n || !n.data || !n.draft) return;
-      for (const u of (n.data.rates && n.data.rates.units) || []) {
-        const cell = [...Q("[data-norm-fx]")].find((el) => el.dataset.normFx === u.unit); if (!cell) continue;
-        const cv = liveConv(n, u.unit);
-        cell.innerHTML = fxHtml(n, u, cv);
-        const inp = [...Q("[data-norm-rate]")].find((el) => el.dataset.normRate === u.unit);
-        if (inp && document.activeElement !== inp && n.draft.rates[u.unit] == null) inp.value = fmtRate(rateShown(n, u, cv), false);
-      }
-    };
-    const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) { d.head = e.target.value; paintFx(); } };
+    const nh = G("[data-norm-head]"); if (nh) nh.oninput = (e) => { const d = nd(); if (d) d.head = e.target.value; };
     /* نام لایه عوض شد: کمّی یا نبودنش فرق کرد، پس فیلد واحد باید بیاید یا برود (بازرندر) */
     Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => {
       const d = nd(); if (!d) return;
       const l = d.layers[+e.target.dataset.normLk], was = isQuant(l.k);
       l.k = e.target.value;
       if (!isQuant(l.k)) l.u = "";
-      if (was !== isQuant(l.k)) render(); else paintFx();
+      if (was !== isQuant(l.k)) render();
     });
     /* دستِ کارشناس که به مقدار بخورد، دیگر «ضمنی» نیست */
-    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLv]; l.t = e.target.value; l.i = false; paintFx(); } });
-    Q("[data-norm-lu]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLu]; l.u = e.target.value; l.i = false; paintFx(); } });
+    Q("[data-norm-lv]").forEach((x) => x.oninput = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLv]; l.t = e.target.value; l.i = false; } });
+    Q("[data-norm-lu]").forEach((x) => x.onchange = (e) => { const d = nd(); if (d) { const l = d.layers[+e.target.dataset.normLu]; l.u = e.target.value; l.i = false; } });
     Q("[data-norm-ldel]").forEach((x) => x.onclick = () => { const d = nd(); if (d) { d.layers.splice(+x.dataset.normLdel, 1); render(); } });
     const nla = G("[data-norm-ladd]");
     if (nla) nla.onclick = () => {
@@ -2677,19 +2588,6 @@
       const used = new Set(n.draft.layers.map((l) => l.k));
       n.draft.layers.push({ k: (n.data.layerNames || []).find((x) => !used.has(x)) || "", t: "", u: "", i: false, lk: true }); render();
     };
-    Q("[data-norm-rate]").forEach((x) => x.oninput = (e) => {
-      const n = S.norm[item().id]; if (!n || !n.draft) return;
-      const u = e.target.dataset.normRate, v = numIn(e.target.value);
-      const orig = ((n.data.rates && n.data.rates.units) || []).find((r) => r.unit === u);
-      /* فقط نرخی که واقعاً عوض شده «نرخ کارشناس» می‌شود؛ خالی یا برابرِ نرخ فایل یا حاصلِ فرمول (همان‌طور که با
-         دو رقم اعشار نشان داده شده) یعنی همان نرخ فایل یا فرمول، با دقتِ کاملش */
-      const live = orig && liveConv(n, u), shown = orig ? (live && live.type === "dynamic" && live.rate != null ? live.rate : orig.rate) : null;
-      const same = (r) => r != null && (v === r || v === Number(fmtRate(r, false)));
-      if (v == null || (orig && orig.src !== "user" && (same(orig.rate) || same(shown)))) delete n.draft.rates[u]; else n.draft.rates[u] = v;
-      /* نوشتن یا پاک کردنِ نرخِ دستی: یادداشتِ «نرخِ دستی مقدم است» کنار فرمول */
-      const cell = [...Q("[data-norm-fx]")].find((el) => el.dataset.normFx === u);
-      if (cell && orig) cell.innerHTML = fxHtml(n, orig, live);
-    });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
     /* 🔒/🔓ِ عنوان، مقدار و هر لایه — در پیش‌نویس؛ با «تأیید» ذخیره می‌شود */
     Q("[data-norm-lock]").forEach((b) => b.onclick = () => {
