@@ -230,7 +230,7 @@
       items: [{ label: "ارجاع به تیم", icon: "users", attrs: `data-delegate="${a.id}"` }] })}</span>` : "";
     const proj = a.project || a.party || "—";
     return `<article class="tp-rcard ${lvl ? `lvl-${lvl}` : ""}" data-req="${a.id}" role="button" tabindex="0" style="--i:${Math.min(i, 12)}" aria-label="درخواست ${esc(a.request_id)}">
-      <header><span class="rid">${esc(a.request_id)}</span><span class="rdate">${esc(a.date)}</span><span class="chips">${chips}</span>${more}</header>
+      <header><span class="rid">${esc(a.request_id)}</span><span class="rdate">${esc(a.date)}</span><span class="chips">${TP.ui.sizeChip(a.size)}${chips}</span>${more}</header>
       <div class="rproj" title="${esc(proj)}">${TP.ui.ICON.project}<span>${esc(proj)}</span></div>
       <div class="rmeta"><span>اقلام باز <b>${a.open_count}</b> از <b>${a.item_count}</b></span><span>استعلام <b>${a.quote_count}</b></span>${a.project && a.party && a.project !== a.party ? `<span title="طرف مقابل">${esc(a.party)}</span>` : ""}</div>
       ${TP.ui.bar.deadline(pct, barLvl, "مهلت", `${a.days} روز`)}
@@ -291,9 +291,9 @@
     const menu = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
       items: [{ label: S.teamOpen[r.id] ? "بستن فهرست اقلام" : "فهرست اقلام", icon: "box", attrs: `data-ttoggle="${esc(r.id)}"` }] });
     const drawer = `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>وضعیت</th><th>توضیحات</th></tr></thead><tbody>
-      ${r.items.map((x) => `<tr><td class="num">${x.line_no}</td><td class="num">${esc(x.code || "")}</td><td>${esc(x.title)}</td><td class="dim">${esc(x.spec || "")}</td><td class="num">${x.qty == null ? "" : M(x.qty)}</td><td>${esc(x.unit || "")}</td><td class="num">${esc(x.need_date || "")}</td><td><span class="st ${TP.STATES[x.state].cls}">${TP.STATES[x.state].label}</span></td><td class="dim">${esc(x.note || "")}</td></tr>`).join("")}</tbody></table>`;
+      ${r.items.map((x) => `<tr><td class="num">${x.line_no}</td><td class="num">${esc(x.code || "")}</td><td>${esc(x.title)}</td><td class="dim">${esc(x.spec || "")}</td><td class="num">${x.qty == null ? "" : M(x.qty)}</td><td>${esc(x.unit || "")} ${TP.ui.estTxt(x)}</td><td class="num">${esc(x.need_date || "")}</td><td><span class="st ${TP.STATES[x.state].cls}">${TP.STATES[x.state].label}</span></td><td class="dim">${esc(x.note || "")}</td></tr>`).join("")}</tbody></table>`;
     return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center, menu,
-      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-ttoggle="${esc(r.id)}" aria-expanded="${S.teamOpen[r.id] ? "true" : "false"}"`,
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length, est: r.items[0] ? TP.ui.estTxt(r.items[0]) : "" }, toggleAttrs: `data-ttoggle="${esc(r.id)}" aria-expanded="${S.teamOpen[r.id] ? "true" : "false"}"`,
       drawerOpen: !!S.teamOpen[r.id], drawerHtml: drawer, units: r.assignments.map((a) => teamUnit(r, a)) });
   }
   /* تب «تیم کارشناسی»: کپسولِ کارشناسان (با شمار) بالا و کارت‌های درخواست زیرش — همان کارت‌های میز مدیر (مهر ۱۴۰۵) */
@@ -509,7 +509,7 @@
         ${vAiBar()}${vRateBar()}
       </div>
       <div class="tp-items" role="tablist" aria-label="اقلام">${its.map((x, i) => `<button type="button" class="tp-item ${i === S.itemIdx ? "on" : ""} ${x.state !== "open" ? "closed" : ""}" data-item="${i}" role="tab" aria-selected="${i === S.itemIdx ? "true" : "false"}" title="${esc(x.title)}">
-        <span class="t">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""}</span>
+        <span class="t">${esc(x.title)}</span><span class="m num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit)}${x.code ? ` · ${esc(x.code)}` : ""} ${TP.ui.estTxt(x)}</span>
         <span class="chips">${x.state !== "open" ? `<span class="st ${TP.STATES[x.state].cls}">${TP.STATES[x.state].label}</span>` : x.commission_ok ? `<span class="chip ok" title="پشتیبانی کمیسیون این قلم را تأیید کرده؛ «خاتمه» آن را می‌بندد">✓ کمیسیون</span>`
           : `<span class="chip" title="تیکِ تأیید کمیسیون فقط در پنل پشتیبانی زده می‌شود">⏳ تأیید پشتیبانی</span>`}
         ${x.state === "open" ? (frozen(x) ? `<span class="chip info" title="ساختار منجمد شد و به کارشناس هوشمند سپرده شد">🔒 منجمد</span>` : normOk(x) ? `<span class="chip ok" title="ساختارِ قلم (نوع، لایه‌ها، نرخ‌ها و قفل‌ها) تأیید شده">🧩 ✓</span>`
@@ -1595,9 +1595,11 @@
       }
       S.norm[it.id] = normState({ ...n.data, ...r.norm, confirmed: true, known: r.known, rates: r.rates, saved: r.saved, edit: r.saved === "reverted" ? null : r.edit || n.data.edit || null });
       dropHist(it);
-      const row = items().find((x) => x.id === it.id); if (row) row.norm_json = JSON.stringify(r.norm);
+      const row = items().find((x) => x.id === it.id); if (row) { row.norm_json = JSON.stringify(r.norm); row.est_at = null; }
       render();
       okTick("ساختار تأیید شد");
+      /* برآوردِ قیمت بر ساختارِ تازه (worker/estimate.js) — در اجرای جدا، بی انتظار */
+      TP.api(`/items/${it.id}/estimate`, { body: {} }).then((e) => { if (row) { row.est_unit_rial = e.est_unit_rial; row.est_at = Date.now(); render(); } }).catch(() => { /* Cron برمی‌دارد */ });
       return true;
     } catch (e) { return fail("ذخیره نشد", esc(e.message)); }
   }

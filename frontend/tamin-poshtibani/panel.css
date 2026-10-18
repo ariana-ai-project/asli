@@ -214,6 +214,15 @@ button.chip:hover { border-color: var(--tp-accent); color: var(--tp-fg); }
 .chip.bad { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.45); color: #fca5a5; }
 .chip.info { background: rgba(79,140,255,.14); border-color: rgba(79,140,255,.45); color: #bcd6ff; }
 .chip.mock { background: rgba(255,140,66,.12); border-color: rgba(255,140,66,.45); color: #ffc49b; }
+/* برچسبِ اندازهٔ درخواست (worker/size.js): جزئی · متوسط · بزرگ · عمده */
+.chip.sz { font-weight: 700; }
+.chip.sz-s { background: rgba(45,212,191,.14); border-color: rgba(45,212,191,.5); color: #5eead4; }
+.chip.sz-m { background: rgba(96,165,250,.15); border-color: rgba(96,165,250,.5); color: #93c5fd; }
+.chip.sz-l { background: rgba(251,191,36,.15); border-color: rgba(251,191,36,.5); color: #fcd34d; }
+.chip.sz-b { background: rgba(244,114,182,.16); border-color: rgba(244,114,182,.55); color: #f9a8d4; }
+.chip.sz .sz-part { font-style: normal; margin-inline-start: 4px; opacity: .8; }
+.est { font-size: .78rem; color: var(--tp-muted); white-space: nowrap; }
+.est.none { opacity: .7; }
 /* وضعیت راهکاران */
 .st { display: inline-block; font-size: .78rem; padding: 0 9px; border-radius: 999px; border: 1px solid; white-space: nowrap; line-height: 1.6; }
 .st-reg  { background: rgba(159,178,216,.12); border-color: rgba(159,178,216,.4); color: #c3d0ea; }
@@ -508,6 +517,10 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 :root[data-theme="light"] .drawer-in th, :root[data-theme="light"] .drawer-in td { border-bottom-color: rgba(30, 60, 120, 0.14); }
 :root[data-theme="light"] .tp-mx thead th { background: #e6edf8; }
 :root[data-theme="light"] .tp-mx tbody td.name { background: #f3f6fb; }
+:root[data-theme="light"] .chip.sz-s { color: #0f766e; }
+:root[data-theme="light"] .chip.sz-m { color: #1d4ed8; }
+:root[data-theme="light"] .chip.sz-l { color: #92400e; }
+:root[data-theme="light"] .chip.sz-b { color: #9d174d; }
 :root[data-theme="light"] .chip.ok { background: rgba(22, 163, 74, 0.1); border-color: rgba(22, 163, 74, 0.4); color: #15803d; }
 :root[data-theme="light"] .chip.warn { background: rgba(224, 172, 8, 0.12); border-color: rgba(224, 172, 8, 0.45); color: #7a5a05; }
 :root[data-theme="light"] .chip.bad { background: rgba(214, 58, 63, 0.1); border-color: rgba(214, 58, 63, 0.4); color: #b91c1c; }

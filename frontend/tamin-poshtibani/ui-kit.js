@@ -243,13 +243,17 @@
 
   /* ---------- نوارِ آستانه‌ها: دستگیره‌های کشیدنی روی مهلت (۰ تا ۱۰۰٪) ----------
      o: { attrs, points: [{ label, value (null = خاموش), color }] } — هر دستگیره بینِ همسایه‌های روشنش می‌ماند (صعودی، ۱ تا ۱۰۰).
-     رویدادها: tp-input / tp-change با { index, value }. در راست‌به‌چپ ۰٪ سمتِ راست است. */
+     رویدادها: tp-input / tp-change با { index, value }. در راست‌به‌چپ ۰٪ سمتِ راست است.
+     اختیاری: fmt (نامِ قالبِ عددِ دستگیره در UI.trackFmt — مثلاً مبلغ به‌جای درصد)، ticks [{x, label}]، ends [آغاز، پایان]. */
+  const trackFmt = {};
   function track(o) {
-    const P = o.points;
-    return `<div class="tp-track" ${o.attrs || ""}><div class="rail"><i class="fillr"></i>
-      ${[25, 50, 75].map((t) => `<span class="tick" style="--x:${t}%"><em>${nf(t)}٪</em></span>`).join("")}
-      ${P.map((p, i) => p.value == null ? "" : `<button type="button" class="h ${i % 2 ? "lo" : ""}" role="slider" data-ti="${i}" style="--x:${p.value}%;--c:${p.color}" aria-label="${esc(p.label)}" aria-valuemin="1" aria-valuemax="100" aria-valuenow="${p.value}" title="${esc(p.label)}"><span class="hv">${nf(p.value)}٪</span><span class="hl">${esc(p.label)}</span></button>`).join("")}</div>
-      <div class="ends"><span>آغاز مهلت</span><span>پایان مهلت</span></div></div>`;
+    const P = o.points, f = (o.fmt && trackFmt[o.fmt]) || ((v) => `${nf(v)}٪`);
+    const ticks = o.ticks || [25, 50, 75].map((t) => ({ x: t, label: `${nf(t)}٪` }));
+    const ends = o.ends || ["آغاز مهلت", "پایان مهلت"];
+    return `<div class="tp-track" ${o.attrs || ""}${o.fmt ? ` data-fmt="${esc(o.fmt)}"` : ""}><div class="rail"><i class="fillr"></i>
+      ${ticks.map((t) => `<span class="tick" style="--x:${t.x}%"><em>${esc(t.label)}</em></span>`).join("")}
+      ${P.map((p, i) => p.value == null ? "" : `<button type="button" class="h ${i % 2 ? "lo" : ""}" role="slider" data-ti="${i}" style="--x:${p.value}%;--c:${p.color}" aria-label="${esc(p.label)}" aria-valuemin="1" aria-valuemax="100" aria-valuenow="${p.value}" title="${esc(p.label)}"><span class="hv">${esc(f(p.value))}</span><span class="hl">${esc(p.label)}</span></button>`).join("")}</div>
+      <div class="ends"><span>${esc(ends[0])}</span><span>${esc(ends[1])}</span></div></div>`;
   }
   const trackVals = (t) => [...t.querySelectorAll(".h")].map((h) => ({ i: +h.dataset.ti, v: +h.getAttribute("aria-valuenow") }));
   function trackSet(t, h, v, final) {
@@ -257,7 +261,8 @@
     const prev = vals.filter((x) => x.i < i).pop(), next = vals.find((x) => x.i > i);
     const nv = clamp(Math.round(v), prev ? prev.v + 1 : 1, next ? next.v - 1 : 100);
     if (nv !== +h.getAttribute("aria-valuenow")) {
-      h.style.setProperty("--x", `${nv}%`); h.setAttribute("aria-valuenow", nv); h.querySelector(".hv").textContent = `${nf(nv)}٪`;
+      const f = trackFmt[t.dataset.fmt];
+      h.style.setProperty("--x", `${nv}%`); h.setAttribute("aria-valuenow", nv); h.querySelector(".hv").textContent = f ? f(nv) : `${nf(nv)}٪`;
       emit(t, "tp-input", { index: i, value: nv });
     }
     if (final) emit(t, "tp-change", { index: i, value: +h.getAttribute("aria-valuenow") });
@@ -293,5 +298,5 @@
   const alarmBar = (list, open) => (!list || !list.length ? "" : `<section class="tp-alarms" aria-label="هشدارها">${list.map((a) => `<div class="tp-alarm" role="alert">
       <span class="ic" aria-hidden="true">🚨</span><div class="t"><b>${esc(a.title)}</b>${a.body ? `<span>${esc(a.body)}</span>` : ""}<small>${esc(TP.fmt ? TP.fmt(a.at) : new Date(a.at).toLocaleString("fa-IR"))}</small></div>
       <div class="acts">${open ? open(a) : ""}<button class="tp-btn sm" type="button" data-alarm-ack="${a.id}">دیدم</button></div></div>`).join("")}</section>`);
-  Object.assign(UI, { fx, success, reveal, switchEl, knob, stepper, range, rating, track, stat, paintAll, alarmBar });
+  Object.assign(UI, { fx, success, reveal, switchEl, knob, stepper, range, rating, track, trackFmt, stat, paintAll, alarmBar });
 })();

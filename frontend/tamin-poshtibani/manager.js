@@ -351,8 +351,8 @@
       status: `<span><span class="st st-tender">در مناقصه</span> <span class="dim">${its.length} قلم</span></span>`, acts });
   }
   function itemsDrawer(r) {
-    return `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
-      ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="dim">${esc(i.note || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td class="num">${esc(i.need_date || "")}</td><td class="num">${esc(i.quote_deadline || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
+    return `<table><thead><tr><th>#</th><th>کد قلم</th><th>عنوان</th><th>مشخصه فنی</th><th>توضیحات</th><th>مقدار</th><th>واحد</th><th title="برآوردِ قیمت واحد از سوابق؛ برآوردِ کل روی همان">برآورد</th><th>تاریخ نیاز</th><th>مهلت استعلام</th><th>مصرف‌کننده</th><th>وضعیت راهکاران</th><th>کارشناس فایل</th><th>وضعیت سامانه</th><th>کارشناس</th></tr></thead><tbody>
+      ${r.items.map((i) => { const a = r.assignments.find((x) => x.id === i.assignment_id); return `<tr><td class="num">${i.line_no}</td><td class="num">${esc(i.code)}</td><td>${esc(i.title)}</td><td class="dim">${esc(i.spec || "")}</td><td class="dim">${esc(i.note || "")}</td><td class="num">${i.qty == null ? "" : M(i.qty)}</td><td>${esc(i.unit)}</td><td>${TP.ui.estTxt(i)}</td><td class="num">${esc(i.need_date || "")}</td><td class="num">${esc(i.quote_deadline || "")}</td><td class="dim">${esc(i.consumer || "")}</td>
         <td><span class="st ${TP.SRC_CLS[i.src_status] || "st-reg"}">${esc(i.src_status || "")}</span></td><td class="dim">${esc(i.src_expert || "—")}</td><td><span class="st ${TP.STATES[i.state].cls}">${TP.STATES[i.state].label}</span></td>
         <td>${a ? esc(a.expert_label || a.expert_name) : (i.state === "open" ? `<span class="chip warn">بدون کارشناس</span>` : "—")}</td></tr>`; }).join("")}
       </tbody></table>`;
@@ -371,8 +371,8 @@
     let lvl = ""; r.assignments.forEach((a) => { const c = unitLevel(r, a); if ((LVL[c] || 0) > (LVL[lvl] || 0)) lvl = c; });
     const menu = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="گزینه‌های درخواست" title="گزینه‌ها">${TP.ui.ICON.more}</button>`,
       items: [{ label: S.open[r.id] ? "بستن فهرست اقلام" : "فهرست اقلام", icon: "box", attrs: `data-toggle="${esc(r.id)}"` }, "-", { label: "حذف از سامانه", icon: "x", attrs: `data-del="${esc(r.id)}"`, cls: "danger" }] });
-    return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center, chips, menu,
-      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-toggle="${esc(r.id)}" aria-expanded="${S.open[r.id] ? "true" : "false"}"`,
+    return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center, chips, menu, size: TP.ui.sizeChip(r.size),
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length, est: r.items[0] ? TP.ui.estTxt(r.items[0]) : "" }, toggleAttrs: `data-toggle="${esc(r.id)}" aria-expanded="${S.open[r.id] ? "true" : "false"}"`,
       drawerOpen: !!S.open[r.id], drawerHtml: itemsDrawer(r), units });
   }
 
@@ -1496,11 +1496,27 @@
           ${unknown.length ? `<br><span style="color:#fcd34d">وضعیت ناشناخته در فایل: ${unknown.map(([k, v]) => `«${esc(k)}» ×${v}`).join("، ")} — باز فرض شد.</span>` : ""}
           ${st.badQty ? `<br><span style="color:#fcd34d">${st.badQty} سطر مقدار غیرعددی داشت.</span>` : ""}
           <br><br>${visible().length === 0 ? '<span style="color:#fca5a5">در بازه «امروز و دو روز گذشته» درخواستی نیست — بازه را روی «همه تاریخ‌ها» بگذارید.</span>' : `<b>${visible().length}</b> درخواست در بازهٔ فعلی.`}`;
+        /* برآوردِ قیمتِ اقلامِ تازه در پس‌زمینه (worker/estimate.js) — برچسبِ اندازهٔ کارت‌ها کم‌کم پر می‌شود */
+        estimateLoop(import_id);
         const nConf = fin.closeCandidates.length + fin.stateDrift.length + fin.expertDrift.length;
         if (!nConf) return TP.modal("فایل بارگذاری شد", summary, null, "باشد", "");
         showConflicts(summary, fin);
       } catch (e) { busy.close(); TP.modal("خطا در بارگذاری", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); }
     }
+  }
+  /* هر فراخوان یکی‌دو قلم (سقفِ کوئریِ هر اجرا)؛ تا left=false، حداکثر ۴۰۰ بار؛ هر ۱۰ بار میز تازه می‌شود */
+  let estRunning = false;
+  async function estimateLoop(importId) {
+    if (estRunning) return; estRunning = true;
+    try {
+      for (let k = 1; k <= 400; k++) {
+        const r = await TP.api("/estimate/run", { body: { import_id: importId } });
+        if (!r.left) break;
+        if (k % 10 === 0) await refresh();
+      }
+      await refresh();
+    } catch (_) { /* برآورد کارِ پس‌زمینه است؛ Cron باقی را برمی‌دارد */ }
+    estRunning = false;
   }
   function showConflicts(summary, fin) {
     const rows = [

@@ -399,8 +399,17 @@ export async function itemHistory(env, it, opts = {}) {
       .map((r) => ({ code: r.code, title: (byCode.get(r.code) || [])[1] || r.title, n: r.n, layers: (byCode.get(r.code) || [])[4] || null }));
   }
 
+  /* ۴) برآوردِ قیمتِ قلم (worker/estimate.js): ریزِ خریدهای همین محدوده، تازه‌ترین اول، با «قیمت روز» (ریالِ امروز) و لایه‌های قلمِ فهرست */
+  let buys;
+  if (opts.buys) {
+    const rows = await scoped(env, sc, `SELECT supplier_n AS sn, order_date, item_code, unit, qty, amount, amount_adj${ub ? `, ${usdAmt(ub)} AS usd` : ", NULL AS usd"}`,
+      `ORDER BY order_date DESC LIMIT ${Math.max(1, Math.min(5000, Number(opts.buys) || 3000))}`, [], [], ub ? USD_JOIN : "");
+    buys = rows.filter((r) => !excludedWhy(r.sn)).sort((x, y) => (x.order_date < y.order_date ? 1 : x.order_date > y.order_date ? -1 : 0))
+      .map((r) => ({ ...r, layers: (byCode.get(r.item_code) || [])[4] || null }));
+  }
+
   return {
-    ...head, struct, match, rates, titles,
+    ...head, struct, match, rates, titles, ...(buys ? { buys } : {}),
     excluded: [...excluded.values()],
     unconverted, lowConf, unitDropped, fixedDyn,
     item: { unit: hd.ref, units: [...units.keys()].join("، "), mixedUnits: false, refUnit: hd.ref },

@@ -67,7 +67,7 @@
     codes: null, codesOpen: false, codesErr: "",
     th: null, thErr: "", thLoading: false, thF: { expert: "", rid: "", q: "" }, thId: null, thData: null, thStick: false,
     log: null, logErr: "", logLoading: false, logF: { from: "", to: "", expert: "", rid: "", g: "" }, logMore: false, logNext: null, lfOpen: false,
-    cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1, cmRuleN: 0, cmRuleOpen: false,
+    cm: null, cmErr: "", cmLoading: false, cmF: { scope: "ready", expert: "", q: "" }, cmSel: new Set(), cmMin: 1, cmRuleN: 0, cmRuleOpen: false, sz: null, szErr: "", szOpen: false,
     /* کارشناس هوشمند (فاز ۲): فهرستِ کارشناسان با تیکِ هوشمند/دستی، و داشبوردِ یک کارشناس (expert-ai.js) */
     ai: null, aiErr: "", aiLoading: false, aiEx: null,
     /* فاز ۳: قواعدِ «حداقلِ استعلام» (زیرنمای تبِ کارشناس هوشمند) و تحویل‌های کارشناس هوشمند */
@@ -286,11 +286,11 @@
       acts: `<button class="tp-btn xs" type="button" data-tab="td">مناقصه‌ها</button><button class="tp-btn xs" type="button" data-tunref="${esc(r.id)}" title="اقلام به میز ارجاع مدیر برمی‌گردند">بازگرداندن</button>` }));
     if (!units.length) units.push(`<div class="tp-unit none">بی‌کارشناس</div>`);
     const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
-    const drawer = `<div class="sv-items">${r.items.map((x) => `<div class="sv-item"><span class="num dim">${x.line_no}</span><b>${esc(x.title)}</b><span class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</span>
+    const drawer = `<div class="sv-items">${r.items.map((x) => `<div class="sv-item"><span class="num dim">${x.line_no}</span><b>${esc(x.title)}</b><span class="num">${x.qty == null ? "" : M(x.qty)} ${esc(x.unit || "")}</span>${TP.ui.estTxt(x)}
       <span class="st ${(TP.STATES[x.state] || TP.STATES.open).cls}">${(TP.STATES[x.state] || TP.STATES.open).label}</span>${x.commission_ok ? `<span class="chip ok">🏆</span>` : ""}</div>`).join("")}</div>`;
     return TP.ui.reqCard({ i, lvl, rid: r.id, date: r.date, need, project: r.project, party: r.party, center: r.center,
-      chips: `<span class="st ${RS[st][1]}">${RS[st][0]}</span>`,
-      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length }, toggleAttrs: `data-rtog="${esc(r.id)}" aria-expanded="${S.rOpen[r.id] ? "true" : "false"}"`,
+      chips: `<span class="st ${RS[st][1]}">${RS[st][0]}</span>`, size: TP.ui.sizeChip(r.size),
+      items: { first: r.items[0] ? r.items[0].title : "", total: r.items.length, est: r.items[0] ? TP.ui.estTxt(r.items[0]) : "" }, toggleAttrs: `data-rtog="${esc(r.id)}" aria-expanded="${S.rOpen[r.id] ? "true" : "false"}"`,
       drawerOpen: !!S.rOpen[r.id], drawerHtml: drawer, units });
   }
   /** اقلامی که می‌شود به مناقصه برد: باز یا معلق، بی‌کارشناس یا در ارجاعِ ارسال‌نشده */
@@ -746,7 +746,9 @@
     /* حداقلِ استعلام (گزارشِ مالک، مهر ۱۴۰۵): همان حدی که «تولید جدول کمیسیون»ِ کارشناس را باز می‌کند، و قواعدش همین‌جا */
     h += `<div class="sv-cmrule"><span class="ic" aria-hidden="true">🎯</span><span class="t"><b>حداقل استعلام برای جدول کمیسیون</b>
         <small>پایهٔ مدیر: <b class="num">${M(S.cmMin)}</b> استعلام برای هر قلم${S.cmRuleN ? ` · <b class="num">${M(S.cmRuleN)}</b> بازهٔ قیمت/مقدار برای اقلامِ گران‌تر` : " · بی بازهٔ قیمت"}</small></span>
+        <button type="button" class="tp-btn sm ${S.szOpen ? "primary" : ""}" data-szopen aria-expanded="${S.szOpen ? "true" : "false"}">📏 برچسبِ اندازه</button>
         <button type="button" class="tp-btn sm ${S.cmRuleOpen ? "primary" : ""}" data-cmrules aria-expanded="${S.cmRuleOpen ? "true" : "false"}">${TP.ui.ICON.settings} قواعد حداقل استعلام</button>${TP.ui.info("support.cm", "مسیر جدول کمیسیون")}</div>`;
+    if (S.szOpen) h += vSize();
     if (S.cmRuleOpen) h += `<section class="tp-box sv-cmrules">${vRules()}</section>`;
     if (S.cmErr) h += `<div class="tp-note warn">${esc(S.cmErr)}</div>`;
     if (!S.cm) return h + (S.cmLoading ? `${TP.ui.loader()}` : "");
@@ -846,6 +848,42 @@
     const on = A.experts.filter((e) => e.on).length;
     h += `<h4 class="sv-h">کارشناسان <span class="chip">${M(on)} هوشمند از ${M(A.experts.length)}</span></h4>
       <div class="sv-aigrid">${A.experts.slice().sort((a, b) => (b.on ? 1 : 0) - (a.on ? 1 : 0)).map(aiCard).join("")}</div></div>`;
+    return h;
+  }
+
+  /* ---------- «📏 برچسبِ اندازه»: جزئی / متوسط / بزرگ / عمده (worker/size.js) ----------
+     سه مرز (تومان) روی نوارِ کشیدنی با مقیاسِ لگاریتمی (۱ میلیون تا ۱۰۰ میلیارد)؛ هر دستگیره فقط میانِ همسایه‌هایش. حداقلِ استعلامِ
+     هر رده و گامِ موجِ دعوت (٪ از مهلت) هم همین‌جا. ذخیرهٔ خودکار پس از مکث. */
+  const SZ_FA = { s: "جزئی", m: "متوسط", l: "بزرگ", b: "عمده" }, SZ_C = ["#2dd4bf", "#60a5fa", "#fbbf24"];
+  const szVal = (p) => { const x = Math.pow(10, 6 + p / 20), k = Math.pow(10, Math.floor(Math.log10(x)) - 1); return Math.round(x / k) * k; };
+  const szPos = (t) => Math.min(100, Math.max(1, Math.round((Math.log10(Math.max(1, t)) - 6) * 20)));
+  const fmtT = (t) => (t >= 1e9 ? `${+(t / 1e9).toFixed(1)} میلیارد` : t >= 1e6 ? `${+(t / 1e6).toFixed(1)} میلیون` : `${M(t)}`);
+  if (TP.ui.trackFmt) TP.ui.trackFmt.szToman = (p) => fmtT(szVal(p));
+  async function loadSize() {
+    S.szErr = ""; render();
+    try { S.sz = (await api("/support/size-rules")).rules; } catch (e) { S.szErr = e.message; }
+    render();
+  }
+  let szTimer = null;
+  function saveSizeSoon() {
+    clearTimeout(szTimer);
+    szTimer = setTimeout(async () => {
+      try {
+        S.sz = (await api("/support/size-rules", { method: "PUT", body: S.sz })).rules; S.szErr = "";
+        const ok = app.querySelector("[data-szsaved]"); if (ok) { ok.classList.remove("flash"); void ok.offsetWidth; ok.classList.add("flash"); }
+      } catch (e) { S.szErr = e.message; render(); }
+    }, 700);
+  }
+  const szBands = (th) => [`${SZ_FA.s} ≤ ${fmtT(th[0])}`, `${SZ_FA.m} ≤ ${fmtT(th[1])}`, `${SZ_FA.l} ≤ ${fmtT(th[2])}`, `${SZ_FA.b} > ${fmtT(th[2])}`];
+  function vSize() {
+    let h = `<section class="tp-box sv-size"><div class="tp-box-h"><span class="bi">📏</span><h2>برچسبِ اندازهٔ درخواست</h2><span class="sub">مرزها به تومان</span>${TP.ui.info("support.size", "راهنمای برچسبِ اندازه")}<span class="end"><span class="tp-saved" data-szsaved><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12.5l4.5 4.5L19 7"/></svg><span>ذخیرهٔ خودکار</span></span></span></div>`;
+    if (S.szErr) h += `<div class="tp-note warn">${esc(S.szErr)}</div>`;
+    if (!S.sz) return h + `${TP.ui.loader()}</section>`;
+    const th = S.sz.th, points = ["جزئی | متوسط", "متوسط | بزرگ", "بزرگ | عمده"].map((label, i) => ({ label, value: szPos(th[i]), color: SZ_C[i] }));
+    h += TP.ui.track({ attrs: "data-sz-track", points, fmt: "szToman", ticks: [1e7, 1e8, 1e9, 1e10].map((t) => ({ x: szPos(t), label: fmtT(t) })), ends: ["۱ میلیون", "۱۰۰ میلیارد"] });
+    h += `<div class="sv-szbands" data-szbands>${szBands(th).map((t, i) => `<span class="chip sz sz-${"smlb"[i]}">${esc(t)}</span>`).join("")}</div>`;
+    h += `<div class="sv-szq"><b>حداقلِ استعلامِ هر قلم</b>${["s", "m", "l", "b"].map((k) => `<label class="sv-szk"><span class="chip sz sz-${k}">${SZ_FA[k]}</span>${TP.ui.stepper({ attrs: `data-szq="${k}"`, value: S.sz.minQ[k], min: 1, max: 20, label: `حداقلِ استعلامِ ${SZ_FA[k]}` })}</label>`).join("")}
+      <label class="sv-szk"><b>موجِ دعوت هر</b>${TP.ui.stepper({ attrs: "data-szwave", value: S.sz.waveAt, min: 5, max: 95, step: 5, unit: "٪ مهلت", label: "گامِ موجِ دعوت" })}</label></div></section>`;
     return h;
   }
 
@@ -1420,6 +1458,7 @@
     if (d.lg !== undefined) { S.logF.g = d.lg; return loadLog(); }
     /* تأیید کمیسیون */
     if (d.cscope) { S.cmF.scope = d.cscope; S.cmSel.clear(); return loadCm(); }
+    if (d.szopen !== undefined) { S.szOpen = !S.szOpen; if (S.szOpen && !S.sz) return loadSize(); return render(); }
     if (d.cmrules !== undefined) { S.cmRuleOpen = !S.cmRuleOpen; if (S.cmRuleOpen && !S.rules) return loadRules(); return render(); }
     if (d.thOpen) { S.thF = { expert: "", rid: "", q: "" }; S.th = null; setTab("chat"); return openThread(Number(d.thOpen)); }
     if (d.thfClear !== undefined) { S.thF.rid = ""; return loadThreads(); }
@@ -1470,10 +1509,26 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-cmrules],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-cmrules],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
+  });
+  /* «📏 برچسبِ اندازه»: نوارِ مرزها و شمارنده‌ها (ui-kit.js) — tp-input حینِ کشیدن، tp-change پایان */
+  app.addEventListener("tp-input", (e) => {
+    const tr = e.target.closest && e.target.closest("[data-sz-track]"); if (!tr || !S.sz) return;
+    const th = S.sz.th.slice(); th[e.detail.index] = szVal(e.detail.value);
+    const b = app.querySelector("[data-szbands]"); if (b) b.querySelectorAll(".chip").forEach((c, i) => { c.textContent = szBands(th)[i]; });
+  });
+  app.addEventListener("tp-change", (e) => {
+    if (!S.sz) return;
+    const tr = e.target.closest && e.target.closest("[data-sz-track]");
+    if (tr) { const th = S.sz.th.slice(); th[e.detail.index] = szVal(e.detail.value); S.sz = { ...S.sz, th }; return saveSizeSoon(); }
+    const q = e.target.closest && e.target.closest("[data-szq]");
+    if (q) { S.sz = { ...S.sz, minQ: { ...S.sz.minQ, [q.dataset.szq]: e.detail.value } }; return saveSizeSoon(); }
+    const w = e.target.closest && e.target.closest("[data-szwave]");
+    if (w) { S.sz = { ...S.sz, waveAt: e.detail.value }; return saveSizeSoon(); }
+    return undefined;
   });
   app.addEventListener("change", (e) => {
     const t = e.target, d = t.dataset;

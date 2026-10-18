@@ -57,6 +57,7 @@ import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus, expertAppUrl } from "./tg-nav.js";
 import { normConfirmed } from "./structure.js";
+import { estimateRun } from "./estimate.js";
 import { BOXES, BOX_FA, boxesOn } from "./critique.js";
 export { dispatchText, seenKb } from "./assign.js";
 
@@ -3973,6 +3974,11 @@ export async function scheduled(env, cron) {
     if (!out.jobs) out = { ...out, ...(await aiTick(env).catch((e) => ({ aiError: e && e.message }))) };
     /* منوی ثابتِ کارشناسانی که هنوز نگرفته‌اند — فقط در دقیقه‌ای که نه جستجو اجرا شد نه گامی از کارشناس هوشمند */
     if (!out.jobs && !out.ai && env.TG_BOT_TOKEN) out = { ...out, ...(await pushNavMenus(env, telegram(env)).catch((e) => ({ navError: e && e.message }))) };
+    /* برآوردِ قیمتِ اقلامِ در صف (worker/estimate.js) — فقط دقیقهٔ بیکار و با سقفِ روزانه؛ پس‌مانده‌ها و اقلامی که ساختارشان عوض شد */
+    if (!out.jobs && !out.ai && !out.navSent) {
+      const e = await estimateRun(env, { daily: true, max: 1, budget: 40 }).catch((x) => ({ estError: x && x.message }));
+      out = { ...out, est: e.done || 0, ...(e.estError ? { estError: e.estError } : {}) };
+    }
   }
   return out;
 }

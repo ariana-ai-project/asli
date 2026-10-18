@@ -597,12 +597,34 @@
   function reqCard(o) {
     const proj = o.project || o.party || "—";
     return `<article class="tp-rcard mgr ${o.lvl ? `lvl-${o.lvl}` : ""}" ${o.attrs || ""} style="--i:${Math.min(o.i || 0, 12)}">
-      <header><span class="rid">${esc(o.rid)}</span>${o.date ? `<span class="rdate">${esc(o.date)}</span>` : ""}${o.need ? `<span class="chip" title="نزدیک‌ترین تاریخ نیاز اقلام">نیاز ${esc(o.need)}</span>` : ""}<span class="chips">${o.chips || ""}</span>${o.menu ? `<span class="more" data-stop>${o.menu}</span>` : ""}</header>
+      <header><span class="rid">${esc(o.rid)}</span>${o.date ? `<span class="rdate">${esc(o.date)}</span>` : ""}${o.need ? `<span class="chip" title="نزدیک‌ترین تاریخ نیاز اقلام">نیاز ${esc(o.need)}</span>` : ""}<span class="chips">${o.size || ""}${o.chips || ""}</span>${o.menu ? `<span class="more" data-stop>${o.menu}</span>` : ""}</header>
       <div class="rproj" title="${esc(proj)}">${ICON.project}<span>${esc(proj)}</span>${o.project && o.party && o.project !== o.party ? `<span class="dim">(${esc(o.party)})</span>` : ""}${o.center ? `<span class="dim">· ${esc(o.center)}</span>` : ""}</div>
-      ${o.items ? `<div class="rmeta ritems"><button type="button" class="tp-btn xs" ${o.toggleAttrs || ""} title="اقلام" data-stop>${o.drawerOpen ? "▾" : "◂"} ${esc(o.items.total)} قلم</button><span class="rfirst" title="${esc(o.items.first || "")}">${esc(o.items.first || "")}</span>${o.items.total > 1 ? `<span class="dim">و ${esc(o.items.total - 1)} قلم دیگر</span>` : ""}</div>` : ""}
+      ${o.items ? `<div class="rmeta ritems"><button type="button" class="tp-btn xs" ${o.toggleAttrs || ""} title="اقلام" data-stop>${o.drawerOpen ? "▾" : "◂"} ${esc(o.items.total)} قلم</button><span class="rfirst" title="${esc(o.items.first || "")}">${esc(o.items.first || "")}</span>${o.items.est || ""}${o.items.total > 1 ? `<span class="dim">و ${esc(o.items.total - 1)} قلم دیگر</span>` : ""}</div>` : ""}
       ${(o.units || []).length ? `<div class="tp-units">${o.units.join("")}</div>` : ""}
       ${o.drawerOpen && o.drawerHtml ? `<div class="tp-drawer">${o.drawerHtml}</div>` : ""}
       ${o.foot || ""}</article>`;
+  }
+  /* ---------- برچسبِ اندازهٔ درخواست و برآوردِ قیمتِ قلم (worker/size.js، worker/estimate.js) ----------
+     مبلغ‌ها در دیتابیس ریالی‌اند؛ مرزهای رده به تومان (۱ تومان = ۱۰ ریال). size از سرور: {cat, total_rial, n, est, miss, pend, partial} */
+  const SIZE_FA = { s: "جزئی", m: "متوسط", l: "بزرگ", b: "عمده" };
+  const nM = (n) => Math.round(Number(n) || 0).toLocaleString("en-US");
+  function sizeChip(sz) {
+    if (!sz || !sz.n) return "";
+    if (!sz.cat) {
+      return sz.pend ? `<span class="chip sz" title="برآوردِ قیمتِ اقلام هنوز در صف است">⏳ برآورد</span>`
+        : `<span class="chip sz" title="هیچ قلمی خریدِ هم‌واحد و هم‌لایه در سوابق نداشت">بی‌برآورد</span>`;
+    }
+    const tip = `برآوردِ کل ≈ ${nM(sz.total_rial / 10)} تومان (${nM(sz.total_rial)} ریال) · ${nM(sz.est)} از ${nM(sz.n)} قلم برآورد شد${sz.partial ? ` — ${sz.pend ? `${nM(sz.pend)} قلم در صف، ` : ""}${nM(sz.miss)} قلم بی‌برآورد` : ""}`;
+    return `<span class="chip sz sz-${sz.cat}" title="${esc(tip)}">${SIZE_FA[sz.cat]}${sz.partial ? `<i class="sz-part" aria-label="ناقص">◐</i>` : ""}</span>`;
+  }
+  /** برآوردِ قیمت واحدِ یک قلم کنارِ نامش — title: برآوردِ کل (قیمت واحد × مقدار) */
+  function estTxt(it) {
+    if (!it) return "";
+    if (it.est_unit_rial > 0) {
+      const tot = it.qty > 0 ? it.est_unit_rial * it.qty : null;
+      return `<span class="est num" title="${esc(`برآوردِ قیمت واحد از سوابق (قیمت روز)${tot ? ` · برآوردِ کل ≈ ${nM(tot)} ریال (${nM(tot / 10)} تومان)` : ""}`)}">≈ ${nM(it.est_unit_rial)} ریال</span>`;
+    }
+    return it.est_at ? `<span class="est none" title="در سوابق خریدِ هم‌واحد و هم‌لایه پیدا نشد">بی‌برآورد</span>` : `<span class="est none" title="برآورد در صف است">⏳</span>`;
   }
   /** یک ارجاع داخلِ کارت: o: { who (html کارشناس)، days (html)، ticks (html)، status (html)، bars (html)، acts (html منو) } */
   const unitRow = (o) => `<div class="tp-unit"><div class="u-who">${o.who || ""}${o.ticks ? `<span class="u-ticks">${o.ticks}</span>` : ""}</div><div class="u-days">${o.days || ""}</div><div class="u-bars">${o.bars || ""}</div><div class="u-st">${o.status || ""}</div><div class="u-acts">${o.acts || ""}</div></div>`;
@@ -741,5 +763,5 @@
     };
   })();
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, chatRow, avColor, avInitial, once, resetOnce, loader, push };
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, sizeChip, estTxt, chatRow, avColor, avInitial, once, resetOnce, loader, push };
 })();

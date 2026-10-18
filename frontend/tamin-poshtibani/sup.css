@@ -184,6 +184,12 @@
 .sv-cmrule .ic { font-size: 1.25rem; line-height: 1; }
 .sv-cmrule .t { display: flex; flex-direction: column; gap: 2px; flex: 1; min-width: 200px; line-height: 1.45; }
 .sv-cmrule .t small { color: var(--tp-muted); font-size: .8rem; }
+/* «📏 برچسبِ اندازه» (worker/size.js): نوارِ مرزها، رده‌ها و حداقلِ استعلامِ هر رده */
+.sv-size { margin: 10px 18px 0; }
+.sv-szbands { display: flex; flex-wrap: wrap; gap: 6px; margin: 2px 4px 10px; }
+.sv-szq { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 18px; padding: 6px 4px 2px; }
+.sv-szk { display: inline-flex; align-items: center; gap: 8px; }
+@media (max-width: 720px) { .sv-size { margin: 10px 10px 0; } .sv-szq { gap: 10px; } }
 .sv-cmrule .tp-btn svg { width: 15px; height: 15px; vertical-align: -3px; }
 .sv-cmrules { margin: 10px 18px 0; padding: 4px 16px 14px; }
 .sv-cmpath { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 4px; }

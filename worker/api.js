@@ -75,6 +75,8 @@ import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tend
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
+import { estimateRun, estimateItem, resetEstimate, EST_PENDING_SQL } from "./estimate.js";
+import { reqSize, reqSizeAgg, sizeRulesOf, getSizeRules, saveSizeRules, SIZE_KEY } from "./size.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines, withTqLocks } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
@@ -374,6 +376,10 @@ const COLUMN_MIGRATIONS = [
   ["ai_rates", "boxes", "TEXT"],
   ["ai_props", "boxes", "TEXT"],
   ["ai_feedback", "boxes", "TEXT"],
+  /* برچسبِ اندازهٔ درخواست (مهر ۱۴۰۵): برآوردِ قیمت واحدِ هر قلم به ریالِ امروز، منشأش و زمانش (worker/estimate.js) — est_at خالی = در صف */
+  ["items", "est_unit_rial", "REAL"],
+  ["items", "est_src", "TEXT"],
+  ["items", "est_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -451,6 +457,10 @@ const READ_INDEXES = [
   "CREATE INDEX IF NOT EXISTS ix_alog_at ON assignment_log(at)",
   "CREATE INDEX IF NOT EXISTS ix_items_hist ON items(hist_done_at)",
   "CREATE INDEX IF NOT EXISTS ix_items_norm ON items(norm_at)",
+  /* صفِ برآوردِ قیمت (worker/estimate.js): فقط اقلامِ بازِ برآوردنشده */
+  `CREATE INDEX IF NOT EXISTS ix_items_estq ON items(id) WHERE ${EST_PENDING_SQL}`,
+  /* برآوردِ Cron سوابقِ فعال را می‌خواهد (catalog.js:activeImport) */
+  "CREATE INDEX IF NOT EXISTS ix_himp_state ON hist_imports(state, id)",
   "CREATE INDEX IF NOT EXISTS ix_smart_at ON smart_searches(created_at)",
   "CREATE INDEX IF NOT EXISTS ix_quotes_at ON quotes(created_at)",
   "CREATE INDEX IF NOT EXISTS ix_quotes_final ON quotes(final_at)",
@@ -663,7 +673,8 @@ export async function cleanOrphans(env) {
 
 async function putSettings(env, patch) {
   const t = now(); const stmts = [];
-  const known = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => k in DEFAULTS));
+  /* sizeRules فقط از پنل پشتیبانی (PUT /support/size-rules) */
+  const known = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => k in DEFAULTS && k !== SIZE_KEY));
   /* هر تغییرِ آستانه‌ها و ضرایب ارجاع/مهلت هوشمند با مقدار قبلی در تاریخچه می‌ماند */
   stmts.push(...await settingsHistoryStmts(env, known, "manager"));
   for (const [k, v] of Object.entries(known)) {
@@ -940,6 +951,9 @@ async function desk(env, url) {
   /* پروژهٔ هر درخواست و گروه اصناف هر قلم از همین‌جا می‌روند: ارجاع و مهلت هوشمند نباید
      پروژه را از روی نام طرف مقابل و گروه را از روی عنوان حدس بزنند (تصمیم مدیر، مهر ۱۴۰۵) */
   await withProjectsAndGuilds(env, out, extra.settings);
+  /* برچسبِ اندازه از برآوردِ ذخیره‌شدهٔ اقلام (worker/size.js) — بی کوئریِ تازه */
+  const sr = sizeRulesOf(extra.settings);
+  for (const r of out) r.size = reqSize(r.items, sr);
   return { requests: out, ...extra };
 }
 
@@ -1421,6 +1435,10 @@ async function tray(env, ex, url) {
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.commission_ok=1) AS ok_count,
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quote_count,
       (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count,
+      (SELECT SUM(CASE WHEN i.est_unit_rial>0 AND i.qty>0 THEN i.est_unit_rial*i.qty END) FROM items i WHERE i.request_id=a.request_id AND i.state<>'stop') AS est_sum,
+      (SELECT COUNT(*) FROM items i WHERE i.request_id=a.request_id AND i.state<>'stop') AS est_n,
+      (SELECT COUNT(*) FROM items i WHERE i.request_id=a.request_id AND i.state<>'stop' AND i.est_unit_rial>0 AND i.qty>0) AS est_ok,
+      (SELECT COUNT(*) FROM items i WHERE i.request_id=a.request_id AND i.state<>'stop' AND i.est_at IS NULL) AS est_pend,
       ${AI_OWNED_SQL} AS ai
     FROM assignments a JOIN requests r ON r.id=a.request_id
     WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL
@@ -1428,7 +1446,8 @@ async function tray(env, ex, url) {
     ORDER BY a.dispatched_at DESC`).bind(ex.id).all(), getSettings(env)]);
   /* نامِ پروژهٔ هر درخواست (همان projectOf میز مدیر) — روی کارتِ کارتابل به‌جای «طرف مقابل» (مهر ۱۴۰۵) */
   const projects = reportProjects(settings);
-  for (const a of res.results || []) { const p = projectOf(projects, a.party, a.center); a.project = p ? p.name : null; }
+  const sr = sizeRulesOf(settings);
+  for (const a of res.results || []) { const p = projectOf(projects, a.party, a.center); a.project = p ? p.name : null; a.size = reqSizeAgg(a, sr); }
   const out = { assignments: res.results || [], settings: await settingsFor(env, ex.id, settings) };
   if (!full) return out;
   const tg = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(ex.id).first();
@@ -2087,6 +2106,9 @@ async function route(request, env, ctx) {
         if (mm[3] === "pass" && m === "POST") return json(await tenderPhonePass(env, mm[1], mm[2]));
       }
       if ((mm = /^\/support\/tenders\/(\d+)\/bids\/(\d+)$/.exec(path)) && m === "POST") return json(await tenderBidFix(env, mm[1], mm[2], await readJson(request)));
+      /* برچسبِ اندازه و حداقلِ استعلامِ هر رده (worker/size.js) */
+      if (path === "/support/size-rules" && m === "GET") return json({ rules: await getSizeRules(env) });
+      if (path === "/support/size-rules" && m === "PUT") return json({ rules: await saveSizeRules(env, await readJson(request), "support") });
       if (path === "/support/desk" && m === "GET") {
         /* همان میز مدیر، بی امتیازها و تصمیم‌ها (with) و بی کد ورود و تلگرامِ کارشناسان */
         const du = new URL(url.origin);
@@ -2200,6 +2222,12 @@ async function route(request, env, ctx) {
     if (path === "/import/chunk" && m === "POST") { await requireManager(request, env); return json(await importChunk(env, await readJson(request))); }
     if (path === "/import/finish" && m === "POST") { await requireManager(request, env); return json(await importFinish(env, await readJson(request))); }
     if (path === "/import/apply" && m === "POST") { await requireManager(request, env); return json(await importApply(env, await readJson(request))); }
+    /* برآوردِ قیمتِ اقلامِ تازه (worker/estimate.js): پنل مدیر بعد از بارگذاری پشتِ سرِ هم می‌زند تا left=false — هر بار یکی‌دو قلم */
+    if (path === "/estimate/run" && m === "POST") {
+      await requireManager(request, env);
+      const b = await readJson(request);
+      return json(await estimateRun(env, { importId: int(b && b.import_id) || null }));
+    }
     if (path === "/import/history" && m === "GET") { await requireManager(request, env); return json(await historyFingerprints(env)); }
     if (path === "/import/history" && m === "POST") { await requireManager(request, env); return json(await importHistory(env, await readJson(request))); }
     if (path === "/imports" && m === "GET") { await requireManager(request, env); return json({ imports: (await env.DB.prepare("SELECT * FROM imports ORDER BY id DESC LIMIT 30").all()).results || [] }); }
@@ -2635,8 +2663,8 @@ async function route(request, env, ctx) {
         if (vsBase.length && vsBefore.length) throw new HttpError("ساختارِ این قلم عوض شده؛ بنویسید چرا این تغییر لازم است.", 422, { need_reason: true, lines: diffLines(vsBase) });
       };
       const r = await confirmNorm(env, it, nb, who, { check });
-      /* سابقهٔ تغییرات (طرح «خرید هوشمند»): هر ذخیره — کنشگر، زمان، قبل ← بعد، و علتِ کارشناس */
-      await changeStmt(env, it, actorOf(who), "norm", before, r.norm, undefined, reason || null).run();
+      /* سابقهٔ تغییرات (طرح «خرید هوشمند»): هر ذخیره — کنشگر، زمان، قبل ← بعد، و علتِ کارشناس؛ برآوردِ قیمت بر ساختارِ تازه از نو */
+      await env.DB.batch([changeStmt(env, it, actorOf(who), "norm", before, r.norm, undefined, reason || null), resetEstimate(env, it.id)]);
       if (r.norm && r.rates) r.rates = await ratesWithShares(env, r.rates, r.norm.head, r.norm.code || null, r.norm.layers || null);
       return json(r);
     }
@@ -2657,6 +2685,14 @@ async function route(request, env, ctx) {
         ev(env, `expert:${ex.id}`, "item_terms", it.request_id, it.id, { assignment_id: it.aid, terms }),
       ]);
       return json({ ok: true, terms, text: limitsTxt(terms) });
+    }
+    /* برآوردِ دوبارهٔ قیمتِ یک قلم — پنل کارشناس بعد از تأییدِ ساختار (در اجرای جدا، به خاطرِ سقفِ کوئری) */
+    if ((mm = /^\/items\/(\d+)\/estimate$/.exec(path)) && m === "POST") {
+      const who = await requireAny(request, env);
+      const it0 = await ownItem(env, who, int(mm[1]));
+      const it = await env.DB.prepare("SELECT * FROM items WHERE id=?").bind(it0.id).first();
+      const est = await estimateItem(env, it);
+      return json({ ok: true, est_unit_rial: est ? est.unit_rial : null });
     }
     /* 🔒/🔓ِ عنوان و مقدار برای تأمین‌کننده — از «📋 شرایط خرید» (مهر ۱۴۰۵؛ پیش‌تر در ویرایشگرِ ساختار). همان norm_json.locks،
        پس sp-core.js:lineLocks و itemLocks همان را می‌خوانند؛ قلمِ تأییدنشده: پنل در پیش‌نویسِ ساختار نگه می‌دارد و با «تأیید» می‌رود */
