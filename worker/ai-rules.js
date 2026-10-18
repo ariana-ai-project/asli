@@ -16,8 +16,15 @@
  * ستونِ «استعلام n/حد»ِ تبِ «تأیید کمیسیون» پشتیبانی هم هست (itemNeeds) — دیگر دو عددِ جدا برای دو مسیر نیست.
  *
  * ذخیره در جدول settings با کلیدی بیرون از DEFAULTS (settingsFromRows به پنل‌های دیگر نمی‌دهدش).
+ *
+ * مهر ۱۴۰۵ (تصمیمِ مالک، برچسبِ اندازه — worker/size.js): حداقلِ استعلامِ هر قلم دیگر از «حدِ پایهٔ مدیر» و بازه‌های بالا نمی‌آید،
+ * بلکه از ردهٔ خودِ همان قلم: needFor ← minQِ ردهٔ «بالاترین پیشنهادِ کل» (قیمت واحد × مقدار) در میانِ خط‌های استعلام و اعلام‌های
+ * تأمین‌کنندگان؛ تا پیشنهادی نرسیده، ردهٔ برآوردِ کلِ قلم (est_unit_rial × مقدار)؛ بی هر دو، «جزئی». همهٔ مسیرها (نگهبانِ جدول
+ * کمیسیون در پنل و بات، کارشناس هوشمند، تبِ تأیید کمیسیون و شمارنده‌ها) از همین‌جا می‌خوانند. بازه‌ها و حدِ پایهٔ قدیمی در دیتابیس
+ * دست‌نخورده می‌مانند؛ از این قواعد فقط «مهلتِ رسیدن به حد» (waitHours) هنوز به کار می‌رود.
  */
 import { HttpError } from "./http.js";
+import { getSizeRules, minQOf, sizeOfRial, rialToToman, tomanTxt, SIZE_FA, SIZE_DEFAULT } from "./size.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const FA = "۰۱۲۳۴۵۶۷۸۹";
@@ -88,33 +95,29 @@ export async function saveRules(env, body, by = "support") {
 }
 
 /**
- * حداقلِ استعلامِ یک قلم: بیشینهٔ حدِ پایه و حدِ بازه‌هایی که بالاترین قیمت واحد، بالاترین قیمت کل یا مقدارِ درخواست در آن‌ها
- * می‌افتد. offers: [{price, qty}] — هر قیمتِ رسیده برای همین قلم. خروجی {need, base, vals, why: [{dim, v, from, to, min}]}.
+ * حداقلِ استعلامِ یک قلم از ردهٔ اندازه‌اش (worker/size.js). sr: settings.sizeRules؛ offers: [{price, qty}] — هر قیمتِ رسیده برای همین
+ * قلم (قیمت واحد، ریال). خروجی {need, cat, src: quote|est|none, v: مبلغِ کلِ سنجیده (ریال) یا null}.
  */
-export function needFor(rules, base, { qty, offers } = {}) {
-  const b = Math.max(1, Math.round(Number(base) || 1));
-  const priced = (offers || []).filter((o) => Number(o.price) > 0);
+export function needFor(sr, { qty, est_unit_rial, offers } = {}) {
+  const R = sr && sr.th ? sr : SIZE_DEFAULT;
   const q = Number(qty) > 0 ? Number(qty) : null;
-  const unit = priced.length ? Math.max(...priced.map((o) => Number(o.price))) : null;
-  const totals = priced.map((o) => Number(o.price) * (Number(o.qty) > 0 ? Number(o.qty) : q || 0)).filter((x) => x > 0);
-  const vals = { unit, total: totals.length ? Math.max(...totals) : null, qty: q };
-  const why = [];
-  for (const d of DIMS) {
-    const v = vals[d];
-    if (v == null) continue;
-    for (const r of (rules && rules[d]) || []) if (v >= r.from && (r.to == null || v < r.to)) why.push({ dim: d, v, from: r.from, to: r.to, min: r.min });
-  }
-  return { need: Math.max(b, ...why.map((w) => w.min)), base: b, vals, why };
+  const totals = (offers || []).filter((o) => Number(o.price) > 0).map((o) => Number(o.price) * (Number(o.qty) > 0 ? Number(o.qty) : q || 0)).filter((x) => x > 0);
+  let v = null, src = "none";
+  if (totals.length) { v = Math.max(...totals); src = "quote"; }
+  else if (Number(est_unit_rial) > 0 && q) { v = Number(est_unit_rial) * q; src = "est"; }
+  const cat = v != null ? sizeOfRial(v, R.th) : "s";
+  return { need: minQOf(R, cat), cat, src, v };
 }
 
-const range = (w) => `${w.dim === "qty" ? faN(w.from) : money(w.from)}${w.to == null ? " به بالا" : ` تا ${w.dim === "qty" ? faN(w.to) : money(w.to)}`}`;
-/** چرا این حد — یک جملهٔ کوتاه: «قیمت واحد ۱۲٬۰۰۰٬۰۰۰ ریال (بازهٔ ۱۰٬۰۰۰٬۰۰۰ تا ۵۰٬۰۰۰٬۰۰۰) ← ۳» */
+/** چرا این حد — یک جملهٔ کوتاه: «ردهٔ «بزرگ» — بالاترین پیشنهادِ کل ≈ ۳۰۰ میلیون تومان ← ۵» */
 export function whyText(n) {
-  if (!n || !n.why || !n.why.length) return `حدِ پایهٔ شرکت ← ${faN(n ? n.base : 1)}`;
-  const top = n.why.filter((w) => w.min === n.need);
-  const w = top[0] || n.why[0];
-  return `${DIM_FA[w.dim]} ${w.dim === "qty" ? faN(w.v) : `${money(w.v)} ریال`} (بازهٔ ${range(w)}) ← ${faN(w.min)}`;
+  if (!n) return "";
+  const c = SIZE_FA[n.cat] || SIZE_FA.s;
+  if (n.src === "quote") return `ردهٔ «${c}» — بالاترین پیشنهادِ کل ≈ ${tomanTxt(rialToToman(n.v))} تومان ← ${faN(n.need)}`;
+  if (n.src === "est") return `ردهٔ «${c}» — برآوردِ کل ≈ ${tomanTxt(rialToToman(n.v))} تومان ← ${faN(n.need)}`;
+  return `بی برآورد و پیشنهاد — ردهٔ «${c}» ← ${faN(n.need)}`;
 }
+const range = (w) => `${w.dim === "qty" ? faN(w.from) : money(w.from)}${w.to == null ? " به بالا" : ` تا ${w.dim === "qty" ? faN(w.to) : money(w.to)}`}`;
 /** شرحِ یک بازه برای پنل و پرامپت */
 export const ruleText = (d, r) => `${DIM_FA[d]} ${range({ dim: d, from: r.from, to: r.to })}${d === "qty" ? "" : " ریال"} ← دست‌کم ${faN(r.min)} استعلام`;
 
@@ -125,18 +128,14 @@ const LINE_OK = "l.state IN ('submitted','approved','proforma','final')";
 
 /**
  * حداقلِ استعلامِ هر قلم برای «تولید جدول کمیسیون» — یک قاعده برای کارشناس (پنل و بات)، کارشناس هوشمند و تبِ «تأیید
- * کمیسیون»ِ پشتیبانی (مهر ۱۴۰۵، گزارشِ مالک: پنل پشتیبانی حداقلِ استعلام را در مسیرِ جدول کمیسیون نداشت). بیشینهٔ حدِ پایهٔ
- * مدیر و بازه‌های پشتیبانی؛ وقتی هیچ بازه‌ای نیست کوئری نمی‌زند. items: [{id, qty}] از ارجاع‌های aids.
- * خروجی Map(itemId → {need, why, ruled}) — ruled یعنی بازه‌ای حد را از پایه بالاتر برده.
+ * کمیسیون»ِ پشتیبانی: ردهٔ اندازهٔ همان قلم (needFor). items: [{id, qty, est_unit_rial}] از ارجاع‌های aids. base و rules فقط برای
+ * سازگاری با فراخوان‌های قدیمی‌اند و در حد اثری ندارند.
+ * خروجی Map(itemId → {need, why, cat, src, ruled}) — ruled یعنی رده از «جزئی» بالاتر است.
  */
-export async function itemNeeds(env, aids, items, base, rules) {
-  const R = rules || await getRules(env);
-  const b = Math.max(1, Math.round(Number(base) || 1));
+export async function itemNeeds(env, aids, items, base, rules, sr) {
+  const S = sr || await getSizeRules(env);
   const out = new Map();
-  if (!ruleCount(R) || !items.length) {
-    for (const i of items) out.set(i.id, { need: b, why: whyText({ base: b }), ruled: false });
-    return out;
-  }
+  if (!items.length) return out;
   const ids = JSON.stringify([...new Set(aids.map(Number).filter(Boolean))]);
   const [qr, lr] = await env.DB.batch([
     env.DB.prepare("SELECT item_id, qty, price FROM quotes WHERE assignment_id IN (SELECT value FROM json_each(?)) AND price>0").bind(ids),
@@ -149,8 +148,8 @@ export async function itemNeeds(env, aids, items, base, rules) {
     offers.get(o.item_id).push({ price: Number(o.price), qty: o.qty });
   }
   for (const i of items) {
-    const n = needFor(R, b, { qty: i.qty, offers: offers.get(i.id) || [] });
-    out.set(i.id, { need: n.need, why: whyText(n), ruled: n.need > b });
+    const n = needFor(S, { qty: i.qty, est_unit_rial: i.est_unit_rial, offers: offers.get(i.id) || [] });
+    out.set(i.id, { need: n.need, why: whyText(n), cat: n.cat, src: n.src, v: n.src === "quote" ? n.v : null, ruled: n.cat !== "s" });
   }
   return out;
 }
@@ -162,8 +161,9 @@ export function ruleCount(R) { return DIMS.reduce((s, d) => s + ((R && R[d]) || 
  * (have). پیشنهادهای سنجیدنی: خط‌های استعلامِ قیمت‌دار و اعلام‌های تأمین‌کنندگان در مکاتبات (بی ردشده‌ها و پیش‌نویس‌ها).
  */
 export async function coverOf(env, assignmentId, rules, base) {
+  const sr = await getSizeRules(env);
   const [ir, qr, lr] = await env.DB.batch([
-    env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no, id").bind(assignmentId),
+    env.DB.prepare("SELECT id, title, qty, unit, est_unit_rial FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no, id").bind(assignmentId),
     env.DB.prepare("SELECT item_id, supplier_name, qty, price, saved, final FROM quotes WHERE assignment_id=?").bind(assignmentId),
     env.DB.prepare(`SELECT l.item_id, l.qty, l.price FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
       WHERE t.assignment_id=? AND l.price>0 AND ${LINE_OK}`).bind(assignmentId),
@@ -171,8 +171,8 @@ export async function coverOf(env, assignmentId, rules, base) {
   const quotes = qr.results || [], lines = lr.results || [];
   return (ir.results || []).map((i) => {
     const offers = [...quotes.filter((q) => q.item_id === i.id && Number(q.price) > 0), ...lines.filter((l) => l.item_id === i.id)].map((o) => ({ price: Number(o.price), qty: o.qty }));
-    const n = needFor(rules, base, { qty: i.qty, offers });
+    const n = needFor(sr, { qty: i.qty, est_unit_rial: i.est_unit_rial, offers });
     const have = new Set(quotes.filter((q) => q.item_id === i.id && q.saved && q.final).map((q) => skey(q.supplier_name)).filter(Boolean)).size;
-    return { id: i.id, title: i.title, qty: i.qty, unit: i.unit, need: n.need, have, why: whyText(n) };
+    return { id: i.id, title: i.title, qty: i.qty, unit: i.unit, need: n.need, cat: n.cat, have, why: whyText(n) };
   });
 }

@@ -45,6 +45,8 @@ if (DB) {
   DB.raw.prepare(`INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,req_qty,req_unit,qty,unit,price,state,no,created_at,updated_at) VALUES (50,41,'میلگرد ۱۲ آجدار','میلگرد',?,5,'تن',5,'تن',410000000,'final',1,?,?)`)
     .run(JSON.stringify([{ k: "قطر", v: "12" }]), t, t);
   DB.raw.prepare("INSERT INTO ai_threads (thread_id,run_id,source,state,seen_msg,created_at,updated_at) VALUES (50,?,'smart','final',0,?,?)").run(RUN, t, t);
+  /* حداقلِ استعلام از ردهٔ اندازهٔ قلم (مهر ۱۴۰۵، worker/size.js): ۵ تن × ۴۱۰ میلیون ریال = ۲۰۵ میلیون تومان ← «بزرگ» — در این آزمون ۳ */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('sizeRules',?,?)").run(JSON.stringify({ th: [50e6, 200e6, 5e9], minQ: { s: 1, m: 2, l: 3, b: 4 }, waveAt: 20 }), t);
   /* یک پیشنهادِ تأییدنهایی (کارشناس هوشمند) — حد با قواعدِ این آزمون ۳ است */
   DB.raw.prepare(`INSERT INTO quotes (id,assignment_id,item_id,supplier_name,unit,qty,price,dtime,pay,invoice,vat,saved,final,source,origin,created_at,updated_at)
     VALUES (101,1,41,'آهن الف','تن',5,410000000,'10','نقدی','رسمی','دارد',1,1,'ai','smart',?,?)`).run(t, t);
@@ -98,17 +100,18 @@ const RULES = {
   waitHours: 24,
 };
 
-test("needFor و cleanRules: بازه‌ها، رقم فارسی، حدِ پایه و خطاهای فرم", () => {
+test("needFor (ردهٔ اندازه) و cleanRules (مهلت و بازه‌های کهنه): رقم فارسی و خطاهای فرم", () => {
   const r = cleanRules(RULES);
   assert.deepEqual(r.unit, [{ from: 10000000, to: 100000000, min: 2 }, { from: 100000000, to: null, min: 3 }]);
   assert.equal(r.waitHours, 24);
-  /* قیمت واحد ۴۱۰ میلیون ← ۳؛ قیمت کل ۲٬۰۵ میلیارد ← ۲؛ مقدار ۵ ← هیچ */
-  const n = needFor(r, 1, { qty: 5, offers: [{ price: 410000000, qty: 5 }] });
-  assert.equal(n.need, 3);
-  assert.match(whyText(n), /قیمت واحد ۴۱۰٬۰۰۰٬۰۰۰ ریال .* ← ۳/);
-  assert.equal(needFor(r, 1, { qty: 5, offers: [{ price: 5000000, qty: 5 }] }).need, 1, "زیرِ همهٔ بازه‌ها: حدِ پایه");
-  assert.equal(needFor(r, 2, { qty: 5, offers: [] }).need, 2, "بی قیمت: حدِ پایه");
-  assert.equal(needFor(r, 1, { qty: 150, offers: [] }).need, 4, "بازهٔ مقدار");
+  /* مهر ۱۴۰۵: حد از ردهٔ «بالاترین پیشنهادِ کل» — ۵ × ۴۱۰ میلیون ریال = ۲۰۵ میلیون تومان ← بزرگ */
+  const sr = { th: [50e6, 200e6, 5e9], minQ: { s: 1, m: 2, l: 3, b: 4 }, waveAt: 20 };
+  const n = needFor(sr, { qty: 5, offers: [{ price: 410000000, qty: 5 }] });
+  assert.deepEqual([n.need, n.cat], [3, "l"]);
+  assert.match(whyText(n), /ردهٔ «بزرگ» — بالاترین پیشنهادِ کل ≈ ۲۰۵ میلیون تومان ← ۳/);
+  assert.equal(needFor(sr, { qty: 5, offers: [{ price: 5000000, qty: 5 }] }).need, 1, "جزئی");
+  assert.equal(needFor(sr, { qty: 5, offers: [] }).need, 1, "بی قیمت و برآورد: جزئی");
+  assert.equal(needFor(sr, { qty: 150, est_unit_rial: 4e8, offers: [] }).need, 4, "برآوردِ کل ۶ میلیارد تومان ← عمده");
   assert.throws(() => cleanRules({ unit: [{ from: 5, to: 3, min: 2 }] }), /«تا» باید از «از» بزرگ‌تر/);
   assert.throws(() => cleanRules({ total: [{ from: 1, min: 0 }] }), /حداقلِ استعلام/);
   assert.throws(() => cleanRules({ waitHours: 1000 }), /مهلت/);
@@ -139,7 +142,7 @@ test("پروندهٔ مذاکره حداقلِ استعلامِ هر قلم را
   due();
   const r = await aiTick(env);
   assert.equal(r.step, "turn", JSON.stringify(r));
-  assert.match(ctxText, /حداقلِ استعلامِ این قلم: ۳ پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف \(قیمت واحد ۴۱۰٬۰۰۰٬۰۰۰ ریال .*\) — تا حالا ۱/);
+  assert.match(ctxText, /حداقلِ استعلامِ این قلم: ۳ پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف \(ردهٔ «بزرگ» .*\) — تا حالا ۱/);
   assert.match(sys, /«حداقلِ استعلام»/, "قاعدهٔ تصمیم در پرامپت");
   /* سکوت هم که باشد، با یک پیشنهاد از سه، پایان نیست */
   DB.raw.prepare("UPDATE sp_msgs SET at=? WHERE thread_id=50").run(Date.now() - 2 * HOUR);

@@ -17,7 +17,8 @@ import { managerCode } from "./settings.js";
 import { queueStmt } from "./queue.js";
 import { pushStmt, EXPERT } from "./push.js";
 import { threadRow, threadOut, lineOut, bundleOut, msgOut, msgFor, FILE_LABELS } from "./sp-core.js";
-import { getRules, itemNeeds, ruleCount } from "./ai-rules.js";
+import { itemNeeds } from "./ai-rules.js";
+import { getSizeRules } from "./size.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -497,9 +498,9 @@ export async function commissionList(env, url, settings) {
   if (scope === "ok") conds.push("i.commission_ok=1");
   if (ex) { conds.push("a.expert_id=?"); args.push(ex); }
   if (rid) { conds.push("i.request_id=?"); args.push(rid); }
-  const rows = (await env.DB.prepare(`SELECT i.id, i.title, i.qty, i.unit, i.code, i.line_no, i.commission_ok, i.request_id, a.id AS aid, a.expert_id,
-      a.commission_no, a.commission_at, r.party, r.date,
-      (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.saved=1) AS saved,
+  const rows = (await env.DB.prepare(`SELECT i.id, i.title, i.qty, i.unit, i.code, i.line_no, i.commission_ok, i.request_id, i.est_unit_rial, a.id AS aid, a.expert_id,
+      a.commission_no, a.commission_at, a.size_cm, r.party, r.date,
+      (SELECT COUNT(DISTINCT q.supplier_name) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.saved=1) AS saved,
       (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS finals,
       (SELECT group_concat(q.supplier_name, '، ') FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS final_sup,
       (SELECT MIN(q.price) FROM quotes q WHERE q.assignment_id=a.id AND q.item_id=i.id AND q.final=1) AS final_price,
@@ -508,11 +509,11 @@ export async function commissionList(env, url, settings) {
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=i.request_id
     WHERE ${conds.join(" AND ")}
     ORDER BY (a.commission_at IS NULL), a.commission_at DESC, r.date DESC, i.request_id, i.line_no LIMIT 600`).bind(...args).all()).results || [];
-  /* حداقلِ استعلامِ هر قلم (پایهٔ مدیر + قواعدِ همین پنل) — همان که «تولید جدول کمیسیون»ِ کارشناس را باز می‌کند */
-  const base = Math.max(1, Number(settings && settings.minSuppliers) || 1), rules = await getRules(env);
-  const nd = await itemNeeds(env, rows.map((r) => r.aid), rows, base, rules);
-  for (const r of rows) { const x = nd.get(r.id); r.need = x.need; r.why = x.why; }
-  return { scope, min: base, rules: ruleCount(rules), items: rows };
+  /* حداقلِ استعلامِ هر قلم از ردهٔ اندازه‌اش — همان که «تولید جدول کمیسیون»ِ کارشناس را باز می‌کند (ai-rules.js) */
+  const sr = await getSizeRules(env);
+  const nd = await itemNeeds(env, rows.map((r) => r.aid), rows, null, null, sr);
+  for (const r of rows) { const x = nd.get(r.id); r.need = x.need; r.why = x.why; r.cat = x.cat; try { r.size_cm = r.size_cm ? JSON.parse(r.size_cm) : null; } catch (_) { r.size_cm = null; } }
+  return { scope, min: sr.minQ.s, minQ: sr.minQ, items: rows };
 }
 
 /**

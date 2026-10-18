@@ -1400,8 +1400,8 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   if (!g.finals) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
   if (g.missing.length) {
     return tableSelect(env, api, chat, ex, aid, messageId,
-      `⛔ هر قلم باید به حداقلِ استعلامِ ثبت‌موقت‌شده‌اش برسد (پایهٔ مدیر ${M(g.need)}؛ اقلامِ گران‌تر یا پرمقدارتر طبقِ قواعدِ پشتیبانی بیشتر). این‌ها کم دارند:\n`
-      + g.missing.slice(0, 8).map((x) => `• ${esc(short(x.title, 40))} (${M(x.n)} از ${M(x.need)})`).join("\n"));
+      `⛔ هر قلم باید به حداقلِ استعلامِ ردهٔ خودش (جزئی، متوسط، بزرگ، عمده — از بالاترین پیشنهادِ کل) از تأمین‌کنندگانِ مختلف برسد. این‌ها کم دارند؛ استعلامِ بیشتر بگیرید:\n`
+      + g.missing.slice(0, 8).map((x) => `• ${esc(short(x.title, 40))} (ردهٔ «${esc(x.cat_fa || "جزئی")}»: ${M(x.n)} از ${M(x.need)})`).join("\n"));
   }
   const st = readiness(d);
   const finals = d.quotes.filter((q) => q.final && q.saved);

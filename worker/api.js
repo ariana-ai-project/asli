@@ -380,6 +380,8 @@ const COLUMN_MIGRATIONS = [
   ["items", "est_unit_rial", "REAL"],
   ["items", "est_src", "TEXT"],
   ["items", "est_at", "INTEGER"],
+  /* برچسبِ اندازه در لحظهٔ جدول کمیسیون (bundle.js:commissionSize) */
+  ["assignments", "size_cm", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -1520,9 +1522,9 @@ async function assignmentDetail(env, aid, who) {
   /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
   for (const i of items) delete i.pick_json;
   const settings = await settingsFor(env, a.expert_id);
-  /* حداقلِ استعلامِ هر قلمِ باز برای «تولید جدول کمیسیون» (پایهٔ مدیر + قواعدِ پشتیبانی؛ همان نگهبانِ سرور) */
-  const base = Math.max(1, Number(settings.minSuppliers) || 1);
-  const nd = await itemNeeds(env, [aid], open, base);
+  /* حداقلِ استعلامِ هر قلمِ باز برای «تولید جدول کمیسیون» — ردهٔ اندازهٔ همان قلم (همان نگهبانِ سرور، ai-rules.js) */
+  const sr = sizeRulesOf(settings), base = sr.minQ.s;
+  const nd = await itemNeeds(env, [aid], open, base, null, sr);
   const need = { base, items: Object.fromEntries([...nd].map(([id, x]) => [id, x])) };
   return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings, ai, need };
 }
@@ -1641,7 +1643,7 @@ async function commission(env, ex, aid) {
   /* همان نگهبانی که بات هم دارد (bundle.js) */
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
-  if (g.missing.length) throw new HttpError(`هر قلم باید به حداقل استعلامش برسد؛ کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
+  if (g.missing.length) throw new HttpError(`هر قلم باید به حداقلِ استعلامِ ردهٔ خودش از تأمین‌کنندگانِ مختلف برسد؛ استعلامِ بیشتر بگیرید — کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
   /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود؛ عکسِ جدول هم ثبت می‌شود */
   const no = await recordCommission(env, aid, { expertId: ex.id, channel: "panel" });
   await env.DB.batch([ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid, commission_no: no })]);

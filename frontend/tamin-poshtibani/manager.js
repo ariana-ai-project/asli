@@ -503,7 +503,7 @@
             ${TP.ui.switchEl({ attrs: `data-thr-on="${i}"`, on: p.value != null, label: "هشدار مهلت" })}
             ${TP.ui.switchEl({ attrs: `data-mstage="${i}"`, on: !!ticks[i], label: "اعلان تلگرام به من" })}</div>`).join("")}</div></section>
       <section class="tp-box al-rules"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.settings}</span><h2>قواعدِ کار</h2><span class="sub">دایره را بچرخانید یا − و + بزنید</span></div>
-        <div class="al-knobs">${knob("dispatchDays", "یادآوری مدیر توسط مدیر", "روز کاری", 0, 10)}${knob("minSuppliers", "حداقل تأمین‌کننده برای هر قلم", "تأمین‌کننده", 1, 10)}${knob("capacity", "ظرفیتِ درخواستِ باز هر کارشناس", "درخواست", 1, 40)}</div></section></div>`;
+        <div class="al-knobs">${knob("dispatchDays", "یادآوری مدیر توسط مدیر", "روز کاری", 0, 10)}${knob("capacity", "ظرفیتِ درخواستِ باز هر کارشناس", "درخواست", 1, 40)}</div></section></div>`;
   }
 
   /* ---------- ارجاع و مهلت هوشمند (مهر ۱۴۰۵): کارتی، با لغزنده، دایره، شمارنده و امتیازِ نقطه‌ای ---------- */
@@ -1243,7 +1243,7 @@
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
     /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ هر چهار مقدار از settings() یک‌جا (یک تایمر برای همه) */
-    const saveAlerts = () => autoSave("alerts", () => { const s = settings(); return saveQuiet({ thresholds: s.thresholds, dispatchDays: s.dispatchDays, minSuppliers: s.minSuppliers, capacity: s.capacity }); });
+    const saveAlerts = () => autoSave("alerts", () => { const s = settings(); return saveQuiet({ thresholds: s.thresholds, dispatchDays: s.dispatchDays, capacity: s.capacity }); });
     const thrTrack = G("[data-thr-track]");
     if (thrTrack) {
       thrTrack.addEventListener("tp-input", (e) => { const v = G(`[data-thr-v="${e.detail.index}"]`); if (v) v.textContent = `${M(e.detail.value)}٪`; });

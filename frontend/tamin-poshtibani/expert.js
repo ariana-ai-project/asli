@@ -2030,12 +2030,22 @@
       <div class="tp-field"><b>نوع معامله</b><select class="tp-select" data-h="deal_type">${DEALT.map((x) => `<option ${(r.head_deal_type || "خرید") === x ? "selected" : ""}>${x}</option>`).join("")}</select></div>
       <div class="tp-field" style="flex:1;min-width:240px"><b>محل پروژه</b><input class="tp-input" data-h="site" value="${esc(r.head_site == null ? r.party : r.head_site)}" style="width:100%"></div></div>`;
   }
-  /* حداقلِ استعلامِ هر قلم از سرور (پایهٔ مدیر + قواعدِ پنل پشتیبانی برای اقلامِ گران یا پرمقدار — همان نگهبانِ «تولید جدول») */
+  /* حداقلِ استعلامِ هر قلم: ردهٔ اندازهٔ همان قلم (مهر ۱۴۰۵؛ worker/size.js، ai-rules.js) — حدِ سرور، و اگر استعلامِ تازه‌ای که هنوز
+     بارگذاری نشده پیشنهادِ کلِ بزرگ‌تری دارد، ردهٔ همان (همان قاعدهٔ نگهبانِ «تولید جدول»)؛ تأمین‌کنندگانِ مختلف شمرده می‌شوند */
+  const SZ_FA = { s: "جزئی", m: "متوسط", l: "بزرگ", b: "عمده" };
+  function localNeed(it) {
+    const sr = settings().sizeRules || { th: [50e6, 200e6, 5e9], minQ: { s: 3, m: 5, l: 5, b: 7 } };
+    const tots = S.d.quotes.filter((q) => q.saved && q.item_id === it.id && +q.price > 0).map((q) => +q.price * (+q.qty > 0 ? +q.qty : +it.qty || 0)).filter((x) => x > 0);
+    if (!tots.length) return null;
+    const t = Math.max(...tots) / 10, cat = t <= sr.th[0] ? "s" : t <= sr.th[1] ? "m" : t <= sr.th[2] ? "l" : "b";
+    return { need: sr.minQ[cat], cat };
+  }
   function guardCheck() {
-    const N = S.d.need || {}, need = N.base || settings().minSuppliers || 1, by = N.items || {}, miss = [];
+    const N = S.d.need || {}, need = N.base || 3, by = N.items || {}, miss = [];
     openItems().forEach((it) => {
-      const n = S.d.quotes.filter((q) => q.saved && q.item_id === it.id).length, x = by[it.id] || {}, k = x.need || need;
-      if (n < k) miss.push({ t: it.title, n, k, why: x.ruled ? x.why : "" });
+      const n = new Set(S.d.quotes.filter((q) => q.saved && q.item_id === it.id).map((q) => TP.nrm(q.supplier_name))).size, x = by[it.id] || {}, L = localNeed(it);
+      const k = Math.max(x.need || need, L ? L.need : 0), cat = L && L.need > (x.need || 0) ? L.cat : x.cat || "s";
+      if (n < k) miss.push({ t: it.title, n, k, cat, why: x.why || "" });
     });
     return { miss, need, ruled: Object.values(by).some((x) => x.ruled), fin: S.d.quotes.filter((q) => q.final && q.saved).length };
   }
@@ -2044,7 +2054,7 @@
     if (aiOwned()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
-      ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلام نرسیده‌اند (پایه <b>${g.need}</b>) ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
+      ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلامِ ردهٔ خود نرسیده‌اند؛ استعلامِ بیشتر بگیرید ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (ردهٔ «${SZ_FA[m.cat] || "جزئی"}»: ${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
   }
 
   /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ----------
@@ -2073,7 +2083,8 @@
     if (!sh) loadSheets();
     const z = S.sheetZoom || 10;
     const ready = sh && sh.rq && sh.cm;
-    return `<div class="pad"><div class="toolrow"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b><span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
+    let szc = null; try { szc = a.size_cm ? JSON.parse(a.size_cm) : null; } catch (_) { szc = null; }
+    return `<div class="pad"><div class="toolrow"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b>${TP.ui.sizeChip(szc, true)}<span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
         <span style="margin-inline-start:auto"></span>
         <button class="tp-btn sm" data-dl="commission">دانلود اکسل جدول کمیسیون</button>
         <button class="tp-btn sm" data-dl="request">دانلود Word برگهٔ درخواست خرید</button>

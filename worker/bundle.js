@@ -17,6 +17,7 @@ import { renderRequestDoc } from "./reqdoc.js";
 import { jStr, fmtFa } from "./time.js";
 import { commissionRecordStmts } from "./records.js";
 import { itemNeeds } from "./ai-rules.js";
+import { getSizeRules, minQOf, sizeOfRial, SIZE_FA } from "./size.js";
 
 /** همهٔ داده‌های لازم برای برگه‌ها، با یک بار خواندن از دیتابیس */
 export async function bundleData(env, aid, settings, company) {
@@ -78,29 +79,42 @@ export async function buildFiles(d, letterBytes) {
 }
 
 /**
- * نگهبان جدول کمیسیون — یک قاعده برای پنل و بات: دست‌کم یک «تأیید نهایی»، و برای
- * هر قلمِ باز دست‌کم به تعدادِ «حداقل استعلام»ِ همان قلم استعلامِ ثبت‌موقت‌شده: حدِ پایهٔ مدیر
- * («حداقل تأمین‌کننده»)، و برای اقلامی که در بازه‌های قواعدِ پشتیبانی می‌افتند بیشتر (ai-rules.js:itemNeeds).
- * need = حدِ پایه؛ هر قلمِ کم: {title, n, need, why}.
+ * نگهبان جدول کمیسیون — یک قاعده برای پنل و بات: دست‌کم یک «تأیید نهایی»، و برای هر قلمِ باز دست‌کم به تعدادِ «حداقل استعلام»ِ
+ * ردهٔ همان قلم استعلامِ ثبت‌موقت‌شده از تأمین‌کنندگانِ مختلف (مهر ۱۴۰۵: رده از بالاترین پیشنهادِ کل — قیمت واحد × مقدار —
+ * وگرنه برآوردِ کل؛ ai-rules.js:itemNeeds، worker/size.js). need = حداقلِ کوچک‌ترین رده؛ هر قلمِ کم: {title, n, need, cat, why}.
  */
 export async function commissionGuard(env, aid, settings) {
-  const need = Math.max(1, Number(settings && settings.minSuppliers) || 1);
+  const sr = await getSizeRules(env);
+  const need = minQOf(sr, "s");
   const [items, counts, fin] = await Promise.all([
-    env.DB.prepare("SELECT id, title, qty FROM items WHERE assignment_id=? AND state='open'").bind(aid).all(),
-    env.DB.prepare("SELECT item_id, COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 GROUP BY item_id").bind(aid).all(),
+    env.DB.prepare("SELECT id, title, qty, est_unit_rial FROM items WHERE assignment_id=? AND state='open'").bind(aid).all(),
+    env.DB.prepare("SELECT item_id, COUNT(DISTINCT supplier_name) AS n FROM quotes WHERE assignment_id=? AND saved=1 GROUP BY item_id").bind(aid).all(),
     env.DB.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=? AND saved=1 AND final=1").bind(aid).first(),
   ]);
   const byItem = new Map((counts.results || []).map((c) => [c.item_id, c.n]));
   const its = items.results || [];
-  const needs = await itemNeeds(env, [aid], its, need);
+  const needs = await itemNeeds(env, [aid], its, need, null, sr);
   const missing = its.map((i) => ({ i, n: byItem.get(i.id) || 0, nd: needs.get(i.id) }))
-    .filter((x) => x.n < x.nd.need).map((x) => ({ title: x.i.title, n: x.n, need: x.nd.need, why: x.nd.why }));
+    .filter((x) => x.n < x.nd.need).map((x) => ({ title: x.i.title, n: x.n, need: x.nd.need, cat: x.nd.cat, cat_fa: SIZE_FA[x.nd.cat], why: x.nd.why }));
   return { need, missing, finals: (fin && fin.n) || 0 };
 }
-/** «… (۱ از ۳)، …» — اقلامِ کم برای پیام‌های خطا */
+/** «… (ردهٔ «بزرگ»: ۱ از ۵)، …» — اقلامِ کم برای پیام‌های خطا */
 const faD = (n) => String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
-export const missingText = (missing, max = 3) => missing.slice(0, max).map((m) => `${m.title} (${faD(m.n)} از ${faD(m.need)})`).join("، ")
+export const missingText = (missing, max = 3) => missing.slice(0, max).map((m) => `${m.title} (${m.cat_fa ? `ردهٔ «${m.cat_fa}»: ` : ""}${faD(m.n)} از ${faD(m.need)})`).join("، ")
   + (missing.length > max ? ` و ${faD(missing.length - max)} قلمِ دیگر` : "");
+
+/**
+ * برچسبِ اندازهٔ درخواست در لحظهٔ جدول کمیسیون (مهر ۱۴۰۵): جمعِ «بالاترین پیشنهادِ کل»ِ هر قلمِ باز (قیمت واحد × مقدار) ← رده.
+ * قلمِ بی پیشنهاد در جمع نیست و برچسب را ناقص می‌کند. روی ارجاع می‌نشیند (assignments.size_cm) — پنل کمیسیون و پروندهٔ کمیسیون.
+ */
+export async function commissionSize(env, aid, sr) {
+  const S = sr || await getSizeRules(env);
+  const its = (await env.DB.prepare("SELECT id, qty, est_unit_rial FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
+  const nd = its.length ? await itemNeeds(env, [aid], its, null, null, S) : new Map();
+  let total = 0, quoted = 0;
+  const items = its.map((i) => { const x = nd.get(i.id) || {}; if (x.v != null) { total += x.v; quoted++; } return { id: i.id, cat: x.cat || "s", v: x.v == null ? null : x.v }; });
+  return { cat: quoted ? sizeOfRial(total, S.th) : null, total_rial: quoted ? total : null, n: its.length, quoted, partial: quoted > 0 && quoted < its.length, items, at: Date.now() };
+}
 
 /**
  * ثبتِ «جدول کمیسیون ساخته شد» + شمارهٔ ترتیبی فرم.
@@ -135,7 +149,9 @@ export async function markCommission(env, aid, at) {
 export async function recordCommission(env, aid, { expertId, channel } = {}) {
   const t = Date.now();
   const no = await markCommission(env, aid, t);
-  await env.DB.batch(await commissionRecordStmts(env, aid, { no, expertId, channel, t }));
+  const size = await commissionSize(env, aid).catch((e) => { console.error("commission size", e && e.message); return null; });
+  await env.DB.batch([...await commissionRecordStmts(env, aid, { no, expertId, channel, t }),
+    ...(size ? [env.DB.prepare("UPDATE assignments SET size_cm=? WHERE id=?").bind(JSON.stringify(size), aid)] : [])]);
   return no;
 }
 

@@ -608,8 +608,14 @@
      مبلغ‌ها در دیتابیس ریالی‌اند؛ مرزهای رده به تومان (۱ تومان = ۱۰ ریال). size از سرور: {cat, total_rial, n, est, miss, pend, partial} */
   const SIZE_FA = { s: "جزئی", m: "متوسط", l: "بزرگ", b: "عمده" };
   const nM = (n) => Math.round(Number(n) || 0).toLocaleString("en-US");
-  function sizeChip(sz) {
+  function sizeChip(sz, cm) {
     if (!sz || !sz.n) return "";
+    /* برچسبِ لحظهٔ جدول کمیسیون (bundle.js:commissionSize): جمعِ بالاترین پیشنهادِ کلِ هر قلم */
+    if (cm) {
+      if (!sz.cat) return "";
+      const t = `برچسبِ کمیسیون: جمعِ بالاترین پیشنهادِ کلِ اقلام ≈ ${nM(sz.total_rial / 10)} تومان (${nM(sz.total_rial)} ریال) · ${nM(sz.quoted)} از ${nM(sz.n)} قلم پیشنهاد داشت`;
+      return `<span class="chip sz sz-${sz.cat}" title="${esc(t)}">🏷 ${SIZE_FA[sz.cat]}${sz.partial ? `<i class="sz-part" aria-label="ناقص">◐</i>` : ""}</span>`;
+    }
     if (!sz.cat) {
       return sz.pend ? `<span class="chip sz" title="برآوردِ قیمتِ اقلام هنوز در صف است">⏳ برآورد</span>`
         : `<span class="chip sz" title="هیچ قلمی خریدِ هم‌واحد و هم‌لایه در سوابق نداشت">بی‌برآورد</span>`;
