@@ -39,13 +39,30 @@ import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { HEAD_RULES } from "../frontend/tamin-poshtibani/catalog-head-rules.mjs";
 import { aiFetch } from "./ai-fetch.js";
-import { cleanLocks } from "./structure.js";
+import { cleanLocks, newLayerName, addCustomLayers } from "./structure.js";
 
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 /* ۲٫۱: فهرستِ لایه‌ها بی «نمره» و با مساحت، محیط و یال‌ها (یکسان‌سازیِ دوم) */
 export const NORM_PROMPT_VERSION = "item-norm/2.1";
 /* لایه‌هایی که ذخیره و خوانده می‌شوند: فهرستِ استاندارد به‌علاوهٔ «نمره»ای که معنایش هنوز تصمیم نشده */
 const knownLayers = (meta) => new Set([...RULES.layerList(meta.layers).map((l) => l.fa), ...RULES.HIDDEN_LAYERS]);
+/* «＋ لایهٔ تازه…» (مهر ۱۴۰۵): نامی که کارشناس بیرون از فهرستِ ثابت می‌افزاید، برای هر نوع قلم در settings.customLayers
+   می‌ماند تا دفعهٔ بعد در فهرستِ نام‌های همان نوع قلم بیاید. لایهٔ تازه کمّی نیست (QUANT ندارد). */
+export const CUSTOM_LAYERS_KEY = "customLayers";
+async function customLayerMap(env) {
+  const r = await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(CUSTOM_LAYERS_KEY).first().catch(() => null);
+  try { const v = r && r.value ? JSON.parse(r.value) : null; return v && typeof v === "object" && !Array.isArray(v) ? v : {}; } catch (_) { return {}; }
+}
+export async function customLayerNames(env, head) {
+  const m = await customLayerMap(env), h = nameOf(head);
+  return h && Array.isArray(m[h]) ? m[h] : [];
+}
+async function rememberCustomLayers(env, head, names) {
+  if (!names.length) return;
+  const m = addCustomLayers(await customLayerMap(env), head, names);
+  await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(CUSTOM_LAYERS_KEY, JSON.stringify(m), now()).run().catch((e) => console.error("customLayers", e && e.message));
+}
 /* نسخهٔ ساختارِ ذخیره‌شده (norm_json و norm_cache): ۲ = لایهٔ کمّی عدد + واحد، جنسِ ضمنی، نوع قلمِ مؤثر */
 const NORM_V = 2;
 const T = (v) => String(v == null ? "" : v).trim();
@@ -197,8 +214,10 @@ export const toolSchema = (layers) => ({
  * کارشناس است؛ عددِ نامعتبر خطا می‌دهد به‌جای این‌که متن بماند.
  * خروجی: {head, layers, residual, confidence, hd}.
  */
-export async function settle(env, meta, raw, text, { strict = false } = {}) {
+export async function settle(env, meta, raw, text, { strict = false, more = null } = {}) {
   const known = knownLayers(meta);
+  /* لایه‌های تازهٔ کارشناس (فقط در ذخیرهٔ کارشناس) */
+  for (const k of more || []) known.add(k);
   const entries = Array.isArray(raw && raw.layers)
     ? raw.layers.map((x) => [nameOf(x && x.name), { text: T(x && x.value), unit: T(x && x.unit), imp: !!(x && x.implicit) }])
     : Object.entries((raw && raw.layers) || {}).map(([k, v]) => [nameOf(k), Array.isArray(v) || (v && typeof v === "object")
@@ -389,7 +408,10 @@ export async function normalizeItem(env, it, opts = {}) {
   /* نام لایه‌های استاندارد همراه هر پاسخ — پنل برای ویرایش لایه‌ها فهرستشان را لازم دارد.
      هزینهٔ کار با مدل به کاربر گفته نمی‌شود (تصمیم مدیر، مهر ۱۴۰۵) */
   const p = await proposal(env, it, meta, opts);
-  return { ...p, layerNames: RULES.layerList(meta.layers).map((l) => l.fa) };
+  const std = RULES.layerList(meta.layers).map((l) => l.fa);
+  /* لایه‌های تازه‌ای که کارشناس‌ها قبلاً برای همین نوع قلم افزوده‌اند هم در فهرستِ نام‌ها */
+  const custom = p.head ? await customLayerNames(env, p.head) : [];
+  return { ...p, layerNames: [...new Set([...std, ...custom])] };
 }
 
 /**
@@ -498,7 +520,14 @@ export async function confirmNorm(env, it, body, who = null, { check } = {}) {
   if (!meta) throw new HttpError("فهرست اقلام هنوز بارگذاری نشده است.", 409);
   if (!nameOf(body && body.head)) throw new HttpError("نوع قلم لازم است.");
   const known = knownLayers(meta);
-  for (const k of Object.keys((body && body.layers) || {})) if (!known.has(nameOf(k))) throw new HttpError(`«${nameOf(k)}» لایهٔ استاندارد نیست.`);
+  /* نامِ بیرون از فهرستِ ثابت: «＋ لایهٔ تازه…»ِ کارشناس — با همان سنجشِ پنل (structure.js:newLayerName) */
+  const fresh = [];
+  for (const k of Object.keys((body && body.layers) || {})) {
+    if (known.has(nameOf(k))) continue;
+    const v = newLayerName(k);
+    if (v.err) throw new HttpError(`لایهٔ «${nameOf(k)}»: ${v.err}`);
+    fresh.push(v.name);
+  }
   const rates = {};
   for (const [u, r] of Object.entries((body && body.rates) || {})) {
     const n = Number(r);
@@ -506,7 +535,7 @@ export async function confirmNorm(env, it, body, who = null, { check } = {}) {
     if (!(n > 0) || !Number.isFinite(n)) throw new HttpError(`نرخ «${nameOf(u)}» باید عدد مثبت باشد.`);
     rates[nameOf(u)] = n;
   }
-  const s = await settle(env, meta, { head: body.head, layers: body.layers, residual: body.residual, confidence: "high" }, textOf(it), { strict: true });
+  const s = await settle(env, meta, { head: body.head, layers: body.layers, residual: body.residual, confidence: "high" }, textOf(it), { strict: true, more: fresh });
   /* قلمی که برای تأمین‌کننده رفته (sp-core.js:itemLocks): check خطا می‌دهد مگر نوع قلم و لایه‌ها همان بستهٔ رفته باشند */
   if (check) check(s);
   const saved = await saveEdit(env, it, s, rates, who);
@@ -517,12 +546,22 @@ export async function confirmNorm(env, it, body, who = null, { check } = {}) {
       : ["catalog", "title", "edit", "cache", "model", "manual"].includes(body.source) ? body.source : "manual",
     code: T(body.code) || null, rates, confirmed_at: now(),
     /* فاز ۱ طرح «خرید هوشمند»: 🔒/🔓ِ عنوان، مقدار و هر لایه برای تأمین‌کننده (پیش‌فرض همه 🔒 — worker/structure.js) */
-    locks: cleanLocks(body && body.locks, s.layers),
+    locks: cleanLocks(tqKeep(body && body.locks, normOf(it)), s.layers),
   };
   await env.DB.prepare("UPDATE items SET norm_json=?, norm_at=? WHERE id=?").bind(JSON.stringify(norm), norm.confirmed_at, it.id).run();
+  await rememberCustomLayers(env, s.head, fresh.filter((k) => k in s.layers));
   /* نوع قلم پس از ذخیره — اگر قلم به نوع قلمِ دیگری رفت، حالا جزء آن است */
   const hd = saved === "same" ? s.hd : await headData(env, s.head);
   return { ok: true, norm, known: !!hd, rates: ratesView(hd, norm.code, rates, norm.layers), saved, edit: (db && db.edit) || null };
+}
+
+/** قفلِ عنوان و مقدار از «📋 شرایط خرید» می‌آید (مهر ۱۴۰۵): ذخیرهٔ ساختاری که آن دو را نفرستاده، همان قبلی‌ها را نگه می‌دارد */
+export function tqKeep(locks, prev) {
+  const l = locks && typeof locks === "object" ? { ...locks } : {};
+  const p = (prev && prev.locks) || {};
+  if (typeof l.title !== "boolean" && typeof p.title === "boolean") l.title = p.title;
+  if (typeof l.qty !== "boolean" && typeof p.qty === "boolean") l.qty = p.qty;
+  return l;
 }
 
 export async function clearNorm(env, it) {

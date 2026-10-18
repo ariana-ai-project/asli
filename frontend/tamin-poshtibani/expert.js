@@ -54,6 +54,7 @@
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     picks: {}, pickOpen: {},           // فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (/items/:id/picks) و قلمِ «مستقیم»ی که کارشناس می‌خواهد بسپارد
     termsOpen: {}, termsEd: {},        // فاز ۴ب گام ۳: ویرایشگرِ «📋 شرایط خرید»ِ هر قلم و پیش‌نویسش
+    normMin: {},                       // «بررسی سوابق» زده شد: پنلِ «نرمال‌سازی اقلام» جمع می‌شود تا نتیجه دیده شود
     norm: {},                          // نرمال‌سازی هر قلم: {loading, error, data, draft}
     normOn: false,                     // تیک «نرمال‌سازی اقلام» — از localStorage
     hmode: "head",                     // «نوع قلم» (head، پیش‌فرض — تصمیم مدیر) یا «عین قلم» (exact)
@@ -403,6 +404,8 @@
      هوشمند» می‌سپارد — تا آن موقع کار «pending» است (ai.owned بی run_id). نرمال‌سازی برای همه اجباری و اول از همه است: سوابقِ قلمِ
      تأییدنشده خوانده نمی‌شود. با سپردن، ساختار منجمد است (frozen_at) تا کار دستِ کارشناس هوشمند است (worker/structure.js). */
   const aiPending = () => aiOwned() && !S.d.ai.owned.run_id;
+  /* گزینهٔ «＋ لایهٔ تازه…» در فهرستِ نامِ لایه‌ها (newLayerUI) */
+  const NEW_LAYER = "__new_layer__";
   const normOk = (it) => { try { const x = it && it.norm_json ? JSON.parse(it.norm_json) : null; return !!(x && x.head && x.source !== "ai"); } catch (_) { return false; } };
   const frozen = (it) => !!(it && it.frozen_at && aiOwned());
   /* طرح «خرید هوشمند» فاز ۴ب: هر قلم با حالتِ نوعِ خودش (worker/ai-modes.js) — «انجام دستی»ِ تأییدشدهٔ مدیر، قلمِ بیرون از کارِ کارشناس
@@ -540,8 +543,13 @@
     if (!it || it.state !== "open") return "";
     const L = termsOfItem(it), ro = termsFixed(it), open = !!S.termsOpen[it.id] && !ro;
     const sum = termsSummary(L);
+    /* 🔒/🔓ِ عنوان و مقدار برای تأمین‌کننده — کنارِ بقیهٔ قفل‌ها (مهر ۱۴۰۵؛ پیش‌تر در «نرمال‌سازی اقلام»)؛ کلیک همان لحظه ذخیره می‌شود */
+    const tq = tqOf(it), tqDis = ro ? "disabled" : "";
+    const tqBtn = (k, on, label, tip) => `<button class="tp-btn xs lockbtn ${on ? "on" : ""}" data-tq-lock="${k}" ${tqDis} title="${esc(tip)}">${on ? "🔒" : "🔓"} ${label}</button>`;
     const head = `<div class="toolrow" style="margin:0"><b>📋 شرایط خرید</b>
       ${sum ? `<span class="chip info" title="🔒 را پنل و بات تأمین‌کننده بیرونش نمی‌پذیرند؛ 🔓 فقط خواستهٔ شرکت است">${esc(sum)}</span>` : `<span class="dim" style="font-size:.85rem">بی قید</span>`}
+      ${tqBtn("title", tq.title, "عنوان", tq.title ? "🔒 تأمین‌کننده عنوان را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند عنوان را اصلاح کند — کلیک: قفل")}
+      ${tqBtn("qty", tq.qty, `مقدار${it.qty != null ? ` (${M(it.qty)} ${esc(it.unit || "")})` : ""}`, tq.qty ? "🔒 کلِ مقدار لازم است — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد — کلیک: قفل")}
       <span style="margin-inline-start:auto"></span>
       ${ro ? `<span class="chip" title="${it.sp_lock ? "قلم برای تأمین‌کننده رفته؛ شرایطش مثلِ ساختارش ثابت است" : "قلم سپرده شده و منجمد است"}">🔒 ثابت</span>`
         : `<button class="tp-btn sm" data-terms-open>${open ? "بستن" : "✏️ تعیینِ شرایط"}</button>`}</div>`;
@@ -564,6 +572,36 @@
       </tbody></table></div>
       <div class="dim" style="font-size:.8rem;margin:6px 0">بی تیک = بی قید · 🔒 الزامی · 🔓 خواستهٔ شرکت ${TP.ui.info("expert.terms", "راهنمای شرایط خرید")}</div>
       <div class="toolrow" style="margin:0"><button class="tp-btn primary sm" data-terms-save>ذخیرهٔ شرایط</button><button class="tp-btn sm" data-terms-reset>برگرداندن</button></div></div>`;
+  }
+  /* قفلِ عنوان و مقدار: ساختارِ تأییدشده (norm_json.locks)، وگرنه پیش‌نویسِ ویرایشگر (با «تأیید» می‌رود)؛ پیش‌فرض 🔒 */
+  function tqOf(it) {
+    const n = S.norm[it.id];
+    if (!normOk(it) && n && n.draft) return { title: n.draft.tl !== false, qty: n.draft.ql !== false };
+    let lk = null; try { lk = (JSON.parse(it.norm_json || "null") || {}).locks || null; } catch (_) { lk = null; }
+    return { title: !(lk && lk.title === false), qty: !(lk && lk.qty === false) };
+  }
+  /* هم‌گام کردنِ پیش‌نویس و مبنای ویرایشگر، تا «تغییرات ذخیره نشده» دروغ نگوید */
+  const tqSync = (it, k, v) => {
+    const n = S.norm[it.id]; if (!n || !n.draft) return;
+    n.draft[k === "title" ? "tl" : "ql"] = v;
+    try { const b = JSON.parse(n.base); b[k === "title" ? "tl" : "ql"] = v; n.base = JSON.stringify(b); } catch (_) { /* مبنای خراب */ }
+    if (n.data) n.data.locks = { ...(n.data.locks || {}), [k]: v };
+  };
+  async function tqToggle(it, k) {
+    const v = !tqOf(it)[k];
+    if (!normOk(it)) {
+      const n = S.norm[it.id];
+      if (!n || !n.draft) { TP.modal("اول ساختار", "ساختارِ این قلم هنوز خوانده نشده؛ در «بررسی سوابق» ساختار را ببینید، بعد قفل را بزنید.", null, "باشد", ""); return; }
+      n.draft[k === "title" ? "tl" : "ql"] = v; render(); return;
+    }
+    try {
+      const r = await TP.api(`/items/${it.id}/locks`, { method: "PUT", body: { [k]: v } });
+      it.norm_json = JSON.stringify(r.norm);
+      const row = items().find((x) => x.id === it.id); if (row && row !== it) row.norm_json = it.norm_json;
+      tqSync(it, k, v);
+      render();
+      okTick(v ? "قفل شد" : "باز شد");
+    } catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
   }
   async function saveTermsUI(it) {
     const D = termsDraftOf(it);
@@ -1269,7 +1307,8 @@
     const pickMode = S.hmode === "pick", pk = pickOf(it);
     /* نام‌های پنهان («نمره») در فهرستِ انتخاب نمی‌آیند، مگر همین لایه همان باشد */
     const names = d.layerNames || [];
-    const opt = (sel) => [...new Set([...names, ...(sel && !names.includes(sel) ? [sel] : [])])].map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("");
+    const opt = (sel) => [...new Set([...names, ...(sel && !names.includes(sel) ? [sel] : [])])].map((x) => `<option ${x === sel ? "selected" : ""}>${esc(x)}</option>`).join("")
+      + `<option value="${NEW_LAYER}">＋ لایهٔ تازه…</option>`;
     const cands = [...new Set([d.head, ...(d.candidates || [])].filter(Boolean))];
     const fromDb = DB_SRC.has(d.source);
     const where = it.code ? `کد ${it.code}` : "عنوانِ همین قلم";
@@ -1292,9 +1331,6 @@
       <div class="normgrid">
         <label class="tp-field"><b>نوع قلم</b><input class="tp-input" data-norm-head value="${esc(dr.head)}" list="nh-${it.id}" style="width:100%" ${dis} title="${lk ? "قفل: این قلم برای تأمین‌کننده رفته است" : "نوع قلم را می‌توانید عوض کنید: از فهرستِ نوع‌های قلم انتخاب کنید یا بنویسید"}">
           <datalist id="nh-${it.id}" data-heads="${esc(JSON.stringify(cands))}">${headOptions(cands)}</datalist>
-          <b style="margin-top:10px">قفل برای تأمین‌کننده</b>
-          <div class="toolrow" style="gap:6px;margin:3px 0 0">${lockBtn("title", dr.tl, "عنوان", dr.tl ? "🔒 تأمین‌کننده عنوان را عوض نمی‌کند — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند عنوان را اصلاح کند — کلیک: قفل")}
-            ${lockBtn("qty", dr.ql, `مقدار${it.qty != null ? ` (${M(it.qty)} ${esc(it.unit || "")})` : ""}`, dr.ql ? "🔒 کلِ مقدار لازم است — کلیک: باز" : "🔓 تأمین‌کننده می‌تواند مقدارِ کمتری پیشنهاد دهد — کلیک: قفل")}</div>
 </label>
         <div class="tp-field"><b>لایه‌های ویژگی</b>
           ${pickMode ? `<div class="dim" style="font-size:.8rem;margin:2px 0 4px">☑️ لایه‌هایی که با همین مقدار در جستجو بیایند</div>` : ""}
@@ -1320,24 +1356,25 @@
   }
 
   /* خلاصهٔ ساختارِ قلم: نوع و لایه‌ها با 🔒/🔓؛ ویرایشگر با «ویرایش ساختار» باز می‌شود (تأییدنشده: همیشه باز) */
-  function vStructSum(it) {
+  function vStructSum(it, mini) {
     const n = S.norm[it.id], d = n && n.data, nj = (() => { try { return JSON.parse(it.norm_json || "null"); } catch (_) { return null; } })();
     const head = (nj && nj.head) || (d && d.head) || "", layers = (nj && nj.layers) || (d && d.layers) || {}, locks = (nj && nj.locks) || {};
     const lk = (k) => !(locks.layers && locks.layers[k] === false);
     const fixed = it.sp_lock || frozen(it);
     return `<section class="hx-struct">${fixed ? `<span class="chip warn" title="${frozen(it) ? `منجمد و سپرده به کارشناس هوشمند — ${esc(TP.fmt(it.frozen_at))}` : "برای تأمین‌کننده فرستاده شده"}">🔒 ${frozen(it) ? "منجمد" : "فرستاده‌شده"}</span>` : `<span class="chip ok">✓ ساختار تأییدشده</span>`}${head ? `<b class="hx-head">${esc(head)}</b>` : ""}
       <span class="hx-layers">${Object.entries(layers).map(([k, v]) => `<span class="chip">${lk(k) ? "🔒" : "🔓"} ${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("") || `<span class="dim">بی لایه</span>`}</span>
-      ${fixed ? "" : `<button class="tp-btn sm" data-norm-on>${TP.ui.ICON.edit} ویرایش ساختار</button>`}</section>`;
+      ${mini ? `<button class="tp-btn sm" data-norm-on title="پنلِ «نرمال‌سازی اقلام» باز شود">▾ نرمال‌سازی اقلام</button>` : fixed ? "" : `<button class="tp-btn sm" data-norm-on>${TP.ui.ICON.edit} ویرایش ساختار</button>`}</section>`;
   }
   function vHistory(it) {
     const d = S.hist[it.id];
     const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
     const fixed = !!(it.sp_lock || frozen(it));
-    const ok = normOk(it), editing = (S.normOn && !fixed) || S.hmode === "pick" || !ok;
+    const ok = normOk(it), mini = ok && !!S.normMin[it.id];
+    const editing = !mini && ((S.normOn && !fixed) || S.hmode === "pick" || !ok);
     const tools = TP.ui.menu({ btn: `<button class="tp-icon-btn sm" type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="ابزارهای سوابق" title="ابزارها">${TP.ui.ICON.more}</button>`,
       items: [{ label: "نمودار روند", icon: "data", attrs: `data-chart ${canChart ? "" : "disabled"}`, disabled: !canChart },
         ...(it.hist_done_at ? [] : [{ label: "علامتِ «بررسی شد»", icon: "check", attrs: 'data-mark="hist"' }]),
-        ...(fixed ? [] : [{ label: editing && ok ? "بستنِ ویرایشگرِ ساختار" : "ویرایش ساختار", icon: "edit", attrs: "data-norm-on" }])] });
+        ...(fixed && !mini ? [] : [{ label: editing && ok ? "بستنِ ویرایشگرِ ساختار" : mini ? "نمایشِ نرمال‌سازی اقلام" : "ویرایش ساختار", icon: "edit", attrs: "data-norm-on" }])] });
     const head = `<section class="hx-top">
       <div class="hx-title"><b>${esc(it.title)}</b>${it.code ? `<span class="chip info num">${esc(it.code)}</span>` : ""}
         ${it.sp_lock ? `<span class="chip warn" title="برای تأمین‌کننده فرستاده شده: عنوان، نوع قلم و لایه‌ها قفل‌اند">🔒 فرستاده‌شده</span>` : ""}
@@ -1352,7 +1389,7 @@
           <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff"><b class="num" data-mom-val>${M(S.mom)}</b></label>
         <label class="chkline" title="به‌جای «قیمت روز» با نرخ دلار، تعدیلِ شاخصِ مرکز آمار (مبلغ به زمستان ۱۴۰۴)"><input type="checkbox" data-pidx ${S.priceIdx ? "checked" : ""}> تعدیل مرکز آمار (زمستان ۱۴۰۴)</label></div></details></section>`;
     /* ساختار: تأییدنشده یا «قلم انتخابی» یا ویرایش → ویرایشگرِ کامل؛ وگرنه یک خطِ خلاصه */
-    const norm = editing ? `<div class="hx-step ${ok ? "" : "need"}">${ok ? "" : `<div class="hx-stepn"><b>۱</b> ساختارِ قلم را ببینید و تأیید کنید</div>`}${vNorm(it)}</div>` : vStructSum(it);
+    const norm = editing ? `<div class="hx-step ${ok ? "" : "need"}">${ok ? "" : `<div class="hx-stepn"><b>۱</b> ساختارِ قلم را ببینید و تأیید کنید</div>`}${vNorm(it)}</div>` : vStructSum(it, mini);
 
     if (!d) return `<div class="pad hx">${head}${norm}${vTerms(it)}${vPicks(it)}${ok ? `<div class="hx-none">${TP.ui.ICON.search}<b>سوابق هنوز خوانده نشده</b><span>حالت جستجو را بزنید و «بررسی سوابق»</span></div>` : ""}</div>`;
     if (d.available === false) return `<div class="pad hx">${head}${norm}${vTerms(it)}${vPicks(it)}<div class="chip warn">${esc(d.message)}</div></div>`;
@@ -1441,24 +1478,27 @@
     });
   }
 
-  async function runHist() {
+  /* collapse: فقط دکمهٔ «بررسی سوابق» — تیکِ لایه یا حالتِ جستجو که دوباره می‌خواند، ویرایشگر را جمع نمی‌کند */
+  async function runHist(collapse) {
     const it = item(); if (!it) return;
     if (!(await ensureNorm(it))) return;
     /* نرمال‌سازی اجباری و اول از همه (طرح «خرید هوشمند» فاز ۱): سوابقِ قلمِ تأییدنشده خوانده نمی‌شود — سرور هم نمی‌خواند */
     if (!normOk(it)) {
       /* ساختار همین بالا در ویرایشگر دیده می‌شود و دکمه «تأییدِ ساختار و بررسی سوابق» است: مستقیم تأیید (و اگر عوض شده، علت) */
-      if (await confirmNormUI()) return runHist();
+      if (await confirmNormUI()) return runHist(collapse);
       return;
     }
     /* جستجو بر ساختارِ ذخیره‌شده است؛ ویرایشِ ذخیره‌نشده اول ذخیره شود */
     if (normDirty(it)) {
       return TP.modal("تغییرات ذخیره نشده", "نوع قلم، لایه‌ها یا نرخ‌هایی را که عوض کرده‌اید هنوز ذخیره نکرده‌اید و جستجو بر ساختارِ ذخیره‌شده انجام می‌شود.",
-        async () => { if (await confirmNormUI()) runHist(); }, "ذخیره و بررسی", "انصراف");
+        async () => { if (await confirmNormUI()) runHist(collapse); }, "ذخیره و بررسی", "انصراف");
     }
     const b = TP.busy("خواندن سوابق…", `${esc(it.title)} — ${HMODE_FA[S.hmode]}`);
     try { S.hist[it.id] = await TP.api(`/suppliers/history?${histQuery(it)}`); S.prof = null; }
     catch (e) { b.close(); TP.modal("خطا", esc(e.message), null, "باشد", ""); return; }
     b.close();
+    /* نتیجه جای اصلی را بگیرد: «نرمال‌سازی اقلام» جمع می‌شود و با «▾ نرمال‌سازی اقلام» دوباره باز */
+    if (collapse === true) S.normMin[it.id] = true;
     /* خواندنِ سوابق خودش همان «بررسی سوابق» است — باکس دوم پایش مدیر سبز می‌شود */
     if (!it.hist_done_at && S.hist[it.id].available && (S.hist[it.id].suppliers || []).length) {
       try { await TP.api(`/items/${it.id}/progress`, { body: { stage: "hist" } }); await reload(); return; }
@@ -1560,6 +1600,32 @@
       okTick("ساختار تأیید شد");
       return true;
     } catch (e) { return fail("ذخیره نشد", esc(e.message)); }
+  }
+
+  /* «＋ لایهٔ تازه…» (مهر ۱۴۰۵): نامِ لایه‌ای که در فهرستِ ثابت نیست — همان سنجشِ سرور (structure.js:newLayerName)؛
+     با «تأیید ساختار» روی قلم و برای همین نوع قلم در فهرستِ نام‌ها می‌نشیند */
+  function newLayerUI(it, l) {
+    const n = it && S.norm[it.id]; if (!n || !n.draft) return;
+    const d = TP.modal("لایهٔ تازه", `<input class="tp-input" id="nl-txt" maxlength="30" aria-label="نامِ لایهٔ تازه" aria-describedby="nl-err" style="width:100%" placeholder="نامِ لایه">
+      <div class="tp-auth-err" id="nl-err" role="alert" style="min-height:18px"></div>`, null, "افزودن", "انصراف");
+    const t = d.querySelector("#nl-txt"), err = d.querySelector("#nl-err");
+    const back = () => render();
+    d.querySelector("[data-y]").onclick = () => {
+      const name = String(t.value || "").replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/[\u200c\u200e\u200f]/g, " ").replace(/\s+/g, " ").trim();
+      const others = n.draft.layers.filter((x) => x !== l).map((x) => x.k);
+      const bad = !name ? "نامِ لایه را بنویسید." : name.length > 30 ? "نامِ لایه حداکثر ۳۰ نویسه است." : !/\p{L}/u.test(name) ? "نامِ لایه باید حرف داشته باشد."
+        : /[<>"{}[\]`]/.test(name) ? "نامِ لایه نویسهٔ نامجاز دارد." : others.includes(name) ? `لایهٔ «${name}» همین حالا روی قلم هست.` : "";
+      if (bad) { err.textContent = bad; t.focus(); return; }
+      d.remove();
+      l.k = name; l.u = ""; l.i = false;
+      if (n.data && !(n.data.layerNames || []).includes(name)) n.data.layerNames = [...(n.data.layerNames || []), name];
+      render();
+    };
+    t.addEventListener("input", () => { err.textContent = ""; });
+    t.addEventListener("keydown", (e) => { if (e.key === "Enter") d.querySelector("[data-y]").click(); });
+    const no = d.querySelector("[data-n]"); if (no) no.addEventListener("click", back);
+    d.addEventListener("click", (e) => { if (e.target === d) back(); });
+    setTimeout(() => t.focus(), 40);
   }
 
   /** «چرا این تغییر لازم است؟» — تا علت ننویسد ذخیره نمی‌شود (خطا همان‌جا، پنجره باز می‌ماند)؛ انصراف = null */
@@ -2544,10 +2610,13 @@
       mo.oninput = (e) => { S.mom = +e.target.value; const lab = G("[data-mom-val]"); if (lab) lab.textContent = M(S.mom); };
       mo.onchange = () => { try { localStorage.setItem(MOM_KEY, String(S.mom)); } catch (_) { /* حالت خصوصی */ } if (S.hist[item().id]) runHist(); };
     }
-    const rh = G("[data-run-hist]"); if (rh) rh.onclick = runHist;
+    const rh = G("[data-run-hist]"); if (rh) rh.onclick = () => runHist(true);
     const pix = G("[data-pidx]"); if (pix) pix.onchange = (e) => { S.priceIdx = e.target.checked; try { localStorage.setItem(PIDX_KEY, S.priceIdx ? "1" : "0"); } catch (_) { /* حالت خصوصی */ } render(); };
     /* نرمال‌سازی اقلام و حالت جستجو */
     Q("[data-norm-on]").forEach((b) => b.onclick = () => {
+      const it0 = item();
+      /* پنلِ جمع‌شده بعد از «بررسی سوابق»: فقط باز می‌شود */
+      if (it0 && S.normMin[it0.id]) { delete S.normMin[it0.id]; if (!S.normOn && !(it0.sp_lock || frozen(it0)) && S.hmode !== "pick") S.normOn = true; if (!S.norm[it0.id]) runNormalize(false); render(); return; }
       S.normOn = !S.normOn;
       try { localStorage.setItem(NORM_KEY, S.normOn ? "1" : "0"); } catch (_) { /* حالت خصوصی */ }
       /* فقط ویرایشگرِ ساختار باز و بسته می‌شود؛ مبنای جستجو عوض نمی‌شود، پس نتیجه می‌ماند */
@@ -2574,6 +2643,8 @@
     Q("[data-norm-lk]").forEach((x) => x.onchange = (e) => {
       const d = nd(); if (!d) return;
       const l = d.layers[+e.target.dataset.normLk], was = isQuant(l.k);
+      /* «＋ لایهٔ تازه…»: نامی بیرون از فهرستِ ثابت — کمّی نیست */
+      if (e.target.value === NEW_LAYER) { newLayerUI(item(), l); return; }
       l.k = e.target.value;
       if (!isQuant(l.k)) l.u = "";
       if (was !== isQuant(l.k)) render();
@@ -2593,7 +2664,7 @@
     Q("[data-norm-lock]").forEach((b) => b.onclick = () => {
       const d = nd(); if (!d) return;
       const k = b.dataset.normLock;
-      if (k === "title") d.tl = !d.tl; else if (k === "qty") d.ql = !d.ql; else { const l = d.layers[+k.slice(2)]; if (l) l.lk = l.lk === false; }
+      const l = d.layers[+k.slice(2)]; if (l) l.lk = l.lk === false;
       render();
     });
     const man = G("[data-manual]"); if (man) man.onclick = () => manualUI();
@@ -2617,6 +2688,7 @@
     const pkl = G("[data-pkreload]"); if (pkl) pkl.onclick = () => loadPicks(item(), true);
     const pkg = G("[data-pkgo]"); if (pkg) pkg.onclick = () => { S.tab = "history"; render(); };
     /* فاز ۴ب گام ۳: «📋 شرایط خرید» — پیش‌نویس بی بازرندر (جز دکمه‌های 🔒/🔓 و تاریخ) */
+    Q("[data-tq-lock]").forEach((b) => b.onclick = () => tqToggle(item(), b.dataset.tqLock));
     const tmo = G("[data-terms-open]"); if (tmo) tmo.onclick = () => { const it = item(); S.termsOpen[it.id] = !S.termsOpen[it.id]; delete S.termsEd[it.id]; render(); };
     Q("[data-tm-opt]").forEach((c) => c.onchange = () => {
       const it = item(), D = termsDraftOf(it), f = c.dataset.tmOpt;

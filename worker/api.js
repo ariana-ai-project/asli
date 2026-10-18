@@ -75,7 +75,7 @@ import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tend
 import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
-import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines } from "./structure.js";
+import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines, withTqLocks } from "./structure.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -2657,6 +2657,24 @@ async function route(request, env, ctx) {
         ev(env, `expert:${ex.id}`, "item_terms", it.request_id, it.id, { assignment_id: it.aid, terms }),
       ]);
       return json({ ok: true, terms, text: limitsTxt(terms) });
+    }
+    /* 🔒/🔓ِ عنوان و مقدار برای تأمین‌کننده — از «📋 شرایط خرید» (مهر ۱۴۰۵؛ پیش‌تر در ویرایشگرِ ساختار). همان norm_json.locks،
+       پس sp-core.js:lineLocks و itemLocks همان را می‌خوانند؛ قلمِ تأییدنشده: پنل در پیش‌نویسِ ساختار نگه می‌دارد و با «تأیید» می‌رود */
+    if ((mm = /^\/items\/(\d+)\/locks$/.exec(path)) && m === "PUT") {
+      const who = await requireAny(request, env);
+      const it = await ownItem(env, who, int(mm[1]));
+      await frozenGuard(env, it);
+      await aiGuard(env, who, it.aid, "norm", it);
+      if ((await itemLocks(env, [it.id])).has(it.id)) throw new HttpError(LOCK_MSG, 409, { locked: true });
+      if (!normConfirmed(it)) throw new HttpError(NEED_NORM_MSG, 409, { need_norm: true });
+      const b = await readJson(request);
+      const before = JSON.parse(it.norm_json);
+      const after = withTqLocks(before, { title: typeof b.title === "boolean" ? b.title : undefined, qty: typeof b.qty === "boolean" ? b.qty : undefined });
+      await env.DB.batch([
+        env.DB.prepare("UPDATE items SET norm_json=? WHERE id=?").bind(JSON.stringify(after), it.id),
+        changeStmt(env, it, actorOf(who), "norm", before, after),
+      ]);
+      return json({ ok: true, locks: after.locks, norm: after });
     }
     /* برگرداندنِ قلم به فهرست اقلام: ویرایشِ کارشناس در دیتابیس اصلی برای این قلم پاک می‌شود */
     if ((mm = /^\/items\/(\d+)\/edit$/.exec(path)) && m === "DELETE") {

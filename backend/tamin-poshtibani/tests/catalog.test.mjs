@@ -558,7 +558,9 @@ test("نرمال‌سازی: کد در فهرست ← بی‌مدل؛ عنوان
     const b = h.suppliers.find((s) => s.name === "شرکت ب");
     assert.equal(b.qty, 170, "۲ کیلوگرم × ۶۰ (نرخ کارشناس) + ۵۰");
     assert.equal(h.rates.find((r) => r.unit === "کیلو گرم").src, "user");
-    await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: { "ساختگی": "x" } }), /لایهٔ استاندارد نیست/);
+    /* «＋ لایهٔ تازه…» (مهر ۱۴۰۵): نامِ بیرون از فهرست پذیرفته است، ولی نامِ نامعتبر نه */
+    await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: { "<ساختگی>": "x" } }), /نامجاز/);
+    await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: { ["ل".repeat(31)]: "x" } }), /حداکثر/);
     await assert.rejects(() => confirmNorm(env, fresh, { head: "پیچ", layers: {}, rates: { "کیلو گرم": -1 } }), /عدد مثبت/);
   } finally { globalThis.fetch = realFetch; }
 });

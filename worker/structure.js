@@ -52,6 +52,48 @@ export function cleanLocks(raw, layers) {
 export const locksOf = (s) => cleanLocks(s && s.locks, s && s.layers);
 
 /* ------------------------------------------------------------------ */
+/* لایهٔ تازه و قفلِ عنوان/مقدار (مهر ۱۴۰۵، درخواست مالک)                 */
+/* ------------------------------------------------------------------ */
+export const LAYER_NAME_MAX = 30;
+const lname = (x) => T(x).replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/[\u200c\u200e\u200f]/g, " ").replace(/\s+/g, " ").trim();
+/**
+ * نامِ «＋ لایهٔ تازه…»ِ کارشناس: بی فاصلهٔ اضافه، حداکثر ۳۰ نویسه، با دست‌کم یک حرف، و تکراریِ لایه‌های همین قلم نه.
+ * خروجی {name} یا {err}.
+ */
+export function newLayerName(raw, existing = []) {
+  const name = lname(raw);
+  if (!name) return { err: "نامِ لایه را بنویسید." };
+  if (name.length > LAYER_NAME_MAX) return { err: `نامِ لایه حداکثر ${LAYER_NAME_MAX.toLocaleString("fa-IR")} نویسه است.` };
+  if (!/[\p{L}]/u.test(name)) return { err: "نامِ لایه باید حرف داشته باشد." };
+  if (/[<>"{}\[\]`]/.test(name)) return { err: "نامِ لایه نویسهٔ نامجاز دارد." };
+  if ((existing || []).some((x) => lname(x) === name)) return { err: `لایهٔ «${name}» همین حالا روی قلم هست.` };
+  return { name };
+}
+/** نام‌های لایهٔ تازهٔ هر نوع قلم (settings.customLayers = {نوع قلم: [نام‌ها]}) — افزودن بی تکرار، هر نوع حداکثر ۴۰ و کل ۴۰۰ نوع */
+export function addCustomLayers(map, head, names) {
+  const m = map && typeof map === "object" && !Array.isArray(map) ? { ...map } : {};
+  const h = lname(head);
+  if (!h || !(names || []).length) return m;
+  const cur = Array.isArray(m[h]) ? m[h] : [];
+  m[h] = [...new Set([...cur, ...names.map(lname).filter(Boolean)])].slice(-40);
+  const keys = Object.keys(m);
+  if (keys.length > 400) for (const k of keys.slice(0, keys.length - 400)) delete m[k];
+  return m;
+}
+/**
+ * قفلِ عنوان و مقدار از «📋 شرایط خرید»: همان norm_json.locks.title و locks.qty (پس sp-core.js:lineLocks و itemLocks همان را
+ * می‌خوانند). ورودیِ نبوده دست نمی‌خورد. خروجی: ساختارِ تازه (کپی).
+ */
+export function withTqLocks(norm, { title, qty } = {}) {
+  const n = { ...(norm || {}) };
+  const lk = cleanLocks(n.locks, n.layers);
+  if (typeof title === "boolean") lk.title = title;
+  if (typeof qty === "boolean") lk.qty = qty;
+  n.locks = lk;
+  return n;
+}
+
+/* ------------------------------------------------------------------ */
 /* پیشنهادِ سامانه و فرقِ دو ساختار                                       */
 /* ------------------------------------------------------------------ */
 /** پیشنهادِ normalizeItem ← عکسِ «پیشنهادِ سامانه» (نرخ‌ها: نرخی که سامانه برای هر واحد حساب کرد) */
