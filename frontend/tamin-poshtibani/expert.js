@@ -664,7 +664,7 @@
     const rule = `قاعدهٔ دعوت: ${tiers ? `${tiers}، ` : ""}${PK_THEN[r.then] || PK_THEN.type}`;
     const help = A_ ? "«سپردن یا برگشت»: فهرست همان رتبه‌بندیِ کارشناس هوشمند است و عوض نمی‌شود — «🤖 سپردن» یا «↩️ برگرداندن به مدیر»."
       : D_ ? "«مستقیم»: تیک‌ها آزادند و توضیح نمی‌خواهند."
-      : "«انتخاب کارشناس»: تیک‌ها را کم و زیاد کنید؛ برداشتنِ هر کدام از پنج نفر اول (★) یک توضیحِ کوتاه کنار همان نام می‌خواهد. افزودن توضیح نمی‌خواهد.";
+      : "«انتخاب کارشناس»: تیک‌ها را کم و زیاد کنید؛ برداشتنِ هر کدام از نفراتِ پیش‌تیک (★ — به شمارِ حداقلِ استعلامِ ردهٔ قلم) یک توضیحِ کوتاه کنار همان نام می‌خواهد. افزودن توضیح نمی‌خواهد.";
     const phCell = (e) => (e.panel
       ? `<button class="tp-btn xs" data-pkph="${esc(e.k)}" title="${esc(e.phones.filter((p) => p.panel).map((p) => p.phone + (p.label ? ` (${p.label})` : "")).join("، "))}">☑️ ${M(e.panel)} شمارهٔ پنل</button>`
       : `<button class="tp-btn xs ${e.on ? "warn" : ""}" data-pkph="${esc(e.k)}" title="کارشناس هوشمند فقط به شمارهٔ پنلِ تیک‌خورده پیامک می‌دهد">📱 ${e.phones.length ? "تیکِ پنل" : "شماره"}</button>`);
@@ -685,7 +685,7 @@
               <input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="${e.why_box === "دیگر" ? "توضیح (اجباری)" : "توضیح (اختیاری)"}" style="flex:1;min-width:160px"></div>`
             : why ? `<div style="margin-top:4px"><input class="tp-input" data-pkwhy="${esc(e.k)}" value="${esc(e.why || "")}" placeholder="علتِ برداشتن (اجباری)" style="width:100%;min-width:200px"></div>`
             : e.why || e.why_box ? `<div class="dim" style="font-size:.8rem;margin-top:2px;white-space:normal">علت: ${esc([e.why_box, e.why].filter(Boolean).join(" — "))}</div>` : ""}</td>
-        <td><span class="chip">${esc(e.src_fa || "")}</span>${e.grade ? ` <span class="chip grade g${esc(e.grade)}" title="رده">${esc(e.grade)}</span>` : ""}</td>
+        <td><span class="chip">${esc(e.src_fa || "")}</span>${e.wave ? ` <span class="chip info" title="کارشناس هوشمند خودکار دعوت کرد: قلم کمتر از حداقلِ استعلامِ ردهٔ خودش پیشنهاد داشت">📨 موج ${M(e.wave + 1)}</span>` : ""}${e.grade ? ` <span class="chip grade g${esc(e.grade)}" title="رده">${esc(e.grade)}</span>` : ""}</td>
         <td>${phCell(e)}</td>
         ${stCol ? `<td>${e.st !== "off" && (started || e.go || e.st === "human") ? `<span class="chip ${cls}">${lab}</span>` : `<span class="dim">—</span>`}</td>` : ""}</tr>`;
     };
@@ -974,7 +974,7 @@
     const P = S.picks[it.id], started = !!P.started_at;
     const go = P.list.filter((e) => e.on && (!started || !e.go));
     const miss = P.mode === "pick" && !started ? P.list.filter((e) => e.top && !e.on && !String(e.why || "").trim()) : [];
-    if (miss.length) { render(); return TP.modal("توضیح لازم است", `برداشتنِ تیکِ پنج نفر اول توضیح می‌خواهد: ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} — علت را کنار همان نام بنویسید.`, null, "باشد", ""); }
+    if (miss.length) { render(); return TP.modal("توضیح لازم است", `برداشتنِ تیکِ نفراتِ پیش‌تیک (★) توضیح می‌خواهد: ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} — علت را کنار همان نام بنویسید.`, null, "باشد", ""); }
     if (!go.length) return TP.modal("تیکی نیست", started ? "انتخابِ تازه‌ای برای دعوت نیست." : "دست‌کم یک تأمین‌کننده را تیک بزنید.", null, "باشد", "");
     const noPh = go.filter((e) => !e.panel).length;
     const title = started ? "📨 دعوت از انتخاب‌های تازه" : P.mode === "handoff" ? "🤖 سپردن به کارشناس هوشمند" : "🚀 شروع";

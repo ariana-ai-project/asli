@@ -382,6 +382,8 @@ const COLUMN_MIGRATIONS = [
   ["items", "est_at", "INTEGER"],
   /* برچسبِ اندازه در لحظهٔ جدول کمیسیون (bundle.js:commissionSize) */
   ["assignments", "size_cm", "TEXT"],
+  /* موجِ دومِ دعوتِ کارشناس هوشمند (ai-agent.js:aiWaves): لحظهٔ گامِ بعد؛ ۰ = بی موج */
+  ["items", "wave_due", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -463,6 +465,7 @@ const READ_INDEXES = [
   `CREATE INDEX IF NOT EXISTS ix_items_estq ON items(id) WHERE ${EST_PENDING_SQL}`,
   /* برآوردِ Cron سوابقِ فعال را می‌خواهد (catalog.js:activeImport) */
   "CREATE INDEX IF NOT EXISTS ix_himp_state ON hist_imports(state, id)",
+  "CREATE INDEX IF NOT EXISTS ix_items_wave ON items(wave_due) WHERE wave_due>0",
   "CREATE INDEX IF NOT EXISTS ix_smart_at ON smart_searches(created_at)",
   "CREATE INDEX IF NOT EXISTS ix_quotes_at ON quotes(created_at)",
   "CREATE INDEX IF NOT EXISTS ix_quotes_final ON quotes(final_at)",

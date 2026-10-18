@@ -28,7 +28,7 @@ const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { retu
 const faN = (s) => String(s).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]);
 const list = (xs) => xs.map((x) => `«${x}»`).join("، ");
 
-/** «پنج نفر اول» (تصمیم ۱۷) */
+/** «پنج نفر اول» (تصمیم ۱۷) — از مهر ۱۴۰۵ فقط پیش‌فرضِ بی‌رده؛ شمارِ پیش‌تیک حداقلِ استعلامِ ردهٔ قلم است (ai-agent.js:preTickN، worker/size.js) */
 export const TOP = 5;
 /** فهرستِ سوابق — همان سقفِ آماده‌سازیِ کارشناس هوشمند */
 const MAX_LIST = 15;
@@ -109,6 +109,8 @@ export function applyEdits(pick, body, { mode, by, cap, at = Date.now() }) {
     if (e.go && !want) throw new HttpError(`«${e.name}» به کارشناس هوشمند سپرده شده و تیکش برداشته نمی‌شود.`, 409);
     if (e.on === want) continue;
     e.on = want;
+    /* برداشتنِ صریحِ تیک: موجِ دومِ دعوت (waveTargets) سراغش نمی‌رود */
+    e.off_at = want ? null : at;
     if (want && e.top) { e.why = null; e.why_at = null; e.why_by = null; }
   }
   for (const [k, v] of Object.entries(why)) {
@@ -177,7 +179,7 @@ export function startCheck(pick, mode, { cap, more = false, need = true } = {}) 
     if (dev.length) throw new HttpError(`تیکِ ${list(dev.map((e) => e.name))} با استراتژی استعلام فرق دارد؛ علت را کنار همان نام انتخاب کنید (و برای «دیگر» بنویسید).`, 422, { need_reason: dev.map((e) => e.k) });
   } else if (mode === "pick") {
     const miss = L.filter((e) => e.top && !e.on && !T(e.why));
-    if (miss.length) throw new HttpError(`برداشتنِ تیکِ پنج نفر اول توضیح می‌خواهد: ${list(miss.map((e) => e.name))} — علت را کنار همان نام بنویسید.`, 422, { need_reason: miss.map((e) => e.k) });
+    if (miss.length) throw new HttpError(`برداشتنِ تیکِ نفراتِ پیش‌تیک (به شمارِ حداقلِ استعلامِ ردهٔ قلم) توضیح می‌خواهد: ${list(miss.map((e) => e.name))} — علت را کنار همان نام بنویسید.`, 422, { need_reason: miss.map((e) => e.k) });
   }
   if (cap && on.length > cap) throw new HttpError(`حداکثر ${faN(cap)} تأمین‌کنندهٔ تیک‌خورده برای هر قلم (سقفِ دعوت در پنل پشتیبانی).`, 422, { cap });
   return on;
@@ -227,6 +229,31 @@ export function applyStrategy(pick, plan, { by, at = Date.now(), cautious = fals
     markets_known: plan.plan.markets_known, dominant_hub: plan.plan.dominant_hub, unit_key: plan.unit_key, wave1: [...want] };
   pick.top_n = want.size;
   return pick;
+}
+
+/* ------------------------------------------------------------------ */
+/* موجِ دومِ دعوت (مهر ۱۴۰۵، درخواست مالک — ai-agent.js:aiWaves)          */
+/* ------------------------------------------------------------------ */
+/**
+ * گامِ موج: هر waveAt٪ از پنجرهٔ مهلت (ارسالِ ارجاع ← پایانِ مهلت) یک گام. پیش از گامِ اول ۰؛ بعد از مهلت null.
+ */
+export function waveStep(t, start, end, waveAt) {
+  if (!(end > start) || !(waveAt > 0) || t >= end) return null;
+  if (t <= start) return 0;
+  return Math.floor((t - start) / ((end - start) * waveAt / 100));
+}
+/** لحظهٔ گامِ بعد (یا ۰ اگر بعد از مهلت است) */
+export function waveNextDue(step, start, end, waveAt) {
+  const due = start + (step + 1) * (end - start) * waveAt / 100;
+  return due < end ? Math.ceil(due) : 0;
+}
+/**
+ * چه کسانی در این موج دعوت شوند: به ترتیبِ فهرست (رتبهٔ سوابق)، فقط بی‌تیک‌ها و سپرده‌نشده‌ها — نه آن‌که کارشناس صریحاً تیکش را
+ * برداشت (off_at، یا پیش‌تیکی که حالا بی‌تیک است) — و فقط به شمارِ کمبود.
+ */
+export function waveTargets(pick, missing) {
+  if (!(missing > 0)) return [];
+  return ((pick && pick.list) || []).filter((e) => !e.on && !e.go && !e.off_at && !e.top).slice(0, missing);
 }
 
 /** تیک‌خورده‌ها سپرده می‌شوند — فقط همین‌ها دعوت می‌شوند */
@@ -301,7 +328,7 @@ export function pickSummary(rows, titleOf) {
     const off = L.filter((e) => e.top && !e.on);
     const added = on.filter((e) => !HIST.has(e.src));
     return `- ${title}: ${faN(on.length)} تأمین‌کننده سپرده شد از ${faN(L.length)} نفرِ فهرست (به ترتیبِ رتبهٔ نهایی و قاعدهٔ دعوت؛ پنج نفر اول از پیش تیک‌خورده)`
-      + (off.length ? `\n    برداشتنِ تیکِ پنج نفر اول: ${off.map((e) => `${e.name}${e.why ? ` — علت: ${e.why}` : ""}`).join("؛ ")}` : "")
+      + (off.length ? `\n    برداشتنِ تیکِ نفراتِ پیش‌تیک: ${off.map((e) => `${e.name}${e.why ? ` — علت: ${e.why}` : ""}`).join("؛ ")}` : "")
       + (added.length ? `\n    افزودهٔ کارشناس: ${added.map((e) => `${e.name} (${PICK_SRC_FA[e.src]})`).join("، ")}` : "");
   }).join("\n");
 }

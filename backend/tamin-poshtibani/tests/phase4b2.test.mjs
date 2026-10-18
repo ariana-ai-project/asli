@@ -65,6 +65,8 @@ const catalog = (code, head, layers) => JSON.stringify({ v: 2, head, layers, sou
 
 if (DB) {
   await ensureSchema(env);
+  /* شمارِ پیش‌تیک = حداقلِ استعلامِ ردهٔ قلم (مهر ۱۴۰۵، worker/size.js)؛ اقلامِ این آزمون برآورد ندارند ← «جزئی» — این‌جا ۵ تا همان پنج نفر اولِ پیشین */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('sizeRules',?,?)").run(JSON.stringify({ th: [50e6, 200e6, 5e9], minQ: { s: 5, m: 5, l: 5, b: 7 }, waveAt: 20 }), Date.now());
   const out = TP0.TP.buildCatalog(books());
   W.resetCatalogCache();
   const beg = await W.catalogBegin(env, { fp: out.fp, meta: out.meta, stats: out.stats, filename: "test" });
@@ -162,7 +164,7 @@ test("فهرست از قاعدهٔ دعوت (بی پایگاه داده): پنج
   assert.deepEqual(c.map((x) => [x.key, [...x.items].sort(), x.rank]), [["x", [1], 1], ["y", [1, 2], 2], ["z", [2], 3]], "فقط سپرده‌شده‌ها؛ نفرِ اولِ هر قلم، بعد دوم");
 });
 
-test("بررسی سوابق کارِ خودِ کارشناس است؛ فهرستِ دعوت فقط بر ساختارِ تأییدشده، پنج نفر اول تیک‌خورده", { skip: SKIP }, async () => {
+test("بررسی سوابق کارِ خودِ کارشناس است؛ فهرستِ دعوت فقط بر ساختارِ تأییدشده، به شمارِ حداقلِ ردهٔ قلم تیک‌خورده", { skip: SKIP }, async () => {
   assert.notEqual((await call("/suppliers/history?item_id=41", { headers: EX })).status, 423, "گام ۲: سوابق برای کارشناسِ هوشمند باز است");
   const no = await picks(41);
   assert.equal(no.status, 409);

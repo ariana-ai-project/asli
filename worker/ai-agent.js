@@ -53,7 +53,7 @@ import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, 
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
 import { AI_ASK_SQL, aiOwned } from "./ai-lock.js";
-import { getRules, saveRules, coverOf, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
+import { getRules, saveRules, coverOf, needFor, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
 import { queueStmt } from "./queue.js";
@@ -63,7 +63,8 @@ import { getRanking, saveRanking, dispatchOrder, RANK_FA, THEN_FA } from "./rank
 import { getSwitches, saveSwitches, pfReadOn, SWITCH_FA } from "./switches.js";
 import { getModes, saveModes, itemModes, searchHeads, MODE_FA, MODE_DEFAULT } from "./ai-modes.js";
 import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuilt, applyEdits, resetToDefault, startCheck, release, pickView, pickCands, pickSummary,
-  applyStrategy, strategyDeviations, WHY_BOXES } from "./ai-picks.js";
+  applyStrategy, strategyDeviations, WHY_BOXES, waveStep, waveNextDue, waveTargets } from "./ai-picks.js";
+import { getSizeRules, SIZE_FA } from "./size.js";
 import { crFlags } from "./cr-api.js";
 import { headPolicy, recipientPlan } from "./cr-engine.js";
 import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
@@ -307,11 +308,16 @@ async function picksOut(env, { it, o, m, cfg }, pick) {
     first_msg: !!flags.firstmsg, doc: !!flags.doc,
   };
 }
-/** شمارِ پیش‌تیکِ فهرستِ تازه: شمارِ موج اولِ استراتژیِ نوع قلم (کلیدِ pretick)، وگرنه پنج */
-async function preTickN(env, { it, m }) {
-  if (!m.head || !(await crFlags(env)).pretick) return TOP;
-  const hp = await headPolicy(env, m.head, { itemCode: it.code || null }).catch(() => null);
-  return hp && hp.policy.n_wave1 ? Math.min(hp.policy.n_wave1, 15) : TOP;
+/**
+ * شمارِ پیش‌تیکِ فهرستِ تازه: شمارِ موج اولِ استراتژیِ نوع قلم (کلیدِ pretick)، وگرنه حداقلِ استعلامِ ردهٔ همین قلم (مهر ۱۴۰۵،
+ * worker/size.js — جزئی ۳، متوسط ۵، بزرگ ۵، عمده ۷؛ رده از برآوردِ کلِ قلم، بی برآورد «جزئی»)
+ */
+export async function preTickN(env, { it, m }) {
+  if (m && m.head && (await crFlags(env)).pretick) {
+    const hp = await headPolicy(env, m.head, { itemCode: it.code || null }).catch(() => null);
+    if (hp && hp.policy.n_wave1) return Math.min(hp.policy.n_wave1, 15);
+  }
+  return needFor(await getSizeRules(env), { qty: it.qty, est_unit_rial: it.est_unit_rial }).need;
 }
 
 /** /items/:id/picks (GET، PUT) و /items/:id/ai-start (POST) — از api.js، با requireExpert */
@@ -417,7 +423,7 @@ export async function startItem(env, ex, itemId) {
   const more = !!it.ai_start_at;
   if (!pick) {
     if (more) throw new HttpError("فهرستِ این قلم را کارشناس هوشمند همین حالا می‌سازد؛ کمی بعد دوباره ببینید.", 409);
-    pick = { ...(await buildDefault(env, it)), by };
+    pick = { ...(await buildDefault(env, it, await preTickN(env, k))), by };
   }
   if (m.mode === "handoff" && !more) resetToDefault(pick);
   const go = startCheck(pick, m.mode, { cap: cfg.maxInvites, more });
@@ -440,6 +446,8 @@ export async function startItem(env, ex, itemId) {
   }
   const r = await env.DB.prepare(`UPDATE items SET pick_json=?, ai_start_at=?, ai_start_by=?, frozen_at=COALESCE(frozen_at,?), frozen_by=COALESCE(frozen_by,?)
       WHERE id=? AND ai_start_at IS NULL AND state='open'`).bind(JSON.stringify(pick), t, by, t, by, it.id).run();
+  /* موجِ دومِ دعوت (aiWaves): اولین گام */
+  await waveArm(env, it.aid, t).catch((e) => console.error("wave arm", e && e.message));
   if (!r.meta.changes) throw new HttpError("این قلم همین حالا سپرده شد؛ صفحه را تازه کنید.", 409);
   await env.DB.batch([
     changeStmt(env, { id: it.id, request_id: it.request_id, aid: it.aid }, by, "freeze", parse(it.sugg_json, null), parse(it.norm_json, null), t),
@@ -448,7 +456,7 @@ export async function startItem(env, ex, itemId) {
   let runId = run ? run.id : null;
   if (run) {
     await env.DB.batch([env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=?").bind(t, run.id),
-      logStmt(env, run.id, null, "step", `«🚀 شروع»ِ «${it.title}» (${MODE_FA[m.mode] || m.mode}) با ${faN(go.length)} تأمین‌کنندهٔ تیک‌خورده${offTop.length ? `؛ برداشتنِ پنج نفر اول: ${offTop.map((x) => `«${x.name}»${x.why ? ` (${x.why})` : ""}`).join("، ")}` : ""}.`)]);
+      logStmt(env, run.id, null, "step", `«🚀 شروع»ِ «${it.title}» (${MODE_FA[m.mode] || m.mode}) با ${faN(go.length)} تأمین‌کنندهٔ تیک‌خورده${offTop.length ? `؛ برداشتنِ نفراتِ پیش‌تیک: ${offTop.map((x) => `«${x.name}»${x.why ? ` (${x.why})` : ""}`).join("، ")}` : ""}.`)]);
   } else {
     const a = await env.DB.prepare("SELECT id, request_id, expert_id, dispatched_at, closed_at, ai_on FROM assignments WHERE id=?").bind(it.aid).first();
     /* شکستِ ساختنِ کار (مسابقهٔ دو شروعِ هم‌زمان): قلم سپرده شده و discover در Cronِ بعد کار را می‌سازد */
@@ -461,6 +469,72 @@ export async function startItem(env, ex, itemId) {
   }
   const fresh = await env.DB.prepare("SELECT i.*, a.id AS aid FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(it.id).first();
   return { ok: true, started: true, released: go.length, run_id: runId, ...(await picksOut(env, { ...k, it: { ...it, ...fresh }, o: { ...o, run_id: runId } }, pick)) };
+}
+
+/* ------------------------------------------------------------------ */
+/* موجِ دومِ دعوت (مهر ۱۴۰۵، درخواست مالک)                                */
+/* ------------------------------------------------------------------ */
+/**
+ * گامِ اولِ موج برای اقلامِ سپرده‌شدهٔ یک ارجاع که هنوز ندارند (items.wave_due خالی): ارسالِ ارجاع + waveAt٪ از پنجرهٔ مهلت.
+ * بی مهلت ← ۰ (بی موج).
+ */
+async function waveArm(env, aid, t = now()) {
+  const q = await env.DB.prepare("SELECT COUNT(*) AS n FROM items WHERE assignment_id=? AND ai_start_at IS NOT NULL AND state='open' AND wave_due IS NULL").bind(aid).first();
+  if (!q || !q.n) return;
+  const a = await env.DB.prepare("SELECT dispatched_at, deadline_at FROM assignments WHERE id=?").bind(aid).first();
+  const sr = await getSizeRules(env);
+  const due = a && a.dispatched_at && a.deadline_at ? waveNextDue(Math.max(0, waveStep(t, a.dispatched_at, a.deadline_at, sr.waveAt) || 0), a.dispatched_at, a.deadline_at, sr.waveAt) : 0;
+  await env.DB.prepare("UPDATE items SET wave_due=? WHERE assignment_id=? AND ai_start_at IS NOT NULL AND state='open' AND wave_due IS NULL").bind(due, aid).run();
+}
+
+/**
+ * موجِ دومِ دعوت — Cron (aiTick): هر waveAt٪ (پیش‌فرض ۲۰٪، settings.sizeRules) از پنجرهٔ مهلتِ ارجاع، قلمِ سپرده‌شده‌ای که هنوز کمتر از
+ * حداقلِ استعلامِ ردهٔ خودش پیشنهادِ معتبر دارد (coverOf — همان سنجشِ بستنِ مذاکره)، به شمارِ کمبود از نفراتِ بعدیِ فهرستِ دعوت (ترتیبِ
+ * رتبهٔ سوابق) دعوت می‌شود — جز کسانی که کارشناس صریحاً تیکشان را برداشت (ai-picks.js:waveTargets). از همان مسیرِ «📨 دعوت از
+ * انتخاب‌های تازه»: تیک و سپردن (go)، و کارِ همین ارجاع آن‌ها را مثلِ بقیه دعوت می‌کند — با همان حالت‌های ⏱/👁 و قفل‌ها. هر گام یک
+ * بار (pick.wave.step)؛ با هر گام رخدادِ ai_wave و یک سطر در گزارشِ کار. کارشناس هوشمندِ خاموش، کارِ مکث‌شده، ارجاعِ دستی یا
+ * قلمِ «انجام دستی» ← بعداً دوباره؛ کارِ تمام‌شده، قلمِ بسته یا مهلتِ گذشته ← پایانِ موج‌ها (wave_due=0).
+ */
+export async function aiWaves(env, t = now(), max = 1) {
+  const rows = (await env.DB.prepare("SELECT id FROM items WHERE wave_due>0 AND wave_due<=? ORDER BY wave_due LIMIT ?").bind(t, max).all()).results || [];
+  let n = 0;
+  for (const { id } of rows) {
+    const it = await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.state, i.ai_off, i.pick_json, i.qty, a.id AS aid, a.expert_id, a.dispatched_at, a.deadline_at, a.closed_at, a.ai_on,
+        r.id AS run_id, r.state AS run_state, r.finished_at, g.mode AS agent FROM items i JOIN assignments a ON a.id=i.assignment_id
+        LEFT JOIN ai_runs r ON r.assignment_id=a.id LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE i.id=?`).bind(id).first();
+    const stop = () => env.DB.prepare("UPDATE items SET wave_due=0 WHERE id=?").bind(id).run();
+    if (!it || it.state !== "open" || it.closed_at || !it.deadline_at || !it.dispatched_at || t >= it.deadline_at || !it.run_id || it.finished_at) { await stop(); continue; }
+    if (it.agent !== "on" || it.run_state === "paused" || it.ai_on === 0 || Number(it.ai_off) === 1) {
+      await env.DB.prepare("UPDATE items SET wave_due=? WHERE id=?").bind(t + 15 * 60000, id).run(); continue;
+    }
+    const sr = await getSizeRules(env);
+    const step = waveStep(t, it.dispatched_at, it.deadline_at, sr.waveAt);
+    const next = step == null ? 0 : waveNextDue(step, it.dispatched_at, it.deadline_at, sr.waveAt);
+    const pick = pickOf(it);
+    const last = pick && pick.wave ? Number(pick.wave.step) || 0 : 0;
+    if (!pick || !step || step <= last) { await env.DB.prepare("UPDATE items SET wave_due=? WHERE id=?").bind(next, id).run(); continue; }
+    const c = (await coverOf(env, it.aid)).find((x) => x.id === id);
+    const missing = c ? Math.max(0, c.need - c.have) : 0;
+    const pct = Math.min(100, step * sr.waveAt);
+    const before = it.pick_json;
+    const go = waveTargets(pick, missing);
+    for (const e of go) { e.on = true; e.wave = step; }
+    if (go.length) release(pick, t);
+    pick.wave = { step, at: t, n: go.length, need: c ? c.need : null, have: c ? c.have : null };
+    /* هر گام یک بار: اگر کارشناس هم‌زمان فهرست را عوض کرد، این گام دفعهٔ بعد دوباره سنجیده می‌شود */
+    const w = await env.DB.prepare("UPDATE items SET pick_json=?, wave_due=? WHERE id=? AND pick_json=?").bind(JSON.stringify(pick), next, id, before).run();
+    if (!w.meta.changes) continue;
+    if (!go.length) continue;
+    n++;
+    const cat = c ? SIZE_FA[c.cat] || "" : "";
+    const payload = { assignment_id: it.aid, item_id: id, step, pct, need: c && c.need, have: c && c.have, cat: c && c.cat, n: go.length, names: go.map((e) => e.name).slice(0, 20) };
+    await env.DB.batch([
+      env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)").bind(t, `expert:${it.expert_id}`, "ai_wave", it.request_id, id, JSON.stringify(payload)),
+      env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(t, it.run_id, t),
+      logStmt(env, it.run_id, null, "step", `📨 موجِ ${faN(step + 1)} دعوت (${faN(pct)}٪ مهلت): «${it.title}»${cat ? ` (ردهٔ «${cat}»)` : ""} ${faN(c.have)} از ${faN(c.need)} پیشنهادِ معتبر دارد؛ ${faN(go.length)} نفرِ بعدیِ فهرست دعوت شدند: ${go.map((e) => `«${e.name}»`).join("، ")}.`),
+    ]);
+  }
+  return { waves: n };
 }
 
 /** برداشتنِ اتمیِ یک اجرای سررسیده — فقط کارشناس‌های روشن؛ دو Cron هم‌زمان یک اجرا را دو بار نمی‌گیرند */
@@ -478,6 +552,8 @@ async function claimRun(env, t) {
 export async function aiTick(env) {
   /* «⏱ با مهلت»: پیشنهادهایی که مهلتشان گذشت، پیش از هر کارِ دیگر (ارزان: نمایهٔ معطل‌ها) */
   await propsDue(env).catch((e) => console.error("props due", e && e.message));
+  /* موجِ دومِ دعوت: گامِ سررسیدهٔ یک قلم (ارزان: نمایهٔ wave_due) */
+  await aiWaves(env).catch((e) => console.error("ai waves", e && e.message));
   const on = await env.DB.prepare("SELECT COUNT(*) AS n FROM ai_agents WHERE mode='on'").first().catch(() => null);
   if (!on || !on.n) return { ai: 0 };
   const t = now();
@@ -918,6 +994,8 @@ const shortOf = (cover) => cover.filter((c) => c.have < c.need).map((c) => ({ id
  */
 async function finishCheck(env, run, { cfg, asg, ex }) {
   const rules = await getRules(env);
+  /* اقلامِ سپرده‌شده‌ای که هنوز گامِ موجِ دعوت ندارند (سپردنِ یکجا، یا پیش از این قاعده) */
+  await waveArm(env, run.assignment_id).catch((e) => console.error("wave arm", e && e.message));
   const cover = await coverOf(env, run.assignment_id, rules, (await getSettings(env)).minSuppliers);
   const covered = cover.length > 0 && cover.every((c) => c.have >= c.need);
   const some = cover.length > 0 && cover.every((c) => c.have > 0);
@@ -1471,7 +1549,7 @@ async function closingContext(env, run) {
     "</حداقل_استعلام>",
     "", "<اقلام_و_پیشنهادها>", items, "</اقلام_و_پیشنهادها>",
     "", prow
-      ? `<نامزدها>\nفهرستِ دعوتِ هر قلم را کارشناسِ خرید چید — از سوابق به ترتیبِ رتبهٔ نهایی و قاعدهٔ دعوت، پنج نفر اول از پیش تیک‌خورده؛ کارشناس هوشمند خودش تأمین‌کننده‌ای نیفزود و جستجو نکرد:\n${pickSummary(prow, (id) => (d.items.find((x) => x.id === id) || {}).title)}\n${faN(noPanel)} تیک‌خورده شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`
+      ? `<نامزدها>\nفهرستِ دعوتِ هر قلم را کارشناسِ خرید چید — از سوابق به ترتیبِ رتبهٔ نهایی و قاعدهٔ دعوت، به شمارِ حداقلِ استعلامِ ردهٔ قلم از پیش تیک‌خورده (و موج‌های بعدی خودکار اگر قلم کم داشت)؛ کارشناس هوشمند خودش تأمین‌کننده‌ای نیفزود و جستجو نکرد:\n${pickSummary(prow, (id) => (d.items.find((x) => x.id === id) || {}).title)}\n${faN(noPanel)} تیک‌خورده شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`
       : `<نامزدها>\n${faN(cands.length)} تأمین‌کنندهٔ نامزد از سوابق خرید و جستجوی هوشمند پیدا شد؛ ${faN(noPanel)} نامزد شمارهٔ پنلِ تأییدشده نداشتند و دعوت نشدند (دعوت فقط با شماره‌ای که کارشناس تیکِ «پنل» زده باشد).\n</نامزدها>`,
     "", "<دعوت‌ها_و_گفت‌وگوها>", ths || "دعوتی نرفت.", "</دعوت‌ها_و_گفت‌وگوها>",
     "", "شرح، معیارها، چالش‌ها و پیشنهاد هر قلم را بنویس.",
