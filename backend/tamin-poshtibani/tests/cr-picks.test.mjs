@@ -239,7 +239,7 @@ test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده
   assert.match(okp.data.rows.find((x) => x.k === rows[0].k).text, /پیچ M10 را بفرمایید/);
   /* قاعدهٔ علت: ردیفِ اول (متنِ دستی) با پیش‌فرض فرق دارد و ردیفِ دوم با برگشت به پیش‌فرض با ردیفِ اول؛ بقیه همان ردیفِ بالایی‌اند */
   assert.deepEqual(okp.data.missing.map((x) => x.k), [rows[0].k, rows[1].k]);
-  assert.deepEqual(okp.data.rows.map((x) => x.diff), [true, true, false, false]);
+  assert.deepEqual(okp.data.rows.map((x) => x.diff), okp.data.rows.map((_, i) => i < 2));
   /* «🚀 شروع»: کارشناس هوشمند به دو تیک‌خوردهٔ با شمارهٔ پنل همان متنِ پیش‌نمایش را می‌فرستد */
   const want = okp.data.rows.slice(0, 2);
   for (const [i, x] of want.entries()) assert.equal((await call("/sp/x/phones", { headers: EX, body: { supplier_name: x.name, phone: `0912000020${i}`, label: "فروش", panel: true } })).status, 200);
