@@ -53,6 +53,7 @@
     templates: [], tpl: 0,
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     picks: {}, pickOpen: {},           // فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (/items/:id/picks) و قلمِ «مستقیم»ی که کارشناس می‌خواهد بسپارد
+    pkWarn: {}, pkMsg: {}, pkBusy: {}, // «🧭 چینش گسترده / محتاط»ِ هر قلم: هشدارِ تیکِ دستی، خطِ نتیجه و چیدنِ در جریان
     termsOpen: {}, termsEd: {},        // فاز ۴ب گام ۳: ویرایشگرِ «📋 شرایط خرید»ِ هر قلم و پیش‌نویسش
     normMin: {},                       // «بررسی سوابق» زده شد: پنلِ «نرمال‌سازی اقلام» جمع می‌شود تا نتیجه دیده شود
     norm: {},                          // نرمال‌سازی هر قلم: {loading, error, data, draft}
@@ -685,9 +686,77 @@
     render();
   }
   async function pkEdit(it, body) {
+    delete S.pkMsg[it.id]; delete S.pkWarn[it.id];
     try { S.picks[it.id] = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body }); }
     catch (e) { TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); return loadPicks(it, true); }
     render();
+  }
+
+  /* ---------- «🧭 چینش گسترده / محتاط» (درخواست مالک، مهر ۱۴۰۵) ----------
+     پیش‌تر بعد از «استعلام محتاط را بچین» راهِ برگشت نبود. حالا دو گزینهٔ ثابت همیشه پیداست (بالای فهرست و در صفحهٔ «🧭 استراتژی
+     استعلام»): گزینهٔ روشن همان چینشِ فعلی است (pick_json.strategy.variant)، «پیشنهادِ سامانه» گزینهٔ خانوادهٔ پیش‌فرضِ نوع قلم، و هر زدن
+     تیک‌ها را همان لحظه با برنامهٔ موتور از نو می‌چیند (PUT picks {strategy: {variant}}؛ worker/cr-engine.js:headPolicy). اگر تیکی از آخرین
+     چینش دستی عوض شده، اول یک خطِ هشدار — تا کارِ دستیِ کارشناس بی‌صدا دور ریخته نشود. */
+  const VARS = ["broad", "cautious"];
+  const VAR_FA = { broad: "چینش گسترده", cautious: "چینش محتاط" };
+  const VAR_TIP = { broad: "رقابت با بیشترین گیرندهٔ مجاز در ردهٔ همین قلم", cautious: "کم‌شمار، یکی در هر بازار، دو موج و افشای کم — برای بازارِ کمیاب یا متمرکز" };
+  const FAM_FA = { max: "حداکثری", cautious: "محتاط", special: "ویژه" };
+  const CAUTIOUS_M = new Set(["LIMITED_STAGED", "STAGED_BROADENING", "DIRECT_PLUS_MARKET_TEST"]);
+  const MODE_FA = { BROAD: "گسترده (حداکثری)", STANDARD: "استاندارد", SIMULTANEOUS_INDEX: "هم‌زمان قیمت‌مرجع", MULTICHANNEL: "چندکاناله", LIMITED_STAGED: "محدود و مرحله‌ای",
+    CONSULT_THEN_COMPETE: "مشورت سپس رقابت", DIRECT_PLUS_MARKET_TEST: "مستقیم با آزمون بازار", FRAMEWORK_CALLOFF: "قرارداد چارچوب", STAGED_BROADENING: "مرحله‌ای با گسترش مشروط" };
+  /* همان worker/strategy/config.js:MS_NAMES */
+  const MS_FA = { "MS-0": "دادهٔ ناکافی", "MS-1": "رقابتی استاندارد", "MS-2": "رقابتی متمایز (کیفیت/برند)", "MS-3": "کالای پایهٔ قیمت‌مرجع",
+    "MS-4": "متمرکز (چندتأمین‌کننده‌ای محدود)", "MS-5": "قطعهٔ اصلی/برند وابسته به واردات", "MS-6": "خدمات و کار سفارشی" };
+  /** «؟»ِ کوچکِ واژه‌نامه کنارِ یک نام (help-content.js، کلیدهای gl.*) — فقط اگر آن اصطلاح در راهنما هست */
+  const glq = (key, name) => { const T = key && window.TP_HELP && window.TP_HELP.topics; return T && T[key] ? TP.ui.info(key, `«${name || T[key].title}» چیست؟`, "sm") : ""; };
+  /** گزینهٔ چیده‌شده — فهرست‌های پیش از این تغییر فقط پرچمِ cautious یا خانوادهٔ برنامه را دارند */
+  const pkVarOf = (P) => { const SG = P && P.strategy; return !SG ? null : VARS.includes(SG.variant) ? SG.variant : SG.cautious || SG.family === "cautious" ? "cautious" : "broad"; };
+  const pkRecOf = (P) => (P && P.cr ? P.cr.recommended || (P.cr.family === "cautious" ? "cautious" : "broad") : null);
+  /** تیک‌ها از آخرین چینش دستی عوض شده‌اند؟ (چینشِ استراتژی: تیک ≠ برنامه؛ فهرستِ سوابق: تیک ≠ پیش‌تیک) — سپرده‌شده‌ها نه */
+  const pkManual = (P) => !!P && (P.list || []).some((e) => !e.go && !!e.on !== !!(P.strategy ? e.strat : e.top));
+  /** دو گزینهٔ ثابت؛ attr: نامِ data-attribute دکمه‌ها (فهرست یا صفحهٔ استراتژی) */
+  const varSeg = (P, attr, busy) => {
+    const cur = pkVarOf(P), rec = pkRecOf(P);
+    return `<span class="tp-seg sm" role="radiogroup" aria-label="چینشِ فهرستِ دعوت">${VARS.map((v) => `<button type="button" role="radio" aria-checked="${cur === v}" class="${cur === v ? "on" : ""}" ${attr}="${v}" title="${esc(VAR_TIP[v])}" ${busy ? "disabled" : ""}>${VAR_FA[v]}${rec === v ? ` <span class="tp-seg-tag">پیشنهادِ سامانه</span>` : ""}</button>`).join("")}</span>`;
+  };
+  /** خطِ وضعیتِ زیرِ دو گزینه: در حالِ چیدن، هشدارِ تیکِ دستی (با «بچین / انصراف»)، نتیجهٔ آخرین چیدن، یا راهنمای یک‌خطی */
+  function varLine(it, P) {
+    const busy = S.pkBusy[it.id], warn = S.pkWarn[it.id], msg = S.pkMsg[it.id], cur = pkVarOf(P);
+    if (busy) return `<span class="dim">⏳ چیدن با «${VAR_FA[busy]}»…</span>`;
+    if (warn) return `<span class="pk-warn">⚠️ ${warn === cur ? `تیک‌ها به «${VAR_FA[warn]}» برمی‌گردند و تغییرهای دستیِ شما کنار می‌رود.` : `تیک‌هایی که دستی عوض کرده‌اید با «${VAR_FA[warn]}» از نو چیده می‌شوند.`}
+      <button type="button" class="tp-btn xs primary" data-pkvar-go="${warn}">بچین</button> <button type="button" class="tp-btn xs" data-pkvar-no>انصراف</button></span>`;
+    if (msg) return `<span class="${msg.bad ? "pk-bad" : "pk-ok"}">${esc(msg.t)}</span>`;
+    return `<span class="dim">${cur ? `تیک‌ها با «${VAR_FA[cur]}» چیده شده‌اند؛ هر تیکِ دیگر علت می‌خواهد.` : "فهرست از سوابق است؛ با زدنِ یکی از دو گزینه، تیک‌ها با برنامهٔ بازار چیده می‌شوند."}</span>`;
+  }
+  /* صفحهٔ «🧭 استراتژی استعلام» وقتی باز است، با هر تغییرِ چینش خودش را هم از نو می‌کشد */
+  let pkStratPaint = null;
+  const pkPaint = () => { render(); if (pkStratPaint) pkStratPaint(); };
+  /** زدنِ یکی از دو گزینه: تیکِ دستی ← اول هشدار؛ گزینهٔ فعلیِ بی تغییر ← فقط یک خط؛ وگرنه همان لحظه چیده می‌شود */
+  function pkVarPress(it, v, sure) {
+    const P = S.picks[it.id]; if (!P || !VARS.includes(v) || S.pkBusy[it.id]) return;
+    delete S.pkMsg[it.id];
+    if (!sure && pkManual(P)) { S.pkWarn[it.id] = v; return pkPaint(); }
+    delete S.pkWarn[it.id];
+    if (!sure && v === pkVarOf(P)) { S.pkMsg[it.id] = { t: `تیک‌ها همین حالا با «${VAR_FA[v]}» چیده شده‌اند.` }; return pkPaint(); }
+    return pkVarApply(it, v);
+  }
+  async function pkVarApply(it, v) {
+    delete S.pkWarn[it.id]; delete S.pkMsg[it.id]; S.pkBusy[it.id] = v; pkPaint();
+    try {
+      const r = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body: { strategy: { variant: v } } });
+      S.picks[it.id] = r;
+      S.pkMsg[it.id] = { t: `✓ تیک‌ها با «${VAR_FA[v]}» چیده شد — ${M(((r.strategy || {}).wave1 || []).length)} گیرندهٔ موج اول.` };
+    } catch (e) { S.pkMsg[it.id] = { t: `⛔ چیده نشد: ${e.message}`, bad: true }; }
+    delete S.pkBusy[it.id]; pkPaint();
+  }
+  /** همان دو گزینه بالای «🎯 فهرست دعوت» (جای نوارِ «این قلم کمیاب است… بچینم؟» و «🧭 تیک‌ها با استراتژیِ…») */
+  function pkVarHtml(it, P) {
+    const SG = P.strategy, mode = SG ? SG.mode : P.cr.mode, modeFa = (SG ? SG.mode_fa : P.cr.mode_fa) || MODE_FA[mode] || "";
+    const notes = SG ? (SG.notes || []).concat(SG.relaxations || []) : [];
+    return `<div class="pk-strat">${varSeg(P, "data-pkvar", !!S.pkBusy[it.id])}
+      <span class="pk-mode"><span class="chip">${esc(modeFa)}</span>${glq(`gl.mode.${mode}`, modeFa)}</span>
+      <span class="pk-line" aria-live="polite">${varLine(it, P)}</span>
+      ${notes.length ? TP.ui.det({ key: `pkn-${it.id}`, sub: `یادداشت‌های چینش ${M(notes.length)}`, tabs: [{ k: "n", t: "یادداشت‌های چینش", html: `<ul>${notes.map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` }] }) : ""}</div>`;
   }
   /** توضیح‌هایی که در خانه‌ها نوشته شده ولی هنوز ذخیره نشده‌اند (پیش از «شروع») */
   async function pkFlushWhy(it) {
@@ -763,9 +832,9 @@
         ${!started && !D_ ? `<button class="tp-btn sm warn" data-pkback title="این قلم را با علت به مدیر برگردانید تا خودتان انجام دهید">↩️ برگرداندن به مدیر</button>` : ""}
         ${startBtn}</div>
       <div class="pk-rule"><span class="chip" title="${esc(help)}">${esc(rule)}</span>${P.n ? `<span class="dim">${M(P.n)} تأمین‌کننده در سوابق</span>` : ""}${TP.ui.info("expert.picks", "راهنمای فهرست دعوت")}</div>
-      ${SG ? `<div class="tp-note" style="margin:6px 0">🧭 تیک‌ها با استراتژیِ «${esc(SG.mode_fa || "")}»${SG.cautious ? " (محتاط)" : ""} چیده شد: ${M(SG.n_wave1)} گیرندهٔ موج اول${SG.dominant_hub ? `، بازارِ غالب «${esc(SG.dominant_hub)}»` : ""}. هر تیکِ دیگر علت می‌خواهد.
-          ${(SG.notes || []).concat(SG.relaxations || []).length ? `<div class="dim" style="font-size:.8rem;margin-top:4px">${(SG.notes || []).concat(SG.relaxations || []).map((n) => `• ${esc(n)}`).join("<br>")}</div>` : ""}</div>`
-        : P.cr && P.cr.family === "cautious" && !started && !A_ ? `<div class="tp-note warn" style="margin:6px 0">این قلم کمیاب یا متمرکز است (${esc(P.cr.mode_fa || "")})؛ استعلام محتاط را بچینم؟ <button class="tp-btn xs primary" data-pkstrat-go="1">بچین</button> <button class="tp-btn xs" data-pkstrat>ببینم</button></div>` : ""}
+      ${P.cr && !started && !A_ ? pkVarHtml(it, P)
+        : SG ? `<div class="pk-strat"><span class="dim">🧭 تیک‌ها با «${VAR_FA[pkVarOf(P)]}» چیده شد — ${esc(SG.mode_fa || "")}${glq(`gl.mode.${SG.mode}`, SG.mode_fa)} · ${M(SG.n_wave1)} گیرندهٔ موج اول${SG.dominant_hub ? `، بازارِ غالب «${esc(SG.dominant_hub)}»` : ""}</span>
+          ${(SG.notes || []).concat(SG.relaxations || []).length ? TP.ui.det({ key: `pkn-${it.id}`, sub: `یادداشت‌های چینش ${M((SG.notes || []).concat(SG.relaxations || []).length)}`, tabs: [{ k: "n", t: "یادداشت‌های چینش", html: `<ul>${(SG.notes || []).concat(SG.relaxations || []).map((n) => `<li>${esc(n)}</li>`).join("")}</ul>` }] }) : ""}</div>` : ""}
       ${P.msg && !L.length ? `<div class="tp-note warn">${esc(P.msg)}</div>` : ""}
       ${L.length ? `<div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th title="تیک = پیامِ دعوت می‌رود">دعوت</th><th title="★ = پیش‌تیک؛ برداشتنش علت می‌خواهد">#</th><th class="rt">تأمین‌کننده</th><th>از</th><th>شمارهٔ پنل</th>${stCol ? "<th>وضعیت</th>" : ""}</tr></thead>
         <tbody>${L.map(row).join("")}</tbody></table></div>`
@@ -773,38 +842,78 @@
       ${miss.length ? `<div class="tp-note warn" style="margin-top:8px">برای «شروع»، علتِ برداشتنِ ${miss.map((e) => `«${esc(e.name)}»`).join("، ")} را کنار همان نام بنویسید.</div>` : ""}
       ${steps}</div>`;
   }
-  /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): سیاستِ نوع قلم و برنامهٔ گیرندگان روی گراف — از worker/cr-engine.js، بی مدل */
+  /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴؛ صفحهٔ خلاصه و تیتروار — درخواست مالک، مهر ۱۴۰۵: خواندنِ صفحه حداکثر دو سه دقیقه):
+     بالا همان دو گزینهٔ ثابتِ «چینش گسترده / محتاط» (هر زدن تیک‌ها را از نو می‌چیند)، بعد نامِ حالت و خانواده با «؟» (واژه‌نامه)، یک
+     خطِ «چرا»، چهار نکتهٔ تیتروار و گیرندگانِ موج اول. چرایی (با برنامهٔ گزینهٔ دیگر)، قاعده‌های پخش و افشا، و داده و اطمینان زیرِ
+     «≡ جزئیات». برنامهٔ هر دو گزینه یک بار از worker/cr-engine.js (بی مدل) خوانده می‌شود تا رفت‌وبرگشت فوری باشد. */
   const VER_FA = { 2: "✔ تأییدشده", 1: "هویت قابل احراز", 0: "هنوز راستی‌آزمایی نشده" };
-  async function pkStratApply(it, cautious) {
-    const b = TP.busy("🧭 چیدن تیک‌ها", cautious ? "برنامهٔ محتاط: کم‌شمار و پخش در بازارها" : "برنامهٔ استراتژیِ این نوع قلم");
-    try { S.picks[it.id] = await TP.api(`/items/${it.id}/picks`, { method: "PUT", body: { strategy: { cautious: !!cautious } } }); b.close(); render(); okTick("تیک‌ها چیده شد"); }
-    catch (e) { b.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); }
-  }
+  /** دلیلِ موتور بی ارجاع‌های درونِ پرانتز (S-02، SRC-06 ص ۱۷…) برای خطِ «چرا»؛ متنِ کامل زیرِ «≡ جزئیات» */
+  const whyShort = (s) => String(s || "").replace(/\s*\([^()]*\)/g, "").trim();
   async function pkStratUI(it) {
     const P = S.picks[it.id]; if (!P || !P.head) return;
-    const q = (c) => `/cr/plan?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}${c ? "&cautious=1" : ""}`;
+    const q = (v) => `/cr/plan?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}&variant=${v}`;
     const b = TP.busy("🧭 استراتژی استعلام", esc(P.head));
-    let d, dc = null;
-    try { d = await TP.api(q(false)); if (d.family !== "cautious") dc = await TP.api(q(true)).catch(() => null); }
+    const plans = {};
+    try { [plans.broad, plans.cautious] = await Promise.all(VARS.map((v) => TP.api(q(v)))); }
     catch (e) { b.close(); return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     b.close();
-    const pol = d.policy, dist = pol.distribution || {}, dis = pol.disclosure || {};
+    const m = TP.modal(`🧭 استراتژی استعلام — ${esc(P.head)}`, `<div class="st-page" data-strat></div>`, null, "بستن", "");
+    const box = m.querySelector("[data-strat]"), dk = `st-${it.id}-${Date.now()}`;
+    const close = () => { if (pkStratPaint === paint) pkStratPaint = null; m.remove(); };
+    /* تنها کارِ اصلیِ صفحه زدنِ یکی از دو گزینه است؛ «بستن» دکمهٔ معمولی */
+    const y = m.querySelector("[data-y]"); if (y) { y.classList.remove("primary"); y.onclick = close; }
+    m.onclick = (e) => { if (e.target === m) close(); };
+    const li = (a) => (a && a.length ? `<ul>${a.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : "");
+    const dh = (t) => `<span class="dh">${t}</span>`;
     const who = (x) => `<li>${esc(x.name)}${x.incumbent ? ` <span class="chip">${x.trusted ? "فعلیِ معتمد" : "فعلی"}</span>` : ""}${x.hub ? ` <span class="dim">${esc(x.hub)}</span>` : ""}${!x.incumbent && VER_FA[x.verification] ? ` <span class="chip ${x.verification >= 2 ? "ok" : "warn"}">${VER_FA[x.verification]}</span>` : ""}</li>`;
-    const plan = (p) => `<b>موج اول (${M(p.plan.wave1.length)} از ${M(p.policy.n_wave1)})</b><ul style="margin:4px 0 8px;padding-inline-start:20px;line-height:1.9">${p.plan.wave1.map(who).join("") || "<li class='dim'>نامزدی نیست</li>"}</ul>
-      ${p.plan.reserve.length ? `<b class="dim">ذخیره</b><div class="dim" style="font-size:.84rem">${p.plan.reserve.slice(0, 6).map((x) => esc(x.name)).join("، ")}</div>` : ""}
-      ${(p.plan.notes || []).concat(p.plan.relaxations || []).length ? `<div class="tp-note warn" style="margin-top:6px;font-size:.84rem">${(p.plan.notes || []).concat(p.plan.relaxations || []).map((n) => `• ${esc(n)}`).join("<br>")}</div>` : ""}`;
-    const m = TP.modal(`🧭 استراتژی استعلام — ${esc(P.head)}`, `<div style="line-height:1.9">
-        <div><b>${esc(d.mode_fa)}</b>${d.competition_fa && d.competition_fa !== d.mode_fa ? ` ← رقابتِ «${esc(d.competition_fa)}»` : ""} · ردهٔ ${esc(pol.tier)} · ${M(pol.n_wave1)} گیرندهٔ موج اول، سقف ${M(pol.n_max)}${pol.waves > 1 ? ` · موج دوم پس از ${M(pol.wave2_after_days)} روز اگر: ${esc(pol.wave2_trigger || "")}` : ""}</div>
-        <div class="dim" style="font-size:.86rem">${(pol.why || []).map(esc).join("<br>")}</div>
-        <div style="font-size:.86rem;margin-top:6px">پخش: ${dist.max_per_hub ? `حداکثر ${M(dist.max_per_hub)} در هر بازار` : "حداکثر نیمی در یک بازار"} · دست‌کم ${M(dist.min_markets)} بازار${dist.need_outsider ? " · یک گیرنده بیرون از بازارِ غالب" : ""} · حداکثر ${M(dist.max_incumbents)} تأمین‌کنندهٔ فعلی</div>
-        <div style="font-size:.86rem">افشا: مقدار «${esc(dis.quantity || "")}» · فوریت «${esc(dis.urgency || "")}»${dis.text_variation ? " · متنِ متفاوت برای هر گیرنده" : ""}</div>
-        <div style="font-size:.86rem">زمان: ${esc(pol.timing || "")}</div>
-        ${(d.notes || []).length ? `<div class="dim" style="font-size:.82rem">${d.notes.map(esc).join("<br>")}</div>` : ""}
-        <hr style="border:0;border-top:1px solid var(--tp-line);margin:10px 0">${plan(d)}
-        ${dc ? `<hr style="border:0;border-top:1px solid var(--tp-line);margin:10px 0"><b>اگر این قلم کمیاب یا متمرکز است — استعلام محتاط</b><div style="margin-top:4px">${plan(dc)}</div>` : ""}
-        <div class="dim" style="font-size:.8rem;margin-top:8px">با چیدن، تیک‌های فهرست با همین برنامه عوض می‌شود؛ هر تیکِ دیگر پیش از «🚀 شروع» علت می‌خواهد. کشف‌شده‌ها تا شمارهٔ همراهشان با تیکِ پنل ثبت نشود دعوت نمی‌شوند.</div></div>
-        <div class="toolrow" style="margin-top:10px;gap:8px"><button class="tp-btn primary" data-st-apply="0">🧭 چیدن با همین</button>${dc ? `<button class="tp-btn warn" data-st-apply="1">استعلام محتاط را بچین</button>` : ""}</div>`, null, "بستن", "");
-    m.querySelectorAll("[data-st-apply]").forEach((x) => x.onclick = () => { m.remove(); pkStratApply(it, x.dataset.stApply === "1"); });
+    function paint() {
+      if (!m.isConnected) { if (pkStratPaint === paint) pkStratPaint = null; return; }
+      /* گزینهٔ چیده‌شده؛ پیش از نخستین چیدن، برنامهٔ «پیشنهادِ سامانه» */
+      const P1 = S.picks[it.id] || P, cur = pkVarOf(P1), shown = cur || plans.broad.recommended || "broad", other = shown === "broad" ? "cautious" : "broad";
+      const d = plans[shown], od = plans[other], pol = d.policy, dist = pol.distribution || {}, dis = pol.disclosure || {}, pl = d.plan || {};
+      const facts = [
+        ["👥", "موج اول", `${M(pol.n_wave1)} گیرنده، سقف ${M(pol.n_max)} · ردهٔ ${esc(pol.tier || "")}`],
+        ["🗺", "پخش", `${dist.max_per_hub ? `از هر بازار حداکثر ${M(dist.max_per_hub)}` : "حداکثر نیمی از یک بازار"}، دست‌کم ${M(dist.min_markets)} بازار${dist.need_outsider ? "، یکی بیرون از بازارِ غالب" : ""}`],
+        ["🔒", "افشا", `${/^بازه/.test(dis.quantity || "") ? "مقدار به‌صورتِ بازه" : "مقدارِ کامل"}؛ ${dis.urgency === "هرگز" ? "فوریت گفته نمی‌شود" : "فقط تاریخِ تحویل"}${dis.text_variation ? "؛ متنِ هر گیرنده جدا" : ""}`],
+        ["⏱", "موج دوم", pol.waves > 1 ? `پس از ${M(pol.wave2_after_days)} روز، اگر ${esc(pol.wave2_trigger || "")}` : "ندارد — همه هم‌زمان"],
+      ];
+      const tabs = [
+        { k: "why", t: "چرا؟", html: [dh("دلیل‌های موتور") + li(pol.why), (d.notes || []).length ? dh("تنظیمِ پشتیبانی") + li(d.notes) : "",
+          d.forced ? `<div class="dim">پیشنهادِ سامانه برای این نوع قلم «${esc(d.base_mode_fa || "")}» است؛ این چینش انتخابِ شماست.</div>` : "",
+          od ? dh(`گزینهٔ دیگر — «${VAR_FA[other]}»`) + `<div>${esc(od.mode_fa || "")} · ${M(od.policy.n_wave1)} گیرندهٔ موج اول، سقف ${M(od.policy.n_max)}${od.policy.waves > 1 ? " · دو موج" : ""}${((od.plan || {}).wave1 || []).length ? `: ${od.plan.wave1.map((x) => esc(x.name)).join("، ")}` : ""}</div>` : ""].join("") },
+        { k: "rule", t: "قاعده‌های پخش و افشا", html: [
+          dh("پخش") + li([dist.max_per_hub ? `از هر بازار یا پاساژ حداکثر ${M(dist.max_per_hub)} گیرنده` : "حداکثر نیمی از گیرندگان از یک بازار", `دست‌کم ${M(dist.min_markets)} بازار`,
+            dist.need_outsider ? "دست‌کم یک گیرنده بیرون از بازارِ غالب" : "", `حداکثر ${M(dist.max_incumbents)} تأمین‌کنندهٔ فعلی؛ دست‌کم ${M(dist.min_new_suppliers || 1)} تأمین‌کنندهٔ تازه`,
+            (dist.blocking_edges || []).length ? `دو سرِ این پیوندها با هم دعوت نمی‌شوند: ${dist.blocking_edges.join("، ")}` : "", dist.role_mix || ""].filter(Boolean)),
+          dh("افشا") + li([`مقدار: ${dis.quantity || "—"}`, `فوریت: ${dis.urgency || "—"}`, `نامِ پروژه: ${dis.project_name || "—"}`, `بودجه یا قیمت مرجع: ${dis.budget_or_reference_price || "—"}`,
+            `پیشنهاددهندگانِ دیگر: ${dis.other_bidders || "—"}`, dis.text_variation ? "هر گیرنده متنِ متفاوتی می‌گیرد" : ""].filter(Boolean)),
+          dh("زمان") + li([pol.timing || "", pol.waves > 1 ? `موج دوم پس از ${M(pol.wave2_after_days)} روز، اگر: ${pol.wave2_trigger || ""}` : ""].filter(Boolean)),
+          (pol.anti_collusion_steps || []).length ? dh("ضدتبانی") + li(pol.anti_collusion_steps) : "",
+          (pol.quote_must_include || []).length ? dh("آنچه در پیشنهاد خواسته می‌شود") + li(pol.quote_must_include) : "",
+          (pol.spec_clarification || []).length ? dh("روشن کردنِ مشخصات") + li(pol.spec_clarification) : "",
+          Object.values(pol.runtime || {}).length ? dh("همین درخواست") + li(Object.values(pol.runtime)) : "",
+          `<div class="dim">با چیدن، تیک‌های فهرست با همین برنامه عوض می‌شود؛ هر تیکِ دیگر پیش از «🚀 شروع» علت می‌خواهد. کشف‌شده‌ها تا شمارهٔ همراهشان با تیکِ پنل ثبت نشود دعوت نمی‌شوند.</div>`].join("") },
+        { k: "data", t: "داده و اطمینان", html: [
+          (pl.notes || []).concat(pl.relaxations || []).length ? dh("یادداشت‌ها و قاعده‌های سهل‌شده") + li((pl.notes || []).concat(pl.relaxations || [])) : "",
+          dh("بازارها و نامزدها") + li([`بازارهای شناخته‌شدهٔ موج اول: ${M(pl.markets_known || 0)}${pl.unknown_location ? `؛ ${M(pl.unknown_location)} گیرنده با مکانِ نامعلوم` : ""}`,
+            pl.dominant_hub ? `بازارِ غالب: «${pl.dominant_hub}»` : "", `نامزدها: ${M(d.candidates || 0)} (فعلی و کشف‌شده) · پیوندهای میانشان: ${M(d.edges || 0)}`].filter(Boolean)),
+          d.ms ? dh("ساختارِ بازار") + `<div>${esc(MS_FA[d.ms] || d.ms)} <span class="dim" dir="ltr">${esc(d.ms)}</span>${glq("gl.ms", "ساختار بازار")}${d.confidence ? ` · اطمینانِ دادهٔ تحقیق: ${esc(d.confidence)}` : ""}${d.workflow ? ` · حالتِ کار: ${esc(d.workflow)}` : ""}</div>` : "",
+          (pl.reserve || []).length ? dh("ذخیرهٔ موج دوم") + `<div class="dim">${pl.reserve.slice(0, 8).map((x) => esc(x.name)).join("، ")}</div>` : ""].join("") },
+      ];
+      box.innerHTML = `${varSeg(P1, "data-stvar", !!S.pkBusy[it.id])}
+        <div class="st-line" aria-live="polite">${varLine(it, P1)}</div>
+        <div class="st-mode"><span class="chip info">${esc(d.mode_fa || "")}</span>${glq(`gl.mode.${pol.mode}`, d.mode_fa)}${d.competition_fa && d.competition_fa !== d.mode_fa ? ` <span class="dim">← رقابتِ «${esc(d.competition_fa)}»</span>` : ""}
+          <span class="dim">· خانوادهٔ ${esc(FAM_FA[d.family] || "")}</span>${glq(`gl.family.${d.family}`, FAM_FA[d.family])}</div>
+        ${(pol.why || []).length ? `<p class="st-why">${esc(whyShort(pol.why[0]))}</p>` : ""}
+        <ul class="st-facts">${facts.map(([ic, h, t]) => `<li><span aria-hidden="true">${ic}</span><span><b>${h}:</b> ${t}</span></li>`).join("")}</ul>
+        <div class="st-who"><b>گیرندگانِ موج اول</b> <span class="dim">(${M((pl.wave1 || []).length)} از ${M(pol.n_wave1)})</span><ol>${(pl.wave1 || []).map(who).join("") || "<li class='dim'>نامزدی نیست</li>"}</ol></div>
+        ${TP.ui.det({ key: dk, sub: "چرا · قاعده‌ها · داده", tabs })}`;
+      box.querySelectorAll("[data-stvar]").forEach((x) => x.onclick = () => pkVarPress(it, x.dataset.stvar));
+      const go = box.querySelector("[data-pkvar-go]"); if (go) go.onclick = () => pkVarPress(it, go.dataset.pkvarGo, true);
+      const no = box.querySelector("[data-pkvar-no]"); if (no) no.onclick = () => { delete S.pkWarn[it.id]; pkPaint(); };
+    }
+    pkStratPaint = paint;
+    paint();
   }
   /* «✉️ پیام اول» (سند طراحی، بخش ۱؛ تصمیم‌های ۱ و ۶): قالبِ پیش‌فرضِ درخواست، قالب یا متنِ جدا برای هر تیک‌خورده و پیش‌نمایشِ
      همان متنی که «🚀 شروع» می‌فرستد؛ متنی که نامِ دیگران یا شمارِ پیشنهادها را لو بدهد ذخیره نمی‌شود (worker/first-msg.js) */
@@ -905,10 +1014,26 @@
     });
   }
   /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc): سندِ نوع قلم پیش از «🚀 شروع» — دیدن، امتیاز (۱ تا ۳ با توضیح و جعبهٔ
-     راهبرد)، تأیید، ویرایش یا سازندهٔ پارامتری؛ عددهای درونیِ همین قلم (هدف، حد، پیشنهادِ هر دور) فقط برای شما */
+     راهبرد)، تأیید، ویرایش یا سازندهٔ پارامتری؛ عددهای درونیِ همین قلم (هدف، حد، پیشنهادِ هر دور) فقط برای شما.
+     نما (درخواست مالک، مهر ۱۴۰۵: تیتروار، خواندن دو سه دقیقه): «در یک نگاه»، چهار کاشی (بازار، استعلام، مذاکره، 🔒 عددهای درونی) با
+     «؟» کنارِ هر اصطلاح، و وضعیت‌های محتمل جمع‌شده (پاسخِ آماده با باز کردنِ ردیف)؛ متنِ کامل و قاعده‌ها، ریسک‌ها، قیدها و تأییدها و
+     سازندهٔ پارامتری زیرِ «≡ جزئیات». امتیاز، «✅ تأیید»، «✏️ ویرایش» و «⋯» (سازندهٔ پارامتری، ساختِ دوباره) در نوارِ چسبانِ پایین. */
   const MV_FA = { "M-ANCHOR": "لنگر", "M-COUNTER": "پیشنهادِ متقابل", "M-PACKAGE": "بستهٔ معاوضه", "M-FACT": "بیانِ واقعیت", "M-ASK": "پرسش", "M-PAUSE": "مکث",
     "M-SPLIT": "تقسیمِ سفارش", "M-CLOSE": "جمع‌بندی", "M-WALK": "ترکِ مؤدبانه", "M-ESCALATE": "ارجاع به کارشناس" };
+  const MV_TONE = { "M-PACKAGE": "ok", "M-CLOSE": "ok", "M-WALK": "bad", "M-ESCALATE": "warn" };
+  /** حرکتِ مذاکره ← اصطلاحِ واژه‌نامه (help-content.js) */
+  const GL_MOVE = { "M-ANCHOR": "gl.anchor", "M-COUNTER": "gl.counter", "M-PACKAGE": "gl.package", "M-FACT": "gl.fact", "M-ASK": "gl.ask", "M-PAUSE": "gl.pause",
+    "M-SPLIT": "gl.split", "M-CLOSE": "gl.close", "M-WALK": "gl.walk", "M-ESCALATE": "gl.escalate" };
   const rial = (n) => (n == null ? "—" : M(Math.round(n)));
+  const pctS = (x) => (x == null || !Number.isFinite(Number(x)) ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${M(Math.abs(Math.round(x * 1000) / 10))}٪`);
+  /* آهنگ از c (worker/strategy-doc.js:PACE): ۰٫۳ شکیبا، ۰٫۵ متعادل، ۱ یکنواخت — c=۰٫۶ِ کلاس‌های متمایز «متعادل» */
+  const paceFa = (c) => (c == null || c === "" ? "—" : c <= 0.35 ? "شکیبا" : c < 0.9 ? "متعادل" : "یکنواخت");
+  /** «در یک نگاه»: نخستین جملهٔ خلاصهٔ سند (و دومی اگر اولی کوتاه است) — متنِ کامل زیرِ «≡ جزئیات» */
+  const glanceOf = (s) => {
+    const a = (String(s || "").replace(/\s+/g, " ").match(/[^.!؟]+[.!؟]?/g) || []).map((x) => x.trim()).filter(Boolean);
+    let g = a[0] || ""; if (g.length < 90 && a[1]) g += ` ${a[1]}`;
+    return g.length > 300 ? `${g.slice(0, 299)}…` : g;
+  };
   async function pkDocUI(it, then) {
     const P = S.picks[it.id]; if (!P || !P.head) return;
     const q = `/cr/doc?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}&enqueue=1`;
@@ -916,10 +1041,12 @@
     try { d = await TP.api(q); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     if (!d.available) return TP.modal("📘 سند راهبرد", "این نوع قلم در دادهٔ تحقیق نیست؛ سند ندارد.", null, "باشد", "");
     const m = TP.modal(`📘 سند راهبرد — ${esc(d.head)}`, `<div data-doc></div>`, null, "بستن", "");
-    m.querySelector(".tp-modal").classList.add("fm-modal");
-    const box = m.querySelector("[data-doc]");
+    m.querySelector(".tp-modal").classList.add("fm-modal", "doc-modal");
+    const box = m.querySelector("[data-doc]"), dk = `doc-${it.id}-${Date.now()}`;
+    /* نوارِ چسبانِ پایینِ پنجره (همان .tp-acts) جای امتیاز و دکمه‌های بازبینی است */
+    const acts = m.querySelector(".tp-acts"); acts.classList.add("doc-foot");
     const st = { mode: "view", score: 0, note: "", boxes: [] };
-    const msg = (t) => { const n = box.querySelector("[data-docmsg]"); if (n) n.innerHTML = t ? `<div class="tp-note warn" style="margin:6px 0">⛔ ${esc(t)}</div>` : ""; };
+    const msg = (t) => m.querySelectorAll("[data-docmsg], [data-dfmsg]").forEach((n) => { n.innerHTML = t ? `<div class="tp-note warn" style="margin:6px 0">⛔ ${esc(t)}</div>` : ""; });
     const reload = async () => { try { d = await TP.api(q); } catch (e) { return msg(e.message); } paint(); };
     async function review(body) {
       const L = d.latest;
@@ -932,29 +1059,59 @@
     }
     const rv = () => (st.score ? { score: st.score, note: st.note, boxes: st.boxes } : {});
     function docHtml(x, nums) {
-      const sec = (t, h) => (h ? `<div class="doc-sec"><b>${t}</b>${h}</div>` : "");
+      const n = x.negotiation || {}, r = x.rfq || {}, mv = x.market_view || {}, rp = n.rules_pct || {};
       const ul = (a) => (a && a.length ? `<ul>${a.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : "");
-      const n = x.negotiation || {}, r = x.rfq || {}, mv = x.market_view || {};
-      return `<pre class="fm-text">${esc(x.summary_fa || "")}</pre>
-        ${sec("بازار", `<div class="dim">${esc(mv.ms || "")} · ${esc((mv.labels || []).join(" "))} · اطمینان ${esc(mv.confidence_band || "—")}</div>${ul(mv.key_facts)}`)}
-        ${sec("استعلام", `<div class="dim">${esc(r.mode || "")} · موج اول ${M(r.n_wave1 || 0)} از ${M(r.n_max || 0)}${r.waves > 1 ? " · دو موج" : ""}</div>${ul([...(r.why || []), ...(r.distribution_explained || []), ...(r.anti_leak_measures || [])])}`)}
-        ${sec("مذاکره", `<div>${esc(n.anchor_rule || "")}</div><div>${esc(n.reservation_rule || "")}</div><div class="dim">آهنگ c=${esc(n.concession_c)} · ${M(n.rounds || 0)} دور${n.parallel_with ? ` · هم‌زمان با ${M(n.parallel_with)} تأمین‌کننده` : ""}</div>
-          ${(n.packages || []).length ? `<div>بسته‌های معاوضه: ${n.packages.map((p) => `<span class="chip ok">${esc(p.description_fa)}${p.effect_pct != null ? ` (${esc(String(p.effect_pct))}٪)` : ""}</span>`).join(" ")}</div>` : ""}
-          ${(n.hard_constraints || []).length ? `<div>قیدهای سخت: ${n.hard_constraints.map(esc).join("، ")}</div>` : ""}`)}
-        ${nums && nums.status === "OK" ? sec("🔒 عددهای همین قلم — درونی، به تأمین‌کننده گفته نمی‌شود", `<div>قیمت مرجع ${rial(nums.ref)} · هدف ${rial(nums.target)} · حد ${rial(nums.reservation)} ریال${nums.unit ? ` (${esc(nums.unit)})` : ""}</div><div class="dim">پیشنهادِ ما در هر دور: ${nums.offers.map(rial).join(" ← ")}</div>`)
-          : nums && nums.status ? sec("🔒 عددهای همین قلم", `<div class="dim">قیمت مرجع ندارد — ${esc(nums.action || "")}</div>`) : ""}
-        ${sec("وضعیت‌های محتمل و پاسخِ آماده", (x.anticipated_states || []).map((s) => `<div class="doc-st"><b>${esc(s.name || s.state_id)}</b> <span class="chip">${esc(MV_FA[s.move] || s.move)}</span>${s.blocked ? ` <span class="chip bad" title="${esc(s.blocked.join("؛ "))}">⛔ افشاگر — نمی‌رود</span>` : ""}<div class="dim">«${esc(s.prepared_reply_fa)}»</div></div>`).join(""))}
-        ${sec("ریسک‌ها", (x.risks || []).length ? `<ul>${x.risks.map((k) => `<li>${esc(k.risk)} — <span class="dim">${esc(k.control)}</span></li>`).join("")}</ul>` : "")}
-        ${sec("آنچه تأییدِ شما را می‌خواهد", ul(x.needs_approval))}
-        ${x.builder ? sec("سازندهٔ پارامتری", `<div class="dim">وزن‌ها: ${Object.entries(x.builder.weights).map(([k, v]) => `${esc(d.builder.weights[k] || k)} ${M(v)}`).join("، ")} · آهنگِ ${esc(d.builder.pace[x.builder.pace] || "")} · پیشنهادِ دیگران: ${esc(d.builder.others[x.builder.others] || "")}${x.builder.split_ok ? " · تقسیمِ سفارش مجاز" : ""}</div>`) : ""}`;
+      const dh = (t) => `<span class="dh">${t}</span>`;
+      const tile = (lab, main, sub, cls, tip) => `<div class="doc-tile ${cls || ""}"${tip ? ` title="${esc(tip)}"` : ""}><span class="tl">${lab}</span><b>${main}</b>${sub ? `<span class="dim">${sub}</span>` : ""}</div>`;
+      const ok = nums && nums.status === "OK", first = (rp.offers_by_round_vs_ref || [])[0];
+      const risks = x.risks || [], hard = n.hard_constraints || [], need = x.needs_approval || [], pk = n.packages || [];
+      /* چینشِ فهرستِ همین قلم اگر با خانوادهٔ سند (سیاستِ پیش‌فرضِ نوع قلم) فرق دارد */
+      const v = pkVarOf(S.picks[it.id]), docV = CAUTIOUS_M.has(r.competition_mode || r.mode) ? "cautious" : "broad";
+      const tiles = [
+        tile("بازار", `${esc(MS_FA[mv.ms] || mv.ms || "—")}${glq("gl.ms", "ساختار بازار")}`, mv.confidence_band ? `اطمینان ${esc(mv.confidence_band)}` : ""),
+        tile("استعلام", `${esc(MODE_FA[r.mode] || r.mode || "—")}${glq(`gl.mode.${r.mode}`, MODE_FA[r.mode])}`,
+          `موج اول ${M(r.n_wave1 || 0)} از ${M(r.n_max || 0)}${r.waves > 1 ? " · دو موج" : ""}${v && v !== docV ? ` · فهرستِ این قلم: «${VAR_FA[v]}»` : ""}`),
+        tile("مذاکره", `لنگر ${first != null ? pctS(first) : "از هدف"}${glq("gl.anchor", "لنگر")}`,
+          `${M(n.rounds || 0)} دور · <span class="nw">آهنگِ ${paceFa(n.concession_c)}${glq("gl.pace", "آهنگِ امتیازدهی")}</span>${pk.length ? ` · ${M(pk.length)} بستهٔ معاوضه` : ""}`, "", "لنگر: پیشنهادِ دورِ اولِ ما نسبت به قیمت مرجع"),
+        ok ? tile("🔒 عددهای درونی", `مرجع ${rial(nums.ref)}${glq("gl.ref", "قیمت مرجع")}`,
+          `<span class="nw">هدف ${rial(nums.target)}${glq("gl.target", "هدف")}</span> · <span class="nw">حد ${rial(nums.reservation)}${glq("gl.reservation", "حد")}</span> · <span class="nw">ریال${nums.unit ? `/${esc(nums.unit)}` : ""}</span>`, "lock", "درونی — به تأمین‌کننده گفته نمی‌شود")
+          : tile("🔒 عددهای درونی", `<span class="nw">هدف ${pctS(rp.target_vs_ref)}${glq("gl.target", "هدف")}</span> · <span class="nw">حد ${pctS(rp.rv_tol)}${glq("gl.reservation", "حد")}</span>`,
+            `نسبت به قیمت مرجع${nums && nums.status ? ` — ${esc(nums.action || "قیمت مرجعِ این قلم نیست")}` : ""}`, "lock", "درونی — به تأمین‌کننده گفته نمی‌شود"),
+      ].join("");
+      const states = (x.anticipated_states || []).map((s) => `<details class="doc-st"><summary><span class="nm">${esc(s.name || s.state_id)}</span><span class="chip ${MV_TONE[s.move] || ""}">${esc(MV_FA[s.move] || s.move)}</span>${glq(GL_MOVE[s.move], MV_FA[s.move])}${s.blocked ? ` <span class="chip bad" title="${esc(s.blocked.join("؛ "))}">⛔ افشاگر — نمی‌رود</span>` : ""}</summary>
+        <p>«${esc(s.prepared_reply_fa)}»</p>${s.blocked ? `<p class="dim">چرا نمی‌رود: ${esc(s.blocked.join("؛ "))}</p>` : ""}</details>`).join("");
+      const rq = [...(r.why || []), ...(r.distribution_explained || []), ...(r.anti_leak_measures || [])];
+      const B = x.builder;
+      const tabs = [
+        { k: "why", t: "متن و قاعده‌ها", html: [
+          x.summary_fa ? dh("خلاصهٔ کامل") + `<pre class="fm-text">${esc(x.summary_fa)}</pre>` : "",
+          (mv.key_facts || []).length ? dh("بازار") + ul(mv.key_facts) : "",
+          rq.length ? dh("استعلام") + ul(rq) : "",
+          n.anchor_rule || n.reservation_rule ? dh("لنگر، هدف و حد") + ul([n.anchor_rule, n.reservation_rule].filter(Boolean)) : "",
+          dh("آهنگ و دورها") + `<div class="dim">آهنگِ ${paceFa(n.concession_c)} (c=${esc(n.concession_c)}) · ${M(n.rounds || 0)} دور${n.parallel_with ? ` · هم‌زمان با ${M(n.parallel_with)} تأمین‌کننده` : ""}</div>`,
+          pk.length ? dh("بسته‌های معاوضه") + `<div>${pk.map((p) => `<span class="chip ok">${esc(p.description_fa)}${p.effect_pct != null ? ` (${esc(String(p.effect_pct))}٪)` : ""}</span>`).join(" ")}</div>` : "",
+          ok ? dh("🔒 پیشنهادِ ما در هر دور — درونی") + `<div class="dim">${nums.offers.map(rial).join(" ← ")} ریال${nums.unit ? ` (${esc(nums.unit)})` : ""}</div>` : "",
+          mv.ms || (mv.labels || []).length ? dh("کلاس و برچسب‌ها") + `<div class="dim">${esc(mv.ms || "")} · ${esc((mv.labels || []).join(" "))} · اطمینان ${esc(mv.confidence_band || "—")}</div>` : "",
+          x.notes_for_buyer ? dh("یادداشت برای کارشناس") + `<div>${esc(x.notes_for_buyer)}</div>` : ""].join("") },
+        { k: "risk", t: `ریسک‌ها${risks.length ? ` ${M(risks.length)}` : ""}`, html: risks.length ? `<ul>${risks.map((k) => `<li>${esc(k.risk)} — <span class="dim">${esc(k.control)}</span></li>`).join("")}</ul>` : "" },
+        { k: "hard", t: "قیدها و تأییدِ شما", html: (hard.length ? dh("قیدهای سخت — معامله نمی‌شوند") + ul(hard) : "") + (need.length ? dh("آنچه تأییدِ شما را می‌خواهد") + ul(need) : "") },
+        { k: "build", t: "سازندهٔ پارامتری", html: B ? `<div class="dim">وزن‌ها: ${Object.entries(B.weights || {}).map(([k, w]) => `${esc(d.builder.weights[k] || k)} ${M(w)}`).join("، ")} · آهنگِ ${esc(d.builder.pace[B.pace] || "")} · پیشنهادِ دیگران: ${esc(d.builder.others[B.others] || "")}${B.split_ok ? " · تقسیمِ سفارش مجاز" : ""}</div>
+          <div class="dim">هدف ${pctS(B.target_vs_ref)} و تحملِ حد ${pctS(B.rv_tol)} نسبت به مرجع · ${M(B.rounds || 0)} دور · حداکثر ${M(B.max_pay_months || 0)} ماه تعویقِ پرداخت${B.panel_rate != null ? ` · نرخِ ماهانهٔ پنل ${pctS(B.panel_rate)}` : ""}</div>
+          ${(B.tradeables || []).length ? `<div class="dim">قابلِ معامله: ${B.tradeables.map(esc).join("، ")}</div>` : ""}${B.note ? `<div class="dim">یادداشت: ${esc(B.note)}</div>` : ""}` : "" },
+      ];
+      const sub = [risks.length ? `ریسک‌ها ${M(risks.length)}` : "", hard.length ? `قیدهای سخت ${M(hard.length)}` : "", need.length ? `تأیید ${M(need.length)}` : "", B ? "سازندهٔ پارامتری" : ""].filter(Boolean).join(" · ") || "متن و قاعده‌ها";
+      const glance = glanceOf(x.summary_fa);
+      return `${glance ? `<p class="doc-glance"><b>در یک نگاه:</b> ${esc(glance)}</p>` : ""}
+        <div class="doc-tiles">${tiles}</div>
+        ${states ? `<div class="doc-states"><b>وضعیت‌های محتمل</b> <span class="dim">— پاسخِ آماده با زدنِ هر ردیف</span>${states}</div>` : ""}
+        ${TP.ui.det({ key: dk, sub, tabs })}`;
     }
-    function reviewHtml(noActions) {
-      const low = st.score && st.score <= 3;
-      return `<div class="doc-rev" data-drev><b>امتیازِ شما به این سند</b>
-        <div class="toolrow" style="gap:6px;flex-wrap:wrap">${[1, 2, 3, 4, 5].map((n) => `<button type="button" class="tp-btn sm ${st.score === n ? "primary" : ""}" data-dscore="${n}">${M(n)}</button>`).join("")}</div>
-        ${low ? `<textarea class="tp-input" data-dnote style="width:100%;min-height:60px;margin-top:6px" placeholder="چه چیزِ این سند درست نبود؟ (اجباری)">${esc(st.note)}</textarea>
-          <div class="sp-cboxes" role="group" aria-label="جعبه‌های نقدِ راهبرد"><b>کدام بخش؟ (دست‌کم یکی)</b>${d.builder.boxes.map((b) => `<label class="sp-cbox"><input type="checkbox" data-dbox="${b.code}" ${st.boxes.includes(b.code) ? "checked" : ""}> ${esc(b.fa)}</label>`).join("")}</div>` : ""}
-        ${noActions ? "" : `<div class="toolrow" style="gap:8px;margin-top:8px;flex-wrap:wrap"><button type="button" class="tp-btn primary" data-dok>✅ تأیید</button><button type="button" class="tp-btn" data-dedit>✏️ ویرایش</button><button type="button" class="tp-btn" data-dbuild>🧱 سازندهٔ پارامتری</button></div>`}</div>`;
+    /** امتیاز و نقد (۱ تا ۳: توضیح و دست‌کم یک جعبهٔ راهبرد) — در ویرایش و سازنده درونِ فرم، در نما درونِ نوارِ پایین */
+    const stars = () => `<span class="doc-stars" role="radiogroup" aria-label="امتیاز به سند">${[1, 2, 3, 4, 5].map((n) => `<button type="button" role="radio" aria-checked="${st.score === n}" class="tp-btn sm ${st.score === n ? "on" : ""}" data-dscore="${n}">${M(n)}</button>`).join("")}</span>`;
+    const critique = () => (st.score && st.score <= 3 ? `<textarea class="tp-input" data-dnote style="width:100%;min-height:60px;margin-top:6px" placeholder="چه چیزِ این سند درست نبود؟ (اجباری)">${esc(st.note)}</textarea>
+      <div class="sp-cboxes" role="group" aria-label="جعبه‌های نقدِ راهبرد"><b>کدام بخش؟ (دست‌کم یکی)</b>${d.builder.boxes.map((b) => `<label class="sp-cbox"><input type="checkbox" data-dbox="${b.code}" ${st.boxes.includes(b.code) ? "checked" : ""}> ${esc(b.fa)}</label>`).join("")}</div>` : "");
+    function reviewHtml() {
+      return `<div class="doc-rev" data-drev><b>امتیازِ شما به این سند</b><div class="toolrow" style="gap:6px;flex-wrap:wrap">${stars()}</div>${critique()}</div>`;
     }
     function editHtml(x) {
       const n = x.negotiation || {};
@@ -962,7 +1119,7 @@
         <label class="tp-field"><b>قاعدهٔ لنگر و هدف</b><input class="tp-input" data-eanchor style="width:100%" value="${esc(n.anchor_rule || "")}"></label>
         <label class="tp-field"><b>قاعدهٔ حد</b><input class="tp-input" data-eres style="width:100%" value="${esc(n.reservation_rule || "")}"></label>
         ${(x.anticipated_states || []).map((s) => `<label class="tp-field"><b>${esc(s.name || s.state_id)} — ${esc(MV_FA[s.move] || s.move)}</b><textarea class="tp-input" data-erep="${esc(s.state_id)}" style="width:100%;min-height:50px">${esc(s.prepared_reply_fa)}</textarea></label>`).join("")}
-        ${reviewHtml(true)}
+        ${reviewHtml()}
         <div class="toolrow" style="gap:8px;margin-top:8px"><button type="button" class="tp-btn primary" data-esave>ذخیره و تأیید</button><button type="button" class="tp-btn" data-ecancel>انصراف</button></div></div>`;
     }
     function builderHtml() {
@@ -971,44 +1128,65 @@
       return `<div class="doc-builder"><b>🧱 سازندهٔ پارامتری</b>
         <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">${Object.entries(B.weights).map(([k, fa]) => `<label class="tp-field"><b>${esc(fa)}</b><input class="tp-input num" data-bw="${k}" value="${w[k] ?? 20}" style="width:64px" dir="ltr" inputmode="numeric"></label>`).join("")}<span class="dim">جمعِ وزن‌ها ۱۰۰</span></div>
         <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">
-          <label class="tp-field"><b>هدف نسبت به مرجع (٪)</b><input class="tp-input num" data-bp="target_vs_ref" value="${pc(df.target_vs_ref)}" style="width:80px" dir="ltr"></label>
-          <label class="tp-field"><b>تحملِ حد (٪)</b><input class="tp-input num" data-bp="rv_tol" value="${pc(df.rv_tol)}" style="width:80px" dir="ltr"></label>
+          <label class="tp-field"><b>هدف نسبت به مرجع (٪)${glq("gl.target", "هدف")}</b><input class="tp-input num" data-bp="target_vs_ref" value="${pc(df.target_vs_ref)}" style="width:80px" dir="ltr"></label>
+          <label class="tp-field"><b>تحملِ حد (٪)${glq("gl.reservation", "حد")}</b><input class="tp-input num" data-bp="rv_tol" value="${pc(df.rv_tol)}" style="width:80px" dir="ltr"></label>
           <label class="tp-field"><b>شمارِ دور</b><input class="tp-input num" data-bp="rounds" value="${df.rounds || 3}" style="width:60px" dir="ltr"></label>
           <label class="tp-field"><b>حداکثر ماهِ تعویقِ پرداخت</b><input class="tp-input num" data-bp="max_pay_months" value="${df.max_pay_months ?? 3}" style="width:60px" dir="ltr"></label>
           <label class="tp-field"><b>نرخِ ماهانهٔ پنل (٪، اختیاری)</b><input class="tp-input num" data-bp="panel_rate" value="" style="width:80px" dir="ltr"></label></div>
-        <div style="margin-top:6px"><b>آهنگِ امتیازدهی</b> ${Object.entries(B.pace).map(([k, fa]) => `<label class="chkline"><input type="radio" name="bpace" value="${k}" ${k === (df.pace || "balanced") ? "checked" : ""}> ${esc(fa)}</label>`).join(" ")}</div>
+        <div style="margin-top:6px"><b>آهنگِ امتیازدهی${glq("gl.pace", "آهنگِ امتیازدهی")}</b> ${Object.entries(B.pace).map(([k, fa]) => `<label class="chkline"><input type="radio" name="bpace" value="${k}" ${k === (df.pace || "balanced") ? "checked" : ""}> ${esc(fa)}</label>`).join(" ")}</div>
         <div><b>استفاده از پیشنهادِ دیگران</b> ${Object.entries(B.others).map(([k, fa]) => `<label class="chkline"><input type="radio" name="bothers" value="${k}" ${k === (df.others || "better_only") ? "checked" : ""}> ${esc(fa)}</label>`).join(" ")}</div>
-        ${B.tradeable_issues.length ? `<div><b>موضوع‌های قابلِ معامله</b><div class="sp-cboxes">${B.tradeable_issues.map((t) => `<label class="sp-cbox"><input type="checkbox" data-btrade="${esc(t)}" checked> ${esc(t)}</label>`).join("")}</div></div>` : ""}
+        ${B.tradeable_issues.length ? `<div><b>موضوع‌های قابلِ معامله${glq("gl.package", "بستهٔ معاوضه")}</b><div class="sp-cboxes">${B.tradeable_issues.map((t) => `<label class="sp-cbox"><input type="checkbox" data-btrade="${esc(t)}" checked> ${esc(t)}</label>`).join("")}</div></div>` : ""}
         <label class="tp-field" style="margin-top:6px"><b>قیدهای سخت (هر خط یکی)</b><textarea class="tp-input" data-bhard style="width:100%;min-height:50px">${esc((df.hard_constraints || []).join("\n"))}</textarea></label>
-        <label class="chkline"><input type="checkbox" data-bsplit> تقسیمِ سفارش مجاز است</label>
+        <label class="chkline"><input type="checkbox" data-bsplit> تقسیمِ سفارش مجاز است${glq("gl.split", "تقسیمِ سفارش")}</label>
         <label class="tp-field"><b>یادداشت (اختیاری)</b><input class="tp-input" data-bnote style="width:100%"></label>
-        ${d.latest && d.latest.doc ? reviewHtml(true) : ""}
+        ${d.latest && d.latest.doc ? reviewHtml() : ""}
         <div class="toolrow" style="gap:8px;margin-top:8px"><button type="button" class="tp-btn primary" data-bsave>ساخت و تأیید</button><button type="button" class="tp-btn" data-bcancel>انصراف</button></div></div>`;
+    }
+    const ready = () => { const L = d.latest; return !!(L && ["draft", "approved"].includes(L.state) && (L.final || L.doc)); };
+    /** نوارِ چسبانِ پایین: در نمای سند امتیاز، «✅ تأیید» (تنها کارِ اصلی)، «✏️ ویرایش» و «⋯»؛ در ویرایش، سازنده و صف فقط «بستن» */
+    function footHtml() {
+      const close = `<button type="button" class="tp-btn ghost" data-dclose>بستن</button>`;
+      if (st.mode !== "view" || !ready()) return `<div data-dfmsg></div><div class="doc-bar"><span class="sp"></span>${close}</div>`;
+      const more = TP.ui.menu({ cls: "up", btn: `<button type="button" class="tp-icon-btn" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="کارهای بیشتر" title="کارهای بیشتر">${TP.ui.ICON.more}</button>`,
+        items: [{ label: "🧱 سازندهٔ پارامتری", attrs: "data-dbuild" }, { label: "↻ ساختِ دوباره با مدل", attrs: "data-drebuild-ask" }] });
+      return `<div data-dfmsg></div>${critique()}<div class="doc-bar"><span class="dim">امتیاز:</span>${stars()}
+        <button type="button" class="tp-btn primary" data-dok>✅ تأیید</button><button type="button" class="tp-btn" data-dedit>✏️ ویرایش</button>${more}<span class="sp"></span>${close}</div>`;
     }
     function paint() {
       const L = d.latest, x = L && (L.final || L.doc);
       const tone = L ? (L.state === "approved" ? "ok" : L.state === "failed" ? "bad" : L.state === "draft" ? "warn" : "") : "";
-      let h = `<div class="dim" style="font-size:.86rem">${TP.ui.info("expert.picks", "راهنمای سند راهبرد")} ${L ? `نسخهٔ ${M(L.version)} · <span class="chip ${tone}">${esc(L.state_fa)}</span>${L.source === "builder" ? " · سازندهٔ پارامتری" : L.model ? ` · <span dir="ltr">${esc(L.model)}</span>` : ""}${L.review && L.review.score ? ` · امتیازِ ${esc(L.review.by || "")}: ${M(L.review.score)}` : ""}` : "هنوز سندی نیست"}</div><div data-docmsg></div>`;
+      let h = `<div class="doc-head dim">${TP.ui.info("expert.picks", "راهنمای سند راهبرد")} ${L ? `نسخهٔ ${M(L.version)} · <span class="chip ${tone}">${esc(L.state_fa)}</span>${L.source === "builder" ? " · سازندهٔ پارامتری" : L.model ? ` · <span dir="ltr">${esc(L.model)}</span>` : ""}${L.review && L.review.score ? ` · امتیازِ ${esc(L.review.by || "")}: ${M(L.review.score)}` : ""}` : "هنوز سندی نیست"}</div><div data-docmsg></div>`;
       if (st.mode === "builder") h += builderHtml();
       else if (st.mode === "edit" && x) h += editHtml(x);
       else if (!L || ["queued", "building"].includes(L.state)) h += `<div class="tp-note" style="margin:8px 0">⏳ سند در صفِ ساخت است (یکی دو دقیقه). <button type="button" class="tp-btn xs" data-dreload>↻ تازه کن</button></div><div class="toolrow"><button type="button" class="tp-btn" data-dbuild>🧱 همین حالا با سازندهٔ پارامتری</button></div>`;
       else if (L.state === "failed") h += `<div class="tp-note warn">ساخت نشد: ${esc(L.error || "")}</div><div class="toolrow" style="gap:8px"><button type="button" class="tp-btn primary" data-drebuild>↻ دوباره بساز</button><button type="button" class="tp-btn" data-dbuild>🧱 سازندهٔ پارامتری</button></div>`;
-      else h += docHtml(x, d.numbers) + reviewHtml(false);
+      else h += docHtml(x, d.numbers);
       box.innerHTML = h;
+      acts.innerHTML = footHtml();
       bind();
     }
     function keep() {
-      const nt = box.querySelector("[data-dnote]"); if (nt) st.note = nt.value;
-      const bx = [...box.querySelectorAll("[data-dbox]")]; if (bx.length) st.boxes = bx.filter((c) => c.checked).map((c) => c.dataset.dbox);
+      const nt = m.querySelector("[data-dnote]"); if (nt) st.note = nt.value;
+      const bx = [...m.querySelectorAll("[data-dbox]")]; if (bx.length) st.boxes = bx.filter((c) => c.checked).map((c) => c.dataset.dbox);
     }
+    const rebuild = async () => { try { await TP.api("/cr/doc/build", { body: { head: d.head, code: it.code || null, force: true } }); await reload(); } catch (e) { msg(e.message); } };
     function bind() {
-      const Qd = (s) => box.querySelectorAll(s), G1 = (s) => box.querySelector(s);
-      Qd("[data-dscore]").forEach((b) => b.onclick = () => { keep(); st.score = +b.dataset.dscore; const el = G1("[data-drev]"); if (!el) return paint(); el.outerHTML = reviewHtml(st.mode !== "view"); bind(); });
+      /* نوارِ پایین بیرون از box است؛ همهٔ دکمه‌ها از ریشهٔ پنجره */
+      const Qd = (s) => m.querySelectorAll(s), G1 = (s) => m.querySelector(s);
+      Qd("[data-dscore]").forEach((b) => b.onclick = () => {
+        keep(); st.score = +b.dataset.dscore;
+        const el = box.querySelector("[data-drev]");
+        if (el) el.outerHTML = reviewHtml(); else acts.innerHTML = footHtml();
+        bind();
+      });
       const dok = G1("[data-dok]"); if (dok) dok.onclick = () => { keep(); if (!st.score) return msg("امتیازِ ۱ تا ۵ را بزنید."); review({ action: "approve", ...rv() }); };
       const ded = G1("[data-dedit]"); if (ded) ded.onclick = () => { keep(); st.mode = "edit"; paint(); };
       Qd("[data-dbuild]").forEach((b) => b.onclick = () => { keep(); st.mode = "builder"; paint(); });
       const drl = G1("[data-dreload]"); if (drl) drl.onclick = reload;
-      const drb = G1("[data-drebuild]"); if (drb) drb.onclick = async () => { try { await TP.api("/cr/doc/build", { body: { head: d.head, code: it.code || null, force: true } }); await reload(); } catch (e) { msg(e.message); } };
+      const drb = G1("[data-drebuild]"); if (drb) drb.onclick = rebuild;
+      /* «↻ ساختِ دوباره با مدل» (منوی ⋯): نسخهٔ تازه با هزینهٔ مدل — پیش از رفتن می‌پرسد */
+      const dra = G1("[data-drebuild-ask]"); if (dra) dra.onclick = () => TP.modal("↻ ساختِ دوبارهٔ سند", `نسخهٔ تازهٔ سندِ «${esc(d.head)}» با مدل ساخته می‌شود (یکی دو دقیقه، با هزینهٔ مدل). نسخه‌های قبلی می‌مانند و نسخهٔ تأییدشده تا تأییدِ نسخهٔ تازه معتبر است.`, rebuild, "↻ بساز", "انصراف");
+      const dcl = G1("[data-dclose]"); if (dcl) dcl.onclick = () => m.remove();
       const ec = G1("[data-ecancel]"); if (ec) ec.onclick = () => { keep(); st.mode = "view"; paint(); };
       const es = G1("[data-esave]"); if (es) es.onclick = () => {
         keep();
@@ -2887,7 +3065,10 @@
     /* «🧭 استراتژی استعلام»: علتِ تیکِ متفاوت با برنامه، دیدنِ برنامه و چیدن */
     Q("[data-pkbox]").forEach((s) => s.onchange = () => pkEdit(item(), { whybox: { [s.dataset.pkbox]: s.value } }));
     Q("[data-pkstrat]").forEach((b) => b.onclick = () => pkStratUI(item()));
-    Q("[data-pkstrat-go]").forEach((b) => b.onclick = () => pkStratApply(item(), true));
+    /* «🧭 چینش گسترده / محتاط»: زدن، و «بچین / انصراف»ِ خطِ هشدارِ تیکِ دستی */
+    Q("[data-pkvar]").forEach((b) => b.onclick = () => pkVarPress(item(), b.dataset.pkvar));
+    Q("[data-pkvar-go]").forEach((b) => b.onclick = () => pkVarPress(item(), b.dataset.pkvarGo, true));
+    Q("[data-pkvar-no]").forEach((b) => b.onclick = () => { delete S.pkWarn[item().id]; pkPaint(); });
     Q("[data-pkfm]").forEach((b) => b.onclick = () => pkFmUI(item()));
     /* «② 📋 شرایط خرید» در گام‌های شروع: ویرایشگر باز و همان‌جا */
     Q("[data-pkterms]").forEach((b) => b.onclick = () => termsGo(item()));

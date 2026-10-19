@@ -3,6 +3,7 @@
    • شمارِ پیش‌تیکِ فهرستِ تازه از استراتژیِ نوع قلم (کلیدِ pretick) — با استثنای پشتیبانی
    • «استعلام محتاط را بچین»: تیک‌ها با برنامهٔ گیرندگان روی گراف؛ تازه‌ها با منبعِ «استراتژی استعلام» و شمارهٔ دفتر
    • پس از چیدن، هر تیکِ متفاوت با برنامه پیش از «🚀 شروع» علت می‌خواهد (جعبه، و برای «دیگر» متن)
+   • دو گزینهٔ ثابتِ «چینش گسترده / محتاط» (مهر ۱۴۰۵): هر زدن از نو می‌چیند، گزینه در pick_json می‌ماند و برگشت آزاد است
    ============================================================ */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -16,6 +17,7 @@ import { ensureSchema, route } from "../../../worker/api.js";
 import { aiTick } from "../../../worker/ai-agent.js";
 import { fmCheck } from "../../../worker/first-msg.js";
 import { supKey } from "../../../worker/cr-data.js";
+import * as C from "../../../worker/strategy/config.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FX = JSON.parse(gunzipSync(readFileSync(resolve(HERE, "fixtures/cr02-parity.json.gz"))).toString("utf8"));
@@ -144,6 +146,56 @@ test("تیکِ متفاوت با برنامه پیش از «🚀 شروع» عل
   r = await call("/items/61/picks", { method: "PUT", headers: EX, body: { why: { [off.k]: "تأمین‌کنندهٔ اصلیِ این پروژه است" } } });
   assert.deepEqual(r.data.deviations, []);
   assert.deepEqual(r.data.why_boxes.slice(0, 2), ["معتمد است", "شماره یا فعالیتش نامعتبر است"]);
+});
+
+test("دو گزینهٔ ثابتِ «چینش گسترده / محتاط»: هر زدن تیک‌ها را از نو می‌چیند، گزینه در pick_json می‌ماند و رفت‌وبرگشت آزاد است؛ cautious ِ قدیمی هم", { skip: SKIP }, async () => {
+  const pj = () => JSON.parse(DB.raw.prepare("SELECT pick_json FROM items WHERE id=61").get().pick_json).strategy;
+  const put = (strategy) => call("/items/61/picks", { method: "PUT", headers: EX, body: { strategy } });
+  const on = (r) => r.data.list.filter((e) => e.on).map((e) => e.k).sort();
+  /* «پیچ» قرارداد چارچوب (ویژه) است: پیشنهادِ سامانه «گسترده» = برنامهٔ پیش‌فرض (با استثنای شمارِ پشتیبانی، ۳) */
+  let r = await put({ variant: "broad" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.cr.recommended, "broad");
+  assert.deepEqual([r.data.strategy.variant, r.data.strategy.mode, r.data.strategy.cautious], ["broad", "FRAMEWORK_CALLOFF", false]);
+  assert.equal(pj().variant, "broad", "گزینه در pick_json");
+  assert.deepEqual(r.data.deviations, [], "تیکِ علت‌دارِ پیشین با چینشِ تازه کنار رفت");
+  const onB = on(r);
+  assert.equal(onB.length, 3);
+  /* برگشت به محتاط و دوباره گسترده: هر بار از نو */
+  r = await put({ variant: "cautious" });
+  assert.deepEqual([r.data.strategy.variant, r.data.strategy.mode, r.data.strategy.cautious, pj().variant], ["cautious", "LIMITED_STAGED", true, "cautious"]);
+  const onC = on(r);
+  assert.notDeepEqual(onC, onB, "محتاط: یکی در هر بازار، یک تأمین‌کنندهٔ فعلی");
+  assert.equal(r.data.list.filter((e) => e.on && e.incumbent).length, 1);
+  r = await put({ variant: "broad" });
+  assert.deepEqual(on(r), onB);
+  assert.equal(pj().variant, "broad");
+  assert.equal((await put({ variant: "wide" })).status, 422, "فقط دو گزینه");
+  /* پرچمِ قدیمی: cautious: true همان «محتاط»؛ cautious: false برنامهٔ پیش‌فرض (پیشنهادِ سامانه) */
+  r = await put({ cautious: true });
+  assert.deepEqual([r.data.strategy.variant, r.data.strategy.mode, pj().variant], ["cautious", "LIMITED_STAGED", "cautious"]);
+  r = await put({ cautious: false });
+  assert.deepEqual([r.data.strategy.variant, r.data.strategy.mode], ["broad", "FRAMEWORK_CALLOFF"]);
+  /* نوع قلمی که پیش‌فرضش محتاط است (پشتیبانی «پیچ» را محدود و مرحله‌ای کرده): «گسترده» برنامهٔ حداکثری با شمارِ ردهٔ خودش */
+  const H = encodeURIComponent("پیچ");
+  assert.equal((await call(`/support/strategy/heads/${H}`, { method: "PUT", headers: SUP, body: { mode: "LIMITED_STAGED", reason: "بازارِ پیچ متمرکز شد" } })).status, 200);
+  const pl = (await call(`/cr/plan?head=${H}&code=1003&variant=broad`, { headers: EX })).data;
+  assert.deepEqual([pl.policy.mode, pl.forced, pl.recommended], ["BROAD", true, "cautious"]);
+  assert.deepEqual([pl.policy.n_wave1, pl.policy.n_max], C.RFQ_N.BROAD[pl.policy.tier], "شمارِ ردهٔ قلم، نه استثنای حالتِ پیش‌فرض");
+  r = await put({ variant: "broad" });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.deepEqual([r.data.cr.recommended, r.data.strategy.variant, r.data.strategy.mode, r.data.strategy.family], ["cautious", "broad", "BROAD", "max"]);
+  assert.equal(r.data.strategy.n_wave1, pl.policy.n_wave1);
+  assert.equal(on(r).length, pl.plan.wave1.length);
+  assert.ok(on(r).length > onC.length, "گسترده گیرندهٔ بیشتری از محتاط دارد");
+  assert.match(r.data.strategy.why[0], /چینش گسترده/);
+  r = await put({ variant: "cautious" });
+  assert.deepEqual([r.data.strategy.variant, r.data.strategy.mode], ["cautious", "LIMITED_STAGED"]);
+  assert.equal((await call(`/support/strategy/heads/${H}`, { method: "PUT", headers: SUP, body: { clear: ["mode"], reason: "برگشت به تحقیق" } })).status, 200);
+  /* آزمون‌های بعد با همان چینشِ محتاطِ «استعلام محتاط را بچین» ادامه می‌دهند */
+  r = await put({ variant: "cautious" });
+  assert.deepEqual([r.data.strategy.mode, r.data.deviations], ["LIMITED_STAGED", []]);
+  assert.deepEqual(on(r), onC);
 });
 
 test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده (محتاط، بی مقدار، گونه‌های متفاوت)؛ متنِ ممنوع ذخیره نمی‌شود؛ دعوتِ کارشناس هوشمند همان متن", { skip: SKIP }, async () => {

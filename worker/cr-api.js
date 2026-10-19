@@ -5,7 +5,7 @@
  *   GET  /sreg/profile?sid=|name=&head=      GET /sreg/search?q=        GET /sreg/graph?sid=|name=&depth=1|2
  *   POST /sreg/opinions   PUT /sreg/opinions/:id   POST /sreg/opinions/:id/hide
  *   POST /sreg/links      POST /sreg/edges/:id/review
- *   GET  /cr/flags        GET /cr/head?head=&code=       GET /cr/plan?head=&code=&cautious=1
+ *   GET  /cr/flags        GET /cr/head?head=&code=       GET /cr/plan?head=&code=&variant=broad|cautious (یا cautious=1ِ قدیمی)
  *   GET  /cr/doc?head=&code=&enqueue=1   POST /cr/doc/build   POST /cr/doc/:id/review     («📘 سند راهبرد»، کلیدِ doc)
  * پشتیبانی:
  *   GET/PUT /support/cr/flags      GET /support/cr/status
@@ -16,7 +16,7 @@
  */
 import { HttpError } from "./http.js";
 import { supplierProfile, addOpinion, editOpinion, hideOpinion, addLinks, reviewEdge, egoGraph, searchSuppliers, g4List, g4Decide, fullGraph } from "./sreg.js";
-import { headPolicy, recipientPlan, rfqNTable, MODE_FA, FAMILY } from "./cr-engine.js";
+import { headPolicy, recipientPlan, rfqNTable, MODE_FA, FAMILY, VARIANTS } from "./cr-engine.js";
 import * as C from "./strategy/config.js";
 import { WORKFLOWS, WORKFLOW_SUP, SUP_FA } from "./ai-supervise.js";
 import { docView, enqueueDoc, reviewDoc, docOut, docStates, docProgress, panelSettings, savePanel, docModel } from "./strategy-doc.js";
@@ -64,7 +64,8 @@ export async function crRoute(request, env, path, m, url, { json, readJson, who 
       tier: p.tier, n_wave1: p.n_wave1, n_max: p.n_max, why: p.why, workflow: hp.workflow, priority: hp.priority, confidence: hp.confidence, notes: hp.notes,
       disclosure: p.disclosure, quote_must_include: p.quote_must_include, timing: p.timing, ms: hp.profile.ms, labels: hp.profile.labels });
   }
-  if (path === "/cr/plan" && m === "GET") return json(await recipientPlan(env, T(q.head), { itemCode: T(q.code) || null, cautious: q.cautious === "1" }));
+  /* variant=broad|cautious: دو گزینهٔ ثابتِ «🧭 چینش» (cr-engine.js:VARIANTS)؛ cautious=1 همان «محتاط»ِ قدیمی */
+  if (path === "/cr/plan" && m === "GET") return json(await recipientPlan(env, T(q.head), { itemCode: T(q.code) || null, variant: VARIANTS.includes(q.variant) ? q.variant : null, cautious: q.cautious === "1" }));
   /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc) */
   if (path === "/cr/doc" || path.startsWith("/cr/doc/")) {
     if (!(await crFlags(env)).doc) throw new HttpError("«سند راهبرد» هنوز در پنل پشتیبانی روشن نشده است.", 409);

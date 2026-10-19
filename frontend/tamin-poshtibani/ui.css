@@ -234,6 +234,32 @@ body.has-sky .tp-note { background: rgba(79, 140, 255, 0.1); }
 .tp-info { width: 22px; height: 22px; flex-shrink: 0; border-radius: 50%; border: 1px solid var(--gl-edge-hover); background: var(--gl-sheen), var(--gl-fill); color: var(--tp-accent);
   font-weight: 800; font-size: .78rem; line-height: 1; display: inline-grid; place-items: center; padding: 0; cursor: pointer; vertical-align: middle; margin-inline-start: 4px; }
 .tp-info:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+/* «؟»ِ کوچک کنارِ نامِ اصطلاح درونِ متن، چیپ و کاشی (واژه‌نامه) — آرام، تا صفحه شلوغ نشود */
+.tp-info.sm { width: 17px; height: 17px; font-size: .66rem; margin-inline-start: 3px; vertical-align: 1px; border-color: var(--gl-edge); }
+
+/* «≡ جزئیات» (ui.js:det): کنترلِ جدا از «؟» — کپسولِ خط‌چین با نشانِ نارنجیِ «≡»؛ زبانه‌ها بر پایهٔ کارِ هر توضیح */
+.tp-det { display: inline-flex; align-items: center; gap: 6px; font: inherit; font-size: .86rem; font-weight: 600; color: var(--tp-fg); background: transparent;
+  border: 1px dashed var(--tp-line-2); border-radius: 999px; padding: 3px 12px 3px 10px; cursor: pointer; }
+.tp-det:hover { background: rgba(158, 197, 255, 0.08); }
+.tp-det[aria-expanded="true"] { border-style: solid; background: rgba(158, 197, 255, 0.08); }
+.tp-det .sub { color: var(--tp-muted); font-weight: 500; font-size: .8rem; }
+.tp-det-i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 5px; background: rgba(255, 140, 66, 0.22); color: #ffc79e; font-size: .8rem; font-weight: 800; line-height: 1; }
+:root[data-theme="light"] .tp-det-i { background: rgba(255, 140, 66, 0.2); color: #a8480f; }
+.tp-detbox { margin-top: 8px; border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; background: rgba(3, 8, 20, 0.28); font-size: .86rem; line-height: 1.85; }
+:root[data-theme="light"] .tp-detbox { background: rgba(255, 255, 255, 0.55); }
+.tp-detbox ul { margin: 2px 0; padding-inline-start: 18px; }
+.tp-detbox .dh { display: block; margin: 6px 0 2px; font-size: .78rem; font-weight: 700; color: var(--tp-muted); }
+.tp-detbox .dh:first-child { margin-top: 0; }
+.tp-dtabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: 8px; }
+.tp-dtabs button { font: inherit; font-size: .82rem; color: var(--tp-muted); background: transparent; border: 1px solid transparent; border-radius: 8px; padding: 2px 10px; cursor: pointer; }
+.tp-dtabs button.on { color: var(--tp-fg); border-color: var(--tp-line-2); background: rgba(158, 197, 255, 0.08); font-weight: 700; }
+/* کپسولِ دوگزینه‌ای کوچک (مثلِ «چینش گسترده / محتاط») و برچسبِ «پیشنهادِ سامانه» */
+.tp-seg.sm > button { padding: 4px 12px; font-size: .84rem; }
+.tp-seg > button[disabled] { opacity: .55; cursor: progress; }
+.tp-seg-tag { font-size: .68rem; font-weight: 600; padding: 0 6px; border-radius: 999px; background: rgba(79, 140, 255, 0.18); color: var(--tp-fg); }
+.tp-seg > button.on .tp-seg-tag { background: rgba(255, 255, 255, 0.22); color: #fff; }
+/* منویی که در نوارِ پایین است رو به بالا باز می‌شود (گوشی: همان برگهٔ پایینِ صفحه) */
+@media (min-width: 721px) { .tp-menu.up > .tp-menu-list { top: auto; bottom: calc(100% + 8px); transform-origin: bottom; } .tp-menu.up > .tp-menu-list::before { top: auto; bottom: -10px; } }
 
 /* ============================================================
    نوار مهلت و نوار پیشرفت
@@ -528,7 +554,8 @@ body.has-foot .tp-cards, body.has-foot .tp-wrap { padding-bottom: 96px; }
 .sp-card.sp-sum { padding: 12px 14px; }
 .sp-card.sp-sum .sp-actions { justify-content: flex-start; }
 .sp-card.sp-sum .sp-chips { margin-top: 4px; }
-.tp-help { position: fixed; inset: 0; z-index: 890; }
+/* بالای پنجره‌ها (tp-modal-bg، ۹۰۰): «؟»ِ درونِ پنجره (واژه‌نامه کنارِ نام‌ها در «🧭 استراتژی» و «📘 سند راهبرد») کشو را روی همان پنجره باز می‌کند */
+.tp-help { position: fixed; inset: 0; z-index: 905; }
 .tp-help[hidden] { display: none; }
 .tp-help-scrim { position: absolute; inset: 0; background: rgba(3, 8, 20, 0.45); animation: uiFade var(--ui-base) ease both; }
 :root[data-theme="light"] .tp-help-scrim { background: rgba(15, 27, 51, 0.28); }
@@ -559,6 +586,16 @@ body.has-foot .tp-cards, body.has-foot .tp-wrap { padding-bottom: 96px; }
 .tp-help-topic .rel { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 8px; }
 .tp-help-topic .rel button, .tp-help-list button { border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); box-shadow: var(--gl-rim); color: var(--tp-fg); border-radius: 999px; padding: 3px 11px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
 .tp-help-topic .rel button:hover, .tp-help-list button:hover { background: var(--gl-sheen), var(--gl-fill-hover); }
+/* واژه‌نامه: نامِ انگلیسی، «بیشتر بخوانید» با نشانِ پولی */
+.tp-help-topic .en { margin: -2px 0 8px; font-size: .78rem; color: var(--tp-muted); text-align: end; }
+.tp-help-topic code { font-size: .82em; padding: 0 4px; border-radius: 5px; background: rgba(120, 165, 255, 0.12); unicode-bidi: isolate; }
+.tp-help-topic ul.links { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.tp-help-topic ul.links li { padding: 6px 10px; border-radius: 10px; border: 1px solid var(--tp-line); background: rgba(3, 8, 20, 0.18); line-height: 1.6; }
+:root[data-theme="light"] .tp-help-topic ul.links li { background: rgba(255, 255, 255, 0.6); }
+.tp-help-topic ul.links a { color: var(--tp-accent); font-weight: 600; text-underline-offset: 3px; overflow-wrap: anywhere; }
+.tp-help-topic ul.links small { display: block; color: var(--tp-muted); font-size: .78rem; }
+.tp-help-topic .paid { display: inline-block; font-size: .68rem; font-weight: 700; padding: 0 7px; border-radius: 999px; color: #f2c230; background: rgba(242, 194, 48, 0.14); vertical-align: 1px; }
+:root[data-theme="light"] .tp-help-topic .paid { color: #8a5a00; background: rgba(196, 128, 26, 0.14); }
 .tp-help-list h4 { margin: 10px 0 6px; font-size: .78rem; color: var(--tp-muted); font-weight: 700; }
 .tp-help-list .grp { display: flex; gap: 6px; flex-wrap: wrap; }
 .tp-help-list button.on { border-color: var(--tp-accent); background: var(--gl-sheen), rgba(79, 140, 255, 0.18); }

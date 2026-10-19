@@ -273,7 +273,8 @@
     const areaOf = (k) => String(k || "").split(".")[0];
     const areaName = (a) => (H().area || {})[a] || a;
     const nrm = (x) => String(x == null ? "" : x).replace(/[ي]/g, "ی").replace(/[ك]/g, "ک").replace(/‌/g, " ").replace(/\s+/g, " ").toLowerCase().trim();
-    const plain = (t) => [t.title, t.summary, ...(t.steps || []), ...(t.tips || []), ...((t.faq || []).flatMap((f) => [f.q, f.a]))].map(nrm).join(" ");
+    const plain = (t) => [t.title, t.en, t.summary, ...(t.steps || []), ...(t.tips || []), ...((t.faq || []).flatMap((f) => [f.q, f.a])),
+      ...((t.sections || []).flatMap((s) => [s.h, s.p, ...(s.li || [])])), ...((t.links || []).map((l) => l.t))].map(nrm).join(" ");
     const find = (k) => { const T = topics(); if (T[k]) return [k, T[k]]; const p = String(k || "").split("."); while (p.length > 1) { p.pop(); const kk = p.join("."); if (T[kk]) return [kk, T[kk]]; } return [null, null]; };
     function mountFab() {
       if (fab && fab.isConnected) return;
@@ -283,22 +284,30 @@
       fab.onclick = () => open();
       document.body.appendChild(fab);
     }
+    /* «بیشتر بخوانید» (واژه‌نامه): هر پیوند در زبانهٔ تازه و بی دسترسیِ صفحهٔ مقصد به این پنجره؛ فقط https */
+    const PAID_FA = { abs: "پولی؛ چکیده آزاد" };
+    const linkHtml = (l) => (/^https:\/\//.test(String(l.u || "")) ? `<li><a href="${esc(l.u)}" target="_blank" rel="noopener noreferrer">${esc(l.t)}</a>${l.paid ? ` <span class="paid">${esc(PAID_FA[l.paid] || "پولی")}</span>` : ""}${l.d ? `<small>${esc(l.d)}</small>` : ""}</li>` : "");
     function topicHtml(k, t) {
       const rel = (t.related || []).filter((r) => topics()[r]).map((r) => `<button type="button" data-help-go="${esc(r)}">${esc(topics()[r].title)}</button>`).join("");
+      const links = (t.links || []).map(linkHtml).join("");
       return `<section class="tp-help-topic"><h3>${esc(t.title)}<span class="area">${esc(areaName(areaOf(k)))}</span></h3>
+        ${t.en ? `<div class="en" dir="ltr">${esc(t.en)}</div>` : ""}
         ${t.summary ? `<p>${t.summary}</p>` : ""}
+        ${(t.sections || []).map((s) => `<div class="tip-h">${esc(s.h)}</div>${s.p ? `<p>${s.p}</p>` : ""}${(s.li || []).length ? `<ul>${s.li.map((x) => `<li>${x}</li>`).join("")}</ul>` : ""}`).join("")}
         ${(t.steps || []).length ? `<div class="tip-h">گام‌به‌گام</div><ol>${t.steps.map((s) => `<li>${s}</li>`).join("")}</ol>` : ""}
         ${(t.tips || []).length ? `<div class="tip-h">نکته‌ها</div><ul class="tips">${t.tips.map((s) => `<li>${s}</li>`).join("")}</ul>` : ""}
         ${(t.faq || []).length ? `<div class="tip-h">پرسش‌های رایج</div><ul>${t.faq.map((f) => `<li><b>${f.q}</b><br>${f.a}</li>`).join("")}</ul>` : ""}
+        ${links ? `<div class="tip-h">بیشتر بخوانید</div><ul class="links">${links}</ul>` : ""}
         ${rel ? `<div class="tip-h">مرتبط</div><div class="rel">${rel}</div>` : ""}</section>`;
     }
     function listHtml(key) {
       const T = topics(), a = areaOf(key), qq = nrm(q);
       const keys = Object.keys(T).filter((k) => (qq ? plain(T[k]).includes(qq) : areaOf(k) === a));
       if (!keys.length) return `<div class="tp-help-none">${qq ? "چیزی با این واژه پیدا نشد." : "موضوعی برای این بخش ثبت نشده."}</div>`;
+      /* زیرگروه (grp) — ۳۵ اصطلاحِ واژه‌نامه در یک دسته شلوغ می‌شد */
       const groups = new Map();
-      keys.forEach((k) => { const g = areaOf(k); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); });
-      return [...groups].map(([g, ks]) => `<h4>${esc(areaName(g))}</h4><div class="grp">${ks.map((k) => `<button type="button" class="${k === key ? "on" : ""}" data-help-go="${esc(k)}">${esc(T[k].title)}</button>`).join("")}</div>`).join("");
+      keys.forEach((k) => { const g = areaOf(k) + (T[k].grp ? `|${T[k].grp}` : ""); if (!groups.has(g)) groups.set(g, []); groups.get(g).push(k); });
+      return [...groups].map(([g, ks]) => { const [ar, sub] = g.split("|"); return `<h4>${esc(areaName(ar))}${sub ? ` · ${esc(sub)}` : ""}</h4><div class="grp">${ks.map((k) => `<button type="button" class="${k === key ? "on" : ""}" data-help-go="${esc(k)}">${esc(T[k].title)}</button>`).join("")}</div>`; }).join("");
     }
     const ASK_ICON = svg('<path d="M21 12a8.5 8.5 0 0 1-12.4 7.5L3 21l1.5-5.4A8.5 8.5 0 1 1 21 12z"/><path d="M8.5 10.5h7M8.5 14h4.5"/>');
     const askCard = () => (asst ? `<button type="button" class="tp-help-ask" data-help-ask><span class="ic" aria-hidden="true">${ASK_ICON}</span>
@@ -314,7 +323,7 @@
     function flowLoad() {
       if (FL.data || FL.wait) return FL.wait || Promise.resolve(FL.data);
       FL.wait = new Promise((res) => {
-        const sc = document.createElement("script"); sc.src = "help-flows.js?v=3"; sc.async = true;
+        const sc = document.createElement("script"); sc.src = "help-flows.js?v=4"; sc.async = true;
         sc.onload = () => { FL.data = window.TP_FLOWS || null; res(FL.data); };
         sc.onerror = () => { FL.wait = null; sc.remove(); res(null); };
         document.head.appendChild(sc);
@@ -408,7 +417,9 @@
       const body = $(".tp-help-body", panel); if (!body) return;
       if (mode === "chat" && asst) return paintChat(true);
       const [k, t] = find(key);
-      body.innerHTML = (!nrm(q) ? askCard() + flowCard(k || key) : "") + (t && !nrm(q) ? topicHtml(k, t) : "") + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
+      /* اصطلاحِ واژه‌نامه («؟» کنارِ یک نام) خودش اول می‌آید؛ کارتِ دستیار و نقشهٔ کار زیرش */
+      const top = !nrm(q) ? askCard() + flowCard(k || key) : "", tx = t && !nrm(q) ? topicHtml(k, t) : "";
+      body.innerHTML = (areaOf(k) === "gl" ? tx + top : top + tx) + `<nav class="tp-help-list">${listHtml(k || key)}</nav>`;
       body.dataset.flowKey = k || key || "";
       fitThumbs(body);
       body.scrollTop = 0;
@@ -566,8 +577,41 @@
     }
     return { set(key, o) { cur = key || ""; mountFab(); fab.hidden = !!(o && o.fab === false); const right = !!(o && o.side === "right"); fab.classList.toggle("right", right); if (panel) panel.classList.toggle("right", right); if (panel && !panel.hidden && mode !== "chat") paint(cur); }, open, close, current: () => cur, assistant };
   })();
-  /** دکمهٔ «؟» کنار بخش‌های پیچیده */
-  const info = (key, title) => `<button type="button" class="tp-info" data-help="${esc(key)}" title="${esc(title || "راهنما")}" aria-label="${esc(title || "راهنما")}">؟</button>`;
+  /** دکمهٔ «؟» کنار بخش‌های پیچیده — و کنارِ نامِ هر اصطلاح (کلیدِ gl.*، واژه‌نامه)؛ cls: «sm» برای کنارِ نامِ درونِ متن */
+  const info = (key, title, cls) => `<button type="button" class="tp-info${cls ? ` ${cls}` : ""}" data-help="${esc(key)}" title="${esc(title || "راهنما")}" aria-label="${esc(title || "راهنما")}">؟</button>`;
+
+  /* ---------- «≡ جزئیات» (مهر ۱۴۰۵، خواستهٔ مالک): توضیحِ حاشیه‌ایِ یک صفحه، دسته‌بندی‌شده بر پایهٔ کارش ----------
+     جدا از «؟» (که «این اصطلاح چیست» را در کشوی راهنما باز می‌کند): «≡ جزئیات» یعنی «چرا و با چه قاعده‌ای» و همان‌جا باز می‌شود، تا
+     صفحه فقط تیتر بماند. det({key, sub, tabs: [{k, t, html}], tab}) ← html؛ باز و بسته و زبانه را شنوندهٔ سراسریِ پایین عوض می‌کند و
+     برای همان key به یاد می‌سپارد تا بازرسمِ صفحه یا پنجره آن را نبندد (برای هر بار بازشدنِ پنجره key تازه بدهید). */
+  const detMem = new Map();
+  function det(o) {
+    const tabs = (o.tabs || []).filter((x) => x && x.html);
+    if (!tabs.length) return "";
+    if (detMem.size > 200) detMem.clear();   /* کلیدِ هر بار بازشدنِ پنجره تازه است؛ حافظه کوچک می‌ماند */
+    const mem = detMem.get(o.key) || {};
+    const has = (k) => tabs.some((x) => x.k === k);
+    const cur = has(mem.tab) ? mem.tab : has(o.tab) ? o.tab : tabs[0].k, open = !!mem.open;
+    const id = `tpdet-${String(o.key).replace(/[^\w-]/g, "_")}`;
+    return `<div class="tp-det-wrap" data-det-key="${esc(o.key)}"><button type="button" class="tp-det" data-det aria-expanded="${open}" aria-controls="${id}"><span class="tp-det-i" aria-hidden="true">≡</span> جزئیات${o.sub ? ` <span class="sub">(${esc(o.sub)})</span>` : ""}</button>
+      <div class="tp-detbox" id="${id}" ${open ? "" : "hidden"}>${tabs.length > 1 ? `<div class="tp-dtabs" role="tablist">${tabs.map((x) => `<button type="button" role="tab" aria-selected="${x.k === cur}" class="${x.k === cur ? "on" : ""}" data-dtab="${esc(x.k)}">${esc(x.t)}</button>`).join("")}</div>` : ""}
+        ${tabs.map((x) => `<div class="tp-dpane" role="tabpanel" data-dpane="${esc(x.k)}" ${x.k === cur ? "" : "hidden"}>${x.html}</div>`).join("")}</div></div>`;
+  }
+  document.addEventListener("click", (e) => {
+    const w = e.target.closest && e.target.closest("[data-det-key]"); if (!w) return;
+    const key = w.dataset.detKey, mem = detMem.get(key) || {};
+    const b = e.target.closest("[data-det]");
+    if (b && w.contains(b)) {
+      const box = w.querySelector(".tp-detbox"), open = box.hidden;
+      box.hidden = !open; b.setAttribute("aria-expanded", String(open)); detMem.set(key, { ...mem, open });
+      return;
+    }
+    const tb = e.target.closest("[data-dtab]"); if (!tb) return;
+    const k = tb.dataset.dtab;
+    w.querySelectorAll("[data-dtab]").forEach((x) => { const on = x === tb; x.classList.toggle("on", on); x.setAttribute("aria-selected", String(on)); });
+    w.querySelectorAll("[data-dpane]").forEach((p) => { p.hidden = p.dataset.dpane !== k; });
+    detMem.set(key, { ...mem, open: true, tab: k });
+  });
 
   /* ---------- بازخوانیِ خودکارِ بی‌پرش ----------
      هر ms میلی‌ثانیه (پنجرهٔ پنهان: نه)، فقط وقتی کاربر وسطِ کاری نیست: فیلدی فوکوس ندارد، پنجره‌ای باز نیست، منویی باز نیست.
@@ -769,5 +813,5 @@
     };
   })();
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, idle, reqCard, unitRow, sizeChip, estTxt, chatRow, avColor, avInitial, once, resetOnce, loader, push };
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, det, autoRefresh, idle, reqCard, unitRow, sizeChip, estTxt, chatRow, avColor, avInitial, once, resetOnce, loader, push };
 })();

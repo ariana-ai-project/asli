@@ -20,6 +20,17 @@ const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { retu
 const YM = (y) => y * 12 + 1;                         /* purchases.ym = سال × ۱۲ + ماه */
 export const CAUTIOUS = new Set(["LIMITED_STAGED", "STAGED_BROADENING", "DIRECT_PLUS_MARKET_TEST"]);
 export const FAMILY = (mode) => (mode === "BROAD" ? "max" : CAUTIOUS.has(mode) ? "cautious" : "special");
+/**
+ * دو گزینهٔ ثابتِ «🧭 چینش» (درخواست مالک، مهر ۱۴۰۵): «گسترده» و «محتاط». گزینه‌ای که با خانوادهٔ پیش‌فرضِ نوع قلم یکی است
+ * همان سیاستِ پیش‌فرض است («پیشنهادِ سامانه»)؛ گزینهٔ دیگر حالت را به زور عوض می‌کند — محتاط ← «محدود و مرحله‌ای»، و گسترده
+ * برای نوع قلمی که پیش‌فرضش محتاط است ← «گسترده (حداکثری)» با قاعده‌های ردهٔ همان قلم. پیش‌تر بعد از «محتاط» راهِ برگشت نبود.
+ */
+export const VARIANTS = ["broad", "cautious"];
+export const variantOfFamily = (family) => (family === "cautious" ? "cautious" : "broad");
+const FORCE = {
+  cautious: ["LIMITED_STAGED", "به درخواست کارشناس: «این قلم کمیاب یا متمرکز است؛ استعلام محتاط»"],
+  broad: ["BROAD", "به انتخاب کارشناس: «چینش گسترده» — رقابتِ حداکثری با قاعده‌های ردهٔ همین قلم"],
+};
 export const MODE_FA = { BROAD: "گسترده (حداکثری)", STANDARD: "استاندارد", SIMULTANEOUS_INDEX: "هم‌زمان قیمت‌مرجع", MULTICHANNEL: "چندکاناله",
   LIMITED_STAGED: "محدود و مرحله‌ای", CONSULT_THEN_COMPETE: "مشورت سپس رقابت", DIRECT_PLUS_MARKET_TEST: "مستقیم با آزمون بازار",
   FRAMEWORK_CALLOFF: "قرارداد چارچوب", STAGED_BROADENING: "مرحله‌ای با گسترش مشروط" };
@@ -115,23 +126,29 @@ export async function rfqNTable(env) {
 }
 
 /**
- * سیاستِ استعلامِ مؤثر برای یک نوع قلم. runtime: {urgent, quantity_vs_typical, request_value_bn}؛ cautious: برنامهٔ «محتاط»
- * (حالتِ محدود و مرحله‌ای) حتی اگر پیش‌فرضِ نوع قلم چیز دیگری است.
+ * سیاستِ استعلامِ مؤثر برای یک نوع قلم. runtime: {urgent, quantity_vs_typical, request_value_bn}؛ variant: «broad» یا «cautious»
+ * (VARIANTS) — گزینه‌ای که با خانوادهٔ پیش‌فرض فرق دارد حالت را به زور عوض می‌کند (FORCE)؛ cautious: true همان variant «cautious»ِ
+ * قدیمی است. استثنای شمارِ پشتیبانی برای حالتِ پیش‌فرضِ نوع قلم است، پس با حالتِ به‌زور‌عوض‌شده نمی‌آید.
+ * خروجی: variant (گزینهٔ مؤثر)، recommended (گزینهٔ «پیشنهادِ سامانه»)، forced، base_mode و base_family (پیش‌فرضِ نوع قلم).
  */
-export async function headPolicy(env, head, { itemCode, runtime, cautious } = {}) {
+export async function headPolicy(env, head, { itemCode, runtime, cautious, variant } = {}) {
   const hp = await headProfile(env, head, itemCode);
   if (!hp) return null;
   const prof = { ...hp.profile };
-  if (cautious && !CAUTIOUS.has(rfqPolicy(prof, runtime).competition_mode)) {
-    prof.forced_mode = "LIMITED_STAGED";
-    prof.forced_why = "به درخواست کارشناس: «این قلم کمیاب یا متمرکز است؛ استعلام محتاط»";
+  const base = rfqPolicy(prof, runtime);
+  const baseFam = FAMILY(base.competition_mode), rec = variantOfFamily(baseFam);
+  const want = VARIANTS.includes(variant) ? variant : cautious ? "cautious" : null;
+  const forced = !!want && want !== rec;
+  if (forced) {
+    [prof.forced_mode, prof.forced_why] = FORCE[want];
+    if (want === "broad") prof.forced_why += `؛ پیشنهادِ سامانه «${MODE_FA[base.mode]}» بود`;
   }
-  const pol = rfqPolicy(prof, runtime);
+  const pol = forced ? rfqPolicy(prof, runtime) : base;
   const table = await rfqNTable(env);
   const tierN = (table[pol.competition_mode] || {})[pol.tier];
   const notes = [];
   if (tierN && (tierN[0] !== pol.n_wave1 || tierN[1] !== pol.n_max)) { [pol.n_wave1, pol.n_max] = tierN; notes.push("شمارِ موج اول و سقف از جدولِ پنل پشتیبانی"); }
-  if (hp.changes.n && !cautious) {
+  if (hp.changes.n && !forced) {
     const v = hp.changes.n.value || {};
     if (Number.isInteger(v.n_wave1) && Number.isInteger(v.n_max) && v.n_wave1 >= 1 && v.n_wave1 <= v.n_max) {
       [pol.n_wave1, pol.n_max] = [v.n_wave1, v.n_max];
@@ -139,6 +156,7 @@ export async function headPolicy(env, head, { itemCode, runtime, cautious } = {}
     }
   }
   return { head: hp.row.head, profile: prof, policy: pol, family: FAMILY(pol.competition_mode), mode_fa: MODE_FA[pol.mode], competition_fa: MODE_FA[pol.competition_mode],
+    variant: forced ? want : rec, recommended: rec, forced, base_mode: base.mode, base_mode_fa: MODE_FA[base.mode], base_family: baseFam,
     workflow: hp.row.workflow, priority: hp.row.priority, confidence: hp.row.confidence, changes: hp.changes, notes, code: hp.code };
 }
 
@@ -178,8 +196,8 @@ const inChunks = async (env, sql, ids, size = 90) => {
 const TYPE_OF_NATURE = { same_business: "تلفن مشترک", same_market: "هم‌پاساژ", partner: "هم‌پاساژ (همکاری)", rival: "رقابت", chain: "زنجیرهٔ تأمین", collusion: "الگوی سلطهٔ مکمل (کارشناس)" };
 
 /**
- * برنامهٔ گیرندگانِ یک قلم: {policy, plan, candidates, cautious?} — plan همان خروجیِ selectRecipients با نام و جزئیاتِ هر نامزد.
- * opts: {itemCode, runtime, cautious, recentlyAsked}
+ * برنامهٔ گیرندگانِ یک قلم: {policy, plan, candidates, variant, recommended} — plan همان خروجیِ selectRecipients با نام و جزئیاتِ هر نامزد.
+ * opts: {itemCode, runtime, variant, cautious (همان variant «cautious»ِ قدیمی), recentlyAsked}
  */
 export async function recipientPlan(env, head, opts = {}) {
   const hp = await headPolicy(env, head, opts);
@@ -230,7 +248,8 @@ export async function recipientPlan(env, head, opts = {}) {
   const pub = (id) => { const c = byId.get(id) || { id }; return { id, name: c.name, incumbent: !!c.is_incumbent, hub: c.hub, role: c.role, verification: c.verification,
     trusted: !!c.trusted, fit: c.fit || null, rank: c.rank ?? null, phones: c.phones || null, mobiles: c.mobiles || null, k: c.k || supKey(c.name) }; };
   return { head: hp.head, unit_key: unitKey, policy: hp.policy, family: hp.family, mode_fa: hp.mode_fa, competition_fa: hp.competition_fa, notes: hp.notes,
-    workflow: hp.workflow, changes: hp.changes,
+    variant: hp.variant, recommended: hp.recommended, forced: hp.forced, base_mode: hp.base_mode, base_mode_fa: hp.base_mode_fa, base_family: hp.base_family,
+    ms: hp.profile.ms || null, confidence: hp.confidence || null, workflow: hp.workflow, changes: hp.changes,
     plan: { ...plan, wave1: plan.wave1.map(pub), reserve: plan.reserve.map(pub) },
     candidates: cands.length, edges: edges.length };
 }

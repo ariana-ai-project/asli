@@ -672,6 +672,51 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .sp-cbox { display: inline-flex; gap: 5px; align-items: center; padding: 4px 10px; border: 1px solid var(--tp-line-2); border-radius: 999px; cursor: pointer; user-select: none; }
 .sp-cbox:has(input:checked) { background: rgba(229,72,77,.14); border-color: rgba(229,72,77,.55); }
 .sp-cbox input { margin: 0; }
+/* نمای تیترواری «📘 سند راهبرد» (مهر ۱۴۰۵): «در یک نگاه»، چهار کاشی، وضعیت‌های جمع‌شده و نوارِ چسبانِ بازبینی در .tp-acts */
+.doc-head { font-size: .84rem; margin-bottom: 6px; }
+.doc-glance { margin: 6px 0 10px; padding: 8px 12px; border-radius: 12px; background: rgba(79,140,255,.09); border: 1px solid rgba(79,140,255,.3); line-height: 1.9; font-size: .92rem; }
+.doc-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 8px; margin-bottom: 10px; }
+.doc-tile { display: flex; flex-direction: column; gap: 2px; min-width: 0; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--tp-line); background: rgba(158,197,255,.05); font-size: .88rem; line-height: 1.7; }
+.doc-tile .tl { font-size: .74rem; font-weight: 700; color: var(--tp-muted); }
+.doc-tile b { font-size: .95rem; }
+.doc-tile .dim { font-size: .8rem; }
+.doc-tile.lock { border-color: rgba(242,194,48,.35); background: rgba(242,194,48,.06); }
+.doc-tile .nw { white-space: nowrap; }
+.doc-states { display: flex; flex-direction: column; gap: 6px; margin-bottom: 10px; font-size: .9rem; }
+details.doc-st { margin: 0; border: 1px solid var(--tp-line); border-radius: 10px; padding: 4px 10px; background: rgba(3,8,20,.2); }
+details.doc-st > summary { cursor: pointer; display: flex; align-items: center; gap: 6px; flex-wrap: wrap; list-style: none; padding: 2px 0; }
+details.doc-st > summary::-webkit-details-marker { display: none; }
+details.doc-st > summary::before { content: "‹"; color: var(--tp-muted); transition: transform .15s; display: inline-block; }
+details.doc-st[open] > summary::before { transform: rotate(-90deg); }
+details.doc-st > summary .nm { flex: 1 1 160px; min-width: 0; }
+details.doc-st p { margin: 4px 0 6px; font-size: .88rem; line-height: 1.85; color: var(--tp-muted); }
+:root[data-theme="light"] details.doc-st { background: rgba(255,255,255,.5); }
+.tp-acts.doc-foot { flex-direction: column; align-items: stretch; gap: 6px; }
+.doc-bar { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.doc-bar .sp { flex: 1; }
+.doc-stars { display: inline-flex; gap: 3px; }
+.doc-stars .tp-btn { min-width: 32px; padding-inline: 8px; }
+.doc-stars .tp-btn.on { background: linear-gradient(135deg, rgba(40,100,220,.92), rgba(60,122,240,.88)); border-color: rgba(150,190,255,.55); color: #fff; font-weight: 800; }
+.doc-foot .sp-cboxes { margin-top: 0; }
+@media (max-width: 640px) { .doc-tiles { grid-template-columns: 1fr 1fr; } .doc-bar .sp { display: none; } }
+/* صفحهٔ تیترواری «🧭 استراتژی استعلام» (expert.js:pkStratUI) و دو گزینهٔ «چینش» بالای «🎯 فهرست دعوت» (pkVarHtml) */
+.st-page { display: flex; flex-direction: column; gap: 10px; line-height: 1.85; }
+.st-page > .tp-seg { align-self: flex-start; }
+.st-line, .pk-line { font-size: .86rem; }
+.st-mode { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.st-why { margin: 0; color: var(--tp-muted); font-size: .9rem; }
+.st-facts { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.st-facts li { display: grid; grid-template-columns: 24px 1fr; gap: 6px; align-items: baseline; padding: 6px 10px; border-radius: 10px; background: rgba(158,197,255,.06); border: 1px solid var(--tp-line); font-size: .9rem; }
+.st-who ol { margin: 4px 0 0; padding-inline-start: 22px; display: flex; flex-direction: column; gap: 2px; font-size: .9rem; }
+.pk-strat { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 8px 0; padding: 8px 10px; border-radius: 12px; border: 1px solid var(--tp-line); background: rgba(158,197,255,.05); }
+.pk-strat .tp-det-wrap { flex-basis: 100%; }
+.pk-mode { display: inline-flex; align-items: center; }
+.pk-warn { color: #f2c230; }
+.pk-ok { color: #4cc685; }
+.pk-bad { color: #f08a70; }
+:root[data-theme="light"] .pk-warn { color: #8a5a00; }
+:root[data-theme="light"] .pk-ok { color: #1d7f49; }
+:root[data-theme="light"] .pk-bad { color: #b4381f; }
 /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ هر قلم (expert.js:vTerms) */
 .terms-box { border: 1px dashed var(--tp-line); border-radius: 12px; padding: 8px 12px; margin: 10px 0; }
 .terms-box .terms-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }

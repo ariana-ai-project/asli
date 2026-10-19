@@ -64,10 +64,14 @@ export function buildKnowledge() {
     const a = k.split(".")[0];
     if (!byArea.has(a)) byArea.set(a, []);
     const parts = [`### ${strip(t.title)} (${k})`];
+    /* واژه‌نامه (gl.*): نامِ انگلیسی، توضیحِ یک‌صفحه‌ای و «بیشتر بخوانید» هم — دستیار می‌تواند اصطلاح را با منبعش توضیح دهد */
+    if (t.en) parts.push(`انگلیسی: ${strip(t.en)}`);
     if (t.summary) parts.push(strip(t.summary));
+    for (const s of t.sections || []) parts.push(`${strip(s.h)}:${s.p ? `\n${strip(s.p)}` : ""}${(s.li || []).length ? `\n${s.li.map((x) => `- ${strip(x)}`).join("\n")}` : ""}`);
     if ((t.steps || []).length) parts.push("گام‌ها:\n" + t.steps.map((s, i) => `${i + 1}. ${strip(s)}`).join("\n"));
     if ((t.tips || []).length) parts.push("نکته‌ها:\n" + t.tips.map((s) => `- ${strip(s)}`).join("\n"));
     if ((t.faq || []).length) parts.push("پرسش‌های رایج:\n" + t.faq.map((f) => `- پرسش: ${strip(f.q)}\n  پاسخ: ${strip(f.a)}`).join("\n"));
+    if ((t.links || []).length) parts.push("بیشتر بخوانید:\n" + t.links.map((l) => `- ${strip(l.t)} — ${l.u}${l.paid ? (l.paid === "abs" ? " (پولی؛ چکیده آزاد)" : " (پولی)") : ""}`).join("\n"));
     byArea.get(a).push(parts.join("\n"));
   }
   const sections = [...byArea].map(([a, list]) => `## ${(H.area || {})[a] || a}\n\n${list.join("\n\n")}`);

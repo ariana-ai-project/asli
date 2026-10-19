@@ -195,6 +195,8 @@ export function strategyDeviations(pick) {
  * «🧭 استراتژی استعلام»: تیک‌ها با برنامهٔ گیرندگان (worker/cr-engine.js:recipientPlan) چیده می‌شوند. موج اولِ برنامه تیک می‌خورد
  * (نامِ تازه با منبعِ «استراتژی استعلام» و شماره‌های دفتر افزوده می‌شود)، بقیه بی‌تیک؛ ذخیره‌ها در فهرست می‌آیند ولی بی‌تیک.
  * پیش از «شروع»، هر فرقی با برنامه علت می‌خواهد (strategyDeviations). سپرده‌شده‌ها (go) دست نمی‌خورند.
+ * گزینهٔ چیده‌شده (strategy.variant: broad | cautious) می‌ماند تا دو گزینهٔ ثابتِ «چینش گسترده / محتاط» حالتِ فعلی را نشان دهند؛
+ * cautious همان پرچمِ قدیمی است (first-msg.js و فهرست‌های چیده‌شدهٔ پیشین با آن خوانده می‌شوند).
  */
 export function applyStrategy(pick, plan, { by, at = Date.now(), cautious = false } = {}) {
   const L = pick.list;
@@ -224,7 +226,8 @@ export function applyStrategy(pick, plan, { by, at = Date.now(), cautious = fals
     e.on = e.strat; e.top = e.strat;
     e.why = null; e.why_at = null; e.why_by = null; e.why_box = null;
   }
-  pick.strategy = { at, by, cautious: !!cautious, mode: plan.policy.mode, competition_mode: plan.policy.competition_mode, family: plan.family, mode_fa: plan.mode_fa,
+  const variant = plan.variant || (cautious || plan.family === "cautious" ? "cautious" : "broad");
+  pick.strategy = { at, by, variant, recommended: plan.recommended || null, cautious: variant === "cautious", mode: plan.policy.mode, competition_mode: plan.policy.competition_mode, family: plan.family, mode_fa: plan.mode_fa,
     n_wave1: plan.policy.n_wave1, n_max: plan.policy.n_max, why: plan.policy.why, notes: [...(plan.notes || []), ...(plan.plan.notes || [])], relaxations: plan.plan.relaxations || [],
     markets_known: plan.plan.markets_known, dominant_hub: plan.plan.dominant_hub, unit_key: plan.unit_key, wave1: [...want] };
   pick.top_n = want.size;

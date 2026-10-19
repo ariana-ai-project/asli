@@ -169,7 +169,8 @@ export async function fmContext(env, deps, items) {
     let pk = null; try { pk = it.pick_json ? JSON.parse(it.pick_json) : null; } catch (_) { pk = null; }
     const stMode = pk && pk.strategy ? pk.strategy.competition_mode || pk.strategy.mode : null;
     if (head && deps.headPolicy) {
-      const hp = await deps.headPolicy(env, head, { itemCode: it.code || null, cautious: !!(pk && pk.strategy && pk.strategy.cautious) }).catch(() => null);
+      /* گزینهٔ چیده‌شده («چینش گسترده / محتاط») همان سیاست را برمی‌گرداند؛ فهرست‌های پیش از آن فقط پرچمِ cautious دارند */
+      const hp = await deps.headPolicy(env, head, { itemCode: it.code || null, cautious: !!(pk && pk.strategy && pk.strategy.cautious), variant: pk && pk.strategy ? pk.strategy.variant : undefined }).catch(() => null);
       if (hp) {
         family = FAMILY_OF_MODE[stMode || hp.policy.mode] || "max";
         for (const q of hp.policy.quote_must_include || []) must.add(q);

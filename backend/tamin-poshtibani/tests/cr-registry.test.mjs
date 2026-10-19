@@ -11,6 +11,7 @@ import { dirname, resolve } from "node:path";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { supKey, crShard } from "../../../worker/cr-data.js";
+import * as C from "../../../worker/strategy/config.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FX = JSON.parse(gunzipSync(readFileSync(resolve(HERE, "fixtures/cr02-parity.json.gz"))).toString("utf8"));
@@ -129,6 +130,34 @@ test("محتاط برای قلمِ حداکثری، و تغییرِ پشتیبا
   assert.equal((await call("GET", `/cr/head?head=${H}`, null, EX)).data.n_wave1, 7);
   assert.equal((await call("PUT", "/support/strategy/rfqn", { table: { BROAD: { A: [9, 7] } } }, SUP)).status, 422);
   await call("PUT", "/support/strategy/rfqn", { table: {} }, SUP);
+});
+
+test("دو گزینهٔ ثابتِ «چینش گسترده / محتاط»: گسترده برای قلمِ محتاط‌پیش‌فرض برنامهٔ حداکثری با قاعده‌های رده است، بی استثنای شمارِ حالتِ پیش‌فرض", { skip: SKIP }, async () => {
+  const plan = async (h, qs) => { const r = await call("GET", `/cr/plan?head=${encodeURIComponent(h)}${qs}`, null, EX); assert.equal(r.status, 200, JSON.stringify(r.data)); return r.data; };
+  /* «ورق» محدود و مرحله‌ای است: پیشنهادِ سامانه «محتاط» */
+  const c = await plan("ورق", "&code=1080000001&variant=cautious");
+  assert.equal(c.policy.mode, "LIMITED_STAGED");
+  assert.deepEqual([c.variant, c.recommended, c.forced], ["cautious", "cautious", false]);
+  const b = await plan("ورق", "&code=1080000001&variant=broad");
+  assert.equal(b.policy.mode, "BROAD");
+  assert.equal(b.family, "max");
+  assert.deepEqual([b.variant, b.recommended, b.forced, b.base_mode], ["broad", "cautious", true, "LIMITED_STAGED"]);
+  assert.deepEqual([b.policy.n_wave1, b.policy.n_max], C.RFQ_N.BROAD[b.policy.tier], "شمارِ ردهٔ همین قلم در حالتِ گسترده");
+  assert.ok([null, 2].includes(b.policy.distribution.max_per_hub), "سقفِ «یکی در هر بازار»ِ محتاط برداشته می‌شود");
+  assert.equal(b.policy.waves, 1);
+  assert.match(b.policy.why[0], /چینش گسترده.*پیشنهادِ سامانه «محدود و مرحله‌ای»/);
+  assert.ok(b.plan.wave1.length > c.plan.wave1.length, "گسترده گیرندهٔ بیشتری دارد");
+  assert.equal((await plan("ورق", "&code=1080000001")).policy.mode, "LIMITED_STAGED", "بی گزینه: همان پیش‌فرض");
+  /* استثنای شمارِ پشتیبانی مالِ حالتِ پیش‌فرض است؛ گسترده‌ای که به زور آمده شمارِ ردهٔ خودش را دارد */
+  const H = encodeURIComponent("ورق");
+  assert.equal((await call("PUT", `/support/strategy/heads/${H}`, { n: { n_wave1: 2, n_max: 3 }, reason: "بازارِ کوچک" }, SUP)).status, 200);
+  assert.deepEqual([(await plan("ورق", "&variant=cautious")).policy.n_wave1, (await plan("ورق", "&variant=broad")).policy.n_wave1], [2, C.RFQ_N.BROAD[b.policy.tier][0]]);
+  assert.equal((await call("PUT", `/support/strategy/heads/${H}`, { clear: ["n"], reason: "برگشت" }, SUP)).status, 200);
+  /* «داربست» گسترده است: پیشنهادِ سامانه «گسترده»؛ محتاط به زور ← محدود و مرحله‌ای (همان cautious=1ِ قدیمی) */
+  const db = await plan("داربست", "&variant=broad"), dc = await plan("داربست", "&variant=cautious"), old = await plan("داربست", "&cautious=1");
+  assert.deepEqual([db.policy.mode, db.variant, db.recommended, db.forced], ["BROAD", "broad", "broad", false]);
+  assert.deepEqual([dc.policy.mode, dc.variant, dc.forced], ["LIMITED_STAGED", "cautious", true]);
+  assert.deepEqual([old.policy.mode, old.variant], ["LIMITED_STAGED", "cautious"]);
 });
 
 /* ---------------- پروفایل و نظرها ---------------- */

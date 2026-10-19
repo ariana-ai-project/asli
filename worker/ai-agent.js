@@ -66,7 +66,7 @@ import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuil
   applyStrategy, strategyDeviations, WHY_BOXES, waveStep, waveNextDue, waveTargets } from "./ai-picks.js";
 import { getSizeRules, SIZE_FA } from "./size.js";
 import { crFlags } from "./cr-api.js";
-import { headPolicy, recipientPlan } from "./cr-engine.js";
+import { headPolicy, recipientPlan, VARIANTS } from "./cr-engine.js";
 import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
 import { limitsOf, LIMIT_FA, fieldTxt, limitsTxt } from "./terms-locks.js";
 import { PLACEHOLDER_SRC } from "./quote-src.js";
@@ -295,12 +295,14 @@ async function pickCtx(env, ex, itemId) {
 async function picksOut(env, { it, o, m, cfg }, pick) {
   const started = !!it.ai_start_at;
   const list = await pickView(env, it, it.aid, pick);
-  /* «🧭 استراتژی استعلام»: خلاصهٔ سیاستِ نوع قلم برای نشان و پرسشِ «محتاط را بچینم؟» — فقط وقتی کلیدش روشن است */
+  /* «🧭 استراتژی استعلام»: خلاصهٔ سیاستِ پیش‌فرضِ نوع قلم برای نشان و دو گزینهٔ «چینش گسترده / محتاط» (recommended = «پیشنهادِ
+     سامانه») — فقط وقتی کلیدش روشن است */
   let cr = null;
   const flags = await crFlags(env);
   if (flags.strategy && m.head) {
     const hp = await headPolicy(env, m.head, { itemCode: it.code || null }).catch(() => null);
-    if (hp) cr = { family: hp.family, mode: hp.policy.mode, mode_fa: hp.mode_fa, n_wave1: hp.policy.n_wave1, n_max: hp.policy.n_max, why: hp.policy.why, workflow: hp.workflow };
+    if (hp) cr = { family: hp.family, mode: hp.policy.mode, mode_fa: hp.mode_fa, n_wave1: hp.policy.n_wave1, n_max: hp.policy.n_max, why: hp.policy.why, workflow: hp.workflow,
+      recommended: hp.recommended };
   }
   return {
     item_id: it.id, mode: m.mode, mode_fa: MODE_FA[m.mode] || m.mode, head: m.head || null, supervise: !!m.supervise,
@@ -349,13 +351,18 @@ export async function picksRoute(request, env, path, m, deps) {
       if (k.m.mode === "handoff" && pick) throw new HttpError(A_MSG, 409);
       pick = { ...mergeRebuilt(await buildDefault(env, it, await preTickN(env, k)), pick), by };
     } else if (b.strategy) {
-      /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): تیک‌ها با برنامهٔ گیرندگانِ موتور چیده می‌شوند؛ cautious = برنامهٔ «محتاط» */
+      /* «🧭 استراتژی استعلام» (سند طراحی، بخش ۴): تیک‌ها با برنامهٔ گیرندگانِ موتور چیده می‌شوند. variant: «broad» یا «cautious» — دو
+         گزینهٔ ثابتِ «چینش گسترده / محتاط» که هر بار زدن، چینش را عوض می‌کند (مهر ۱۴۰۵)؛ cautious: true همان «محتاط»ِ قدیمی و بی هیچ‌کدام
+         برنامهٔ پیش‌فرضِ نوع قلم */
       if (!(await crFlags(env)).strategy) throw new HttpError("«استراتژی استعلام» هنوز در پنل پشتیبانی روشن نشده است.", 409);
       if (k.m.mode === "handoff") throw new HttpError(A_MSG, 409);
       if (!pick) throw new HttpError("اول فهرست را باز کنید.", 409);
       if (!k.m.head) throw new HttpError("نوعِ این قلم معلوم نیست؛ اول ساختارش را تأیید کنید.", 409);
-      const plan = await recipientPlan(env, k.m.head, { itemCode: it.code || null, cautious: !!b.strategy.cautious });
-      applyStrategy(pick, plan, { by, at: t, cautious: !!b.strategy.cautious });
+      const st = typeof b.strategy === "object" ? b.strategy : {};
+      if (st.variant != null && !VARIANTS.includes(st.variant)) throw new HttpError("چینش فقط «گسترده» (broad) یا «محتاط» (cautious) است.", 422);
+      const variant = st.variant || (st.cautious ? "cautious" : null);
+      const plan = await recipientPlan(env, k.m.head, { itemCode: it.code || null, variant });
+      applyStrategy(pick, plan, { by, at: t, cautious: variant === "cautious" });
     } else {
       if (!pick) throw new HttpError(it.ai_start_at ? "فهرستِ این قلم را کارشناس هوشمند همین حالا می‌سازد؛ کمی بعد دوباره ببینید." : "اول فهرست را باز کنید.", 409);
       applyEdits(pick, b, { mode: k.m.mode, by, cap: k.cfg.maxInvites, at: t });
