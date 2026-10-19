@@ -2678,7 +2678,8 @@
       const sms = s.sms === "no_phone" ? `<span class="chip warn">☎️ شماره ندارد</span>` : s.sms_fa ? `<span class="dim">${esc(s.sms_fa)}${s.sms_at ? ` · ${esc(TP.fmt(s.sms_at))}` : ""}</span>` : "—";
       const act = !open || s.status === "valid" ? "" : `${s.sms === "no_phone" || !s.thread_id ? `<button class="tp-btn xs" data-fc-phone="${esc(s.name)}">📱 شماره</button>` : `<button class="tp-btn xs" data-fc-sms="${esc(s.name)}" title="همان پیامک، با رمزِ تازه">🔁 پیامک</button>`}
         <button class="tp-btn xs" data-fc-up="${esc(s.name)}" title="پیش‌فاکتورِ رسمیِ همین تأمین‌کننده را خودتان بارگذاری کنید (همان سنجش)">📎 بارگذاری</button>`;
-      return `<tr><td class="num">${esc(s.offer_no)}</td><td class="rt">${esc(s.name)}${s.revised ? ` <span class="chip info" title="قیمت با پیش‌فاکتورِ رسمی عوض شد">✏️ نهایی</span>` : ""}</td><td>${st}</td><td>${sms}</td><td class="fc-act">${act}</td></tr>`;
+      const file = s.offpf_id ? `<button class="tp-btn xs" data-fc-file="${s.offpf_id}" title="دیدنِ پیش‌فاکتورِ رسمیِ ثبت‌شده">🧾 سند</button>` : "";
+      return `<tr><td class="num">${esc(s.offer_no)}</td><td class="rt">${esc(s.name)}${s.revised ? ` <span class="chip info" title="قیمت با پیش‌فاکتورِ رسمی عوض شد">✏️ نهایی</span>` : ""}</td><td>${st}</td><td>${sms}</td><td class="fc-act">${file}${act}</td></tr>`;
     }).join("");
     const head = open ? `<b>📨 فراخوانِ پیش‌فاکتورِ رسمی</b><span class="chip info">تا ${esc(TP.fmt(c.deadline_at))} — ${hoursLeft(c.deadline_at)} مانده</span>`
       : `<b>📦 بستهٔ کمیسیون بسته شد</b><span class="dim">${esc(TP.fmt(c.closed_at || c.deadline_at))}${c.close_why === "all" ? " — همه پیش‌فاکتورِ معتبر داشتند" : c.close_why === "early" ? " — پایانِ زودهنگام" : ""}</span>`;
@@ -3491,6 +3492,16 @@
         try { const r = await TP.api(fcp("/phone"), { body: { supplier_name: name, phone } }); await reload(); okTick(r.state === "sent" ? "پیامک رفت" : "ثبت شد"); } catch (e) { TP.modal("شمارهٔ تأمین‌کننده", esc(e.message), null, "باشد", ""); }
       }, "ثبت و پیامک", "انصراف");
       setTimeout(() => { const i = d.querySelector("#fcph"); if (i) i.focus(); }, 30);
+    });
+    /* فایلِ پیش‌فاکتورِ رسمی با همان هدرِ ورود (پنجرهٔ تازه بی هدر باز نمی‌شود) */
+    Q("[data-fc-file]").forEach((b) => b.onclick = async () => {
+      const w = window.open("", "_blank");
+      try {
+        const res = await fetch((CFG.apiBase || "/tamin-poshtibani/api") + fcp(`/offpf/${b.dataset.fcFile}/file`), { headers: TP.authHeaders() });
+        if (!res.ok) throw new Error(`خطای سرور ${res.status}`);
+        const url = URL.createObjectURL(await res.blob());
+        if (w) w.location = url; else location.href = url;
+      } catch (e) { if (w) w.close(); TP.modal("پیش‌فاکتورِ رسمی", esc(e.message), null, "باشد", ""); }
     });
     Q("[data-fc-sms]").forEach((b) => b.onclick = async () => {
       try { const r = await TP.api(fcp("/phone"), { body: { supplier_name: b.dataset.fcSms } }); await reload(); okTick(r.state === "sent" ? "پیامک دوباره رفت" : "ثبت شد"); } catch (e) { TP.modal("پیامک", esc(e.message), null, "باشد", ""); }

@@ -2437,6 +2437,16 @@ async function route(request, env, ctx) {
         return json({ ok: true, ...r });
       }
       let om;
+      /* فایلِ پیش‌فاکتورِ رسمیِ یک تأمین‌کننده — برای کارشناس و کمیسیون */
+      if ((om = /^\/offpf\/(\d+)\/file$/.exec(sub)) && m === "GET") {
+        const o = await env.DB.prepare("SELECT skey, filename, mime FROM offpf WHERE id=? AND assignment_id=?").bind(int(om[1]), aid).first();
+        const store = storage(env);
+        if (!o || !o.skey || !store) throw new HttpError("فایلِ این پیش‌فاکتور پیدا نشد.", 404);
+        const f = await store.get(o.skey);
+        if (!f) throw new HttpError("فایل در انبار پیدا نشد.", 404);
+        return new Response(f.body, { headers: { "content-type": o.mime || f.contentType || "application/octet-stream",
+          "content-disposition": `inline; filename*=UTF-8''${encodeURIComponent(o.filename || "proforma")}`, "cache-control": "private, no-store" } });
+      }
       if ((om = /^\/offpf\/(\d+)\/decide$/.exec(sub)) && m === "POST") {
         const b = await readJson(request);
         const r = await offpfDecide(env, int(om[1]), { replace: !!b.replace, by: `expert:${ex.id}` }, { expert: ex });
