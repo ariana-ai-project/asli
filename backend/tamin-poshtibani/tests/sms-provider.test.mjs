@@ -85,6 +85,8 @@ test("درگاهِ فعال و آمادگی: textbee پیش‌فرض؛ ippanel �
   assert.ok(!JSON.stringify(st).includes("secret-key-xyz"), "کلید هیچ‌جا");
   const full = smsStatus({ ...IP, IPPANEL_PATTERN_OTP: "otp-1" });
   assert.deepEqual([full.ready, full.from, full.pattern, full.pattern_var], [true, "+983000505", "otp-1", "code"]);
+  assert.deepEqual(full.others, [{ provider: "textbee", label: "TextBee", ready: false, set: false, missing: ["TEXTBEE_API_KEY"] }], "درگاه‌های غیرفعال، بی کلید");
+  assert.deepEqual(smsStatus({ IPPANEL_API_KEY: "k" }).others, [{ provider: "ippanel", label: "IPPanel", ready: false, set: true, missing: ["IPPANEL_FROM"] }]);
   assert.match(smsStatus({ SMS_PROVIDER: "faraz" }).note, /شناخته نیست/);
   assert.deepEqual([lineE164("3000505"), lineE164("03000505"), lineE164("983000505"), lineE164("+983000505"), lineE164("۹۰۰۰۵۱۲۳"), lineE164("")],
     ["+983000505", "+983000505", "+983000505", "+983000505", "+9890005123", ""]);
@@ -170,6 +172,11 @@ test("«تستِ درگاه» بی پیامک: IPPanel اعتبارِ حساب (
   const off = await smsCheck({ SMS_PROVIDER: "ippanel" });
   assert.deepEqual([off.ok, off.code], [false, "off"]);
   assert.match(off.error, /IPPANEL_API_KEY، IPPANEL_FROM/);
+  /* کلیدِ IPPanel پیش از عوض کردنِ SMS_PROVIDER (درگاهِ فعال هنوز TextBee) */
+  n = calls.length;
+  const pre = await smsCheck({ TEXTBEE_API_KEY: "tbk", TEXTBEE_API_BASE: "https://sms.test", ...IP, SMS_PROVIDER: "textbee" }, "ippanel");
+  assert.deepEqual([pre.ok, pre.provider, pre.credit, since(n)[0].url], [true, "ippanel", CREDIT.credit, "https://sms.test/v1/api/payment/credit/mine"]);
+  assert.deepEqual([(await smsCheck(IP, "faraz")).ok, (await smsCheck(IP, "faraz")).code], [false, "off"]);
   /* TextBee: GET /devices با x-api-key */
   const TB = { TEXTBEE_API_KEY: "tbk", TEXTBEE_API_BASE: "https://sms.test" };
   n = calls.length;
@@ -246,6 +253,14 @@ test("پنل پشتیبانی: «درگاه پیامک» فقط‌خواندنی
   /* داشبوردِ کارشناس هوشمند: نامِ درگاه کنارِ «وصل است» */
   const ai = await call("/support/ai/experts", { headers: SUP });
   assert.deepEqual([ai.data.sms, ai.data.sms_label], [true, "IPPanel"]);
+  /* درگاهِ غیرفعالی که کلیدش ست شده: در وضعیت می‌آید و جدا سنجیده می‌شود (کلیدِ تازه پیش از عوض کردنِ SMS_PROVIDER) */
+  Object.assign(env, { TEXTBEE_API_KEY: "tbk", TEXTBEE_API_BASE: "https://sms.test" });
+  try {
+    assert.deepEqual((await call("/support/sms", { headers: SUP })).data.others, [{ provider: "textbee", label: "TextBee", ready: true, set: true, missing: [] }]);
+    const tb = (await call("/support/sms/check", { headers: SUP, body: { provider: "textbee" } })).data;
+    assert.deepEqual([tb.ok, tb.provider, tb.devices], [true, "textbee", 2]);
+    assert.equal((await call("/support/sms/check", { headers: SUP, body: { provider: "nope" } })).data.code, "off");
+  } finally { delete env.TEXTBEE_API_KEY; delete env.TEXTBEE_API_BASE; }
   /* درگاهِ ناقص: وضعیت می‌گوید چه چیزی ست نشده و تست پیامکی نمی‌زند */
   const from = env.IPPANEL_FROM;
   delete env.IPPANEL_FROM;

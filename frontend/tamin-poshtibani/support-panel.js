@@ -1367,24 +1367,32 @@
       : `✅ کلید پذیرفته شد · ${M(r.enabled || 0)} گوشیِ روشن از ${M(r.devices || 0)}${r.device ? ` · ${esc(r.device)}` : ""}`);
   /**
    * «درگاه پیامک» (worker/sms.js): کدام درگاه فعال است و وصل است یا نه — فقط‌خواندنی و بی هیچ کلید — و «تستِ درگاه» که بی فرستادنِ
-   * پیامک کلید و حساب را می‌سنجد. خودِ درگاه با متغیرهای Worker (SMS_PROVIDER و رازها) عوض می‌شود، نه از این پنل.
+   * پیامک کلید و حساب را می‌سنجد. درگاهِ غیرفعالی که کلیدش ست شده (مثلاً IPPanel پیش از عوض کردنِ SMS_PROVIDER) هم دکمهٔ تستِ خودش را
+   * دارد. خودِ درگاه با متغیرهای Worker (SMS_PROVIDER و رازها) عوض می‌شود، نه از این پنل.
    */
   async function smsGwDialog() {
     let s; try { s = await api("/sms"); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     const row = (k, v) => `<div class="al-row"><b>${k}</b><div>${v}</div></div>`;
+    const vars = (xs) => xs.map((x) => `<code dir="ltr">${esc(x)}</code>`).join(" ");
+    const alt = (s.others || []).filter((o) => o.set).map((o) => row(`${esc(o.label)} <span class="dim">— فعال نیست</span>`, o.ready
+      ? `<button type="button" class="tp-btn sm" data-smschk="${esc(o.provider)}">🔌 تستِ ${esc(o.label)}</button> <span class="dim" data-smsres="${esc(o.provider)}">پیش از عوض کردنِ <span dir="ltr">SMS_PROVIDER</span> — بی پیامک</span>`
+      : `<span class="dim">ست نشده:</span> ${vars(o.missing)}`)).join("");
     const d = TP.modal("📶 درگاه پیامک", `<div class="al-cfg">
         ${row("درگاه", `${esc(s.label)} ${s.ready ? `<span class="chip ok">✅ وصل است</span>` : `<span class="chip warn">وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند</span>`}`)}
-        ${(s.missing || []).length ? row("ست نشده", s.missing.map((x) => `<code dir="ltr">${esc(x)}</code>`).join(" ")) : ""}${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
+        ${(s.missing || []).length ? row("ست نشده", vars(s.missing)) : ""}${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
         ${s.from ? row("خط فرستنده", `<span dir="ltr">${esc(s.from)}</span>`) : ""}${s.device ? row("دستگاه", `<span dir="ltr">${esc(s.device)}</span>`) : ""}
         ${s.provider === "ippanel" ? row("الگوی رمز", s.pattern ? `<code dir="ltr">${esc(s.pattern)}</code> · متغیر <code dir="ltr">${esc(s.pattern_var)}</code>` : `<span class="dim">ندارد — رمزها با متنِ ساده می‌روند</span>`) : ""}
-        <div class="al-row"><button type="button" class="tp-btn sm" data-smschk ${s.ready ? "" : "disabled"}>🔌 تستِ درگاه</button><span class="dim" data-smsres>بی فرستادنِ پیامک — ${s.provider === "ippanel" ? "اعتبارِ حساب" : "گوشی‌های حساب"} سنجیده می‌شود.</span></div>
+        <div class="al-row"><button type="button" class="tp-btn sm" data-smschk="" ${s.ready ? "" : "disabled"}>🔌 تستِ درگاه</button><span class="dim" data-smsres="">بی فرستادنِ پیامک — ${s.provider === "ippanel" ? "اعتبارِ حساب" : "گوشی‌های حساب"} سنجیده می‌شود.</span></div>
+        ${alt}
         <div class="dim">درگاه با متغیرهای Worker عوض می‌شود (<span dir="ltr">SMS_PROVIDER</span>)، نه از این پنل.</div></div>`, null, "بستن", "");
-    const b = d.querySelector("[data-smschk]"), out = d.querySelector("[data-smsres]");
-    if (b) b.onclick = async () => {
-      b.disabled = true; out.textContent = "…";
-      try { out.innerHTML = smsCheckText(await api("/sms/check", { body: {} })); } catch (e) { out.textContent = e.message; }
-      b.disabled = false;
-    };
+    d.querySelectorAll("[data-smschk]").forEach((b) => {
+      const p = b.dataset.smschk, out = d.querySelector(`[data-smsres="${p}"]`);
+      b.onclick = async () => {
+        b.disabled = true; out.textContent = "…";
+        try { out.innerHTML = smsCheckText(await api("/sms/check", { body: p ? { provider: p } : {} })); } catch (e) { out.textContent = e.message; }
+        b.disabled = false;
+      };
+    });
   }
   /* متنِ تأییدِ تیک — همان در داشبوردِ هر کارشناس (expert-ai.js)؛ رفتار: worker/ai-agent.js:aiModeSet */
   function aiToggle(id, on) {

@@ -2294,9 +2294,9 @@ async function route(request, env, ctx) {
       if (path === "/support/alert-contacts" && m === "GET") return json(await alertContacts(env));
       if (path === "/support/alert-contacts" && m === "PUT") return json(await alertContactsSave(env, await readJson(request)));
       /* درگاه پیامک (worker/sms.js): وضعیتِ فقط‌خواندنی — کدام درگاه، وصل یا نه، چه چیزی ست نشده (بی هیچ کلید) — و «تستِ درگاه» بی
-         فرستادنِ پیامک (اعتبارِ IPPanel یا گوشی‌های TextBee) */
+         فرستادنِ پیامک (اعتبارِ IPPanel یا گوشی‌های TextBee)؛ {provider} درگاهِ غیرفعالی را پیش از عوض کردنِ SMS_PROVIDER می‌سنجد */
       if (path === "/support/sms" && m === "GET") return json(smsStatus(env));
-      if (path === "/support/sms/check" && m === "POST") return json(await smsCheck(env));
+      if (path === "/support/sms/check" && m === "POST") { const b = await readJson(request).catch(() => ({})); return json(await smsCheck(env, b && b.provider)); }
       if (path === "/support/commission/result" && m === "POST") { const r = await commissionResultSave(env, await readJson(request), env.COMPANY || "تونل سد آریانا"); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
     }

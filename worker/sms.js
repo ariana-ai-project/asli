@@ -192,16 +192,21 @@ export const viaSent = (via) => !!via && via !== "sim" && via !== "hold";
 export const smsReady = (env) => { const p = smsProvider(env); return !!p && PROVIDERS[p].need.every((k) => !!T((env || {})[k])); };
 
 /**
- * وضعیتِ فقط‌خواندنی برای پنل پشتیبانی — بی هیچ کلید: {provider, label, known, ready, missing: [نامِ متغیرهای ست‌نشده], …}
- * (TextBee: device؛ IPPanel: from، pattern، pattern_var)
+ * وضعیتِ فقط‌خواندنی برای پنل پشتیبانی — بی هیچ کلید: {provider, label, known, ready, missing: [نامِ متغیرهای ست‌نشده], others, …}
+ * (TextBee: device؛ IPPanel: from، pattern، pattern_var). others: درگاه‌های غیرفعال با {ready, set, missing} — کلیدِ درگاهِ تازه را می‌شود
+ * پیش از عوض کردنِ SMS_PROVIDER با «تستِ درگاه» سنجید، بی این‌که پیامکِ واقعی از آن برود.
  */
 export function smsStatus(env) {
   const p = smsProvider(env), e = env || {};
-  if (!p) return { provider: rawName(env), label: rawName(env), known: false, ready: false, missing: [], dev_fa: "",
+  const others = Object.keys(PROVIDERS).filter((k) => k !== p).map((k) => {
+    const need = PROVIDERS[k].need, missing = need.filter((v) => !T(e[v]));
+    return { provider: k, label: PROVIDERS[k].label, ready: !missing.length, set: missing.length < need.length, missing };
+  });
+  if (!p) return { provider: rawName(env), label: rawName(env), known: false, ready: false, missing: [], dev_fa: "", others,
     note: `SMS_PROVIDER=«${rawName(env)}» شناخته نیست (textbee یا ippanel)؛ پیامکی نمی‌رود.` };
   const d = PROVIDERS[p];
   const missing = d.need.filter((k) => !T(e[k]));
-  return { provider: p, label: d.label, known: true, ready: !missing.length, missing, dev_fa: d.devFa, ...d.info(e) };
+  return { provider: p, label: d.label, known: true, ready: !missing.length, missing, dev_fa: d.devFa, ...d.info(e), others };
 }
 
 /**
@@ -230,11 +235,15 @@ export async function sendSms(env, to, text, opts = {}) {
 /**
  * «تستِ درگاه» بی فرستادنِ پیامک: کلید و حساب سنجیده می‌شود (IPPanel: اعتبار؛ TextBee: گوشی‌ها). همیشه یک شیء برمی‌گردد، نه خطا —
  * {ok, provider, label, error, code?, credit?, gift?, at?, devices?, enabled?, device?, last?} — تا پنل نتیجه را همان‌جا نشان دهد.
+ * provider (اختیاری): درگاهِ دیگری غیر از درگاهِ فعال — برای سنجیدنِ کلیدِ تازه پیش از عوض کردنِ SMS_PROVIDER.
  */
-export async function smsCheck(env) {
-  const st = smsStatus(env);
+export async function smsCheck(env, provider) {
+  const want = T(provider).toLowerCase();
+  if (want && !Object.prototype.hasOwnProperty.call(PROVIDERS, want)) return { provider: want, label: want, ok: false, code: "off", error: "این درگاه شناخته نیست (textbee یا ippanel)." };
+  const e = want ? { ...env, SMS_PROVIDER: want } : env;
+  const st = smsStatus(e);
   const base = { provider: st.provider, label: st.label };
   if (!st.ready) return { ...base, ok: false, code: "off", error: st.known ? `درگاه وصل نیست — ست نشده: ${st.missing.join("، ")}` : st.note };
-  try { return { ...base, ...(await PROVIDERS[st.provider].check(env)) }; }
-  catch (e) { return { ...base, ok: false, code: (e && e.code) || "error", error: String((e && e.message) || e).slice(0, 300) }; }
+  try { return { ...base, ...(await PROVIDERS[st.provider].check(e)) }; }
+  catch (x) { return { ...base, ok: false, code: (x && x.code) || "error", error: String((x && x.message) || x).slice(0, 300) }; }
 }
