@@ -285,8 +285,14 @@ export async function startCall(env, aid, { by = "system", mode = "manual" } = {
  * پیامکِ یک تأمین‌کننده (یا هشدار به کارشناس اگر شماره نیست) و ثبتش روی همان ردیف. گفت‌وگوی پنل لازم است تا تأمین‌کننده
  * بتواند بارگذاری کند؛ تأمین‌کننده‌ای که فقط در تب استعلامات است «شماره ندارد» حساب می‌شود تا کارشناس شماره بدهد.
  */
-async function smsOne(env, call, s, asg, cfg) {
+async function smsOne(env, call, s0, asg, cfg) {
   const t = now();
+  const s = { ...s0 };
+  /* تأمین‌کنندهٔ دستی (بی گفت‌وگوی پنل) که در دفترچهٔ شماره‌ها شماره دارد — اول شمارهٔ تیک‌خوردهٔ پنل: گفت‌وگوی فراخوان ساخته می‌شود */
+  if (!s.thread_id) {
+    const known = (await C.phonesOfName(env, s.supplier_name).catch(() => [])).sort((a, b) => (b.panel ? 1 : 0) - (a.panel ? 1 : 0))[0];
+    if (known) s.thread_id = await callThread(env, asg, known.supplier_id, known.id, s);
+  }
   const ph = s.thread_id ? await env.DB.prepare(`SELECT p.id, p.phone, p.k, p.label FROM sp_threads t JOIN sp_phones p ON p.id=t.phone_id WHERE t.id=?`).bind(s.thread_id).first() : null;
   if (!ph || !ph.phone) {
     const via = await alertExpert(env, asg, call, s).catch((e) => { console.error("final call alert", e && e.message); return ""; });
@@ -313,6 +319,22 @@ async function smsOne(env, call, s, asg, cfg) {
     await P.pushMsgs(env, { id: s.thread_id }, [C.msgOut(msg)]).catch(() => {});
   }
   return { state, error: d.error || null };
+}
+
+/**
+ * گفت‌وگوی پنلِ فراخوان برای تأمین‌کننده‌ای که در این درخواست گفت‌وگو نداشت (استعلامِ تلفنی یا دستی): بی قلم — پنل و بات پیشنهادِ او را
+ * از خطِ استعلام نشان می‌دهند و فقط «🧾 پیش‌فاکتورِ رسمی» می‌خواهند. ردیفِ فراخوان به همین گفت‌وگو وصل می‌شود.
+ */
+async function callThread(env, asg, supplierId, phoneId, s) {
+  const t = now();
+  const have = await env.DB.prepare("SELECT id FROM sp_threads WHERE assignment_id=? AND supplier_id=?").bind(asg.id, supplierId).first();
+  const id = have ? have.id : (await env.DB.prepare("INSERT INTO sp_threads (assignment_id,request_id,supplier_id,phone_id,created_by,last_at,created_at) VALUES (?,?,?,?,?,?,?) RETURNING id")
+    .bind(asg.id, asg.request_id, supplierId, phoneId, asg.expert_id, t, t).first()).id;
+  await env.DB.batch([
+    ...(have ? [env.DB.prepare("UPDATE sp_threads SET phone_id=? WHERE id=?").bind(phoneId, id)] : []),
+    env.DB.prepare("UPDATE final_call_sups SET thread_id=?, updated_at=? WHERE id=?").bind(id, t, s.id),
+  ]);
+  return id;
 }
 
 /** «شمارهٔ این تأمین‌کننده را ندارم؛ شماره‌اش را بدهید یا خودتان بفرستید» — پیامک (اگر کارشناس شماره دارد)، تلگرام و اعلان */
@@ -373,16 +395,8 @@ export async function callPhone(env, ex, aid, b) {
   let threadId = s.thread_id;
   if (T(b.phone)) {
     const r = await C.savePhone(env, ex.id, { supplier_name: s.supplier_name, phone: b.phone, label: T(b.label) || "فراخوان" });
-    const ph = await env.DB.prepare("SELECT id FROM sp_phones WHERE id=?").bind(r.phone.id).first();
-    const t = now();
-    if (threadId) await env.DB.prepare("UPDATE sp_threads SET phone_id=? WHERE id=?").bind(ph.id, threadId).run();
-    else {
-      const have = await env.DB.prepare("SELECT id FROM sp_threads WHERE assignment_id=? AND supplier_id=?").bind(aid, r.supplier.id).first();
-      threadId = have ? have.id : (await env.DB.prepare("INSERT INTO sp_threads (assignment_id,request_id,supplier_id,phone_id,created_by,last_at,created_at) VALUES (?,?,?,?,?,?,?) RETURNING id")
-        .bind(aid, asg.request_id, r.supplier.id, ph.id, ex.id, t, t).first()).id;
-      if (have) await env.DB.prepare("UPDATE sp_threads SET phone_id=? WHERE id=?").bind(ph.id, threadId).run();
-    }
-    await env.DB.prepare("UPDATE final_call_sups SET thread_id=?, updated_at=? WHERE id=?").bind(threadId, t, s.id).run();
+    if (threadId) await env.DB.prepare("UPDATE sp_threads SET phone_id=? WHERE id=?").bind(r.phone.id, threadId).run();
+    else threadId = await callThread(env, asg, r.supplier.id, r.phone.id, s);
   }
   if (!threadId) throw new HttpError("شمارهٔ این تأمین‌کننده را بدهید.", 422);
   const r = await smsOne(env, c, { ...s, thread_id: threadId }, asg, { ...FC_DEFAULT, ...parse(c.cfg_json, {}) });

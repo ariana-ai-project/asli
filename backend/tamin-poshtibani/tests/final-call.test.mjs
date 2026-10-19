@@ -349,3 +349,26 @@ test("بات مکاتبات: فایل در پنجرهٔ فراخوان همان 
   const o = DB.raw.prepare("SELECT channel, state FROM offpf WHERE assignment_id=4").get();
   assert.deepEqual({ ...o }, { channel: "telegram", state: "applied" });
 });
+
+test("تأمین‌کنندهٔ دستی با شماره در دفترچه: فراخوان خودش گفت‌وگوی پنل را می‌سازد و پیامک می‌دهد", { skip: SKIP }, async () => {
+  const t = Date.now();
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-K','1405/07/27','پروژهٔ دفترچه')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (5,'R-K',2,5,?,?,?)").run(t, t + 9e8, t);
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (51,'R-K','a',1,'لوله ۲ اینچ',4,'شاخه','open',5,?)").run(norm("لوله"));
+  assert.equal((await call("/sp/x/phones", { headers: HU, body: { supplier_name: "لوله‌گستر", phone: "09120000951", label: "فروش", panel: true } })).status, 200);
+  for (const [n, p] of [["لوله‌گستر", 900000], ["لوله دو", 920000], ["لوله سه", 950000]]) {
+    DB.raw.prepare("INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,dtime,pay,invoice,vat,saved,final,final_at,created_at,updated_at) VALUES (5,51,?,'شاخه',4,?,'7','نقدی','رسمی','دارد',1,1,?,?,?)").run(n, p, t, t, t);
+  }
+  const n0 = calls.length;
+  const st = await call("/assignments/5/final-call", { headers: HU, body: {} });
+  assert.equal(st.status, 200, JSON.stringify(st.data));
+  const sups = st.data.view.sups;
+  assert.deepEqual(sups.map((s) => [s.name, s.sms]), [["لوله‌گستر", "sent"], ["لوله دو", "no_phone"], ["لوله سه", "no_phone"]]);
+  assert.ok(sups[0].thread_id, "گفت‌وگوی فراخوان ساخته شد");
+  const sms = calls.slice(n0).filter((c) => c.bot === "sms");
+  assert.equal(sms.filter((c) => c.body.recipients[0] === "+989120000951").length, 1, "پیامکِ فراخوان به شمارهٔ دفترچه");
+  assert.equal(sms.filter((c) => c.body.recipients[0] === "+989121111111" && /شمارهٔ «لوله (دو|سه)»/.test(c.body.message)).length, 2, "هشدارِ «شماره ندارم» به همراهِ کارشناس (پنل پشتیبانی)");
+  const H = await supplierSession("09120000951");
+  const d = (await call(`/sp/thread/${sups[0].thread_id}`, { headers: H })).data;
+  assert.deepEqual([d.lines.length, d.final_call.offer_no, d.final_call.items[0].price], [0, "R-K-1", 900000]);
+});
