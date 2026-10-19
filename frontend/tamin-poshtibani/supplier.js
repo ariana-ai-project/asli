@@ -198,12 +198,15 @@
     }
   }
 
-  async function openThread(id, first) {
+  async function openThread(id, first, noCard) {
     if (!first && (S.dirty.size || S.termsDirty) && S.th !== id && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بروید؟")) return false;
     const was = $("#msgIn"); if (was && was.dataset.draft) S.drafts[was.dataset.draft] = was.value;
     S.th = id; store.sset("sp.th", String(id));
     S.dirty.clear(); S.extra = {}; S.termsDraft = null; S.termsDirty = false; S.pfFile = null; S.bot = []; S.flow = null; S.wz = null; S.pending = []; S.outbox = [];
     await loadThread();
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» باز است: کارتِ بارگذاری همان اول در گفت‌وگوی گوشی (در دسکتاپ نوارِ بالای استعلام هم هست)؛
+       «st» خودش کارتِ اقلام را می‌آورد */
+    if (!noCard && S.d && S.d.final_call && S.d.final_call.can_upload) itemsCard();
     return true;
   }
   /** خواندنِ دوبارهٔ استعلام؛ quiet: فقط داده (کارِ بات خودش کارت می‌گذارد و یک بار رسم می‌کند) */
@@ -387,16 +390,33 @@
     const kb = S.threads.map((t) => [{ t: `${t.unread ? `🔴${fa(t.unread)} ` : ""}${S.pfRead && t.need_pf ? "📄 " : ""}استعلام ${t.request_id} — ${fa(t.lines)} قلم${t.todo ? ` (${fa(t.todo)} مانده)` : ""}${t.id === S.th ? " ✓" : ""}`, d: `st:${t.id}` }]);
     return card(`<div class="ph-bot-t">📋 <b>استعلام‌های شما</b><br><i>🔴 پیام نخوانده${S.pfRead ? " · 📄 منتظر پیش‌فاکتور" : ""}</i></div>`, kb, replace);
   }
+  /** «📨 فراخوانِ پیش‌فاکتورِ رسمی» در کارتِ گوشی: شمارهٔ پیشنهاد، مهلت، کمترین قیمت و دکمهٔ بارگذاری (همان fcBanner در پنلِ کناری) */
+  function fcCardTxt() {
+    const f = S.d && S.d.final_call;
+    if (!f) return "";
+    if (f.status === "valid") return `<div class="ph-bot-t">🧾 پیش‌فاکتورِ رسمیِ شما (پیشنهادِ ${fa(f.offer_no)}) ثبت شد${f.valid_to ? ` — معتبر تا ${when(f.valid_to)}` : ""}؛ قیمت برای کمیسیون قفل است.</div>`;
+    if (!f.can_upload) return `<div class="ph-bot-t">⏹ مهلتِ پیش‌فاکتورِ رسمی (پیشنهادِ ${fa(f.offer_no)}) تمام شد.</div>`;
+    return `<div class="ph-bot-t">📨 <b>پیشنهادِ شما با شمارهٔ ${fa(f.offer_no)} وارد کمیسیون معاملات می‌شود</b> — تا <b>${when(f.deadline_at)}</b> پیش‌فاکتورِ رسمیِ مهر و امضادار با دست‌کم ${fa(f.min_valid_h)} ساعت اعتبار بفرستید.`
+      + `${f.lowest && f.lowest.length ? `<br>کمترین قیمتِ رسیده: ${f.lowest.map((x) => `«${esc(x.title)}» <b>${money(x.price)}</b> ریال${x.own ? " (پیشنهادِ خودتان)" : ""}`).join("، ")}` : ""}</div>`;
+  }
   function itemsCard(head, replace) {
     const th = S.d.thread, L = S.d.lines.slice().sort((a, b) => b.id - a.id);
+    const fc = S.d.final_call;
+    /* گفت‌وگویی که فقط برای فراخوان ساخته شد (تأمین‌کنندهٔ تلفنی): اقلامِ پیشنهادش از خطِ استعلام، بی فرم و شرایط */
+    if (!L.length && fc) {
+      const rows = (fc.items || []).map((x) => `<li><b>${esc(x.title)}</b><div class="ph-bot-s">${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} ریال</div></li>`).join("");
+      return card(`${head ? `<div class="ph-bot-t">${head}</div>` : ""}${fcCardTxt()}<div class="ph-bot-t">📦 <b>پیشنهادِ شما در استعلام ${esc(th.request_id)}</b></div><ul class="ph-bot-l">${rows}</ul>`,
+        fc.can_upload ? [[{ t: "🧾 بارگذاریِ پیش‌فاکتورِ رسمی", d: "fc" }]] : null, replace);
+    }
     const ready = L.filter((l) => l.state === "ready"), tm = threadTerms(), miss = termsMissing(tm);
     const waitPf = S.pfRead ? S.d.bundles.filter((b) => b.state === "approved") : [];
     const rows = L.map((l) => `<li><b>${esc(tag(l))}</b> <span class="sp-st ${l.state}">${esc(l.state_fa)}</span><div class="ph-bot-s">${lineSumTxt(l)}</div></li>`).join("");
-    const html = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t">📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i></div><ul class="ph-bot-l">${rows}</ul>
+    const html = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}${fcCardTxt()}<div class="ph-bot-t">📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i></div><ul class="ph-bot-l">${rows}</ul>
       <div class="ph-bot-t">🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${miss.length ? `<br><i>مانده: ${esc(miss.join("، "))}</i>` : ""}</div>
       ${waitPf.length ? `<div class="ph-bot-t">📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.</div>` : ""}
       <div class="ph-bot-t"><i>روی هر قلم بزنید و «📝 پر کردن اطلاعات» را بزنید؛ بعد «آمادهٔ ارسال».</i></div>`;
     const kb = L.slice(0, 30).map((l) => [{ t: `${FILLING.includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${tag(l, 30)}`, d: `si:${l.id}` }]);
+    if (fc && fc.can_upload) kb.unshift([{ t: "🧾 بارگذاریِ پیش‌فاکتورِ رسمی", d: "fc" }]);
     if (ready.length) kb.push([{ t: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, d: "ss" }]);
     for (const b of waitPf) kb.push([{ t: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, d: `sp:${b.id}` }]);
     return card(html, kb, replace);
@@ -595,8 +615,10 @@
     const p = String(data).split(":"), a = p[0], n = (i) => parseInt(p[i], 10) || 0;
     try {
       if (a === "ic") { S.flow = null; S.wz = null; return itemsCard("", cardId); }
+      /* «🧾 پیش‌فاکتورِ رسمی» (فراخوان): فایل‌گیر در همان کلیک؛ بعد سنجش و حکم */
+      if (a === "fc") return offpfUpload("call", null, null);
       if (a === "list") return threadsCard();
-      if (a === "st") { if (n(1) !== S.th) { if (await openThread(n(1))) itemsCard(); return; } return itemsCard("", cardId); }
+      if (a === "st") { if (n(1) !== S.th) { if (await openThread(n(1), false, true)) itemsCard(); return; } return itemsCard("", cardId); }
       if (a === "si") { S.flow = null; S.wz = null; const l = lineOf(n(1)); return l ? lineCard(l, "", cardId) : itemsCard("", cardId); }
       /* کارت‌های نوبتی: wz:<قلم> شروع · wz:<قلم>:s رد شدن از گام · wz:<قلم>:m دکمه‌های تک‌فیلد روی کارتِ قلم */
       if (a === "wz") {
