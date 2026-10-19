@@ -325,6 +325,8 @@ test("پذیرش: M-CLOSE با «پس از تأیید کمیسیون» و توا
 });
 
 test("کلید خاموش ← مذاکرهٔ همیشگی؛ روشن با مدلِ ردشده ← طبقه‌بند با Haiku 4.5", { skip: SKIP }, async () => {
+  /* سقفِ ۵ دورِ کارشناس هوشمند (ai-lock.js:TURN_CAP) آزمونِ خودش را دارد؛ این‌جا دورهای همین گفت‌وگو از نو */
+  DB.raw.prepare("UPDATE ai_threads SET turns=0 WHERE thread_id=?").run(TH);
   assert.equal((await call("/support/cr/flags", { method: "PUT", headers: SUP, body: { turn: false } })).status, 200);
   const n0 = calls.length;
   assert.equal(await say("راستی زمان تحویل چند روزه؟"), 200);
@@ -344,6 +346,8 @@ test("کلید خاموش ← مذاکرهٔ همیشگی؛ روشن با مدل
 });
 
 test("«⏱ با مهلت»: پاسخِ مذاکرهٔ دوگامی هم اول پیشنهاد می‌شود", { skip: SKIP }, async () => {
+  /* سقفِ ۵ دورِ کارشناس هوشمند (ai-lock.js:TURN_CAP) آزمونِ خودش را دارد؛ این‌جا دورهای همین گفت‌وگو از نو */
+  DB.raw.prepare("UPDATE ai_threads SET turns=0 WHERE thread_id=?").run(TH);
   DB.raw.prepare("UPDATE experts SET sup_json='{\"mode\":\"timer\",\"minutes\":10}' WHERE id=1").run();
   p4Out = () => turnOut({ move: "M-ASK", message_fa: "ممنون؛ اعتبارِ پیش‌فاکتور چند روز است؟" });
   const e0 = lastE().id;

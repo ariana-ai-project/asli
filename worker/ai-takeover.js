@@ -55,7 +55,8 @@ export async function handbackThread(env, ex, th) {
   const t = now();
   const who = ex.label || ex.name;
   await env.DB.batch([
-    env.DB.prepare("UPDATE ai_threads SET state='active', ask_json=json_set(COALESCE(ask_json,'{}'),'$.handback_at',?), updated_at=? WHERE thread_id=?").bind(t, t, th.id),
+    /* cap_base: سقفِ دورهای کارشناس هوشمند (ai-lock.js:TURN_CAP) از همین لحظه دوباره شمرده می‌شود */
+    env.DB.prepare("UPDATE ai_threads SET state='active', ask_json=json_set(json_set(COALESCE(ask_json,'{}'),'$.handback_at',?),'$.cap_base',turns), updated_at=? WHERE thread_id=?").bind(t, t, th.id),
     env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) VALUES (?,?,?,'takeover',?)").bind(x.run_id, th.id, t, `🤖 ${who} گفت‌وگو را دوباره به کارشناس هوشمند سپرد.`),
     env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, `expert:${ex.id}`, "ai_handback", th.request_id,
       JSON.stringify({ assignment_id: th.assignment_id, thread_id: th.id, supplier: th.supplier_name })),

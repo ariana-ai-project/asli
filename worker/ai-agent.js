@@ -53,7 +53,7 @@ import { fmtFa, tehranParts } from "./time.js";
 import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
-import { AI_ASK_SQL, aiOwned, aiRevStmt } from "./ai-lock.js";
+import { AI_ASK_SQL, aiOwned, aiRevStmt, TURN_CAP, turnsUsed } from "./ai-lock.js";
 import { getRules, saveRules, coverOf, needFor, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
@@ -108,8 +108,8 @@ CREATE INDEX IF NOT EXISTS ix_aiprop_th ON ai_props(thread_id, state);
 
 /* تنظیماتِ هر کارشناس هوشمند (تب کارشناس هوشمند). minInvites فقط هدف است: بی شمارهٔ پنل دعوتی نمی‌رود */
 /* model و effort: مدلِ مذاکره و شرحِ پایانی و «عمق فکر»ش — از تب (ai-prompts.js:AGENT_MODELS) */
-export const AI_DEFAULTS = { minInvites: 5, maxInvites: 10, markets: ["IR"], quietMin: 30, maxTurns: 30, maxItems: 10, reuseDays: 14, model: AGENT_MODEL, effort: "medium" };
-const LIMITS = { minInvites: [1, 20], maxInvites: [1, 30], quietMin: [5, 10080], maxTurns: [3, 80], maxItems: [1, 20], reuseDays: [0, 60] };
+export const AI_DEFAULTS = { minInvites: 5, maxInvites: 10, markets: ["IR"], quietMin: 30, maxTurns: TURN_CAP, maxItems: 10, reuseDays: 14, model: AGENT_MODEL, effort: "medium" };
+const LIMITS = { minInvites: [1, 20], maxInvites: [1, 30], quietMin: [5, 10080], maxTurns: [1, TURN_CAP], maxItems: [1, 20], reuseDays: [0, 60] };
 const LOCK_LONG = 16 * 60000;           /* جستجوی هوشمند چند دقیقه طول می‌کشد؛ سقف Cron ۱۵ دقیقه */
 const LOCK_STEP = 4 * 60000;
 const THREAD_LOCK = 3 * 60000;
@@ -1044,10 +1044,11 @@ async function inviteOne(env, run, ex, inv) {
 /** گفت‌وگویی که کاری برایش هست: پیامِ تازهٔ تأمین‌کننده بعد از آخرین دورِ مدل، یا دوباره‌سازیِ دورِ ناموفق */
 async function pickThread(env, run, cfg) {
   const t = now();
-  /* «پرسش از کارشناس» (state='ask'): تا پاسخِ کارشناس، گفت‌وگو دستِ اوست و کارشناس هوشمند منتظر می‌ماند */
-  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','ask','human') AND x.turns<? AND (x.lock_until IS NULL OR x.lock_until<?)
+  /* «پرسش از کارشناس» (state='ask'): تا پاسخِ کارشناس، گفت‌وگو دستِ اوست و کارشناس هوشمند منتظر می‌ماند. سقفِ دورها این‌جا نیست:
+     گفت‌وگویی که سقفش پر شده و پیامِ تازه دارد برداشته می‌شود تا threadTurn بی مدل به کارشناس بسپاردش (capThread) */
+  return env.DB.prepare(`SELECT x.thread_id FROM ai_threads x WHERE x.run_id=? AND x.state NOT IN ('closed','ask','human') AND (x.lock_until IS NULL OR x.lock_until<?)
       AND (EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s' AND m.id>x.seen_msg) OR (x.retry_at IS NOT NULL AND x.retry_at<=?))
-    ORDER BY x.updated_at LIMIT 1`).bind(run.id, cfg.maxTurns, t, t).first();
+    ORDER BY x.updated_at LIMIT 1`).bind(run.id, t, t).first();
 }
 
 async function stepWork(env, run, k) {
@@ -1190,6 +1191,8 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
       await env.DB.prepare("UPDATE ai_threads SET state='closed', lock_until=NULL, updated_at=? WHERE thread_id=?").bind(now(), threadId).run();
       return { closed: true };
     }
+    /* سقفِ دورهای کارشناس هوشمند در این گفت‌وگو (پیش‌فرض ۵) پر شده: بی مدل، گفت‌وگو دستِ خودِ کارشناس — پیش از تصمیمِ خودکارِ بسته‌ها */
+    if (turnsUsed(st.turns, st.ask_json) >= cfg.maxTurns) return await capThread(env, run, ex, th, st, cfg.maxTurns);
     const pfRead = await pfReadOn(env);
     /* فاز ۴ب گام ۳: روالِ تازه — تصمیمِ بسته با سامانه؛ بسته‌ای که هنگامِ ارسال تأیید نهایی نشد (مثلاً خطای گذرا) همین‌جا، نه با مدل */
     const chat = chatOnlyRun(run, pfRead);
@@ -1323,12 +1326,15 @@ async function askAlarm(env, ex, th, q) {
   const text = `🚨 <b>کارشناس هوشمند از شما سؤال دارد</b>\n\nتأمین‌کنندهٔ «${esc(th.supplier_name)}» در درخواست <b>${esc(th.request_id)}</b> چیزی پرسیده که جوابش در پروندهٔ درخواست نیست:\n`
     + `«${esc(q)}»\n\nاین گفت‌وگو تا پاسخِ شما برایتان باز است؛ جواب را فقط در همان گفت‌وگو بنویسید (صفحهٔ مکاتبات یا بات مکاتبات) — مستقیم برای تأمین‌کننده می‌رود. `
     + "بعد از پاسخ، گفت‌وگو دوباره دستِ کارشناس هوشمند است.";
+  return tellExpert(env, ex, th, { text, title: "🚨 کارشناس هوشمند از شما سؤال دارد", body: `${th.supplier_name} — درخواست ${th.request_id}: «${String(q).slice(0, 220)}»`, tag: `ask${th.id}` });
+}
+/** خبرِ فوریِ یک گفت‌وگو به کارشناس: اعلانِ گوشی، بات کارشناسان (مینی‌اپِ مکاتبات) و بات مکاتبات (رفتن به همین گفت‌وگو) */
+async function tellExpert(env, ex, th, { text, title, body, tag }) {
   let sent = 0;
-  await pushTo(env, EXPERT(ex.id), { title: "🚨 کارشناس هوشمند از شما سؤال دارد", body: `${th.supplier_name} — درخواست ${th.request_id}: «${String(q).slice(0, 220)}»`,
-    url: `correspond?th=${th.id}`, tag: `ask${th.id}` });
+  await pushTo(env, EXPERT(ex.id), { title, body, url: `correspond?th=${th.id}`, tag });
   if (ex.telegram_chat && env.TG_BOT_TOKEN) {
     await telegram(env).call("sendMessage", { chat_id: ex.telegram_chat, text, parse_mode: "HTML", link_preview_options: { is_disabled: true },
-      reply_markup: { inline_keyboard: [[{ text: "💬 باز کردنِ مکاتبات", web_app: { url: P.appUrl(env, "e") } }]] } }).then(() => sent++).catch((e) => console.error("ask tg", e && e.message));
+      reply_markup: { inline_keyboard: [[{ text: "💬 باز کردنِ مکاتبات", web_app: { url: P.appUrl(env, "e") } }]] } }).then(() => sent++).catch((e) => console.error("tell tg", e && e.message));
   }
   if (env.TG_SP_BOT_TOKEN) {
     const rows = (await env.DB.prepare("SELECT chat FROM sp_tg WHERE expert_id=? AND role='e' LIMIT 3").bind(ex.id).all()).results || [];
@@ -1338,6 +1344,33 @@ async function askAlarm(env, ex, th, q) {
     }
   }
   return sent;
+}
+
+/**
+ * سقفِ دورهای کارشناس هوشمند در یک گفت‌وگو پر شد (بازخوردِ آزمونِ مهر ۱۴۰۵): مثلِ «🚨 باز کردنِ اضطراری» گفت‌وگو دستِ خودِ کارشناس
+ * می‌شود (state='human'، ask_json.cap) — بی مدل و بی هشدار به مدیر؛ یادداشتِ درونی در گفت‌وگو و خبر به کارشناس. پیشنهادهای معطل
+ * کنار می‌روند (پیامِ تازهٔ تأمین‌کننده کهنه‌شان کرده). «🤖 برگرداندن» (ai-takeover.js:handbackThread) سقفِ تازه می‌دهد.
+ */
+async function capThread(env, run, ex, th, st, max) {
+  const t = now();
+  const r = await env.DB.prepare(`UPDATE ai_threads SET state='human', lock_until=NULL, retry_at=NULL,
+      ask_json=json_set(COALESCE(ask_json,'{}'),'$.cap',json_object('at',?,'turns',turns,'max',?,'from',state)), updated_at=? WHERE thread_id=? AND state NOT IN ('closed','human')`)
+    .bind(t, max, t, th.id).run();
+  if (!r.meta.changes) { await env.DB.prepare("UPDATE ai_threads SET lock_until=NULL WHERE thread_id=?").bind(th.id).run(); return { capped: false }; }
+  const note = `✋ کارشناس هوشمند ${faN(max)} دورش را در این گفت‌وگو زد و از این‌جا گفت‌وگو با خودِ شماست: پیام و تصمیمِ بسته‌ها را مثلِ گفت‌وگوی دستی بفرستید. `
+    + `«🤖 برگرداندن» ${faN(max)} دورِ دیگر به کارشناس هوشمند می‌دهد.`;
+  await C.postMsg(env, th, "e", note, { ai: true, ev: "cap" }, "note").catch((e) => console.error("ai cap note", e && e.message));
+  await env.DB.batch([
+    env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='cap' WHERE thread_id=? AND state='pending'").bind(t, th.id),
+    logStmt(env, run.id, th.id, "takeover", `✋ سقفِ ${faN(max)} دورِ کارشناس هوشمند با «${th.supplier_name}» پر شد — گفت‌وگو به خودِ کارشناس سپرده شد.`),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, "ai", "ai_cap", th.request_id,
+      JSON.stringify({ assignment_id: th.assignment_id, thread_id: th.id, supplier: th.supplier_name, turns: st.turns || 0, max })),
+  ]);
+  const text = `✋ <b>گفت‌وگو به شما سپرده شد</b>\n\nکارشناس هوشمند ${faN(max)} دورش را با <b>${esc(th.supplier_name)}</b> (درخواست <b>${esc(th.request_id)}</b>) زد و `
+    + "پیامِ تازهٔ تأمین‌کننده منتظرِ شماست. از این‌جا گفت‌وگو را خودتان ادامه دهید (صفحهٔ مکاتبات یا بات مکاتبات)؛ «🤖 برگرداندن» دوباره به کارشناس هوشمند می‌سپاردش.";
+  await tellExpert(env, ex, th, { text, title: "✋ گفت‌وگو به شما سپرده شد", body: `${th.supplier_name} — درخواست ${th.request_id}: سقفِ ${faN(max)} دورِ کارشناس هوشمند پر شد`, tag: `cap${th.id}` })
+    .catch((e) => console.error("ai cap tell", e && e.message));
+  return { capped: true };
 }
 
 /** دورِ فوری کنار می‌رود: همین گفت‌وگو در Cronِ بعدی (هر دقیقه؛ kickNow اجرا را سررسید کرده) با عمقِ فکرِ تب */

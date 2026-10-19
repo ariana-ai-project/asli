@@ -357,6 +357,10 @@
   /* گفت‌وگوی کارشناس هوشمند: فقط دیدن (locked) یا «🚨 اضطراری» بازشده و دستِ کارشناس (human) */
   const roOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.locked);
   const humanOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.human);
+  /* سقفِ ۵ دورِ کارشناس هوشمند در هر گفت‌وگو (ai-lock.js:TURN_CAP): «دورِ n از ۵»، و وقتی پر شد گفت‌وگو دستِ کارشناس است (cap) */
+  const turnsOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.turns) || null;
+  const turnsTxt = () => { const t = turnsOf(); return t ? ` · دورِ ${fa(Math.min(t.used, t.max))} از ${fa(t.max)}` : ""; };
+  const capNote = () => { const c = humanOf() && S.d.thread.ai.cap; return c ? `<div class="ph-ask ph-watch" role="note"><b>✋ سقفِ ${fa(c.max)} دورِ کارشناس هوشمند پر شد ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>گفت‌وگو با خودِ شماست؛ «🤖» در بالای صفحه ${fa(c.max)} دورِ تازه به کارشناس هوشمند می‌دهد.</div>` : ""; };
   const ACT_FA = { approve: "✅ تأییدِ مشخصات", return: "↩️ برگشت برای اصلاح", reject: "❌ رد", accept_rows: "☑️ پذیرشِ مغایرت", final: "🏁 تأیید نهایی" };
   function bundleSum(bid) {
     const b = S.d.bundles.find((x) => x.id === bid);
@@ -384,12 +388,12 @@
   const propsNote = () => {
     const w = watchOf();
     if (!w) return "";
-    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>${w.hold ? "⏸ بی‌مهلت" : `⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه`} ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${floorNote(w)}</div>`;
+    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>${w.hold ? "⏸ بی‌مهلت" : `⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه`}${turnsTxt()} ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${floorNote(w)}</div>`;
     return w.pending.map(propCard).join("");
   };
   /* «🤖 خودکار»: گفت‌وگو بسته است و کارشناس هوشمند خودش مذاکره می‌کند */
   const autoNote = () => (roOf() ? `<div class="ph-ask ph-watch" role="note"><b>🤖 خودکار ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b></div>` : "");
-  const feedHtml = () => msgsHtml() + rateNote() + askNote() + autoNote() + propsNote() + threadRateCard();
+  const feedHtml = () => msgsHtml() + rateNote() + askNote() + capNote() + autoNote() + propsNote() + threadRateCard();
 
   /* --- ⭐ امتیاز به کارِ کارشناس هوشمند (مهر ۱۴۰۵): هر پیامش ۱ تا ۵ ستاره (کمتر از سه با علت)، و کلِ مکاتبه بعد از بسته شدن با نظرِ
      اجباری. «خاتمه»ِ درخواست تا همهٔ امتیازها داده نشده معلق است (worker/ai-rates.js) --- */
@@ -453,7 +457,7 @@
           <button class="ph-glass ph-circ" data-items aria-label="اقلام و تصمیم‌ها${waiting ? ` — ${fa(waiting)} بسته منتظر تصمیم` : ""}" title="اقلام و تصمیم‌ها">${I.box}${waiting ? `<b class="ph-dot">${fa(waiting)}</b>` : ""}</button>`,
       },
       composer: roOf()
-        ? { readonly: `<span class="ph-ro-t">🤖 کارشناس هوشمند این گفت‌وگو را پیش می‌برد — <b>فقط دیدن</b></span><button type="button" class="ph-ro-sos" data-takeover title="گفت‌وگو را خودتان ادامه دهید — مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button>` }
+        ? { readonly: `<span class="ph-ro-t">🤖 کارشناس هوشمند این گفت‌وگو را پیش می‌برد — <b>فقط دیدن</b>${turnsTxt()}</span><button type="button" class="ph-ro-sos" data-takeover title="گفت‌وگو را خودتان ادامه دهید — مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button>` }
         : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "✏️ پیامِ خودتان — جای آخرین پیشنهاد می‌رود (با علتِ رد)" : `پیام به ${th.supplier}`, draft: S.th },
     });
   }

@@ -31,6 +31,14 @@
 const now = () => Date.now();
 const parse = (s, d) => { try { return s ? JSON.parse(s) : d; } catch (_) { return d; } };
 
+/* سقفِ دورهای کارشناس هوشمند در هر گفت‌وگو (بازخوردِ آزمونِ مهر ۱۴۰۵): پیش‌فرض و بیشینه ۵ — پیامِ بعدیِ تأمین‌کننده که برسد، گفت‌وگو
+   دستِ خودِ کارشناس است (ai-agent.js:capThread)؛ هر «🤖 برگرداندن» سقفِ تازه می‌دهد (ask_json.cap_base = شمارِ دورها در همان لحظه) */
+export const TURN_CAP = 5;
+/** سقفِ همین کارشناس (تنظیمِ تب، از ۱ تا TURN_CAP) */
+export const turnCapOf = (configJson) => { const n = Math.round(Number((parse(configJson, {}) || {}).maxTurns)); return n >= 1 ? Math.min(TURN_CAP, n) : TURN_CAP; };
+/** دورهای مصرف‌شده از آخرین برگرداندن */
+export const turnsUsed = (turns, askJson) => Math.max(0, (Number(turns) || 0) - (Number((parse(askJson, {}) || {}).cap_base) || 0));
+
 export const AI_LOCK_MSG = "🤖 این درخواست دستِ کارشناس هوشمند است و این کار را خودش انجام می‌دهد. تیکِ «هوشمند / دستی» در پنل پشتیبانی است.";
 export const AI_QUOTE_MSG = "🤖 این خط استعلام را کارشناس هوشمند ساخته (یا از گفت‌وگوی او آمده) و تغییرش ممکن نیست. خطِ دستیِ خودتان را می‌توانید بیفزایید.";
 /** پشتیبانی تحویلِ کارشناس هوشمند را «رد» کرده: درخواست کامل به کارشناس برگشته (review_json از ai_runs) */
@@ -107,16 +115,23 @@ export const aiResearchLocked = (owned) => !!owned && !!owned.run_id && owned.fl
  * است و سؤالی منتظرِ او نیست؛ ask: {q, at} وقتی کارشناس هوشمند از او پرسیده؛ watch: «⏱ با مهلت» — باز ولی فقط‌خواندنی.
  */
 export async function aiThread(env, threadId, expertId) {
-  const r = await env.DB.prepare(`SELECT x.state, x.ask_json, x.run_id, run.expert_id AS run_expert, run.review_json, g.mode, ${AI_SUP_SQL("x.thread_id")} AS sup
+  const r = await env.DB.prepare(`SELECT x.state, x.ask_json, x.turns, x.run_id, run.expert_id AS run_expert, run.review_json, g.mode, g.config_json, ${AI_SUP_SQL("x.thread_id")} AS sup
       FROM ai_threads x JOIN ai_runs run ON run.id=x.run_id LEFT JOIN ai_agents g ON g.expert_id=? WHERE x.thread_id=?`).bind(expertId || 0, threadId).first().catch(() => null);
   if (!r) return { ai: false, locked: false, ask: null, watch: false };
   /* ارجاع به کارشناسِ دیگری رفته (کارِ کارشناس هوشمند بسته شد)، کارشناس «دستی» است، یا پشتیبانی تحویل را رد کرد: باز */
   if (r.mode !== "on" || r.run_expert !== expertId || aiRejected(r.review_json)) return { ai: true, locked: false, ask: null, watch: false };
-  /* «🚨 باز کردنِ اضطراری» (ai-takeover.js): کارشناس خودش ادامه می‌دهد؛ کارشناس هوشمند در این گفت‌وگو جواب نمی‌دهد */
-  if (r.state === "human") return { ai: true, locked: false, ask: null, watch: false, human: true };
+  /* دورهای کارشناس هوشمند در این گفت‌وگو از سقفش — چیپِ «🤖 n از ۵» و نوارِ «✋ سقف پر شد» */
+  const turns = { used: turnsUsed(r.turns, r.ask_json), max: turnCapOf(r.config_json) };
+  /* «🚨 باز کردنِ اضطراری» (ai-takeover.js) یا سقفِ دورها (ai-agent.js:capThread): کارشناس خودش ادامه می‌دهد؛ کارشناس هوشمند در این
+     گفت‌وگو جواب نمی‌دهد. cap: وقتی آخرین سپردن از سقف بوده */
+  if (r.state === "human") {
+    const a = parse(r.ask_json, {}) || {};
+    const cap = a.cap && (!a.takeover || Number(a.cap.at) > Number(a.takeover.at)) ? a.cap : null;
+    return { ai: true, locked: false, ask: null, watch: false, human: true, cap, turns };
+  }
   const ask = r.state === "ask" ? parse(r.ask_json, {}) : null;
   const watch = !!r.sup;
-  return { ai: true, locked: !ask && !watch, ask, watch };
+  return { ai: true, locked: !ask && !watch, ask, watch, turns };
 }
 
 /** نام تأمین‌کنندگانی که خط‌هایشان در این ارجاع مالِ کارشناس هوشمند است (دعوت یا گفت‌وگوی او) — فقط وقتی کارشناس «هوشمند» است */

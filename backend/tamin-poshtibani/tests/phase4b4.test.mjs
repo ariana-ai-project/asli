@@ -228,6 +228,8 @@ test("بی‌پاسخ سرِ مهلت: صفحهٔ باز سرِ صفر می‌ف
 
 test("بات: «✅ ارسال همین حالا» می‌فرستد؛ «✏️ رد» علت و پیامِ تازه می‌خواهد و «-» برای پیام پذیرفته نیست", { skip: SKIP }, async () => {
   const { th, H } = S;
+  /* سقفِ ۵ دورِ کارشناس هوشمند (ai-lock.js:TURN_CAP) آزمونِ خودش را دارد؛ این‌جا دورهای همین گفت‌وگو از نو */
+  DB.raw.prepare("UPDATE ai_threads SET turns=0 WHERE thread_id=?").run(th);
   model = () => reply("پیشنهادِ تازه برای ارسال.");
   assert.equal((await call(`/sp/thread/${th}/msg`, { headers: H, body: { text: "خبری شد؟" } })).status, 200);
   const p = props(th).find((x) => x.kind === "reply" && x.state === "pending");
@@ -254,6 +256,8 @@ test("بات: «✅ ارسال همین حالا» می‌فرستد؛ «✏️ 
 
 test("«🤖 خودکار»: معطل‌ها همان لحظه می‌روند، گفت‌وگو بسته و پاسخ‌ها بی پیشنهاد؛ برگشت به مهلت و «🚨 اضطراری»", { skip: SKIP }, async () => {
   const { th, H } = S;
+  /* سقفِ ۵ دورِ کارشناس هوشمند (ai-lock.js:TURN_CAP) آزمونِ خودش را دارد؛ این‌جا دورهای همین گفت‌وگو از نو */
+  DB.raw.prepare("UPDATE ai_threads SET turns=0 WHERE thread_id=?").run(th);
   model = () => reply("پیامِ معطل پیش از خودکار.");
   assert.equal((await call(`/sp/thread/${th}/msg`, { headers: H, body: { text: "سؤالی دارم" } })).status, 200);
   const p = props(th).find((x) => x.state === "pending");
@@ -315,4 +319,31 @@ test("ردِ «🏁 تأیید نهایی» از بات با «❌ ردِ بست
   assert.deepEqual({ ...DB.raw.prepare("SELECT state, reason, own FROM ai_props WHERE id=?").get(f.id) }, { state: "no", reason: "برند نامعتبر است", own: null });
   assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(sub.data.bundle_id).state, "rejected", "بسته رد شد");
   assert.match(sentTexts().pop(), /پیشنهاد رد شد[\s\S]*بسته رد شد/);
+});
+
+test("سقفِ ۵ دورِ کارشناس هوشمند: پیامِ بعدیِ تأمین‌کننده بی مدل به کارشناس سپرده می‌شود؛ «🤖 برگرداندن» ۵ دورِ تازه می‌دهد", { skip: SKIP }, async () => {
+  const { th, H } = S;
+  assert.equal((await call("/me/supervise", { method: "PUT", headers: EX, body: { mode: "auto" } })).status, 200);
+  /* بعد از «🚨 اضطراری»ِ آزمونِ پیشین: اول برگرداندن */
+  if (DB.raw.prepare("SELECT state FROM ai_threads WHERE thread_id=?").get(th).state === "human") assert.equal((await call(`/sp/x/thread/${th}/handback`, { headers: EX, body: {} })).status, 200);
+  DB.raw.prepare("UPDATE ai_threads SET turns=COALESCE(json_extract(ask_json,'$.cap_base'),0)+5 WHERE thread_id=?").run(th);
+  let n = 0;
+  model = () => { n++; return reply("این پیام نباید برود."); };
+  const c0 = calls.length;
+  assert.equal((await call(`/sp/thread/${th}/msg`, { headers: H, body: { text: "پیامِ ششم" } })).status, 200);
+  assert.equal(n, 0, "مدل صدا زده نشد");
+  const x = DB.raw.prepare("SELECT state, ask_json FROM ai_threads WHERE thread_id=?").get(th);
+  assert.equal(x.state, "human");
+  assert.equal(JSON.parse(x.ask_json).cap.max, 5);
+  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM sp_msgs WHERE thread_id=? AND kind='note' AND body LIKE '%دورش را در این گفت‌وگو زد%'").get(th), "یادداشتِ درونی");
+  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='ai_cap'").get());
+  assert.ok(calls.slice(c0).some((c) => c.method === "sendMessage" && /گفت‌وگو به شما سپرده شد/.test(String(c.body.text || ""))), "خبر به کارشناس");
+  assert.ok(!msgBy(th, "این پیام نباید برود."));
+  /* برگرداندن: سقفِ تازه از همین لحظه */
+  assert.equal((await call(`/sp/x/thread/${th}/handback`, { headers: EX, body: {} })).status, 200);
+  const y = DB.raw.prepare("SELECT state, turns, ask_json FROM ai_threads WHERE thread_id=?").get(th);
+  assert.deepEqual([y.state, JSON.parse(y.ask_json).cap_base], ["active", y.turns]);
+  model = () => { n++; return reply("دورِ تازه بعد از برگرداندن."); };
+  assert.equal((await call(`/sp/thread/${th}/msg`, { headers: H, body: { text: "پیامِ هفتم" } })).status, 200);
+  assert.equal(n, 1, "بعد از برگرداندن، کارشناس هوشمند دوباره پاسخ می‌دهد");
 });
