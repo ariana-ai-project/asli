@@ -425,6 +425,27 @@
 .ph-cfg { display: inline-flex; margin-inline-start: .5em; padding: .05em .6em; border-radius: 99px; border: 1px solid rgba(156, 192, 255, 0.5); background: transparent; color: inherit; font: inherit; font-size: .85em; font-weight: 600; cursor: pointer; vertical-align: 1px; }
 .ph-cfg:hover { background: rgba(79, 140, 255, 0.18); }
 .sp-mode { display: block; line-height: 1.8; margin-top: 8px; }
+/* W3 (آزمونِ مالک): پیشنهاد سرِ جای خودش — زیرِ کارتِ بسته یا بعد از پیامِ تأمین‌کننده — با فاصلهٔ کم و لبهٔ پررنگ‌تر تا گم نشود */
+.ph-ask.ph-prop.anch { margin-top: .45em; }
+.ph-ask.ph-prop.fin { box-shadow: inset 0 0 0 1.5px rgba(79, 140, 255, 0.8), 0 .5em 1.4em -.9em rgba(79, 140, 255, 0.9); }
+.ph-prop-acts.fin .tp-btn { flex: 1 1 8.5em; }
+/* نوارِ وضعیتِ «⏱ با مهلت / ⏸ بی‌مهلت» و کارتِ «⏸ تصمیمِ بسته با خودِ شماست» */
+.ph-ask.ph-wbar, .ph-ask.ph-manual { white-space: normal; }
+.ph-wline { display: block; margin-top: .25em; }
+.ph-wacts { display: flex; justify-content: flex-end; margin-top: .45em; }
+.ph-sos-mini { border: 0; border-radius: 999px; padding: .32em .9em; font: inherit; font-size: .92em; font-weight: 800; color: #fff; cursor: pointer;
+  background: linear-gradient(135deg, #ef4444, #b91c1c); box-shadow: 0 4px 12px -6px rgba(239, 68, 68, 0.7), inset 0 1px 0 rgba(255, 255, 255, 0.3); }
+.ph-sos-mini:hover { filter: brightness(1.08); }
+.ph-sos-mini:focus-visible { outline: 2px solid #fecaca; outline-offset: 2px; }
+/* نشانِ «⏱ n»ِ پیشنهادهای معطل سرِ گفت‌وگو (گوشی: سمتِ خالیِ نوار؛ ستونِ وسط: کنارِ نامِ تأمین‌کننده) — کلیکش به اولین پیشنهاد می‌رود */
+.ph-pchip { display: inline-flex; align-items: center; gap: .25em; height: 2.3em; padding: 0 .85em; border-radius: 999px; font: inherit; font-size: .82em; font-weight: 800;
+  color: #9cc0ff; cursor: pointer; box-shadow: inset 0 0 0 1px rgba(79, 140, 255, 0.6), 0 .3em 1em -.4em rgba(0, 0, 0, 0.4); }
+.ph-pchip:hover { background-color: var(--ph-glass-hover); }
+:root[data-theme="light"] .ph-pchip { color: #1f5fd6; }
+button.sp-badge { border: 0; font-family: inherit; cursor: pointer; }
+.sp-pjump { margin-inline-start: 6px; vertical-align: 2px; }
+@media (prefers-reduced-motion: no-preference) { .ph-pchip { animation: phPchip 2.4s ease-in-out 2; } }
+@keyframes phPchip { 50% { box-shadow: inset 0 0 0 1px rgba(79, 140, 255, 0.6), 0 0 0 .35em rgba(79, 140, 255, 0.25); } }
 
 /* ⭐ امتیازِ کارشناس به پیام‌های کارشناس هوشمند: بی‌امتیازها لبهٔ نقطه‌چینِ کهربایی، امتیازدارها لبهٔ سبز (کمتر از سه: سرخ)؛
    ستاره‌ها زیرِ حباب — بی‌امتیاز با نگه داشتنِ نشانگر (یا لمس روی گوشی)، امتیازدار همیشه و کوچک‌تر */

@@ -49,7 +49,7 @@ import { commissionXlsx } from "./sheets.js";
 import { writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { getSettings } from "./settings.js";
-import { fmtFa, tehranParts } from "./time.js";
+import { fmtFa, tehranParts, inWorkHours } from "./time.js";
 import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
@@ -1201,6 +1201,8 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     if (chat) {
       const a = await autoDecide(env, threadId).catch(() => null);
       if (a && a.msgs.length) await P.pushMsgs(env, th, a.msgs).catch((e) => console.error("ai push", e && e.message));
+      /* «⏱ با مهلت»: کارتِ «🏁 تأیید نهایی»ِ پیشنهادشده همین حالا در بات، نه با چرخهٔ پنج‌دقیقه‌ایِ صف */
+      if (a && a.props && a.props.length) await propCardsNow(env, a.props);
     }
     const [lr, br, mr] = await env.DB.batch([
       env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? ORDER BY id").bind(threadId),
@@ -1277,6 +1279,7 @@ async function threadTurn(env, threadId, { run, ex, cfg, rec, fast = false }) {
     if (holdActs || holdReply) {
       prop = await propose(env, { run, ex, th, kind: holdActs ? "act" : "reply", body: T(res.reply).slice(0, 2900) || null, seen: Math.max(maxId || 0, st.seen_msg || 0), minutes: sup.minutes,
         hold: sup.hold, why: holdWhy(sup), meta: holdActs ? { actions: acts, bundles: [...new Set(acts.map((a) => int(a.bundle_id)).filter(Boolean))] } : null });
+      await propCardsNow(env, [prop]);
     }
     const out = [], errors = [];
     if (!holdActs) out.push(...(await runActions(env, ex, bundles, acts, errors)));
@@ -1821,6 +1824,33 @@ async function propose(env, { run, ex, th, kind, body = null, bundle_id = null, 
     body: `${th.supplier_name} — ${what}${body ? `: «${String(body).slice(0, 160)}»` : ""}`, url: `correspond?th=${th.id}`, tag: `prop${id}` }));
   await env.DB.batch(stmts);
   return id;
+}
+
+/**
+ * کارتِ پیشنهادهای تازه همان لحظه در بات کارشناسان (W3، آزمونِ مالک): صفِ تلگرام (bot.js:drainOutbox) فقط در دقیقه‌های مضربِ ۵ خالی
+ * می‌شود و کارشناس تا پنج دقیقه از مهلتِ ده‌دقیقه‌ای را بی کارت می‌ماند. همان ردیفِ صف (idem «prop:<id>»، همان batchِ propose) اول ادعا
+ * می‌شود (sent، یک UPDATE با RETURNING) و بعد فرستاده؛ تلگرام نشد ← ردیف به صف برمی‌گردد و Cron می‌فرستد. هرگز خطا نمی‌دهد؛
+ * صدازننده‌ها بیرون از پاسخ (waitUntil) یا در کارِ پس‌زمینه می‌زنند. بیرون از ساعت اداری همان قاعدهٔ صف: نمی‌رود. خروجی شمارِ رفته‌ها.
+ */
+export async function propCardsNow(env, ids) {
+  const list = [...new Set((ids || []).map(int).filter(Boolean))];
+  if (!list.length || !env.TG_BOT_TOKEN) return 0;
+  if (!env.TG_IGNORE_HOURS && !inWorkHours(now())) return 0;
+  let sent = 0;
+  for (const id of list) {
+    try {
+      const row = await env.DB.prepare("UPDATE outbox SET status='sent', sent_at=?, attempts=attempts+1 WHERE idem=? AND status='pending' RETURNING id, target, payload_json")
+        .bind(now(), `prop:${id}`).first();
+      if (!row) continue;
+      const p = parse(row.payload_json, {}) || {};
+      try { await telegram(env).sendMessage(row.target, p.text, p.keyboard); sent++; }
+      catch (e) {
+        await env.DB.prepare("UPDATE outbox SET status='pending', next_at=?, last_error=? WHERE id=? AND status='sent'").bind(now(), String((e && e.message) || e).slice(0, 300), row.id).run()
+          .catch(() => {});
+      }
+    } catch (e) { console.error("prop card now", id, e && e.message); }
+  }
+  return sent;
 }
 
 /** «✏️ رد» که باز شد، مهلت دست‌کم این‌قدر تمدید می‌شود */

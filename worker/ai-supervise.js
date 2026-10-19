@@ -133,9 +133,11 @@ export async function propsOf(env, threadId) {
   const list = (rows.results || []).map(propOut);
   return { pending: list.filter((p) => p.state === "pending").reverse(), done: list.filter((p) => p.state !== "pending").slice(0, 10) };
 }
+/* seen: آخرین پیامِ گفت‌وگو هنگامِ نوشتنِ پیشنهاد — صفحهٔ مکاتبات کارتِ «💬 پاسخ» را درست بعد از پیامِ تأمین‌کننده‌ای می‌نشاند که جوابش است
+   (ph-props.js:anchors) */
 export function propOut(p) {
   const meta = parse(p.meta_json, {}) || {};
-  return { id: p.id, kind: p.kind, kind_fa: PROP_FA[p.kind] || p.kind, body: p.body || "", bundle_id: p.bundle_id || null, actions: meta.actions || [], why: meta.why || null,
+  return { id: p.id, kind: p.kind, kind_fa: PROP_FA[p.kind] || p.kind, body: p.body || "", bundle_id: p.bundle_id || null, actions: meta.actions || [], why: meta.why || null, seen: p.seen_msg || 0,
     state: p.state, state_fa: PROP_STATE_FA[p.state] || p.state, reason: p.reason || null, own: p.own || null, bundle_act: meta.bundle_act || null,
     boxes: boxesOf(p.boxes), created_at: p.created_at, due_at: p.due_at || null, decided_at: p.decided_at || null, decided_by: p.decided_by || null };
 }

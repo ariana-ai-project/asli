@@ -19,7 +19,7 @@ import { storage, storageKey, MAX_BYTES } from "./storage.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { deliverPass } from "./sp-sms.js";
-import { aiKick, autoDecide } from "./ai-agent.js";
+import { aiKick, autoDecide, propCardsNow } from "./ai-agent.js";
 import { rangeTxt, payModes, priceRows, pricesMissing, PRICE_FA } from "./terms-locks.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
@@ -85,6 +85,13 @@ const WELCOME = "این بات برای مکاتبهٔ کارشناسان خری
 
 async function plain(env, chat, text, kb) {
   return P.spApi(env).sendMessage(chat, text, kb).catch(() => null);
+}
+/** «⏱ با مهلت»: کارتِ «🏁 تأیید نهایی»ِ پیشنهادشده با ارسالِ بسته همین حالا در بات کارشناسان (ai-agent.js:propCardsNow) — بیرون از پاسخ اگر ctx هست */
+function propCards(env, row, auto) {
+  if (!auto || !auto.props || !auto.props.length) return null;
+  const p = propCardsNow(env, auto.props);
+  if (row._ctx && typeof row._ctx.waitUntil === "function") { row._ctx.waitUntil(p); return null; }
+  return p;
 }
 
 async function onMessage(env, msg, ctx) {
@@ -684,6 +691,7 @@ async function supplierMessage(env, row, msg, text) {
       /* فاز ۴ب گام ۳: در کارِ کارشناس هوشمند بستهٔ ارسالی همان لحظه تأیید نهایی می‌شود — بی مدل */
       const auto = await autoDecide(env, r.thread.id).catch(() => null);
       await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
+      await propCards(env, row, auto);
       aiKick(env, row._ctx, r.thread.id);
       if (auto && auto.ids.includes(r.bundle_id)) return itemsCardSend(env, row, sup, th.id, null, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)})؛ پیش‌فاکتورِ خودتان هم پیوستش شد. ممنون از همکاری‌تان 🙏`);
       const head = r.state === "proforma" ? `✅ مشخصات و پیش‌فاکتور با هم برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}).`
@@ -825,6 +833,7 @@ async function submitWithOffpf(env, row, sup, thId, offpfId, mid) {
   if (op) await markSubmitted(env, op, r.bundle_id);
   const auto = await autoDecide(env, r.thread.id).catch(() => null);
   await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
+  await propCards(env, row, auto);
   aiKick(env, row._ctx, r.thread.id);
   if (auto && auto.ids.includes(r.bundle_id)) return itemsCardSend(env, row, sup, th.id, mid, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)}). ممنون از همکاری‌تان 🙏`);
   return itemsCardSend(env, row, sup, th.id, mid, `✅ پیشنهادتان با پیش‌فاکتورِ رسمیِ خودتان برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
@@ -1094,6 +1103,7 @@ async function onCallback(env, cq, ctx) {
         await ack("فرستاده شد");
         const auto = await autoDecide(env, r.thread.id).catch(() => null);
         await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
+        await propCards(env, row, auto);
         aiKick(env, row._ctx, r.thread.id);
         if (auto && auto.ids.includes(r.bundle_id)) return await itemsCardSend(env, row, sup, n(1), mid, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)}). ممنون از همکاری‌تان 🙏`);
         return await itemsCardSend(env, row, sup, n(1), mid, `✅ ${gen ? "پیشنهاد با پیش‌فاکتورِ سامانه" : ""}${gen ? " " : ""}برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);

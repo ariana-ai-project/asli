@@ -690,8 +690,10 @@ export function threadOut(th, side) {
   return {
     id: th.id, request_id: th.request_id, supplier: th.supplier_name, expert: th.expert_label || th.expert_name,
     phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
+    /* turns و cap (ai-lock.js:aiThread): «دورِ n از ۵» و نوارِ «✋ سقفِ ۵ دور پر شد»ِ صفحهٔ مکاتبات — پیش از این به صفحه نمی‌رسیدند */
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
-      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, human: !!th.ai.human, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch } : null } : {}),
+      ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, human: !!th.ai.human, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch,
+        turns: th.ai.turns || null, cap: th.ai.cap || null } : null } : {}),
   };
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */

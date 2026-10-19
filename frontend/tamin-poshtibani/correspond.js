@@ -12,9 +12,12 @@
    فاز ۴ طرح «خرید هوشمند، کارشناس ناظر»: «خوانش هوشمند پیش‌فاکتور» (کلیدِ پنل پشتیبانی) پیش‌فرض خاموش است — بسته بعد از بررسی
    یکراست «🏁 تأیید نهایی» می‌شود (مقدارهای خودِ تأمین‌کننده و پیش‌فاکتورِ سامانه، با «👁 پیش‌فاکتور»، چاپ به PDF و Word) یا با
    توضیح برمی‌گردد؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است. عنوان و لایه‌های 🔓ِ پیشنهادیِ تأمین‌کننده کنارِ هر قلم.
-   فاز ۴ب گام ۴ («👁 حالت تأیید»): گفت‌وگوی «با تأیید» باز و فقط‌خواندنی است — پیشنهادهای کارشناس هوشمند (پاسخ، تأیید نهایی،
-   تصمیمِ بسته) بالای کادرِ پیام با «✅ تأیید» (بی توضیح) و «❌ رد» (توضیحِ اجباری، بعد پیامِ خودِ کارشناس یا هیچ) می‌آیند؛
-   پیامی که کارشناس در کادر می‌نویسد همان «پیامِ خودش» در ردِ پیشنهادِ معطل است. ?th=<گفت‌وگو> همان گفت‌وگو را باز می‌کند.
+   فاز ۴ب گام ۴ («⏱ با مهلت / ⏸ بی‌مهلت»): گفت‌وگو باز و فقط‌خواندنی است — هر پیشنهادِ کارشناس هوشمند سرِ جای خودش در گفت‌وگو
+   می‌نشیند (W3، آزمونِ مالک — ph-props.js): «🏁 تأیید نهایی» و «🧾 تصمیمِ بسته» درست زیرِ کارتِ همان بسته با «🏁 تأیید نهایی»،
+   «↩️ برگشت با توضیح»، «❌ رد» و «⏸ بعداً خودم»؛ «💬 پاسخ» درست بعد از پیامِ تأمین‌کننده‌ای که جوابش است با «✅ ارسال» و «✏️ رد»
+   (علتِ اجباری و پیامِ خودِ کارشناس). پیامِ کادرِ پایین فقط با تأییدِ صریح و علت جای پیشنهادِ پیام می‌نشیند — هیچ ردِ بی‌صدایی؛
+   نوارِ وضعیت «🚨 باز کردنِ اضطراری» و راهِ رسیدن به پیشنهادهای بالاتر را دارد و سرِ گفت‌وگو شمارِ پیشنهادهای معطل.
+   ?th=<گفت‌وگو> همان گفت‌وگو را باز می‌کند.
    ورود: کد کارشناس یا initData مینی‌اپ.
    ============================================================ */
 (function () {
@@ -268,15 +271,16 @@
       const av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
       if (t.ai === "locked") return TP.ui.chatRow({ on: S.th === t.id, cls: "lock", lock: true, av, attrs: `data-th="${t.id}" title="گفت‌وگوی کارشناس هوشمند — فقط دیدن"`,
         title: esc(t.supplier), time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
-      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 با تأیید شما · ${fa(t.lines)} قلم`
+      /* «⏱ با مهلت»: شمارِ پیشنهادهای معطل همان‌جا که چشم می‌رود (W3) — بی پیشنهاد، همان «با تأیید شما» */
+      const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? (t.props ? `⏱ ${fa(t.props)} پیشنهادِ کارشناس هوشمند منتظرِ شماست` : `👁 با تأیید شما · ${fa(t.lines)} قلم`)
         : preview(t) || `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`;
       return TP.ui.chatRow({ on: S.th === t.id, cls: t.ai === "ask" ? "ask" : t.ai === "watch" ? "watch" : "", av, attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)}"`,
         title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "⏱ " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}`, time: when(t.last_at), sub,
         badges: `${propBadge(t.props)}${badge(t.unread)}${badge(t.waiting, "wait")}` });
     }).join("");
   }
-  /* «⏱ با مهلت»: شمارِ پیشنهادهای کارشناس هوشمند که منتظرِ «ارسال» یا «رد»ِ شمایند */
-  const propBadge = (n) => (n ? `<span class="sp-badge prop" title="پیشنهادِ کارشناس هوشمند منتظرِ «ارسال» یا «رد»ِ شما — بی‌پاسخ، سرِ مهلت خودکار می‌رود">⏱ ${fa(n)}</span>` : "");
+  /* «⏱ با مهلت»: شمارِ پیشنهادهای کارشناس هوشمند که منتظرِ «تأیید» یا «رد»ِ شمایند (سرور: sp-core.js:expertThreads، همان یک کوئریِ فهرست) */
+  const propBadge = (n) => (n ? `<span class="sp-badge prop" title="${fa(n)} پیشنهادِ کارشناس هوشمند منتظرِ «تأیید» یا «رد»ِ شما — با مهلت، بی‌پاسخ سرِ مهلت خودکار می‌رود">⏱ ${fa(n)}</span>` : "");
   function render() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
     /* پیش‌نویسِ نیمه‌کارهٔ هر گفت‌وگو با رسمِ دوباره (تغییر پهنا، تصمیم روی بسته) پاک نمی‌شود */
@@ -336,7 +340,7 @@
     const av = `<span class="sp-av" style="--av:${TP.ui.avColor(th.supplier)}" aria-hidden="true">${esc(TP.ui.avInitial(th.supplier))}</span>`;
     /* «👤 پروفایل تأمین‌کننده» (sup-profile.js) — فقط وقتی کلیدِ دفتر تأمین‌کنندگان در پنل پشتیبانی روشن است */
     if (S.crReg === undefined && TP.supProfile) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
-    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${S.crReg ? ` ${TP.supProfile.btn(th.supplier)}` : ""}</h3>
+    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${S.crReg ? ` ${TP.supProfile.btn(th.supplier)}` : ""}${propChip("sp-badge prop sp-pjump")}</h3>
         <span class="sp-muted">📞 <span dir="ltr">${esc(th.phone || "—")}</span>${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست <b>${esc(th.request_id)}</b></span></div>${back}</div>
       <div class="sp-kpis">${TP.ui.stat({ label: "اقلام", value: fa(S.d.lines.length), icon: "box", sub: `${fa(priced)} با قیمت` })}
         ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}
@@ -352,8 +356,15 @@
   /** «🚨 پرسش از کارشناس»: سؤال و راهنما در انتهای گفت‌وگو، درست بالای کادرِ پیام */
   const askOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.ask) || null;
   const askNote = () => { const k = askOf(); return k ? `<div class="ph-ask" role="note"><b>🚨 کارشناس هوشمند از شما می‌پرسد ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${esc(k.q)}<i>پاسخ را همین پایین بنویسید.</i></div>` : ""; };
-  /* «👁 با تأیید» (فاز ۴ب گام ۴): پیشنهادهای معطلِ کارشناس هوشمند در انتهای گفت‌وگو، درست بالای کادرِ پیام */
+  /* «⏱ با مهلت / ⏸ بی‌مهلت» (فاز ۴ب گام ۴): پیشنهادهای معطلِ کارشناس هوشمند — هر کدام سرِ جای خودش در گفت‌وگو (W3، propPlaces) */
   const watchOf = () => (S.d && S.d.watch) || null;
+  /** شمارِ پیشنهادهای معطلِ همین گفت‌وگو */
+  const pendN = () => { const w = watchOf(); return w ? (w.pending || []).length : 0; };
+  /** نشانِ «⏱ n» سرِ گفت‌وگو (W3): کلیکش به اولین پیشنهادِ معطل در گفت‌وگو می‌رود */
+  const propChip = (cls) => {
+    const n = pendN();
+    return n ? ` <button type="button" class="${cls}" data-prop-jump aria-label="${fa(n)} پیشنهادِ کارشناس هوشمند منتظرِ شما — رفتن به آن" title="${fa(n)} پیشنهادِ کارشناس هوشمند منتظرِ «تأیید» یا «رد»ِ شما — رفتن به آن">⏱ ${fa(n)}</button>` : "";
+  };
   /* گفت‌وگوی کارشناس هوشمند: فقط دیدن (locked) یا «🚨 اضطراری» بازشده و دستِ کارشناس (human) */
   const roOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.locked);
   const humanOf = () => !!(S.d && S.d.thread.ai && S.d.thread.ai.human);
@@ -371,29 +382,84 @@
   /* --- «⏱ با مهلت» (مهر ۱۴۰۵): پیشنهادِ کارشناس هوشمند با شمارشِ معکوس (ساعتِ سرور) — سرِ صفر خودِ صفحه «سرِ مهلت» را می‌زند --- */
   const leftMs = (p) => (p && p.due_at ? p.due_at - (Date.now() + (S.skew || 0)) : null);
   const mmss = (ms) => { const x = Math.max(0, Math.ceil(ms / 1000)); return fa(`${Math.floor(x / 60)}:${String(x % 60).padStart(2, "0")}`); };
-  const dueLabel = (p) => { const l = leftMs(p); return l == null ? "" : l > 0 ? `بی‌پاسخ، خودکار می‌رود تا <b class="num">${mmss(l)}</b>` : "⏳ مهلت تمام شد — در حال ارسالِ خودکار…"; };
+  /* «🏁 تأیید نهایی» سرِ مهلت خودکار تأیید می‌شود و بقیه خودکار می‌روند — برچسبِ شمارش همین را می‌گوید */
+  const dueLabel = (p) => {
+    const l = leftMs(p), fin = p && p.kind === "final";
+    return l == null ? "" : l > 0 ? `بی‌پاسخ، ${fin ? "خودکار تأیید نهایی می‌شود" : "خودکار می‌رود"} تا <b class="num">${mmss(l)}</b>` : `⏳ مهلت تمام شد — در حالِ ${fin ? "تأیید نهاییِ" : "ارسالِ"} خودکار…`;
+  };
   const duePct = (p) => { const l = leftMs(p), tot = p.due_at && p.created_at ? p.due_at - p.created_at : 0; return tot > 0 ? Math.max(0, Math.min(1, l / tot)).toFixed(3) : 0; };
-  function propCard(p) {
-    const what = p.kind === "final" ? `بستهٔ ${fa(p.bundle_id)} را تأیید نهایی کند` : p.kind === "act" ? "این تصمیمِ بسته را بگیرد" : "این پیام را بفرستد";
-    return `<div class="ph-ask ph-prop" role="note" data-prop="${p.id}"><b>${p.due_at ? "⏱" : "⏸"} کارشناس هوشمند می‌خواهد ${what} ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>
-      ${p.kind === "final" ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
+  /**
+   * کارتِ یک پیشنهاد (W3): anchored یعنی سرِ جای خودش نشسته — «🏁 تأیید نهایی» درست زیرِ کارتِ همان بسته (فهرستِ اقلامش همان بالاست)،
+   * «💬 پاسخ» درست بعد از پیامِ تأمین‌کننده؛ وگرنه ته گفت‌وگو و با خلاصهٔ بسته. دکمه‌ها به نوعِ پیشنهاد (ph-props.js:acts).
+   */
+  function propCard(p, anchored) {
+    const fin = p.kind === "final";
+    const what = fin ? `${anchored ? `همین بسته (بستهٔ ${fa(p.bundle_id)})` : `بستهٔ ${fa(p.bundle_id)}`} را تأیید نهایی کند`
+      : p.kind === "act" ? "این تصمیمِ بسته را بگیرد" : anchored ? "این پاسخ را بفرستد" : "این پیام را بفرستد";
+    return `<div class="ph-ask ph-prop${anchored ? " anch" : ""}${fin ? " fin" : ""}" role="group" aria-label="پیشنهادِ کارشناس هوشمند: ${esc(p.kind_fa || "")}" data-prop="${p.id}"><b>${p.due_at ? "⏱" : "⏸"} کارشناس هوشمند می‌خواهد ${what} ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>
+      ${fin && !anchored ? `<div class="ph-prop-body">${bundleSum(p.bundle_id)}</div>` : ""}
       ${p.kind === "act" ? `<div class="ph-prop-body">${(p.actions || []).map((a) => `• ${esc(ACT_FA[a.type] || a.type)} — بستهٔ ${fa(a.bundle_id)}${a.comment ? `: «${esc(a.comment)}»` : ""}`).join("\n")}</div>` : ""}
       ${p.body ? `<div class="ph-prop-body">${esc(p.body)}</div>` : ""}
-      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : `<div class="ph-due"><span class="t">⏸ بی‌مهلت — منتظرِ شما</span></div>`}
-      <div class="ph-prop-acts"><button class="tp-btn primary sm" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger sm" data-prop-no="${p.id}">✏️ رد و نوشتن پیام خودم</button></div></div>`;
+      ${p.due_at ? `<div class="ph-due" data-due="${p.id}" style="--p:${duePct(p)}"><span class="bar"><i></i></span><span class="t" data-due-t>${dueLabel(p)}</span></div>` : `<div class="ph-due"><span class="t">⏸ بی‌مهلت — تا تصمیمِ شما نمی‌رود</span></div>`}
+      ${PH.props.acts(p)}</div>`;
+  }
+  /** «⏸ بعداً خودم»: بستهٔ بازی که تصمیمش با خودِ کارشناس است — زیرِ کارتِ همان بسته با دکمه‌های همیشگیِ تصمیم (/sp/x/bundle/:id/decide) */
+  function manualCard(b) {
+    const acts = S.pfRead ? `<button type="button" class="tp-btn sm" data-goto-b="${b.id}">📦 تصمیم در «اقلام و تصمیم‌ها»</button>`
+      : `<button type="button" class="tp-btn primary sm" data-bact="${b.id}:final" ${b.ready ? "" : `disabled title="${esc(`هنوز کامل نیست: ${(b.problems || []).join("، ")}`)}"`}>🏁 تأیید نهایی</button>`
+        + `<button type="button" class="tp-btn warn sm" data-bact="${b.id}:return">↩️ برگرداندن با توضیح</button><button type="button" class="tp-btn danger sm" data-bact="${b.id}:reject">❌ رد</button>`;
+    return `<div class="ph-ask ph-watch ph-manual" role="group" aria-label="تصمیمِ بستهٔ ${fa(b.id)} با شما" data-manual="${b.id}"><b>⏸ تصمیمِ بستهٔ ${fa(b.id)} با خودِ شماست ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b><span class="ph-wline">کارشناس هوشمند این بسته را خودکار تأیید نمی‌کند؛ هر وقت آماده بودید همین‌جا تصمیم بگیرید.</span><div class="ph-prop-acts">${acts}</div></div>`;
+  }
+  /**
+   * جای کارت‌های «⏱ با مهلت» در گفت‌وگو (W3): هر پیشنهادِ معطل زیرِ پیامی که به آن مربوط است (ph-props.js:anchors)، و بسته‌ای که
+   * «⏸ بعداً خودم» خورده و هنوز باز است زیرِ کارتِ همان بسته. خروجی: {at: {msgId: html} برای PH.feed، tail: html ته گفت‌وگو، up: شمارِ
+   * پیشنهادهایی که بالاتر از آخرین پیام نشسته‌اند}.
+   */
+  function propPlaces() {
+    const w = watchOf(), out = { at: {}, tail: "", up: 0 };
+    if (!w || !S.d) return out;
+    const msgs = S.d.msgs, pend = w.pending || [], last = msgs.length ? String(msgs[msgs.length - 1].id) : "";
+    const add = (id, h) => { out.at[id] = (out.at[id] || "") + h; };
+    /* اول کارتِ خودِ بسته («⏸ تصمیم با شما»)، بعد پیشنهادهای همان‌جا به ترتیب — کارتِ بسته درست زیرِ همان بسته می‌ماند */
+    for (const bid of w.manual || []) {
+      const b = S.d.bundles.find((x) => x.id === bid && OPEN_ST.includes(x.state));
+      if (!b || pend.some((p) => PH.props.bundlesOf(p).includes(bid))) continue;
+      const m = PH.props.bundleEv(msgs, [bid]);
+      if (m) add(m.id, manualCard(b)); else out.tail += manualCard(b);
+    }
+    const A = PH.props.anchors(msgs, pend);
+    for (const [id, L] of Object.entries(A.at)) { add(id, L.map((p) => propCard(p, true)).join("")); if (id !== last) out.up += L.length; }
+    out.tail = A.tail.map((p) => propCard(p, false)).join("") + out.tail;
+    return out;
   }
   const cfgBtn = `<button type="button" class="ph-cfg" data-supcfg title="حالتِ مکاتباتِ کارشناس هوشمند: با مهلت، بی‌مهلت یا خودکار">⚙️ تغییر</button>`;
   /** کفِ حالت از «حالت کار»ِ نوع قلم — فقط وضعیت؛ توضیح در راهنما */
   const floorNote = (w) => (w.floor ? `<span class="sp-muted">نوع قلمِ «${esc(w.floor.head)}» «${esc(w.floor.workflow)}» است</span>` : "");
-  const propsNote = () => {
+  /**
+   * نوارِ وضعیتِ «⏱ با مهلت / ⏸ بی‌مهلت» ته گفت‌وگو — همیشه، حتی با پیشنهادِ معطل (W3): مهلت، دورها، «⚙️ تغییر»، شمارِ پیشنهادهای
+   * منتظر با «⤴ رفتن» به پیشنهادهای بالاتر، و «🚨 باز کردنِ اضطراری»؛ بعدش کارت‌هایی که لنگرشان در صفحه نیست.
+   */
+  function watchNote(P) {
     const w = watchOf();
     if (!w) return "";
-    if (!(w.pending || []).length) return `<div class="ph-ask ph-watch" role="note"><b>${w.hold ? "⏸ بی‌مهلت" : `⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه`}${turnsTxt()} ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${floorNote(w)}</div>`;
-    return w.pending.map(propCard).join("");
-  };
+    const n = (w.pending || []).length;
+    return `<div class="ph-ask ph-watch ph-wbar" role="note"><b>${w.hold ? "⏸ بی‌مهلت" : `⏱ با مهلتِ ${fa(w.minutes || 10)} دقیقه`}${turnsTxt()} ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>${floorNote(w)}`
+      + (n ? `<span class="ph-wline">${fa(n)} پیشنهادِ کارشناس هوشمند منتظرِ «تأیید» یا «رد»ِ شماست${P.up ? ` <button type="button" class="ph-cfg" data-prop-jump>⤴ رفتن به پیشنهاد</button>` : ""}</span>` : "")
+      + `<span class="ph-wacts"><button type="button" class="ph-sos-mini" data-takeover title="گفت‌وگو را خودتان ادامه دهید — کارشناس هوشمند دیگر در آن جواب نمی‌دهد و مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button></span></div>`
+      + P.tail;
+  }
   /* «🤖 خودکار»: گفت‌وگو بسته است و کارشناس هوشمند خودش مذاکره می‌کند */
   const autoNote = () => (roOf() ? `<div class="ph-ask ph-watch" role="note"><b>🤖 خودکار ${cfgBtn}${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b></div>` : "");
-  const feedHtml = () => msgsHtml() + rateNote() + askNote() + capNote() + autoNote() + propsNote() + threadRateCard();
+  const feedHtml = () => { const P = propPlaces(); return msgsHtml(P.at) + rateNote() + askNote() + capNote() + autoNote() + watchNote(P) + threadRateCard(); };
+  /** «⏱ n» سرِ گفت‌وگو و «⤴ رفتن به پیشنهاد»: اولین پیشنهادِ معطل در گفت‌وگو پیدا و چشمک‌زن می‌شود (صفحهٔ باریک: اول برگشت به گفت‌وگو) */
+  function jumpProp() {
+    if (!phoneMode && S.tab === "items") { S.tab = "chat"; render(); }
+    const c = $("#chat"), el = c && $("[data-prop]", c);
+    if (!el) return;
+    c.scrollTop = Math.max(0, c.scrollTop + el.getBoundingClientRect().top - c.getBoundingClientRect().top - c.clientHeight / 4);
+    el.classList.add("sp-flash");
+    setTimeout(() => el.classList.remove("sp-flash"), 1600);
+  }
 
   /* --- ⭐ امتیاز به کارِ کارشناس هوشمند (مهر ۱۴۰۵): هر پیامش ۱ تا ۵ ستاره (کمتر از سه با علت)، و کلِ مکاتبه بعد از بسته شدن با نظرِ
      اجباری. «خاتمه»ِ درخواست تا همهٔ امتیازها داده نشده معلق است (worker/ai-rates.js) --- */
@@ -428,10 +494,12 @@
       ${boxPicker(S.tboxes || (R.thread && R.thread.boxes) || [], "جعبه‌های نقد (اختیاری)")}
       <div class="sp-err" data-trate-err></div><div class="ph-prop-acts"><button type="button" class="tp-btn primary sm" data-trate-save ${v ? "" : "disabled"}>ثبتِ امتیاز و نظر</button></div></div>`;
   }
-  const msgsHtml = () => PH.feed(S.d.msgs.concat(PH.outboxMsgs((S.outbox || []).filter((x) => x.th === S.th), S.d.msgs, "e")), {
+  /* after: کارت‌های «⏱ با مهلت» زیرِ همان پیامی که به آن مربوط‌اند (propPlaces) */
+  const msgsHtml = (after) => PH.feed(S.d.msgs.concat(PH.outboxMsgs((S.outbox || []).filter((x) => x.th === S.th), S.d.msgs, "e")), {
     mine: (m) => m.who === "e",
     ai: (m) => !!(m.meta && m.meta.ai), /* پیامِ کارشناس هوشمند (worker/ai-agent.js) */
     rate: rateOf,
+    after: after || {},
     rich: (m) => PH.evCard(m, { mine: m.who === "e", termsLine, goLabel: "دیدن در اقلام و تصمیم‌ها" }),
     transcript: true,
     empty: `<div class="ph-void"><b>هنوز پیامی نیست</b>اولین پیام را برای ${esc(S.d.thread.supplier)} بنویسید.</div>`,
@@ -449,8 +517,9 @@
     return PH.screen({
       framed, body: feedHtml(), label: `گفت‌وگو با ${th.supplier}`,
       nav: {
-        /* در گوشی «بازگشت به تأمین‌کنندگان» در نوار بالای صفحه است (top())؛ دو دکمهٔ هم‌کار روی هم نمی‌آید */
-        start: "",
+        /* در گوشی «بازگشت به تأمین‌کنندگان» در نوار بالای صفحه است (top())؛ دو دکمهٔ هم‌کار روی هم نمی‌آید. جای خالیِ همین سمت: نشانِ
+           «⏱ n»ِ پیشنهادهای معطل (W3) — کلیکش به اولین پیشنهاد می‌رود */
+        start: propChip("ph-glass ph-pchip").trim(),
         title: `${humanOf() ? "✋ " : ""}${th.supplier}`, initial: String(th.supplier || "").replace(/^(تأمین‌کنندهٔ|شرکت|فروشگاه)\s+/, "").trim()[0] || "؟",
         whoAttrs: "data-items", whoTitle: `${th.supplier} · 📞 ${th.phone || ""} · درخواست ${th.request_id}`,
         acts: `${humanOf() ? `<button class="ph-glass ph-circ" type="button" data-handback aria-label="برگرداندن به کارشناس هوشمند" title="✋ اضطراری دستِ شماست — برگرداندن به کارشناس هوشمند">🤖</button>` : ""}${framed ? "" : `<button class="ph-glass ph-circ" type="button" data-help="corr.main" aria-label="راهنما" title="راهنما">${TP.ui.ICON.help}</button>`}<button class="ph-glass ph-circ" data-clear-chat aria-label="پاک کردن گفت‌وگو" title="پاک کردن گفت‌وگو — فقط از صفحهٔ شما">${I.erase}</button>
@@ -458,7 +527,9 @@
       },
       composer: roOf()
         ? { readonly: `<span class="ph-ro-t">🤖 کارشناس هوشمند این گفت‌وگو را پیش می‌برد — <b>فقط دیدن</b>${turnsTxt()}</span><button type="button" class="ph-ro-sos" data-takeover title="گفت‌وگو را خودتان ادامه دهید — مدیر و پشتیبان خبردار می‌شوند">🚨 باز کردنِ اضطراری</button>` }
-        : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? "✏️ پیامِ خودتان — جای آخرین پیشنهاد می‌رود (با علتِ رد)" : `پیام به ${th.supplier}`, draft: S.th },
+        /* «⏱ با مهلت»: پیامِ کادر فقط با تأییدِ صریح و علت جای پیشنهادِ پیامِ کارشناس هوشمند می‌رود (W3 — دامِ تایپ؛ composeWatch) */
+        : { placeholder: askOf() ? "پاسخ به پرسشِ کارشناس هوشمند" : watchOf() ? (PH.props.target(watchOf().pending) ? "✏️ پیامِ خودتان، به‌جای پیشنهادِ کارشناس هوشمند" : "⏱ پیام فقط به‌جای پیشنهادِ کارشناس هوشمند")
+          : `پیام به ${th.supplier}`, draft: S.th },
     });
   }
   const composerState = PH.grow;
@@ -562,16 +633,16 @@
       <button class="tp-btn warn" data-act="return">↩️ برگرداندن با توضیح</button><button class="tp-btn danger" data-act="reject">❌ رد</button></div>`;
   }
   /**
-   * «👁 با تأیید»: تصمیمِ بسته با پیشنهادِ کارشناس هوشمند و تأییدِ شماست — مگر بسته‌ای که پیشنهادش را رد کرده‌اید (manual)؛ null یعنی
-   * دکمه‌های همیشگیِ تصمیم.
+   * «⏱ با مهلت»: تصمیمِ بسته با پیشنهادِ کارشناس هوشمند و تأییدِ شماست — مگر بسته‌ای که پیشنهادش را رد کرده‌اید یا «⏸ بعداً خودم»
+   * زده‌اید (manual)؛ null یعنی دکمه‌های همیشگیِ تصمیم. همان دکمه‌های کارتِ گفت‌وگو (ph-props.js:acts — «🏁 تأیید نهایی» چهار راه دارد).
    */
   function watchActs(b) {
     if (roOf()) return `<div class="sp-muted" style="margin-top:6px">🤖 تصمیمِ این بسته با کارشناس هوشمند است — فقط دیدن.</div>`;
     const w = watchOf();
     if (!w || (w.manual || []).includes(b.id)) return null;
-    const p = (w.pending || []).find((x) => x.bundle_id === b.id || (x.actions || []).some((a) => +a.bundle_id === b.id));
-    return p ? `<div class="sp-watch-box">⏱ پیشنهادِ کارشناس هوشمند: <b>${esc(p.kind_fa)}</b> — منتظرِ «ارسال» یا «رد»ِ شما؛ بی‌پاسخ سرِ مهلت خودکار می‌رود
-        <div class="sp-actions"><button class="tp-btn primary" data-prop-ok="${p.id}">✅ ارسال همین حالا</button><button class="tp-btn danger" data-prop-no="${p.id}">✏️ رد و پیام خودم</button></div></div>`
+    const p = (w.pending || []).find((x) => PH.props.bundlesOf(x).includes(b.id));
+    return p ? `<div class="sp-watch-box">${p.due_at ? "⏱" : "⏸"} پیشنهادِ کارشناس هوشمند: <b>${esc(p.kind_fa)}</b> — منتظرِ «تأیید» یا «رد»ِ شما${p.due_at ? "؛ بی‌پاسخ سرِ مهلت خودکار می‌رود" : ""}
+        ${PH.props.acts(p, { size: "", short: true })}</div>`
       : `<div class="sp-muted" style="margin-top:6px">⏱ تصمیمِ این بسته را کارشناس هوشمند پیشنهاد می‌کند و اول به شما نشان داده می‌شود.</div>`;
   }
   function countOpen(b) {
@@ -621,7 +692,8 @@
     const sq = $("[data-sq]"); if (sq) sq.oninput = () => { S.sq = sq.value; const b = $("[data-sups]"); if (b) { b.innerHTML = supList(); bind(); } };
     $$("[data-aid]").forEach((b) => { b.onclick = () => { S.aid = +b.dataset.aid; S.view = "sup"; S.sq = ""; ss.set("sp.aid", String(S.aid)); render(); }; });
     $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
-    const sos = $("[data-takeover]"); if (sos) sos.onclick = takeoverDialog;
+    /* «🚨 باز کردنِ اضطراری»: کادرِ «فقط دیدن»ِ 🤖 خودکار و نوارِ وضعیتِ «⏱ با مهلت / ⏸ بی‌مهلت» (W3) */
+    $$("[data-takeover]").forEach((b) => { b.onclick = takeoverDialog; });
     const hb = $("[data-handback]"); if (hb) hb.onclick = handbackDialog;
     $$("[data-th-lock]").forEach((b) => { b.onclick = () => say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و تا وقتی تیکِ شما در «پنل پشتیبانی» روی «🤖 هوشمند» است برای شما بسته است.\nاگر سؤالی از شما داشته باشد همین‌جا با 🚨 باز می‌شود و در تلگرام هم خبر می‌دهد.", "🔒 گفت‌وگوی کارشناس هوشمند"); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
@@ -636,6 +708,11 @@
     $$("[data-act]").forEach((b) => { b.onclick = () => act(+b.closest("[data-b]").dataset.b, b.dataset.act); });
     $$("[data-prop-ok]").forEach((b) => { b.onclick = () => propOk(+b.dataset.propOk, b); });
     $$("[data-prop-no]").forEach((b) => { b.onclick = () => propNo(+b.dataset.propNo); });
+    /* «🏁 تأیید نهایی»: «↩️ برگشت با توضیح»، «❌ رد» و «⏸ بعداً خودم» — <پیشنهاد>:<سرنوشتِ بسته> (W3) */
+    $$("[data-prop-fin]").forEach((b) => { b.onclick = () => { const [id, fate] = b.dataset.propFin.split(":"); propFin(+id, fate); }; });
+    $$("[data-prop-jump]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); jumpProp(); }; });
+    /* بستهٔ «⏸ بعداً خودم» در گفت‌وگو: همان تصمیم‌های «اقلام و تصمیم‌ها» (act) */
+    $$("[data-bact]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const [bid, a] = b.dataset.bact.split(":"); act(+bid, a); }; });
     $$("[data-supcfg]").forEach((b) => { b.onclick = () => supCfgDialog(); });
     $$("[data-rate-star]").forEach((b) => { b.onclick = (e) => { e.stopPropagation(); const [id, n] = b.dataset.rateStar.split(":").map(Number); rateMsg(id, n); }; });
     /* گوشی: لمسِ پیامِ بی‌امتیاز ستاره‌ها را نشان می‌دهد (بی نشانگرِ موشواره) */
@@ -679,12 +756,9 @@
         const text = inp.value.trim(); if (!text) return;
         send.disabled = true;
         if (askOf()) { send.disabled = false; return answerAsk(text); }
-        /* «👁 با تأیید»: پیامِ خودِ کارشناس همان «پیامِ جایگزین»ِ ردِ آخرین پیشنهادِ معطل است */
-        if (watchOf()) {
-          send.disabled = false;
-          const p = (watchOf().pending || []).slice().reverse().find((x) => x.kind !== "final") || (watchOf().pending || []).slice(-1)[0];
-          return p ? propNo(p.id, text) : say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و الان پیشنهادی منتظرِ شما نیست؛ پیامِ خودتان را با «✏️ رد»ِ پیشنهادِ بعدی بفرستید.", "⏱ با مهلت");
-        }
+        /* «⏱ با مهلت / ⏸ بی‌مهلت» (W3، دامِ تایپ): پیامِ کادر فقط با تأییدِ صریح و علت جای پیشنهادِ پیامِ کارشناس هوشمند می‌رود —
+           هیچ ردِ بی‌صدایی، و «🏁 تأیید نهایی» هرگز با پیامِ کادر رد نمی‌شود */
+        if (watchOf()) { send.disabled = false; return composeWatch(text); }
         /* حباب همان لحظه می‌آید؛ پاسخِ سرور جایش را با پیامِ واقعی عوض می‌کند (مهر ۱۴۰۵) */
         const th = S.th, p = { at: Date.now(), body: text, th };
         S.outbox = (S.outbox || []).concat(p); inp.value = ""; S.drafts[S.th] = "";
@@ -717,7 +791,7 @@
         await shut("پاسخ شما رفت و کارشناس هوشمند مذاکره را ادامه می‌دهد. گزارشِ کارش در «پنل پشتیبانی» است.", "✅ پاسخ فرستاده شد");
       } }, { label: "انصراف" }]);
   }
-  /* --- «⏱ با مهلت»: ارسال (بی توضیح) و رد (علتِ اجباری و پیامِ تازهٔ خودِ کارشناس؛ در تأیید نهایی سرنوشتِ بسته) --- */
+  /* --- «⏱ با مهلت»: تأیید (بی توضیح) و رد (علتِ اجباری؛ پیامِ تازهٔ خودِ کارشناس یا سرنوشتِ بسته) — همه POST /sp/x/prop/:id --- */
   const propOf = (id) => ((watchOf() || {}).pending || []).find((p) => p.id === id) || null;
   async function propOk(id, btn) {
     const m = $(".sp-main"); S.mainScroll = m ? m.scrollTop : 0;
@@ -725,39 +799,109 @@
     try { await api(`/sp/x/prop/${id}`, { body: { action: "ok" } }); await afterDecide(); }
     catch (e) { if (btn) btn.disabled = false; say(e.message, e.status === 409 ? "پیشنهاد کنار رفت" : "نشد"); if (e.status === 409) await afterDecide().catch(() => {}); }
   }
-  function propNo(id, prefill) {
+  /** تا نوشتنِ علت و پیام، مهلت دست‌کم سه دقیقه تمدید می‌شود تا وسطِ نوشتن خودکار نرود */
+  const holdProp = (p) => api(`/sp/x/prop/${p.id}`, { body: { action: "hold" } }).then((r) => { if (r && r.due_at) p.due_at = r.due_at; }).catch(() => {});
+  const holdNote = (p) => (p.due_at ? `<div class="sp-muted" style="margin-top:6px">⏱ برای نوشتن، مهلت تا دست‌کم سه دقیقهٔ دیگر تمدید شد.</div>` : "");
+  /**
+   * ثبتِ رد؛ پیشنهادی که همان لحظه رفت یا کنار رفت (۴۰۹) صفحه را هم تازه می‌کند و خطایش در همان پنجره می‌ماند. done: بعد از ثبت و
+   * پیش از رسمِ دوباره (مثلاً خالی کردنِ کادرِ پیام — وگرنه رسمِ دوباره پیش‌نویس را برمی‌گرداند)
+   */
+  async function propSend(p, body, done) {
+    try { await api(`/sp/x/prop/${p.id}`, { body }); }
+    catch (e) { if (e.status === 409) afterDecide().catch(() => {}); throw e; }
+    if (done) done();
+    await afterDecide();
+  }
+  /** کادرِ پیامِ همین گفت‌وگو خالی (پیش‌نویسش هم) */
+  const clearDraft = (tid) => () => { S.drafts[tid] = ""; const inp = $("#msgIn"); if (inp && S.th === tid) { inp.value = ""; composerState(inp); } };
+  /** «✏️ رد و نوشتن پیام خودم»ِ «💬 پاسخ» و «🧾 تصمیمِ بسته» — «🏁 تأیید نهایی» راه‌های خودش را دارد (propFin) */
+  function propNo(id) {
     const p = propOf(id);
     if (!p) return say("این پیشنهاد دیگر منتظرِ شما نیست؛ صفحه تازه شد.", "⏱ پیشنهاد");
-    const fin = p.kind === "final", th = S.d.thread, tid = S.th, needText = !fin && !!p.body;
-    /* تا نوشتنِ علت و پیام، مهلت دست‌کم سه دقیقه تمدید می‌شود تا وسطِ نوشتن خودکار نرود */
-    api(`/sp/x/prop/${id}`, { body: { action: "hold" } }).then((r) => { if (r && r.due_at) { p.due_at = r.due_at; } }).catch(() => {});
+    if (p.kind === "final") return propFin(id, "return");
+    const th = S.d.thread, tid = S.th, needText = !!p.body;
+    holdProp(p);
     const d = dlg("✏️ رد و نوشتن پیام خودم", `<p>چرا ردش می‌کنید؟ همین توضیح به کارشناس هوشمند می‌رسد تا دفعهٔ بعد درست‌تر بنویسد (تأمین‌کننده نمی‌بیند).</p>
       <textarea class="tp-input tp-textarea" data-r style="min-height:70px" placeholder="علتِ رد (اجباری)"></textarea>
       ${boxPicker([], "کدام جزء درست نبود؟ (دست‌کم یکی)")}
-      ${fin ? `<b style="display:block;margin-top:10px">با بستهٔ ${fa(p.bundle_id)} چه شود؟</b>
-        <label class="sp-check"><input type="radio" name="bact" value="return" checked> ↩️ برگشت برای اصلاح، با پیامِ شما</label>
-        <label class="sp-check"><input type="radio" name="bact" value="reject"> ❌ ردِ بسته</label>
-        <label class="sp-check"><input type="radio" name="bact" value="keep"> ⏸ فعلاً بماند — تصمیمش با خودم</label>` : ""}
       ${p.body ? `<div class="sp-muted" style="margin-top:10px">پیشنهادِ کارشناس هوشمند: <button type="button" class="tp-btn xs" data-copy-prop>📋 شروع از همین متن</button></div><div class="sp-sms">${esc(p.body)}</div>` : ""}
-      <b style="display:block;margin-top:10px">پیامِ تازهٔ خودتان برای ${esc(th.supplier)} ${needText ? "(اجباری — همین به‌جای پیامِ ردشده می‌رود)" : fin ? "(برای «برگشت» اجباری)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
+      <b style="display:block;margin-top:10px">پیامِ تازهٔ خودتان برای ${esc(th.supplier)} ${needText ? "(اجباری — همین به‌جای پیامِ ردشده می‌رود)" : "(اختیاری — خالی یعنی هیچ پیامی نرود)"}</b>
       <textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea>
-      ${p.due_at ? `<div class="sp-muted" style="margin-top:6px">⏱ برای نوشتن، مهلت تا دست‌کم سه دقیقهٔ دیگر تمدید شد.</div>` : ""}<div class="sp-err" data-err></div>`,
+      ${holdNote(p)}<div class="sp-err" data-err></div>`,
     [{ label: "✏️ رد و ارسالِ پیامِ من", cls: "danger", fn: async (dd) => {
       const reason = $("[data-r]", dd).value.trim();
       if (!reason) throw new Error("علتِ رد را بنویسید.");
       const boxes = boxesFrom(dd);
       if (critique() && !boxes.length) throw new Error("دست‌کم یک جعبهٔ نقد بزنید — کدام جزءِ کارِ کارشناس هوشمند درست نبود؟");
       const text = $("[data-t]", dd).value.trim();
-      const bundle = fin ? ($('input[name="bact"]:checked', dd) || {}).value : undefined;
       if (needText && !text) throw new Error("پیامِ تازهٔ خودتان را بنویسید — به‌جای پیامِ ردشده همین می‌رود.");
-      if (bundle === "return" && !text) throw new Error("برای «برگشت» پیامِ برگشت را بنویسید تا تأمین‌کننده بداند چه چیزی را اصلاح کند.");
-      await api(`/sp/x/prop/${p.id}`, { body: { action: "no", reason, text, ...(bundle ? { bundle } : {}), ...(critique() ? { boxes } : {}) } });
-      S.drafts[tid] = ""; const inp = $("#msgIn"); if (inp) inp.value = "";
-      await afterDecide();
+      await propSend(p, { action: "no", reason, text, ...(critique() ? { boxes } : {}) }, clearDraft(tid));
     } }, { label: "انصراف" }]);
-    if (prefill) $("[data-t]", d).value = prefill;
     const cp = $("[data-copy-prop]", d); if (cp) cp.onclick = () => { const t = $("[data-t]", d); t.value = p.body; t.focus(); };
     setTimeout(() => { const r = $("[data-r]", d); if (r) r.focus(); }, 30);
+  }
+  /**
+   * «🏁 تأیید نهایی»ِ پیشنهادی (W3): «↩️ برگشت با توضیح»، «❌ رد» یا «⏸ بعداً خودم» — همان «رد»ِ پیشنهاد با سرنوشتِ بسته
+   * (ph-props.js:finBody): سرور بسته را با همان تصمیمِ صفحهٔ مکاتبات برمی‌گرداند یا رد می‌کند، و «⏸» بسته را منتظرِ تصمیمِ خودِ
+   * شما نگه می‌دارد و ارسالِ خودکارِ پیشنهاد را برمی‌دارد. علت همیشه اجباری است (به کارشناس هوشمند می‌رسد).
+   */
+  function propFin(id, fate) {
+    const p = propOf(id);
+    if (!p) return say("این پیشنهاد دیگر منتظرِ شما نیست؛ صفحه تازه شد.", "⏱ پیشنهاد");
+    if (!PH.props.FATES.includes(fate)) return;
+    holdProp(p);
+    const th = S.d.thread, sup = esc(th.supplier), n = fa(p.bundle_id), keep = fate === "keep";
+    const K = {
+      return: { h: `↩️ برگشتِ بستهٔ ${n} با توضیح`, lead: `بسته برای اصلاح به <b>${sup}</b> برمی‌گردد و اقلامش دوباره قابل ویرایش می‌شود.`,
+        t: `چه چیزی باید اصلاح شود؟ (اجباری — برای ${sup} می‌رود)`, ok: "↩️ برگردان", cls: "warn", done: "بسته برای اصلاح برگشت" },
+      reject: { h: `❌ ردِ بستهٔ ${n}`, lead: `پیشنهادِ <b>${sup}</b> برای این بسته رد می‌شود.`, t: `پیام برای ${sup} (اختیاری)`, ok: "❌ رد کن", cls: "danger", done: "بسته رد شد" },
+      keep: { h: `⏸ تصمیمِ بستهٔ ${n} با خودم`, lead: "این تأیید نهایی <b>خودکار نمی‌رود</b> و بسته منتظرِ تصمیمِ خودِ شما می‌ماند — هر وقت آماده بودید، زیرِ کارتِ همین بسته در گفت‌وگو یا در «اقلام و تصمیم‌ها» «🏁 تأیید نهایی»، «↩️ برگرداندن» یا «❌ رد» را بزنید. برای تأمین‌کننده پیامی نمی‌رود.",
+        t: null, ok: "⏸ نگه دار، با خودم", cls: "primary", done: "تصمیمِ بسته با شماست" },
+    }[fate];
+    const d = dlg(K.h, `<p style="margin-top:0">${K.lead} پیشنهادِ «🏁 تأیید نهایی»ِ کارشناس هوشمند رد می‌شود.</p>
+      ${K.t ? `<b style="display:block;margin-top:6px">${K.t}</b><textarea class="tp-input tp-textarea" data-t style="min-height:80px"></textarea>` : ""}
+      <b style="display:block;margin-top:10px">چرا پیشنهادِ کارشناس هوشمند را نمی‌پذیرید؟ (اجباری — فقط کارشناس هوشمند می‌بیند)</b>
+      <textarea class="tp-input tp-textarea" data-r style="min-height:60px" placeholder="${keep ? "مثلاً می‌خواهم اول با پیشنهادِ بقیه مقایسه کنم" : "مثلاً قیمت از سوابق بالاتر است"}"></textarea>
+      ${boxPicker([], "کدام جزء درست نبود؟ (دست‌کم یکی)")}
+      ${holdNote(p)}<div class="sp-err" data-err></div>`,
+    [{ label: K.ok, cls: K.cls, fn: async (dd) => {
+      const t = $("[data-t]", dd);
+      const body = PH.props.finBody(fate, { reason: $("[data-r]", dd).value, text: t ? t.value : "", boxes: boxesFrom(dd), needBoxes: !!critique() });
+      await propSend(p, body);
+      if (TP.ui && TP.ui.success) TP.ui.success(K.done);
+    } }, { label: "انصراف" }]);
+    setTimeout(() => { const f = $(keep ? "[data-r]" : "[data-t]", d); if (f) f.focus(); }, 30);
+  }
+  /**
+   * دامِ تایپ (W3): پیامِ کادرِ پایین در «⏱ با مهلت / ⏸ بی‌مهلت». اگر پیشنهادِ پیامی منتظر است (ph-props.js:target — آخرین «💬 پاسخ»، وگرنه
+   * «🧾 تصمیمِ بسته»ِ پیام‌دار؛ هرگز «🏁 تأیید نهایی»)، پنجرهٔ صریحِ «پیشنهاد رد می‌شود و پیامِ شما جایش می‌رود» با علتِ اجباری؛ وگرنه
+   * توضیح و راهِ «🚨 باز کردنِ اضطراری». متنِ نوشته‌شده تا ارسالِ واقعی در کادر می‌ماند.
+   */
+  function composeWatch(text) {
+    const w = watchOf(), p = PH.props.target(w.pending);
+    const th = S.d.thread, tid = S.th;
+    if (!p) {
+      const fin = (w.pending || []).some((x) => x.kind === "final");
+      return dlg("⏱ پیامِ آزاد در این گفت‌وگو بسته است", `<p style="margin-top:0">در «${w.hold ? "⏸ بی‌مهلت" : "⏱ با مهلت"}» پیامِ شما فقط <b>به‌جای پیشنهادِ پیامِ کارشناس هوشمند</b> می‌رود و الان چنین پیشنهادی منتظرِ شما نیست${fin ? "؛ دربارهٔ «🏁 تأیید نهایی» با دکمه‌های زیرِ کارتِ همان بسته تصمیم بگیرید" : ""}.</p>
+        <p class="sp-muted">برای نوشتنِ آزاد، گفت‌وگو را با «🚨 باز کردنِ اضطراری» دستِ خودتان بگیرید — متنی که نوشتید در کادر می‌ماند.</p>`,
+      [{ label: "🚨 باز کردنِ اضطراری", cls: "danger", fn: () => { setTimeout(takeoverDialog, 0); } }, { label: "باشد", cls: "primary" }]);
+    }
+    holdProp(p);
+    const act = p.kind === "act";
+    const d = dlg("✏️ پیامِ شما به‌جای پیشنهادِ کارشناس هوشمند", `<p style="margin-top:0">با فرستادنِ این پیام، <b>پیشنهادِ کارشناس هوشمند رد می‌شود</b>${act ? " (تصمیمِ بسته‌هایش هم اجرا نمی‌شود و تصمیمِ آن بسته‌ها با خودِ شما می‌ماند)" : ""} و پیامِ شما به‌جایش برای <b>${esc(th.supplier)}</b> می‌رود.</p>
+      <div class="sp-muted">پیشنهادِ کارشناس هوشمند — <b>نمی‌رود</b>:</div><div class="sp-sms">${esc(p.body)}</div>
+      <div class="sp-muted" style="margin-top:8px">پیامِ شما — <b>می‌رود</b>:</div><textarea class="tp-input tp-textarea" data-t style="min-height:70px">${esc(text)}</textarea>
+      <b style="display:block;margin-top:10px">چرا پیشنهاد را رد می‌کنید؟ (اجباری — فقط کارشناس هوشمند می‌بیند)</b>
+      <textarea class="tp-input tp-textarea" data-r style="min-height:60px" placeholder="علتِ رد"></textarea>
+      ${boxPicker([], "کدام جزء درست نبود؟ (دست‌کم یکی)")}
+      ${holdNote(p)}<div class="sp-err" data-err></div>`,
+    [{ label: "✏️ رد کن و پیامِ من برود", cls: "danger", fn: async (dd) => {
+      const body = PH.props.replaceBody({ text: $("[data-t]", dd).value, reason: $("[data-r]", dd).value, boxes: boxesFrom(dd), needBoxes: !!critique() });
+      await propSend(p, body, clearDraft(tid));
+      if (TP.ui && TP.ui.success) TP.ui.success("پیامِ شما رفت و پیشنهاد کنار رفت");
+    } }, { label: "انصراف" }]);
+    setTimeout(() => { const r = $("[data-r]", d); if (r) r.focus(); }, 30);
+    return d;
   }
   /* سرِ صفرِ شمارش: خودِ صفحه «سرِ مهلت» را می‌زند (Cron هم هر دقیقه)؛ بعدش گفت‌وگو دوباره خوانده می‌شود */
   const dueFired = new Set();

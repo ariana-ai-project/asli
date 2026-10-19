@@ -15,7 +15,7 @@ import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { ensureSpWebhook } from "./sp-bot.js";
 import { deliverSms, deliverPass, smsNote } from "./sp-sms.js";
-import { aiKick, autoDecide, propDecide } from "./ai-agent.js";
+import { aiKick, autoDecide, propDecide, propCardsNow } from "./ai-agent.js";
 import { takeoverThread, handbackThread } from "./ai-takeover.js";
 import { rate } from "./ai-rates.js";
 import { runAiCheck } from "./sp-ai.js";
@@ -254,6 +254,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       /* فاز ۴ب گام ۳: در کارِ کارشناس هوشمند بستهٔ ارسالی (در چارچوبِ قفل‌ها) همان لحظه تأیید نهایی می‌شود — بی مدل */
       const auto = await autoDecide(env, r.thread.id).catch((e) => { console.error("ai auto", e && e.message); return null; });
       await later(ctx, () => P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]));
+      /* «⏱ با مهلت»: کارتِ «🏁 تأیید نهایی»ِ پیشنهادشده بیرون از پاسخ، همین حالا در بات کارشناسان */
+      if (auto && auto.props && auto.props.length) await later(ctx, () => propCardsNow(env, auto.props));
       aiKick(env, ctx, r.thread.id);
       return json({ ok: true, bundle_id: r.bundle_id, state: auto && auto.ids.includes(r.bundle_id) ? "final" : r.state });
     }
@@ -277,6 +279,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
       catch (e) { const store = storage(env); if (store) await later(ctx, () => store.remove(f.skey)); throw e; }
       const auto = await autoDecide(env, r.thread.id).catch((e) => { console.error("ai auto", e && e.message); return null; });
       await later(ctx, () => P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]));
+      if (auto && auto.props && auto.props.length) await later(ctx, () => propCardsNow(env, auto.props));
       aiKick(env, ctx, r.thread.id);
       return json({ ok: true, bundle_id: r.bundle_id, state: auto && auto.ids.includes(r.bundle_id) ? "final" : r.state });
     }
