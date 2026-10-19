@@ -97,9 +97,8 @@
     return `<div class="toolrow" style="flex-wrap:wrap;gap:8px"><input class="tp-input" data-cr-gh placeholder="نوع قلم (مثلاً ورق)" value="${esc(S.grF.head)}" style="min-width:160px">
         <input class="tp-input" data-cr-gb placeholder="بازار یا پاساژ" value="${esc(S.grF.hub)}" style="min-width:160px"><button class="tp-btn sm" data-cr-gload>نمایش</button>
         <span class="dim" style="font-size:.8rem">بی فیلتر: تازه‌ترین یال‌ها. روی هر گره بزنید تا پروفایلش باز شود.</span></div>
-      ${!d ? TP.ui.loader("") : `<div class="spp-legend" style="display:flex;gap:10px;flex-wrap:wrap;font-size:.8rem;margin:8px 0">${d.natures.map((n) => `<span style="display:inline-flex;gap:5px;align-items:center"><i style="width:20px;height:3px;border-radius:2px;display:inline-block;background:${esc(n.color)}"></i>${esc(n.fa)}</span>`).join("")}<span>خط‌چین = پیشنهادی</span>
-        <span class="dim">${fa(d.nodes.length)} گره · ${fa(d.edges.length)} یال</span></div>
-        <svg class="spp-graph" data-cr-graph viewBox="0 0 560 420" style="width:100%;max-height:70vh"></svg>`}`;
+      ${!d ? TP.ui.loader("") : `${TP.supProfile && TP.supProfile.legend ? TP.supProfile.legend(d) : ""}<div class="dim" style="font-size:.8rem;margin-bottom:6px">${fa(d.nodes.length)} گره · ${fa(d.edges.length)} یال</div>
+        <div class="spp-gwrap"><svg class="spp-graph" data-cr-graph role="img" aria-label="گراف روابط"></svg></div>`}`;
   }
   function vFlags() {
     const f = S.flags || {}, st = S.status;
@@ -139,11 +138,13 @@
     setTimeout(drawGraph, 0);
     return `<div class="tp-seg" style="margin-bottom:10px;flex-wrap:wrap">${sub}</div>${body}`;
   }
+  /* نمای کامل (بی مرکز، چیدمانِ نیرویی به اندازهٔ ظرف). گره کشو را روی «👤 پروفایل» باز می‌کند — پیش‌تر روی «🕸 کاوش گراف» باز می‌شد و
+     گرافِ دوم از پشتِ پردهٔ نیمه‌شفاف روی همین گراف دیده می‌شد («تو در تو»)؛ گرافِ همان تأمین‌کننده یک زبانه آن‌طرف‌تر است */
   function drawGraph() {
     const svg = document.querySelector("[data-cr-graph]");
     if (!svg || !S.gr || !TP.supProfile || svg.dataset.drawn) return;
     svg.dataset.drawn = "1";
-    TP.supProfile.graph(svg, { ...S.gr, nodes: S.gr.nodes.map((n) => ({ ...n, root: false })) }, { onNode: (sid, name) => TP.supProfile.open({ sid, name, tab: "graph" }) });
+    TP.supProfile.graph(svg, { ...S.gr, nodes: S.gr.nodes.map((n) => ({ ...n, root: false })) }, { onNode: (sid, name) => TP.supProfile.open({ sid, name, tab: "info" }) });
   }
 
   /* ---------- رفتارها ---------- */

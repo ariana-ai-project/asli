@@ -8,10 +8,12 @@ import { readFileSync } from "node:fs";
 import { gunzipSync } from "node:zlib";
 import { fileURLToPath } from "node:url";
 import { dirname, resolve } from "node:path";
+import vm from "node:vm";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { supKey, crShard } from "../../../worker/cr-data.js";
 import * as C from "../../../worker/strategy/config.js";
+import { nkey } from "../../../worker/sp-core.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FX = JSON.parse(gunzipSync(readFileSync(resolve(HERE, "fixtures/cr02-parity.json.gz"))).toString("utf8"));
@@ -209,6 +211,109 @@ test("«🔗 پیوند» و «🕸 کاوش گراف»: رنگِ هر نوع ر
   /* گرافِ کاملِ پشتیبانی با فیلترِ نوع قلم */
   const fg = (await call("GET", `/support/graph?head=${encodeURIComponent("ورق")}`, null, SUP)).data;
   assert.ok(fg.edges.length >= 1);
+});
+
+/* ---------------- «🔗 پیوند تازه» از کشو (مهر ۱۴۰۵) ----------------
+   بدنه را همان تابعِ کشو می‌سازد (frontend/tamin-poshtibani/sup-profile.js:lib.linkBody)، نه کپیِ دستی که ممکن است واگرا شود.
+   پیش‌تر: جست‌وجو فقط آغازِ نام را می‌یافت، کشو فقط sid می‌فرستاد و «L:» با کلیدِ نرمال («آهن آلات نو 12») نام می‌گرفت. */
+function drawerLib() {
+  const sb = { console, Date, Math, JSON, Intl, setTimeout, clearTimeout };
+  sb.window = sb; sb.self = sb; sb.globalThis = sb;
+  sb.document = { getElementById: () => ({}), createElement: () => ({ style: {} }), head: { appendChild() {} }, body: { appendChild() {} }, addEventListener() {} };
+  vm.createContext(sb);
+  for (const f of ["shared.js", "sup-profile.js"]) vm.runInContext(readFileSync(resolve(HERE, "../../../frontend/tamin-poshtibani", f), "utf8"), sb, { filename: f });
+  return sb.TP.supProfile.lib;
+}
+test("«🔗 پیوند تازه»: هر واژهٔ نام پیدا می‌شود؛ «L:» نامِ نمایشی‌اش را نگه می‌دارد؛ نامِ تازه ردیف و یال می‌سازد؛ ثبت‌کننده با نام", { skip: SKIP }, async () => {
+  const lib = drawerLib();
+  const search = async (q, not) => {
+    const r = await call("GET", `/sreg/search?q=${encodeURIComponent(q)}${not ? `&not=${encodeURIComponent(not)}` : ""}`, null, EX);
+    assert.equal(r.status, 200, JSON.stringify(r.data));
+    return r.data.list;
+  };
+  const sids = async (q, not) => (await search(q, not)).map((x) => x.sid).sort();
+  /* واژهٔ وسطِ نام، نه فقط آغازش؛ آغازِ واژه، نه تکه‌ای از وسطِ واژه؛ کمتر از دو نویسه هیچ */
+  assert.deepEqual(await sids("آلات"), ["NEW-0001", "NEW-0002", "NEW-0003"]);
+  assert.deepEqual(await sids("آلات ب"), ["NEW-0002"]);
+  assert.deepEqual(await sids("الف"), ["NEW-0001"]);
+  assert.deepEqual(await sids("خوزستان"), ["201734"]);
+  assert.deepEqual(await sids("آهن‌آلات"), ["NEW-0001", "NEW-0002", "NEW-0003"], "نیم‌فاصله همان فاصله است");
+  assert.deepEqual(await sids("لات"), []);
+  assert.deepEqual(await sids("آ"), []);
+  assert.deepEqual(await sids("آلات", "NEW-0001"), ["NEW-0002", "NEW-0003"], "خودِ پروفایل نه");
+  /* فهرستِ واژه‌ها یک بار ساخته می‌شود (cr_cache)، نه در هر جست‌وجو */
+  const meta = get("SELECT at FROM cr_cache WHERE k='sdir:@'");
+  assert.ok(meta, "فهرستِ واژه‌ها ساخته شد");
+  assert.ok(get("SELECT COUNT(*) AS n FROM cr_cache WHERE k LIKE 'sdir:%'").n > 3);
+  await search("فولاد ت");
+  assert.equal(get("SELECT at FROM cr_cache WHERE k='sdir:@'").at, meta.at, "ساختِ دوباره نه");
+  /* تأمین‌کنندهٔ مکاتبات (sp_suppliers): بیرونِ دفتر با sys و بی sid؛ درونِ دفتر همان ردیفِ دفتر، یک بار */
+  for (const n of ["فروشگاه ستاره شرق", "فولاد ت"]) run("INSERT INTO sp_suppliers (name,name_n,demo,created_at) VALUES (?,?,0,?)", n, nkey(n), T0);
+  const sys = (await search("فروشگاه")).find((x) => x.name === "فروشگاه ستاره شرق");
+  assert.deepEqual({ sid: sys.sid, sys: sys.sys, kind: sys.kind }, { sid: null, sys: 1, kind: "loc" });
+  assert.deepEqual((await search("فولاد ت")).map((x) => x.sid), ["NEW-0004"]);
+
+  /* پروفایلِ «L:» (فقط در سامانه) با نام باز می‌شود؛ کشو بعد sid و نام را با هم می‌فرستد */
+  const NM = "آهن‌آلات نو ۱۲";
+  const p = (await call("GET", `/sreg/profile?name=${encodeURIComponent(NM)}`, null, EX)).data;
+  assert.deepEqual([p.sid, p.virtual, p.name], [`L:${supKey(NM)}`, true, NM]);
+  assert.equal((await call("GET", `/sreg/profile?sid=${encodeURIComponent(p.sid)}&name=${encodeURIComponent(NM)}`, null, EX)).data.name, NM);
+  /* همان گام‌های کشو: «فولاد » با فاصلهٔ آخر، نوعِ رابطه و یادداشت، تیکِ یک یافته */
+  let s = lib.lfReduce(lib.lfInit(), { type: "nature", value: "partner" });
+  s = lib.lfReduce(s, { type: "note", value: "هم‌پاساژ" });
+  s = lib.lfReduce(s, { type: "q", value: "فولاد " });
+  s = lib.lfReduce(s, { type: "ask" });
+  const hits = await search(s.q.trim(), p.sid);
+  s = lib.lfReduce(s, { type: "hits", seq: s.seq, q: s.q.trim(), list: hits });
+  s = lib.lfReduce(s, { type: "pick", hit: hits.find((h) => h.sid === "NEW-0004"), on: true });
+  assert.equal(s.q, "فولاد ");
+  const body = lib.linkBody(s, { sid: p.sid, name: p.name });
+  assert.equal(body.name, NM, "نامِ نمایشی کنارِ sid");
+  const r = await call("POST", "/sreg/links", body, EX);
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(get("SELECT name FROM sreg WHERE sid=?", p.sid).name, NM, "نامِ نمایشی، نه «آهن آلات نو 12»");
+  const e = get("SELECT * FROM sreg_edges WHERE a=? AND b='NEW-0004' AND source='کارشناس'", p.sid);
+  assert.deepEqual([e.nature, e.note, e.status, e.by_name], ["partner", "هم‌پاساژ", "تأییدشده", "آقای یک"]);
+  const p2 = (await call("GET", `/sreg/profile?sid=${encodeURIComponent(p.sid)}`, null, EX)).data;
+  assert.deepEqual([p2.virtual, p2.name, p2.edges.map((x) => x.other)], [false, NM, ["NEW-0004"]]);
+
+  /* ردیفی که کشوی پیشین بی نام ساخته بود با نخستین نامِ همان کلید درست می‌شود؛ نامِ ناهمخوان نه */
+  const BAD = "بازرگانی نوین ۷", bk = `L:${supKey(BAD)}`;
+  assert.equal((await call("POST", "/sreg/links", { sid: bk, to: [{ sid: "NEW-0005" }], nature: "rival" }, EX)).status, 200);
+  assert.equal(get("SELECT name FROM sreg WHERE sid=?", bk).name, supKey(BAD));
+  await call("POST", "/sreg/links", { sid: bk, name: "نامی دیگر", to: [{ sid: "NEW-0005" }], nature: "rival" }, EX);
+  assert.equal(get("SELECT name FROM sreg WHERE sid=?", bk).name, supKey(BAD));
+  await call("POST", "/sreg/links", { sid: bk, name: BAD, to: [{ sid: "NEW-0005" }], nature: "rival" }, EX);
+  assert.equal(get("SELECT name FROM sreg WHERE sid=?", bk).name, BAD);
+
+  /* «پیدا نشد» ← «تأمین‌کنندهٔ تازه»: فقط با نام می‌رود؛ ردیفِ «L:» و یال ساخته می‌شوند */
+  let f = lib.lfReduce(lib.lfReduce(lib.lfInit(), { type: "nature", value: "rival" }), { type: "q", value: "پارسیان  شرق " });
+  f = lib.lfReduce(f, { type: "free" });
+  const fb = lib.linkBody(f, { sid: "NEW-0005", name: "فولاد ث" });
+  assert.deepEqual(JSON.parse(JSON.stringify(fb.to)), [{ name: "پارسیان شرق" }]);
+  assert.equal((await call("POST", "/sreg/links", fb, EX)).status, 200);
+  const fk = `L:${supKey("پارسیان شرق")}`;
+  assert.deepEqual({ ...get("SELECT kind, name FROM sreg WHERE sid=?", fk) }, { kind: "loc", name: "پارسیان شرق" });
+  assert.equal(get("SELECT nature FROM sreg_edges WHERE a=? AND b='NEW-0005' AND status='تأییدشده'", fk).nature, "rival");
+  /* نامی که به خودش می‌رسد: پیوند با خود نه (پیش‌تر «ثبت شد» بی هیچ پیوندی) */
+  assert.equal((await call("POST", "/sreg/links", { sid: "NEW-0005", to: [{ name: "فولاد ث" }], nature: "rival" }, EX)).status, 422);
+
+  /* پشتیبانی و مدیر هم پیوند می‌زنند؛ نامِ ثبت‌کننده در یال و در روابطِ پروفایل */
+  assert.equal((await call("POST", "/sreg/links", { sid: "NEW-0001", name: "آهن آلات الف", to: [{ sid: "NEW-0004", name: "فولاد ت" }], nature: "chain" }, SUP)).status, 200);
+  assert.equal((await call("POST", "/sreg/links", { sid: "NEW-0002", to: [{ sid: "NEW-0004" }], nature: "partner" }, MG)).status, 200);
+  const by = (a, b, n) => ({ ...get("SELECT by_kind, by_name FROM sreg_edges WHERE a=? AND b=? AND nature=?", a, b, n) });
+  assert.deepEqual(by("NEW-0001", "NEW-0004", "chain"), { by_kind: "support", by_name: "پشتیبانی" });
+  assert.deepEqual(by("NEW-0002", "NEW-0004", "partner"), { by_kind: "manager", by_name: "مدیر خرید" });
+  const rel = (await call("GET", "/sreg/profile?sid=NEW-0004", null, EX)).data.edges;
+  assert.ok(rel.some((x) => x.other === "NEW-0001" && x.by === "پشتیبانی"));
+  assert.ok(rel.some((x) => x.other === "NEW-0002" && x.by === "مدیر خرید"));
+
+  /* چیدمانِ شعاعیِ کشو روی همان دادهٔ سرور: مرکز وسط، همسایه‌های مستقیم در حلقهٔ ۱ */
+  const g = (await call("GET", "/sreg/graph?sid=NEW-0004&depth=2", null, EX)).data;
+  const L = lib.radial(g, 343, 429, {});
+  const c = L.nodes.find((n) => n.ring === 0);
+  assert.deepEqual([c.sid, c.x, c.y], ["NEW-0004", 343 / 2, 429 / 2]);
+  assert.deepEqual([...L.nodes.filter((n) => n.ring === 1).map((n) => n.sid)].sort(), [...new Set(rel.map((x) => x.other))].sort());
 });
 
 /* ---------------- «نام نزدیک» (G4) ---------------- */

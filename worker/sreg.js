@@ -49,17 +49,24 @@ export async function resolveSid(env, { sid, name } = {}) {
   return `L:${k}`;
 }
 
-/** ردیفِ دفتر برای sid؛ برای «L:» که هنوز ردیفی ندارد، ردیفِ مجازی از نام */
+/** نامِ نمایشیِ همان «L:» (نه نامِ دیگری که اشتباهی کنارش آمده) */
+const ownName = (sid, name) => (T(name) && supKey(name) === sid.slice(2) ? T(name) : "");
+/** ردیفِ دفتر برای sid؛ برای «L:» که هنوز ردیفی ندارد، ردیفِ مجازی از نام (کشو نام را کنارِ sid هم می‌فرستد تا نامِ نرمال جایش ننشیند) */
 async function regRow(env, sid, nameHint) {
   const r = await env.DB.prepare("SELECT * FROM sreg WHERE sid=?").bind(sid).first();
   if (r) return r;
-  if (sid.startsWith("L:")) return { sid, kind: "loc", name: T(nameHint) || sid.slice(2), name_n: sid.slice(2), data: null, virtual: true };
+  if (sid.startsWith("L:")) return { sid, kind: "loc", name: ownName(sid, nameHint) || T(nameHint) || sid.slice(2), name_n: sid.slice(2), data: null, virtual: true };
   return null;
 }
-/** پیش از نوشتنِ نظر یا پیوند برای «L:»، ردیفِ دفتر ساخته می‌شود (یک بار) */
+/** پیش از نوشتنِ نظر یا پیوند برای «L:»، ردیفِ دفتر ساخته می‌شود (یک بار). ردیفی که پیش‌تر بی نامِ نمایشی ساخته شده بود (کشو فقط sid
+    می‌فرستاد و نامش همان کلیدِ نرمال ماند: «آهن‌آلات نو ۱۲» ← «آهن آلات نو 12») با نخستین نامِ نمایشیِ همان کلید درست می‌شود — تک‌ردیف و
+    فقط همان بار، بی بازنویسیِ انبوه */
 async function ensureLocal(env, sid, name) {
   if (!sid.startsWith("L:")) return;
-  await env.DB.prepare("INSERT OR IGNORE INTO sreg (sid,kind,name,name_n,verification,imported_at) VALUES (?, 'loc', ?, ?, 0, ?)").bind(sid, T(name) || sid.slice(2), sid.slice(2), now()).run();
+  const fix = ownName(sid, name);
+  await env.DB.prepare(`INSERT INTO sreg (sid,kind,name,name_n,verification,imported_at) VALUES (?, 'loc', ?, ?, 0, ?)
+    ON CONFLICT(sid) DO UPDATE SET name=excluded.name WHERE ?=1 AND sreg.kind='loc' AND sreg.name=sreg.name_n AND excluded.name<>sreg.name`)
+    .bind(sid, fix || T(name) || sid.slice(2), sid.slice(2), now(), fix ? 1 : 0).run();
 }
 
 /* ------------------------------------------------------------------ */
@@ -187,7 +194,8 @@ export async function opinionsFor(env, sid) {
 /* ------------------------------------------------------------------ */
 /* پیوندها و گراف                                                      */
 /* ------------------------------------------------------------------ */
-/** POST /sreg/links — {sid|name, to: [{sid|name}], nature, note} — پیوندِ کارشناس «تأییدشده» است */
+/** POST /sreg/links — {sid|name, to: [{sid|name}], nature, note} — پیوندِ کارشناس «تأییدشده» است. کشو نامِ نمایشی را کنارِ sid
+    می‌فرستد ({sid, name}) و نامِ تازه یا «در سامانه» را فقط با نام ({name}) — resolveSid جایش را در دفتر پیدا یا «L:» می‌سازد */
 export async function addLinks(env, w, b) {
   const from = await resolveSid(env, b);
   if (!NATURES[b.nature]) throw new HttpError("نوعِ رابطه را انتخاب کنید.", 422);
@@ -205,6 +213,8 @@ export async function addLinks(env, w, b) {
     stmts.push(env.DB.prepare(`INSERT INTO sreg_edges (a,b,ev,nature,strength,directed,evidence,source,status,note,by_kind,by_id,by_name,at) VALUES (?,?,NULL,?,NULL,0,NULL,'کارشناس','تأییدشده',?,?,?,?,?)`)
       .bind(a, c, b.nature, note, w.kind, w.id || null, whoName(w), t));
   }
+  /* همه همان خودش بودند (مثلاً نامِ تازه‌ای که به همین تأمین‌کننده رسید): «ثبت شد» بی هیچ پیوندی گمراه می‌کرد */
+  if (!ids.length && !stmts.length) throw new HttpError("این همان تأمین‌کننده است؛ پیوند با خودش معنا ندارد.", 422);
   if (stmts.length) { const res = await env.DB.batch(stmts); for (const r of res) ids.push(r.meta.last_row_id); }
   return { ok: true, ids };
 }
@@ -252,12 +262,83 @@ export async function egoGraph(env, q) {
   };
 }
 
-/** GET /sreg/search?q= — جست‌وجوی نام در دفتر (برای «🔗 پیوند») */
+/* ---------- جست‌وجوی نام برای «🔗 پیوند تازه» ----------
+   نمایهٔ name_n فقط آغازِ نام را پیدا می‌کند؛ «آلات» در «آهن آلات الف» با LIKE '%…%' یعنی خواندنِ کلِ دفتر (بیش از ده هزار ردیف) در
+   هر جست‌وجو — سقفِ روزانهٔ D1 و هشدارِ «خواندنِ سنگین» (d1-guard.js) — و فهرستِ همهٔ نام‌ها در Worker هم سهمِ پردازنده را می‌خورد
+   (catalog.js: نیم‌مگابایت JSON دوازده میلی‌ثانیه). پس «فهرستِ واژه‌ها» در cr_cache: برای هر حرفِ آغازِ واژه یک ردیف با نام‌هایی که واژه‌ای
+   با آن حرف دارند («نامِ نرمال⇥sid» در هر خط). خودِ D1 هر ۱۲ ساعت یک بار با یک دستور می‌سازدش (داده از Worker نمی‌گذرد؛ چند ده ردیف
+   نوشتن، نه بازنویسیِ انبوه) و هر جست‌وجو فقط ردیفِ حرفِ اولِ پرسش را می‌خواند. نامِ تازه تا ساختِ بعدی فقط با آغازش پیدا می‌شود. */
+const DIR_TTL = 12 * 3600e3;
+const DIR_SQL = `WITH RECURSIVE w(sid, n, rest) AS (SELECT sid, name_n, name_n FROM sreg UNION ALL SELECT sid, n, substr(rest, instr(rest, ' ') + 1) FROM w WHERE instr(rest, ' ') > 0)
+INSERT INTO cr_cache (k, v, at) SELECT 'sdir:' || c, group_concat(line, char(10)), ? FROM (SELECT DISTINCT substr(rest, 1, 1) AS c, n || char(9) || sid AS line FROM w WHERE rest <> '' ORDER BY c, line) WHERE 1 GROUP BY c
+ON CONFLICT(k) DO UPDATE SET v=excluded.v, at=excluded.at`;
+const DIR = new Map();   /* حرف ← {at, v} — حافظهٔ همین isolate، تا ساختِ بعدی */
+let dirFail = 0;          /* ساختِ ناموفق: ده دقیقه دوباره نه (هر جست‌وجو دستورِ سنگین را تکرار نکند)؛ فهرستِ کهنه اگر هست به کار می‌آید */
+async function dirShard(env, c) {
+  const t = now(), m = DIR.get(c);
+  if (m && t - m.at < DIR_TTL) return m.v;
+  const read = async () => (await env.DB.prepare("SELECT k, v, at FROM cr_cache WHERE k IN ('sdir:@', ?)").bind(`sdir:${c}`).all()).results || [];
+  let rows = await read(), meta = rows.find((r) => r.k === "sdir:@");
+  if ((!meta || t - meta.at >= DIR_TTL) && t - dirFail > 600e3) {
+    try {
+      await env.DB.batch([env.DB.prepare(DIR_SQL).bind(t),
+        env.DB.prepare("INSERT INTO cr_cache (k, v, at) VALUES ('sdir:@', '', ?) ON CONFLICT(k) DO UPDATE SET at=excluded.at").bind(t)]);
+      rows = await read(); meta = rows.find((r) => r.k === "sdir:@");
+    } catch (e) { dirFail = t; console.error("sreg dir build", e && e.message); }
+  }
+  if (!meta) return "";
+  /* ردیفِ حرفی که در ساختِ تازه دیگر نبود، کهنه است */
+  const sh = rows.find((r) => r.k !== "sdir:@" && r.at >= meta.at), v = sh ? sh.v : "";
+  DIR.delete(c); DIR.set(c, { at: meta.at, v });
+  if (DIR.size > 8) DIR.delete(DIR.keys().next().value);
+  return v;
+}
+/* کلیدِ sp_suppliers.name_n (sp-core.js:nkey) — مثلِ supKey ولی رقم‌های فارسی می‌مانند */
+const spKey = (x) => T(x).replace(/ي/g, "ی").replace(/ك/g, "ک").replace(/[\s‌]+/g, " ").trim().toLowerCase();
+const HIT = "sid, name, name_n, hub, city, kind, verification";
+
+/**
+ * GET /sreg/search?q=&not= — جست‌وجوی نام برای «🔗 پیوند تازه» (حداکثر ۲۰): اول آغازِ نام (نمایه)، بعد هر واژهٔ وسطِ نام («آلات» ←
+ * «آهن آلات الف»)، بعد تأمین‌کنندگانِ مکاتبات (sp_suppliers) که در دفتر نیستند با sys=1 و بی sid — کشو آن‌ها را فقط با نام می‌فرستد.
+ * not: خودِ پروفایل. کمتر از دو نویسه: هیچ.
+ */
 export async function searchSuppliers(env, q) {
-  const k = supKey(q.q || "");
+  const raw = T(q.q).slice(0, 80), k = supKey(raw), not = T(q.not), LIM = 20;
   if (k.length < 2) return { list: [] };
-  const rows = (await env.DB.prepare("SELECT sid, name, hub, city, kind, verification FROM sreg WHERE name_n >= ? AND name_n < ? ORDER BY name_n LIMIT 20").bind(k, k + "￿").all()).results || [];
-  return { list: rows };
+  const sk = spKey(raw);
+  const [pre, sp] = await env.DB.batch([
+    env.DB.prepare(`SELECT ${HIT} FROM sreg WHERE name_n >= ? AND name_n < ? ORDER BY name_n LIMIT ${LIM}`).bind(k, k + "￿"),
+    env.DB.prepare("SELECT name FROM sp_suppliers WHERE demo=0 AND name_n >= ? AND name_n < ? ORDER BY name_n LIMIT 10").bind(sk, sk + "￿")]);
+  const out = new Map();
+  for (const r of pre.results || []) if (r.sid !== not) out.set(r.sid, r);
+  if (out.size < LIM) {
+    const v = await dirShard(env, k[0]).catch((e) => { console.error("sreg dir", e && e.message); return ""; });
+    const ids = [];
+    for (const line of v ? v.split("\n") : []) {
+      const i = line.lastIndexOf("\t"), n = line.slice(0, i), sid = line.slice(i + 1);
+      if (sid === not || out.has(sid) || ids.includes(sid) || !(n.startsWith(k) || n.includes(` ${k}`))) continue;
+      ids.push(sid);
+      if (out.size + ids.length >= LIM) break;
+    }
+    if (ids.length) {
+      const by = new Map(((await env.DB.prepare(`SELECT ${HIT} FROM sreg WHERE sid IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || []).map((r) => [r.sid, r]));
+      for (const s of ids) if (by.has(s)) out.set(s, by.get(s));
+    }
+  }
+  /* نامِ مکاتبات: اگر در دفتر هست همان ردیف، وگرنه «در سامانه» */
+  const sys = new Map();
+  for (const r of sp.results || []) { const key = supKey(r.name); if (key.length >= 2 && !sys.has(key)) sys.set(key, T(r.name)); }
+  for (const r of out.values()) sys.delete(r.name_n);
+  if (sys.size && out.size < LIM) {
+    const keys = [...sys.keys()];
+    for (const r of (await env.DB.prepare(`SELECT ${HIT} FROM sreg WHERE name_n IN (${keys.map(() => "?").join(",")})`).bind(...keys).all()).results || []) {
+      sys.delete(r.name_n);
+      if (r.sid !== not && !out.has(r.sid) && out.size < LIM) out.set(r.sid, r);
+    }
+  }
+  const list = [...out.values()].map(({ name_n, ...r }) => r);
+  for (const [key, name] of sys) if (list.length < LIM && `L:${key}` !== not) list.push({ sid: null, name, hub: null, city: null, kind: "loc", verification: null, sys: 1 });
+  return { list };
 }
 
 /* ------------------------------------------------------------------ */
