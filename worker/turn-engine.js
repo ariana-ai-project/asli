@@ -19,7 +19,7 @@
 import { HttpError } from "./http.js";
 import { callModel } from "./ai-prompts.js";
 import { headPolicy, headRow } from "./cr-engine.js";
-import { docNumbers, docRules, panelSettings, docBlock } from "./strategy-doc.js";
+import { docNumbers, docRules, panelSettings, docBlock, applyRules } from "./strategy-doc.js";
 import { effectivePrice, nominalForEffective, settingsFor } from "./strategy/pricing.js";
 import { planNegotiation, nextOffer, accept as acceptOffer } from "./strategy/negotiation.js";
 import { validateTurn, norm as vnorm } from "./strategy/validator.js";
@@ -162,21 +162,40 @@ const effOf = (price, terms, settings) => effectivePrice({ qty: 1, condition_ok:
 /** شرایطِ پنلِ تأمین‌کننده (quote-rules.js) ← شرایطِ effectivePrice؛ مدتِ «اعتباری» گفته نشده، پس محتاطانه نقد */
 const panelTerms = (t) => ({ has_official_invoice: t.invoice !== "غیر رسمی", vat_included: t.vat === "ندارد", pay_months: 0, prepay_share: /۵۰|50/.test(T(t.pay)) ? 0.5 : 0 });
 
+/* پیشنهادهای ارسال‌شدهٔ پنلِ گفت‌وگوهای دیگرِ همین قلم (BATNA) — قیمت و نامِ گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) نه محکِ
+   مذاکره است و نه رقیب. همین را کارتِ «🧭 مذاکره»ٔ مکاتبات هم می‌خواند (worker/neg-view.js) تا عددهایش همان عددهای موتور باشد */
+export const othersStmt = (env, itemId, threadId) => env.DB.prepare(`SELECT l.id, l.price, l.unit, b.terms_json FROM sp_lines l JOIN sp_bundles b ON b.id=l.bundle_id
+  WHERE l.item_id=? AND l.thread_id<>? AND l.price>0 AND b.state IN ('pending','approved','proforma','final')
+    AND NOT EXISTS (SELECT 1 FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.id=l.thread_id AND s.demo=1)`).bind(itemId, threadId);
+/** بهترین پیشنهادِ واقعیِ دیگران (BATNA): خط‌های ارسال‌شدهٔ پنل و قیمت‌های یادداشتِ گفت‌وگوهای دیگر، به همان واحدِ قلم ← {eff, id} یا null */
+export function bestOther(panelRows, facts, threadId, unit, settings) {
+  let best = null;
+  for (const l of panelRows || []) {
+    if (!sameUnit(l.unit, unit)) continue;
+    const e = effOf(Number(l.price), panelTerms(termsOf(l)), settings);
+    if (Number.isFinite(e) && (!best || e < best.eff)) best = { eff: e, id: `L${l.id}` };
+  }
+  for (const f of facts || []) if (f.thread_id !== threadId && f.type === "قیمت" && f.eff && (!best || f.eff < best.eff)) best = { eff: f.eff, id: f.id };
+  return best;
+}
+/** تنظیم‌های قیمتِ مؤثرِ قلم: پنلِ پشتیبانی روی پروفایل، با نرخِ پنلِ سازندهٔ پارامتریِ سندِ تأییدشده اگر گذاشته شده */
+export function turnSettings(prof, panel, rules) {
+  const s = settingsFor(prof, panel);
+  const b = (rules && rules.builder) || {};
+  if (b.panel_rate != null) s.panel_rate = b.panel_rate;
+  return s;
+}
+/** قیمت مرجعِ برنامه — فقط وقتی واحدِ قیمت مرجع همان واحدِ قلم است */
+export const refOf = (nums, unit) => (nums && nums.status === "OK" && sameUnit(unit, nums.unit) ? nums.ref : null);
+
 /**
  * برنامهٔ مذاکره با این تأمین‌کننده (A5): planNegotiation با قیمت مرجع و پیشنهادهای واقعیِ دیگران، و درصدهای سندِ تأییدشده
  * (rules_pct: هدف و حد نسبت به مرجع، آهنگ c و دورها) اگر هست — هر دو هرگز بالاتر از بهترین پیشنهادِ واقعی.
  */
 export function planOf(profile, ref, quotes, rules) {
   const p = planNegotiation(profile, ref, quotes, false);
-  if (p.status !== "OK") return null;
-  const r = rules || {}, best = p.batna;
-  const cap = (v) => (best != null ? Math.min(v, best) : v);
-  if (Number.isFinite(r.target_vs_ref)) p.target = cap(p.anchor * (1 + r.target_vs_ref));
-  if (Number.isFinite(r.rv_tol)) p.reservation = cap(p.anchor * (1 + r.rv_tol));
-  if (Number(r.concession_c) > 0) p.c = Number(r.concession_c);
-  if (Number.isInteger(r.rounds) && r.rounds >= 1) p.rounds = r.rounds;
-  if (p.target > p.reservation) p.target = p.reservation;
-  return p;
+  /* همان قاعده‌ای که عددهای درونیِ سند (strategy-doc.js:docNumbers) می‌گذارد */
+  return p.status === "OK" ? applyRules(p, rules) : null;
 }
 
 const fid = (id) => `F-${id}`;
@@ -264,19 +283,16 @@ export async function turnReply(env, rec, { run, th, st, lines, msgs, fast = fal
   const prof = hp.profile, pol = hp.policy;
   const [models, panel, row, rules, nums, turnRow, factRows, panelRows, othersRows] = await Promise.all([
     turnModels(env), panelSettings(env), headRow(env, hp.head), docRules(env, hp.head, it.code || null).catch(() => null),
-    docNumbers(env, hp.head, it.code || null).catch(() => null),
+    /* فقط قیمت مرجع و واحدش؛ قاعده‌های سند را planOf با rules می‌گذارد */
+    docNumbers(env, hp.head, it.code || null, { hp, rules: null }).catch(() => null),
     env.DB.prepare("SELECT * FROM cr_turns WHERE thread_id=?").bind(th.id).first(),
     env.DB.prepare("SELECT * FROM cr_facts WHERE item_id=? ORDER BY at DESC, id DESC LIMIT 80").bind(it.id).all(),
-    /* قیمت و نامِ گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) نه محکِ مذاکره است و نه رقیب */
-    env.DB.prepare(`SELECT l.id, l.price, l.unit, b.terms_json FROM sp_lines l JOIN sp_bundles b ON b.id=l.bundle_id
-      WHERE l.item_id=? AND l.thread_id<>? AND l.price>0 AND b.state IN ('pending','approved','proforma','final')
-        AND NOT EXISTS (SELECT 1 FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.id=l.thread_id AND s.demo=1)`).bind(it.id, th.id).all(),
+    othersStmt(env, it.id, th.id).all(),
     env.DB.prepare("SELECT DISTINCT s.name FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.request_id=? AND t.id<>? AND s.demo=0").bind(th.request_id, th.id).all(),
   ]);
   const nd = ((row && row.rec) || {}).negotiation_defaults || {};
   const builder = (rules && rules.builder) || {};
-  const settings = settingsFor(prof, panel);
-  if (builder.panel_rate != null) settings.panel_rate = builder.panel_rate;
+  const settings = turnSettings(prof, panel, rules);
   const ts = { t: turnRow ? turnRow.t : 0, offers: turnRow ? parse(turnRow.offers, []) : [], agreement: turnRow ? parse(turnRow.agreement, null) : null };
   const facts0 = factRows.results || [];
   const others = (othersRows.results || []).map((r) => r.name).filter((n) => T(n) && n !== th.supplier_name);
@@ -298,14 +314,8 @@ export async function turnReply(env, rec, { run, th, st, lines, msgs, fast = fal
   const terms = { has_official_invoice: ex.official_invoice ?? true, vat_included: ex.vat_included ?? false, pay_months: ex.pay_months || 0, prepay_share: ex.prepay_share || 0 };
   const eff = priceRial && unitOk ? effOf(priceRial, { ...terms, condition_ok: ex.condition_accepted ?? true }, settings) : null;
   /* بهترین پیشنهادِ واقعیِ دیگران (BATNA): خط‌های ارسال‌شدهٔ پنل و قیمت‌های یادداشت، به همان واحد */
-  let best = null;
-  for (const l of panelRows.results || []) {
-    if (!sameUnit(l.unit, it.unit)) continue;
-    const e = effOf(Number(l.price), panelTerms(termsOf(l)), settings);
-    if (Number.isFinite(e) && (!best || e < best.eff)) best = { eff: e, id: `L${l.id}` };
-  }
-  for (const f of facts0) if (f.thread_id !== th.id && f.type === "قیمت" && f.eff && (!best || f.eff < best.eff)) best = { eff: f.eff, id: f.id };
-  const ref = nums && nums.status === "OK" && sameUnit(it.unit, nums.unit) ? nums.ref : null;
+  const best = bestOther(panelRows.results, facts0, th.id, it.unit, settings);
+  const ref = refOf(nums, it.unit);
   const plan = unitOk ? planOf(prof, ref, best ? [best.eff] : [], rules && rules.rules) : null;
   const t = ts.t;
   const hardOk = ex.condition_accepted !== false;

@@ -905,6 +905,22 @@ button.tp-stat.on { border-color: rgba(120, 170, 255, 0.75); box-shadow: inset 0
 .sp-kpis .tp-stat .si svg { width: 16px; height: 16px; }
 .sp-kpis .tp-stat b { font-size: 1rem; }
 .sp-terms { font-size: .82rem; color: var(--tp-muted); margin: -2px 0 10px; }
+/* «🧭 مذاکرهٔ کارشناس هوشمند» (strategy-view.js:negCard؛ worker/neg-view.js): تیترِ یک‌خطی و «≡ جزئیات» — فقط صفحهٔ کارشناس */
+.neg-card { margin: 0 0 12px; padding: 10px 12px; border-radius: 14px; border: 1px solid rgba(79, 140, 255, 0.32); background: rgba(79, 140, 255, 0.07); display: flex; flex-direction: column; gap: 6px; }
+:root[data-theme="light"] .neg-card { background: rgba(47, 111, 228, 0.05); }
+.neg-hd { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.neg-it { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: .8rem; }
+.neg-it .sp { flex: 1; }
+/* چهار خانهٔ تیتر: در ستونِ باریک دو‌به‌دو، در پهن یک ردیف */
+.neg-line { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; }
+.neg-k { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: 4px 10px; border-radius: 10px; border: 1px solid var(--tp-line); background: rgba(158, 197, 255, 0.05); line-height: 1.6; }
+.neg-k i { font-style: normal; font-size: .72rem; font-weight: 700; color: var(--tp-muted); }
+.neg-k b { font-size: .92rem; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.neg-k.lock { border-color: rgba(242, 194, 48, 0.4); background: rgba(242, 194, 48, 0.07); }
+.neg-k.warn { border-color: rgba(242, 194, 48, 0.6); }
+.neg-k.bad { border-color: rgba(229, 72, 77, 0.6); }
+.neg-ok { font-size: .86rem; padding: 6px 10px; border-radius: 10px; background: rgba(34, 197, 94, 0.08); border: 1px solid rgba(34, 197, 94, 0.35); }
+.neg-card .tp-detbox { margin-top: 2px; }
 .sp-panes { margin-bottom: 12px; }
 @media (max-width: 560px) { .sp-panes { display: flex; width: 100%; flex-wrap: nowrap; } .sp-panes > button { flex: 1 1 auto; min-width: 0; white-space: nowrap; padding-inline: 8px; font-size: .84rem; } }
 .sp-panes .cnt { margin-inline-start: 6px; }

@@ -220,6 +220,8 @@
     if (typeof d.pf_read === "boolean") S.pfRead = d.pf_read;
     const pend = (d.watch && d.watch.pending) || [];
     S.propSig = d.watch ? `${pend.reduce((m, p) => Math.max(m, p.id), 0)}:${pend.length}` : null;
+    /* «🧭 مذاکره»: همان امضایی که نظرسنجی برمی‌گرداند (worker/neg-view.js:negSig) */
+    S.negSig = d.neg ? d.neg.sig : null;
     const f = findThread(S.th); if (f) { S.unread -= f.t.unread; f.g.unread -= f.t.unread; f.t.unread = 0; S.aid = f.g.assignment_id; }
     ss.set("sp.th.e", String(S.th)); ss.set("sp.aid", String(S.aid || ""));
     render();
@@ -346,6 +348,7 @@
         ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}
         ${TP.ui.stat({ label: "جمع پیشنهادها", value: sum ? short(sum)[0] : "—", icon: "file", tone: "sum", sub: sum ? short(sum)[1] : "", attrs: sum ? `title="${money(sum)} ریال"` : "" })}</div>
       ${termsLine(th.terms) ? `<div class="sp-terms">🧾 ${esc(termsLine(th.terms))}</div>` : ""}
+      ${negHtml()}
       <div class="tp-seg sm sp-panes" role="tablist">${panes().map(([k, l, n]) => `<button type="button" role="tab" class="${pane === k ? "on" : ""}" aria-selected="${pane === k}" data-pane="${k}">${l}${n ? `<span class="cnt">${fa(n)}</span>` : ""}</button>`).join("")}</div>
       <div id="pane">${itemsPane(pane)}</div></div>`;
   }
@@ -372,6 +375,23 @@
   const turnsOf = () => (S.d && S.d.thread.ai && S.d.thread.ai.turns) || null;
   const turnsTxt = () => { const t = turnsOf(); return t ? ` · دورِ ${fa(Math.min(t.used, t.max))} از ${fa(t.max)}` : ""; };
   const capNote = () => { const c = humanOf() && S.d.thread.ai.cap; return c ? `<div class="ph-ask ph-watch" role="note"><b>✋ سقفِ ${fa(c.max)} دورِ کارشناس هوشمند پر شد ${TP.ui.info("corr.main", "راهنمای مکاتبات")}</b>گفت‌وگو با خودِ شماست؛ «🤖» در بالای صفحه ${fa(c.max)} دورِ تازه به کارشناس هوشمند می‌دهد.</div>` : ""; };
+  /* «🧭 مذاکرهٔ کارشناس هوشمند» (worker/neg-view.js، strategy-view.js): بالای «اقلام و تصمیم‌ها» — دورِ n از ۵، آخرین حرکت، پیشنهادِ ما و
+     تأمین‌کننده و 🔒 هدف و حد؛ برنامه، دورها، یادداشت و سند زیرِ «≡ جزئیات». فقط همین صفحهٔ کارشناس — سرور آن را به تأمین‌کننده نمی‌دهد */
+  const negOf = () => (S.d && S.d.neg) || null;
+  const negHtml = () => { const n = negOf(); return n && TP.stratView ? TP.stratView.negCard(n, { key: `neg-${S.th}`, help: TP.ui.info("corr.main", "راهنمای مکاتبات") }) : ""; };
+  /** امضای کارت در نظرسنجی عوض شد (دورِ تازه، حالتِ گفت‌وگو یا نوبتِ موتور): فقط همین کارت از نو — گفت‌وگو و پیش‌نویس دست نمی‌خورند */
+  async function refreshNeg() {
+    const th = S.th;
+    const r = await api(`/sp/x/thread/${th}/neg`);
+    if (S.th !== th || !S.d) return;
+    S.d.neg = r.neg || null; S.negSig = S.d.neg ? S.d.neg.sig : null;
+    const el = $("[data-neg]");
+    if (el) { el.outerHTML = negHtml(); bind(); }
+  }
+  /** «📘 سند راهبرد» از کارت: همان نمای فقط‌خواندنیِ پنل کارشناس (strategy-view.js:openDoc)، با هدرهای همین صفحه (مینی‌اپ) */
+  const negDoc = (b) => TP.stratView.openDoc({ head: b.dataset.head, code: b.dataset.code || null, api,
+    roTip: "بازبینی و تأییدِ سند در پنل کارشناس و پیش از «🚀 شروع» است؛ این‌جا فقط دیدن",
+    why: `همان سندی که کارشناس هوشمند با آن با «${S.d ? S.d.thread.supplier : ""}» مذاکره می‌کند.` });
   const ACT_FA = { approve: "✅ تأییدِ مشخصات", return: "↩️ برگشت برای اصلاح", reject: "❌ رد", accept_rows: "☑️ پذیرشِ مغایرت", final: "🏁 تأیید نهایی" };
   function bundleSum(bid) {
     const b = S.d.bundles.find((x) => x.id === bid);
@@ -694,6 +714,8 @@
     $$("[data-th]").forEach((b) => { b.onclick = () => openThread(+b.dataset.th); });
     /* «🚨 باز کردنِ اضطراری»: کادرِ «فقط دیدن»ِ 🤖 خودکار و نوارِ وضعیتِ «⏱ با مهلت / ⏸ بی‌مهلت» (W3) */
     $$("[data-takeover]").forEach((b) => { b.onclick = takeoverDialog; });
+    /* «📘 سند راهبرد»ِ فقط‌خواندنی از کارتِ «🧭 مذاکرهٔ کارشناس هوشمند» (W9) */
+    $$("[data-negdoc]").forEach((b) => { b.onclick = () => negDoc(b); });
     const hb = $("[data-handback]"); if (hb) hb.onclick = handbackDialog;
     $$("[data-th-lock]").forEach((b) => { b.onclick = () => say("این گفت‌وگو را کارشناس هوشمند پیش می‌برد و تا وقتی تیکِ شما در «پنل پشتیبانی» روی «🤖 هوشمند» است برای شما بسته است.\nاگر سؤالی از شما داشته باشد همین‌جا با 🚨 باز می‌شود و در تلگرام هم خبر می‌دهد.", "🔒 گفت‌وگوی کارشناس هوشمند"); });
     $$("[data-back]").forEach((b) => { b.onclick = () => { S.view = b.dataset.back; render(); }; });
@@ -1139,6 +1161,9 @@
           const m = $(".sp-main"), c = $("#chat"); S.mainScroll = m ? m.scrollTop : 0;
           S.chatPos = c && c.scrollHeight - c.scrollTop - c.clientHeight > 90 ? c.scrollTop : null;
           const keep = S.unseen; await loadThread(); S.unseen = phoneMode || S.tab === "chat" ? 0 : keep;
+        } else if (r.neg != null && S.d && r.neg !== S.negSig) {
+          /* «🧭 مذاکره»: کارشناس هوشمند دورِ تازه زد یا حالتِ گفت‌وگو عوض شد — فقط همان کارت تازه می‌شود */
+          await refreshNeg().catch(() => {});
         }
       }
       const ck = $(".ph-clock"); if (ck) ck.textContent = clock();

@@ -24,6 +24,7 @@ import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
 import { proformaHtml, renderProformaDoc, PROFORMA_CSS } from "./pfdoc.js";
 import { pfReadOn } from "./switches.js";
 import { callForThread, offpfIngest, offpfDecide, submitOffpf, markSubmitted } from "./final-call.js";
+import { negView, negSig, NEG_SIG_SQL } from "./neg-view.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -132,11 +133,17 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): شمارهٔ پیشنهاد، مهلت، وضعیت و آخرین پیش‌فاکتورِ رسمی */
     const full = await C.threadFull(env, th, who.side);
     full.final_call = await callForThread(env, th, who.side).catch((e) => { console.error("final call thread", e && e.message); return null; });
+    /* «🧭 مذاکرهٔ کارشناس هوشمند» (worker/neg-view.js): دور، حرکت، پیشنهادها، هدف و حد و سندِ راهبرد — فقط سمتِ کارشناس و فقط
+       گفت‌وگوی کارشناس هوشمند؛ تأمین‌کننده (پنل و بات) هرگز این کلید را نمی‌گیرد */
+    if (who.side === "e" && th.ai && th.ai.ai) full.neg = await negView(env, th).catch((e) => { console.error("neg view", e && e.message); return null; });
     return json(full);
   }
   if (path === "/sp/poll" && m === "GET") {
     const th = await C.threadFor(env, url.searchParams.get("t"), who, { read: true });
-    return json(await C.poll(env, th, who.side, url.searchParams.get("since")));
+    const r = await C.poll(env, th, who.side, url.searchParams.get("since"));
+    /* امضای کارتِ «🧭 مذاکره»: اگر عوض شد، صفحه فقط همان کارت را از /sp/x/thread/:id/neg تازه می‌کند — دو جست‌وجو با کلیدِ اصلی */
+    if (who.side === "e" && th.ai && th.ai.ai) r.neg = negSig(await env.DB.prepare(NEG_SIG_SQL).bind(th.id).first().catch(() => null));
+    return json(r);
   }
   if ((mm = /^\/sp\/thread\/(\d+)\/msg$/.exec(path)) && m === "POST") {
     const th = await C.threadFor(env, mm[1], who);
@@ -363,6 +370,11 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   if ((mm = /^\/sp\/x\/thread\/(\d+)\/handback$/.exec(path)) && m === "POST") {
     const th = await C.threadFor(env, mm[1], who, { read: true });
     return json(await handbackThread(env, ex, th));
+  }
+  /* «🧭 مذاکرهٔ کارشناس هوشمند» (worker/neg-view.js): همان کلیدِ neg گفت‌وگو، برای تازه کردنِ کارت وقتی امضای نظرسنجی عوض شد */
+  if ((mm = /^\/sp\/x\/thread\/(\d+)\/neg$/.exec(path)) && m === "GET") {
+    const th = await C.threadFor(env, mm[1], who, { read: true });
+    return json({ neg: th.ai && th.ai.ai ? await negView(env, th) : null });
   }
   /* «⏱ با مهلت»: ارسال، رد یا سرِ مهلتِ پیشنهادِ کارشناس هوشمند — {action: ok|no|due, reason, text, bundle} */
   if ((mm = /^\/sp\/x\/prop\/(\d+)$/.exec(path)) && m === "POST") {

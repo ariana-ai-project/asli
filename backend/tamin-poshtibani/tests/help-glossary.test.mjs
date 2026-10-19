@@ -1,7 +1,7 @@
 /* ============================================================
    واژه‌نامهٔ راهنما (help-content.js، کلیدهای gl.*) — «؟» کنارِ نامِ حالت‌ها، خانواده‌ها، حرکت‌ها و اصطلاح‌ها (مهر ۱۴۰۵، خواستهٔ مالک)
    • ۳۵ اصطلاح، هر کدام با خلاصه و دست‌کم یک پیوندِ https («بیشتر بخوانید»)؛ شش اصطلاحِ پرکاربرد توضیحِ یک‌صفحه‌ای دارند
-   • هر کلیدِ واژه‌نامه که صفحه‌ها به کار می‌برند هست: نُه حالتِ استعلام، سه خانواده، ده حرکتِ مذاکره و کلیدهای expert.js
+   • هر کلیدِ واژه‌نامه که صفحه‌ها به کار می‌برند هست: نُه حالتِ استعلام، سه خانواده، ده حرکتِ مذاکره و کلیدهای expert.js و strategy-view.js
    • کشوی راهنما پیوند را در زبانهٔ تازه و بی دسترسی به پنجره باز می‌کند؛ دانشِ «دستیار سامانه» واژه‌نامه را دارد
    ============================================================ */
 import test from "node:test";
@@ -50,15 +50,16 @@ test("شش اصطلاحِ پرکاربرد توضیحِ یک‌صفحه‌ای �
   }
 });
 
-test("هر «؟»ِ صفحه‌ها به اصطلاحی می‌رسد که هست: حالت‌ها، خانواده‌ها، حرکت‌ها و کلیدهای expert.js", () => {
+test("هر «؟»ِ صفحه‌ها به اصطلاحی می‌رسد که هست: حالت‌ها، خانواده‌ها، حرکت‌ها و کلیدهای expert.js و strategy-view.js", () => {
   for (const m of C.RFQ_MODES) assert.ok(HELP.topics[`gl.mode.${m}`], m);
   const fams = [...new Set(C.RFQ_MODES.map(FAMILY))].sort();
   assert.deepEqual(fams, ["cautious", "max", "special"]);
   for (const f of fams) assert.ok(HELP.topics[`gl.family.${f}`], f);
-  const ex = readFileSync(join(DIR, "expert.js"), "utf8");
+  /* نمای «📘 سند راهبرد» و کارتِ «🧭 مذاکره» در strategy-view.js است (مشترکِ پنل و مکاتبات)؛ بقیه در expert.js */
+  const ex = ["expert.js", "strategy-view.js"].map((f) => readFileSync(join(DIR, f), "utf8")).join("\n");
   const keys = [...new Set([...ex.matchAll(/"(gl\.[A-Za-z_.-]+)"/g)].map((x) => x[1]))];
-  assert.ok(keys.length >= 15, `کلیدهای واژه‌نامه در expert.js: ${keys.length}`);
-  for (const k of keys) assert.ok(HELP.topics[k], `expert.js: ${k}`);
+  assert.ok(keys.length >= 15, `کلیدهای واژه‌نامه در expert.js و strategy-view.js: ${keys.length}`);
+  for (const k of keys) assert.ok(HELP.topics[k], `expert.js / strategy-view.js: ${k}`);
   /* هر حرکتِ مذاکرهٔ بسته (kb-data.js) در GL_MOVE، و هر کلاسِ بازار در MS_FA */
   const gm = /const GL_MOVE = \{([^}]+)\}/.exec(ex)[1];
   for (const mv of MOVES) assert.ok(gm.includes(`"${mv.id}"`), mv.id);

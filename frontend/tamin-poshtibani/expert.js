@@ -701,15 +701,11 @@
      تیک‌ها را همان لحظه با برنامهٔ موتور از نو می‌چیند (PUT picks {strategy: {variant}}؛ worker/cr-engine.js:headPolicy). اگر تیکی از آخرین
      چینش دستی عوض شده، اول یک خطِ هشدار — تا کارِ دستیِ کارشناس بی‌صدا دور ریخته نشود. */
   const VARS = ["broad", "cautious"];
-  const VAR_FA = { broad: "چینش گسترده", cautious: "چینش محتاط" };
   const VAR_TIP = { broad: "رقابت با بیشترین گیرندهٔ مجاز در ردهٔ همین قلم", cautious: "کم‌شمار، یکی در هر بازار، دو موج و افشای کم — برای بازارِ کمیاب یا متمرکز" };
   const FAM_FA = { max: "حداکثری", cautious: "محتاط", special: "ویژه" };
-  const CAUTIOUS_M = new Set(["LIMITED_STAGED", "STAGED_BROADENING", "DIRECT_PLUS_MARKET_TEST"]);
-  const MODE_FA = { BROAD: "گسترده (حداکثری)", STANDARD: "استاندارد", SIMULTANEOUS_INDEX: "هم‌زمان قیمت‌مرجع", MULTICHANNEL: "چندکاناله", LIMITED_STAGED: "محدود و مرحله‌ای",
-    CONSULT_THEN_COMPETE: "مشورت سپس رقابت", DIRECT_PLUS_MARKET_TEST: "مستقیم با آزمون بازار", FRAMEWORK_CALLOFF: "قرارداد چارچوب", STAGED_BROADENING: "مرحله‌ای با گسترش مشروط" };
-  /* همان worker/strategy/config.js:MS_NAMES */
-  const MS_FA = { "MS-0": "دادهٔ ناکافی", "MS-1": "رقابتی استاندارد", "MS-2": "رقابتی متمایز (کیفیت/برند)", "MS-3": "کالای پایهٔ قیمت‌مرجع",
-    "MS-4": "متمرکز (چندتأمین‌کننده‌ای محدود)", "MS-5": "قطعهٔ اصلی/برند وابسته به واردات", "MS-6": "خدمات و کار سفارشی" };
+  /* نامِ دو چینش، حالت‌های استعلام و کلاس‌های بازار (همان worker/cr-engine.js:MODE_FA و strategy/config.js:MS_NAMES) — strategy-view.js،
+     مشترکِ پنل و مکاتبات، تا «📘 سند راهبرد» در هر دو یک نما باشد */
+  const { VAR_FA, MODE_FA, MS_FA } = TP.stratView;
   /** «؟»ِ کوچکِ واژه‌نامه کنارِ یک نام (help-content.js، کلیدهای gl.*) — فقط اگر آن اصطلاح در راهنما هست */
   const glq = (key, name) => { const T = key && window.TP_HELP && window.TP_HELP.topics; return T && T[key] ? TP.ui.info(key, `«${name || T[key].title}» چیست؟`, "sm") : ""; };
   /** گزینهٔ چیده‌شده — فهرست‌های پیش از این تغییر فقط پرچمِ cautious یا خانوادهٔ برنامه را دارند */
@@ -828,7 +824,7 @@
         <span class="chip">${M(on.length)} تیک‌خورده · ${M(ready)} با شمارهٔ پنل</span>
         <span style="margin-inline-start:auto"></span>
         ${P.cr && !started && !A_ ? `<button class="tp-btn sm" data-pkstrat title="سیاستِ استعلامِ این نوع قلم و برنامهٔ گیرندگان روی گراف (کمیاب یا گسترده)">🧭 استراتژی استعلام</button>` : ""}
-        ${P.doc && P.head && !started ? `<button class="tp-btn sm" data-pkdoc title="سندِ راهبردِ این نوع قلم — پیش از «🚀 شروع» بازبینی و تأیید می‌شود">📘 سند راهبرد</button>` : ""}
+        ${P.doc && P.head ? `<button class="tp-btn sm" data-pkdoc title="${started ? "سندِ راهبردِ این نوع قلم — فقط‌خواندنی: همان سندی که کارشناس هوشمند با آن مذاکره می‌کند" : "سندِ راهبردِ این نوع قلم — پیش از «🚀 شروع» بازبینی و تأیید می‌شود"}">📘 سند راهبرد${started ? " 🔒" : ""}</button>` : ""}
         ${P.first_msg && on.length && (!started || fresh) ? `<button class="tp-btn sm" data-pkfm title="متنِ نخستین پیامِ هر تیک‌خورده: قالبِ درخواست، یا قالب و متنِ جدا برای هر تأمین‌کننده — با پیش‌نمایش">✉️ پیام اول</button>` : ""}
         ${!started && !A_ ? `<button class="tp-btn sm" data-pkrebuild title="فهرست از سوابقِ امروز دوباره ساخته می‌شود؛ تیک‌ها به پیش‌فرض برمی‌گردند و افزوده‌های شما می‌مانند">↻ بازسازی</button>` : ""}
         ${!A_ ? `<button class="tp-btn sm" data-pkadd title="تأمین‌کنندهٔ دیگری به فهرست؛ از جستجوی هوشمند با «🎯 به فهرست دعوت» در همان تب">➕ افزودن</button>` : ""}
@@ -1242,25 +1238,20 @@
      راهبرد)، تأیید، ویرایش یا سازندهٔ پارامتری؛ عددهای درونیِ همین قلم (هدف، حد، پیشنهادِ هر دور) فقط برای شما.
      نما (درخواست مالک، مهر ۱۴۰۵: تیتروار، خواندن دو سه دقیقه): «در یک نگاه»، چهار کاشی (بازار، استعلام، مذاکره، 🔒 عددهای درونی) با
      «؟» کنارِ هر اصطلاح، و وضعیت‌های محتمل جمع‌شده (پاسخِ آماده با باز کردنِ ردیف)؛ متنِ کامل و قاعده‌ها، ریسک‌ها، قیدها و تأییدها و
-     سازندهٔ پارامتری زیرِ «≡ جزئیات». امتیاز، «✅ تأیید»، «✏️ ویرایش» و «⋯» (سازندهٔ پارامتری، ساختِ دوباره) در نوارِ چسبانِ پایین. */
-  const MV_FA = { "M-ANCHOR": "لنگر", "M-COUNTER": "پیشنهادِ متقابل", "M-PACKAGE": "بستهٔ معاوضه", "M-FACT": "بیانِ واقعیت", "M-ASK": "پرسش", "M-PAUSE": "مکث",
-    "M-SPLIT": "تقسیمِ سفارش", "M-CLOSE": "جمع‌بندی", "M-WALK": "ترکِ مؤدبانه", "M-ESCALATE": "ارجاع به کارشناس" };
-  const MV_TONE = { "M-PACKAGE": "ok", "M-CLOSE": "ok", "M-WALK": "bad", "M-ESCALATE": "warn" };
-  /** حرکتِ مذاکره ← اصطلاحِ واژه‌نامه (help-content.js) */
-  const GL_MOVE = { "M-ANCHOR": "gl.anchor", "M-COUNTER": "gl.counter", "M-PACKAGE": "gl.package", "M-FACT": "gl.fact", "M-ASK": "gl.ask", "M-PAUSE": "gl.pause",
-    "M-SPLIT": "gl.split", "M-CLOSE": "gl.close", "M-WALK": "gl.walk", "M-ESCALATE": "gl.escalate" };
-  const rial = (n) => (n == null ? "—" : M(Math.round(n)));
-  const pctS = (x) => (x == null || !Number.isFinite(Number(x)) ? "—" : `${x > 0 ? "+" : x < 0 ? "−" : ""}${M(Math.abs(Math.round(x * 1000) / 10))}٪`);
-  /* آهنگ از c (worker/strategy-doc.js:PACE): ۰٫۳ شکیبا، ۰٫۵ متعادل، ۱ یکنواخت — c=۰٫۶ِ کلاس‌های متمایز «متعادل» */
-  const paceFa = (c) => (c == null || c === "" ? "—" : c <= 0.35 ? "شکیبا" : c < 0.9 ? "متعادل" : "یکنواخت");
-  /** «در یک نگاه»: نخستین جملهٔ خلاصهٔ سند (و دومی اگر اولی کوتاه است) — متنِ کامل زیرِ «≡ جزئیات» */
-  const glanceOf = (s) => {
-    const a = (String(s || "").replace(/\s+/g, " ").match(/[^.!؟]+[.!؟]?/g) || []).map((x) => x.trim()).filter(Boolean);
-    let g = a[0] || ""; if (g.length < 90 && a[1]) g += ` ${a[1]}`;
-    return g.length > 300 ? `${g.slice(0, 299)}…` : g;
-  };
+     سازندهٔ پارامتری زیرِ «≡ جزئیات». امتیاز، «✅ تأیید»، «✏️ ویرایش» و «⋯» (سازندهٔ پارامتری، ساختِ دوباره) در نوارِ چسبانِ پایین.
+     نما و کاشی‌ها در strategy-view.js است (TP.stratView.docBody) — همان نما فقط‌خواندنی پس از «🚀 شروع» و از کارتِ مذاکرهٔ مکاتبات. */
+  const { MV_FA } = TP.stratView;
+  /** «📘 سند راهبرد»ِ قلمِ سپرده‌شده (پس از «🚀 شروع»): فقط‌خواندنی — همان نسخهٔ تأییدشده‌ای که کارشناس هوشمند با آن مذاکره می‌کند */
+  function pkDocRoUI(it) {
+    const P = S.picks[it.id]; if (!P || !P.head) return;
+    return TP.stratView.openDoc({ head: P.head, code: it.code || null, variant: pkVarOf(P),
+      roTip: "قلم سپرده شده؛ بازبینی و تأیید پیش از «🚀 شروع» است و این‌جا فقط دیدن",
+      why: `«${it.title}» سپرده شده${P.started_at ? ` (${TP.fmt(P.started_at)})` : ""}؛ کارشناس هوشمند با همین سند مذاکره می‌کند — حالِ هر گفت‌وگو در کارتِ «🧭 مذاکره»ٔ «💬 مکاتبات».` });
+  }
   async function pkDocUI(it, then) {
     const P = S.picks[it.id]; if (!P || !P.head) return;
+    /* پس از «🚀 شروع» سند فقط‌خواندنی است (بازبینی و تأیید پیش از شروع است؛ سرور: doc_ro) */
+    if ((P.doc_ro || P.started_at) && !then) return pkDocRoUI(it);
     const q = `/cr/doc?head=${encodeURIComponent(P.head)}${it.code ? `&code=${encodeURIComponent(it.code)}` : ""}&enqueue=1`;
     let d;
     try { d = await TP.api(q); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
@@ -1283,54 +1274,8 @@
       } catch (e) { msg(e.message); }
     }
     const rv = () => (st.score ? { score: st.score, note: st.note, boxes: st.boxes } : {});
-    function docHtml(x, nums) {
-      const n = x.negotiation || {}, r = x.rfq || {}, mv = x.market_view || {}, rp = n.rules_pct || {};
-      const ul = (a) => (a && a.length ? `<ul>${a.map((s) => `<li>${esc(s)}</li>`).join("")}</ul>` : "");
-      const dh = (t) => `<span class="dh">${t}</span>`;
-      const tile = (lab, main, sub, cls, tip) => `<div class="doc-tile ${cls || ""}"${tip ? ` title="${esc(tip)}"` : ""}><span class="tl">${lab}</span><b>${main}</b>${sub ? `<span class="dim">${sub}</span>` : ""}</div>`;
-      const ok = nums && nums.status === "OK", first = (rp.offers_by_round_vs_ref || [])[0];
-      const risks = x.risks || [], hard = n.hard_constraints || [], need = x.needs_approval || [], pk = n.packages || [];
-      /* چینشِ فهرستِ همین قلم اگر با خانوادهٔ سند (سیاستِ پیش‌فرضِ نوع قلم) فرق دارد */
-      const v = pkVarOf(S.picks[it.id]), docV = CAUTIOUS_M.has(r.competition_mode || r.mode) ? "cautious" : "broad";
-      const tiles = [
-        tile("بازار", `${esc(MS_FA[mv.ms] || mv.ms || "—")}${glq("gl.ms", "ساختار بازار")}`, mv.confidence_band ? `اطمینان ${esc(mv.confidence_band)}` : ""),
-        tile("استعلام", `${esc(MODE_FA[r.mode] || r.mode || "—")}${glq(`gl.mode.${r.mode}`, MODE_FA[r.mode])}`,
-          `موج اول ${M(r.n_wave1 || 0)} از ${M(r.n_max || 0)}${r.waves > 1 ? " · دو موج" : ""}${v && v !== docV ? ` · فهرستِ این قلم: «${VAR_FA[v]}»` : ""}`),
-        tile("مذاکره", `لنگر ${first != null ? pctS(first) : "از هدف"}${glq("gl.anchor", "لنگر")}`,
-          `${M(n.rounds || 0)} دور · <span class="nw">آهنگِ ${paceFa(n.concession_c)}${glq("gl.pace", "آهنگِ امتیازدهی")}</span>${pk.length ? ` · ${M(pk.length)} بستهٔ معاوضه` : ""}`, "", "لنگر: پیشنهادِ دورِ اولِ ما نسبت به قیمت مرجع"),
-        ok ? tile("🔒 عددهای درونی", `مرجع ${rial(nums.ref)}${glq("gl.ref", "قیمت مرجع")}`,
-          `<span class="nw">هدف ${rial(nums.target)}${glq("gl.target", "هدف")}</span> · <span class="nw">حد ${rial(nums.reservation)}${glq("gl.reservation", "حد")}</span> · <span class="nw">ریال${nums.unit ? `/${esc(nums.unit)}` : ""}</span>`, "lock", "درونی — به تأمین‌کننده گفته نمی‌شود")
-          : tile("🔒 عددهای درونی", `<span class="nw">هدف ${pctS(rp.target_vs_ref)}${glq("gl.target", "هدف")}</span> · <span class="nw">حد ${pctS(rp.rv_tol)}${glq("gl.reservation", "حد")}</span>`,
-            `نسبت به قیمت مرجع${nums && nums.status ? ` — ${esc(nums.action || "قیمت مرجعِ این قلم نیست")}` : ""}`, "lock", "درونی — به تأمین‌کننده گفته نمی‌شود"),
-      ].join("");
-      const states = (x.anticipated_states || []).map((s) => `<details class="doc-st"><summary><span class="nm">${esc(s.name || s.state_id)}</span><span class="chip ${MV_TONE[s.move] || ""}">${esc(MV_FA[s.move] || s.move)}</span>${glq(GL_MOVE[s.move], MV_FA[s.move])}${s.blocked ? ` <span class="chip bad" title="${esc(s.blocked.join("؛ "))}">⛔ افشاگر — نمی‌رود</span>` : ""}</summary>
-        <p>«${esc(s.prepared_reply_fa)}»</p>${s.blocked ? `<p class="dim">چرا نمی‌رود: ${esc(s.blocked.join("؛ "))}</p>` : ""}</details>`).join("");
-      const rq = [...(r.why || []), ...(r.distribution_explained || []), ...(r.anti_leak_measures || [])];
-      const B = x.builder;
-      const tabs = [
-        { k: "why", t: "متن و قاعده‌ها", html: [
-          x.summary_fa ? dh("خلاصهٔ کامل") + `<pre class="fm-text">${esc(x.summary_fa)}</pre>` : "",
-          (mv.key_facts || []).length ? dh("بازار") + ul(mv.key_facts) : "",
-          rq.length ? dh("استعلام") + ul(rq) : "",
-          n.anchor_rule || n.reservation_rule ? dh("لنگر، هدف و حد") + ul([n.anchor_rule, n.reservation_rule].filter(Boolean)) : "",
-          dh("آهنگ و دورها") + `<div class="dim">آهنگِ ${paceFa(n.concession_c)} (c=${esc(n.concession_c)}) · ${M(n.rounds || 0)} دور${n.parallel_with ? ` · هم‌زمان با ${M(n.parallel_with)} تأمین‌کننده` : ""}</div>`,
-          pk.length ? dh("بسته‌های معاوضه") + `<div>${pk.map((p) => `<span class="chip ok">${esc(p.description_fa)}${p.effect_pct != null ? ` (${esc(String(p.effect_pct))}٪)` : ""}</span>`).join(" ")}</div>` : "",
-          ok ? dh("🔒 پیشنهادِ ما در هر دور — درونی") + `<div class="dim">${nums.offers.map(rial).join(" ← ")} ریال${nums.unit ? ` (${esc(nums.unit)})` : ""}</div>` : "",
-          mv.ms || (mv.labels || []).length ? dh("کلاس و برچسب‌ها") + `<div class="dim">${esc(mv.ms || "")} · ${esc((mv.labels || []).join(" "))} · اطمینان ${esc(mv.confidence_band || "—")}</div>` : "",
-          x.notes_for_buyer ? dh("یادداشت برای کارشناس") + `<div>${esc(x.notes_for_buyer)}</div>` : ""].join("") },
-        { k: "risk", t: `ریسک‌ها${risks.length ? ` ${M(risks.length)}` : ""}`, html: risks.length ? `<ul>${risks.map((k) => `<li>${esc(k.risk)} — <span class="dim">${esc(k.control)}</span></li>`).join("")}</ul>` : "" },
-        { k: "hard", t: "قیدها و تأییدِ شما", html: (hard.length ? dh("قیدهای سخت — معامله نمی‌شوند") + ul(hard) : "") + (need.length ? dh("آنچه تأییدِ شما را می‌خواهد") + ul(need) : "") },
-        { k: "build", t: "سازندهٔ پارامتری", html: B ? `<div class="dim">وزن‌ها: ${Object.entries(B.weights || {}).map(([k, w]) => `${esc(d.builder.weights[k] || k)} ${M(w)}`).join("، ")} · آهنگِ ${esc(d.builder.pace[B.pace] || "")} · پیشنهادِ دیگران: ${esc(d.builder.others[B.others] || "")}${B.split_ok ? " · تقسیمِ سفارش مجاز" : ""}</div>
-          <div class="dim">هدف ${pctS(B.target_vs_ref)} و تحملِ حد ${pctS(B.rv_tol)} نسبت به مرجع · ${M(B.rounds || 0)} دور · حداکثر ${M(B.max_pay_months || 0)} ماه تعویقِ پرداخت${B.panel_rate != null ? ` · نرخِ ماهانهٔ پنل ${pctS(B.panel_rate)}` : ""}</div>
-          ${(B.tradeables || []).length ? `<div class="dim">قابلِ معامله: ${B.tradeables.map(esc).join("، ")}</div>` : ""}${B.note ? `<div class="dim">یادداشت: ${esc(B.note)}</div>` : ""}` : "" },
-      ];
-      const sub = [risks.length ? `ریسک‌ها ${M(risks.length)}` : "", hard.length ? `قیدهای سخت ${M(hard.length)}` : "", need.length ? `تأیید ${M(need.length)}` : "", B ? "سازندهٔ پارامتری" : ""].filter(Boolean).join(" · ") || "متن و قاعده‌ها";
-      const glance = glanceOf(x.summary_fa);
-      return `${glance ? `<p class="doc-glance"><b>در یک نگاه:</b> ${esc(glance)}</p>` : ""}
-        <div class="doc-tiles">${tiles}</div>
-        ${states ? `<div class="doc-states"><b>وضعیت‌های محتمل</b> <span class="dim">— پاسخِ آماده با زدنِ هر ردیف</span>${states}</div>` : ""}
-        ${TP.ui.det({ key: dk, sub, tabs })}`;
-    }
+    /* نمای تیترواریِ سند (strategy-view.js) — همان نمایی که پس از «🚀 شروع» و در مکاتبات فقط‌خواندنی دیده می‌شود */
+    const docHtml = (x, nums) => TP.stratView.docBody(x, nums, { dk, builder: d.builder, variant: pkVarOf(S.picks[it.id]) });
     /** امتیاز و نقد (۱ تا ۳: توضیح و دست‌کم یک جعبهٔ راهبرد) — در ویرایش و سازنده درونِ فرم، در نما درونِ نوارِ پایین */
     const stars = () => `<span class="doc-stars" role="radiogroup" aria-label="امتیاز به سند">${[1, 2, 3, 4, 5].map((n) => `<button type="button" role="radio" aria-checked="${st.score === n}" class="tp-btn sm ${st.score === n ? "on" : ""}" data-dscore="${n}">${M(n)}</button>`).join("")}</span>`;
     const critique = () => (st.score && st.score <= 3 ? `<textarea class="tp-input" data-dnote style="width:100%;min-height:60px;margin-top:6px" placeholder="چه چیزِ این سند درست نبود؟ (اجباری)">${esc(st.note)}</textarea>
@@ -1379,8 +1324,7 @@
     }
     function paint() {
       const L = d.latest, x = L && (L.final || L.doc);
-      const tone = L ? (L.state === "approved" ? "ok" : L.state === "failed" ? "bad" : L.state === "draft" ? "warn" : "") : "";
-      let h = `<div class="doc-head dim">${TP.ui.info("expert.picks", "راهنمای سند راهبرد")} ${L ? `نسخهٔ ${M(L.version)} · <span class="chip ${tone}">${esc(L.state_fa)}</span>${L.source === "builder" ? " · سازندهٔ پارامتری" : L.model ? ` · <span dir="ltr">${esc(L.model)}</span>` : ""}${L.review && L.review.score ? ` · امتیازِ ${esc(L.review.by || "")}: ${M(L.review.score)}` : ""}` : "هنوز سندی نیست"}</div><div data-docmsg></div>`;
+      let h = `${TP.stratView.docHead(L)}<div data-docmsg></div>`;
       if (st.mode === "builder") h += builderHtml();
       else if (st.mode === "edit" && x) h += editHtml(x);
       else if (!L || ["queued", "building"].includes(L.state)) h += `<div class="tp-note" style="margin:8px 0">⏳ سند در صفِ ساخت است (یکی دو دقیقه). <button type="button" class="tp-btn xs" data-dreload>↻ تازه کن</button></div><div class="toolrow"><button type="button" class="tp-btn" data-dbuild>🧱 همین حالا با سازندهٔ پارامتری</button></div>`;

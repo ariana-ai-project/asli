@@ -693,7 +693,7 @@ export function threadOut(th, side) {
     /* turns و cap (ai-lock.js:aiThread): «دورِ n از ۵» و نوارِ «✋ سقفِ ۵ دور پر شد»ِ صفحهٔ مکاتبات — پیش از این به صفحه نمی‌رسیدند */
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
       ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, human: !!th.ai.human, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch,
-        turns: th.ai.turns || null, cap: th.ai.cap || null } : null } : {}),
+        turns: th.ai.turns ? { used: th.ai.turns.used, max: th.ai.turns.max } : null, cap: th.ai.cap ? { max: th.ai.cap.max, at: th.ai.cap.at || null } : null } : null } : {}),
   };
 }
 /** پیام‌هایی که این طرف از صفحه‌اش پاک کرده: تا همین شناسه (در دیتابیس می‌مانند و طرف دیگر هنوز می‌بیند) */

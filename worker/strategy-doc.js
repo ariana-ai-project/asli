@@ -323,11 +323,31 @@ async function nextPregen(env) {
 /* عددهای هر درخواست                                                    */
 /* ------------------------------------------------------------------ */
 /**
- * هدف، حد، لنگر و پیشنهادِ هر دور برای یک قلمِ درخواست — قیمت مرجعِ کد (cr_prices) و برنامهٔ موتور (planNegotiation). درونی:
- * هرگز به تأمین‌کننده نمی‌رسد. بی قیمت مرجع: status NO_ANCHOR (ST-P11).
+ * قاعده‌های سند (rules_pct: هدف و حد نسبت به لنگر، آهنگِ c و شمارِ دور) روی برنامهٔ موتور — هدف و حد هرگز بالاتر از بهترین
+ * پیشنهادِ واقعی (p.batna). همان قاعده برای مذاکرهٔ دوگامی (turn-engine.js:planOf) و عددهای درونیِ سند (docNumbers)؛ urgent: افزودهٔ
+ * فوریت (C.URGENT_RV_EXTRA) روی تحملِ حدِ سند هم می‌ماند. p را عوض می‌کند و برمی‌گرداند.
  */
-export async function docNumbers(env, head, itemCode, { urgent = false } = {}) {
-  const hp = await headPolicy(env, head, { itemCode });
+export function applyRules(p, r, { urgent = false } = {}) {
+  if (!p || p.status !== "OK") return p;
+  const x = r || {}, best = p.batna;
+  const cap = (v) => (best != null ? Math.min(v, best) : v);
+  if (Number.isFinite(x.target_vs_ref)) p.target = cap(p.anchor * (1 + x.target_vs_ref));
+  if (Number.isFinite(x.rv_tol)) p.reservation = cap(p.anchor * (1 + x.rv_tol + (urgent ? C.URGENT_RV_EXTRA : 0)));
+  if (Number(x.concession_c) > 0) p.c = Number(x.concession_c);
+  if (Number.isInteger(x.rounds) && x.rounds >= 1) p.rounds = x.rounds;
+  if (p.target > p.reservation) p.target = p.reservation;
+  return p;
+}
+
+/**
+ * هدف، حد، لنگر و پیشنهادِ هر دور برای یک قلمِ درخواست — قیمت مرجعِ کد (cr_prices) و برنامهٔ موتور (planNegotiation) با قاعده‌های
+ * سندِ تأییدشدهٔ همین نوع قلم (applyRules؛ سندِ سازندهٔ پارامتری درصدهای خودش را دارد — پیش‌تر این‌جا نادیده می‌ماند و عددهای
+ * درونیِ سند و زمینهٔ مدل با متنِ سند و موتورِ مذاکره نمی‌خواند). درونی: هرگز به تأمین‌کننده نمی‌رسد. بی قیمت مرجع: status
+ * NO_ANCHOR (ST-P11). rules: قاعده‌های یک نسخهٔ مشخص (null یعنی پیش‌فرضِ کلاسِ بازار؛ نگذاشتن یعنی سندِ تأییدشده، اگر کلیدِ doc روشن
+ * است). hp: سیاستِ همین قلم اگر صدازننده پیش‌تر خوانده، تا headPolicy دوباره خوانده نشود.
+ */
+export async function docNumbers(env, head, itemCode, { urgent = false, hp: hp0 = null, rules = undefined } = {}) {
+  const hp = hp0 || await headPolicy(env, head, { itemCode });
   if (!hp) return null;
   let ref = null, refRow = null;
   if (T(itemCode)) {
@@ -338,8 +358,10 @@ export async function docNumbers(env, head, itemCode, { urgent = false } = {}) {
   }
   const p = planNegotiation(hp.profile, ref, [], urgent);
   if (p.status !== "OK") return { status: p.status, action: p.action, ref: null };
+  const r = rules !== undefined ? rules : ((await docRules(env, hp.head, itemCode, { hp }).catch(() => null)) || {}).rules || null;
+  applyRules(p, r, { urgent });
   return { status: "OK", ref: Math.round(ref), unit: refRow ? refRow.u : null, quality: refRow ? refRow.q : null, target: Math.round(p.target), reservation: Math.round(p.reservation),
-    anchor: Math.round(p.anchor), c: p.c, rounds: p.rounds, offers: Array.from({ length: p.rounds }, (_, i) => Math.round(nextOffer(p, i + 1))), urgent };
+    anchor: Math.round(p.anchor), c: p.c, rounds: p.rounds, offers: Array.from({ length: p.rounds }, (_, i) => Math.round(nextOffer(p, i + 1))), urgent, rules: !!r };
 }
 
 /* ------------------------------------------------------------------ */
@@ -381,7 +403,10 @@ export function builderDoc(input, b) {
   }, input);
   doc.negotiation.concession_c = PACE[b.pace];
   doc.negotiation.rounds = rounds;
-  doc.negotiation.rules_pct = { ...e.negotiation, target_vs_ref: tv, rv_tol: rv, concession_c: PACE[b.pace], rounds };
+  /* پیشنهادِ هر دور نسبت به مرجع با همین پارامترها (پیش‌تر از پیش‌فرضِ کلاسِ بازار می‌ماند و «لنگر»ِ سند با سازنده نمی‌خواند) */
+  const pl = { target: Math.min(1 + tv, 1 + rv), reservation: 1 + rv, c: PACE[b.pace], rounds };
+  doc.negotiation.rules_pct = { ...e.negotiation, target_vs_ref: tv, rv_tol: rv, concession_c: PACE[b.pace], rounds,
+    offers_by_round_vs_ref: Array.from({ length: rounds }, (_, i) => pyRound(nextOffer(pl, i + 1) - 1, 4)) };
   doc.builder = { weights: Object.fromEntries(WEIGHT_KEYS.map((k, i) => [k, ws[i]])), target_vs_ref: tv, rv_tol: rv, rounds, max_pay_months: payMax, panel_rate: rate,
     pace: b.pace, others: b.others, tradeables: tradeable, hard_constraints: hard, split_ok: !!b.split_ok, note: clip(b.note, 600) || null };
   return doc;
@@ -472,7 +497,12 @@ export async function docView(env, head, { itemCode = null, urgent = false, enqu
   if (enqueue && !(await latestDoc(env, hp.head, variant))) await enqueueDoc(env, hp.head, { itemCode, prio: 1, by }).catch((e) => console.error("doc enqueue", e && e.message));
   const [last, ok, row] = await Promise.all([latestDoc(env, hp.head, variant), approvedDoc(env, hp.head, variant), headRow(env, hp.head)]);
   const nd = (row && row.rec && row.rec.negotiation_defaults) || {};
-  return { available: true, head: hp.head, variant, latest: docOut(last), approved: docOut(ok), numbers: await docNumbers(env, hp.head, itemCode, { urgent }).catch(() => null),
+  /* عددهای درونی با قاعده‌های همان نسخه‌ای که دیده می‌شود: numbers برای آخرین نسخه (بازبینی)، numbers_approved برای نسخهٔ تأییدشده وقتی
+     نسخهٔ تازه‌تری هست (نمای فقط‌خواندنیِ پس از «🚀 شروع» همان نسخهٔ تأییدشده را نشان می‌دهد) */
+  const rulesOf = (r) => { const d = r ? parse(r.final_json, null) || parse(r.doc_json, null) : null; return (d && d.negotiation && d.negotiation.rules_pct) || null; };
+  const nums = (r) => docNumbers(env, hp.head, itemCode, { urgent, hp, rules: rulesOf(r) }).catch(() => null);
+  return { available: true, head: hp.head, variant, latest: docOut(last), approved: docOut(ok), numbers: await nums(last || ok),
+    ...(ok && last && ok.id !== last.id ? { numbers_approved: await nums(ok) } : {}),
     builder: { pace: PACE_FA, others: OTHERS_FA, weights: WEIGHT_FA, boxes: STRAT_BOXES, tradeable_issues: nd.tradeable_issues || [],
       defaults: { ...negRules(hp.profile), weights: Object.fromEntries(Object.entries(nd.weights || {}).map(([k, v]) => [k, Math.round(v * 100)])), max_pay_months: 3, pace: "balanced",
         others: "better_only", hard_constraints: nd.hard_constraints || [] } },
@@ -480,15 +510,35 @@ export async function docView(env, head, { itemCode = null, urgent = false, enqu
 }
 
 /** قاعده‌های سندِ تأییدشدهٔ قلم برای مذاکرهٔ دوگامی (turn-engine.js): درصدهای هدف و حد، آهنگ و دورها، پارامترهای سازنده و قیدهای سخت */
-export async function docRules(env, head, itemCode) {
+export async function docRules(env, head, itemCode, { hp: hp0 = null } = {}) {
   if (!(await docOn(env)) || !T(head)) return null;
-  const hp = await headPolicy(env, head, { itemCode }).catch(() => null);
+  const hp = hp0 || await headPolicy(env, head, { itemCode }).catch(() => null);
   if (!hp) return null;
   const ok = await approvedDoc(env, hp.head, variantOf(hp.code));
   const d = ok ? parse(ok.final_json, null) : null;
   if (!d) return null;
   const n = d.negotiation || {};
   return { rules: n.rules_pct || null, builder: d.builder || null, hard: n.hard_constraints || [], version: ok.version };
+}
+
+/**
+ * سندِ تأییدشدهٔ نوع قلمِ یک قلم، کوتاه — برای کارتِ «🧭 مذاکرهٔ کارشناس هوشمند»ِ مکاتبات (worker/neg-view.js): نسخه، کلاسِ بازار،
+ * حالتِ استعلام، آهنگ و دورها، قاعده‌های لنگر و حد، قیدهای سخت و بسته‌ها — همان نسخه‌ای که docBlock در زمینهٔ کارشناس هوشمند
+ * می‌گذارد. با کلیدِ خاموش یا بی سندِ تأییدشده null. newer: نسخهٔ تازه‌تری که هنوز تأیید نشده (کارشناس هوشمند تا آن موقع با همین است).
+ */
+export async function docBrief(env, head, itemCode, { hp: hp0 = null } = {}) {
+  if (!(await docOn(env)) || !T(head)) return null;
+  const hp = hp0 || await headPolicy(env, head, { itemCode }).catch(() => null);
+  if (!hp) return null;
+  const variant = variantOf(hp.code);
+  const [ok, last] = await Promise.all([approvedDoc(env, hp.head, variant), latestDoc(env, hp.head, variant)]);
+  const d = ok ? parse(ok.final_json, null) : null;
+  if (!d) return null;
+  const n = d.negotiation || {}, mv = d.market_view || {}, r = d.rfq || {};
+  return { id: ok.id, version: ok.version, head: hp.head, source: ok.source, reviewed_by: ok.reviewed_by || null, reviewed_at: ok.reviewed_at || null,
+    ms: mv.ms || null, mode: r.mode || null, c: n.concession_c ?? null, rounds: n.rounds ?? null, anchor_rule: T(n.anchor_rule), reservation_rule: T(n.reservation_rule),
+    hard: (n.hard_constraints || []).slice(0, 8), packages: (n.packages || []).map((p) => p.description_fa).filter(Boolean).slice(0, 4), summary: clip(d.summary_fa, 600),
+    newer: last && last.id !== ok.id && last.version > ok.version ? { version: last.version, state: last.state, state_fa: DOC_STATE_FA[last.state] || last.state } : null };
 }
 
 /** «🚀 شروع» با کلیدِ doc: سندِ تأییدشده برای نوع قلمِ این قلم لازم است (نوع قلمِ بیرون از دادهٔ تحقیق آزاد است) */
@@ -524,7 +574,8 @@ export async function docBlock(env, items) {
     const ok = seen.has(key) ? null : await approvedDoc(env, hp.head, variantOf(hp.code));
     seen.add(key);
     const d = ok ? parse(ok.final_json, null) : null;
-    const nums = await docNumbers(env, hp.head, it.code || null).catch(() => null);
+    /* عددهای درونی با قاعده‌های همین سند (قلمِ دیگرِ همان نوع: سندِ تأییدشده را docNumbers خودش می‌خواند) */
+    const nums = await docNumbers(env, hp.head, it.code || null, { hp, rules: d ? (d.negotiation || {}).rules_pct || null : undefined }).catch(() => null);
     if (!d && !(nums && nums.status === "OK")) continue;
     const lines = [`«${it.title || hp.head}» (نوع قلم: ${hp.head})`];
     if (d) {
