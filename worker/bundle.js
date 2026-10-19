@@ -30,11 +30,16 @@ export async function bundleData(env, aid, settings, company) {
   ).bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
 
-  const [items, quotes, letter] = await Promise.all([
+  const [items, quotes, letter, fc] = await Promise.all([
     env.DB.prepare("SELECT * FROM items WHERE assignment_id=? ORDER BY line_no").bind(aid).all(),
     env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=?").bind(aid).all(),
     env.DB.prepare("SELECT * FROM letters WHERE assignment_id=? AND state='written' ORDER BY id DESC LIMIT 1").bind(aid).first(),
+    /* «📦 بستهٔ کمیسیون» (worker/final-call.js): دارندگانِ پیش‌فاکتورِ رسمیِ معتبر هنگامِ ورود — نامشان در جدول کمیسیون سبز است */
+    env.DB.prepare("SELECT id, cfg_json FROM final_calls WHERE assignment_id=? AND state='closed' ORDER BY id DESC LIMIT 1").bind(aid).first().catch(() => null),
   ]);
+  const offpf = fc ? ((await env.DB.prepare("SELECT supplier_name FROM final_call_sups WHERE call_id=? AND final='ok'").bind(fc.id).all().catch(() => ({ results: [] }))).results || []).map((r) => r.supplier_name) : [];
+  let offpfHours = 24;
+  try { const c = fc && fc.cfg_json ? JSON.parse(fc.cfg_json) : null; if (c && Number(c.min_valid_h) >= 0) offpfHours = Number(c.min_valid_h); } catch (_) { /* پیش‌فرض */ }
 
   return {
     assignment: a,
@@ -58,6 +63,7 @@ export async function bundleData(env, aid, settings, company) {
     company,
     vatRate: typeof settings.vatRate === "number" ? settings.vatRate : 0.1,
     date: jStr(Date.now()),
+    offpf, offpfHours,
   };
 }
 

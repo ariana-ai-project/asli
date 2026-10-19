@@ -363,6 +363,16 @@ function smsBody(env, { intro, k, bot, pass }) {
     .filter((x) => x != null).join("\n");
 }
 const maskPass = (text, pass) => String(text).split(pass).join("••••••");
+/**
+ * «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): متنِ پیامک با لینکِ پنل، بات و رمزِ تازهٔ ورود — همان قالبِ پیامکِ استعلام.
+ * stmts رمز را می‌نویسند (با همان batchِ ثبتِ پیامک)؛ masked همان متن بی رمز برای sp_sms.
+ */
+export async function smsWithLogin(env, phone, intro) {
+  const { pass, stmts } = await newPassword(env, phone.id);
+  const bot = await spBotUser(env);
+  const text = smsBody(env, { intro, k: phone.k, bot, pass });
+  return { text, masked: maskPass(text, pass), stmts, panel: panelLink(env, phone.k), bot: botLink(bot, "s" + phone.k) };
+}
 
 /** «ارسال رمز به پیامک» از صفحهٔ ورود یا بات. پیامک شبیه‌سازی‌شده به کارشناسِ آخرین گفت‌وگوی همین تأمین‌کننده می‌رود */
 export async function resendPassword(env, k) {

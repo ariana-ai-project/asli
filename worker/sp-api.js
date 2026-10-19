@@ -23,6 +23,7 @@ import { verifyInitData, tgIdentity } from "./tg-auth.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
 import { proformaHtml, renderProformaDoc, PROFORMA_CSS } from "./pfdoc.js";
 import { pfReadOn } from "./switches.js";
+import { callForThread, offpfIngest, offpfDecide, submitOffpf, markSubmitted } from "./final-call.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const int = (v) => { const n = parseInt(v, 10); return Number.isFinite(n) ? n : null; };
@@ -128,7 +129,10 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   /* --- هر دو طرف --- */
   if ((mm = /^\/sp\/thread\/(\d+)$/.exec(path)) && m === "GET") {
     const th = await C.threadFor(env, mm[1], who, { read: true });
-    return json(await C.threadFull(env, th, who.side));
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): شمارهٔ پیشنهاد، مهلت، وضعیت و آخرین پیش‌فاکتورِ رسمی */
+    const full = await C.threadFull(env, th, who.side);
+    full.final_call = await callForThread(env, th, who.side).catch((e) => { console.error("final call thread", e && e.message); return null; });
+    return json(full);
   }
   if (path === "/sp/poll" && m === "GET") {
     const th = await C.threadFor(env, url.searchParams.get("t"), who, { read: true });
@@ -221,8 +225,32 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if ((mm = /^\/sp\/line\/(\d+)$/.exec(path)) && m === "PUT") return json(await C.lineSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/line\/(\d+)\/ready$/.exec(path)) && m === "POST") return json(await C.lineReady(env, sup, mm[1], !!(await readJson(request)).on));
     if ((mm = /^\/sp\/thread\/(\d+)\/terms$/.exec(path)) && (m === "POST" || m === "PUT")) return json(await C.termsSave(env, sup, mm[1], await readJson(request)));
+    /* «🧾 پیش‌فاکتورِ رسمی» (worker/final-call.js): بدنه خودِ فایل است. stage=call در پنجرهٔ فراخوان؛ stage=submit پیش از «📤 ارسال» وقتی
+       کارشناس «پیش‌فاکتورِ رسمی 🔒» گذاشته (ids: اقلامِ آمادهٔ ارسال). مدل سند را با پیشنهاد می‌سنجد و حکم برمی‌گردد */
+    if ((mm = /^\/sp\/thread\/(\d+)\/offpf$/.exec(path)) && m === "POST") {
+      const th = await C.threadFor(env, mm[1], who);
+      const stage = url.searchParams.get("stage") === "submit" ? "submit" : "call";
+      const ids = T(url.searchParams.get("ids")).split(",").map(int).filter(Boolean);
+      const f = await storeBody(env, request, url, th.assignment_id, "offpf");
+      try {
+        const r = await offpfIngest(env, { aid: th.assignment_id, name: th.supplier_name, threadId: th.id, file: f, channel: who.tg ? "telegram" : "panel",
+          by: `supplier:${sup.supplier_id}`, stage, lineIds: ids });
+        return json({ ok: true, ...r });
+      } catch (e) { const store = storage(env); if (store) await later(ctx, () => store.remove(f.skey)); throw e; }
+    }
+    if ((mm = /^\/sp\/offpf\/(\d+)\/decide$/.exec(path)) && m === "POST") {
+      const b = await readJson(request);
+      return json(await offpfDecide(env, mm[1], { replace: !!b.replace, by: `supplier:${sup.supplier_id}` }, who));
+    }
     if ((mm = /^\/sp\/thread\/(\d+)\/submit$/.exec(path)) && m === "POST") {
-      const r = await C.submitLines(env, sup, mm[1], (await readJson(request)).line_ids);
+      const sb = await readJson(request);
+      /* «پیش‌فاکتورِ رسمی 🔒»: همان پیش‌فاکتورِ سنجیده‌شده پیوستِ بسته می‌شود */
+      const th0 = await C.threadFor(env, mm[1], who);
+      const want = Array.isArray(sb.line_ids) && sb.line_ids.length ? new Set(sb.line_ids.map(int)) : null;
+      const rl = ((await env.DB.prepare("SELECT id, item_id FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th0.id).all()).results || []).filter((l) => !want || want.has(l.id));
+      const op = rl.length ? await submitOffpf(env, th0, rl, sb.offpf_id) : null;
+      const r = await C.submitLines(env, sup, mm[1], sb.line_ids, op ? { skey: op.skey, filename: op.filename, mime: op.mime, size: op.size } : undefined);
+      if (op) await markSubmitted(env, op, r.bundle_id);
       /* فاز ۴ب گام ۳: در کارِ کارشناس هوشمند بستهٔ ارسالی (در چارچوبِ قفل‌ها) همان لحظه تأیید نهایی می‌شود — بی مدل */
       const auto = await autoDecide(env, r.thread.id).catch((e) => { console.error("ai auto", e && e.message); return null; });
       await later(ctx, () => P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]));
@@ -240,6 +268,9 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     if ((mm = /^\/sp\/thread\/(\d+)\/submit-pf$/.exec(path)) && m === "POST") {
       const th = await C.threadFor(env, mm[1], who);
       const ids = T(url.searchParams.get("ids")).split(",").map(int).filter(Boolean);
+      /* «پیش‌فاکتورِ رسمی 🔒»: پیوستِ بی‌سنجش پذیرفته نیست — اول «🧾 پیش‌فاکتورِ رسمی» (sp/thread/:id/offpf) */
+      const rl = ((await env.DB.prepare("SELECT id, item_id FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th.id).all()).results || []).filter((l) => !ids.length || ids.includes(l.id));
+      if (rl.length) await submitOffpf(env, th, rl, null);
       const f = await storeBody(env, request, url, th.assignment_id, "sp-pf");
       let r;
       try { r = await C.submitLines(env, sup, th.id, ids, f); }

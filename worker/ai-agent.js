@@ -44,6 +44,7 @@ import { deliverSms } from "./sp-sms.js";
 import { smsReady, smsLabel, isMobile } from "./sms.js";
 import { runAiCheck, aiUsable, resolve, acceptable } from "./sp-ai.js";
 import { bundleData, recordCommission } from "./bundle.js";
+import { fcCfg, startCall, closeCall, fcAdmin, saveFcCfg } from "./final-call.js";
 import { commissionXlsx } from "./sheets.js";
 import { writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
@@ -1103,7 +1104,8 @@ async function finishCheck(env, run, { cfg, asg, ex }) {
   const props = (waitP && waitP.n) || 0;
   if (((covered && why) || (run.finish_at && some)) && (!props || run.finish_at)) {
     const short = shortOf(cover);
-    run.data.closing = { step: "report", why, ...(short.length ? { short } : {}) };
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): اگر پشتیبانی روشن گذاشته، اول پیامک به تأمین‌کنندگانِ تأییدنهایی و «📦 بستهٔ کمیسیون» سرِ مهلت */
+    run.data.closing = { step: (await fcCfg(env)).on ? "call" : "report", why, ...(short.length ? { short } : {}) };
     await env.DB.batch([saveData(env, run), next(env, run, 0, "closing"),
       env.DB.prepare("UPDATE ai_props SET state='off', decided_at=?, decided_by='system' WHERE run_id=? AND state='pending'").bind(now(), run.id),
       logStmt(env, run.id, null, "step", short.length
@@ -1498,6 +1500,33 @@ async function stepClosing(env, run, k) {
   const { ex, rec } = k;
   const cl = run.data.closing || (run.data.closing = { step: "report" });
   const aid = run.assignment_id;
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی»: لحظهٔ تصمیم ثبت، پیامک به تأمین‌کنندگانِ تأییدنهایی (جز دارندگانِ پیش‌فاکتورِ رسمیِ معتبر) */
+  if (cl.step === "call") {
+    let r = null;
+    try { r = await startCall(env, aid, { by: "ai", mode: "ai" }); } catch (e) {
+      /* خاموش شده یا خطِ تأییدنهایی نیست: بی فراخوان ادامه */
+      cl.step = "report";
+      await env.DB.batch([saveData(env, run), logStmt(env, run.id, null, "close", `فراخوانِ پیش‌فاکتورِ رسمی زده نشد (${String((e && e.message) || e).slice(0, 160)}); جدول کمیسیون بی آن ساخته می‌شود.`), next(env, run, 0)]);
+      return { step: "close-call-skip" };
+    }
+    cl.call_id = r.call.id; cl.step = "call_wait";
+    const wait = Math.max(0, Math.min(r.call.deadline_at - now(), 30 * 60000));
+    await env.DB.batch([saveData(env, run), logStmt(env, run.id, null, "close", r.existed ? "فراخوانِ پیش‌فاکتورِ رسمیِ همین درخواست از قبل هست؛ منتظرِ «📦 بستهٔ کمیسیون»."
+      : `📨 فراخوانِ پیش‌فاکتورِ رسمی: ${faN(r.sent || 0)} پیامک${r.no_phone ? ` · ${faN(r.no_phone)} تأمین‌کنندهٔ بی‌شماره (به کارشناس گفته شد)` : ""}؛ مهلت تا ${faN(fmtFa(r.call.deadline_at))}.`), next(env, run, wait)]);
+    return { step: "close-call" };
+  }
+  /* منتظرِ مهلت (یا همه معتبر): بعد «📦 بستهٔ کمیسیون» بسته و جدول کمیسیون */
+  if (cl.step === "call_wait") {
+    const c = cl.call_id ? await env.DB.prepare("SELECT * FROM final_calls WHERE id=?").bind(cl.call_id).first() : null;
+    if (c && c.state === "open" && c.deadline_at > now()) {
+      await next(env, run, Math.max(60000, Math.min(c.deadline_at - now(), 30 * 60000))).run();
+      return { step: "call-wait" };
+    }
+    if (c && c.state === "open") await closeCall(env, c, { by: "ai", why: "deadline" });
+    cl.step = "report";
+    await env.DB.batch([saveData(env, run), logStmt(env, run.id, null, "close", "📦 بستهٔ کمیسیون بسته شد؛ شرح، نامه و جدول کمیسیون آماده می‌شود."), next(env, run, 0)]);
+    return { step: "call-closed" };
+  }
   if (cl.step === "report") {
     const context = await closingContext(env, run);
     rec.purpose = "closing"; rec.thread = null;
@@ -2357,6 +2386,9 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   if (sub === "/modes" && m === "PUT") { const r = await saveModes(env, await readJson(request), "support"); return json({ ok: true, ...r, fa: MODE_FA, default: MODE_DEFAULT }); }
   if (sub === "/heads" && m === "GET") return json({ heads: await searchHeads(env, url.searchParams.get("q")) });
   if (sub === "/switches" && m === "PUT") return json({ ok: true, ...(await saveSwitches(env, await readJson(request), "support")) });
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): روشن/خاموش، مهلت و کمینهٔ اعتبار (ساعت)، کمترین قیمت در پیامک و همراهِ کارشناسان */
+  if (sub === "/final-call" && m === "GET") return json(await fcAdmin(env));
+  if (sub === "/final-call" && m === "PUT") return json({ ok: true, ...(await saveFcCfg(env, await readJson(request), "support")) });
   if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
   let dm;
   if ((dm = /^\/deliveries\/(\d+)$/.exec(sub)) && m === "GET") return json(await delivery(env, int(dm[1])));

@@ -33,6 +33,7 @@ import { runExtraction, extractFor, saveExtraction, applyExtraction, lineUnitPri
 import { transcribe, writeLetter, letterSubject } from "./letter.js";
 import { renderLetter } from "./docx.js";
 import { bundleData, readiness, commissionGuard, recordCommission } from "./bundle.js";
+import { callGuard, callView, startCall, callText, finalCallTick } from "./final-call.js";
 import { deleteQuotes, phoneChannels, withPhoneKeys, itemSearches, titleKey, PLATFORMS } from "./records.js";
 import { commissionXlsx } from "./sheets.js";
 import { renderRequestDoc } from "./reqdoc.js";
@@ -1423,6 +1424,13 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
     return tableSelect(env, api, chat, ex, aid, messageId,
       `⛔ هر قلم باید به حداقلِ استعلامِ ردهٔ خودش (جزئی، متوسط، بزرگ، عمده — از بالاترین پیشنهادِ کل) از تأمین‌کنندگانِ مختلف برسد. این‌ها کم دارند؛ استعلامِ بیشتر بگیرید:\n`
       + g.missing.slice(0, 8).map((x) => `• ${esc(short(x.title, 40))} (ردهٔ «${esc(x.cat_fa || "جزئی")}»: ${M(x.n)} از ${M(x.need)})`).join("\n"));
+  }
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): جدول فقط بعد از بسته شدنِ «📦 بستهٔ کمیسیون» */
+  try { await callGuard(env, aid); } catch (e) {
+    if (!(e && e.status === 409)) throw e;
+    const none = !!(e.extra && e.extra.final_call === "none");
+    await api.sendMessage(chat, `📨 ${esc(e.message)}`, [[none ? { text: "📨 فراخوانِ پیش‌فاکتورِ رسمی", callback_data: `fc:${aid}:go` } : { text: "📨 وضعیتِ فراخوان", callback_data: `fc:${aid}:st` }]]);
+    return { ok: true };
   }
   const st = readiness(d);
   const finals = d.quotes.filter((q) => q.final && q.saved);
@@ -3030,7 +3038,10 @@ async function deliverSend(env, api, chat, ex, f, d, mid) {
   }
   const finals = b.quotes.filter((q) => q.final && q.saved);
   if (d.docs.table) {
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی»: جدول فقط بعد از «📦 بستهٔ کمیسیون» */
+    const fcBlock = finals.length ? await callGuard(env, aid).then(() => null, (e) => (e && e.status === 409 ? e.message : null)) : null;
     if (!finals.length) notes.push("⚠️ جدول کمیسیون خطِ «تأیید نهایی» ندارد و فرستاده نشد.");
+    else if (fcBlock) notes.push(`⚠️ ${esc(fcBlock)}`);
     else {
       /* جدولی که این‌جا ساخته می‌شود همان تولید جدول است: شمارهٔ فرم (اگر هنوز ندارد) همین‌جا داده می‌شود */
       b.commission_no = await recordCommission(env, aid, { expertId: ex.id, channel: "telegram" });
@@ -3752,6 +3763,27 @@ async function onCallback(env, cq, apiIn) {
     return tableSelect(env, api, chat, ex, aid, null);
   }
 
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): fc:<aid>:go (شروع، با همان نگهبانِ جدول کمیسیون) · st (وضعیت) */
+  if (action === "fc") {
+    const aid = num(1), step = parts[2];
+    const own = await env.DB.prepare("SELECT id FROM assignments WHERE id=? AND expert_id=?").bind(aid, ex.id).first();
+    if (!own) { await ack("این ارجاع متعلق به شما نیست.", true); return { ok: true }; }
+    if (step === "go") {
+      if (await aiEndLocked(env, await aiOwned(env, aid), aid)) { await ack(AI_LOCK_MSG.slice(0, 190), true); return { ok: true }; }
+      const g = await commissionGuard(env, aid, await getSettings(env));
+      if (!g.finals || g.missing.length) { await ack("هنوز هر قلم به حداقلِ استعلامِ ردهٔ خودش نرسیده؛ «📊 جدول کمیسیون» کمبودها را می‌گوید.", true); return { ok: true }; }
+      await ack("در حال فرستادنِ پیامک‌ها…");
+      try {
+        const r = await startCall(env, aid, { by: `expert:${ex.id}`, mode: "manual" });
+        if (r.existed) await api.sendMessage(chat, callText(await callView(env, aid)));
+      } catch (e) { await api.sendMessage(chat, `⚠️ ${esc(e.message)}`); }
+      return { ok: true };
+    }
+    await ack();
+    await api.sendMessage(chat, callText(await callView(env, aid)));
+    return { ok: true };
+  }
+
   /* خاتمه: cm:<aid>:end · card. تیک‌های قدیمیِ t/all/none (دکمه‌های پیام‌های پیشین) دیگر چیزی را عوض
      نمی‌کنند — تأیید کمیسیون فقط از پنل پشتیبانی است */
   if (action === "cm") {
@@ -4030,6 +4062,8 @@ export async function scheduled(env, cron) {
       if (cron && (u.usd || u.usdError)) return { ...out, ...u };
       out = { ...out, ...u };
     }
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): فراخوان‌های سررسیده بسته و «📦 بستهٔ کمیسیون» ساخته می‌شود — یک کوئری وقتی چیزی سررسید نیست */
+    out = { ...out, ...(await finalCallTick(env).catch((e) => ({ fcError: e && e.message }))) };
     out = { ...out, ...(await runSmartJobs(env).catch((e) => ({ jobsError: e && e.message }))) };
     /* کارشناس هوشمند (worker/ai-agent.js): یک گام — فقط در دقیقه‌ای که جستجوی هوشمندِ صف اجرا نشد (سقف زیردرخواست) */
     if (!out.jobs) out = { ...out, ...(await aiTick(env).catch((e) => ({ aiError: e && e.message }))) };

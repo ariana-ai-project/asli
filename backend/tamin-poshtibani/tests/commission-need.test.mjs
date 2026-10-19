@@ -19,6 +19,8 @@ const env = { DB, MANAGER_CODE: "4321", TG_WEBHOOK_SECRET: "raz-e-server" };
 const T0 = Date.now() - 3600000;
 if (DB) {
   await ensureSchema(env);
+  /* این فایل جدول کمیسیون را بی «📨 فراخوانِ پیش‌فاکتورِ رسمی» می‌آزماید (همان رفتارِ پیش از آن)؛ فراخوان در final-call.test.mjs */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('finalCall',?,?)").run(JSON.stringify({ on: false, by: "test" }), Date.now());
   DB.raw.exec("DELETE FROM experts");
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,created_at) VALUES (1,'کارشناس یک','یک','1111',1,1,?)").run(T0);
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-N','1405/07/20','پروژهٔ حد')").run();

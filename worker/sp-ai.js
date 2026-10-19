@@ -107,6 +107,28 @@ const TOOL = {
         },
         required: ["value", "sure"],
       },
+      /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): تاریخِ صدور، اعتبار، مهر و امضا و نامِ فروشنده — برای سنجشِ «دست‌کم ۲۴ ساعت اعتبار» */
+      issue_date: {
+        type: "object",
+        properties: { value: { type: ["string", "null"], description: "تاریخِ صدورِ سند، شمسی با رقم انگلیسی مثل 1405/07/27 (اگر میلادی است همان را بنویس)؛ اگر نیامده null" }, sure: SURE },
+        required: ["value", "sure"],
+      },
+      valid_until: {
+        type: "object",
+        properties: { value: { type: ["string", "null"], description: "اگر اعتبار تا تاریخِ معینی نوشته شده («معتبر تا ۱۴۰۵/۰۸/۰۱»)، همان تاریخ شمسی با رقم انگلیسی؛ وگرنه null" }, sure: SURE },
+        required: ["value", "sure"],
+      },
+      valid_hours: {
+        type: "object",
+        properties: { value: { type: ["integer", "null"], description: "اگر اعتبار به ساعت نوشته شده («اعتبار ۴۸ ساعت»)، شمارِ ساعت؛ وگرنه null" }, sure: SURE },
+        required: ["value", "sure"],
+      },
+      stamped: {
+        type: "object",
+        properties: { value: { type: ["boolean", "null"], description: "مهر یا امضای فروشنده روی سند دیده می‌شود؟ اگر نمی‌توانی بگویی null" }, sure: SURE },
+        required: ["value", "sure"],
+      },
+      seller: { type: ["string", "null"], description: "نامِ فروشنده در سربرگ یا مهرِ سند، عیناً" },
       ship: TERM("روش حمل، عیناً"),
       place: {
         type: "object",
@@ -186,6 +208,8 @@ sure=false هر جا رقم یا متن مبهم است، سند ناخوانا�
 - unit.same=true اگر واحدِ سند هم‌معنای واحدِ اعلامی است (بند الف-۳ را هم در نظر بگیر).
 
 ت) شرایطِ فاکتور برای کلِ سند: زمان تحویل، شرایط تسویه، نوع فاکتور، ارزش افزوده و اعتبار؛ و اگر آمده روش حمل و محل تحویل. هر کدام را با شرطِ اعلامیِ تأمین‌کننده بسنج و same را بگو. نوع فاکتور را فقط اگر سند صریح گفته پر کن. اگر شرطی در سند نیامده value=null، و اگر مطمئنی که نیامده sure=true.
+
+ج) مشخصاتِ خودِ سند: تاریخِ صدور (issue_date)، اعتبار — به روز (valid_days)، به ساعت (valid_hours) یا تا تاریخی معین (valid_until) — و این‌که مهر یا امضای فروشنده روی سند دیده می‌شود (stamped)، و نامِ فروشنده در سربرگ یا مهر (seller). تاریخ‌ها را با رقم انگلیسی و به شکلِ ۱۴۰۵/۰۷/۲۷ بنویس. هر کدام نیامده null.
 
 ث) فقط آنچه در سند آمده؛ حدس نزن. اگر سند خوانا نیست یا پیش‌فاکتور نیست، readable=false و دلیلش. کلیدِ هر قلم همان «L…» است که در فهرستِ بسته آمده — شمارهٔ ردیفِ سند را کلید نکن. برای هر قلمِ بسته دقیقاً یک خروجی و برای هر لایهٔ نام‌برده یک ردیف بده. زبانِ متن‌ها فارسی.`;
 
@@ -362,9 +386,16 @@ export function judge(lines, r, meta = {}, terms = null) {
   if (pl.got === "سایر" && r.place && r.place.other) pl.other = T(r.place.other);
   header.push(pl);
 
+  /* سندِ رسمی: تاریخِ صدور، اعتبار (روز، ساعت یا تا تاریخ)، مهر و امضا و فروشنده — فقط آنچه مدل خواند؛ حسابِ «معتبر تا» کارِ final-call.js است */
+  const dv = (o) => (o && typeof o === "object" ? o.value : o);
+  const jd = (s) => { const x = latin(T(dv(s))).replace(/-/g, "/"); return /^\d{4}\/\d{1,2}\/\d{1,2}$/.test(x) ? x : null; };
+  const doc = {
+    issue: jd(r.issue_date), until: jd(r.valid_until), days: numOf(dv(r.valid_days)), hours: numOf(dv(r.valid_hours)),
+    stamped: dv(r.stamped) == null ? null : !!dv(r.stamped), stamped_sure: sureOf(r.stamped), seller: T(r.seller) || null,
+  };
   const out = {
     v: AI_VERSION, readable: r.readable !== false, reason: r.reason || null, currency: r.currency || null,
-    vat_included: r.vat_included == null ? null : !!r.vat_included, lines: outLines, header, notes: r.notes || null, at: Date.now(), ...meta,
+    vat_included: r.vat_included == null ? null : !!r.vat_included, lines: outLines, header, doc, notes: r.notes || null, at: Date.now(), ...meta,
   };
   out.ok = resolve(out, {}).ready;
   return out;

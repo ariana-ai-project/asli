@@ -30,6 +30,8 @@ const EX = { "X-Expert-Code": "7001" };
 
 if (DB) {
   await ensureSchema(env);
+  /* این فایل جدول کمیسیون را بی «📨 فراخوانِ پیش‌فاکتورِ رسمی» می‌آزماید (همان رفتارِ پیش از آن)؛ فراخوان در final-call.test.mjs */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('finalCall',?,?)").run(JSON.stringify({ on: false, by: "test" }), Date.now());
   /* این فایل مسیرِ پیشین را می‌آزماید: «خوانش هوشمند پیش‌فاکتور» روشن (پنل پشتیبانی). فاز ۴ — خاموش، پیش‌فرض — در phase4.test.mjs */
   DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('aiSwitches',?,?)").run(JSON.stringify({ pfRead: true, by: "test" }), Date.now());
   const t = Date.now();

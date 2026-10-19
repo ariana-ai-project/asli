@@ -25,6 +25,7 @@ import { renderLetter } from "./docx.js";
 import { HttpError } from "./http.js";
 import { DEFAULTS, getSettings, settingsFromRows, managerCode, managerCodeStmt } from "./settings.js";
 import { bundleData, readiness, commissionGuard, recordCommission, missingText } from "./bundle.js";
+import { FC_DDL, callGuard, callView, startCall, closeEarly, callPhone, offpfIngest, offpfDecide, packageOf } from "./final-call.js";
 import { assignmentLogStmt, settingsHistoryStmts, scoresHistoryStmts, deleteQuotes, phoneChannels, setPhoneChannel, itemSearches, withPhoneKeys, backfillSearchKeys } from "./records.js";
 import { expertDecision, approveDecision, rejectDecision } from "./decisions.js";
 import { historyStatus, itemHistory, supplierBuys, itemSeries, ratesWithShares } from "./history.js";
@@ -267,6 +268,7 @@ ${TPL_DDL};
 ${DOC_DDL.trim()}
 ${TURN_DDL.trim()}
 ${QUOTE_EDITS_DDL};
+${FC_DDL}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -316,7 +318,8 @@ const COLUMN_MIGRATIONS = [
   ["quotes", "final_at", "INTEGER"],              /* لحظهٔ تیک «تأیید نهایی» */
   ["quotes", "commission_at", "INTEGER"],         /* در آخرین جدول کمیسیونِ ساخته‌شده بود */
   ["quotes", "src_json", "TEXT"],                 /* منبعِ هر خانه (quote-src.js): دستی، بستهٔ پنل یا مذاکرهٔ هوشمند، خوانشِ پیش‌فاکتور، … */
-  ["quotes", "prices_json", "TEXT"],              /* «قیمتِ نقدی و اعتباری»: {cash, c1, c2, r1, r2} — price همان قیمتِ اصلی */
+  ["quotes", "prices_json", "TEXT"],
+  ["experts", "phone", "TEXT"],                    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی»: پیامکِ «شمارهٔ تأمین‌کننده نیست» به همراهِ کارشناس (پنل پشتیبانی) */              /* «قیمتِ نقدی و اعتباری»: {cash, c1, c2, r1, r2} — price همان قیمتِ اصلی */
   /* تیم کارشناسی (تصمیم مدیر، شهریور ۱۴۰۵): کارشناس ارشد، سرپرستِ هر کارشناس، مقصد اعلان‌های پایش
      (manager | senior)، گروه تلگرامِ تیمِ کارشناس ارشد، و مرحله‌هایی که او اعلانشان را می‌خواهد */
   ["experts", "senior", "INTEGER"],
@@ -1560,7 +1563,9 @@ async function assignmentDetail(env, aid, who) {
   const sr = sizeRulesOf(settings), base = sr.minQ.s;
   const nd = await itemNeeds(env, [aid], open, base, null, sr);
   const need = { base, items: Object.fromEntries([...nd].map(([id, x]) => [id, x])) };
-  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings, ai, need };
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» و «📦 بستهٔ کمیسیون» (worker/final-call.js) — کارتِ پیش از جدول کمیسیون */
+  const final_call = await callView(env, aid).catch((e) => { console.error("final call view", e && e.message); return null; });
+  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings, ai, need, final_call };
 }
 
 /* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
@@ -1758,6 +1763,8 @@ async function commission(env, ex, aid) {
   const g = await commissionGuard(env, aid, await getSettings(env));
   if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
   if (g.missing.length) throw new HttpError(`هر قلم باید به حداقلِ استعلامِ ردهٔ خودش از تأمین‌کنندگانِ مختلف برسد؛ استعلامِ بیشتر بگیرید — کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): جدول فقط بعد از بسته شدنِ «📦 بستهٔ کمیسیون» — درخواستِ پیش از این روال همان‌طور که بود */
+  await callGuard(env, aid);
   /* شمارهٔ ترتیبی فرم (TSA-PS-FO-n) همین‌جا و فقط یک بار داده می‌شود؛ عکسِ جدول هم ثبت می‌شود */
   const no = await recordCommission(env, aid, { expertId: ex.id, channel: "panel" });
   await env.DB.batch([ev(env, `expert:${ex.id}`, "commission", null, null, { assignment_id: aid, commission_no: no })]);
@@ -2394,6 +2401,49 @@ async function route(request, env, ctx) {
     if ((mm = /^\/assignments\/(\d+)$/.exec(path)) && m === "GET") { const who = await requireAny(request, env); return json(await assignmentDetail(env, int(mm[1]), who)); }
     if ((mm = /^\/assignments\/(\d+)\/viewed$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); await ownAssignment(env, ex, int(mm[1])); await env.DB.prepare("UPDATE assignments SET viewed_at=COALESCE(viewed_at,?) WHERE id=?").bind(now(), int(mm[1])).run(); return json({ ok: true }); }
     if ((mm = /^\/assignments\/(\d+)\/commission$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await commission(env, ex, int(mm[1]))); }
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): کارت، شروعِ دستی (پیش از جدول کمیسیون)، پایانِ زودهنگام، شمارهٔ تأمین‌کنندهٔ
+       بی‌شماره، پیش‌فاکتورِ رسمی از دستِ کارشناس و «📦 بستهٔ کمیسیون» */
+    if ((mm = /^\/assignments\/(\d+)\/final-call(\/.*)?$/.exec(path))) {
+      const ex = await requireExpert(request, env);
+      const aid = int(mm[1]), sub = mm[2] || "";
+      await ownAssignment(env, ex, aid);
+      if (sub === "" && m === "GET") return json(await callView(env, aid));
+      if (sub === "" && m === "POST") {
+        /* درخواستِ دستِ کارشناس هوشمند: فراخوان را خودش می‌زند */
+        await aiGuard(env, { expert: ex }, aid);
+        const g = await commissionGuard(env, aid, await getSettings(env));
+        if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
+        if (g.missing.length) throw new HttpError(`فراخوان وقتی است که هر قلم به حداقلِ استعلامِ ردهٔ خودش رسیده باشد — کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
+        const r = await startCall(env, aid, { by: `expert:${ex.id}`, mode: "manual" });
+        return json({ ok: true, existed: !!r.existed, sent: r.sent || 0, no_phone: r.no_phone || 0, view: await callView(env, aid) });
+      }
+      if (sub === "/close" && m === "POST") return json({ ok: true, view: await closeEarly(env, ex, aid) });
+      if (sub === "/phone" && m === "POST") return json(await callPhone(env, ex, aid, await readJson(request)));
+      if (sub === "/package" && m === "GET") return json({ package: await packageOf(env, aid) });
+      /* پیش‌فاکتورِ رسمیِ یک تأمین‌کننده از دستِ کارشناس (تأمین‌کنندهٔ بی‌شماره یا تلفنی) — بدنه خودِ فایل است */
+      if (sub === "/offpf" && m === "POST") {
+        const name = T(url.searchParams.get("supplier"));
+        if (!name) throw new HttpError("نامِ تأمین‌کننده لازم است.");
+        const store = storage(env);
+        if (!store) return NOT_CONNECTED("انبار فایل");
+        const size = int(request.headers.get("content-length"), 0);
+        if (size > MAX_BYTES) throw new HttpError(`حجم فایل بیشتر از ${Math.round(MAX_BYTES / 1048576)} مگابایت است.`, 413);
+        const filename = T(url.searchParams.get("filename")).slice(0, 120) || "proforma";
+        const mime = request.headers.get("content-type") || "application/octet-stream";
+        const skey = storageKey(aid, `offpf-${filename}`);
+        await store.put(skey, request.body, { contentType: mime, size: size || undefined });
+        const r = await offpfIngest(env, { aid, name, file: { skey, filename, mime, size: size || null }, channel: "expert", by: `expert:${ex.id}`, stage: "call" })
+          .catch(async (e) => { await store.remove(skey).catch(() => {}); throw e; });
+        return json({ ok: true, ...r });
+      }
+      let om;
+      if ((om = /^\/offpf\/(\d+)\/decide$/.exec(sub)) && m === "POST") {
+        const b = await readJson(request);
+        const r = await offpfDecide(env, int(om[1]), { replace: !!b.replace, by: `expert:${ex.id}` }, { expert: ex });
+        return json({ ...r, view: await callView(env, aid) });
+      }
+      throw new HttpError("مسیر پیدا نشد.", 404);
+    }
     /* طرح «خرید هوشمند» فاز ۱: ساختارِ همهٔ اقلام منجمد و کار به کارشناس هوشمند سپرده می‌شود (worker/ai-agent.js:aiHandoff) */
     if ((mm = /^\/assignments\/(\d+)\/handoff$/.exec(path)) && m === "POST") {
       const ex = await requireExpert(request, env);

@@ -27,6 +27,8 @@ const HOUR = 3600000;
 let RUN = 0;
 if (DB) {
   await ensureSchema(env);
+  /* این فایل جدول کمیسیون را بی «📨 فراخوانِ پیش‌فاکتورِ رسمی» می‌آزماید (همان رفتارِ پیش از آن)؛ فراخوان در final-call.test.mjs */
+  DB.raw.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('finalCall',?,?)").run(JSON.stringify({ on: false, by: "test" }), Date.now());
   const t = Date.now();
   DB.raw.exec("DELETE FROM experts");
   DB.raw.prepare("INSERT INTO experts (id,name,label,code,active,speed,telegram_chat,created_at) VALUES (1,'هوشمند','آقای هوشمند','9001',1,1,?,?)").run(String(AI_CHAT), t);

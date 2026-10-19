@@ -13,7 +13,7 @@
  * «تأیید نهایی» می‌شود (ai-agent.js:autoDecide) — تصمیمِ بسته دیگر با مدل نیست.
  *
  * items.terms_json: {pay: {opts, lock}, invoice: {opts, lock}, vat: {opts, lock}, dtime: {from, to, lock}, place: {opt, note, lock}, deal: {opt, lock},
- *   ship: {text, lock}, valid: {min, lock}}
+ *   ship: {text, lock}, valid: {min, lock}, offpf: {on, lock}}
  * بی ایمپورت از sp-core.js، تا sp-core.js و api.js بی حلقه بپرسند.
  */
 import { HttpError } from "./http.js";
@@ -28,9 +28,9 @@ const faN = (s) => String(s).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]);
 export const ENUM_FIELDS = ["pay", "invoice", "vat"];
 /* شرطِ شرکت: یکی از فهرست (place، deal)، متن (ship)، کمینهٔ روز (valid) */
 export const ONE_FIELDS = ["place", "deal"];
-export const LIMIT_FIELDS = [...ENUM_FIELDS, "dtime", ...ONE_FIELDS, "ship", "valid"];
+export const LIMIT_FIELDS = [...ENUM_FIELDS, "dtime", ...ONE_FIELDS, "ship", "valid", "offpf"];
 export const LIMIT_FA = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل", place: "محل تحویل", deal: "محل معامله",
-  ship: "روش حمل", valid: "اعتبار پیش‌فاکتور" };
+  ship: "روش حمل", valid: "اعتبار پیش‌فاکتور", offpf: "پیش‌فاکتورِ رسمی" };
 export const LIMIT_ENUMS = { pay: ENUMS.pay, invoice: ENUMS.invoice, vat: ENUMS.vat, place: ENUMS.place, deal: ENUMS.deal };
 
 /** قیدهای یک قلم (یا null) */
@@ -78,6 +78,8 @@ export function cleanLimits(raw) {
     if (!Number.isInteger(n) || n < 1 || n > 365) throw new HttpError("کمینهٔ اعتبار پیش‌فاکتور باید شمارِ روز از ۱ تا ۳۶۵ باشد.", 422, { field: "valid" });
     out.valid = { min: n, lock: x.valid.lock === true };
   }
+  /* «پیش‌فاکتورِ رسمی» (مهر و امضادارِ خودِ فروشنده): 🔒 یعنی هنگامِ «📤 ارسال» الزامی است و مدل آن را با پیشنهاد می‌سنجد (worker/final-call.js)؛ 🔓 خواستهٔ شرکت */
+  if (x.offpf && typeof x.offpf === "object" && x.offpf.on) out.offpf = { on: true, lock: x.offpf.lock === true };
   return Object.keys(out).length ? out : null;
 }
 
@@ -131,6 +133,7 @@ export function combineLocks(list) {
       lock[f] = lock[f] ? lock[f].filter((o) => L[f].opts.includes(o)) : [...L[f].opts];
     }
     if (L.valid && L.valid.lock) lock.valid = Math.max(lock.valid || 0, L.valid.min);
+    if (L.offpf && L.offpf.lock) lock.offpf = true;
     if (L.dtime && L.dtime.lock) {
       const c = lock.dtime || {};
       const from = [c.from, L.dtime.from].filter(Boolean).sort().pop() || null;
@@ -194,6 +197,7 @@ export function fieldTxt(f, v) {
   if (ONE_FIELDS.includes(f)) return v.opt ? `${v.opt}${v.note ? ` (${v.note})` : ""}` : "";
   if (f === "ship") return T(v.text);
   if (f === "valid") return v.min ? `دست‌کم ${faN(v.min)} روز` : "";
+  if (f === "offpf") return v.on ? "مهر و امضادار" : "";
   return "";
 }
 
@@ -207,5 +211,6 @@ export function limitsTxt(L) {
   if (L.deal) parts.push(`${LIMIT_FA.deal} ${L.deal.lock ? "🔒" : "🔓"} «${L.deal.opt}»`);
   if (L.ship) parts.push(`${LIMIT_FA.ship} ${L.ship.lock ? "🔒" : "🔓"} «${L.ship.text}»`);
   if (L.valid) parts.push(`${LIMIT_FA.valid} ${L.valid.lock ? "🔒" : "🔓"} دست‌کم ${faN(L.valid.min)} روز`);
+  if (L.offpf) parts.push(`${LIMIT_FA.offpf} ${L.offpf.lock ? "🔒 الزامی هنگامِ ارسال" : "🔓 خواستهٔ شرکت"}`);
   return parts.join(" · ");
 }
