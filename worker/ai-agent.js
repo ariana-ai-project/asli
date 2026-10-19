@@ -1727,9 +1727,11 @@ const chatOnlyRun = (run, pfRead) => !!run && !!run.data && run.data.flow === 2 
 export async function autoDecide(env, threadId) {
   const id = int(threadId);
   if (!id || await pfReadOn(env)) return null;
-  const row = await env.DB.prepare(`SELECT r.id AS run_id, r.expert_id, r.state, r.finished_at, json_extract(r.data_json,'$.flow') AS flow, g.mode
+  const row = await env.DB.prepare(`SELECT r.id AS run_id, r.expert_id, r.state, r.finished_at, x.state AS th_state, json_extract(r.data_json,'$.flow') AS flow, g.mode
       FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN ai_agents g ON g.expert_id=r.expert_id WHERE x.thread_id=?`).bind(id).first().catch(() => null);
   if (!row || row.mode !== "on" || row.finished_at || Number(row.flow) !== 2 || !["prep", "search", "work"].includes(row.state)) return null;
+  /* گفت‌وگویی که دستِ خودِ کارشناس است («🚨 اضطراری» یا سقفِ ۵ دور) یا بسته شده: تصمیمِ بسته با خودِ او، نه خودکار */
+  if (["human", "closed"].includes(row.th_state)) return null;
   const open = (await env.DB.prepare("SELECT id FROM sp_bundles WHERE thread_id=? AND state IN ('pending','approved','proforma') ORDER BY id").bind(id).all()).results || [];
   if (!open.length) return null;
   const ex = await env.DB.prepare("SELECT id, name, label, telegram_chat, active FROM experts WHERE id=?").bind(row.expert_id).first();
@@ -1759,6 +1761,11 @@ export async function autoDecide(env, threadId) {
     }
   }
   if (ids.length) await env.DB.prepare("UPDATE ai_runs SET next_at=? WHERE id=? AND next_at>?").bind(now(), row.run_id, now()).run().catch(() => {});
+  /* «🤖 خودکار»: کارشناس از تأیید نهاییِ خودکار هم خبر می‌گیرد (اعلان، تلگرام، بات مکاتبات) */
+  if (ids.length && thread) {
+    const text = `🏁 <b>تأیید نهاییِ خودکار</b>\n\nبستهٔ ${faN(ids.join("، "))} از <b>${esc(thread.supplier_name)}</b> (درخواست <b>${esc(thread.request_id)}</b>) در چارچوبِ قفل‌های ساختار و شرایط بود و سامانه همان لحظه تأیید نهایی‌اش کرد؛ خط‌های استعلام در تب استعلامات است.`;
+    await tellExpert(env, ex, thread, { text, title: "🏁 تأیید نهاییِ خودکار", body: `${thread.supplier_name} — درخواست ${thread.request_id}: بستهٔ ${faN(ids.join("، "))}`, tag: `af${id}` }).catch((e) => console.error("auto final tell", e && e.message));
+  }
   return ids.length ? { ids, msgs, thread } : null;
 }
 

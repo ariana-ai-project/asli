@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
-import { aiTick } from "../../../worker/ai-agent.js";
+import { aiTick, autoDecide } from "../../../worker/ai-agent.js";
 import * as SP from "../../../worker/sp-core.js";
 import { cleanLimits, combineLocks, dtimeDate, violations, limitsTxt } from "../../../worker/terms-locks.js";
 import { jStr2ms } from "../../../worker/time.js";
@@ -51,7 +51,7 @@ globalThis.fetch = async (url, init = {}) => {
   const u = String(url);
   if (u.startsWith("https://tg.test/bot")) {
     const method = u.split("/").pop();
-    calls.push({ bot: "tg", method });
+    calls.push({ bot: "tg", method, body: typeof init.body === "string" ? JSON.parse(init.body) : {} });
     if (method === "getMe") return R({ ok: true, result: { id: 77, username: "AriaSupplierBot" } });
     return R({ ok: true, result: method === "sendMessage" ? { message_id: calls.length } : true });
   }
@@ -217,6 +217,7 @@ test("کارِ کارشناس هوشمند: بستهٔ ارسالی همان ل�
   const sub = await call(`/sp/thread/${th}/submit`, { headers: H, body: {} });
   assert.equal(sub.status, 200, JSON.stringify(sub.data));
   assert.equal(sub.data.state, "final", "همان لحظه تأیید نهایی");
+  assert.ok(calls.some((c) => c.bot === "tg" && c.method === "sendMessage" && String(c.body.chat_id) === "701" && /تأیید نهاییِ خودکار/.test(String(c.body.text || ""))), "کارشناس از تأیید نهاییِ خودکار خبر گرفت");
   const q1 = DB.raw.prepare("SELECT price, saved, final FROM quotes WHERE assignment_id=2 AND item_id=21 AND supplier_name='فروشگاه پیچ'").get();
   assert.deepEqual([q1.price, q1.saved, q1.final], [3500, 1, 1]);
   assert.ok(seen, "مدل فقط برای گفت‌وگو صدا زده شد");
@@ -239,4 +240,13 @@ test("کارِ کارشناس هوشمند: بستهٔ ارسالی همان ل�
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_bundles WHERE thread_id=? AND state='final'").get(th).n, 2);
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_log WHERE kind='decide'").get().n, 2, "هر دو تصمیم با سامانه");
   assert.ok(!calls.some((c) => c.bot === "ai" && /proforma|record_check/.test(JSON.stringify(c.body.tools || ""))), "سندی خوانده نشد");
+});
+
+test("گفت‌وگوی دستِ کارشناس (✋ اضطراری یا سقفِ دورها): بستهٔ باز خودکار تأیید نهایی نمی‌شود", { skip: SKIP }, async () => {
+  const th = DB.raw.prepare("SELECT thread_id FROM ai_threads").get().thread_id;
+  const ln = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=? LIMIT 1").get(th).id;
+  const b = DB.raw.prepare("INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,created_at) VALUES (?,?,'pending','{}',?) RETURNING id").get(th, JSON.stringify([ln]), Date.now()).id;
+  DB.raw.prepare("UPDATE ai_threads SET state='human' WHERE thread_id=?").run(th);
+  assert.equal(await autoDecide(env, th), null);
+  assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(b).state, "pending", "تصمیم با خودِ کارشناس");
 });
