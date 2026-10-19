@@ -7,6 +7,7 @@
 import { HttpError } from "./http.js";
 import { extractProforma, toRial } from "./extract.js";
 import { VAT_RATE, netOf, ENUMS, missingRequired, validateQuote, INVOICE_AI } from "./quote-rules.js";
+import { SRC_FIELDS, stamp, mergeSrc } from "./quote-src.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -166,15 +167,19 @@ export async function applyExtraction(env, p, body) {
     const saved = miss.length ? 0 : 1;
     if (saved) savedN++; else miss.forEach((f) => missingAll.add(f));
 
+    /* source='extract': مقدار از خواندنِ پیش‌فاکتور آمده — نه 'ai' که نشانِ خطِ کارشناس هوشمند بود و خطِ دستیِ کارشناس را در حالتِ
+       هوشمند قفل می‌کرد (ai-lock.js:aiQuote). منبعِ هر خانه‌ای که همین خوانش پر یا عوض کرد «خوانشِ هوشمندِ پیش‌فاکتور» (quote-src.js) */
+    const fromPf = SRC_FIELDS.filter((f) => f !== "prices_json" && merged[f] != null && String(merged[f]) !== "" && (!old || String(old[f] ?? "") !== String(merged[f])));
+    const src = mergeSrc(old ? old.src_json : null, stamp(fromPf, "pf", { at: t, ref: `pf:${p.id}` }));
     stmts.push(old
       ? env.DB.prepare(`UPDATE quotes SET supplier_code=?, spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?,
-           pay=?, vat=?, place=?, place_other=?, low_conf=?, saved=?, source='ai', updated_at=? WHERE id=?`)
+           pay=?, vat=?, place=?, place_other=?, low_conf=?, saved=?, source='extract', src_json=?, updated_at=? WHERE id=?`)
         .bind(merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime, merged.valid_days, merged.ship, merged.invoice,
-          merged.pay, merged.vat, merged.place, merged.place_other, low, saved, t, old.id)
-      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,origin,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'ai','proforma',?,?)`)
+          merged.pay, merged.vat, merged.place, merged.place_other, low, saved, src, t, old.id)
+      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,origin,src_json,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'extract','proforma',?,?,?)`)
         .bind(p.assignment_id, itemId, supplier, merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime,
-          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, low, t, t));
+          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, low, src, t, t));
   }
   if (!n) throw new HttpError("هیچ سطری از این پیش‌فاکتور به اقلام درخواست وصل نشده بود.", 422);
 

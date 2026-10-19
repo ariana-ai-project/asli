@@ -742,23 +742,52 @@ test("یک گفت‌وگو، دو نقش: کارشناس همان حساب را 
   assert.equal((await call("/sp/login", { body: { k: S.demoK, password: S.demoLatest } })).status, 401, "رمزهای پیامک باطل شد");
 });
 
-test("تب استعلامات پنل کارشناس: ورود و ویرایش دستیِ خط استعلام بسته است؛ تیک «تأیید نهایی» و «ثبت موقت» می‌ماند", { skip: SKIP }, async () => {
-  const q = DB.raw.prepare("SELECT id FROM quotes WHERE origin='supplier' ORDER BY id LIMIT 1").get();
-  const price = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { price: 1 } });
-  assert.equal(price.status, 403);
-  assert.deepEqual(price.data.locked, ["price"]);
-  const many = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { dtime: "10", pay: "نقدی", item_id: 12 } });
+test("تب استعلامات پنل کارشناس: ورودِ دستیِ هر خانه با منبعِ ثبت‌شده؛ جایگزینیِ مقدارِ تأمین‌کننده علت می‌خواهد و مقدارِ قبلی می‌ماند", { skip: SKIP }, async () => {
+  const q = DB.raw.prepare("SELECT * FROM quotes WHERE origin='supplier' ORDER BY id LIMIT 1").get();
+  /* منبعِ خانه‌های بسته (quote-src.js) */
+  const sm = JSON.parse(q.src_json || "{}");
+  assert.equal(sm.price && sm.price.s, "bundle", "قیمت از بستهٔ پنلِ تأمین‌کننده");
+  /* جایگزینیِ قیمتِ تأمین‌کننده بی علت نه */
+  const noWhy = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { price: 1234 } });
+  assert.equal(noWhy.status, 422);
+  assert.deepEqual(noWhy.data.need_reason, ["price"]);
+  const ok = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { price: 1234, reason: "تخفیفِ تلفنی، نامه دارد" } });
+  assert.equal(ok.status, 200, JSON.stringify(ok.data));
+  const row = DB.raw.prepare("SELECT price, saved, src_json FROM quotes WHERE id=?").get(q.id);
+  assert.equal(row.price, 1234);
+  assert.equal(row.saved, 0, "هر ویرایش ثبت موقت را برمی‌دارد");
+  const ps = JSON.parse(row.src_json).price;
+  assert.equal(ps.s, "manual");
+  assert.deepEqual(ps.prev, { v: q.price, s: "bundle" }, "مقدار و منبعِ قبلی");
+  const ed = DB.raw.prepare("SELECT * FROM quote_edits WHERE quote_id=? ORDER BY id DESC LIMIT 1").get(q.id);
+  assert.equal(ed.reason, "تخفیفِ تلفنی، نامه دارد");
+  assert.equal(JSON.parse(ed.fields_json).price.src, "bundle");
+  assert.ok(ok.data.quotes.find((x) => x.id === q.id).src.price.prev, "پاسخ منبع و مقدارِ قبلی را برای پنل دارد");
+  /* نامِ تأمین‌کننده و قلمِ خط دستی عوض نمی‌شوند */
+  const many = await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { item_id: 12, reason: "x y z" } });
   assert.equal(many.status, 403);
-  assert.deepEqual(many.data.locked.sort(), ["dtime", "item_id", "pay"]);
+  assert.deepEqual(many.data.locked, ["item_id"]);
   assert.equal((await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { final: 1 } })).status, 200, "تیک تأیید نهایی");
-  assert.equal((await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { save: true } })).status, 200, "خطِ آمده از پنل تأمین‌کننده کامل است: ثبت موقت");
-  const created = await call("/quotes", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "تأمین‌کنندهٔ دستی", price: 999, qty: 7, spec: "دستی", unit: "تن" } });
-  assert.equal(created.status, 200);
-  const row = DB.raw.prepare("SELECT price, qty, unit, spec FROM quotes WHERE id=?").get(created.data.id);
-  assert.deepEqual({ ...row }, { price: null, qty: 50, unit: "عدد", spec: null }, "خط تازه فقط نام دارد؛ واحد و مقدار همان خواستهٔ قلم");
+  assert.equal((await call(`/quotes/${q.id}`, { method: "PUT", headers: EX, body: { save: true } })).status, 200, "خطِ کامل: ثبت موقت");
+  /* خطِ دستیِ تازه با خانه‌هایش: منبع «دستی»، واحد و مقدارِ نیامده «خواستهٔ درخواست» */
+  const created = await call("/quotes", { headers: EX, body: { assignment_id: 1, item_ids: [12], supplier_name: "تأمین‌کنندهٔ دستی", price: 999, spec: "دستی" } });
+  assert.equal(created.status, 200, JSON.stringify(created.data));
+  const c = DB.raw.prepare("SELECT price, qty, unit, spec, src_json FROM quotes WHERE id=?").get(created.data.id);
+  assert.deepEqual([c.price, c.qty, c.unit, c.spec], [999, 50, "عدد", "دستی"]);
+  const cs = JSON.parse(c.src_json);
+  assert.deepEqual([cs.price.s, cs.spec.s, cs.qty.s, cs.unit.s, cs.invoice.s], ["manual", "manual", "req", "req", "def"]);
+  /* خانهٔ دستی با خانهٔ دستیِ دیگر: بی علت */
+  assert.equal((await call(`/quotes/${created.data.id}`, { method: "PUT", headers: EX, body: { price: 950 } })).status, 200);
   const save = await call(`/quotes/${created.data.id}`, { method: "PUT", headers: EX, body: { save: true } });
   assert.equal(save.status, 422, "ثبت موقت فقط با فیلدهای اجباریِ پر");
-  assert.ok((save.data.missing || []).includes("price"));
+  assert.ok((save.data.missing || []).includes("dtime"));
+  /* شرایطِ فاکتور روی خط‌های دیگرِ همان تأمین‌کننده هم می‌نشیند، جز خانه‌ای که مقدارِ بیرونی دارد */
+  const two = await call("/quotes", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "تأمین‌کنندهٔ دستی", price: 500 } });
+  assert.equal(two.status, 200, JSON.stringify(two.data));
+  const sync = await call(`/quotes/${created.data.id}`, { method: "PUT", headers: EX, body: { pay: "نقدی" } });
+  assert.equal(sync.status, 200);
+  assert.equal(sync.data.synced, 1);
+  assert.equal(DB.raw.prepare("SELECT pay FROM quotes WHERE id=?").get(two.data.id).pay, "نقدی");
 });
 
 test("خروج: رمز باطل؛ ورود دوباره فقط با رمز تازه؛ پنج رمز اشتباه ← قفل", { skip: SKIP }, async () => {

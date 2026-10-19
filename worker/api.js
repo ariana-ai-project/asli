@@ -42,14 +42,15 @@ import { siteState, siteLogin, putSite } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
-import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber } from "./quote-rules.js";
+import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber, PER_SUPPLIER, PER_LINE, LABELS as QUOTE_LABELS } from "./quote-rules.js";
+import { stamp, mergeSrc, manualStamp, overrides, srcMap, srcView, SRC_FA, QUOTE_EDITS_DDL } from "./quote-src.js";
 import { SP_DDL, SP_COLUMNS, spBackfill, itemLocks, sameAsLock, LOCK_MSG } from "./sp-core.js";
 import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime } from "./ai-agent.js";
-import { aiOwned, aiQuote, aiQuoteNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_ASK_SQL } from "./ai-lock.js";
+import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_LIVE_MSG, AI_ASK_SQL } from "./ai-lock.js";
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
@@ -262,6 +263,7 @@ ${CR02_DDL.trim()}
 ${FM_DDL};
 ${DOC_DDL.trim()}
 ${TURN_DDL.trim()}
+${QUOTE_EDITS_DDL};
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -310,6 +312,7 @@ const COLUMN_MIGRATIONS = [
   ["quotes", "origin_ref", "INTEGER"],
   ["quotes", "final_at", "INTEGER"],              /* لحظهٔ تیک «تأیید نهایی» */
   ["quotes", "commission_at", "INTEGER"],         /* در آخرین جدول کمیسیونِ ساخته‌شده بود */
+  ["quotes", "src_json", "TEXT"],                 /* منبعِ هر خانه (quote-src.js): دستی، بستهٔ پنل یا مذاکرهٔ هوشمند، خوانشِ پیش‌فاکتور، … */
   /* تیم کارشناسی (تصمیم مدیر، شهریور ۱۴۰۵): کارشناس ارشد، سرپرستِ هر کارشناس، مقصد اعلان‌های پایش
      (manager | senior)، گروه تلگرامِ تیمِ کارشناس ارشد، و مرحله‌هایی که او اعلانشان را می‌خواهد */
   ["experts", "senior", "INTEGER"],
@@ -723,6 +726,10 @@ const actorOf = (who) => (who && who.expert ? `expert:${who.expert.id}` : "manag
 /** خطِ استعلامی که کارشناس هوشمند ساخته (یا از گفت‌وگوی او آمده) — برای کارشناس دست‌نخوردنی */
 async function aiQuoteGuard(env, q) {
   if (await aiQuote(env, q)) throw new HttpError(AI_QUOTE_MSG, 423, { ai_locked: true });
+}
+/** خطی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند — مقدارهایش تا پایانِ مذاکره یا «🚨 باز کردن» دستی عوض نمی‌شود */
+async function aiLiveGuard(env, q) {
+  if (await aiQuoteLive(env, q)) throw new HttpError(AI_LIVE_MSG, 423, { ai_locked: true, live: true });
 }
 
 /* ------------------------------------------------------------------ */
@@ -1487,7 +1494,15 @@ async function assignmentDetail(env, aid, who) {
   /* فاز ۳: تحویلِ ردشده در پنل پشتیبانی درخواست را کامل به کارشناس برمی‌گرداند — خط‌های کارشناس هوشمند هم آزاد */
   const rv = aiMode ? await env.DB.prepare("SELECT review_json FROM ai_runs WHERE assignment_id=?").bind(aid).first() : null;
   const released = !!rv && aiRejected(rv.review_json);
-  for (const q of quotes) q.ai = aiMode && !released && (q.source === "ai" || names.has(q.supplier_name)) ? 1 : 0;
+  /* خطِ کارشناس هوشمند را نامِ تأمین‌کنندهٔ گفت‌وگوهای او می‌شناسد (دعوتش خط و گفت‌وگو را با هم می‌سازد)؛ source نه — «استخراج»ِ
+     پیش‌فاکتورِ خودِ کارشناس پیش‌تر source='ai' می‌گرفت و خطِ دستی‌اش قفل می‌شد. ai_live: مذاکره‌اش همین حالا جاری است و خط تا پایانش
+     دستی عوض نمی‌شود؛ src: منبعِ هر خانه (quote-src.js) */
+  const live = aiMode && !released ? await aiQuoteLiveNames(env, aid) : new Set();
+  for (const q of quotes) {
+    q.ai = aiMode && !released && names.has(q.supplier_name) ? 1 : 0;
+    q.ai_live = q.ai && live.has(q.supplier_name) ? 1 : 0;
+    q.src = srcView(q);
+  }
   if (aiMode) {
     const k = await env.DB.prepare(`SELECT COUNT(*) AS n FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN assignments a ON a.id=t.assignment_id WHERE t.assignment_id=? AND ${AI_ASK_SQL}`).bind(aid).first();
     ai.asks = k ? k.n : 0;
@@ -1580,57 +1595,137 @@ async function quoteCreate(env, ex, body) {
   /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو) یا دستی */
   const origin = ["history", "smart", "manual"].includes(body.origin) ? body.origin : "manual";
   const originRef = origin === "smart" ? int(body.search_id) : null;
-  /* فقط نام و کد تأمین‌کننده؛ مشخصات، مقدار و قیمت دستی پذیرفته نمی‌شود (MANUAL_LOCKED) — واحد و مقدار
-     همان خواستهٔ قلم است تا پیش‌فاکتور یا پنل تأمین‌کننده جایش را بگیرد */
+  /* خطِ دستی (origin=manual) خانه‌هایش را هم همین‌جا می‌گیرد — مشخصات، واحد، مقدار، قیمت و شرایطِ فاکتور — با همان قالبِ ویرایش
+     (validateQuote) و همان پخشِ شرایط روی خط‌های دستیِ دیگرِ این تأمین‌کننده (termsSync). هرچه نیامده پیش‌فرض است: واحد و مقدار
+     همان خواستهٔ قلم (منبع «خواستهٔ درخواست»)، نوع فاکتور «غیر رسمی» (منبع «پیش‌فرض»)؛ منبعِ هر خانه در src_json (quote-src.js) */
+  const hand = origin === "manual" ? Object.fromEntries(HAND_NEW.filter((f) => f in body && T(body[f]) !== "").map((f) => [f, body[f]])) : {};
+  if (Object.keys(hand).length) {
+    const bad = validateQuote(hand);
+    if (bad.length) throw new HttpError(bad.map((x) => x.message).join(" "), 422, { invalid: bad.map((x) => x.field) });
+    /* مقدارِ دستی روی تأمین‌کننده‌ای که کارشناس هوشمند همین حالا با او مذاکره می‌کند نمی‌نشیند */
+    await aiLiveGuard(env, { assignment_id: aid, supplier_name: supplier });
+  }
+  const hv = (f) => (f in hand ? quoteVal(f, hand[f]) : null);
+  const terms = Object.fromEntries(PER_SUPPLIER.filter((f) => f in hand).map((f) => [f, hv(f)]));
+  const sync = Object.keys(terms).length > 0;
+  const by = `expert:${ex.id}`;
   const stmts = fresh.map((item) => {
     const it = its.get(item);
-    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,invoice,source,origin,origin_ref,created_at,updated_at) VALUES (?,?,?,?,NULL,?,?,NULL,?,'panel',?,?,?,?)`)
-      .bind(aid, item, supplier, T(body.supplier_code) || null, it.unit || null, it.qty ?? null, INVOICE_DEFAULT, origin, originRef, t, t);
+    const src = { ...stamp(Object.keys(hand), "manual", { at: t, by }), ...("unit" in hand ? {} : stamp(["unit", "qty"].filter((f) => !(f in hand)), "req", { at: t })),
+      ...("invoice" in hand ? {} : stamp(["invoice"], "def", { at: t })) };
+    if (T(body.supplier_code)) Object.assign(src, stamp(["supplier_code"], "manual", { at: t, by }));
+    return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,invoice_src,pay,vat,deal,place,place_other,
+        source,origin,origin_ref,src_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'panel',?,?,?,?,?)`)
+      .bind(aid, item, supplier, T(body.supplier_code) || null, hv("spec"), "unit" in hand ? hv("unit") : it.unit || null, "qty" in hand ? hv("qty") : it.qty ?? null,
+        hv("price"), hv("dtime"), hv("valid_days"), hv("ship"), "invoice" in hand ? hv("invoice") : INVOICE_DEFAULT, "invoice" in hand ? "manual" : null,
+        hv("pay"), hv("vat"), hv("deal"), hv("place"), hv("place_other"), origin, originRef, JSON.stringify(src), t, t);
   });
+  /* شرایطِ تازه روی خط‌های دستیِ پیشینِ همین تأمین‌کننده — پیش از ساختنِ خط‌های تازه */
+  if (sync) stmts.unshift(termsSync(env, aid, supplier, terms, 0, by));
   const res = await env.DB.batch(stmts);
-  const ids = res.map((r) => r.meta.last_row_id);
-  return { ok: true, id: ids[0], ids, skipped: wanted.length - fresh.length };
+  const ids = res.slice(sync ? 1 : 0).map((r) => r.meta.last_row_id);
+  return { ok: true, id: ids[0], ids, skipped: wanted.length - fresh.length, synced: sync ? res[0].meta.changes || 0 : 0 };
 }
-/* تصمیم مدیر (مهر ۱۴۰۵): خانه‌های خط استعلام در پنل کارشناس دستی پر یا ویرایش نمی‌شوند — مقدارها از پنل
-   تأمین‌کننده (تأیید نهایی، worker/sp-core.js) یا خواندن پیش‌فاکتور (/proformas/:id/apply) می‌آیند. از پنل فقط
-   تیک «تأیید نهایی» و «ثبت موقت» می‌رسد. بات کارشناسان مسیر جدای خودش را دارد و این قاعده آن را نمی‌گیرد. */
-const MANUAL_LOCKED = QUOTE_FIELDS.filter((f) => f !== "final");
+/** مقدارِ ذخیره‌شدنیِ یک خانهٔ خط استعلام: قیمت و مقدار عدد، تیک‌ها صفر و یک، زمان تحویل یکدست، اعتبار عددِ روز، بقیه متن (خالی = NULL) */
+const quoteVal = (f, v) => (["qty", "price"].includes(f) ? toNumber(v) : ["final", "low_conf", "item_id"].includes(f) ? int(v, 0)
+  : f === "dtime" ? normalizeDtime(v) : f === "valid_days" ? String(toNumber(v) ?? "") || null : T(v) || null);
+/* نامِ تأمین‌کننده (کلیدِ پیوندِ خط با پیش‌فاکتور، گفت‌وگو و خط‌های دیگرش)، قلمِ خط و نشانِ «کم‌اطمینان»ِ خواندن هیچ‌جا دستی عوض
+   نمی‌شوند — تأمین‌کننده یا قلمِ دیگر، خطِ تازه است */
+const ALWAYS_LOCKED = ["supplier_name", "item_id", "low_conf"];
+/** خانه‌هایی که خطِ دستیِ تازه از بدنهٔ «افزودن» هم می‌گیرد؛ کدِ تأمین‌کننده مثل پیش برای هر خطِ تازه جدا */
+const HAND_NEW = [...PER_LINE, ...PER_SUPPLIER.filter((f) => f !== "supplier_code")];
+/* شرطِ SQLِ «این خانهٔ این خط مقدارِ یک منبعِ بیرونی دارد» — پخشِ شرایط روی آن نمی‌نشیند (quote-src.js:EXTERNAL و legacyOf) */
+const EXT_SQL = (f) => `(COALESCE(json_extract(src_json,'$.${f}.s'), CASE WHEN origin IN ('supplier','tender') OR source IN ('supplier','tender','extract','ai') OR origin='proforma' THEN 'ext' ELSE 'manual' END)
+  IN ('bundle','bundle_ai','pf','pf_off','tender','ext') AND COALESCE(${f},'')<>'')`;
+/**
+ * شرایطِ فاکتور (زمان تحویل، تسویه، نوع فاکتور، ارزش افزوده، …) مالِ همهٔ خط‌های یک تأمین‌کننده است — همان قاعدهٔ بات
+ * (bot.js:setField) و همان که جدول کمیسیون از اولین خطِ هر تأمین‌کننده می‌خواند (sheets.js:commissionData). مقدارِ تازه روی خط‌های
+ * دیگرِ همان تأمین‌کننده هم می‌نشیند، جز خانه‌ای که مقدارش از منبعی بیرونی آمده (پنل تأمین‌کننده، پیش‌فاکتور، مناقصه) — آن را فقط
+ * جایگزینیِ صریح با علت عوض می‌کند. «ثبت موقت»ِ خطی که واقعاً عوض شد برداشته می‌شود؛ منبعِ خانه «دستی» می‌شود.
+ * vals: {فیلد: مقدارِ ذخیره‌شدنی}؛ notId: خطی که خودش جدا نوشته می‌شود (۰ = هیچ).
+ */
+function termsSync(env, aid, supplier, vals, notId, by) {
+  const cols = Object.keys(vals), v = cols.map((f) => vals[f]), inv = "invoice" in vals, at = now();
+  const diff = `(${cols.map((f) => `COALESCE(${f},'')<>COALESCE(?,'')`).join(" OR ")})`;
+  const src = cols.reduce((s, f) => `json_set(${s},'$.${f}',json(?))`, "COALESCE(src_json,'{}')");
+  const srcArgs = cols.map(() => JSON.stringify({ s: "manual", at, ...(by ? { by } : {}) }));
+  return env.DB.prepare(`UPDATE quotes SET ${cols.map((f) => `${f}=?`).join(", ")}${inv ? ", invoice_src='manual'" : ""}, src_json=${src}, saved=CASE WHEN ${diff} THEN 0 ELSE saved END, updated_at=?
+      WHERE assignment_id=? AND supplier_name=? AND id<>? AND NOT (${cols.map(EXT_SQL).join(" OR ")}) AND (${diff}${inv ? " OR COALESCE(invoice_src,'')<>'manual'" : ""})`)
+    .bind(...v, ...srcArgs, ...v, at, aid, supplier, notId || 0, ...v);
+}
+/**
+ * ویرایشِ خط استعلام از پنل (درخواست مالک، مهر ۱۴۰۵ — جای قفلِ کاملِ پیشین): هر خانه دستی پر و ویرایش می‌شود و منبعش ثبت می‌شود.
+ * جایگزینیِ مقداری که از تأمین‌کننده، خوانشِ پیش‌فاکتور یا مناقصه آمده علت می‌خواهد (body.reason؛ وگرنه ۴۲۲ با need_reason) و مقدارِ
+ * قبلی در src_json.prev و quote_edits می‌ماند. خطی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند تا «🚨 باز کردن» دست‌نخوردنی است؛
+ * تیکِ «تأیید نهایی»ِ خطِ کارشناس هوشمند هم با خودِ اوست.
+ */
 async function quoteUpdate(env, ex, id, body) {
+  const b = body && typeof body === "object" ? body : {};
   const q = await env.DB.prepare("SELECT q.* FROM quotes q JOIN assignments a ON a.id=q.assignment_id WHERE q.id=? AND a.expert_id=?").bind(id, ex.id).first();
   if (!q) throw new HttpError("استعلام پیدا نشد.", 404);
-  await aiQuoteGuard(env, q);
-  const locked = MANUAL_LOCKED.filter((f) => f in (body || {}));
-  if (locked.length) throw new HttpError("ورود و ویرایش دستیِ خط استعلام بسته است؛ مقدارها از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آیند.", 403, { locked });
-  /* قالبِ فیلدها (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد، اعتبار عدد — وگرنه خطا */
-  const bad = validateQuote(body);
+  const content = QUOTE_FIELDS.filter((f) => f in b && f !== "final");
+  if ("final" in b) await aiQuoteGuard(env, q);
+  if (content.length) await aiLiveGuard(env, q);
+  const locked = content.filter((f) => ALWAYS_LOCKED.includes(f));
+  if (locked.length) {
+    throw new HttpError("نامِ تأمین‌کننده، قلمِ خط و نشانِ «کم‌اطمینان» دستی عوض نمی‌شوند؛ برای تأمین‌کننده یا قلمِ دیگر خطِ تازه بیفزایید (کم‌اطمینان با ویرایشِ قیمت برداشته می‌شود).", 403, { locked });
+  }
+  /* قالبِ فیلدها (تصمیم مدیر): قیمت و مقدار عدد، زمان تحویل تاریخ یا عدد، اعتبار عدد، فهرستی‌ها از گزینه‌ها — وگرنه خطا */
+  const bad = validateQuote(b);
   if (bad.length) throw new HttpError(bad.map((x) => x.message).join(" "), 422, { invalid: bad.map((x) => x.field) });
+  const vals = Object.fromEntries(content.map((f) => [f, quoteVal(f, b[f])]));
+  /* جایگزینیِ مقدارِ یک منبعِ بیرونی علت می‌خواهد */
+  const over = overrides(q, vals);
+  const reason = T(b.reason).slice(0, 300);
+  if (over.length && reason.length < 3) {
+    throw new HttpError(`مقدارِ «${over.map((f) => QUOTE_LABELS[f] || f).join("، ")}» از ${SRC_FA[(srcMap(q)[over[0]] || {}).s] || "منبعی بیرونی"} آمده؛ برای جایگزینیِ دستی علت بنویسید.`, 422, { need_reason: over });
+  }
+  const t = now(), by = `expert:${ex.id}`;
   const sets = [], args = [];
-  for (const f of QUOTE_FIELDS) if (f in body) { sets.push(`${f}=?`); args.push(["qty", "price"].includes(f) ? toNumber(body[f]) : ["final", "low_conf", "item_id"].includes(f) ? int(body[f], 0) : (f === "dtime" ? normalizeDtime(body[f]) : f === "valid_days" ? String(toNumber(body[f]) ?? "") || null : T(body[f]) || null)); }
+  for (const f of content) { sets.push(`${f}=?`); args.push(vals[f]); }
+  /* قیمتی که کارشناس خودش نوشت دیگر «کم‌اطمینان»ِ خواندنِ پیش‌فاکتور نیست */
+  if ("price" in b) sets.push("low_conf=0");
+  /* منبعِ خانه‌های تغییرکرده: «دستی»، با مقدار و منبعِ پیشین */
+  const changed = Object.fromEntries(content.filter((f) => T(q[f]) !== T(vals[f])).map((f) => [f, vals[f]]));
+  if (Object.keys(changed).length) { sets.push("src_json=?"); args.push(mergeSrc(q.src_json, manualStamp(q, changed, { by, at: t }))); }
   /* هر ویرایشِ فیلدِ محتوایی، «ثبت موقت» را برمی‌دارد؛ save صریح آن را می‌گذارد.
      «تأیید نهایی» ویرایش محتوا نیست — تیکش نباید ثبت موقت را باطل کند، وگرنه
      همان تیکی که باید دکمهٔ کمیسیون را روشن کند (saved=1 AND final=1)
      خاموشش می‌کند. مسیر تلگرام از اول همین‌طور بود. */
   /* نوع فاکتوری که کارشناس خودش انتخاب کرده، با خواندن پیش‌فاکتور بعدی عوض نمی‌شود */
-  if ("invoice" in body) sets.push("invoice_src='manual'");
+  if ("invoice" in b) sets.push("invoice_src='manual'");
   /* لحظهٔ تیک «تأیید نهایی» ثبت می‌شود؛ برداشتنِ تیک پاکش می‌کند */
-  if ("final" in body) { sets.push("final_at=?"); args.push(int(body.final, 0) ? (q.final ? q.final_at || now() : now()) : null); }
-  const contentEdited = Object.keys(body).some((f) => QUOTE_FIELDS.includes(f) && f !== "final");
-  if (body.save === true) {
-    const merged = { ...q, ...body };
+  if ("final" in b) { sets.push("final=?", "final_at=?"); args.push(int(b.final, 0), int(b.final, 0) ? (q.final ? q.final_at || t : t) : null); }
+  if (b.save === true) {
+    const merged = { ...q, ...vals };
     const miss = missingRequired(merged);
     if (miss.length) throw new HttpError("این فیلدها خالی‌اند و ثبت موقت انجام نشد.", 422, { missing: miss });
     /* خطی که از خواندن پیش‌فاکتور پر شده هم باید قالب درست داشته باشد تا به جدول برسد */
     const badSaved = validateQuote(merged);
     if (badSaved.length) throw new HttpError(badSaved.map((x) => x.message).join(" "), 422, { invalid: badSaved.map((x) => x.field) });
     sets.push("saved=1");
-  } else if (contentEdited) sets.push("saved=0");
+  } else if (content.length) sets.push("saved=0");
   if (!sets.length) return { ok: true };
-  sets.push("updated_at=?"); args.push(now(), id);
-  const upd = env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args);
+  sets.push("updated_at=?"); args.push(t, id);
+  const stmts = [env.DB.prepare(`UPDATE quotes SET ${sets.join(",")} WHERE id=?`).bind(...args)];
+  /* رخدادِ ویرایش: مقدارِ پیشین و تازه و منبعِ پیشینِ هر خانه، با علت */
+  if (Object.keys(changed).length) {
+    const sm = srcMap(q);
+    const fields = Object.fromEntries(Object.keys(changed).map((f) => [f, { old: q[f] ?? null, new: changed[f], src: (sm[f] && sm[f].s) || null }]));
+    stmts.push(env.DB.prepare("INSERT INTO quote_edits (quote_id,assignment_id,at,by,channel,fields_json,reason) VALUES (?,?,?,?,'panel',?,?)")
+      .bind(id, q.assignment_id, t, by, JSON.stringify(fields), reason || null));
+  }
+  /* شرایطِ فاکتور روی خط‌های دیگرِ همین تأمین‌کننده هم می‌نشیند (termsSync) */
+  const terms = Object.fromEntries(PER_SUPPLIER.filter((f) => f in changed).map((f) => [f, changed[f]]));
+  const sync = Object.keys(terms).length > 0;
+  if (sync) stmts.push(termsSync(env, q.assignment_id, q.supplier_name, terms, id, by));
   /* گزارش رخدادهای پنل پشتیبانی: «ثبت موقت» از پنل هم مثل بات (bot.js، quote_saved) با زمانش می‌ماند */
-  if (body.save === true) await env.DB.batch([upd, ev(env, `expert:${ex.id}`, "quote_saved", null, q.item_id, { assignment_id: q.assignment_id, supplier: q.supplier_name, channel: "panel" })]);
-  else await upd.run();
-  return { ok: true };
+  if (b.save === true) stmts.push(ev(env, by, "quote_saved", null, q.item_id, { assignment_id: q.assignment_id, supplier: q.supplier_name, channel: "panel" }));
+  const res = stmts.length > 1 ? await env.DB.batch(stmts) : [await stmts[0].run()];
+  const si = sync ? stmts.length - (b.save === true ? 2 : 1) : -1;
+  /* همهٔ خط‌های همین تأمین‌کننده — پنل همان‌ها را بی بازخوانیِ کلِ درخواست در جدول جایگزین می‌کند */
+  const rows = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? AND supplier_name=? ORDER BY id").bind(q.assignment_id, q.supplier_name).all()).results || [];
+  return { ok: true, synced: si >= 0 ? (res[si] && res[si].meta && res[si].meta.changes) || 0 : 0, quotes: rows.map((x) => ({ ...x, src: srcView(x) })) };
 }
 /* حذف: از تب و بات کامل بیرون می‌رود، نسخه‌اش در quotes_deleted می‌ماند (records.js) */
 async function quoteDelete(env, ex, id) {

@@ -49,6 +49,7 @@ import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTempl
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
 import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone } from "./sp-core.js";
+import { overrides, srcMap, SRC_FA, PLACEHOLDER_SRC } from "./quote-src.js";
 import { pushMsgs as spPush, appUrl as spAppUrl } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
@@ -1030,8 +1031,8 @@ async function nameForUpload(env, api, chat, ex, up, name) {
 
 /** خط استعلامِ (تأمین‌کننده × قلم) اگر نیست — خطِ موجود دست نمی‌خورد. `origin`: proforma | manual */
 const lineInserts = (env, aid, supplier, ids, t, origin = "proforma") => ids.map((iid) => env.DB.prepare(
-  `INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,created_at,updated_at)
-   SELECT i.assignment_id, i.id, ?, i.unit, i.qty, ?, 'telegram', ?, ?, ? FROM items i
+  `INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,src_json,created_at,updated_at)
+   SELECT i.assignment_id, i.id, ?, i.unit, i.qty, ?, 'telegram', ?, '${PLACEHOLDER_SRC}', ?, ? FROM items i
    WHERE i.id=? AND i.assignment_id=?
      AND NOT EXISTS (SELECT 1 FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.supplier_name=?)`,
 ).bind(supplier, INVOICE_DEFAULT, origin, t, t, iid, aid, supplier));
@@ -1226,18 +1227,34 @@ async function quoteCard(env, api, chat, aid, supplier, messageId, head) {
   return { ok: true };
 }
 
-/** نوشتنِ یک فیلد: شرایط فاکتور روی همهٔ خط‌های تأمین‌کننده، فیلد قلم فقط روی همان خط. هر ویرایش «ثبت موقت» را برمی‌دارد — همان قاعدهٔ پنل. */
-async function setField(env, q, field, value) {
+/**
+ * نوشتنِ یک فیلد: شرایط فاکتور روی همهٔ خط‌های تأمین‌کننده، فیلد قلم فقط روی همان خط. هر ویرایش «ثبت موقت» را برمی‌دارد — همان قاعدهٔ
+ * پنل. منبعِ خانه «دستی (تلگرام)» می‌شود (quote-src.js) و ویرایش در quote_edits می‌ماند. خانه‌ای که مقدارش از پنل تأمین‌کننده،
+ * خوانشِ پیش‌فاکتور یا مناقصه آمده این‌جا عوض نمی‌شود: جایگزینیِ آن علت می‌خواهد و فقط از پنل وب (تب استعلامات) — {ok:false, msg}
+ */
+async function setField(env, q, field, value, by) {
   if (!LABELS[field]) throw new Error("فیلد ناشناخته");
   const v = value == null || value === "" ? null : (field === "qty" || field === "price" ? Number(value) : String(value));
   const t = now();
-  if (PER_SUPPLIER.includes(field)) {
-    await env.DB.prepare(`UPDATE quotes SET ${field}=?${field === "invoice" ? ", invoice_src='manual'" : ""}, saved=0, updated_at=? WHERE assignment_id=? AND supplier_name=?`)
-      .bind(v, t, q.assignment_id, q.supplier_name).run();
-  } else {
-    await env.DB.prepare(`UPDATE quotes SET ${field}=?, saved=0, updated_at=? WHERE id=?`).bind(v, t, q.id).run();
+  const fresh = await env.DB.prepare("SELECT * FROM quotes WHERE id=?").bind(q.id).first();
+  if (fresh && overrides(fresh, { [field]: v }).length) {
+    return { ok: false, msg: `«${fieldLabel(field)}»ِ این خط از ${SRC_FA[srcMap(fresh)[field].s] || "منبعی بیرونی"} آمده؛ جایگزینیِ دستی‌اش علت می‌خواهد — از پنل وب، تب استعلامات.` };
   }
+  const src = JSON.stringify({ s: "manual_tg", at: t, ...(by ? { by } : {}), ...(fresh && String(fresh[field] ?? "") !== "" ? { prev: { v: fresh[field], s: (srcMap(fresh)[field] || {}).s || null } } : {}) });
+  const edit = env.DB.prepare("INSERT INTO quote_edits (quote_id,assignment_id,at,by,channel,fields_json,reason) VALUES (?,?,?,?,'telegram',?,NULL)")
+    .bind(q.id, q.assignment_id, t, by || null, JSON.stringify({ [field]: { old: fresh ? fresh[field] ?? null : null, new: v, src: fresh ? (srcMap(fresh)[field] || {}).s || null : null } }));
+  if (PER_SUPPLIER.includes(field)) {
+    /* خط‌هایی از همین تأمین‌کننده که این خانه‌شان از منبعی بیرونی است دست نمی‌خورند */
+    await env.DB.batch([env.DB.prepare(`UPDATE quotes SET ${field}=?${field === "invoice" ? ", invoice_src='manual'" : ""}, src_json=json_set(COALESCE(src_json,'{}'),'$.${field}',json(?)), saved=0, updated_at=?
+        WHERE assignment_id=? AND supplier_name=? AND (id=? OR NOT ${BOT_EXT_SQL(field)})`).bind(v, src, t, q.assignment_id, q.supplier_name, q.id), edit]);
+  } else {
+    await env.DB.batch([env.DB.prepare(`UPDATE quotes SET ${field}=?, src_json=json_set(COALESCE(src_json,'{}'),'$.${field}',json(?)), saved=0, updated_at=? WHERE id=?`).bind(v, src, t, q.id), edit]);
+  }
+  return { ok: true };
 }
+/* همان شرطِ api.js:EXT_SQL — «این خانهٔ این خط مقدارِ یک منبعِ بیرونی دارد» */
+const BOT_EXT_SQL = (f) => `(COALESCE(json_extract(src_json,'$.${f}.s'), CASE WHEN origin IN ('supplier','tender') OR source IN ('supplier','tender','extract','ai') OR origin='proforma' THEN 'ext' ELSE 'manual' END)
+  IN ('bundle','bundle_ai','pf','pf_off','tender','ext') AND COALESCE(${f},'')<>'')`;
 
 /** فیلد فهرستی: گزینه‌ها همان‌هایی که پنل دارد */
 async function askEnum(api, chat, q, field, messageId) {
@@ -1290,8 +1307,9 @@ async function onFieldText(env, api, chat, f, text) {
     if (!validDtime(text)) { await api.sendMessage(chat, "زمان تحویل باید تاریخ شمسی (مثلاً <code>1405/07/10</code>) یا عدد روز (مثلاً <code>10</code> یا «۱۰ روز کاری») باشد."); return { ok: true }; }
     v = normalizeDtime(text);
   }
-  await setField(env, q, d.field, v);
+  const sf = await setField(env, q, d.field, v, `expert:${f.expert_id || ""}`.replace(/:$/, ""));
   await env.DB.prepare("UPDATE tg_flows SET step='done', done_at=? WHERE id=?").bind(now(), f.id).run();
+  if (!sf.ok) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, null, `⚠️ ${esc(sf.msg)}`);
   return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, null, `✅ ${esc(fieldLabel(d.field))} ثبت شد.`);
 }
 
@@ -2112,8 +2130,8 @@ async function addSelected(env, api, chat, ex, f, d, mid) {
     if (have.has(o.name)) { skipped++; continue; }
     have.add(o.name);
     /* از کجا آمد: سوابق یا جستجوی هوشمند (با شناسهٔ همان جستجو) */
-    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,origin,origin_ref,created_at,updated_at)
-      VALUES (?,?,?,?,?,?,?,'telegram',?,?,?,?)`)
+    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,unit,qty,invoice,source,origin,origin_ref,src_json,created_at,updated_at)
+      VALUES (?,?,?,?,?,?,?,'telegram',?,?,'${PLACEHOLDER_SRC}',?,?)`)
       .bind(aid, d.itemId, o.name, o.code || null, itRow.unit || null, itRow.qty ?? null, INVOICE_DEFAULT,
         f.kind === "hist" ? "history" : "smart", f.kind === "hist" ? null : (d.searchId || null), t, t));
     added++;
@@ -3660,7 +3678,8 @@ async function onCallback(env, cq, apiIn) {
     const v = (ENUMS[field] || [])[parseInt(valRaw, 10)];
     if (!v) { await ack("این گزینه معتبر نیست.", true); return { ok: true }; }
     await ack();
-    await setField(env, q, field, v);
+    const sf = await setField(env, q, field, v, ex ? `expert:${ex.id}` : null);
+    if (!sf.ok) return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid, `⚠️ ${esc(sf.msg)}`);
     if (field === "place" && v === "سایر") return askFieldText(env, api, chat, ex, q, "place_other", mid);
     return quoteCard(env, api, chat, q.assignment_id, q.supplier_name, mid, `✅ ${esc(fieldLabel(field))}: ${esc(v)}`);
   }

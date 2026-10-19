@@ -69,6 +69,7 @@ import { crFlags } from "./cr-api.js";
 import { headPolicy, recipientPlan } from "./cr-engine.js";
 import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
 import { limitsOf, LIMIT_FA, fieldTxt, limitsTxt } from "./terms-locks.js";
+import { PLACEHOLDER_SRC } from "./quote-src.js";
 import { headGuess } from "./ai-modes.js";
 import { supOfThread, rejectBody, PROP_FA, PROP_STATE_FA } from "./ai-supervise.js";
 import { boxesOn, boxesFa } from "./critique.js";
@@ -944,8 +945,8 @@ async function inviteOne(env, run, ex, inv) {
     /* گفت‌وگویی که بسته یا «تأمین نمی‌کند» بود، برای قلمِ تازه دوباره باز است */
     ...(addOn ? [env.DB.prepare("UPDATE ai_threads SET state=CASE WHEN state IN ('closed','declined') THEN 'invited' ELSE state END, updated_at=? WHERE thread_id=?").bind(t, r.thread_id)] : []),
     /* همان «انتخاب جهت استعلام» کارشناس: خطی بی قیمت در تب استعلامات، تا پیش‌فاکتور یا تأیید نهایی پرش کند */
-    ...items.map((i) => env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,created_at,updated_at)
-      SELECT ?,?,?,?,?,'رسمی','ai',?,?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=?)`)
+    ...items.map((i) => env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,src_json,created_at,updated_at)
+      SELECT ?,?,?,?,?,'رسمی','ai',?,'${PLACEHOLDER_SRC}',?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=?)`)
       .bind(run.assignment_id, i.id, r.supplier.name, i.unit || null, i.qty ?? null, inv.src === "smart" ? "smart" : inv.src === "history" ? "history" : "manual", t, t, run.assignment_id, i.id, r.supplier.name)),
   ]);
   await P.pushMsgs(env, { id: r.thread_id }, r.msgs).catch((e) => console.error("ai push", e && e.message));

@@ -112,8 +112,28 @@ export async function aiQuote(env, q, names) {
   if (!q) return false;
   const a = await env.DB.prepare("SELECT g.mode, r.review_json FROM assignments a JOIN ai_agents g ON g.expert_id=a.expert_id LEFT JOIN ai_runs r ON r.assignment_id=a.id WHERE a.id=?").bind(q.assignment_id).first().catch(() => null);
   if (!a || a.mode !== "on" || aiRejected(a.review_json)) return false;
-  if (q.source === "ai") return true;
+  /* فقط نامِ تأمین‌کنندهٔ گفت‌وگوهای او ملاک است — دعوتش خط و گفت‌وگو را با هم می‌سازد (ai-agent.js:inviteOne). source نه: «استخراج»ِ
+     پیش‌فاکتورِ خودِ کارشناس هم پیش‌تر source='ai' می‌گرفت؛ حالا source='extract' است (proforma.js) و خط‌های قدیمی هم آزادند */
   return (names || (await aiQuoteNames(env, q.assignment_id))).has(q.supplier_name);
+}
+
+export const AI_LIVE_MSG = "🤖 کارشناس هوشمند همین حالا با این تأمین‌کننده مذاکره می‌کند؛ تا تمام شدنِ مذاکره یا «🚨 باز کردنِ اضطراری» این خط دستی عوض نمی‌شود.";
+/* گفت‌وگویی که مذاکره‌اش تمام شده (یا دستِ خودِ کارشناس است) دیگر «زنده» نیست */
+const DONE_STATES = "('final','declined','closed','human')";
+/** نامِ تأمین‌کنندگانی که کارشناس هوشمند همین حالا در این ارجاع با آن‌ها مذاکره می‌کند */
+export async function aiQuoteLiveNames(env, assignmentId) {
+  const rows = (await env.DB.prepare(`SELECT DISTINCT s.name FROM ai_threads x JOIN ai_runs r ON r.id=x.run_id JOIN sp_threads t ON t.id=x.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id
+      JOIN assignments a ON a.id=t.assignment_id JOIN ai_agents g ON g.expert_id=a.expert_id AND g.mode='on'
+      WHERE t.assignment_id=? AND x.state NOT IN ${DONE_STATES} AND r.finished_at IS NULL AND NOT ${AI_REJECTED_SQL("r")}`).bind(assignmentId).all().catch(() => null)) || {};
+  return new Set((rows.results || []).map((r) => r.name));
+}
+/**
+ * خطِ استعلامی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند (درخواست مالک، مهر ۱۴۰۵: بقیهٔ خط‌ها، حتی خطِ کارشناس هوشمند بعد از
+ * پایانِ مذاکره، دستی پر و ویرایش می‌شوند و منبعِ هر خانه ثبت می‌شود — api.js:quoteUpdate)
+ */
+export async function aiQuoteLive(env, q) {
+  if (!q || !(await aiQuote(env, q))) return false;
+  return (await aiQuoteLiveNames(env, q.assignment_id)).has(q.supplier_name);
 }
 
 /**

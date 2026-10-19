@@ -27,6 +27,7 @@ import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
 import { limitsOf, combineLocks, violations, violationError, LIMIT_FA, limitsTxt, withCompany } from "./terms-locks.js";
+import { stamp, mergeSrc } from "./quote-src.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
@@ -1475,11 +1476,15 @@ export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = 
  * جای هیچ پیش‌فاکتوری نمی‌نشیند — نه پیش‌فاکتوری که کارشناس خودش گذاشته، نه وقتی Word تولیدی ساخته نشد.
  */
 async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
-  const have = new Map(((await env.DB.prepare("SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
-    .map((r) => [r.item_id, r.id]));
+  const have = new Map(((await env.DB.prepare("SELECT id, item_id, src_json FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
+    .map((r) => [r.item_id, r]));
   const byLine = new Map(res.lines.map((x) => [x.line_id, x.values]));
   /* «📋 شرایط خرید»: محل تحویل، محل معامله و روش حمل را تأمین‌کننده وارد نمی‌کند — از شرطِ شرکتِ همان قلم (terms-locks.js:withCompany) */
   const lim = await limitsOfLines(env, lines);
+  /* منبعِ هر خانه (quote-src.js): بستهٔ گفت‌وگوی کارشناس هوشمند «بستهٔ مذاکرهٔ هوشمند» است، بقیه «بستهٔ پنلِ تأمین‌کننده»؛ خانه‌ای که از شرطِ شرکت پر شد «شرطِ شرکت» */
+  const aiTh = !!(await env.DB.prepare("SELECT 1 AS x FROM ai_threads WHERE thread_id=?").bind(th.id).first().catch(() => null));
+  const kind = aiTh ? "bundle_ai" : "bundle";
+  const COLS = ["spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "vat", "deal", "place", "place_other"];
   const stmts = [];
   for (const l of lines) {
     const tm = withCompany(res.terms, lim.get(l.item_id));
@@ -1489,14 +1494,18 @@ async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
     const ok = canSave(q) ? 1 : 0;
     const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
       tm.deal || null, tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
+    const fromCo = ["deal", "place", "place_other", "ship"].filter((f) => tm[f] != null && T(tm[f]) && !T((res.terms || {})[f]));
+    const filled = COLS.filter((f, i) => vals[i] != null && String(vals[i]) !== "");
+    const src = mergeSrc(have.has(l.item_id) ? have.get(l.item_id).src_json : null,
+      { ...stamp(filled.filter((f) => !fromCo.includes(f)), kind, { at: t, ref: `b:${b.id}` }), ...stamp(fromCo.filter((f) => filled.includes(f)), "company", { at: t }) });
     if (have.has(l.item_id)) {
       stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, deal=?, place=?, place_other=?, saved=?,
-          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, updated_at=? WHERE id=?`)
-        .bind(...vals, b.id, t, have.get(l.item_id)));
+          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, src_json=?, updated_at=? WHERE id=?`)
+        .bind(...vals, b.id, src, t, have.get(l.item_id).id));
     } else {
-      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?)`)
-        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, t, t));
+      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,src_json,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?,?)`)
+        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, src, t, t));
     }
   }
   if (gen) {

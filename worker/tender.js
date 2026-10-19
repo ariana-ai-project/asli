@@ -16,6 +16,8 @@
  *   • بازار: دلار، یورو، درهم، تتر، طلا و سکه از tgju (هر دقیقه یک بار، با کش Cloudflare).
  */
 import { HttpError } from "./http.js";
+/* منبعِ خانه‌های خطِ مناقصه (quote-src.js) */
+const TENDER_SRC = JSON.stringify({ unit: { s: "tender" }, qty: { s: "tender" }, price: { s: "tender" }, deal: { s: "tender" } });
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
 import { sendSms, smsReady, isMobile } from "./sms.js";
 import { queueStmt } from "./queue.js";
@@ -944,8 +946,8 @@ export async function tenderToRequest(env, id, b) {
   const stmts = [env.DB.prepare("DELETE FROM quotes WHERE origin='tender' AND origin_ref=? AND item_id=?").bind(t.id, it.id)];
   for (const [alias, r] of ranks) {
     const win = alias === t.winner_alias;
-    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,deal,saved,final,final_at,source,origin,origin_ref,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,1,?,?,'tender','tender',?,?,?)`).bind(it.assignment_id, it.id, names.get(alias) || aliasLabel(alias), t.unit, t.qty, r.amount,
+    stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,deal,saved,final,final_at,source,origin,origin_ref,src_json,created_at,updated_at)
+        VALUES (?,?,?,?,?,?,?,1,?,?,'tender','tender',?,'${TENDER_SRC}',?,?)`).bind(it.assignment_id, it.id, names.get(alias) || aliasLabel(alias), t.unit, t.qty, r.amount,
       `مناقصهٔ ${t.code} — رتبهٔ ${r.rank}`, win ? 1 : 0, win ? n : null, t.id, n, n));
   }
   stmts.push(env.DB.prepare("UPDATE tenders SET req_aid=?, req_item=?, req_at=?, rev=rev+1, updated_at=? WHERE id=?").bind(it.assignment_id, it.id, n, n, t.id));

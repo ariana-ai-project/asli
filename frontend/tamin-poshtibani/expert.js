@@ -2077,38 +2077,133 @@
     }
   }
 
-  /* خانهٔ فقط‌خواندنیِ خط استعلام (تصمیم مدیر، مهر ۱۴۰۵): مقدارها فقط از پنل تأمین‌کننده یا «استخراج»
-     پیش‌فاکتور می‌آیند و ورود/ویرایش دستی بسته است. خانهٔ اجباریِ خالی با نشان قرمز. */
+  /* خانهٔ فقط‌خواندنیِ خط استعلام: خطی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند (و ارجاعِ تیم برای کارشناس ارشد). خانهٔ اجباریِ خالی با نشان قرمز. */
   function roCell(v, need, opts) {
     const o = opts || {};
     const empty = v == null || v === "";
     const txt = empty ? "—" : o.money ? M(Number(v)) : esc(v);
-    return `<td class="ro${o.num ? " num" : ""}${need && empty ? " miss" : ""}"${o.w ? ` style="min-width:${o.w}px"` : ""}${need && empty ? ' title="اجباری — از پنل تأمین‌کننده یا «استخراج» پیش‌فاکتور می‌آید"' : ""}>${txt}</td>`;
+    return `<td class="ro${o.num ? " num" : ""}${need && empty ? " miss" : ""}"${o.w ? ` style="min-width:${o.w}px"` : ""}${need && empty ? ' title="اجباری — هنوز خالی است"' : ""}>${txt}${o.src || ""}</td>`;
+  }
+  /* «منبعِ هر خانه» (worker/quote-src.js): نشانِ کوچکِ کنارِ مقدار؛ مقدارِ دستی‌ای که جای مقدارِ یک منبعِ بیرونی نشسته، مقدار و منبعِ قبلی را در title نشان می‌دهد */
+  const SRC_ICO = { manual: "✋", manual_tg: "✋", bundle: "📦", bundle_ai: "🤖", pf: "📄", pf_off: "🧾", tender: "🏷", company: "🏢", req: "", def: "" };
+  const SRC_EXT = ["bundle", "bundle_ai", "pf", "pf_off", "tender"];
+  function srcTag(q, k) {
+    const x = q.src && q.src[k];
+    if (!x || !SRC_ICO[x.s]) return "";
+    const tip = `${x.fa}${x.at ? ` · ${TP.fmt(x.at)}` : ""}${x.prev ? ` — پیش‌تر: ${x.prev.v} (${x.prev.fa})` : ""}`;
+    return `<i class="qsrc s-${x.s}" title="${esc(tip)}" aria-label="${esc(tip)}">${SRC_ICO[x.s]}</i>`;
+  }
+  /* خطِ استعلام دستی پر و ویرایش می‌شود (درخواست مالک، مهر ۱۴۰۵)، جز خطی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند؛ سرور هم
+     همین را می‌سنجد (api.js:quoteUpdate). جایگزینیِ مقدارِ تأمین‌کننده، خوانشِ پیش‌فاکتور یا مناقصه علت می‌خواهد */
+  const qEditable = (q) => !q.ai_live && !!A() && !!S.expert && A().expert_id === S.expert.id;
+  /** خانهٔ ویرایش‌پذیر: اجباریِ خالی لبهٔ قرمز دارد و با Enter یا رفتن از خانه ذخیره می‌شود؛ زمان تحویل تایپ‌شدنی است («۱۰ روز کاری»
+      یا تاریخ) و 📅 تقویم را باز می‌کند */
+  function edCell(q, k, w, ty, opt) {
+    const v = q[k] == null ? "" : String(q[k]);
+    const inp = `<input class="tp-input${!opt && !v ? " bad" : ""}${ty === "num" ? " num" : ""}" data-qf="${q.id}|${k}"${opt ? ' data-opt="1"' : ""} value="${esc(v)}" style="width:${w}px"${ty === "num" ? ' inputmode="decimal"' : ""}${ty === "date" ? ' placeholder="۱۰ روز کاری" title="عدد روز (۱۰ یا ۱۰ روز کاری) یا تاریخ شمسی — 📅 تقویم"' : ""} aria-label="${esc(LBL[k] || k)}">`;
+    return `<td class="ed">${ty === "date" ? `<span class="qdt">${inp}<button type="button" class="tp-btn xs" data-qdt="${q.id}" title="انتخاب تاریخ از تقویم" aria-label="تقویمِ زمان تحویل">📅</button></span>` : inp}${srcTag(q, k)}</td>`;
+  }
+  /** فهرستیِ ویرایش‌پذیر — مقدارِ بیرون از فهرست (مثلاً متنِ خامِ تسویه از خواندنِ پیش‌فاکتور) دیده می‌شود و قرمز است تا گزینهٔ درست را بزنید */
+  function edSel(q, k, list, need, title) {
+    const v = q[k] == null ? "" : String(q[k]), odd = !!v && !list.includes(v);
+    return `<select class="tp-select${(need && !v) || odd ? " bad" : ""}" data-qf="${q.id}|${k}"${title ? ` title="${title}"` : ""} aria-label="${esc(LBL[k] || k)}"><option value="">—</option>${odd ? `<option selected>${esc(v)}</option>` : ""}${list.map((x) => `<option ${v === x ? "selected" : ""}>${x}</option>`).join("")}</select>${srcTag(q, k)}`;
+  }
+  function edTerms(q) {
+    return `<td class="ed">${edSel(q, "invoice", INVT, true)}</td><td class="ed">${edSel(q, "pay", PAYS, true)}</td>
+      <td class="ed">${edSel(q, "vat", VATS, true, "اجباری — قیمتِ ردیف بدون ارزش افزوده است؛ ارزش افزوده ته جدول کمیسیون جدا حساب می‌شود")}</td>
+      <td class="ed">${edSel(q, "deal", DEALS, false, "اختیاری — تصمیم داخلی؛ از پیش‌فاکتور خوانده نمی‌شود")}</td>
+      <td class="ed" style="min-width:170px"><div class="stack">${edSel(q, "place", PLACES, false, "اختیاری")}${q.place === "سایر" ? `<input class="tp-input${q.place_other ? "" : " bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}" aria-label="${LBL.place_other}">` : ""}</div></td>`;
   }
   function vQuotes() {
     const r = S.d.request, its = items(), Q = S.d.quotes;
     const itemTitle = (id) => { const x = its.find((i) => i.id === id); return x ? x.title : ""; };
+    const ro = (q) => QF.map(([k, , w, ty, opt]) => roCell(q[k], !opt, { w, num: ty === "num", money: k === "price" || k === "qty", src: srcTag(q, k) })).join("")
+      + `${roCell(q.invoice, true, { src: srcTag(q, "invoice") })}${roCell(q.pay, true, { src: srcTag(q, "pay") })}${roCell(q.vat, true, { src: srcTag(q, "vat") })}${roCell(q.deal, false, { src: srcTag(q, "deal") })}${roCell(q.place === "سایر" && q.place_other ? `سایر: ${q.place_other}` : q.place, false, { src: srcTag(q, "place") })}`;
     return `<div class="pad">
       <div class="toolrow"><button class="tp-btn" data-add-row>افزودن تأمین‌کننده</button>
         <span class="chip">${qCount()} استعلام ثبت‌شده</span><span class="chip">${pCount()} پیش‌فاکتور</span>
         <span class="dim" style="font-size:.85rem">${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
-      ${Q.length ? `<div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
+      ${Q.length ? `<div class="qsrc-legend" aria-label="منبعِ خانه‌ها"><span><i class="qsrc s-manual">✋</i> دستی</span><span><i class="qsrc s-bundle_ai">🤖</i> بستهٔ مذاکرهٔ هوشمند</span><span><i class="qsrc s-bundle">📦</i> بستهٔ پنلِ تأمین‌کننده</span><span><i class="qsrc s-pf">📄</i> خوانشِ پیش‌فاکتور</span><span><i class="qsrc s-pf_off">🧾</i> پیش‌فاکتورِ رسمی</span><span><i class="qsrc s-tender">🏷</i> مناقصه</span><span><i class="qsrc s-company">🏢</i> شرطِ شرکت</span></div>
+        <div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
         <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
-        ${Q.map((q) => `<tr>
+        ${Q.map((q) => { const ed = qEditable(q); return `<tr>
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""} ${q.ai ? "disabled title=\"خطِ کارشناس هوشمند — تأیید نهایی‌اش با خودِ اوست\"" : ""}></td>
-          <td class="rt">${esc(q.supplier_name)}${q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : ""}${q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ تغییرش ممکن نیست">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
+          <td class="rt">${esc(q.supplier_name)}${ed ? `<input class="tp-input qcode num" data-qf="${q.id}|supplier_code" data-opt="1" value="${esc(q.supplier_code || "")}" placeholder="کد (اختیاری)" title="کد تأمین‌کننده — برای همهٔ خط‌های همین تأمین‌کننده" aria-label="کد تأمین‌کننده">` : q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : q.origin === "tender" ? `<div><span class="chip" title="از مناقصهٔ آنلاین">مناقصه</span></div>` : ""}${q.ai_live ? `<div><span class="chip info" title="کارشناس هوشمند همین حالا با این تأمین‌کننده مذاکره می‌کند؛ تا پایانِ مذاکره یا «🚨 باز کردن» دستی عوض نمی‌شود">🤖 در حالِ مذاکره</span></div>` : q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ مذاکره‌اش تمام شده و خانه‌ها دستی هم ویرایش می‌شوند">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
           <td class="ro item">${esc(itemTitle(q.item_id))}</td>
-          ${QF.map(([k, , w, ty, opt]) => roCell(q[k], !opt, { w, num: ty === "num", money: k === "price" || k === "qty" })).join("")}
-          ${roCell(q.invoice, true)}${roCell(q.pay, true)}${roCell(q.vat, true)}${roCell(q.deal, false)}
-          ${roCell(q.place === "سایر" && q.place_other ? `سایر: ${q.place_other}` : q.place, false)}
+          ${ed ? QF.map(([k, , w, ty, opt]) => edCell(q, k, w, ty, opt)).join("") + edTerms(q) : ro(q)}
           <td class="num" data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : pfCell(q)}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : exCell(q)}</td>
-          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
-          <td>${q.ai ? "" : `<button class="tp-btn xs danger" data-del="${q.id}">حذف</button>`}</td></tr>`).join("")}
+          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai_live ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
+          <td>${q.ai ? "" : `<button class="tp-btn xs danger" data-del="${q.id}">حذف</button>`}</td></tr>`; }).join("")}
         </tbody></table></div>
         ${vFormHead(r)}${vGuard()}`
         : `<div class="empty"><b>هنوز استعلامی نیست.</b>با «افزودن تأمین‌کننده» شروع کنید، یا از «💬 مکاتبات» استعلام بفرستید. ${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</div>`}</div>`;
+  }
+  /* ---------- ویرایشِ خانه‌به‌خانهٔ خطِ استعلام ---------- */
+  /* نوشتن‌های تب استعلامات پشتِ هم می‌روند: پاسخِ دیرتر خانهٔ تازه‌تری را با مقدارِ کهنه نمی‌پوشاند و «ثبت موقت» بعد از ذخیرهٔ
+     خانه‌ای می‌رسد که کارشناس همان لحظه از آن بیرون آمد */
+  let qChain = Promise.resolve();
+  const qSeq = (fn) => (qChain = qChain.then(fn).catch(() => { /* هر کار خطای خودش را نشان می‌دهد */ }));
+  /* عددِ خانهٔ مقدار و قیمت با هر رقم و جداکننده (همان quote-rules.js:toNumber) — برای «قیمت کل»ِ زنده حینِ تایپ */
+  const numOf = (s) => { const x = TP.digits(s).replace(/[,٬]/g, "").replace(/٫/g, ".").trim(); return /^\d+(\.\d+)?$/.test(x) ? Number(x) : 0; };
+  function liveTotal(id) {
+    const qn = document.querySelector(`[data-qf="${id}|qty"]`), pr = document.querySelector(`[data-qf="${id}|price"]`), cell = document.querySelector(`[data-qtot="${id}"]`);
+    if (!qn || !pr || !cell) return;
+    const v = numOf(qn.value) * numOf(pr.value);
+    cell.textContent = v ? M(v) : "—";
+  }
+  /* علتِ جایگزینیِ دستیِ مقدارِ یک منبعِ بیرونی — با «انصراف» مقدارِ قبلی برمی‌گردد */
+  function askReason(q, f) {
+    const x = q.src && q.src[f];
+    return new Promise((res) => {
+      const d = TP.modal("✋ جایگزینیِ دستی", `<p style="margin-top:0">«${esc(LBL[f] || f)}»ِ «${esc(q.supplier_name)}» از <b>${esc(x ? x.fa : "منبعی بیرونی")}</b> آمده (${esc(String(q[f]))}). مقدارِ تازه جایش می‌نشیند و مقدارِ قبلی در سابقه می‌ماند.</p>
+        <label class="tp-field"><b>علت (اجباری)</b><input class="tp-input" id="qreason" style="width:100%" placeholder="مثلاً: تخفیفِ تلفنی، نامه دارد"></label>`, () => res((d.querySelector("#qreason").value || "").trim()), "ذخیره", "انصراف");
+      const n = d.querySelector("[data-n]"); if (n) n.addEventListener("click", () => res(null));
+      d.addEventListener("click", (e) => { if (e.target === d) res(null); });
+      setTimeout(() => { const i = d.querySelector("#qreason"); if (i) i.focus(); }, 30);
+    });
+  }
+  /* یک خانه: قالب (همان قاعدهٔ سرور، TP.quoteFieldError) ← اگر جای مقدارِ بیرونی می‌نشیند علت ← PUT ← جایگزینیِ خط‌های همان تأمین‌کننده
+     از پاسخ (شرایطِ فاکتور روی خط‌های دیگرِ او هم نشسته). قالبِ نادرست ذخیره نمی‌شود و خانه قرمز می‌ماند */
+  async function saveField(el, id, f) {
+    const q = S.d && S.d.quotes.find((x) => x.id === id); if (!q) return;
+    const v = el.value.trim();
+    if (String(q[f] == null ? "" : q[f]) === v) return;
+    const bad = TP.quoteFieldError(f, v);
+    if (bad) { el.classList.add("bad"); TP.modal("قالب فیلد درست نیست", esc(bad), null, "باشد", ""); return; }
+    const body = { [f]: v };
+    const x = q.src && q.src[f];
+    if (x && SRC_EXT.includes(x.s) && String(q[f] == null ? "" : q[f]) !== "") {
+      const why = await askReason(q, f);
+      if (!why || why.length < 3) { el.value = q[f] == null ? "" : String(q[f]); if (f === "qty" || f === "price") liveTotal(id); return; }
+      body.reason = why;
+    }
+    try { patchQuotes(await TP.api(`/quotes/${id}`, { method: "PUT", body }), `${id}|${f}`); }
+    catch (e) { el.classList.add("bad"); TP.modal("ذخیره نشد", esc(e.message), null, "باشد", ""); }
+  }
+  /* پاسخِ PUT /quotes/:id همهٔ خط‌های همان تأمین‌کننده را دارد — همان‌ها در جدول می‌نشینند، بی بازخوانیِ کلِ درخواست */
+  function patchQuotes(r, doneKey) {
+    if (!S.d || S.screen !== "detail") return;
+    if (!r || !Array.isArray(r.quotes)) { reload(); return; }
+    for (const x of r.quotes) { const q = S.d.quotes.find((y) => y.id === x.id); if (q) Object.assign(q, x); }
+    S.sheets = null;   /* پیش‌نمایشِ جدول کمیسیون با مقدارهای تازه از نو ساخته شود */
+    renderKeep(doneKey);
+  }
+  /* بازرندر بی آنکه فوکوس و نوشتهٔ نیمه‌کارهٔ خانه‌ای که کارشناس با Tab به آن رفته گم شود؛ خانهٔ تازه‌ذخیره‌شده مقدارِ سرور را می‌گیرد */
+  function renderKeep(doneKey) {
+    const f = document.activeElement, key = f && f.dataset ? f.dataset.qf : null;
+    const typed = key && key !== doneKey && f.tagName !== "SELECT" ? f.value : null;
+    let pos = null; try { pos = key ? f.selectionStart : null; } catch (_) { /* غیرمتنی */ }
+    render();
+    const n = key ? document.querySelector(`[data-qf="${CSS.escape(key)}"]`) : null;
+    if (!n) return;
+    if (typed != null && n.value !== typed) {
+      n.value = typed; if (!n.dataset.opt) n.classList.toggle("bad", !typed.trim());
+      const [id, k] = key.split("|"); if (k === "qty" || k === "price") liveTotal(id);
+    }
+    n.focus();
+    if (pos != null) try { n.setSelectionRange(pos, pos); } catch (_) { /* غیرمتنی */ }
   }
   function vFormHead(r) {
     return `<div class="endbar" style="margin:16px 0 0;align-items:flex-end">
@@ -2870,12 +2965,24 @@
         }, "افزودن");
       const all = d.querySelector("#supall"); if (all) all.onchange = () => d.querySelectorAll("[data-supi]").forEach((c) => { c.checked = all.checked; });
     };
-    /* خانه‌های خط استعلام فقط‌خواندنی‌اند (تصمیم مدیر، مهر ۱۴۰۵) — ویرایشگرِ فیلدها دیگر نیست */
-    Q("[data-fin]").forEach((c) => c.onchange = async (e) => { await TP.api(`/quotes/${e.target.dataset.fin}`, { method: "PUT", body: { final: e.target.checked ? 1 : 0 } }); await reload(); });
-    Q("[data-save]").forEach((b) => b.onclick = async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); okTick("استعلام ثبت شد"); } catch (e) {
+    /* خطِ استعلام: هر خانه با Enter یا رفتن از آن ذخیره می‌شود (saveField)؛ خطی که کارشناس هوشمند همین حالا رویش مذاکره می‌کند ورودی ندارد */
+    Q("[data-qf]").forEach((el) => {
+      const [id, f] = el.dataset.qf.split("|");
+      el.onchange = () => qSeq(() => saveField(el, +id, f));
+      if (el.tagName !== "SELECT") el.oninput = () => { if (!el.dataset.opt) el.classList.toggle("bad", !el.value.trim()); if (f === "qty" || f === "price") liveTotal(id); };
+    });
+    /* زمان تحویل: تایپ («۱۰ روز کاری») یا تاریخ از تقویم — «پاک کردن»ِ تقویم خانه را خالی می‌کند */
+    Q("[data-qdt]").forEach((b) => b.onclick = () => {
+      const el = G(`[data-qf="${b.dataset.qdt}|dtime"]`); if (!el) return;
+      TP.openDatePicker(el, (v) => { const x = String(v || "").split("،")[0].trim(); if (x !== el.value.trim()) { el.value = x; el.onchange(); } }, { single: true });
+    });
+    Q("[data-fin]").forEach((c) => c.onchange = () => { const on = c.checked; qSeq(async () => {
+      try { await TP.api(`/quotes/${c.dataset.fin}`, { method: "PUT", body: { final: on ? 1 : 0 } }); } catch (e) { TP.modal("تیک «تأیید نهایی» ثبت نشد", esc(e.message), null, "باشد", ""); }
+      await reload(); }); });
+    Q("[data-save]").forEach((b) => b.onclick = () => qSeq(async () => { try { await TP.api(`/quotes/${b.dataset.save}`, { method: "PUT", body: { save: true } }); await reload(); okTick("استعلام ثبت شد"); } catch (e) {
       const miss = (e.data && e.data.missing) || [];
       if (!miss.length) return TP.modal("ثبت موقت انجام نشد", esc(e.message), null, "باشد", "");
-      TP.modal("ثبت موقت انجام نشد", `این فیلدهای اجباری خالی‌اند:<br><br><b>${miss.map((f) => LBL[f] || f).join("، ")}</b><br><br>تا ثبت موقت انجام نشود، این ردیف در شمارنده و کمیسیون حساب نمی‌شود.`, null, "باشد", ""); } });
+      TP.modal("ثبت موقت انجام نشد", `این فیلدهای اجباری خالی‌اند:<br><br><b>${miss.map((f) => LBL[f] || f).join("، ")}</b><br><br>خانه‌های قرمز را همین‌جا در جدول پر کنید. تا ثبت موقت انجام نشود، این ردیف در شمارنده و کمیسیون حساب نمی‌شود.`, null, "باشد", ""); } }));
     Q("[data-del]").forEach((b) => b.onclick = () => TP.modal("حذف استعلام", "این ردیف حذف شود؟", async () => { await TP.api(`/quotes/${b.dataset.del}`, { method: "DELETE" }); await reload(); }, "حذف"));
     Q("[data-pf]").forEach((b) => b.onclick = () => {
       const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".pdf,.jpg,.jpeg,.png";
