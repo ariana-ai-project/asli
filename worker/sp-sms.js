@@ -1,21 +1,22 @@
 /**
  * پیامک‌های پنل تأمین‌کننده — «ارسال» کارشناس، دعوتِ کارشناس هوشمند و «ارسال رمز»، با یک قاعده (مهر ۱۴۰۵):
  *
- *   • درگاه پیامک (TextBee، worker/sms.js) وصل است و شماره واقعی است ← پیامکِ واقعی به گوشیِ تأمین‌کننده. کارشناس فقط
- *     خبرِ «فرستاده شد» را می‌گیرد، بی رمز: رمز کلیدِ ورودِ تأمین‌کننده است و فقط به گوشیِ خودش می‌رود.
- *   • درگاه وصل نیست، پیامک نرفت (سقف پلن، گوشیِ خاموش…) یا تأمین‌کنندهٔ فرضی ← همان شبیه‌سازیِ قبلی: متنِ کامل (با
- *     لینک و رمز) در بات مکاتباتِ کارشناس؛ اگر هنوز وصلش نکرده، لینکِ اتصال در بات کارشناسان و پیامک تا اتصال نگه
- *     داشته می‌شود (sp_links.payload).
+ *   • درگاه پیامک (worker/sms.js — TextBee یا IPPanel، با SMS_PROVIDER) وصل است و شماره واقعی است ← پیامکِ واقعی به گوشیِ
+ *     تأمین‌کننده. کارشناس فقط خبرِ «فرستاده شد» را می‌گیرد، بی رمز: رمز کلیدِ ورودِ تأمین‌کننده است و فقط به گوشیِ خودش می‌رود.
+ *   • درگاه وصل نیست یا پیامک نرفت (سقف پلن، اعتبارِ پنل، گوشیِ خاموش…) ← همان شبیه‌سازیِ قبلی: متنِ کامل (با لینک و رمز) در بات
+ *     مکاتباتِ کارشناس؛ اگر هنوز وصلش نکرده، لینکِ اتصال در بات کارشناسان و پیامک تا اتصال نگه داشته می‌شود (sp_links.payload).
  *   • hold — کارشناس هوشمند در حالت آزمایشی برای تأمین‌کنندهٔ واقعی: هیچ‌جا نمی‌رود؛ فقط ثبت می‌شود.
- * نتیجه روی همان ردیفِ sp_sms می‌نشیند (via: textbee | sim | hold، status، ref، error).
+ * نتیجه روی همان ردیفِ sp_sms می‌نشیند (via: نامِ درگاه — textbee | ippanel — یا sim | hold؛ status، ref، error).
+ * شمارهٔ رزرو (sp-core.js:RESERVED_PHONE، مالِ «تأمین‌کنندهٔ فرضی»ِ برداشته‌شده) هرگز پیامکِ واقعی نمی‌گیرد.
  */
 import { telegram, esc } from "./telegram.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
-import { smsReady, sendSms } from "./sms.js";
+import { smsReady, sendSms, viaSent } from "./sms.js";
 
 /**
- * s: {smsId, expertId, expertChat, threadId, supplier, to, label, text, panel, bot, demo, hold, kind: "rfq" | "pass"}
+ * s: {smsId, expertId, expertChat, threadId, supplier, to, label, text, otp, panel, bot, hold, kind: "rfq" | "pass"}
+ *    otp: رمزِ همین پیامک وقتی خودش «پیامکِ رمز» است — درگاهی که الگوی رمز دارد فقط همان را با الگو می‌فرستد (sms.js)
  * opts.sim: "push" (پیش‌فرض) — اگر پیامک نرفت، شبیه‌سازی در بات مکاتبات؛ "none" — صدازننده خودش متن را نشان می‌دهد.
  * opts.pointer: اگر کارشناس بات مکاتبات را وصل نکرده، بات کارشناسان لینکِ اتصال را بدهد (پیش‌فرض: بله).
  * خروجی {via, sent, error, pushed, where}
@@ -24,8 +25,8 @@ export async function deliverSms(env, s, opts = {}) {
   const sim = opts.sim || "push";
   let via = "sim", status = "sim", ref = null, error = null;
   if (s.hold) { via = "hold"; status = "held"; }
-  else if (!s.demo && s.to !== C.DEMO.phone && smsReady(env)) {
-    try { const r = await sendSms(env, s.to, s.text); via = "textbee"; status = "queued"; ref = r.ref; }
+  else if (s.to !== C.RESERVED_PHONE && smsReady(env)) {
+    try { const r = await sendSms(env, s.to, s.text, s.otp ? { otp: s.otp } : {}); via = r.provider; status = "queued"; ref = r.ref; }
     catch (e) { error = String((e && e.message) || e).slice(0, 300); status = "failed"; }
   }
   let pushed = 0, where = "";
@@ -34,7 +35,7 @@ export async function deliverSms(env, s, opts = {}) {
     await env.DB.prepare("UPDATE sp_sms SET via=?, status=?, ref=?, error=? WHERE id=?").bind(via, status, ref, error, s.smsId).run()
       .catch((e) => console.error("sp_sms status", e && e.message));
   }
-  return { via, sent: via === "textbee", error, pushed, where };
+  return { via, sent: viaSent(via), error, pushed, where };
 }
 
 /** شبیه‌سازی: متنِ پیامک در بات مکاتباتِ کارشناس؛ اگر وصل نیست، اشاره و لینکِ اتصال در بات کارشناسان */
@@ -52,10 +53,10 @@ async function simulate(env, s, error, pointer) {
   return { pushed: 0, where: "بات مکاتبات (بعد از اتصالِ کارشناس)" };
 }
 
-/** «ارسال رمز به پیامک» — صفحهٔ ورود یا بات. r خروجیِ C.resendPassword است */
+/** «ارسال رمز به پیامک» — صفحهٔ ورود یا بات. r خروجیِ C.resendPassword است (otp: همان رمز، برای الگوی رمزِ درگاه) */
 export function deliverPass(env, r) {
   return deliverSms(env, { smsId: r.smsId, expertId: r.expertId, expertChat: r.expertChat, threadId: r.threadId, supplier: r.supplier,
-    to: r.to, label: r.label, text: r.text, panel: r.panel, bot: r.bot, demo: r.demo, kind: "pass" });
+    to: r.to, label: r.label, text: r.text, otp: r.otp, panel: r.panel, bot: r.bot, kind: "pass" });
 }
 
 /** متنِ کوتاهِ وضعیتِ پیامک برای کارشناس — بی رمز */

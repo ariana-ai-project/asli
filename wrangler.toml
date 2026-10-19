@@ -16,8 +16,14 @@
 #                      نام کاربری‌اش را خودِ Worker از getMe می‌خواند و در settings نگه می‌دارد
 #   TG_WEBHOOK_SECRET  رازی که تلگرام در هدر X-Telegram-Bot-Api-Secret-Token برمی‌گرداند
 #                      (یک راز برای هر چهار بات؛ وبهوکشان جداست)
-#   TEXTBEE_API_KEY    کلید درگاه پیامک TextBee (worker/sms.js) — تا ست نشده، پیامک‌ها شبیه‌سازی می‌شوند.
+#   درگاه پیامک (worker/sms.js) — کدام درگاه را SMS_PROVIDER می‌گوید (پایین، [vars])؛ تا درگاهِ فعال کامل ست نشده، پیامک‌ها
+#   شبیه‌سازی می‌شوند. وضعیت و «تستِ درگاه» (بی فرستادنِ پیامک) در پنل پشتیبانی ← منوی پروفایل ← «درگاه پیامک».
+#   TEXTBEE_API_KEY    کلید درگاه پیامک TextBee (SMS_PROVIDER = "textbee"، پیش‌فرض)
 #                      اختیاری: TEXTBEE_DEVICE_ID (شناسهٔ گوشی؛ بی آن، گوشیِ پیش‌فرضِ حساب TextBee)
+#   IPPANEL_API_KEY    کلید API پنل پیامکِ IPPanel یا پنلِ هم‌خانواده‌اش (SMS_PROVIDER = "ippanel")؛ پنل ← توسعه‌دهندگان ← کلیدهای دسترسی
+#   IPPANEL_FROM       خطِ فرستندهٔ همان پنل، مثل +983000505 (هر شکلی نوشته شود +98… می‌شود) — راز نیست ولی کنارِ کلید ست می‌شود
+#                      اختیاری: IPPANEL_PATTERN_OTP (کدِ الگوی پیامکِ رمز؛ با آن رمزهای ورود با الگو می‌روند، بی آن متنِ ساده) و
+#                      IPPANEL_PATTERN_VAR (نامِ متغیرِ رمز در همان الگو؛ پیش‌فرض code — الگو در پنل مثل «رمز ورود: %code%»)
 #   TG_VB_BOT_TOKEN    توکن بات ویس (ویس به متن — worker/voice-bot.js)؛ وبهوکش را Cronِ ویس خودش ثبت می‌کند
 #   VOICE_PASS         رمزِ اولیهٔ ورودِ بات ویس و حالتِ صوتِ بات مکاتبات؛ کاربر عوضش کند، هشِ رمزِ تازه در settings
 #   ELEVENLABS_API_KEY تبدیل صوت به متن (نامهٔ کمیسیون، پیامِ صوتی، بات ویس)
@@ -33,6 +39,9 @@ SITE_ORIGIN = "https://arianaai.website"
 TG_BOT_USERNAME = "ArianaSupplyBot"
 # بات تیمیِ کارشناسان ارشد (اعلان‌های پایش تیم). توکنش راز است: wrangler secret put TG_TEAM_BOT_TOKEN
 TG_TEAM_BOT_USERNAME = "Supply_SeniorBot"
+# درگاه پیامک (worker/sms.js): "textbee" (پیش‌فرض، همان گوشیِ اندرویدی) یا "ippanel" (پنل پیامکِ IPPanel — رازها بالا).
+# برای رفتن به IPPanel: wrangler secret put IPPANEL_API_KEY، بعد IPPANEL_FROM، و این‌جا "ippanel"؛ نامِ ناشناخته یعنی هیچ پیامکی نرود
+SMS_PROVIDER = "textbee"
 
 # انبار فایل پیش‌فاکتور — سطل خصوصی روی Supabase. آدرس راز نیست؛ کلید سرویس
 # با wrangler secret put SUPABASE_SERVICE_KEY ست می‌شود. تا وقتی کلید نباشد،

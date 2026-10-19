@@ -145,7 +145,7 @@
     const items = [...(S.botLogin && !inTg ? [{ label: "همین پنل در تلگرام", icon: "telegram", href: S.botLogin, attrs: 'target="_blank" rel="noopener"' }] : []),
       { label: "راهنما", icon: "help", attrs: 'data-help="sup.panel"' }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }];
     return UI.topbar({ title: "پنل تأمین‌کنندگان", sub: `شرکت ${esc(S.company)}`, home: "#", homeTitle: "",
-      user: S.me ? { name: S.me.name, sub: S.me.demo ? "تأمین‌کنندهٔ فرضی" : "تأمین‌کننده" } : null, items: S.me ? items : [] });
+      user: S.me ? { name: S.me.name, sub: "تأمین‌کننده" } : null, items: S.me ? items : [] });
   }
   document.addEventListener("click", (e) => { if (e.target.closest("[data-logout]")) askLogout(); });
   const askLogout = () => modal("خروج", "<p>بعد از خروج، برای ورود دوباره باید «ارسال رمز به پیامک» را بزنید.</p>", logout, "خروج", "انصراف");

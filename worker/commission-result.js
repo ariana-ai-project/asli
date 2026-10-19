@@ -37,15 +37,18 @@ export const REASONS = {
   other: { fa: "علت دیگر", phrase: "" },
 };
 
-/** پیشنهادهای هر قلم با گفت‌وگو و شمارهٔ تأمین‌کننده (اگر دارد) */
+/**
+ * پیشنهادهای هر قلم با گفت‌وگو و شمارهٔ تأمین‌کننده (اگر دارد). گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) این‌جا نیست: نه پیامِ
+ * تشکر می‌گیرد و نه پیامک
+ */
 async function itemsOf(env, aid) {
   const a = await env.DB.prepare("SELECT a.id, a.request_id, a.expert_id, r.party FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=?").bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
   const [items, quotes, threads, results, notes] = await Promise.all([
     env.DB.prepare("SELECT id, title, qty, unit, line_no, commission_ok FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all(),
     env.DB.prepare("SELECT id, item_id, supplier_name, price, qty, unit, dtime, pay, invoice, vat, saved, final, origin, origin_ref FROM quotes WHERE assignment_id=? AND saved=1 ORDER BY item_id, price").bind(aid).all(),
-    env.DB.prepare(`SELECT t.id, t.supplier_id, s.name, s.demo, p.phone, p.id AS phone_id, (SELECT b.id FROM sp_bundles b WHERE b.thread_id=t.id ORDER BY b.id DESC LIMIT 1) AS last_b
-      FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id WHERE t.assignment_id=? AND (t.request_id IS NULL OR t.request_id=?)`).bind(aid, a.request_id).all(),
+    env.DB.prepare(`SELECT t.id, t.supplier_id, s.name, p.phone, p.id AS phone_id, (SELECT b.id FROM sp_bundles b WHERE b.thread_id=t.id ORDER BY b.id DESC LIMIT 1) AS last_b
+      FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id AND s.demo=0 LEFT JOIN sp_phones p ON p.id=t.phone_id WHERE t.assignment_id=? AND (t.request_id IS NULL OR t.request_id=?)`).bind(aid, a.request_id).all(),
     env.DB.prepare("SELECT * FROM commission_results WHERE assignment_id=?").bind(aid).all(),
     env.DB.prepare("SELECT n.* FROM commission_notes n JOIN items i ON i.id=n.item_id WHERE i.assignment_id=?").bind(aid).all(),
   ]);
@@ -63,7 +66,7 @@ async function itemsOf(env, aid) {
       const qs = (quotes.results || []).filter((q) => q.item_id === it.id).map((q) => {
         const t = threadOf(q);
         return { id: q.id, supplier: q.supplier_name, price: q.price, total: q.price != null && it.qty != null ? q.price * (q.qty ?? it.qty) : null, qty: q.qty, unit: q.unit,
-          dtime: q.dtime, pay: q.pay, invoice: q.invoice, vat: q.vat, final: !!q.final, thread_id: t ? t.id : null, demo: !!(t && t.demo),
+          dtime: q.dtime, pay: q.pay, invoice: q.invoice, vat: q.vat, final: !!q.final, thread_id: t ? t.id : null,
           phone: t && t.phone ? `${t.phone.slice(0, 4)}•••${t.phone.slice(-4)}` : null, sent: sent.has(`${it.id}|${nameKey(q.supplier_name)}`) };
       });
       return { ...it, quotes: qs, result: res.get(it.id) || null };
@@ -134,7 +137,7 @@ export async function commissionResultSave(env, body, company) {
       for (const q of r.it.quotes) {
         if (q.id === r.q.id || nameKey(q.supplier) === nameKey(r.q.supplier) || q.sent || !q.thread_id) continue;
         const k = q.thread_id;
-        if (!bySup.has(k)) bySup.set(k, { thread_id: k, supplier: q.supplier, demo: q.demo, lost: [] });
+        if (!bySup.has(k)) bySup.set(k, { thread_id: k, supplier: q.supplier, lost: [] });
         if (!bySup.get(k).lost.some((x) => x.item_id === r.it.id)) bySup.get(k).lost.push({ item_id: r.it.id, title: r.it.title, phrase });
       }
     }
@@ -150,8 +153,9 @@ export async function commissionResultSave(env, body, company) {
       await pushMsgs(env, { id: g.thread_id }, [{ id: ins.meta.last_row_id, thread_id: g.thread_id, who: "e", kind: "text", body: text, meta, at }]).catch(() => {});
       let smsVia = null;
       const th = d.threads.find((x) => x.id === g.thread_id);
-      if (body.sms !== false && th && th.phone && !th.demo && smsReady(env)) {
-        try { await sendSms(env, th.phone, smsText(g.lost, company, d.a.request_id)); smsVia = "textbee"; sms++; }
+      if (body.sms !== false && th && th.phone && smsReady(env)) {
+        /* commission_notes.sms: نامِ درگاهی که پیامک را برد (textbee | ippanel) یا «failed: …» */
+        try { smsVia = (await sendSms(env, th.phone, smsText(g.lost, company, d.a.request_id))).provider; sms++; }
         catch (e) { smsVia = `failed: ${String((e && e.message) || e).slice(0, 120)}`; }
       }
       await env.DB.batch(g.lost.map((x) => env.DB.prepare("INSERT OR REPLACE INTO commission_notes (item_id,supplier,thread_id,sms,at) VALUES (?,?,?,?,?)")

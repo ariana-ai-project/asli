@@ -66,7 +66,7 @@ async function later(ctx, fn) {
   if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(p); else await p;
 }
 
-const meOut = (s) => ({ name: s.name, phone: C.maskPhone(s.phone), label: s.label, demo: !!s.demo, k: s.k });
+const meOut = (s) => ({ name: s.name, phone: C.maskPhone(s.phone), label: s.label, k: s.k });
 
 /** بدنهٔ خام درخواست به انبار؛ خروجی: {skey, filename, mime, size} */
 async function storeBody(env, request, url, aid, prefix) {
@@ -115,8 +115,10 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const b = await readJson(request);
     const r = await C.resendPassword(env, b.k);
     const d = await deliverPass(env, r).catch((e) => ({ sent: false, error: e.message, where: "" }));
-    /* رمز فقط به گوشیِ خودِ تأمین‌کننده می‌رود؛ اگر پیامکِ واقعی نرفت، همان شبیه‌سازی (متن در گفت‌وگوی کارشناس) */
-    return json({ ok: true, to: r.masked, sent: !!d.sent, demo: !d.sent, note: d.sent ? ""
+    /* رمز فقط به گوشیِ خودِ تأمین‌کننده می‌رود؛ اگر پیامکِ واقعی نرفت، همان شبیه‌سازی (متن در گفت‌وگوی کارشناس).
+       simulated: پیامک واقعاً نرفت. demo نامِ قدیمیِ همین است (ربطی به «تأمین‌کنندهٔ فرضی» نداشت) و برای صفحه‌های ذخیره‌شده در
+       مرورگر هنوز فرستاده می‌شود */
+    return json({ ok: true, to: r.masked, sent: !!d.sent, simulated: !d.sent, demo: !d.sent, note: d.sent ? ""
       : d.where ? `پیامکِ واقعی ${d.error ? "نرفت" : "فعلاً خاموش است"}؛ متنِ پیامک (با رمز تازه) در ${d.where} آمد و کارشناس خرید آن را به شما می‌رساند.`
         : "پیامک فرستاده نشد و هنوز کارشناسی برای این شماره استعلامی نفرستاده؛ با کارشناس خرید تماس بگیرید." });
   }
@@ -279,7 +281,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
   const ex = who.expert;
   if (path === "/sp/x/threads" && m === "GET") {
     return json({ ...(await C.expertThreads(env, ex)), me: { name: ex.name, label: ex.label }, bot: await C.spBotUser(env), via: who.tg ? "telegram" : "web",
-      labels: C.FILE_LABELS, demo: C.DEMO.name, term_fa: C.TERM_FA, pf_read: await pfReadOn(env) });
+      labels: C.FILE_LABELS, term_fa: C.TERM_FA, pf_read: await pfReadOn(env) });
   }
   /* اعلانِ گوشهٔ پنل کارشناس: پیام‌های تازهٔ تأمین‌کنندگان (هر چند ثانیه، از همهٔ صفحه‌های پنل) */
   if (path === "/sp/x/inbox" && m === "GET") return json(await C.expertInbox(env, ex, url.searchParams.get("since")));
@@ -292,7 +294,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     await later(ctx, () => P.pushMsgs(env, { id: r.thread_id }, r.msgs));
     /* پیامکِ واقعی اگر درگاه وصل است (sp-sms.js)؛ متنِ با رمز فقط وقتی به پنل برمی‌گردد که پیامک نرفت */
     const d = await deliverSms(env, { smsId: r.sms.id, expertId: ex.id, threadId: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label,
-      text: r.sms.text, panel: r.links.panel, bot: r.links.bot, demo: r.supplier.demo, kind: "rfq" }, { sim: "none" });
+      text: r.sms.text, panel: r.links.panel, bot: r.links.bot, kind: "rfq" }, { sim: "none" });
     return json({ ...r, sms: { to: r.sms.to, label: r.sms.label, sent: d.sent, via: d.via, error: d.error, note: smsNote(d, C.maskPhone(r.sms.to)),
       ...(d.sent ? {} : { text: r.sms.text }) } });
   }
@@ -300,7 +302,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     const b = await readJson(request);
     const r = await C.decide(env, ex, mm[1], T(b.action), { comment: b.comment });
     await later(ctx, () => P.pushMsgs(env, r.thread, r.msgs));
-    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, gaps: r.gaps, demo: r.demo, gen: r.gen });
+    return json({ ok: true, state: r.state, quote_ids: r.quote_ids, gaps: r.gaps, gen: r.gen });
   }
   /* جدول تطابق: پذیرفتنِ مغایرت (پیش‌فاکتور ملاک) — keys یا all */
   if ((mm = /^\/sp\/x\/bundle\/(\d+)\/accept$/.exec(path)) && m === "POST") {

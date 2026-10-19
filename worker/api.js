@@ -61,6 +61,7 @@ import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-
 import { RATE_DDL, rateGaps } from "./ai-rates.js";
 import { FB_DDL, feedbackStats, feedbackOne, feedbackExport, feedbackSummary } from "./ai-feedback.js";
 import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
+import { smsStatus, smsCheck } from "./sms.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
@@ -2292,6 +2293,10 @@ async function route(request, env, ctx) {
       if ((mm = /^\/support\/alarms\/(\d+)\/ack$/.exec(path)) && m === "POST") return json(await alarmAck(env, "s", mm[1]));
       if (path === "/support/alert-contacts" && m === "GET") return json(await alertContacts(env));
       if (path === "/support/alert-contacts" && m === "PUT") return json(await alertContactsSave(env, await readJson(request)));
+      /* درگاه پیامک (worker/sms.js): وضعیتِ فقط‌خواندنی — کدام درگاه، وصل یا نه، چه چیزی ست نشده (بی هیچ کلید) — و «تستِ درگاه» بی
+         فرستادنِ پیامک (اعتبارِ IPPanel یا گوشی‌های TextBee) */
+      if (path === "/support/sms" && m === "GET") return json(smsStatus(env));
+      if (path === "/support/sms/check" && m === "POST") return json(await smsCheck(env));
       if (path === "/support/commission/result" && m === "POST") { const r = await commissionResultSave(env, await readJson(request), env.COMPANY || "تونل سد آریانا"); flush(env, ctx, r.notified); return json(r); }
       throw new HttpError("مسیر پشتیبانی پیدا نشد.", 404);
     }

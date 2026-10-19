@@ -149,17 +149,19 @@
   async function settingsDialog() {
     if (!T.cfg) await loadCfg(); else await Promise.race([loadCfg(), new Promise((r) => setTimeout(r, 400))]);
     const c = T.cfg || { defaults: {}, sms: {} }, f = formOf(c.defaults), s = c.sms || {};
+    /* درگاهِ فعالِ مکاتبات (worker/sms.js): TextBee یا IPPanel — «دستگاه» در IPPanel خطِ فرستنده است */
+    const pv = esc(s.provider || "TextBee"), devFa = esc(s.dev_fa || "شناسهٔ دستگاه");
     const dlg = wide(TP.modal("⚙️ تنظیمات مناقصه", `<h4 class="sv-h" style="margin-top:0">پیش‌فرض قواعد مناقصهٔ تازه</h4>
       <div class="td-form">${ruleInputs(f, "data-tdc")}<label class="td-f"><span class="l">مدت (دقیقه)</span><input class="tp-input" data-tdc="duration_min" value="${esc(fa(f.duration_min))}" inputmode="numeric"><small class="h"></small></label>
         <label class="td-f"><span class="l">دور سربسته (دقیقه)</span><input class="tp-input" data-tdc="sealed_min" value="${esc(fa(f.sealed_min))}" inputmode="numeric"><small class="h">۰ = ندارد</small></label></div>
       ${ruleSwitches(f, "data-tdc")}
       <div class="td-form" style="margin-top:12px">${F("شرایط پیش‌فرض", `<textarea class="tp-input" data-tdcterms>${esc(c.terms || "")}</textarea>`, "تحویل، پرداخت، فاکتور… — در هر مناقصه قابل تغییر", true)}</div>
       <h4 class="sv-h">درگاه پیامک</h4>
-      <div class="tp-note ${s.ready ? "" : "warn"}">${s.ready ? `وصل است — ${s.shared ? "همان درگاه TextBee مکاتبات" : `TextBee با کلید جدای مناقصه (${esc(s.key_tail)})`}${s.device ? ` · دستگاه ${esc(s.device)}` : ""}.` : "وصل نیست: نه کلید مکاتبات ست شده و نه کلید جدا."}</div>
-      <div class="td-form" style="margin-top:8px"><label class="td-f"><span class="l">کلید API ویژهٔ مناقصه</span><input class="tp-input" type="password" data-tdckey autocomplete="new-password" dir="ltr" placeholder="${s.own_key ? esc(s.key_tail) : "همان مکاتبات"}"><small class="h">خالی = همان کلید مکاتبات</small></label>
-        <label class="td-f"><span class="l">شناسهٔ دستگاه</span><input class="tp-input" data-tdcdev dir="ltr" value="${esc(s.device || "")}"><small class="h">اختیاری</small></label>
+      <div class="tp-note ${s.ready ? "" : "warn"}">${s.ready ? `وصل است — ${s.shared ? `همان درگاه ${pv} مکاتبات` : `${pv} با کلید جدای مناقصه (${esc(s.key_tail)})`}${s.device ? ` · ${devFa} ${esc(s.device)}` : ""}.` : `وصل نیست: نه درگاه ${pv} مکاتبات کامل ست شده و نه کلید جدا.`}${s.stale ? `<br>کلید یا دستگاهِ جدای قبلیِ مناقصه مالِ ${esc(s.stale)} است و با درگاهِ فعلی (${pv}) به کار نمی‌رود.` : ""}</div>
+      <div class="td-form" style="margin-top:8px"><label class="td-f"><span class="l">کلید API ویژهٔ مناقصه</span><input class="tp-input" type="password" data-tdckey autocomplete="new-password" dir="ltr" placeholder="${s.own_key ? esc(s.key_tail) : "همان مکاتبات"}"><small class="h">خالی = همان کلید مکاتبات (${pv})</small></label>
+        <label class="td-f"><span class="l">${devFa}</span><input class="tp-input" data-tdcdev dir="ltr" value="${esc(s.device || "")}"><small class="h">اختیاری</small></label>
         <label class="td-f"><span class="l">پیامک آزمایشی به</span><input class="tp-input" data-tdctest inputmode="tel" dir="ltr" placeholder="09…"><small class="h"></small></label></div>
-      <div class="td-foot"><button type="button" class="tp-btn" data-tdctestgo>📱 پیامک آزمایشی</button>${s.own_key ? `<button type="button" class="tp-btn" data-tdcshared>برگشت به درگاه مکاتبات</button>` : ""}<span class="dim" data-tdcmsg style="font-size:.82rem"></span></div>`,
+      <div class="td-foot"><button type="button" class="tp-btn" data-tdcchk title="کلید و حسابِ درگاه را بی فرستادنِ پیامک می‌سنجد">🔌 تستِ درگاه</button><button type="button" class="tp-btn" data-tdctestgo>📱 پیامک آزمایشی</button>${s.own_key ? `<button type="button" class="tp-btn" data-tdcshared>برگشت به درگاه مکاتبات</button>` : ""}<span class="dim" data-tdcmsg style="font-size:.82rem"></span></div>`,
     async () => {
       const g = readForm(dlg, "data-tdc", f);
       const body = { defaults: { ...rulesBody(g), duration_s: String(Math.round((Number(n0(g.duration_min)) || 30) * 60)), sealed_s: String(Math.round((Number(n0(g.sealed_min)) || 0) * 60)) },
@@ -169,6 +171,14 @@
       catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     }, "ذخیره", "انصراف"));
     const msg = dlg.querySelector("[data-tdcmsg]");
+    /* «تستِ درگاه»: همان کلیدی که مناقصه به کار می‌برد، بی پیامک — IPPanel اعتبار، TextBee گوشی‌های حساب (worker/sms.js:smsCheck) */
+    dlg.querySelector("[data-tdcchk]").onclick = async (e) => {
+      e.preventDefault(); msg.textContent = "…";
+      try {
+        const r = await C.api("/tender-settings/test", { body: { check: true } });
+        msg.textContent = r.ok ? `درگاه کار می‌کند${r.credit != null ? ` — اعتبار: ${money(r.credit)}` : r.devices != null ? ` — ${fa(r.enabled || 0)} گوشیِ روشن` : ""}.` : (r.error || "درگاه کار نمی‌کند.");
+      } catch (x) { msg.textContent = x.message; }
+    };
     dlg.querySelector("[data-tdctestgo]").onclick = async (e) => {
       e.preventDefault(); msg.textContent = "…";
       try { await C.api("/tender-settings/test", { body: { phone: dlg.querySelector("[data-tdctest]").value } }); msg.textContent = "پیامک رفت؛ گوشی را ببینید."; }

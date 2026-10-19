@@ -267,9 +267,11 @@ export async function turnReply(env, rec, { run, th, st, lines, msgs, fast = fal
     docNumbers(env, hp.head, it.code || null).catch(() => null),
     env.DB.prepare("SELECT * FROM cr_turns WHERE thread_id=?").bind(th.id).first(),
     env.DB.prepare("SELECT * FROM cr_facts WHERE item_id=? ORDER BY at DESC, id DESC LIMIT 80").bind(it.id).all(),
+    /* قیمت و نامِ گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) نه محکِ مذاکره است و نه رقیب */
     env.DB.prepare(`SELECT l.id, l.price, l.unit, b.terms_json FROM sp_lines l JOIN sp_bundles b ON b.id=l.bundle_id
-      WHERE l.item_id=? AND l.thread_id<>? AND l.price>0 AND b.state IN ('pending','approved','proforma','final')`).bind(it.id, th.id).all(),
-    env.DB.prepare("SELECT DISTINCT s.name FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.request_id=? AND t.id<>?").bind(th.request_id, th.id).all(),
+      WHERE l.item_id=? AND l.thread_id<>? AND l.price>0 AND b.state IN ('pending','approved','proforma','final')
+        AND NOT EXISTS (SELECT 1 FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.id=l.thread_id AND s.demo=1)`).bind(it.id, th.id).all(),
+    env.DB.prepare("SELECT DISTINCT s.name FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id WHERE t.request_id=? AND t.id<>? AND s.demo=0").bind(th.request_id, th.id).all(),
   ]);
   const nd = ((row && row.rec) || {}).negotiation_defaults || {};
   const builder = (rules && rules.builder) || {};

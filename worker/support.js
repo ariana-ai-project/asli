@@ -17,6 +17,7 @@ import { managerCode } from "./settings.js";
 import { queueStmt } from "./queue.js";
 import { pushStmt, EXPERT } from "./push.js";
 import { threadRow, threadOut, lineOut, bundleOut, msgOut, msgFor, FILE_LABELS } from "./sp-core.js";
+import { viaSent, viaLabel } from "./sms.js";
 import { itemNeeds } from "./ai-rules.js";
 import { getSizeRules } from "./size.js";
 
@@ -162,7 +163,7 @@ export async function supportExperts(env) {
       (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND a.deadline_at<?1 AND i.state='open') AS overdue,
       (SELECT COUNT(DISTINCT a.id) FROM assignments a JOIN items i ON i.assignment_id=a.id WHERE a.expert_id=e.id AND a.dispatched_at IS NOT NULL AND a.viewed_at IS NULL AND i.state='open') AS unseen,
       (SELECT COUNT(*) FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE a.expert_id=e.id AND a.commission_no IS NOT NULL AND i.state='open' AND i.commission_ok=0) AS cm_wait,
-      (SELECT COUNT(*) FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id WHERE a.expert_id=e.id) AS threads,
+      (SELECT COUNT(*) FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers s ON s.id=t.supplier_id AND s.demo=0 WHERE a.expert_id=e.id) AS threads,
       (SELECT g.mode FROM ai_agents g WHERE g.expert_id=e.id) AS ai
     FROM experts e WHERE e.active=1 ORDER BY e.senior DESC, e.name`).bind(now()).all()).results || [];
   return { experts: rows.map((r) => ({ ...r, tg: !!r.tg, senior: r.senior ? 1 : 0 })) };
@@ -183,7 +184,7 @@ export async function supportExpert(env, id) {
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.saved=1) AS quote_count,
         (SELECT COUNT(*) FROM quotes q WHERE q.assignment_id=a.id AND q.final=1) AS final_count,
         (SELECT COUNT(*) FROM proformas p WHERE p.assignment_id=a.id) AS proforma_count,
-        (SELECT COUNT(*) FROM sp_threads t WHERE t.assignment_id=a.id) AS threads
+        (SELECT COUNT(*) FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id AND s.demo=0 WHERE t.assignment_id=a.id) AS threads
       FROM assignments a JOIN requests r ON r.id=a.request_id
       WHERE a.expert_id=? AND a.dispatched_at IS NOT NULL AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state IN ('open','hold'))
       ORDER BY a.dispatched_at DESC LIMIT 200`).bind(id).all(),
@@ -353,15 +354,16 @@ const FEED_SQL = {
       WHERE p.uploaded_at BETWEEN ?1 AND ?2 {EX} {RID} ORDER BY p.uploaded_at DESC LIMIT ?3`,
     ex: "AND a.expert_id = ?4", rid: "AND a.request_id = ?5",
   },
+  /* پیام و پیامکِ گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) در گزارش نمی‌آید — تأمین‌کنندهٔ فرضی برداشته شده است */
   msg: {
-    sql: `SELECT m.id, m.at, m.who, m.kind, substr(m.body, 1, 200) AS body, (m.meta_json LIKE '%"ai":true%') AS ai, t.id AS tid, t.request_id AS rid, a.expert_id, s.name AS supplier, s.demo
-      FROM sp_msgs m JOIN sp_threads t ON t.id = m.thread_id JOIN assignments a ON a.id = t.assignment_id JOIN sp_suppliers s ON s.id = t.supplier_id
+    sql: `SELECT m.id, m.at, m.who, m.kind, substr(m.body, 1, 200) AS body, (m.meta_json LIKE '%"ai":true%') AS ai, t.id AS tid, t.request_id AS rid, a.expert_id, s.name AS supplier
+      FROM sp_msgs m JOIN sp_threads t ON t.id = m.thread_id JOIN assignments a ON a.id = t.assignment_id JOIN sp_suppliers s ON s.id = t.supplier_id AND s.demo = 0
       WHERE m.at BETWEEN ?1 AND ?2 {EX} {RID} ORDER BY m.at DESC LIMIT ?3`,
     ex: "AND a.expert_id = ?4", rid: "AND t.request_id = ?5",
   },
   sms: {
-    sql: `SELECT x.id, x.at, x.kind, x.via, x.status, x.expert_id, x.thread_id AS tid, t.request_id AS rid, s.name AS supplier, s.demo
-      FROM sp_sms x JOIN sp_phones p ON p.id = x.phone_id JOIN sp_suppliers s ON s.id = p.supplier_id LEFT JOIN sp_threads t ON t.id = x.thread_id
+    sql: `SELECT x.id, x.at, x.kind, x.via, x.status, x.expert_id, x.thread_id AS tid, t.request_id AS rid, s.name AS supplier
+      FROM sp_sms x JOIN sp_phones p ON p.id = x.phone_id JOIN sp_suppliers s ON s.id = p.supplier_id AND s.demo = 0 LEFT JOIN sp_threads t ON t.id = x.thread_id
       WHERE x.at BETWEEN ?1 AND ?2 {EX} {RID} ORDER BY x.at DESC LIMIT ?3`,
     ex: "AND x.expert_id = ?4", rid: "AND t.request_id = ?5",
   },
@@ -369,8 +371,8 @@ const FEED_SQL = {
 
 const MSG_KIND_FA = { voice: "پیام صوتی", note: "یادداشت درونی" };
 const SMS_FA = { rfq: "پیامکِ استعلام", pass: "پیامکِ رمز", resend: "پیامکِ رمز" };
-/* sp-sms.js:deliverSms — via: textbee | sim | hold، و status «failed» یعنی TextBee نپذیرفت و شبیه‌سازی شد */
-const smsState = (r) => (r.via === "textbee" ? "به درگاه پیامک سپرده شد" : r.via === "hold" ? "منتظر اتصالِ بات مکاتبات"
+/* sp-sms.js:deliverSms — via: نامِ درگاه (textbee | ippanel)، sim یا hold؛ status «failed» یعنی درگاه نپذیرفت و شبیه‌سازی شد */
+const smsState = (r) => (viaSent(r.via) ? `به درگاه پیامک${viaLabel(r.via) ? ` (${viaLabel(r.via)})` : ""} سپرده شد` : r.via === "hold" ? "منتظر اتصالِ بات مکاتبات"
   : r.status === "failed" ? "نرفت — شبیه‌سازی شد" : "شبیه‌سازی (بی پیامکِ واقعی)");
 
 /** ردیفِ هر منبع → شکلِ یکسانِ گزارش */
@@ -398,9 +400,9 @@ function feedRow(src, r) {
       const by = r.who === "s" ? "supplier" : r.who === "e" ? (r.ai ? "ai" : "expert") : "system";
       const what = MSG_KIND_FA[r.kind] || (r.kind === "text" ? "پیام" : "رخداد");
       const dir = r.who === "s" ? `از «${short(r.supplier, 40)}»` : `به «${short(r.supplier, 40)}»`;
-      return { ...base, by, kind: `msg_${r.kind}`, thread_id: r.tid, demo: !!r.demo, text: `${what} ${dir}: ${short(r.body, 160) || "—"}` };
+      return { ...base, by, kind: `msg_${r.kind}`, thread_id: r.tid, text: `${what} ${dir}: ${short(r.body, 160) || "—"}` };
     }
-    case "sms": return { ...base, by: "system", kind: "sms", thread_id: r.tid || null, demo: !!r.demo,
+    case "sms": return { ...base, by: "system", kind: "sms", thread_id: r.tid || null,
       text: `${SMS_FA[r.kind] || "پیامک"} برای «${short(r.supplier, 40)}» — ${smsState(r)}` };
     default: return base;
   }
@@ -446,12 +448,13 @@ export async function supportActivity(env, url, opts = {}) {
 /* ------------------------------------------------------------------ */
 /* مکاتبات (فقط‌خواندنی)                                                  */
 /* ------------------------------------------------------------------ */
+/** همهٔ گفت‌وگوها (فیلترِ کارشناس و درخواست) — جز گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) */
 export async function supportThreads(env, url) {
   const ex = int(url.searchParams.get("expert")), rid = T(url.searchParams.get("rid"));
-  const conds = [], args = [];
+  const conds = ["s.demo=0"], args = [];
   if (ex) { conds.push("a.expert_id=?"); args.push(ex); }
   if (rid) { conds.push("t.request_id=?"); args.push(rid); }
-  const rows = (await env.DB.prepare(`SELECT t.id, t.request_id, t.assignment_id, t.last_at, t.created_at, s.name AS supplier, s.demo, a.expert_id, r.party,
+  const rows = (await env.DB.prepare(`SELECT t.id, t.request_id, t.assignment_id, t.last_at, t.created_at, s.name AS supplier, a.expert_id, r.party,
       (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=t.id) AS msgs,
       (SELECT COUNT(*) FROM sp_lines l WHERE l.thread_id=t.id) AS lines,
       (SELECT COUNT(*) FROM sp_bundles b WHERE b.thread_id=t.id AND b.state='final') AS finals,
@@ -461,8 +464,8 @@ export async function supportThreads(env, url) {
       (SELECT substr(m.body, 1, 140) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_body,
       (SELECT x.state FROM ai_threads x WHERE x.thread_id=t.id) AS ai_state
     FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id JOIN assignments a ON a.id=t.assignment_id JOIN requests r ON r.id=a.request_id
-    ${conds.length ? `WHERE ${conds.join(" AND ")}` : ""} ORDER BY t.last_at DESC LIMIT 300`).bind(...args).all()).results || [];
-  return { threads: rows.map((r) => ({ ...r, demo: !!r.demo })) };
+    WHERE ${conds.join(" AND ")} ORDER BY t.last_at DESC LIMIT 300`).bind(...args).all()).results || [];
+  return { threads: rows };
 }
 
 /**

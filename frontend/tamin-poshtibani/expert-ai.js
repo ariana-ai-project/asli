@@ -15,7 +15,8 @@
   const REVIEW_FA = { new: "📥 تحویل شد — منتظرِ بررسیِ پشتیبانی", ok: "✓ کمیسیون تأیید شد", rejected: "✗ پشتیبانی رد کرد" };
   const ST_CHIP = { prep: "info", search: "info", work: "warn", closing: "info", done: "ok", paused: "bad", ended: "bad" };
   const TH_FA = { invited: "دعوت شد", active: "در مذاکره", ask: "🚨 پرسش از کارشناس", final: "تأیید نهایی", declined: "تأمین نمی‌کند", closed: "بسته" };
-  const VIA_FA = { textbee: "✅ پیامک رفت", sim: "🧪 شبیه‌سازی", hold: "⛔ نرفت" };
+  /* via: نامِ درگاهی که پیامک را برد (worker/sms.js) یا sim و hold */
+  const VIA_FA = { textbee: "✅ پیامک رفت (TextBee)", ippanel: "✅ پیامک رفت (IPPanel)", sim: "🧪 شبیه‌سازی", hold: "⛔ نرفت" };
   const p2 = (n) => String(n).padStart(2, "0");
   const when = (ms) => { if (!ms) return "—"; const d = new Date(ms); return `${TP.fmtD(ms)} ${p2(d.getHours())}:${p2(d.getMinutes())}`; };
   const usd = (x) => (x == null ? "—" : `$${Number(x).toFixed(Number(x) < 1 ? 4 : 2)}`);
@@ -65,7 +66,7 @@
         <span class="chip ${g.on ? "ok" : ""}">${g.on ? "🤖 هوشمند" : "✋ دستی"}</span>
         <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "✋ دستی کن" : "🤖 هوشمند کن"}</button>${TP.ui.info("support.ai", "راهنمای هوشمند و دستی")}
         ${g.on ? `<button class="tp-btn sm" data-ai-rebase title="درخواست‌های بازی که پیش از قاعدهٔ «همهٔ درخواست‌های باز» رسیده‌اند: جدول کمیسیون یا نامه‌دار ← دستی، قلمِ با استعلامِ دستی ← «انجام دستی» — اول پیش‌نمایش، بی نوشتن">🔁 بازسنجی</button>` : ""}
-        <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
+        <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">${esc(A.st.sms_label || "درگاه")} وصل است</span>` : `<span class="chip warn">${esc(A.st.sms_label || "درگاه")} وصل نیست — شبیه‌سازی</span>`}</span></div>
       <div class="kpi"><div class="k"><b>کارها</b><span>${M(A.st.runs.length)}</span></div><div class="k"><b>فراخوانیِ مدل</b><span>${M(A.st.totals.n)}</span></div>
         <div class="k"><b>تخمینِ کلِ هزینه</b><span dir="ltr">${usd(A.st.totals.cost)}</span></div>
         ${g.on_at ? `<div class="k"><b>روشن از</b><span style="font-size:.9rem">${when(g.on_at)}</span></div>` : ""}</div>
@@ -158,7 +159,7 @@
     const rows = s.sms.map((m) => `<tr><td class="num">${when(m.at)}</td><td class="rt">${esc(m.supplier)}</td><td dir="ltr">${esc(m.phone)}</td><td>${m.panel ? "☑️" : "—"}</td>
         <td>${m.kind === "pass" ? "رمز تازه" : "استعلام"}</td><td>${esc(VIA_FA[m.via] || m.via || "قدیمی")}</td><td class="rt" style="white-space:normal;max-width:240px">${esc(m.error || "")}</td>
         <td class="rt" style="white-space:pre-wrap;max-width:420px;font-size:.82rem">${esc(m.body)}</td></tr>`).join("");
-    return `<div class="tp-card tp-pane"><p class="lead">${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")} ${s.ready ? "" : "<b>درگاه TextBee وصل نیست؛ پیامک‌ها شبیه‌سازی می‌شوند.</b>"}</p>
+    return `<div class="tp-card tp-pane"><p class="lead">${TP.ui.info("support.ai", "راهنمای کارشناس هوشمند")} ${s.ready ? "" : `<b>درگاه پیامک (${esc(s.label || "—")}) وصل نیست؛ پیامک‌ها شبیه‌سازی می‌شوند.</b>`}</p>
       <div class="tp-scroll"><table class="tp-table" style="width:100%"><thead><tr><th>زمان</th><th class="rt">تأمین‌کننده</th><th>شماره</th><th>پنل</th><th>نوع</th><th>نتیجه</th><th class="rt">دلیل</th><th class="rt">متن</th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8"><div class="empty">هنوز پیامکی نیست.</div></td></tr>`}</tbody></table></div></div>`;
   }

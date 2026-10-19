@@ -81,7 +81,7 @@
   /* کارتِ پیشنهاد در بات کارشناسان (فاز ۴ب گام ۴) با ?th=<گفت‌وگو> همین‌جا را باز می‌کند */
   const qTh = +new URLSearchParams(location.search).get("th") || null;
   const S = { me: null, reqs: [], unread: 0, waiting: 0, asks: 0, props: 0, aid: +ss.get("sp.aid") || null, th: qTh || +ss.get("sp.th.e") || null, d: null, tab: "chat", view: "req",
-    lastMsg: 0, rev: -1, bot: null, via: "web", demoName: "", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {}, pfRead: false, propSig: null,
+    lastMsg: 0, rev: -1, bot: null, via: "web", busy: false, termFa: {}, unseen: 0, goto: null, drafts: {}, pfRead: false, propSig: null,
     rq: "", sq: "" };   /* جستجوی فهرستِ درخواست‌ها و تأمین‌کنندگان (سمت کلاینت) */
   const TERM_FIELDS = ["dtime", "pay", "invoice", "vat", "valid_days"];
   const termsLine = (t) => TERM_FIELDS.filter((f) => t && String(t[f] ?? "").trim()).map((f) => `${(S.termFa[f] || f).replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
@@ -128,7 +128,7 @@
   /* ---------- بارگذاری ---------- */
   async function loadList() {
     const d = await api("/sp/x/threads");
-    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.props = d.props || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.demoName = d.demo; S.termFa = d.term_fa || S.termFa;
+    S.reqs = d.requests || []; S.unread = d.unread; S.waiting = d.waiting; S.asks = d.asks || 0; S.props = d.props || 0; S.me = d.me; S.bot = d.bot; S.via = d.via; S.termFa = d.term_fa || S.termFa;
     S.pfRead = d.pf_read === true;
   }
   async function boot() {
@@ -265,13 +265,13 @@
     const T = g.threads.filter((t) => hit(t.supplier, q) || hit(t.phone, q));
     if (!T.length) return `<div class="sp-empty">چیزی با «${esc(S.sq)}» پیدا نشد.</div>`;
     return T.map((t) => {
-      const demo = t.demo ? `<span class="sp-tag">فرضی</span>` : "", av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
+      const av = { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) };
       if (t.ai === "locked") return TP.ui.chatRow({ on: S.th === t.id, cls: "lock", lock: true, av, attrs: `data-th="${t.id}" title="گفت‌وگوی کارشناس هوشمند — فقط دیدن"`,
-        title: `${esc(t.supplier)}${demo}`, time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
+        title: esc(t.supplier), time: when(t.last_at), sub: preview(t) ? `🤖 ${preview(t)}` : `🤖 دستِ کارشناس هوشمند · فقط دیدن · ${fa(t.lines)} قلم` });
       const sub = t.ai === "ask" ? `🤖 سؤال: ${esc(t.ask || "")}` : t.ai === "watch" ? `👁 با تأیید شما · ${fa(t.lines)} قلم`
         : preview(t) || `📞 ${esc(t.phone || "")}${t.phone_label ? ` (${esc(t.phone_label)})` : ""} · ${fa(t.lines)} قلم`;
       return TP.ui.chatRow({ on: S.th === t.id, cls: t.ai === "ask" ? "ask" : t.ai === "watch" ? "watch" : "", av, attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)}"`,
-        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "⏱ " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}${demo}`, time: when(t.last_at), sub,
+        title: `${t.ai === "ask" ? "🚨 " : t.ai === "watch" ? "⏱ " : t.ai === "human" ? "✋ " : ""}${esc(t.supplier)}`, time: when(t.last_at), sub,
         badges: `${propBadge(t.props)}${badge(t.unread)}${badge(t.waiting, "wait")}` });
     }).join("");
   }
@@ -336,7 +336,7 @@
     const av = `<span class="sp-av" style="--av:${TP.ui.avColor(th.supplier)}" aria-hidden="true">${esc(TP.ui.avInitial(th.supplier))}</span>`;
     /* «👤 پروفایل تأمین‌کننده» (sup-profile.js) — فقط وقتی کلیدِ دفتر تأمین‌کنندگان در پنل پشتیبانی روشن است */
     if (S.crReg === undefined && TP.supProfile) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
-    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${th.demo ? ` <span class="sp-tag">فرضی</span>` : ""}${S.crReg && !th.demo ? ` ${TP.supProfile.btn(th.supplier)}` : ""}</h3>
+    return `<div class="sp-conv"><div class="sp-head sp-head2 ${phoneMode ? "" : "sp-sticky"}">${av}<div class="hd"><h3>${esc(th.supplier)}${S.crReg ? ` ${TP.supProfile.btn(th.supplier)}` : ""}</h3>
         <span class="sp-muted">📞 <span dir="ltr">${esc(th.phone || "—")}</span>${th.phone_label ? ` (${esc(th.phone_label)})` : ""} · درخواست <b>${esc(th.request_id)}</b></span></div>${back}</div>
       <div class="sp-kpis">${TP.ui.stat({ label: "اقلام", value: fa(S.d.lines.length), icon: "box", sub: `${fa(priced)} با قیمت` })}
         ${TP.ui.stat({ label: "منتظر تصمیم", value: fa(waitingCount()), icon: "flag", tone: waitingCount() ? "warn" : "ok" })}
@@ -914,7 +914,7 @@
     catch (e) { if (w) w.close(); say(e.message); }
   }
 
-  /* --- «ارسال استعلام» از همین صفحه --- */
+  /* --- «ارسال استعلام» از همین صفحه: فقط تأمین‌کنندهٔ واقعی با نام و شماره — «🧪 تأمین‌کنندهٔ فرضی» برداشته شد (مهر ۱۴۰۵) --- */
   async function sendDialog() {
     const g = S.reqs.find((x) => x.assignment_id === S.aid);
     const items = (await api(`/sp/x/items?aid=${S.aid}`)).items || [];
@@ -923,9 +923,7 @@
       <b>اقلام</b><div class="sp-modal-list">${items.map((i, n) => `<label><input type="checkbox" data-it="${i.id}" ${n === 0 ? "checked" : ""}> ${esc(i.title)} — ${qty(i.qty)} ${esc(i.unit || "")}${i.locked ? ` <span title="قبلاً برای تأمین‌کنندهٔ دیگری رفته؛ عنوان، لایه‌ها، مقدار و واحدش قفل است و عیناً همان می‌رود">🔒</span>` : ""}</label>`).join("")}</div>
       ${items.some((i) => i.locked) ? `<p class="sp-muted">🔒 یعنی آن قلم برای تأمین‌کنندهٔ دیگری فرستاده شده و بسته‌اش قفل است: برای همه عیناً همان عنوان، لایه‌های ویژگی، مقدار و واحد می‌رود.</p>` : ""}
       <b style="display:block;margin-top:10px">تأمین‌کننده</b>
-      <label class="sp-check"><input type="radio" name="who" value="demo" checked> 🧪 ${esc(S.demoName)} — پیامکش (شبیه‌سازی) همین‌جا نشان داده می‌شود</label>
-      <label class="sp-check"><input type="radio" name="who" value="real"> تأمین‌کنندهٔ دیگر:</label>
-      <div class="sp-upl" data-real style="opacity:.5"><input class="tp-input" data-n placeholder="نام تأمین‌کننده"><input class="tp-input" data-p placeholder="شماره (09…)" inputmode="tel">
+      <div class="sp-upl"><input class="tp-input" data-n placeholder="نام تأمین‌کننده" autocomplete="off"><input class="tp-input" data-p placeholder="شماره (09…)" inputmode="tel" dir="ltr">
         <input class="tp-input full" data-l placeholder="برچسب شماره (همراه، دفتر، فروش…)"></div>
       <b style="display:block;margin-top:10px">متن پیام (اولِ پیامک و اولین پیامِ گفت‌وگو)</b>
       <textarea class="tp-input tp-textarea" data-t style="min-height:90px">سلام، از شرکت تونل سد آریانا.\nبرای اقلامی که در پنل می‌بینید استعلام قیمت داریم؛ ${S.pfRead ? "لطفاً مشخصات، قیمت و پیش‌فاکتور را از لینک زیر ثبت کنید." : "لطفاً قیمت و شرایط را از لینک زیر ثبت کنید؛ پیش‌فاکتور را خودِ سامانه از همان‌ها می‌سازد."}\n${esc((S.me && (S.me.label || S.me.name)) || "")}</textarea>
@@ -933,15 +931,15 @@
     const d = dlg("📨 ارسال استعلام", body, [{ label: "ارسال", cls: "primary", fn: async (dd) => {
       const ids = $$("[data-it]", dd).filter((x) => x.checked).map((x) => +x.dataset.it);
       if (!ids.length) throw new Error("دست‌کم یک قلم را تیک بزنید.");
-      const demo = $('input[name="who"]:checked', dd).value === "demo";
-      const b = { assignment_id: S.aid, item_ids: ids, text: $("[data-t]", dd).value, demo };
-      if (!demo) Object.assign(b, { supplier_name: $("[data-n]", dd).value, phone: $("[data-p]", dd).value, label: $("[data-l]", dd).value });
-      const r = await api("/sp/x/send", { body: b });
+      const name = $("[data-n]", dd).value.trim(), phone = $("[data-p]", dd).value.trim();
+      if (!name) throw new Error("نام تأمین‌کننده را بنویسید.");
+      if (!phone) throw new Error("شمارهٔ تأمین‌کننده را بنویسید (مثل 09121234567).");
+      const r = await api("/sp/x/send", { body: { assignment_id: S.aid, item_ids: ids, text: $("[data-t]", dd).value, supplier_name: name, phone, label: $("[data-l]", dd).value } });
       S.th = r.thread_id; S.view = "chat"; S.tab = "chat";
       await loadList(); await loadThread();
       smsDialog(r);
     } }, { label: "انصراف" }]);
-    $$('input[name="who"]', d).forEach((x) => { x.onchange = () => { $("[data-real]", d).style.opacity = $('input[name="who"]:checked', d).value === "real" ? 1 : 0.5; }; });
+    $("[data-n]", d).focus();
     $("[data-n]", d).onchange = async () => {
       const name = $("[data-n]", d).value.trim(); if (!name) return;
       try {
@@ -951,7 +949,7 @@
     };
   }
   function smsDialog(r) {
-    /* پیامکِ واقعی (TextBee) رفت: رمزِ ورودِ تأمین‌کننده فقط در گوشیِ خودش است و این‌جا نشان داده نمی‌شود */
+    /* پیامکِ واقعی (درگاه پیامک — TextBee یا IPPanel) رفت: رمزِ ورودِ تأمین‌کننده فقط در گوشیِ خودش است و این‌جا نشان داده نمی‌شود */
     if (r.sms.sent) return dlg("📱 پیامک فرستاده شد", `<p class="sp-muted">${esc(r.sms.note || "")} لینک پنل، لینک بات و رمز ورود فقط در همان پیامک است؛ گفت‌وگو و پاسخ‌های تأمین‌کننده همین‌جا می‌آید.</p>`);
     dlg("📱 پیامک شبیه‌سازی‌شده", `<p class="sp-muted">${r.sms.error ? `⚠️ پیامکِ واقعی نرفت: ${esc(r.sms.error)}. ` : "پیامک فعلاً خاموش است؛ "}همین متن به‌جای پیامک برای ${esc(r.sms.to)} (${esc(r.sms.label || "—")}) است. لینک‌ها واقعی‌اند — برای دیدن سمت تأمین‌کننده بازشان کنید.</p>
       <div class="sp-sms">${esc(r.sms.text)}</div>

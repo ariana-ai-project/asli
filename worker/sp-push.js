@@ -136,7 +136,7 @@ export function msgLine(th, m, side) {
 
 export function headerText(env, th, side) {
   if (side === "e") {
-    return `💬 <b>${esc(th.supplier_name)}</b>${th.demo ? " <i>(فرضی)</i>" : ""}\n`
+    return `💬 <b>${esc(th.supplier_name)}</b>\n`
       + `📄 درخواست <b>${esc(th.request_id)}</b>${th.party ? ` — ${esc(th.party)}` : ""}\n`
       + `📞 ${esc(th.phone || "—")}${th.phone_label ? ` (${esc(th.phone_label)})` : ""}\n`
       + "<i>هر پیامی این‌جا بنویسید برای همین تأمین‌کننده فرستاده می‌شود.</i>";
@@ -485,7 +485,7 @@ async function voiceTo(env, row, m) {
 
 /**
  * پیامکِ شبیه‌سازی‌شده در بات مکاتباتِ کارشناس — با لینک پنل، لینک بات و رمز، تا سمتِ تأمین‌کننده را ببیند: وقتی
- * درگاه پیامک وصل نیست، پیامکِ واقعی نرفت (sms.error) یا تأمین‌کنندهٔ فرضی است (worker/sp-sms.js).
+ * درگاه پیامک وصل نیست یا پیامکِ واقعی نرفت (sms.error) (worker/sp-sms.js).
  * خروجی: به چند گفت‌وگو رسید (۰ یعنی کارشناس هنوز بات مکاتبات را وصل نکرده).
  */
 export async function deliverSms(env, expertId, sms, rowsIn) {

@@ -1050,4 +1050,4 @@ async function onCallback(env, cq, ctx) {
   }
 }
 
-/* «ارسال رمز» — پیامکِ واقعی (TextBee) یا شبیه‌سازی در بات مکاتباتِ کارشناس: worker/sp-sms.js:deliverPass */
+/* «ارسال رمز» — پیامکِ واقعی (درگاه پیامک؛ با الگوی رمز اگر درگاه دارد) یا شبیه‌سازی در بات مکاتباتِ کارشناس: worker/sp-sms.js:deliverPass */

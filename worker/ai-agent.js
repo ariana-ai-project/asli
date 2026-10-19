@@ -41,7 +41,7 @@ import { itemSearches } from "./records.js";
 import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { deliverSms } from "./sp-sms.js";
-import { smsReady, isMobile } from "./sms.js";
+import { smsReady, smsLabel, isMobile } from "./sms.js";
 import { runAiCheck, aiUsable, resolve, acceptable } from "./sp-ai.js";
 import { bundleData, recordCommission } from "./bundle.js";
 import { commissionXlsx } from "./sheets.js";
@@ -1386,9 +1386,10 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   const lineOut = lines.map(C.lineOut);
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت برای هر قلم (🔒/🔓) — مدل شرطِ 🔒 را برای تأمین‌کننده روشن می‌گوید */
   const lim = await C.limitsOfLines(env, lines);
-  /* محکِ قیمت: سوابقِ همین قلم (از آماده‌سازی) و پیشنهادهای دیگرِ همین ارجاع — بی نام */
+  /* محکِ قیمت: سوابقِ همین قلم (از آماده‌سازی) و پیشنهادهای دیگرِ همین ارجاع — بی نام؛ قیمتِ «تأمین‌کنندهٔ فرضی»ِ قدیمی محک نیست */
   const others = (await env.DB.prepare(`SELECT l.item_id, COUNT(*) AS n, MIN(l.price) AS min FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
-      WHERE t.assignment_id=? AND l.thread_id<>? AND l.price>0 AND l.state IN ('submitted','approved','proforma','final') GROUP BY l.item_id`).bind(run.assignment_id, th.id).all()).results || [];
+      WHERE t.assignment_id=? AND l.thread_id<>? AND l.price>0 AND l.state IN ('submitted','approved','proforma','final')
+        AND NOT EXISTS (SELECT 1 FROM sp_suppliers s WHERE s.id=t.supplier_id AND s.demo=1) GROUP BY l.item_id`).bind(run.assignment_id, th.id).all()).results || [];
   const bench = lineOut.map((l) => {
     const di = run.data.items.find((x) => x.id === l.item_id);
     const top = (di && di.hist && di.hist.top) || [];
@@ -2085,7 +2086,7 @@ async function aiExperts(env) {
     asks: (asks.results || []).map((a) => { const k = parse(a.ask_json, {}) || {}; return { thread_id: a.thread_id, run_id: a.run_id, expert_id: a.expert_id, request_id: a.request_id, supplier: a.supplier, q: k.q || "", at: k.at || a.updated_at }; }),
     handovers: (ho.results || []).map((h) => ({ id: h.id, assignment_id: h.assignment_id, expert_id: h.expert_id, request_id: h.request_id, at: h.handover_at, items: parse(h.items, []) || [] })),
     deliveries: { new: ((dl.results || [])[0] || {}).n || 0 },
-    sms: smsReady(env),
+    sms: smsReady(env), sms_label: smsLabel(env),
   };
 }
 
@@ -2377,7 +2378,7 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     const cfg = cfgOf(ag);
     return json({ expert: { id: ex.id, name: ex.name, label: ex.label, active: !!ex.active, tg: !!ex.telegram_chat },
       agent: { mode: ag ? ag.mode : "off", on: !!ag && ag.mode === "on", on_at: ag ? ag.on_at : null, off_at: ag ? ag.off_at || null : null, cfg, updated_at: ag ? ag.updated_at : null, updated_by: ag ? ag.updated_by : null },
-      defaults: AI_DEFAULTS, markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env),
+      defaults: AI_DEFAULTS, markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env), sms_label: smsLabel(env),
       models: Object.entries(AGENT_MODELS).map(([id, x]) => ({ id, fa: x.fa, price: x.price, effort: x.effort })), efforts: EFFORTS,
       runs: await runsOf(env, ex.id), open: open.filter((a) => a.items > 0), totals: tot || { n: 0, cost: 0 }, purposes: PURPOSE_FA });
   }
@@ -2493,12 +2494,12 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     if (error) throw new HttpError(`مقایسه نشد: ${error}`, 502);
     return json({ ok: true, out: out.out, model: out.model, call: last, ms: now() - t0 });
   }
-  /* پیامک‌ها: هر پیامکِ گفت‌وگوهای همین کارشناس — رفت یا نه، از چه راهی، چرا (متن با رمزِ پوشیده) */
+  /* پیامک‌ها: هر پیامکِ گفت‌وگوهای همین کارشناس — رفت یا نه، از چه راهی، چرا (متن با رمزِ پوشیده)؛ «تأمین‌کنندهٔ فرضی»ِ قدیمی نه */
   if (path === "/sms" && m === "GET") {
     const rows = (await env.DB.prepare(`SELECT m.id, m.kind, m.body, m.at, m.via, m.status, m.error, m.ref, p.phone, p.label, p.panel, s.name AS supplier, t.request_id
-        FROM sp_sms m JOIN sp_phones p ON p.id=m.phone_id JOIN sp_suppliers s ON s.id=p.supplier_id LEFT JOIN sp_threads t ON t.id=m.thread_id
+        FROM sp_sms m JOIN sp_phones p ON p.id=m.phone_id JOIN sp_suppliers s ON s.id=p.supplier_id AND s.demo=0 LEFT JOIN sp_threads t ON t.id=m.thread_id
         WHERE m.expert_id=? ORDER BY m.id DESC LIMIT 80`).bind(ex.id).all()).results || [];
-    return json({ sms: rows.map((r) => ({ ...r, panel: !!r.panel })), ready: smsReady(env) });
+    return json({ sms: rows.map((r) => ({ ...r, panel: !!r.panel })), ready: smsReady(env), label: smsLabel(env) });
   }
   /* دفترچهٔ شماره‌ها: جستجو، شمارهٔ تازه، تیکِ «پنل» — مشترک بین همهٔ کارشناس‌ها */
   if (path === "/phones" && m === "GET") {

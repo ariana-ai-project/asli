@@ -190,7 +190,7 @@
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
       items: [{ label: "به‌روزرسانی", icon: "refresh", attrs: "data-refresh" }, { label: "تغییر رمز", icon: "key", attrs: "data-pass" }, { label: "گیرندگان هشدار", icon: "bell", attrs: "data-alerts" },
-        { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
+        { label: "درگاه پیامک", icon: "send", attrs: "data-smsgw" }, { label: "تدارکات", icon: "home", href: "./" }, "-", { label: "خروج", icon: "logout", attrs: "data-logout", cls: "danger" }] })
       + vTabs();
   }
   function vTabs() {
@@ -526,7 +526,7 @@
     return TP.ui.chatRow({ on: t.id === S.thId, cls: t.ai_state === "human" ? "ask" : st ? "watch" : "",
       attrs: `data-th="${t.id}" aria-label="${esc(t.supplier)} — درخواست ${esc(t.request_id)}"`,
       av: { text: TP.ui.avInitial(t.supplier), color: TP.ui.avColor(t.supplier) },
-      title: `${st ? `${st[0]} ` : ""}${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}`, time: whenS(t.last_at),
+      title: `${st ? `${st[0]} ` : ""}${esc(t.supplier)}`, time: whenS(t.last_at),
       sub: `<span class="sv-pvr">${esc(t.request_id)} · ${esc(exName(t.expert_id))}</span>${pv ? `<br>${who}${pv}` : ""}`,
       badges: t.finals ? `<span class="sp-badge" title="تأیید نهایی">✓ ${M(t.finals)}</span>` : "" });
   }
@@ -550,7 +550,7 @@
     const finals = (d.bundles || []).filter((b) => b.state === "final").length;
     const stat = (label, value, icon, tone, sub) => TP.ui.stat({ label, value, icon, tone, sub });
     return `<div class="sv-thi">
-      <header class="sv-thh">${avOf(t.supplier, "", "lg")}<div class="t"><h3>${esc(t.supplier)}${t.demo ? ` <span class="sp-tag">فرضی</span>` : ""}${!t.demo && window.TP_CR && window.TP_CR.reg() ? ` ${TP.supProfile.btn(t.supplier)}` : ""}</h3>
+      <header class="sv-thh">${avOf(t.supplier, "", "lg")}<div class="t"><h3>${esc(t.supplier)}${window.TP_CR && window.TP_CR.reg() ? ` ${TP.supProfile.btn(t.supplier)}` : ""}</h3>
           <span class="dim">${t.phone ? `📞 <span dir="ltr">${esc(t.phone)}</span>${t.phone_label ? ` (${esc(t.phone_label)})` : ""}` : "شماره‌ای ثبت نشده"}</span></div></header>
       <div class="sv-thm"><span>${TP.ui.ICON.project}درخواست <b class="num">${esc(t.request_id)}</b>${t.party ? ` · ${esc(t.party)}` : ""}</span>
         <span>${avOf(exName(t.expert_id), "")}${esc(exName(t.expert_id))}</span>${st ? `<span class="chip ${st[2]}">${st[0]} ${st[1]}</span>` : ""}</div>
@@ -657,7 +657,7 @@
     return `<div class="lg-tl sv-tl" data-keep-scroll>${groups.map(([d, list]) => `<div class="lg-day"><h4>${esc(d)}</h4>${list.map((x) => `<div class="lg-ev sv-by-${esc(x.by)}">
         <span class="lg-ic" aria-hidden="true">${x.by === "ai" ? "🤖" : TP.ui.ICON[BY_IC[x.by] || "data"]}</span>
         <div class="lg-eb"><div class="lg-et"><span class="by by-${esc(x.by)}">${BY[x.by] || esc(x.by)}</span>${withExpert && x.expert_id ? `<span class="lg-who">${esc(exName(x.expert_id))}</span>` : ""}
-            ${x.request_id ? `<button type="button" class="chip num sv-rchip" data-lrid-set="${esc(x.request_id)}" title="فقط رخدادهای همین درخواست">${esc(x.request_id)}</button>` : ""}${x.demo ? `<span class="chip mock">دمو</span>` : ""}</div>
+            ${x.request_id ? `<button type="button" class="chip num sv-rchip" data-lrid-set="${esc(x.request_id)}" title="فقط رخدادهای همین درخواست">${esc(x.request_id)}</button>` : ""}</div>
           <div class="lg-ed">${esc(x.text)}</div>
           ${x.thread_id || x.assignment_id ? `<div class="sv-lacts">${x.thread_id ? `<button class="tp-btn xs" data-th-open="${x.thread_id}">💬 گفت‌وگو</button>` : ""}${x.assignment_id ? `<button class="tp-btn xs" data-asg="${x.assignment_id}">${TP.ui.ICON.more} ارجاع</button>` : ""}</div>` : ""}</div>
         <time title="${esc(fmtS(x.at))}">${esc(timeOfS(x.at))}</time></div>`).join("")}</div>`).join("")}</div>`;
@@ -831,7 +831,7 @@
     if (!S.ai) return h + (S.aiLoading ? `${TP.ui.loader()}` : "");
     const A = S.ai;
     h += `<div class="sv-aiwrap ${TP.ui.once("sup.ai")}">`;
-    if (!A.sms) h += `<div class="tp-note warn">درگاه پیامک (TextBee) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند.</div>`;
+    if (!A.sms) h += `<div class="tp-note warn">درگاه پیامک (${esc(A.sms_label || "—")}) وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند. <button type="button" class="tp-btn xs" data-smsgw>درگاه پیامک</button></div>`;
     if (A.asks.length) {
       h += `<h4 class="sv-h">🚨 پرسش‌های بی‌پاسخ از کارشناسان <span class="chip warn">${M(A.asks.length)}</span></h4>
         <div class="sv-asks">${A.asks.map((x) => `<article class="sv-ask"><header>${avOf(exName(x.expert_id), "")}<b>${esc(exName(x.expert_id))}</b><span class="chip num">${esc(x.request_id)}</span><span class="dim">${esc(fmtShort(x.at))}</span></header>
@@ -1361,6 +1361,31 @@
       catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     }, "ذخیره", "بستن");
   }
+  /** نتیجهٔ «تستِ درگاه» (worker/sms.js:smsCheck) — IPPanel: اعتبار؛ TextBee: گوشی‌های حساب */
+  const smsCheckText = (r) => (!r.ok ? `⚠️ ${esc(r.error || "نشد")}`
+    : r.credit != null ? `✅ کلید پذیرفته شد · اعتبارِ حساب: <b class="num">${M(Math.round(r.credit))}</b>${r.gift ? ` (و هدیه ${M(Math.round(r.gift))})` : ""}`
+      : `✅ کلید پذیرفته شد · ${M(r.enabled || 0)} گوشیِ روشن از ${M(r.devices || 0)}${r.device ? ` · ${esc(r.device)}` : ""}`);
+  /**
+   * «درگاه پیامک» (worker/sms.js): کدام درگاه فعال است و وصل است یا نه — فقط‌خواندنی و بی هیچ کلید — و «تستِ درگاه» که بی فرستادنِ
+   * پیامک کلید و حساب را می‌سنجد. خودِ درگاه با متغیرهای Worker (SMS_PROVIDER و رازها) عوض می‌شود، نه از این پنل.
+   */
+  async function smsGwDialog() {
+    let s; try { s = await api("/sms"); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    const row = (k, v) => `<div class="al-row"><b>${k}</b><div>${v}</div></div>`;
+    const d = TP.modal("📶 درگاه پیامک", `<div class="al-cfg">
+        ${row("درگاه", `${esc(s.label)} ${s.ready ? `<span class="chip ok">✅ وصل است</span>` : `<span class="chip warn">وصل نیست — پیامک‌ها شبیه‌سازی می‌شوند</span>`}`)}
+        ${(s.missing || []).length ? row("ست نشده", s.missing.map((x) => `<code dir="ltr">${esc(x)}</code>`).join(" ")) : ""}${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
+        ${s.from ? row("خط فرستنده", `<span dir="ltr">${esc(s.from)}</span>`) : ""}${s.device ? row("دستگاه", `<span dir="ltr">${esc(s.device)}</span>`) : ""}
+        ${s.provider === "ippanel" ? row("الگوی رمز", s.pattern ? `<code dir="ltr">${esc(s.pattern)}</code> · متغیر <code dir="ltr">${esc(s.pattern_var)}</code>` : `<span class="dim">ندارد — رمزها با متنِ ساده می‌روند</span>`) : ""}
+        <div class="al-row"><button type="button" class="tp-btn sm" data-smschk ${s.ready ? "" : "disabled"}>🔌 تستِ درگاه</button><span class="dim" data-smsres>بی فرستادنِ پیامک — ${s.provider === "ippanel" ? "اعتبارِ حساب" : "گوشی‌های حساب"} سنجیده می‌شود.</span></div>
+        <div class="dim">درگاه با متغیرهای Worker عوض می‌شود (<span dir="ltr">SMS_PROVIDER</span>)، نه از این پنل.</div></div>`, null, "بستن", "");
+    const b = d.querySelector("[data-smschk]"), out = d.querySelector("[data-smsres]");
+    if (b) b.onclick = async () => {
+      b.disabled = true; out.textContent = "…";
+      try { out.innerHTML = smsCheckText(await api("/sms/check", { body: {} })); } catch (e) { out.textContent = e.message; }
+      b.disabled = false;
+    };
+  }
   /* متنِ تأییدِ تیک — همان در داشبوردِ هر کارشناس (expert-ai.js)؛ رفتار: worker/ai-agent.js:aiModeSet */
   function aiToggle(id, on) {
     TP.modal(on ? "🤖 هوشمند" : "✋ دستی", on
@@ -1431,6 +1456,7 @@
     if (d.pass !== undefined) return changePass();
     if (d.alarmAck) return alarmAckUi(Number(d.alarmAck));
     if (d.alerts !== undefined) return alertsDialog();
+    if (d.smsgw !== undefined) return smsGwDialog();
     if (d.do) return doAuth(d.do);
     if (d.mode) { S.mode = d.mode; S.err = ""; return render(); }
     if (d.asg) return openAsg(d.asg);
@@ -1509,7 +1535,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

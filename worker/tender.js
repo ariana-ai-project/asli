@@ -12,14 +12,15 @@
  *   • پشتیبانی پیشنهاد اشتباه را اصلاح یا باطل می‌کند (با علت؛ در رخدادها می‌ماند) و بهترین دوباره حساب می‌شود.
  *   • پایان: با اولین خواندن یا Cron (tenderTick)؛ برنده ثبت، تلگرام پشتیبان، پیامک برنده و پیام تشکر به بقیه.
  *   • چندقلمی: قلم‌های یک «گروه» (grp) با یک دعوت و یک ورود؛ هر قلم مزایدهٔ خودش.
- *   • پیامک از همان درگاه TextBee مکاتبات (sms.js)؛ پشتیبانی می‌تواند کلید و دستگاه جدا برای مناقصه بگذارد (settings.tenderSms).
+ *   • پیامک از همان درگاهِ پیامکِ مکاتبات (sms.js — TextBee یا IPPanel، با SMS_PROVIDER)؛ پشتیبانی می‌تواند کلید و دستگاه (در IPPanel
+ *     خطِ فرستنده) جدا برای مناقصه بگذارد (settings.tenderSms)؛ رمزِ ورود با الگوی رمزِ درگاه اگر دارد.
  *   • بازار: دلار، یورو، درهم، تتر، طلا و سکه از tgju (هر دقیقه یک بار، با کش Cloudflare).
  */
 import { HttpError } from "./http.js";
 /* منبعِ خانه‌های خطِ مناقصه (quote-src.js) */
 const TENDER_SRC = JSON.stringify({ unit: { s: "tender" }, qty: { s: "tender" }, price: { s: "tender" }, deal: { s: "tender" } });
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
-import { sendSms, smsReady, isMobile } from "./sms.js";
+import { sendSms, smsReady, isMobile, smsProvider, smsStatus, smsEnvWith, smsCheck, viaLabel } from "./sms.js";
 import { queueStmt } from "./queue.js";
 import { pushTo, SUPPORT } from "./push.js";
 import { keyOf, purchaseHeadsOfCode } from "./catalog.js";
@@ -145,36 +146,50 @@ function cleanRules(b, base) {
   return o;
 }
 async function defaultsOf(env) { return cleanRules({}, (await setting(env, "tenderDefaults")) || {}); }
-/** درگاه پیامک مناقصه: همان TextBee مکاتبات، مگر پشتیبان کلید یا دستگاه جدا گذاشته باشد */
+/**
+ * کلید یا دستگاهِ جدای مناقصه به کار می‌رود؟ فقط برای همان درگاهی که با آن ذخیره شد (c.provider؛ ردیف‌های پیش از لایهٔ درگاه همه
+ * TextBee بودند) — کلیدِ TextBee به IPPanel نمی‌خورد، پس بعد از عوض شدنِ SMS_PROVIDER کنار می‌رود و مناقصه با درگاهِ مکاتبات کار می‌کند.
+ */
+const ownSms = (env, c) => !!(c && (T(c.key) || T(c.device)) && (c.provider || "textbee") === smsProvider(env));
+/** درگاه پیامک مناقصه: همان درگاهِ مکاتبات، مگر پشتیبان کلید یا دستگاه (IPPanel: خطِ فرستنده) جدا گذاشته باشد */
 async function smsEnv(env) {
   const c = (await setting(env, "tenderSms")) || {};
-  if (!T(c.key) && !T(c.device)) return env;
-  return { ...env, ...(T(c.key) ? { TEXTBEE_API_KEY: T(c.key) } : {}), ...(T(c.device) ? { TEXTBEE_DEVICE_ID: T(c.device) } : {}) };
+  return ownSms(env, c) ? smsEnvWith(env, c) : env;
 }
 /** GET /support/tender-settings */
 export async function tenderSettingsGet(env) {
   const c = (await setting(env, "tenderSms")) || {};
-  const se = await smsEnv(env);
+  const se = await smsEnv(env), st = smsStatus(env), own = ownSms(env, c), key = own ? T(c.key) : "";
   return { defaults: await defaultsOf(env), terms: T((await setting(env, "tenderTerms")) || ""),
     ai: { ready: !!T(env.ANTHROPIC_API_KEY), model: env.DISCOVERY_MODEL || DISCOVERY_MODEL, markets: MARKETS.map((m) => ({ key: m.key, fa: m.fa })), max: MAX_MARKETS },
-    sms: { ready: smsReady(se), provider: "TextBee", own_key: !!T(c.key), key_tail: T(c.key) ? `…${T(c.key).slice(-4)}` : "", device: T(c.device), shared: smsReady(env) && !T(c.key) } };
+    /* stale: کلید یا دستگاهِ جدایی که مالِ درگاهِ دیگری است و به کار نمی‌رود؛ dev_fa برچسبِ «دستگاه» برای درگاهِ فعال */
+    sms: { ready: smsReady(se), provider: st.label, dev_fa: st.dev_fa, own_key: !!key, key_tail: key ? `…${key.slice(-4)}` : "", device: own ? T(c.device) : "",
+      shared: smsReady(env) && !key, stale: !own && (T(c.key) || T(c.device)) ? viaLabel(c.provider || "textbee") || T(c.provider) : null } };
 }
 /** PUT /support/tender-settings — {defaults, terms, sms: {key ("" = همان مکاتبات؛ نفرستاده = بی‌تغییر), device}} */
 export async function tenderSettingsSave(env, b) {
   if (b.defaults) await putSetting(env, "tenderDefaults", cleanRules(b.defaults, await defaultsOf(env)));
   if (b.terms !== undefined) await putSetting(env, "tenderTerms", T(b.terms).slice(0, 2000));
   if (b.sms) {
-    const c = (await setting(env, "tenderSms")) || {};
+    const p = smsProvider(env) || "unknown";
+    let c = (await setting(env, "tenderSms")) || {};
+    /* کلید و دستگاهِ درگاهِ دیگر به این درگاه نمی‌خورند: از نو، با نامِ درگاهِ فعال */
+    if ((c.provider || "textbee") !== p) c = {};
     if (b.sms.key !== undefined) c.key = T(b.sms.key).slice(0, 200);
     if (b.sms.device !== undefined) c.device = T(b.sms.device).slice(0, 100);
+    c.provider = p;
     await putSetting(env, "tenderSms", c);
   }
   await env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(now(), "support", "tender_settings", null,
     JSON.stringify({ defaults: !!b.defaults, terms: b.terms !== undefined, sms: !!b.sms })).run();
   return tenderSettingsGet(env);
 }
-/** POST /support/tender-settings/test {phone} — پیامک آزمایشی از درگاه مناقصه */
+/**
+ * POST /support/tender-settings/test — {phone}: پیامک آزمایشی از درگاه مناقصه؛ {check: true}: «تستِ درگاه» بی فرستادنِ پیامک
+ * (اعتبارِ IPPanel یا گوشی‌های TextBee — sms.js:smsCheck) با همان کلیدی که مناقصه به کار می‌برد
+ */
 export async function tenderSmsTest(env, b) {
+  if (b && b.check === true) return smsCheck(await smsEnv(env));
   const p = T(b && b.phone);
   if (!isMobile(p)) throw new HttpError("شمارهٔ همراه را درست بنویسید (مثل ۰۹۱۲۱۲۳۴۵۶۷).");
   const r = await sms(env, p, `${COMPANY(env)}\nپیامک آزمایشی مناقصه — درگاه کار می‌کند.`);
@@ -182,10 +197,11 @@ export async function tenderSmsTest(env, b) {
   return { ok: true };
 }
 
-async function sms(env, to, text) {
+/** opts.otp: رمزِ ورود — درگاهی که الگوی رمز دارد (IPPanel) فقط همان را با الگو می‌فرستد */
+async function sms(env, to, text, opts) {
   const se = await smsEnv(env);
   if (!smsReady(se)) return { state: "off", error: "درگاه پیامک وصل نیست." };
-  try { await sendSms(se, to, text); return { state: "sent" }; }
+  try { await sendSms(se, to, text, opts); return { state: "sent" }; }
   catch (e) { return { state: "error", error: T(e && e.message).slice(0, 200) || "ارسال نشد" }; }
 }
 /** همان پیام در بات تلگرام تأمین‌کنندگان، برای شماره‌ای که بات را وصل کرده (با دکمهٔ «ورود به مناقصه») */
@@ -1050,7 +1066,7 @@ export async function tenderSendPass(env, code, b) {
   if (inv.pass_day === day && inv.pass_n >= PASS_DAY) throw new HttpError("امروز بیش از اندازه رمز خواسته‌اید؛ با تدارکات تماس بگیرید.", 429);
   if (!smsReady(await smsEnv(env))) throw new HttpError("پیامک فعلاً فرستاده نمی‌شود؛ با تدارکات تماس بگیرید تا رمز را تلفنی بدهند.", 503);
   const pass = rand6();
-  const r = await sms(env, inv.phone, `رمز ورود به مناقصه: ${pass}\n${COMPANY(env)}`);
+  const r = await sms(env, inv.phone, `رمز ورود به مناقصه: ${pass}\n${COMPANY(env)}`, { otp: pass });
   if (r.state !== "sent") throw new HttpError("پیامک فرستاده نشد؛ دوباره بزنید یا با تدارکات تماس بگیرید.", 502);
   const h = await passHash(pass);
   await env.DB.batch((await lotsOf(env, t)).map((l) => env.DB.prepare(`UPDATE tender_invites SET pass_hash=?, pass_exp=?, pass_sent_at=?, pass_day=?, pass_n=CASE WHEN pass_day=? THEN pass_n+1 ELSE 1 END

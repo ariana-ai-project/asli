@@ -82,7 +82,7 @@ CREATE INDEX IF NOT EXISTS ix_sppass_phone ON sp_passes(phone_id, created_at);
    روی هر بسته در لحظهٔ ارسال). */
 export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept_json", "TEXT"], ["sp_links", "payload", "TEXT"],
   ["sp_threads", "e_clear", "INTEGER"], ["sp_threads", "s_clear", "INTEGER"], ["sp_threads", "terms_json", "TEXT"], ["sp_bundles", "terms_json", "TEXT"],
-  /* (دور چهارم) پیامکِ واقعی با TextBee: از کدام راه رفت (textbee | sim | hold)، وضعیت، شناسهٔ TextBee و خطا (sp-sms.js) */
+  /* (دور چهارم) پیامکِ واقعی: از کدام راه رفت (نامِ درگاه — textbee | ippanel — یا sim | hold)، وضعیت، شناسهٔ درگاه و خطا (sp-sms.js) */
   ["sp_sms", "via", "TEXT"], ["sp_sms", "status", "TEXT"], ["sp_sms", "ref", "TEXT"], ["sp_sms", "error", "TEXT"],
   /* تیکِ «شمارهٔ پنل»: این شماره واقعاً مال همین تأمین‌کننده است و پنلش به آن وابسته است (چند شماره هم ممکن است).
      کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد — تیک را فقط انسان می‌زند (worker/ai-agent.js) */
@@ -102,13 +102,20 @@ export async function spBackfill(env) {
 /* ------------------------------------------------------------------ */
 /* ثابت‌ها                                                              */
 /* ------------------------------------------------------------------ */
-/** تأمین‌کنندهٔ فرضی دمو — یکی برای همه؛ پیامکش به گفت‌وگوی کارشناسی می‌رود که فرستاده */
-export const DEMO = { name: "تأمین‌کنندهٔ فرضی آریانا (دمو)", phone: "09000000000", label: "دمو" };
+/**
+ * «تأمین‌کنندهٔ فرضی (دمو)» برداشته شد (مهر ۱۴۰۵، مالک: «سامانه واقعی می‌شود؛ تأمین‌کنندهٔ فرضی از همه‌جا برود»): نه گزینه‌ای در صفحهٔ
+ * مکاتبات و بات، نه ساختنِ ردیفش، و درخواستِ قدیمیِ demo با ۴۱۰ رد می‌شود. ستونِ sp_suppliers.demo و فیلترهای demo=0 می‌مانند تا ردیفِ
+ * قدیمیِ تولید (و هر گفت‌وگوی احتمالی‌اش) همه‌جا بیرون بماند — فهرست‌ها، شمارِ نخوانده‌ها، گزارش‌ها، قفلِ بسته، کارشناس هوشمند — و
+ * ورودِ پنلش بسته است. شمارهٔ دمو رزرو می‌ماند: هیچ تأمین‌کننده‌ای نمی‌گیردش و پیامکِ واقعی به آن نمی‌رود.
+ */
+export const RESERVED_PHONE = "09000000000";
+export const DEMO_GONE = "«تأمین‌کنندهٔ فرضی (دمو)» برداشته شده است؛ استعلام را برای تأمین‌کنندهٔ واقعی با نام و شماره‌اش بفرستید.";
+const RESERVED_MSG = "این شماره رزرو است و پیامک نمی‌گیرد؛ شمارهٔ واقعیِ تأمین‌کننده را بنویسید.";
 export const COMPANY = (env) => T(env && env.COMPANY) || "تونل سد آریانا";
 const PASS_TTL = 7 * 86400000;        /* رمز پیامک: هفت روز، یا تا اولین «خروج» */
 const SESSION_TTL = 30 * 86400000;
 const MAX_FAILS = 5, LOCK_MS = 15 * 60000, RESEND_GAP = 60000;
-/* «ارسال رمز» حالا پیامکِ واقعی است (سقف پلنِ TextBee): هر شماره در ۲۴ ساعت حداکثر این‌قدر */
+/* «ارسال رمز» حالا پیامکِ واقعی است (سقفِ پلن یا اعتبارِ درگاهِ پیامک): هر شماره در ۲۴ ساعت حداکثر این‌قدر */
 const RESEND_DAY = 6;
 export const LINE_EDITABLE = ["new", "draft", "returned", "ready"];
 export const LINE_FA = {
@@ -277,9 +284,10 @@ const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${T
 /* ------------------------------------------------------------------ */
 /* هویت تأمین‌کننده: لینک + رمز پیامک → نشست                              */
 /* ------------------------------------------------------------------ */
+/** هویتِ یک شماره؛ شمارهٔ «تأمین‌کنندهٔ فرضی»ِ قدیمی هویت ندارد — نشست و اتصالِ باتِ قبلی‌اش هم دیگر کار نمی‌کند */
 export async function phoneIdentity(env, phoneId) {
-  return env.DB.prepare(`SELECT p.id AS phone_id, p.supplier_id, p.phone, p.label, p.k, s.name, s.demo
-    FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id WHERE p.id=?`).bind(phoneId).first();
+  return env.DB.prepare(`SELECT p.id AS phone_id, p.supplier_id, p.phone, p.label, p.k, s.name
+    FROM sp_phones p JOIN sp_suppliers s ON s.id=p.supplier_id WHERE p.id=? AND s.demo=0`).bind(phoneId).first();
 }
 
 export async function sessionOf(env, token) {
@@ -316,8 +324,9 @@ async function liveHashes(env, p, t) {
 
 /** ورود با کلیدِ لینک و رمز. پنج اشتباهِ پشت‌سرهم → ۱۵ دقیقه قفل (رمز شش‌رقمی بی این سقف حدس‌زدنی است) */
 export async function login(env, k, pass) {
-  const p = await env.DB.prepare("SELECT * FROM sp_phones WHERE k=?").bind(T(k)).first();
+  const p = await env.DB.prepare("SELECT p.*, s.demo FROM sp_phones p LEFT JOIN sp_suppliers s ON s.id=p.supplier_id WHERE p.k=?").bind(T(k)).first();
   if (!p) throw new HttpError("این لینک ورود معتبر نیست.", 404);
+  if (p.demo) throw new HttpError(DEMO_GONE, 410);
   const t = now();
   if (p.lock_until && p.lock_until > t) throw new HttpError("چند بار پشت سر هم رمز اشتباه وارد شد؛ ۱۵ دقیقهٔ دیگر دوباره امتحان کنید یا «ارسال رمز به پیامک» را بزنید.", 429);
   const code = latin(T(pass));
@@ -359,13 +368,14 @@ const maskPass = (text, pass) => String(text).split(pass).join("•••••�
 export async function resendPassword(env, k) {
   const p = await env.DB.prepare("SELECT * FROM sp_phones WHERE k=?").bind(T(k)).first();
   if (!p) throw new HttpError("این لینک ورود معتبر نیست.", 404);
+  const sup = await env.DB.prepare("SELECT name, demo FROM sp_suppliers WHERE id=?").bind(p.supplier_id).first();
+  if (sup && sup.demo) throw new HttpError(DEMO_GONE, 410);
   const t = now();
   if (p.resend_at && t - p.resend_at < RESEND_GAP) throw new HttpError("یک دقیقه صبر کنید و دوباره بخواهید.", 429);
   const day = await env.DB.prepare("SELECT COUNT(*) AS n FROM sp_sms WHERE phone_id=? AND kind='pass' AND at>?").bind(p.id, t - 86400000).first();
   if (day && day.n >= RESEND_DAY) throw new HttpError("امروز چند بار رمز فرستاده شده است؛ فردا دوباره بخواهید یا با کارشناس خرید تماس بگیرید.", 429);
   const th = await env.DB.prepare(`SELECT t.id, a.expert_id, e.telegram_chat FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id
     JOIN experts e ON e.id=a.expert_id WHERE t.supplier_id=? ORDER BY t.last_at DESC LIMIT 1`).bind(p.supplier_id).first();
-  const sup = await env.DB.prepare("SELECT name, demo FROM sp_suppliers WHERE id=?").bind(p.supplier_id).first();
   const { pass, stmts } = await newPassword(env, p.id);
   const bot = await spBotUser(env);
   const text = smsBody(env, { intro: `رمز تازهٔ ورود به پنل تأمین‌کنندگان شرکت ${COMPANY(env)}`, k: p.k, bot, pass });
@@ -374,7 +384,8 @@ export async function resendPassword(env, k) {
     env.DB.prepare("UPDATE sp_phones SET resend_at=? WHERE id=?").bind(t, p.id),
     env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'pass',?,?)").bind(p.id, th ? th.id : null, th ? th.expert_id : null, maskPass(text, pass), t),
   ]);
-  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", demo: !!(sup && sup.demo), text, expertChat: th ? th.telegram_chat : null,
+  /* otp: خودِ رمز فقط برای الگوی رمزِ درگاه (sms.js) — هیچ‌جا ذخیره یا به پنل برگردانده نمی‌شود */
+  return { to: p.phone, masked: maskPhone(p.phone), label: p.label, supplier: sup ? sup.name : "", text, otp: pass, expertChat: th ? th.telegram_chat : null,
     expertId: th ? th.expert_id : null, threadId: th ? th.id : null, panel: panelLink(env, p.k), bot: botLink(bot, "s" + p.k),
     smsId: res[res.length - 1].meta.last_row_id };
 }
@@ -403,7 +414,7 @@ function packLayers(layers, spec) {
 /**
  * بستهٔ قفل‌شده (درخواست کاربر، مهر ۱۴۰۵): اولین ارسالِ هر قلم به یک تأمین‌کنندهٔ واقعی عنوان، نوع قلم، لایه‌های ویژگی،
  * مقدار و واحدش را قفل می‌کند. هر ارسالِ بعدی — به هر تأمین‌کننده، از پنل، بات یا کارشناس هوشمند — عینِ همان می‌رود و
- * ساختارِ قلم دیگر ویرایش نمی‌شود (api.js: /items/:id/norm و /edit). ارسال به تأمین‌کنندهٔ فرضی (دمو) قفل نمی‌کند.
+ * ساختارِ قلم دیگر ویرایش نمی‌شود (api.js: /items/:id/norm و /edit). خطِ قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) قفل نمی‌کند.
  * خروجی Map(item_id → {title, head, layers, qty, unit, at}) — عکسِ همان اولین خطِ تأمین‌کننده.
  */
 export async function itemLocks(env, itemIds) {
@@ -471,15 +482,6 @@ async function insertPhone(env, supplierId, phone, label, by) {
   return { id: r.meta.last_row_id, supplier_id: supplierId, phone, label: label || null, k };
 }
 
-/** تأمین‌کنندهٔ فرضی و شماره‌اش؛ اگر هنوز نیست ساخته می‌شود */
-export async function demoSupplier(env, by) {
-  const ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(DEMO.phone).first();
-  if (ph) return { sup: await env.DB.prepare("SELECT * FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first(), ph };
-  const r = await env.DB.prepare("INSERT INTO sp_suppliers (name,name_n,demo,created_by,created_at) VALUES (?,?,1,?,?)").bind(DEMO.name, nkey(DEMO.name), by || null, now()).run();
-  const sup = { id: r.meta.last_row_id, name: DEMO.name, demo: 1 };
-  return { sup, ph: await insertPhone(env, sup.id, DEMO.phone, DEMO.label, by) };
-}
-
 /**
  * دفترچهٔ شماره‌ها (تب «کارشناس هوشمند»): شمارهٔ تازه برای یک تأمین‌کننده یا ویرایشِ برچسب و تیکِ «پنل» روی شمارهٔ
  * موجود. هر شماره مالِ یک تأمین‌کننده است؛ یک تأمین‌کننده می‌تواند چند شمارهٔ تیک‌خورده داشته باشد.
@@ -493,7 +495,7 @@ export async function savePhone(env, by, b) {
   }
   const num = normPhone(b.phone);
   if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
-  if (num === DEMO.phone) throw new HttpError("این شمارهٔ تأمین‌کنندهٔ فرضی است.");
+  if (num === RESERVED_PHONE) throw new HttpError(RESERVED_MSG);
   const label = nrm(b.label).slice(0, 30);
   let ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
   if (ph && ph.supplier_id !== sup.id) {
@@ -527,11 +529,13 @@ export async function phonesOfName(env, name) {
  * و متن پیامک. قلمی که قبلاً برای همین تأمین‌کننده رفته دوباره ساخته نمی‌شود؛ ولی پیامک (با رمز تازه)
  * باز هم می‌رود — «ارسال» دوباره یعنی یادآوری.
  *
- * b: {assignment_id, item_ids, text, demo} + یا {supplier_id|supplier_name, phone_id | phone+label}
+ * b: {assignment_id, item_ids, text} + {supplier_id|supplier_name, phone_id | phone+label}
+ *    demo (درخواستِ صفحه یا باتِ قدیمی): «تأمین‌کنندهٔ فرضی» برداشته شده — ۴۱۰، هیچ چیز ساخته نمی‌شود.
  *    sms (اختیاری): اولِ پیامک وقتی باید کوتاه‌تر از text (اولین پیامِ گفت‌وگو) باشد.
  *    silent: گفت‌وگو از قبل هست و این فقط پیامکِ شمارهٔ دیگری از همان تأمین‌کننده است — پیامِ تازه‌ای در گفت‌وگو نمی‌نشیند.
  */
 export async function spSend(env, ex, b) {
+  if (b.demo) throw new HttpError(DEMO_GONE, 410);
   const aid = int(b.assignment_id);
   const asg = aid ? await env.DB.prepare("SELECT a.id, a.request_id, a.expert_id, a.dispatched_at, r.party FROM assignments a JOIN requests r ON r.id=a.request_id WHERE a.id=?").bind(aid).first() : null;
   if (!asg || asg.expert_id !== ex.id) throw new HttpError("این درخواست متعلق به شما نیست.", 403);
@@ -541,34 +545,33 @@ export async function spSend(env, ex, b) {
     .bind(aid, ...want).all()).results || []).filter((i) => i.state === "open");
   if (!its.length) throw new HttpError("این اقلام دیگر باز نیستند.", 409);
 
-  let sup, ph;
-  if (b.demo) ({ sup, ph } = await demoSupplier(env, ex.id));
-  else {
-    sup = int(b.supplier_id) ? await env.DB.prepare("SELECT * FROM sp_suppliers WHERE id=?").bind(int(b.supplier_id)).first() : null;
-    if (!sup) {
-      if (!nrm(b.supplier_name)) throw new HttpError("نام تأمین‌کننده لازم است.");
-      sup = await findOrCreateSupplier(env, b.supplier_name, ex.id);
-    }
-    const label = nrm(b.label).slice(0, 30);
-    if (int(b.phone_id)) {
-      ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE id=? AND supplier_id=?").bind(int(b.phone_id), sup.id).first();
-      if (!ph) throw new HttpError("این شماره مال این تأمین‌کننده نیست.", 409);
-    } else {
-      const num = normPhone(b.phone);
-      if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
-      if (num === DEMO.phone) throw new HttpError("این شمارهٔ تأمین‌کنندهٔ فرضی است؛ گزینهٔ «تأمین‌کنندهٔ فرضی» را بزنید.");
-      ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
-      if (ph && ph.supplier_id !== sup.id) {
-        const other = await env.DB.prepare("SELECT name FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first();
-        throw new HttpError(`این شماره قبلاً برای «${other ? other.name : "تأمین‌کنندهٔ دیگر"}» ثبت شده است.`, 409);
-      }
-      if (!ph) {
-        if (!label) throw new HttpError("برای شمارهٔ تازه یک برچسب بزنید (مثلاً «فروش» یا «همراه مدیر»).");
-        ph = await insertPhone(env, sup.id, num, label, ex.id);
-      }
-    }
-    if (label && label !== ph.label) { await env.DB.prepare("UPDATE sp_phones SET label=? WHERE id=?").bind(label, ph.id).run(); ph.label = label; }
+  let sup = int(b.supplier_id) ? await env.DB.prepare("SELECT * FROM sp_suppliers WHERE id=?").bind(int(b.supplier_id)).first() : null;
+  /* شناسهٔ ردیفِ قدیمیِ «تأمین‌کنندهٔ فرضی» (از صفحه‌ای که هنوز تازه نشده) هم همان ۴۱۰ است */
+  if (sup && sup.demo) throw new HttpError(DEMO_GONE, 410);
+  if (!sup) {
+    if (!nrm(b.supplier_name)) throw new HttpError("نام تأمین‌کننده لازم است.");
+    sup = await findOrCreateSupplier(env, b.supplier_name, ex.id);
   }
+  const label = nrm(b.label).slice(0, 30);
+  let ph;
+  if (int(b.phone_id)) {
+    ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE id=? AND supplier_id=?").bind(int(b.phone_id), sup.id).first();
+    if (!ph) throw new HttpError("این شماره مال این تأمین‌کننده نیست.", 409);
+  } else {
+    const num = normPhone(b.phone);
+    if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
+    if (num === RESERVED_PHONE) throw new HttpError(RESERVED_MSG);
+    ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
+    if (ph && ph.supplier_id !== sup.id) {
+      const other = await env.DB.prepare("SELECT name FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first();
+      throw new HttpError(`این شماره قبلاً برای «${other ? other.name : "تأمین‌کنندهٔ دیگر"}» ثبت شده است.`, 409);
+    }
+    if (!ph) {
+      if (!label) throw new HttpError("برای شمارهٔ تازه یک برچسب بزنید (مثلاً «فروش» یا «همراه مدیر»).");
+      ph = await insertPhone(env, sup.id, num, label, ex.id);
+    }
+  }
+  if (label && label !== ph.label) { await env.DB.prepare("UPDATE sp_phones SET label=? WHERE id=?").bind(label, ph.id).run(); ph.label = label; }
 
   const t = now();
   let th = await env.DB.prepare("SELECT * FROM sp_threads WHERE assignment_id=? AND supplier_id=?").bind(aid, sup.id).first();
@@ -629,7 +632,7 @@ export async function spSend(env, ex, b) {
   const out = msgs.map(([who, kind, body, meta], n) => msgObj(res[msgAt + n].meta.last_row_id, th.id, who, kind, body, meta, t));
   return {
     ok: true, thread_id: th.id, request_id: asg.request_id, added: fresh.length, skipped: its.length - fresh.length,
-    supplier: { id: sup.id, name: sup.name, demo: !!sup.demo }, phone: { id: ph.id, phone: ph.phone, label: ph.label, k: ph.k },
+    supplier: { id: sup.id, name: sup.name }, phone: { id: ph.id, phone: ph.phone, label: ph.label, k: ph.k },
     sms: { id: res[smsAt].meta.last_row_id, to: ph.phone, label: ph.label, text: smsTxt }, links: { panel: panelLink(env, ph.k), bot: botLink(bot, "s" + ph.k) }, msgs: out,
   };
 }
@@ -637,7 +640,7 @@ export async function spSend(env, ex, b) {
 /* ------------------------------------------------------------------ */
 /* خواندن                                                                */
 /* ------------------------------------------------------------------ */
-const THREAD_SQL = `SELECT t.*, s.name AS supplier_name, s.demo, p.phone, p.label AS phone_label, p.k AS phone_k,
+const THREAD_SQL = `SELECT t.*, s.name AS supplier_name, p.phone, p.label AS phone_label, p.k AS phone_k,
     a.expert_id, r.party, e.name AS expert_name, e.label AS expert_label, e.telegram_chat AS expert_chat
   FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id
   JOIN assignments a ON a.id=t.assignment_id JOIN requests r ON r.id=a.request_id JOIN experts e ON e.id=a.expert_id`;
@@ -647,10 +650,11 @@ export const threadRow = (env, id) => env.DB.prepare(`${THREAD_SQL} WHERE t.id=?
 
 /**
  * یک گفت‌وگو با سنجش دسترسی. کارشناسِ «فعلیِ» ارجاع صاحب آن است — اگر درخواست به کارشناس دیگری
- * برود، گفت‌وگو هم با آن می‌رود (درس F-05). تأمین‌کننده فقط گفت‌وگوهای خودش را می‌بیند.
+ * برود، گفت‌وگو هم با آن می‌رود (درس F-05). تأمین‌کننده فقط گفت‌وگوهای خودش را می‌بیند. گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی»
+ * (demo=1) برای هیچ‌کس نیست — مثلِ فهرست‌ها.
  */
 export async function threadFor(env, id, who, opts = {}) {
-  const th = int(id) ? await env.DB.prepare(`${THREAD_SQL} WHERE t.id=?`).bind(int(id)).first() : null;
+  const th = int(id) ? await env.DB.prepare(`${THREAD_SQL} WHERE t.id=? AND s.demo=0`).bind(int(id)).first() : null;
   if (!th) throw new HttpError("این گفت‌وگو پیدا نشد.", 404);
   if (who.expert && th.expert_id !== who.expert.id) throw new HttpError("این گفت‌وگو متعلق به شما نیست.", 403);
   if (who.supplier && th.supplier_id !== who.supplier.supplier_id) throw new HttpError("این استعلام متعلق به شما نیست.", 403);
@@ -674,7 +678,7 @@ export async function markSeen(env, thId, side) {
 
 export function threadOut(th, side) {
   return {
-    id: th.id, request_id: th.request_id, supplier: th.supplier_name, demo: !!th.demo, expert: th.expert_label || th.expert_name,
+    id: th.id, request_id: th.request_id, supplier: th.supplier_name, expert: th.expert_label || th.expert_name,
     phone: side === "e" ? th.phone : maskPhone(th.phone), phone_label: th.phone_label, rev: th.rev, last_at: th.last_at, terms: termsOf(th),
     ...(side === "e" ? { assignment_id: th.assignment_id, party: th.party,
       ai: th.ai && th.ai.ai ? { locked: !!th.ai.locked, human: !!th.ai.human, ask: th.ai.ask ? { q: T(th.ai.ask.q), at: th.ai.ask.at || 0 } : null, watch: !!th.ai.watch } : null } : {}),
@@ -804,18 +808,18 @@ export async function supplierThreads(env, sup) {
 
 /**
  * میزِ مکاتبات کارشناس: درخواست‌های باز (و هر درخواستی که گفت‌وگو دارد)، و زیر هر کدام تأمین‌کنندگانش
- * با شمار پیام‌های نخوانده و بسته‌های منتظر تصمیم.
+ * با شمار پیام‌های نخوانده و بسته‌های منتظر تصمیم. گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) نه در فهرست است، نه در شمارها.
  */
 export async function expertThreads(env, ex) {
   /* گفت‌وگوهای کارشناس هوشمند: «locked» (بسته)، «ask» (پرسش از کارشناس — باز تا پاسخ) یا «open» (کارشناس «دستی» است) */
   const [th, asg, air, mode] = await Promise.all([
-    env.DB.prepare(`SELECT t.id, t.assignment_id, t.request_id, t.supplier_id, s.name AS supplier, s.demo, p.phone, p.label AS phone_label, t.last_at, r.party,
+    env.DB.prepare(`SELECT t.id, t.assignment_id, t.request_id, t.supplier_id, s.name AS supplier, p.phone, p.label AS phone_label, t.last_at, r.party,
         (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=t.id AND m.who='s' AND m.id>t.e_seen) AS unread,
         (SELECT COUNT(*) FROM sp_bundles b WHERE b.thread_id=t.id AND b.state IN ('pending','proforma')) AS waiting,
         (SELECT COUNT(*) FROM sp_lines l WHERE l.thread_id=t.id) AS lines,
         (SELECT m.who||'|'||m.kind||'|'||substr(replace(replace(m.body,char(10),' '),char(13),' '),1,120) FROM sp_msgs m WHERE m.thread_id=t.id ORDER BY m.id DESC LIMIT 1) AS last_msg
       FROM sp_threads t JOIN assignments a ON a.id=t.assignment_id AND (t.request_id IS NULL OR a.request_id=t.request_id) JOIN requests r ON r.id=a.request_id
-      JOIN sp_suppliers s ON s.id=t.supplier_id LEFT JOIN sp_phones p ON p.id=t.phone_id
+      JOIN sp_suppliers s ON s.id=t.supplier_id AND s.demo=0 LEFT JOIN sp_phones p ON p.id=t.phone_id
       WHERE a.expert_id=? ORDER BY t.last_at DESC LIMIT 300`).bind(ex.id).all(),
     env.DB.prepare(`SELECT a.id, a.request_id, r.party, a.dispatched_at,
         (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id AND i.state='open') AS open_items
@@ -846,7 +850,7 @@ export async function expertThreads(env, ex) {
     const A = aiOf(t.id);
     /* گفت‌وگوی بسته: نخوانده و منتظرِ تصمیمش به حسابِ کارشناس نمی‌آید */
     const shut = A.ai === "locked";
-    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, demo: !!t.demo, phone: t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
+    g.threads.push({ id: t.id, supplier_id: t.supplier_id, supplier: t.supplier, phone: t.phone, phone_label: t.phone_label, unread: shut ? 0 : t.unread,
       waiting: shut ? 0 : t.waiting, lines: t.lines, last_at: t.last_at, ai: A.ai, ask: A.ask, props: A.props || 0,
       /* پیش‌نمایشِ آخرین پیام برای فهرستِ تلگرام‌مانندِ مکاتبات («که|نوع|متن»)؛ گفت‌وگوی بسته پیش‌نمایش ندارد */
       last_msg: t.last_msg || null });
@@ -866,24 +870,26 @@ export async function expertThreads(env, ex) {
  * فقط پیام‌هایی که بعد از باز شدنش می‌رسند اعلان شوند. بی `since` فقط `last` و شمارِ نخوانده‌ها (برای یک اعلانِ خلاصه).
  * ai: {mode, rev} — «🤖 هوشمند / ✋ دستی»ِ کارشناس و نسخهٔ تکلیفِ درخواست‌هایش (ai-lock.js:aiRevStmt)؛ پنل با تغییرش همان لحظه تازه می‌شود
  * (shared.js: TP.inbox، onAi). یک خواندن با کلیدِ اصلی.
+ * پیامِ گفت‌وگوی قدیمیِ «تأمین‌کنندهٔ فرضی» (demo=1) نه اعلان می‌شود و نه شمرده.
  */
 export async function expertInbox(env, ex, since) {
   const s = Math.max(0, int(since) || 0);
   const [top, unread, rows, asks, ag] = await Promise.all([
     env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM sp_msgs").first(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id
+        JOIN sp_suppliers sup ON sup.id=t.supplier_id AND sup.demo=0
       WHERE a.expert_id=? AND m.who='s' AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) AND ${AI_SHUT_SQL}`).bind(ex.id).first(),
-    s ? env.DB.prepare(`SELECT m.id, m.thread_id, m.kind, m.body, m.at, t.assignment_id, t.request_id, sup.name AS supplier, sup.demo
-        FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id
+    s ? env.DB.prepare(`SELECT m.id, m.thread_id, m.kind, m.body, m.at, t.assignment_id, t.request_id, sup.name AS supplier
+        FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id AND sup.demo=0
         WHERE a.expert_id=? AND m.who='s' AND m.id>? AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) AND ${AI_SHUT_SQL} ORDER BY m.id DESC LIMIT 6`).bind(ex.id, s).all() : null,
     /* «پرسش از کارشناس»های بی‌پاسخ — نشانِ 🚨 کنارِ «مکاتبات» و اعلانِ گوشهٔ پنل */
     env.DB.prepare(`SELECT x.thread_id, x.ask_json, t.assignment_id, t.request_id, sup.name AS supplier FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id
-        JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id WHERE a.expert_id=? AND ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 20`)
+        JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id AND sup.demo=0 WHERE a.expert_id=? AND ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 20`)
       .bind(ex.id).all().catch(() => ({ results: [] })),
     env.DB.prepare("SELECT mode, rev FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null),
   ]);
   const msgs = ((rows && rows.results) || []).reverse().map((m) => ({
-    id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier, demo: !!m.demo,
+    id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier,
     kind: m.kind, body: m.kind === "voice" ? `🎤 ${T(m.body) || "پیام صوتی"}`.slice(0, 300) : T(m.body).slice(0, 300), at: m.at,
   }));
   const askList = (asks.results || []).map((x) => { const k = parse(x.ask_json, {}) || {}; return { thread_id: x.thread_id, assignment_id: x.assignment_id, request_id: x.request_id, supplier: x.supplier, q: k.q || "", at: k.at || 0 }; });
@@ -1512,7 +1518,7 @@ export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = 
     quoteIds = lines.map((l) => byItem.get(l.item_id)).filter(Boolean);
   }
   /* gen: Word تولیدی در پیش‌فاکتورها نشست (فاز ۴) — بی انبار یا با پیش‌فاکتورِ خودِ کارشناس نه */
-  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, demo: !!th.demo, gen: !!pfFile,
+  return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, gen: !!pfFile,
     msgs: [msgObj(mid, th.id, "e", "event", body, meta, t)], thread: th };
 }
 
