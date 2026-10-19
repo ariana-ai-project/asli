@@ -571,15 +571,15 @@
 
   /* ---------- بازخوانیِ خودکارِ بی‌پرش ----------
      هر ms میلی‌ثانیه (پنجرهٔ پنهان: نه)، فقط وقتی کاربر وسطِ کاری نیست: فیلدی فوکوس ندارد، پنجره‌ای باز نیست، منویی باز نیست.
-     fn() می‌تواند Promise برگرداند؛ guard() اختیاری برای شرطِ صفحه. */
+     fn() می‌تواند Promise برگرداند؛ guard() اختیاری برای شرطِ صفحه. idle() همان نگهبان برای صفحه‌ها (تازه‌سازیِ پنل کارشناس با تیکِ «🤖 / ✋»). */
+  function idle() {
+    const a = document.activeElement;
+    if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return false;
+    if ($(".tp-modal-bg, .tp-menu.open, .tp-help:not([hidden]), .tp-flowlb, .chart-bg, .jdp, .fpop")) return false;
+    return true;
+  }
   function autoRefresh(fn, ms, guard) {
     let timer = null, busy = false;
-    const idle = () => {
-      const a = document.activeElement;
-      if (a && (a.tagName === "INPUT" || a.tagName === "TEXTAREA" || a.tagName === "SELECT" || a.isContentEditable)) return false;
-      if ($(".tp-modal-bg, .tp-menu.open, .tp-help:not([hidden]), .tp-flowlb, .chart-bg, .jdp, .fpop")) return false;
-      return true;
-    };
     const tick = async () => {
       if (document.hidden || busy || !idle() || (guard && !guard())) return;
       busy = true; try { await fn(); } catch (_) { /* بازخوانیِ فرعی */ } busy = false;
@@ -769,5 +769,5 @@
     };
   })();
 
-  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, reqCard, unitRow, sizeChip, estTxt, chatRow, avColor, avInitial, once, resetOnce, loader, push };
+  TP.ui = { ICON, esc, fa, digits, theme, themeBtn, mountBg, menu, menuItems, topbar, bar, STAGE_SHORT, login, bindLogin, help, info, autoRefresh, idle, reqCard, unitRow, sizeChip, estTxt, chatRow, avColor, avInitial, once, resetOnce, loader, push };
 })();

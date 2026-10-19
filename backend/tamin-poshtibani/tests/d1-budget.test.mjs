@@ -120,6 +120,11 @@ test("مسیرهای پرتکرار و Cron هیچ جدولِ بزرگی را ک
   if (uniq.length) console.log("SCANS\n" + uniq.map((s) => `  [${s.table}] ${s.detail} :: ${s.sql}`).join("\n"));
   console.log("HOT " + hot.map(([p, s]) => `${s} ${p}`).join(" | "));
   assert.equal(uniq.length, 0, `${uniq.length} خواندنِ کامل در مسیرهای پرتکرار`);
+  /* «🤖 هوشمند / ✋ دستی»ِ کارشناس در صندوقِ پیام (هر ۱۰ ثانیه، worker/sp-core.js:expertInbox): فقط با کلیدِ اصلی — ai_agents کوچک است ولی
+     این نظرسنجی پرتکرارترینِ پنل است */
+  const ag = [...DB.planLog].find(([sql]) => /SELECT mode, rev FROM ai_agents WHERE expert_id=\?/.test(sql));
+  assert.ok(ag, "صندوقِ پیام حالتِ کارشناس را می‌خواند");
+  assert.ok(ag[1].every((d) => !/^SCAN/.test(d)) && ag[1].some((d) => /^SEARCH ai_agents USING INTEGER PRIMARY KEY/.test(d)), ag[1].join(" | "));
 });
 
 /* نگهبانِ اجرا (worker/d1-guard.js): خواندنِ سنگینِ تکراری ← یک هشدارِ پشتیبان؛ یک بارِ سنگین یا سبک ← هیچ */

@@ -864,10 +864,12 @@ export async function expertThreads(env, ex) {
  * اعلانِ گوشهٔ پنل کارشناس (مهر ۱۴۰۵): پیام‌های تازهٔ تأمین‌کنندگان بعد از `since` که کارشناس هنوز ندیده (و از
  * صفحه‌اش پاک نکرده)، حداکثر شش تای آخر. `last` بالاترین شناسهٔ پیام در کل سامانه است — صفحه با آن شروع می‌کند تا
  * فقط پیام‌هایی که بعد از باز شدنش می‌رسند اعلان شوند. بی `since` فقط `last` و شمارِ نخوانده‌ها (برای یک اعلانِ خلاصه).
+ * ai: {mode, rev} — «🤖 هوشمند / ✋ دستی»ِ کارشناس و نسخهٔ تکلیفِ درخواست‌هایش (ai-lock.js:aiRevStmt)؛ پنل با تغییرش همان لحظه تازه می‌شود
+ * (shared.js: TP.inbox، onAi). یک خواندن با کلیدِ اصلی.
  */
 export async function expertInbox(env, ex, since) {
   const s = Math.max(0, int(since) || 0);
-  const [top, unread, rows, asks] = await Promise.all([
+  const [top, unread, rows, asks, ag] = await Promise.all([
     env.DB.prepare("SELECT COALESCE(MAX(id),0) AS id FROM sp_msgs").first(),
     env.DB.prepare(`SELECT COUNT(*) AS n FROM sp_msgs m JOIN sp_threads t ON t.id=m.thread_id JOIN assignments a ON a.id=t.assignment_id
       WHERE a.expert_id=? AND m.who='s' AND m.id>t.e_seen AND m.id>COALESCE(t.e_clear,0) AND ${AI_SHUT_SQL}`).bind(ex.id).first(),
@@ -878,13 +880,15 @@ export async function expertInbox(env, ex, since) {
     env.DB.prepare(`SELECT x.thread_id, x.ask_json, t.assignment_id, t.request_id, sup.name AS supplier FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id
         JOIN assignments a ON a.id=t.assignment_id JOIN sp_suppliers sup ON sup.id=t.supplier_id WHERE a.expert_id=? AND ${AI_ASK_SQL} ORDER BY x.updated_at DESC LIMIT 20`)
       .bind(ex.id).all().catch(() => ({ results: [] })),
+    env.DB.prepare("SELECT mode, rev FROM ai_agents WHERE expert_id=?").bind(ex.id).first().catch(() => null),
   ]);
   const msgs = ((rows && rows.results) || []).reverse().map((m) => ({
     id: m.id, thread_id: m.thread_id, assignment_id: m.assignment_id, request_id: m.request_id, supplier: m.supplier, demo: !!m.demo,
     kind: m.kind, body: m.kind === "voice" ? `🎤 ${T(m.body) || "پیام صوتی"}`.slice(0, 300) : T(m.body).slice(0, 300), at: m.at,
   }));
   const askList = (asks.results || []).map((x) => { const k = parse(x.ask_json, {}) || {}; return { thread_id: x.thread_id, assignment_id: x.assignment_id, request_id: x.request_id, supplier: x.supplier, q: k.q || "", at: k.at || 0 }; });
-  return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs, asks: askList.length, ask_list: askList };
+  return { last: Math.max(top ? top.id : 0, ...msgs.map((m) => m.id)), unread: unread ? unread.n : 0, msgs, asks: askList.length, ask_list: askList,
+    ai: { mode: ag && ag.mode === "on" ? "on" : "off", rev: (ag && Number(ag.rev)) || 0 } };
 }
 /* گفت‌وگوی بستهٔ کارشناس هوشمند (ai-lock.js) برای کارشناس اعلان و شمرده نمی‌شود — t: sp_threads، a: assignments */
 /* «⏱ با مهلت»: گفت‌وگوی کارشناس هوشمند باز است و اعلان و شمرده می‌شود */

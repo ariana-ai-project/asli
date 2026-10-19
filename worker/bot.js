@@ -56,6 +56,7 @@ import { BIDI } from "./sms.js";
 import { aiTick, propDecide } from "./ai-agent.js";
 import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
+import { aiEndLocked } from "./ai-modes.js";
 import { NAV, navApi, navLoad, navSave, ensureMenu, pushNavMenus, expertAppUrl } from "./tg-nav.js";
 import { normConfirmed } from "./structure.js";
 import { estimateRun } from "./estimate.js";
@@ -175,7 +176,8 @@ const reqBtn = (aid) => ({ text: "📄 درخواست", callback_data: `rq:${aid
 const navRow = (aid) => [KARTABL_BTN, reqBtn(aid)];
 /**
  * فاز ۲ پنل پشتیبانی (ai-lock.js): درخواستی که دستِ کارشناس هوشمند است برای کارشناس قفل است — بررسی سوابق، جستجوی
- * هوشمند، جدول کمیسیون و نامه را خودش انجام می‌دهد. پیامِ کوتاه و true، تا تابع همان‌جا برگردد.
+ * هوشمند، جدول کمیسیون و نامه را خودش انجام می‌دهد. پیامِ کوتاه و true، تا تابع همان‌جا برگردد. همان قاعدهٔ پنل (api.js:aiGuard):
+ * جدول و نامه (بی kind) فقط اگر کاری هست یا قلمی هنوز به کارشناس هوشمند می‌رسد (ai-modes.js:aiEndLocked).
  */
 async function aiBlocked(env, api, chat, aid, mid, kind) {
   if (!aid) return false;
@@ -183,7 +185,7 @@ async function aiBlocked(env, api, chat, aid, mid, kind) {
   /* فاز ۴ب گام ۲ (روالِ تازه): «🎯 فهرست دعوت»ِ هر قلم و «🚀 شروع»ش فقط در پنل کارشناس است — بات راهنمایی می‌کند */
   const flow2 = !!o && (o.state === "pending" || o.flow === 2) && !o.handover;
   /* «research» (سوابق و جستجو): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) باز است */
-  if (!(kind === "research" ? aiResearchLocked(o) || flow2 : o)) return false;
+  if (!(kind === "research" ? aiResearchLocked(o) || flow2 : await aiEndLocked(env, o, aid))) return false;
   if (flow2 && (kind === "research" || o.state === "pending")) {
     await show(api, chat, mid || null, "🤖 <b>این درخواست در حالت هوشمند است.</b>\n\nهر قلم را در پنل کارشناس جدا پیش ببرید: ساختارش را ببینید و تأیید کنید (🔒/🔓)، "
       + "«بررسی سوابق» را بزنید — «🎯 فهرست دعوت» با رتبهٔ نهایی و قاعدهٔ دعوت می‌آید و پنج نفر اول از پیش تیک خورده‌اند — بعد «🚀 شروع» را بزنید. "
@@ -3687,7 +3689,7 @@ async function onCallback(env, cq, apiIn) {
   /* جدول کمیسیون: ct:<aid>:t:<quote> · all · none · nt (درج توضیحات) · go (تولید) · start */
   if (action === "ct") {
     const aid = num(1), step = parts[2];
-    if (await aiOwned(env, aid)) { await ack(AI_LOCK_MSG.slice(0, 190), true); return { ok: true }; }
+    if (await aiEndLocked(env, await aiOwned(env, aid), aid)) { await ack(AI_LOCK_MSG.slice(0, 190), true); return { ok: true }; }
     if (step === "t") {
       await env.DB.prepare(
         `UPDATE quotes SET final=CASE WHEN final=1 THEN 0 ELSE 1 END, final_at=CASE WHEN final=1 THEN NULL ELSE ? END, updated_at=? WHERE id=? AND assignment_id=? AND saved=1

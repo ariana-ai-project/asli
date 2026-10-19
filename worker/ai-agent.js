@@ -1,6 +1,6 @@
 /**
  * کارشناس هوشمند (مهر ۱۴۰۵، کارشناس «test») — کارشناسی که ردیفِ ai_agents دارد و «خودکار»ش روشن است، کارِ هر ارجاعِ
- * تازه‌اش را خودِ سامانه انجام می‌دهد:
+ * بازش را — نه فقط ارجاع‌های پس از روشن شدن؛ تیکِ پنل پشتیبانی همان لحظه در پنل کارشناس می‌نشیند (aiModeSet) — خودِ سامانه انجام می‌دهد:
  *   ۰. (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۱) کار فقط با «بررسی سوابق و سپردن به کارشناس هوشمند» شروع می‌شود (aiHandoff): کارشناس
  *      ساختارِ هر قلم را تأیید و 🔒/🔓 کرده، و ساختار منجمد است — دیگر شروعِ خودکار با رسیدنِ ارجاع نیست. فاز ۴ب: فقط اقلامِ
  *      هوشمند به کار می‌روند — نه درخواستی که مدیر دستی کرده، نه «انجام دستی»ِ تأییدشده یا در انتظار، نه قلمِ «مستقیم»ی که کارشناس
@@ -52,7 +52,7 @@ import { fmtFa, tehranParts } from "./time.js";
 import { negotiate, negotiationContext, closingReport, replayCall, AGENT_MODEL, AGENT_MODELS, EFFORTS, modelOk } from "./ai-prompts.js";
 import { threadSection, runMd, SOURCE_FA } from "./ai-md.js";
 import { estimateCost } from "./ai-fetch.js";
-import { AI_ASK_SQL, aiOwned } from "./ai-lock.js";
+import { AI_ASK_SQL, aiOwned, aiRevStmt } from "./ai-lock.js";
 import { getRules, saveRules, coverOf, needFor, DIMS, DIM_FA, DIM_UNIT } from "./ai-rules.js";
 import { expertAppUrl } from "./tg-nav.js";
 import { setCommission } from "./support.js";
@@ -187,9 +187,10 @@ async function discover(env) {
  */
 export async function aiHandoff(env, a, actor, { include = [] } = {}) {
   const ag = await agentOf(env, a.expert_id);
-  if (!ag || ag.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس روشن نیست؛ «بررسی سوابق» هر قلم را خودِ کارشناس می‌زند.", 409);
+  /* ai_mode: صفحهٔ کارشناس کهنه است (تیک عوض شده) — پنل همان لحظه دوباره می‌خواند (expert.js) */
+  if (!ag || ag.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس روشن نیست؛ «بررسی سوابق» هر قلم را خودِ کارشناس می‌زند.", 409, { ai_mode: true });
   /* فاز ۴ب: مدیر در ارجاع تیکِ «🤖 هوشمند» را برداشته — درخواست دستِ خودِ کارشناس است */
-  if (a.ai_on === 0) throw new HttpError("مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ کارشناس است.", 409);
+  if (a.ai_on === 0) throw new HttpError("مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ کارشناس است.", 409, { ai_mode: true });
   if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
   if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(a.id).first()) throw new HttpError("این درخواست از قبل به کارشناس هوشمند سپرده شده است.", 409);
   const all = (await env.DB.prepare(`SELECT i.id, i.title, i.request_id, i.code, i.norm_json, i.sugg_json, i.ai_off, i.pick_json, ${NORM_OK_SQL("i")} AS ok FROM items i
@@ -277,7 +278,8 @@ async function pickCtx(env, ex, itemId) {
   if (!it) throw new HttpError("قلم پیدا نشد.", 404);
   if (it.expert_id !== ex.id) throw new HttpError("این قلم متعلق به شما نیست.", 403);
   const o = await aiOwned(env, it.aid);
-  if (!o) throw new HttpError(it.ai_on === 0 ? "مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ شماست." : "این درخواست در حالت هوشمند نیست؛ کارهایش با خودِ شماست.", 409);
+  /* ai_mode: تیکِ پشتیبانی یا مدیر عوض شده و صفحهٔ کارشناس کهنه است — پنل همان لحظه دوباره می‌خواند (expert.js) */
+  if (!o) throw new HttpError(it.ai_on === 0 ? "مدیر این درخواست را دستی ارجاع داده است؛ همهٔ کارهایش با خودِ شماست." : "این درخواست در حالت هوشمند نیست؛ کارهایش با خودِ شماست.", 409, { ai_mode: true });
   if (o.run_id && o.flow !== 2) throw new HttpError("این درخواست با روالِ پیشینِ کارشناس هوشمند پیش می‌رود و «فهرست دعوت» ندارد.", 409);
   if (it.state !== "open") throw new HttpError("این قلم باز نیست.", 409);
   if (Number(it.ai_off) === 1) throw new HttpError("این قلم «انجام دستی» است و دستِ خودِ شماست.", 409);
@@ -2083,6 +2085,8 @@ async function reviewDelivery(env, id, b, deps) {
     const ex = await env.DB.prepare("SELECT telegram_chat FROM experts WHERE id=?").bind(r.expert_id).first();
     const stmts = [env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,payload_json) VALUES (?,?,?,?,?)").bind(t, "support", "ai_reject", r.request_id,
       JSON.stringify({ assignment_id: r.assignment_id, expert_id: r.expert_id, run_id: r.id, reason })),
+      /* درخواست کامل دستِ کارشناس شد — پنلِ بازش همان لحظه تازه می‌شود */
+      aiRevStmt(env, r.expert_id),
       pushStmt(env, `ai-rej:${r.id}:${t}`, EXPERT(r.expert_id), { title: `↩️ پشتیبانی تحویلِ کارشناس هوشمند درخواست ${r.request_id} را رد کرد`,
         body: `دلیل: ${reason} — درخواست حالا کامل دستِ شماست.`, url: "expert" })];
     if (ex && ex.telegram_chat) {
@@ -2095,6 +2099,162 @@ async function reviewDelivery(env, id, b, deps) {
   }
   if (deps && deps.flush) deps.flush(res.notified);
   return { ok: true, review, changed: res.changed || 0, notified: res.notified || 0 };
+}
+
+/* ------------------------------------------------------------------ */
+/* تیکِ «🤖 هوشمند / ✋ دستی»ِ پشتیبانی — همان لحظه در پنل کارشناس       */
+/* ------------------------------------------------------------------ */
+/* ارجاعِ بازِ کارشناس (?1) که هنوز کاری ندارد و مدیر تیکش را نزده — همان‌ها که با «🤖 هوشمند» شدن تکلیفشان روشن می‌شود */
+const RB_SCOPE = `a.expert_id=?1 AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL AND a.ai_on IS NULL
+  AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.assignment_id=a.id)`;
+/* جدول کمیسیون یا نامه‌اش را کارشناس خودش ساخته — نامه با متن (رونویسی‌شده، نوشته‌شده یا نگارشِ ناموفق)؛ «نامهٔ تازه»ِ بی متن نه */
+const RB_DONE = `(a.commission_at IS NOT NULL OR a.commission_no IS NOT NULL OR EXISTS (SELECT 1 FROM letters l WHERE l.assignment_id=a.id AND l.state IN ('transcribed','written','failed')))`;
+/* قلمِ بازِ نسپرده با استعلامِ دستی: خطی در گفت‌وگوی بی کارشناس هوشمند، یا خطِ استعلامِ ثبت‌موقتِ قیمت‌داری که کارشناس هوشمند نساخته */
+const RB_WORK = `i.state='open' AND COALESCE(i.ai_off,0)<>1 AND i.ai_start_at IS NULL AND (EXISTS (SELECT 1 FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
+    WHERE l.item_id=i.id AND t.assignment_id=i.assignment_id AND NOT EXISTS (SELECT 1 FROM ai_threads x WHERE x.thread_id=t.id))
+  OR EXISTS (SELECT 1 FROM quotes q WHERE q.assignment_id=i.assignment_id AND q.item_id=i.id AND q.saved=1 AND q.price>0 AND COALESCE(q.source,'')<>'ai'))`;
+/* گفت‌وگوی کارِ زندهٔ کارشناس (?1) که خودش بعد از «✋ دستی» شدن (?2) در آن نوشته یا تصمیم گرفته — پیامِ کارشناس هوشمند و یادداشتِ درونی نه */
+const RB_HUMAN = `?2>0 AND x.state NOT IN ('closed','human') AND x.run_id IN (SELECT r.id FROM ai_runs r WHERE r.expert_id=?1 AND r.finished_at IS NULL)
+  AND EXISTS (SELECT 1 FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='e' AND m.kind<>'note' AND m.at>?2 AND COALESCE(json_extract(m.meta_json,'$.ai'),0)=0)`;
+/* پیشنهادِ معطلِ «⏱ با مهلت» در کارهای کارشناس (?1) */
+const RB_PROPS = `p.state='pending' AND p.run_id IN (SELECT r.id FROM ai_runs r WHERE r.expert_id=?1)`;
+/* ارجاعِ بازِ کارشناس (?1) با قلمِ باز که مدیر تیکش را برنداشته و هنوز کاری ندارد — «🎯 منتظرِ شروع» */
+const RB_IDLE = `a.expert_id=?1 AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL AND COALESCE(a.ai_on,1)=1
+  AND NOT EXISTS (SELECT 1 FROM ai_runs r WHERE r.assignment_id=a.id) AND EXISTS (SELECT 1 FROM items i WHERE i.assignment_id=a.id AND i.state='open')`;
+const KEEP_NOTE = "جدول کمیسیون یا نامهٔ این درخواست پیش از «🤖 هوشمند» شدنِ کارشناس دستی ساخته شده بود؛ دستی ماند — مدیر می‌تواند تیکِ «🤖» را بزند.";
+const WORK_NOTE = "استعلامِ دستیِ این قلم پیش از «🤖 هوشمند» شدنِ کارشناس — «انجام دستی» ماند.";
+const HUMAN_NOTE = "✋ کارشناس در زمانِ «✋ دستی» خودش این گفت‌وگو را پیش برد؛ با «🤖 هوشمند» شدنِ دوباره دستِ خودش ماند — «🤖 برگرداندن» در مکاتبات.";
+
+/** شمارهای تیک و «بازسنجی» — یک خواندن (کارِ پشتیبانی، نه مسیرِ پرتکرار). offAt: لحظهٔ «✋ دستی» شدن؛ ۰ = گفت‌وگویی سنجیده نمی‌شود */
+async function modeCounts(env, exId, offAt = 0) {
+  const c = await env.DB.prepare(`SELECT
+      (SELECT COUNT(*) FROM assignments a WHERE ${RB_IDLE}) AS idle,
+      (SELECT COUNT(*) FROM assignments a WHERE ${RB_IDLE} AND NOT (a.ai_on IS NULL AND ${RB_DONE})) AS idle_after,
+      (SELECT COUNT(*) FROM assignments a WHERE ${RB_SCOPE} AND ${RB_DONE}) AS keep,
+      (SELECT COUNT(*) FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE ${RB_SCOPE} AND NOT ${RB_DONE} AND ${RB_WORK}) AS items,
+      (SELECT COUNT(*) FROM ai_runs r JOIN assignments a ON a.id=r.assignment_id WHERE r.expert_id=?1 AND a.expert_id=?1 AND r.finished_at IS NULL) AS live,
+      (SELECT COUNT(*) FROM ai_props p WHERE ${RB_PROPS}) AS props,
+      (SELECT COUNT(*) FROM ai_threads x WHERE ${RB_HUMAN}) AS human`).bind(exId, offAt || 0).first();
+  const n = (k) => Number((c || {})[k]) || 0;
+  return { idle: n("idle"), idle_after: n("idle_after"), keep: n("keep"), items: n("items"), live: n("live"), props: n("props"), human: n("human") };
+}
+
+/**
+ * تکلیفِ کارِ دستیِ پیشین با «🤖 هوشمند» شدن (و «🔁 بازسنجی»)، در ارجاع‌های بازِ بی کار که مدیر تیکشان را نزده:
+ *   • جدول کمیسیون یا نامه‌اش را کارشناس ساخته ← دستی می‌ماند (ai_on=0، ai_set_by='support' با توضیح — مدیر می‌تواند تیک را بزند)؛
+ *   • قلمی که استعلامِ دستی دارد ← «انجام دستی» (ai_off=1، رخدادِ ai_manual)؛ بقیه «🎯 منتظرِ شروع» — کاری ساخته نمی‌شود («🚀 شروع»ِ
+ *     کارشناس یا ▶️ پشتیبانی می‌سازد). گفت‌وگوها و خط‌های دستی دست نمی‌خورند (invitable2 گفت‌وگوی بی ai_threads را دعوت نمی‌کند).
+ * همه set-based، هر رخداد پیش از نوشتنِ همان شرط (تا همان ردیف‌ها شمرده شوند)؛ دوباره‌زدن کاری نمی‌کند.
+ */
+function rebaseStmts(env, exId, t, by) {
+  return [
+    env.DB.prepare(`INSERT INTO events (at,actor,kind,request_id,payload_json) SELECT ?2, ?3, 'ai_tick', a.request_id,
+        json_object('assignment_id', a.id, 'expert_id', a.expert_id, 'on', json('false'), 'reason', ?4) FROM assignments a WHERE ${RB_SCOPE} AND ${RB_DONE}`).bind(exId, t, by, KEEP_NOTE),
+    env.DB.prepare(`UPDATE assignments SET ai_on=0, ai_note=?2, ai_set_at=?3, ai_set_by='support' WHERE id IN (SELECT a.id FROM assignments a WHERE ${RB_SCOPE} AND ${RB_DONE})`).bind(exId, KEEP_NOTE, t),
+    env.DB.prepare(`INSERT INTO events (at,actor,kind,request_id,payload_json) SELECT ?2, ?3, 'ai_manual', a.request_id,
+        json_object('assignment_id', a.id, 'items', json_group_array(i.id), 'reason', ?4) FROM items i JOIN assignments a ON a.id=i.assignment_id
+        WHERE ${RB_SCOPE} AND ${RB_WORK} GROUP BY a.id`).bind(exId, t, by, WORK_NOTE),
+    env.DB.prepare(`UPDATE items SET ai_off=1, ai_off_at=?2 WHERE id IN (SELECT i.id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE ${RB_SCOPE} AND ${RB_WORK})`).bind(exId, t),
+  ];
+}
+/** گفت‌وگویی که کارشناس بعد از «✋ دستی» شدن خودش پیش برد ← همان «🚨 باز کردنِ اضطراری» (ai-takeover.js): کارشناس هوشمند جواب نمی‌دهد تا «🤖 برگرداندن» */
+const humanStmts = (env, exId, offAt, t) => [
+  env.DB.prepare(`INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT x.run_id, x.thread_id, ?3, 'takeover', ?4 FROM ai_threads x WHERE ${RB_HUMAN}`).bind(exId, offAt, t, HUMAN_NOTE),
+  env.DB.prepare(`UPDATE ai_threads SET state='human', lock_until=NULL, updated_at=?3,
+      ask_json=json_set(COALESCE(ask_json,'{}'),'$.takeover',json_object('by','system','at',?3,'reason',?4,'from',state)) WHERE thread_id IN (SELECT x.thread_id FROM ai_threads x WHERE ${RB_HUMAN})`)
+    .bind(exId, offAt, t, HUMAN_NOTE),
+];
+/**
+ * پیشنهادهای معطلِ «⏱ با مهلت»ِ کارهای کارشناس همان لحظه کنار می‌روند (پیش‌تر فقط سرِ مهلت، propLive) — و گفت‌وگویشان با «🤖 هوشمند»ِ بعدی
+ * از نو سنجیده می‌شود (retry_at)، چون پیشنهادِ پاسخ seen_msg را جلو برده بود و پیامِ تأمین‌کننده بی‌جواب می‌ماند.
+ */
+const propsOffStmts = (env, exId, t) => [
+  env.DB.prepare(`UPDATE ai_threads SET retry_at=?2 WHERE state NOT IN ('closed','ask','human') AND thread_id IN (SELECT p.thread_id FROM ai_props p WHERE ${RB_PROPS})`).bind(exId, t),
+  env.DB.prepare(`UPDATE ai_props SET state='off', decided_at=?2, decided_by='support' WHERE id IN (SELECT p.id FROM ai_props p WHERE ${RB_PROPS})`).bind(exId, t),
+];
+const runLogStmt = (env, exId, t, body) => env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT r.id, NULL, ?2, 'run', ?3 FROM ai_runs r WHERE r.expert_id=?1 AND r.finished_at IS NULL")
+  .bind(exId, t, body);
+
+/** خبرِ تیک برای کارشناس — تلگرام (HTML) و اعلانِ گوشی، با شمارها */
+function modeNotice(on, c) {
+  const L = (n, s) => (n ? `• ${s(faN(n))}` : null);
+  if (on) {
+    const lines = [L(c.idle_after, (k) => `${k} درخواستِ باز در حالت هوشمند است — هر قلم را در پنل کارشناس با «🎯 فهرست دعوت» ببینید و «🚀 شروع» را بزنید.`),
+      L(c.keep, (k) => `${k} درخواست که جدول کمیسیون یا نامه‌اش را خودتان ساخته بودید دستی ماند.`),
+      L(c.items, (k) => `${k} قلم که برایش استعلامِ دستی گرفته بودید «انجام دستی» شد و دستِ خودتان است.`),
+      L(c.live, (k) => `${k} کارِ نیمه‌تمامِ کارشناس هوشمند ادامه پیدا می‌کند.`),
+      L(c.human, (k) => `${k} گفت‌وگو را که در این فاصله خودتان پیش بردید دستِ خودتان ماند («🤖 برگرداندن» در مکاتبات).`)].filter(Boolean);
+    return { text: `🤖 <b>کارشناس هوشمندِ شما روشن شد</b>\n\nپشتیبانی تیکِ شما را «🤖 هوشمند» کرد و پنل کارشناس همین حالا عوض شد:\n${lines.join("\n") || "• از این پس درخواست‌هایتان در حالت هوشمند است."}`,
+      push: { title: "🤖 کارشناس هوشمندِ شما روشن شد", body: `${c.idle_after ? `${faN(c.idle_after)} درخواستِ باز هوشمند شد — هر قلم را با «🎯 فهرست دعوت» و «🚀 شروع» بسپارید` : "درخواست‌هایتان در حالت هوشمند است"}`
+        + `${c.keep ? ` · ${faN(c.keep)} درخواست دستی ماند` : ""}${c.items ? ` · ${faN(c.items)} قلم «انجام دستی»` : ""}${c.human ? ` · ${faN(c.human)} گفت‌وگو دستِ خودتان` : ""}.`, url: "expert", tag: "aimode" } };
+  }
+  const open = c.idle + c.live;
+  const lines = [L(open, (k) => `${k} درخواستِ باز دیگر قفلِ هوشمند ندارد — سوابق، جستجو، استعلام، جدول کمیسیون و نامه با شماست.`),
+    L(c.live, (k) => `${k} کارِ کارشناس هوشمند نگه داشته شد و گفت‌وگوهایش برایتان باز است.`),
+    L(c.props, (k) => `${k} پیشنهادِ «⏱ با مهلت» کنار رفت و دیگر خودکار نمی‌رود.`)].filter(Boolean);
+  return { text: `✋ <b>پنل شما «دستی» شد</b>\n\nپشتیبانی کارشناس هوشمندِ شما را خاموش کرد؛ از همین لحظه همهٔ کارها با خودتان است:\n${lines.join("\n") || "• درخواست‌هایتان را خودتان پیش می‌برید."}`,
+    push: { title: "✋ پنل شما «دستی» شد", body: `کارشناس هوشمند خاموش شد؛ ${open ? `${faN(open)} درخواستِ باز` : "همهٔ درخواست‌ها"} دستِ خودتان است${c.props ? ` · ${faN(c.props)} پیشنهادِ معطل کنار رفت` : ""}.`, url: "expert", tag: "aimode" } };
+}
+
+/**
+ * تیکِ «🤖 هوشمند / ✋ دستی»ِ یک کارشناس (پنل پشتیبانی؛ مهر ۱۴۰۵، درخواست مالک: «باید همان لحظه با انتخابِ پنل پشتیبانی عوض شود»):
+ *   • 🤖: همهٔ ارجاع‌های بازِ کارشناس — نه فقط ارجاع‌های بعد از این لحظه — هوشمندند (ai-lock.js:aiOwned)؛ تکلیفِ کارِ دستیِ پیشین در همان
+ *     batch روشن می‌شود (rebaseStmts)، کارهای نیمه‌تمام همین حالا ادامه می‌یابند، جز گفت‌وگویی که کارشناس بعد از «✋ دستی» شدن خودش پیش
+ *     برده (humanStmts). کاری ساخته نمی‌شود.
+ *   • ✋: کارها می‌ایستند (claimRun فقط «on»)، پیشنهادهای معطل همان لحظه کنار می‌روند و off_at برای 🤖ِ بعدی ثبت می‌شود.
+ * هر دو: ai_agents.rev جلو می‌رود (پنل کارشناس و مکاتبات از /sp/x/inbox همان لحظه می‌فهمند)، رخداد با شمارها، و خبر به کارشناس در اعلانِ
+ * گوشی و تلگرام (مثل تیکِ مدیر، api.js:setAiTick). تیکِ تکراری کاری نمی‌کند. خروجی {changed, counts}.
+ */
+export async function aiModeSet(env, ex, on, by = "support") {
+  const ag = await agentOf(env, ex.id);
+  if ((!!ag && ag.mode === "on") === on) return { changed: false, counts: null };
+  const t = now();
+  /* لحظهٔ «✋ دستی» شدن: ردیف‌های پیش از این قاعده off_at ندارند — آخرین تغییرِ ردیفِ خاموش همان است */
+  const offAt = on && ag ? Number(ag.off_at) || Number(ag.updated_at) || 0 : 0;
+  const c = await modeCounts(env, ex.id, offAt);
+  const n = modeNotice(on, c);
+  const counts = on ? { idle: c.idle_after, keep: c.keep, items: c.items, live: c.live, human: c.human, props: c.props } : { open: c.idle + c.live, live: c.live, props: c.props };
+  const idem = `aimode:${ex.id}:${t}`;
+  await env.DB.batch([
+    env.DB.prepare(`INSERT INTO ai_agents (expert_id,mode,on_at,off_at,rev,config_json,updated_at,updated_by) VALUES (?,?,?,?,1,NULL,?,?)
+      ON CONFLICT(expert_id) DO UPDATE SET mode=excluded.mode, on_at=CASE WHEN excluded.mode='on' THEN excluded.on_at ELSE ai_agents.on_at END,
+        off_at=CASE WHEN excluded.mode='off' THEN excluded.off_at ELSE ai_agents.off_at END, rev=ai_agents.rev+1, updated_at=excluded.updated_at, updated_by=excluded.updated_by`)
+      .bind(ex.id, on ? "on" : "off", on ? t : null, on ? null : t, t, by),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, by, on ? "ai_on" : "ai_off", JSON.stringify({ expert_id: ex.id, ...counts })),
+    runLogStmt(env, ex.id, t, on ? `🤖 کارشناس دوباره «هوشمند» شد (پنل پشتیبانی) — کار ادامه دارد${c.human ? `؛ ${faN(c.human)} گفت‌وگو که کارشناس در این فاصله خودش پیش برد دستِ خودش ماند` : ""}.`
+      : `✋ کارشناس «دستی» شد (پنل پشتیبانی) — کار نگه داشته شد${c.props ? ` و ${faN(c.props)} پیشنهادِ معطل کنار رفت` : ""}.`),
+    /* پیشنهادِ معطلِ مانده از پیش (✋ پیش از این قاعده) هم با 🤖 نباید سرِ مهلت برود */
+    ...propsOffStmts(env, ex.id, t),
+    ...(on ? [...rebaseStmts(env, ex.id, t, by), ...humanStmts(env, ex.id, offAt, t),
+      env.DB.prepare("UPDATE ai_runs SET next_at=?2 WHERE expert_id=?1 AND finished_at IS NULL AND next_at>?2").bind(ex.id, t)] : []),
+    ...(ex.telegram_chat ? [queueStmt(env, idem, ex.telegram_chat, n.text, [[{ text: "📋 باز کردنِ پنل کارشناس", web_app: { url: expertAppUrl(env) } }]])] : []),
+    pushStmt(env, idem, EXPERT(ex.id), n.push),
+  ]);
+  return { changed: true, counts, notified: ex.telegram_chat ? 1 : 0 };
+}
+
+/**
+ * «🔁 بازسنجی»ِ پشتیبانی (POST /support/ai/:کارشناس/rebase): همان تکلیفِ «🤖 هوشمند» شدن (rebaseStmts) برای کارشناسی که از پیش هوشمند است —
+ * یک بار، برای درخواست‌های بازی که پیش از این قاعده رسیده‌اند. dry (پیش‌فرض): فقط شمارها و فهرستِ همان درخواست‌ها و اقلام، بی هیچ نوشتن؛
+ * {dry:false} می‌نویسد. دوباره‌زدنش کاری نمی‌کند (ارجاعِ دستی‌مانده ai_on=0 و قلمِ دستی ai_off=1 دیگر در دامنه نیستند).
+ */
+export async function aiRebase(env, ex, { dry = true, by = "support" } = {}) {
+  const ag = await agentOf(env, ex.id);
+  if (!ag || ag.mode !== "on") throw new HttpError("این کارشناس «🤖 هوشمند» نیست؛ با «🤖 هوشمند» کردنش همین بازسنجی خودش انجام می‌شود.", 409);
+  const c = await modeCounts(env, ex.id, 0);
+  const counts = { idle: c.idle_after, keep: c.keep, items: c.items, live: c.live };
+  if (dry) {
+    const [kr, ir] = await env.DB.batch([
+      env.DB.prepare(`SELECT a.id, a.request_id FROM assignments a WHERE ${RB_SCOPE} AND ${RB_DONE} ORDER BY a.id LIMIT 50`).bind(ex.id),
+      env.DB.prepare(`SELECT i.id, i.title, a.request_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE ${RB_SCOPE} AND NOT ${RB_DONE} AND ${RB_WORK} ORDER BY i.id LIMIT 100`).bind(ex.id),
+    ]);
+    return { ok: true, dry: true, changed: false, counts, keep: kr.results || [], items: ir.results || [] };
+  }
+  if (!c.keep && !c.items) return { ok: true, dry: false, changed: false, counts };
+  const t = now();
+  await env.DB.batch([...rebaseStmts(env, ex.id, t, by), aiRevStmt(env, ex.id),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, by, "ai_rebase", JSON.stringify({ expert_id: ex.id, ...counts }))]);
+  return { ok: true, dry: false, changed: true, counts };
 }
 
 /**
@@ -2148,24 +2308,25 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     const tot = await env.DB.prepare("SELECT COUNT(*) AS n, COALESCE(SUM(cost_usd),0) AS cost FROM ai_calls WHERE expert_id=?").bind(ex.id).first();
     const cfg = cfgOf(ag);
     return json({ expert: { id: ex.id, name: ex.name, label: ex.label, active: !!ex.active, tg: !!ex.telegram_chat },
-      agent: { mode: ag ? ag.mode : "off", on: !!ag && ag.mode === "on", on_at: ag ? ag.on_at : null, cfg, updated_at: ag ? ag.updated_at : null, updated_by: ag ? ag.updated_by : null },
+      agent: { mode: ag ? ag.mode : "off", on: !!ag && ag.mode === "on", on_at: ag ? ag.on_at : null, off_at: ag ? ag.off_at || null : null, cfg, updated_at: ag ? ag.updated_at : null, updated_by: ag ? ag.updated_by : null },
       defaults: AI_DEFAULTS, markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, model: cfg.model, sms: smsReady(env),
       models: Object.entries(AGENT_MODELS).map(([id, x]) => ({ id, fa: x.fa, price: x.price, effort: x.effort })), efforts: EFFORTS,
       runs: await runsOf(env, ex.id), open: open.filter((a) => a.items > 0), totals: tot || { n: 0, cost: 0 }, purposes: PURPOSE_FA });
   }
-  /* تیکِ «🤖 هوشمند / ✋ دستی»: هوشمند ارجاع‌های از همین لحظه را خودکار برمی‌دارد و کارهای کارشناس را قفل می‌کند (ai-lock.js)؛
-     دستی همهٔ کارهای کارشناس هوشمند را همان لحظه نگه می‌دارد و قفل‌ها را برمی‌دارد */
+  /* تیکِ «🤖 هوشمند / ✋ دستی» (aiModeSet): هوشمند همهٔ ارجاع‌های بازِ بی کار را هوشمند می‌کند — با تکلیفِ کارِ دستیِ پیشین — و کارهای
+     نیمه‌تمام را ادامه می‌دهد؛ دستی همهٔ کارهای کارشناس هوشمند را همان لحظه نگه می‌دارد و قفل‌ها را برمی‌دارد. پنلِ کارشناس همان لحظه
+     عوض می‌شود و خبر می‌گیرد */
   if (path === "/mode" && m === "PUT") {
     const b = await readJson(request);
     const on = b.on === true;
-    const t = now();
-    await env.DB.batch([
-      env.DB.prepare(`INSERT INTO ai_agents (expert_id,mode,on_at,config_json,updated_at,updated_by) VALUES (?,?,?,NULL,?,?)
-        ON CONFLICT(expert_id) DO UPDATE SET mode=excluded.mode, on_at=CASE WHEN excluded.mode='on' THEN excluded.on_at ELSE ai_agents.on_at END,
-          updated_at=excluded.updated_at, updated_by=excluded.updated_by`).bind(ex.id, on ? "on" : "off", on ? t : null, t, by),
-      env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, "support", on ? "ai_on" : "ai_off", JSON.stringify({ expert_id: ex.id })),
-    ]);
-    return json({ ok: true, on });
+    const r = await aiModeSet(env, ex, on, by);
+    if (r.changed && deps.flush) deps.flush(r.notified);
+    return json({ ok: true, on, ...r });
+  }
+  /* «🔁 بازسنجی»: همان تکلیف برای کارشناسی که از پیش هوشمند است — {dry:false} می‌نویسد، وگرنه فقط شمارها (aiRebase) */
+  if (path === "/rebase" && m === "POST") {
+    const b = await readJson(request).catch(() => ({}));
+    return json(await aiRebase(env, ex, { dry: !(b && b.dry === false), by }));
   }
   if (path === "/config" && m === "PUT") {
     const b = await readJson(request);
@@ -2187,6 +2348,8 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
     if (!a.dispatched_at || a.closed_at) throw new HttpError("این ارجاع ارسال‌نشده یا بسته است.", 409);
     /* همان شرطِ سپردنِ کارشناس: ساختارِ همهٔ اقلام تأییدشده؛ منجمد می‌شود */
     const r = await aiHandoff(env, a, "support");
+    /* پنلِ بازِ کارشناس همان لحظه «سپرده‌شده» را می‌بیند (ai-lock.js:aiRevStmt) */
+    await aiRevStmt(env, ex.id).run();
     return json({ ok: true, run_id: r.run_id, items: r.items });
   }
   if ((mm = /^\/runs\/(\d+)$/.exec(path)) && m === "GET") return json(await runDetail(env, ex, mm[1]));

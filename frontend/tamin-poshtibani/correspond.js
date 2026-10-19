@@ -145,7 +145,7 @@
          همین‌جا باز می‌کند و فهرست‌ها شمارِ نخوانده را همان لحظه می‌گیرند */
       TP.inbox.start({ api, summary: false, active: () => !!S.me, current: () => (S.d ? S.th : null),
         open: (m) => { if (m) openThread(m.thread_id); }, onNew: () => refreshLists().catch(() => {}),
-        onAsks: (k) => { if (k !== S.asks) refreshLists().catch(() => {}); } });
+        onAsks: (k) => { if (k !== S.asks) refreshLists().catch(() => {}); }, onAi: aiChanged });
       /* اعلانِ گوشی و مرورگر (ui.js: TP.ui.push) — همان اشتراکِ پنل کارشناس؛ نه در مینی‌اپ تلگرام */
       if (!inTg && ses && ses.id) TP.ui.push.mount({ role: "expert", who: ses.id, api: (p, b) => TP.api(p, b === undefined ? {} : { body: b }) });
       TP.ui.help.assistant({ role: "expert", api: (p, b) => api(p, b === undefined ? {} : { body: b }), name: (ses && ses.name) || null });
@@ -155,6 +155,17 @@
     }
   }
   function findThread(id) { for (const g of S.reqs) for (const t of g.threads) if (t.id === id) return { g, t }; return null; }
+  /**
+   * «🤖 هوشمند / ✋ دستی»ِ پنل پشتیبانی یا تکلیفِ تازهٔ درخواست‌ها (shared.js: TP.inbox، onAi): فهرست‌ها و گفت‌وگوی باز همان لحظه — قفلِ
+   * «🤖 فقط دیدن»، «⏱ با مهلت» یا «✋ دستِ شما» عوض می‌شود. وسطِ نوشتن، گفت‌وگو پیش‌نویس را نگه می‌دارد و دورِ بعدِ نظرسنجی می‌خواند.
+   */
+  async function aiChanged() {
+    try { await refreshLists(); } catch (_) { /* فهرستِ قبلی می‌ماند */ }
+    if (!S.th || !S.d) return;
+    const typing = document.activeElement && /INPUT|TEXTAREA/.test(document.activeElement.tagName);
+    if (typing || document.querySelector(".tp-modal-bg")) { S.rev = -1; return; }
+    try { await loadThread(); } catch (e) { if (e.status === 423) await shut(e.message); }
+  }
   /** باز کردنِ یک گفت‌وگو — از فهرستِ تأمین‌کنندگان یا از اعلانِ گوشهٔ صفحه؛ پیش‌نویسِ گفت‌وگوی قبلی می‌ماند */
   function openThread(id) {
     S.pane = null;

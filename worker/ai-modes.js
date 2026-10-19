@@ -106,6 +106,24 @@ export async function aiItemFree(env, owned, it) {
   return m.mode === "direct";
 }
 
+/**
+ * جدول کمیسیون و نامهٔ درخواستِ دستِ کارشناس هوشمند (owned از ai-lock.js:aiOwned) برای کارشناس قفل است؟ فقط وقتی کارِ او ساخته شده
+ * یا قلمِ بازی هنوز به او می‌رسد — سپرده‌شده («🚀 شروع»)، یا نه «انجام دستی» و نه از نوعِ «مستقیم». درخواستی که همهٔ اقلامش دستی یا
+ * «مستقیم» است هرگز کاری نمی‌گیرد، پس جدول و نامه‌اش با خودِ کارشناس است (پیش‌تر بن‌بست: کار نبود و قفل هم نمی‌رفت). its: اقلامِ باز
+ * (ai_off، ai_start_at)، modes: خروجیِ itemModes — همان قاعده در جزئیاتِ ارجاع (api.js) بی خواندنِ دوباره.
+ */
+export const endLockedOf = (owned, its, modes) => !!owned && (!!owned.run_id
+  || (its || []).some((i) => Number(i.ai_off) !== 1 && (!!i.ai_start_at || ((modes && modes.get(i.id)) || {}).mode !== "direct")));
+export async function aiEndLocked(env, owned, aid) {
+  if (!owned) return false;
+  if (owned.run_id) return true;
+  const its = (await env.DB.prepare("SELECT id, code, title, norm_json, ai_off, ai_start_at FROM items WHERE assignment_id=? AND state='open' AND COALESCE(ai_off,0)<>1")
+    .bind(aid).all()).results || [];
+  if (!its.length) return false;
+  if (its.some((i) => i.ai_start_at)) return true;
+  return endLockedOf(owned, its, await itemModes(env, its));
+}
+
 /** جستجوی نوع قلم برای پنل پشتیبانی — حداکثر ۳۰ نام */
 export async function searchHeads(env, q) {
   const k = nkey(q);

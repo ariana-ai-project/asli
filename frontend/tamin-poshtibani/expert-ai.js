@@ -64,6 +64,7 @@
         <h2 style="margin:0">🤖 کارشناس هوشمند${A.st.expert ? ` — ${esc(A.st.expert.label || A.st.expert.name)}` : ""}</h2>
         <span class="chip ${g.on ? "ok" : ""}">${g.on ? "🤖 هوشمند" : "✋ دستی"}</span>
         <button class="tp-btn sm ${g.on ? "danger" : "primary"}" data-ai-mode="${g.on ? "off" : "on"}">${g.on ? "✋ دستی کن" : "🤖 هوشمند کن"}</button>${TP.ui.info("support.ai", "راهنمای هوشمند و دستی")}
+        ${g.on ? `<button class="tp-btn sm" data-ai-rebase title="درخواست‌های بازی که پیش از قاعدهٔ «همهٔ درخواست‌های باز» رسیده‌اند: جدول کمیسیون یا نامه‌دار ← دستی، قلمِ با استعلامِ دستی ← «انجام دستی» — اول پیش‌نمایش، بی نوشتن">🔁 بازسنجی</button>` : ""}
         <span style="margin-inline-start:auto" class="muted">مدلِ مذاکره: <b dir="ltr">${esc(A.st.model)}</b> (${esc(A.st.agent.cfg.effort || "medium")}) · پیامک: ${A.st.sms ? `<span class="chip ok">TextBee وصل است</span>` : `<span class="chip warn">TextBee وصل نیست — شبیه‌سازی</span>`}</span></div>
       <div class="kpi"><div class="k"><b>کارها</b><span>${M(A.st.runs.length)}</span></div><div class="k"><b>فراخوانیِ مدل</b><span>${M(A.st.totals.n)}</span></div>
         <div class="k"><b>تخمینِ کلِ هزینه</b><span dir="ltr">${usd(A.st.totals.cost)}</span></div>
@@ -263,11 +264,26 @@
     Q("[data-ai-sub]").forEach((b) => b.onclick = async () => { A.sub = b.dataset.aiSub; if (!b.dataset.aiRuncalls && A.sub !== "runs" && A.sub !== "calls") { /* هر زیرتب داده‌اش را دارد */ } await load(); });
     Q("[data-ai-mode]").forEach((b) => b.onclick = () => {
       const on = b.dataset.aiMode === "on";
+      /* همان متنِ تیکِ فهرستِ کارشناسان (support-panel.js:aiToggle)؛ رفتار: worker/ai-agent.js:aiModeSet */
       TP.modal(on ? "🤖 هوشمند" : "✋ دستی", on
-        ? "از این لحظه هر ارجاعی که به این کارشناس برسد خودکار پیش می‌رود (سوابق، جستجوی هوشمند، دعوت، مذاکره و تصمیم) و همین کارها برای خودِ کارشناس قفل می‌شود. پیامک فقط به شماره‌های تیک‌خوردهٔ «پنل» می‌رود. هوشمند شود؟"
-        : "همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شوند و قفل‌های کارشناس برداشته می‌شوند؛ از این پس خودش دستی کار می‌کند. دستی شود؟",
+        ? "همهٔ درخواست‌های بازِ این کارشناس که هنوز به کارشناس هوشمند سپرده نشده‌اند — نه فقط ارجاع‌های تازه — همین حالا «🤖 هوشمند» می‌شوند: هر قلم با «🎯 فهرست دعوت» و «🚀 شروع»ِ خودِ کارشناس، و دعوت، مذاکره، جدول کمیسیون و نامه با کارشناس هوشمند. "
+          + "درخواستی که کارشناس جدول کمیسیون یا نامه‌اش را ساخته دستی می‌ماند و قلمی که برایش استعلامِ دستی گرفته «انجام دستی» می‌شود؛ کارهای نیمه‌تمام ادامه می‌یابند، جز گفت‌وگویی که کارشناس در زمانِ «✋ دستی» خودش پیش برده. "
+          + "پیامک فقط به شماره‌های تیک‌خوردهٔ «پنل» می‌رود. پنلِ کارشناس همان لحظه عوض می‌شود و خبر می‌گیرد. هوشمند شود؟"
+        : "همهٔ کارهای کارشناس هوشمند همان لحظه نگه داشته می‌شوند، پیشنهادهای معطلِ «⏱ با مهلت» کنار می‌روند و قفل‌های کارشناس برداشته می‌شوند؛ از این پس خودش دستی کار می‌کند. پنلش همان لحظه عوض می‌شود و خبر می‌گیرد. دستی شود؟",
       () => act(() => api("/ai/mode", { method: "PUT", body: { on } })), on ? "هوشمند شود" : "دستی شود");
     });
+    /* «🔁 بازسنجی» (worker/ai-agent.js:aiRebase): اول پیش‌نمایش (dry، بی نوشتن) با فهرستِ همان درخواست‌ها و اقلام، بعد با تأیید؛ دوباره‌زدنش کاری نمی‌کند */
+    const rb = G("[data-ai-rebase]");
+    if (rb) rb.onclick = async () => {
+      let r; try { r = await api("/ai/rebase", { body: { dry: true } }); } catch (e) { return fail(e); }
+      const c = r.counts || {};
+      if (!c.keep && !c.items) return TP.modal("🔁 بازسنجی", "چیزی برای بازسنجی نیست: درخواستِ بازِ بی کاری با جدول کمیسیون، نامه یا استعلامِ دستی نمانده است.", null, "باشد", "");
+      const ul = (xs, f) => `<ul style="margin:4px 0 10px;padding-inline-start:20px;max-height:22vh;overflow:auto">${xs.map((x) => `<li>${f(x)}</li>`).join("")}</ul>`;
+      TP.modal("🔁 بازسنجیِ درخواست‌های باز", `${c.keep ? `<p style="margin:0"><b>${M(c.keep)} درخواست دستی می‌ماند</b> — جدول کمیسیون یا نامه‌اش را کارشناس ساخته (مدیر می‌تواند تیکِ «🤖» را بزند):</p>${ul(r.keep || [], (x) => `<span class="num">${esc(x.request_id)}</span>`)}` : ""}
+        ${c.items ? `<p style="margin:0"><b>${M(c.items)} قلم «انجام دستی» می‌شود</b> — استعلامِ دستی دارد:</p>${ul(r.items || [], (x) => `<span class="num">${esc(x.request_id)}</span> · ${esc(x.title)}`)}` : ""}
+        <p class="dim" style="font-size:.85rem;margin:0">بقیه «🎯 منتظرِ شروع»ِ کارشناس می‌مانند؛ گفت‌وگوها و خط‌های دستی دست نمی‌خورند و کاری ساخته نمی‌شود.</p>`,
+      () => act(() => api("/ai/rebase", { body: { dry: false } })), "بازسنجی کن", "انصراف");
+    };
     Q("[data-ai-run]").forEach((x) => x.onclick = async () => { A.runId = +x.dataset.aiRun; A.run = null; await load(); });
     Q("[data-ai-start]").forEach((b) => b.onclick = () => TP.modal("شروعِ کارشناس هوشمند", "کار روی این ارجاع از سوابق و جستجوی هوشمند شروع می‌شود (جستجوی هوشمند هزینهٔ مدل دارد). شروع شود؟",
       () => act(async () => { const r = await api("/ai/runs", { body: { assignment_id: +b.dataset.aiStart } }); A.runId = r.run_id; A.sub = "runs"; }), "شروع"));

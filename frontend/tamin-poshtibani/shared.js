@@ -370,7 +370,12 @@
     const res = await fetch(base + path, { method: opt.method || (opt.body !== undefined ? "POST" : "GET"), headers, body: opt.body !== undefined ? JSON.stringify(opt.body) : undefined });
     let data = null; const txt = await res.text();
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
-    if (!res.ok) { const e = new Error((data && (data.error || data.detail)) || `خطای سرور ${res.status}`); e.status = res.status; e.data = data; throw e; }
+    if (!res.ok) {
+      const e = new Error((data && (data.error || data.detail)) || `خطای سرور ${res.status}`); e.status = res.status; e.data = data;
+      /* قلابِ صفحه (پنل کارشناس): ۴۲۳ با ai_locked یا ۴۰۹ با ai_mode یعنی تیکِ «🤖 هوشمند / ✋ دستی» عوض شده و صفحه کهنه است */
+      if (TP.onApiError) { try { TP.onApiError(e); } catch (_) { /* قلابِ فرعی */ } }
+      throw e;
+    }
     return data;
   };
 
@@ -381,11 +386,13 @@
      می‌رسند؛ نخوانده‌های قبلی یک اعلانِ خلاصه، یک بار در هر تب. پیامِ گفت‌وگویی که همین حالا باز است اعلان نمی‌شود.
      «🚨 پرسش از کارشناس» (فاز ۲ پنل پشتیبانی) هم از همین نظرسنجی می‌آید: هر سؤالِ تازهٔ کارشناس هوشمند یک اعلان، و شمارش به
      onAsks(n, list) برای نشانِ کنارِ «مکاتبات».
-     TP.inbox.start({ api, active, current, open, onNew, onAsks, summary }) */
+     «🤖 هوشمند / ✋ دستی»ِ پنل پشتیبانی و هر تغییرِ تکلیفِ درخواست‌های کارشناس (ai: {mode, rev}، worker/ai-lock.js:aiRevStmt) هم از همین
+     نظرسنجی: onAi(ai) فقط با تغییر، نه بارِ اول — صفحه همان لحظه تازه می‌شود (مهر ۱۴۰۵، درخواست مالک).
+     TP.inbox.start({ api, active, current, open, onNew, onAsks, onAi, summary }) */
   TP.inbox = (() => {
     const FAD = "۰۱۲۳۴۵۶۷۸۹", faD = (s) => String(s).replace(/\d/g, (d) => FAD[+d]);
     const LIFE = 9000, MAX = 4;
-    let on = false, opt = {}, since = 0, timer = null, busy = false, box = null, ticker = null, baseTitle = "";
+    let on = false, opt = {}, since = 0, timer = null, busy = false, box = null, ticker = null, baseTitle = "", aiSig = "";
     const seen = new Set(), askSeen = new Set();
     let askInit = false;
     const ss = { get(k) { try { return sessionStorage.getItem(k) || ""; } catch (_) { return ""; } }, set(k, v) { try { sessionStorage.setItem(k, v); } catch (_) { /* حالت خصوصی */ } } };
@@ -454,6 +461,11 @@
       }
       asksIn(r, open);
       setTitle(r.unread);
+      if (r.ai) {
+        const sig = `${r.ai.mode}:${r.ai.rev}`;
+        if (aiSig && sig !== aiSig && opt.onAi) { try { opt.onAi(r.ai); } catch (_) { /* تازه‌سازیِ فرعی */ } }
+        aiSig = sig;
+      }
     }
     /* سؤالِ کارشناس هوشمند که جوابش در پروندهٔ درخواست نیست: گفت‌وگو تا پاسخِ کارشناس برایش باز است. اولِ کار یک اعلانِ خلاصه
        (یک بار در هر تب)، بعد هر سؤالِ تازه یک اعلان؛ کلیک همان گفت‌وگو را باز می‌کند. */

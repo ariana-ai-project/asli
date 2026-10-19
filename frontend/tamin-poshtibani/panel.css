@@ -626,6 +626,15 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 @media (prefers-reduced-motion: reduce) { .tp-toast, .tp-toast.bump, .tp-toast.out { animation-duration: .01s; } }
 @media (prefers-reduced-transparency: reduce) { .tp-toast { -webkit-backdrop-filter: none; backdrop-filter: none; background: #18203c; } :root[data-theme="light"] .tp-toast { background: #fff; } }
 @media (prefers-contrast: more) { .tp-toast { border: 1px solid currentColor; } }
+/* «🔄 حالتِ کار عوض شد — ↻»: تیکِ «🤖 هوشمند / ✋ دستی» وقتی کارشناس وسطِ نوشتن یا پنجره‌ای بود عوض شد (expert.js:aiStale) — همان شیشهٔ اعلان، بالا و وسط */
+.tp-ai-stale { position: fixed; z-index: 961; top: 76px; left: 0; right: 0; margin-inline: auto; width: fit-content; max-width: calc(100vw - 24px);
+  display: flex; align-items: center; gap: 10px; padding-block: 7px; padding-inline: 16px 8px; border-radius: 999px; font-size: .92rem; color: #f3f6ff;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.02) 60%), rgba(22, 30, 58, 0.8);
+  -webkit-backdrop-filter: blur(22px) saturate(1.8); backdrop-filter: blur(22px) saturate(1.8); border: .5px solid rgba(255, 255, 255, 0.2);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24), 0 18px 40px -12px rgba(0, 0, 0, 0.65); animation: tpToastIn .45s cubic-bezier(.2, .9, .25, 1.12) both; }
+:root[data-theme="light"] .tp-ai-stale { color: #0d1220; background: rgba(246, 248, 253, 0.9); border-color: rgba(255, 255, 255, 0.95); box-shadow: inset 0 1px 0 #fff, 0 18px 40px -14px rgba(20, 40, 80, 0.38); }
+@media (max-width: 640px) { .tp-ai-stale { top: max(10px, env(safe-area-inset-top)); } }
+@media (prefers-reduced-motion: reduce) { .tp-ai-stale { animation-duration: .01s; } }
 /* فاز ۴ب گام ۲ طرح «خرید هوشمند»: «🎯 فهرست دعوت»ِ هر قلم در «بررسی سوابق» (expert.js:vPicks) */
 .picks { border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px 12px; margin: 10px 0; background: rgba(79,140,255,.05); }
 .picks .toolrow { margin: 0; }

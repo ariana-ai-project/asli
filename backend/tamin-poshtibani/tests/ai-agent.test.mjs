@@ -347,7 +347,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.equal((await call("/support/ai/1/state")).status, 401, "بی نشانهٔ پشتیبانی نه");
 });
 
-test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کردنِ دوباره ارجاع‌های قدیمی را خودکار برنمی‌دارد", { skip: SKIP }, async () => {
+test("خاموش: هیچ گامی برداشته نمی‌شود؛ ارجاعی که در زمانِ «✋ دستی» رسیده با «🤖» همان لحظه هوشمند است ولی کارش فقط با «🚀 شروع» یا ▶️", { skip: SKIP }, async () => {
   const off = await call("/support/ai/1/mode", { method: "PUT", headers: SUP, body: { on: false } });
   assert.equal(off.status, 200);
   const t = Date.now();
@@ -355,10 +355,18 @@ test("خاموش: هیچ گامی برداشته نمی‌شود؛ روشن کر
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,created_at) VALUES (2,'R-AI2',1,5,?,?)").run(t, t);
   DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id) VALUES (32,'R-AI2','a',1,'پیچ',10,'عدد','open',2)").run();
   assert.deepEqual(await aiTick(env), { ai: 0 }, "خاموش");
+  assert.equal((await call("/assignments/2", { headers: EX })).data.ai.owned, null, "✋: دستِ خودِ کارشناس");
+  assert.equal((await call("/tray", { headers: EX })).data.assignments.find((a) => a.id === 2).ai, 0);
   await new Promise((res) => setTimeout(res, 5));
   await call("/support/ai/1/mode", { method: "PUT", headers: SUP, body: { on: true } });
+  /* بی قیدِ زمانِ روشن شدن (مهر ۱۴۰۵، درخواست مالک): همان لحظه هوشمند — «🎯 منتظرِ شروع»، 🤖ِ کارتابل */
+  const d = (await call("/assignments/2", { headers: EX })).data;
+  assert.deepEqual([d.ai.owned && d.ai.owned.state, d.ai.owned && d.ai.owned.run_id], ["pending", null]);
+  assert.equal((await call("/tray", { headers: EX })).data.assignments.find((a) => a.id === 2).ai, 1);
+  const pk = await call("/items/32/picks", { headers: EX });
+  assert.deepEqual([pk.status, pk.data.need_norm], [409, true], "فهرستِ دعوت پس از تأییدِ ساختار — نه «در حالت هوشمند نیست»");
   await aiTick(env);
-  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE assignment_id=2").get().n, 0, "ارجاعِ پیش از روشن شدن فقط با «▶️ شروع»");
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM ai_runs WHERE assignment_id=2").get().n, 0, "کار خودکار ساخته نمی‌شود — «🚀 شروع»ِ کارشناس یا ▶️ پشتیبانی");
   const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.deepEqual(st.open.map((a) => a.request_id), ["R-AI2"]);
   /* «▶️ شروع»ِ پشتیبانی هم همان شرطِ سپردن را دارد: ساختارِ همهٔ اقلام تأییدشده (نرمال‌سازی اجباری) */

@@ -404,6 +404,9 @@
      هوشمند» می‌سپارد — تا آن موقع کار «pending» است (ai.owned بی run_id). نرمال‌سازی برای همه اجباری و اول از همه است: سوابقِ قلمِ
      تأییدنشده خوانده نمی‌شود. با سپردن، ساختار منجمد است (frozen_at) تا کار دستِ کارشناس هوشمند است (worker/structure.js). */
   const aiPending = () => aiOwned() && !S.d.ai.owned.run_id;
+  /* جدول کمیسیون و نامه با کارشناس هوشمند است؟ فقط اگر کاری هست یا قلمی هنوز به او می‌رسد (owned.end — همان نگهبانِ سرور،
+     worker/ai-modes.js:aiEndLocked)؛ درخواستی که همهٔ اقلامش دستی یا «مستقیم» است، جدول و نامه‌اش با خودِ شماست */
+  const aiEnd = () => aiOwned() && S.d.ai.owned.end !== false;
   /* گزینهٔ «＋ لایهٔ تازه…» در فهرستِ نامِ لایه‌ها (newLayerUI) */
   const NEW_LAYER = "__new_layer__";
   const normOk = (it) => { try { const x = it && it.norm_json ? JSON.parse(it.norm_json) : null; return !!(x && x.head && x.source !== "ai"); } catch (_) { return false; } };
@@ -445,9 +448,10 @@
     const H = TP.ui.info("expert.ai", "راهنمای کارشناس هوشمند");
     const free = items().filter((i) => i.state === "open" && aiItem(i) && itemFree(i));
     const freeTxt = free.length ? `<span class="chip" title="${free.some((i) => (aiItem(i) || {}).manual) ? "«انجام دستی»ِ تأییدشدهٔ مدیر یا " : ""}نوعِ «مستقیم» — بررسی سوابق و جستجویشان برایتان باز است${flow2() ? "؛ «مستقیم» را هم اگر خواستید با «🤖 سپردن به کارشناس هوشمند» در «بررسی سوابق» می‌سپارید" : ""}">✋ دستِ شما: ${free.map((i) => esc(i.title)).join("، ")}</span>` : "";
+    /* ✋ با نامِ کسی که دستی‌اش کرد: مدیر (تیکِ ارجاع) یا پشتیبانی (جدول کمیسیون یا نامه پیش از «🤖 هوشمند» شدنِ شما ساخته شده بود) */
     if (!aiOwned()) return ai.review && ai.review.state === "rejected"
       ? `<div class="tp-status warn"><b>↩️ پشتیبانی تحویلِ کارشناس هوشمند را رد کرد</b><span class="sp">${ai.review.reason ? `${esc(ai.review.reason)} — ` : ""}این درخواست حالا کامل دستِ شماست؛ گفت‌وگوها و خط‌های کارشناس هوشمند هم برایتان باز است.</span>${H}</div>`
-      : ai.on === false ? `<div class="tp-status"><b>✋ ارجاعِ دستیِ مدیر</b><span class="sp">${ai.note ? `${esc(ai.note)} — ` : ""}همهٔ کارهایش با خودِ شماست.</span>${H}</div>` : "";
+      : ai.on === false ? `<div class="tp-status"><b>${ai.set_by === "support" ? "✋ دستی ماند — پشتیبانی" : "✋ ارجاعِ دستیِ مدیر"}</b><span class="sp">${ai.note ? `${esc(ai.note)} — ` : ""}همهٔ کارهایش با خودِ شماست.</span>${H}</div>` : "";
     const k = ai.asks || 0, cv = ai.cover || [];
     const ask = k ? `<a class="chip warn" href="correspond" title="پاسخ را در همان گفت‌وگو در «💬 مکاتبات» بنویسید">🚨 ${k === 1 ? "یک سؤال" : `${k} سؤال`} از شما دارد</a>` : "";
     const need = cv.length ? `<span class="chip" title="حداقلِ استعلامِ هر قلم (پنل پشتیبانی)">حداقلِ استعلام: ${cv.map((c) => `${esc(c.title)} <b>${c.have}/${c.need}</b>${c.have >= c.need ? " ✓" : ""}`).join(" · ")}</span>` : "";
@@ -456,7 +460,8 @@
       const st = items().filter((i) => i.state === "open").map(iState);
       const nGo = st.filter((s) => s === "started").length, nSel = st.filter((s) => s === "select").length;
       const ho = aiHandover() ? `<span class="chip warn" title="در «🎯 فهرست دعوت» نفرهای دیگری تیک بزنید یا از «جستجوی هوشمند» بیفزایید و «📨 دعوت از انتخاب‌های تازه» را بزنید — یا خطِ دستیِ ✋ بیفزایید">⚠️ در مهلت به حداقلِ استعلام نرسید</span>` : "";
-      return `<div class="tp-status ${aiHandover() ? "warn" : ""}"><b>🤖 حالتِ هوشمند — هر قلم جدا</b><span class="sp chips"><span class="chip ok">${M(nGo)} قلم سپرده شد</span>${nSel ? `<span class="chip warn">${M(nSel)} قلم منتظرِ «🚀 شروع»</span>` : ""}${ho}${need}${ask}${freeTxt}</span>${H}</div>`;
+      const end = aiEnd() ? "" : `<span class="chip" title="هیچ قلمی به کارشناس هوشمند نمی‌رسد (همه دستی یا «مستقیم»)؛ «تولید جدول کمیسیون» و نامه را خودتان می‌زنید">جدول کمیسیون و نامه با شما</span>`;
+      return `<div class="tp-status ${aiHandover() ? "warn" : ""}"><b>🤖 حالتِ هوشمند — هر قلم جدا</b><span class="sp chips"><span class="chip ok">${M(nGo)} قلم سپرده شد</span>${nSel ? `<span class="chip warn">${M(nSel)} قلم منتظرِ «🚀 شروع»</span>` : ""}${ho}${need}${ask}${freeTxt}${end}</span>${H}</div>`;
     }
     if (aiHandover()) return `<div class="tp-status warn"><b>⚠️ کار به شما واگذار شد</b><span class="sp chips"><span class="chip" title="کارشناس هوشمند در مهلت به حداقلِ استعلام نرسید؛ تأمین‌کنندهٔ تازه پیدا کنید و استعلامِ کم را بگیرید — گفت‌وگوهایش ادامه دارند و وقتی حد پر شد، جدول و نامه را خودش می‌سازد">بررسی سوابق و جستجو برایتان باز است</span>${need}${ask}${freeTxt}</span>${H}</div>`;
     return `<div class="tp-status"><b>🤖 دستِ کارشناس هوشمند</b><span class="sp chips"><span class="chip" title="بررسی سوابق، جستجوی هوشمند، مذاکره، جدول کمیسیون و نامه با اوست و برای شما قفل؛ گفت‌وگوهایش بسته‌اند مگر وقتی از شما سؤال دارد">خطِ دستیِ ✋ را در «استعلامات» می‌افزایید</span>${need}${ask}${freeTxt}</span>${H}</div>`;
@@ -519,8 +524,8 @@
         <button class="tab ${S.tab === "smart" ? "on" : ""}" data-tab="smart">${aiResearch() && !itemFree(it) ? "🔒 " : ""}جستجوی هوشمند</button>
         <button class="tab ${S.tab === "quotes" ? "on" : ""}" data-tab="quotes">استعلامات<span class="cnt">${qCount()}</span></button>
         <button class="tab ${S.tab === "comm" ? "on" : ""}" data-tab="comm">جدول کمیسیون</button>
-        <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiOwned() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
-      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiOwned() && S.tab === "letter") ? vAiLetter() : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
+        <button class="tab ${S.tab === "letter" ? "on" : ""}" data-tab="letter">${aiEnd() ? "🔒 " : ""}نامهٔ کمیسیون</button></div>
+      ${!it ? `<div class="empty">قلمی ندارد.</div>` : (aiResearch() && ["history", "smart"].includes(S.tab) && !itemFree(it)) || (aiEnd() && S.tab === "letter") ? vAiLetter() : S.tab === "history" ? vHistory(it) : S.tab === "smart" ? vSmart(it) : S.tab === "quotes" ? vQuotes() : S.tab === "letter" ? vLetter() : vComm()}
     </div></div>`;
   }
 
@@ -2243,7 +2248,7 @@
   }
   function vGuard() {
     const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
-    if (aiOwned()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
+    if (aiEnd()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
     return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
       ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلامِ ردهٔ خود نرسیده‌اند؛ استعلامِ بیشتر بگیرید ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (ردهٔ «${SZ_FA[m.cat] || "جزئی"}»: ${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
@@ -2587,7 +2592,7 @@
         <span class="dim" style="font-size:.85rem">بر پایهٔ ${M(mt.items || 0)} قلمِ تیک‌خورده و ${M(mt.suppliers || 0)} تأمین‌کننده — همان جدول کمیسیون</span>
         <span style="margin-inline-start:auto"></span>
         <button class="tp-btn sm primary" data-lt-dl ${L.hasFile ? "" : "disabled"}>⬇️ دانلود نامه (Word)</button>
-        ${mt.channel === "ai" ? `<span class="chip info" title="این نامه را کارشناس هوشمند نوشته است">🤖 نوشتهٔ کارشناس هوشمند</span>` : ""}${mt.channel === "ai" && aiOwned() ? "" : `<button class="tp-btn sm" data-lt-start>نامهٔ تازه</button>`}</div>
+        ${mt.channel === "ai" ? `<span class="chip info" title="این نامه را کارشناس هوشمند نوشته است">🤖 نوشتهٔ کارشناس هوشمند</span>` : ""}${mt.channel === "ai" && aiEnd() ? "" : `<button class="tp-btn sm" data-lt-start>نامهٔ تازه</button>`}</div>
       ${L.hasFile ? "" : `<div class="tp-note warn">فایل Word این نامه ساخته نشد؛ متنش را از همین‌جا بردارید.</div>`}
       ${warn.length ? `<div class="tp-note warn" style="display:block"><b>⚠️ پیش از پیوست کردن این‌ها را چک کنید:</b><div style="margin-top:6px">${warn.join("<br>")}</div></div>` : ""}
       <div class="letterpaper">
@@ -2691,6 +2696,7 @@
       /* یک درخواست به‌جای سه: کارتابل، وضعیت تلگرام و «من» (سرعت — هر درخواست رفت‌وبرگشت شبکهٔ خودش را دارد) */
       const t = await TP.api("/tray?full=1"), me = t.me;
       S.tray = t.assignments || []; S.settings = t.settings; S.now = Date.now(); S.error = ""; S.tg = t.tg || null; S.asks = t.asks || 0;
+      if (S.screen !== "detail") aiStale(false);
       /* ارشد بودن، زیرمجموعه‌ها و تیک اعلان‌ها را مدیر هر لحظه ممکن است عوض کند؛ از سرور تازه می‌شود */
       if (me && me.expert) { S.expert = { ...S.expert, ...me.expert, team: me.team || [] }; TP.session.set(S.expert); }
       if (isSenior() && !S.team) loadTeam(true);
@@ -2700,6 +2706,8 @@
   }
   async function openDetail(aid, keepTab) {
     try { const d = await TP.api(`/assignments/${aid}`);
+      /* صفحه تازه شد: نوارِ «🔄 حالتِ کار عوض شد» دیگر لازم نیست */
+      aiStale(false);
       /* بازخوانی خودکار نباید کاری را که کارشناس وسطش است (تب، قلم) به هم بزند */
       if (!keepTab) S.fromTeam = S.screen === "list" && S.tab === "team";
       S.d = d; S.d.loadedAt = Date.now(); S.settings = S.d.settings; S.now = Date.now(); if (!keepTab) { S.itemIdx = 0; S.tab = d.ai && d.ai.owned && d.ai.owned.run_id && !d.ai.owned.handover && d.ai.owned.flow !== 2 ? "quotes" : "history"; } S.picks = {}; if (S.itemIdx >= S.d.items.length) S.itemIdx = 0; S.screen = "detail";
@@ -3110,8 +3118,36 @@
   window.addEventListener("tp-theme", render);
   /* اعلانِ پیامِ تازهٔ تأمین‌کننده در گوشهٔ صفحه (مهر ۱۴۰۵) — فقط یک لایهٔ شناور است و صفحه را دوباره نمی‌سازد؛
      کلیکش صفحهٔ مکاتبات را روی همان گفت‌وگو باز می‌کند (shared.js: TP.inbox) */
-  TP.inbox.start({ active: () => !!S.expert, onAsks: (k) => { if (k !== (S.asks || 0)) { S.asks = k; if (S.screen !== "login") render(); } } });
+  TP.inbox.start({ active: () => !!S.expert, onAsks: (k) => { if (k !== (S.asks || 0)) { S.asks = k; if (S.screen !== "login") render(); } }, onAi: aiChanged });
+  /* «🤖 هوشمند / ✋ دستی»ِ پنل پشتیبانی، تیکِ مدیر روی ارجاع، «انجام دستی»ِ تأییدشده یا ردِ تحویل (worker/ai-lock.js:aiRevStmt) — همان لحظه، بی
+     «به‌روزرسانی» (مهر ۱۴۰۵، درخواست مالک): کارتابل یا صفحهٔ درخواست دوباره خوانده می‌شود اگر کارشناس وسطِ نوشتن یا پنجره‌ای نیست (همان
+     نگهبانِ بازخوانیِ خودکار، ui.js:idle)، وگرنه نوارِ «🔄 حالتِ کار عوض شد — ↻» تا خودش بزند */
+  function aiChanged(ai) {
+    if (!S.expert) return;
+    if (ai && ai.mode && S.expert.ai !== ai.mode) { S.expert.ai = ai.mode; TP.session.set(S.expert); }
+    if (S.screen !== "list" && !(S.screen === "detail" && S.d)) return;
+    if (!TP.ui.idle()) return aiStale(true);
+    return S.screen === "detail" ? reload() : loadTray();
+  }
+  function aiStale(on) {
+    let b = document.getElementById("ai-stale");
+    if (!on) { if (b) b.remove(); return; }
+    if (b) return;
+    b = document.createElement("div"); b.id = "ai-stale"; b.className = "tp-ai-stale"; b.setAttribute("role", "status");
+    b.innerHTML = `<span>🔄 حالتِ کار عوض شد</span><span class="dim">—</span><button type="button" class="tp-btn sm primary" title="تازه کردنِ همین صفحه">↻</button>`;
+    b.querySelector("button").onclick = () => { aiStale(false); return S.screen === "detail" && S.d ? reload() : loadTray(); };
+    document.body.appendChild(b);
+  }
+  /* کارِ کارشناس روی صفحهٔ کهنه: ۴۲۳ با ai_locked (حالا دستِ کارشناس هوشمند است) یا ۴۰۹ با ai_mode (دیگر هوشمند نیست) — همان لحظه دوباره
+     خوانده می‌شود؛ پیامِ خطا را خودِ همان کار نشان می‌دهد (shared.js: TP.onApiError) */
+  let aiReloading = false;
+  TP.onApiError = (e) => {
+    if (!e || !e.data || !(e.data.ai_locked || e.data.ai_mode) || aiReloading || !S.expert) return;
+    aiReloading = true;
+    setTimeout(async () => { try { if (S.screen === "detail" && S.d) await reload(); else if (S.screen === "list") await loadTray(); } finally { aiReloading = false; } }, 0);
+  };
   /* بازخوانیِ خودکارِ بی‌پرش (خواستهٔ مالک، مهر ۱۴۰۵): فقط کارتابل و تیم، هر دقیقه، وقتی کارشناس وسطِ نوشتن یا پنجره‌ای نیست.
-     صفحهٔ درخواست همچنان فقط با کارِ خودِ کارشناس یا «به‌روزرسانی» تازه می‌شود (تصمیم مدیر، شهریور ۱۴۰۵) تا وسط پر کردن چیزی جابه‌جا نشود. */
+     صفحهٔ درخواست همچنان فقط با کارِ خودِ کارشناس یا «به‌روزرسانی» تازه می‌شود (تصمیم مدیر، شهریور ۱۴۰۵) تا وسط پر کردن چیزی جابه‌جا نشود —
+     جز تغییرِ «🤖 هوشمند / ✋ دستی» (aiChanged بالا، با همان نگهبان). */
   TP.ui.autoRefresh(() => (S.tab === "team" ? loadTeam(true) : loadTray()), 60000, () => !!S.expert && S.screen === "list" && !LIST_TABS.includes(S.tab === "team" ? "" : S.tab));
 })();

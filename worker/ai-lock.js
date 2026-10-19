@@ -2,14 +2,18 @@
  * قفل‌های «کارشناس هوشمند» برای کارشناسِ انسانی — فاز ۲ پنل پشتیبانی (مهر ۱۴۰۵، درخواست مالک).
  *
  * تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس در پنل پشتیبانی است (ai_agents.mode). وقتی «هوشمند» است:
- *   • ارجاعی که کارِ زندهٔ کارشناس هوشمند دارد — یا بعد از روشن شدن رسیده و Cron به‌زودی برش می‌دارد — بررسی سوابق،
- *     جستجوی هوشمند، ساختار قلم، جدول کمیسیون و نامه‌اش برای کارشناس قفل است (aiOwned).
+ *   • ارجاعِ بازی که کارِ زندهٔ کارشناس هوشمند دارد — یا هنوز کاری ندارد و قلم‌به‌قلم با «🚀 شروع»ِ کارشناس سپرده می‌شود — بررسی سوابق،
+ *     جستجوی هوشمند، ساختار قلم، جدول کمیسیون و نامه‌اش برای کارشناس قفل است (aiOwned). بی قیدِ زمانِ روشن شدن (مهر ۱۴۰۵، درخواست
+ *     مالک): ارجاعی که وقتِ «✋ دستی» رسیده هم با «🤖 هوشمند» شدن همان لحظه هوشمند است؛ تکلیفِ کارِ دستیِ پیشینش را
+ *     ai-agent.js:aiModeSet روشن می‌کند. جدول و نامه فقط وقتی قفل‌اند که کاری هست یا قلمی هنوز به کارشناس هوشمند می‌رسد
+ *     (ai-modes.js:aiEndLocked).
  *   • خط‌های استعلامی که کارشناس هوشمند ساخته یا از گفت‌وگوهای او آمده تغییر نمی‌کنند (aiQuoteNames / aiQuote)؛ خطِ دستیِ
  *     خودِ کارشناس (افزودن، پیش‌فاکتور و خواندنش) آزاد است و در پنل نشانِ «✋ دستی» دارد.
  *   • گفت‌وگوهایی که کارشناس هوشمند باز کرده برای کارشناس بسته‌اند (aiThread) — مگر «پرسش از کارشناس» (state='ask'): کارشناس
  *     هوشمند سؤالی دارد که جوابش در پروندهٔ درخواست نیست؛ گفت‌وگو تا پاسخِ کارشناس برایش باز است و با پاسخ دوباره بسته می‌شود
  *     (askAnswered، از sp-core.js:postMsg).
- * «دستی» کردنِ کارشناس همهٔ این قفل‌ها را برمی‌دارد و کارهای کارشناس هوشمند همان لحظه می‌ایستند (claimRun فقط «on»).
+ * «دستی» کردنِ کارشناس همهٔ این قفل‌ها را برمی‌دارد و کارهای کارشناس هوشمند همان لحظه می‌ایستند (claimRun فقط «on»)؛ پیشنهادهای
+ * معطلِ «⏱ با مهلت» هم همان لحظه کنار می‌روند (ai-agent.js:aiModeSet). پنلِ باز با هر تغییر تازه می‌شود (aiRevStmt).
  * فاز ۳: اگر کارشناس هوشمند در مهلتِ پنل پشتیبانی به «حداقلِ استعلام» نرسید (ai-rules.js)، کار به کارشناس «واگذار» می‌شود
  * (ai_runs.handover_at): بررسی سوابق، جستجوی هوشمند و ساختار برایش باز می‌شود تا استعلامِ کم را بگیرد؛ جدول و نامه هنوز با
  * کارشناس هوشمند است. «رد»ِ تحویل در پنل پشتیبانی (review_json.state='rejected') درخواست را کامل به کارشناس برمی‌گرداند:
@@ -51,6 +55,13 @@ export const AI_SUP_SQL = (tid) => `EXISTS (SELECT 1 FROM sp_threads st JOIN ass
   WHERE st.id=${tid} AND (COALESCE(json_extract(se.sup_json,'$.mode'),'timer')<>'auto' OR (${HOLD_ON_SQL} AND EXISTS (SELECT 1 FROM sp_lines sl
     JOIN cr_heads ch ON ch.head=${LINE_HEAD_SQL("sl")} WHERE sl.thread_id=st.id AND ${WF_SQL("ch")} IN ('ترکیبی','کارشناس‌محور')))))`;
 
+/**
+ * نسخهٔ «تکلیفِ درخواست‌های» یک کارشناس (ai_agents.rev): هر تغییری که هوشمند یا دستی بودنِ درخواست‌هایش را عوض می‌کند — تیکِ
+ * پشتیبانی، تیکِ مدیر روی ارجاع، «انجام دستی»ِ تأییدشده و ردِ تحویل — یکی جلویش می‌برد؛ پنل کارشناس و مکاتبات از /sp/x/inbox
+ * (کلیدِ اصلی، هر ۱۰ ثانیه) می‌فهمند و همان لحظه تازه می‌شوند. statement برای batchِ صدازننده.
+ */
+export const aiRevStmt = (env, expertId) => env.DB.prepare("UPDATE ai_agents SET rev=rev+1 WHERE expert_id=?").bind(expertId);
+
 /** کارشناس «هوشمند» است؟ */
 export async function aiModeOn(env, expertId) {
   if (!expertId) return false;
@@ -59,13 +70,14 @@ export async function aiModeOn(env, expertId) {
 }
 
 /**
- * ارجاعِ دستِ کارشناس هوشمند: کارشناسش «هوشمند» است و یا کارِ زنده (ai_runs بی finished_at) روی همین ارجاع هست، یا ارجاع
- * بعد از روشن شدن ارسال شده و هنوز بسته نیست (Cron در دقیقهٔ بعد برش می‌دارد). خروجی {run_id, state, handover} یا null.
- * handover: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد — فقط قفلِ جدول و نامه می‌ماند (aiResearchLocked).
+ * ارجاعِ دستِ کارشناس هوشمند: کارشناسش «هوشمند» است، مدیر تیکِ «🤖»ِ ارجاع را برنداشته (COALESCE(ai_on,1)=1) و یا کارِ زنده (ai_runs بی
+ * finished_at) روی همین ارجاع هست، یا ارجاع ارسال شده و هنوز بسته نیست — هر وقت که رسیده باشد (on_at فقط برای نمایشِ «هوشمند از …»).
+ * خروجی {run_id, state, handover} یا null. handover: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد — فقط قفلِ جدول و نامه می‌ماند
+ * (aiResearchLocked). همین قاعده در SQL: AI_OWNED_SQL (کارتابل).
  */
 export async function aiOwned(env, assignmentId) {
   if (!assignmentId) return null;
-  const r = await env.DB.prepare(`SELECT a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, g.mode, g.on_at, x.id AS run_id, x.expert_id AS run_expert, x.state, x.finished_at, x.handover_at,
+  const r = await env.DB.prepare(`SELECT a.expert_id, a.dispatched_at, a.closed_at, a.ai_on, g.mode, x.id AS run_id, x.expert_id AS run_expert, x.state, x.finished_at, x.handover_at,
         json_extract(x.data_json,'$.flow') AS flow
       FROM assignments a JOIN ai_agents g ON g.expert_id=a.expert_id LEFT JOIN ai_runs x ON x.assignment_id=a.id WHERE a.id=?`)
     .bind(assignmentId).first().catch(() => null);
@@ -74,12 +86,19 @@ export async function aiOwned(env, assignmentId) {
   if (r.ai_on === 0) return null;
   /* کارِ همین ارجاع پیش‌تر مالِ کارشناسِ دیگری بود (تغییر کارشناس): کارشناس هوشمند دوباره برش نمی‌دارد، پس قفل هم نیست */
   if (r.run_id) return r.finished_at || r.run_expert !== r.expert_id ? null : { run_id: r.run_id, state: r.state, handover: r.handover_at || null, flow: Number(r.flow) || 1 };
-  /* کارِ تازه همیشه روالِ تازه است (فاز ۴ب گام ۲: فهرستِ دعوتِ کارشناس) */
-  return r.dispatched_at && r.dispatched_at >= (r.on_at || 0) && !r.closed_at ? { run_id: null, state: "pending", handover: null, flow: 2 } : null;
+  /* کارِ تازه همیشه روالِ تازه است (فاز ۴ب گام ۲: فهرستِ دعوتِ کارشناس) — بی قیدِ زمان: ارجاعی که وقتِ «✋ دستی» رسیده هم */
+  return r.dispatched_at && !r.closed_at ? { run_id: null, state: "pending", handover: null, flow: 2 } : null;
 }
 /**
- * بررسی سوابق، جستجوی هوشمند و ساختارِ قلم قفل است؟ فقط در کارِ زندهٔ روالِ پیشین و پیش از «واگذاری» (جدول و نامه با aiOwned
- * قفل می‌مانند). روالِ تازه (فاز ۴ب گام ۲): بررسی سوابق و جستجوی هوشمند کارِ خودِ کارشناس است — فهرستِ دعوتِ هر قلم را او می‌چیند.
+ * همان قاعدهٔ aiOwned در یک ستون — a: assignments؛ ۰ (نه)، ۱ (دستِ کارشناس هوشمند) یا ۲ (کارِ واگذارشده). کارتابل نشانِ 🤖 می‌زند.
+ * ai_agents با کلیدِ اصلی و ai_runs با کلیدِ یکتای assignment_id — در نظرسنجیِ کارتابل هم ارزان.
+ */
+export const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0 WHEN a.ai_on=0 THEN 0
+    WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN (CASE WHEN x.handover_at IS NULL THEN 1 ELSE 2 END) ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
+    WHEN a.dispatched_at IS NOT NULL AND a.closed_at IS NULL THEN 1 ELSE 0 END FROM ai_agents g WHERE g.expert_id=a.expert_id)`;
+/**
+ * بررسی سوابق، جستجوی هوشمند و ساختارِ قلم قفل است؟ فقط در کارِ زندهٔ روالِ پیشین و پیش از «واگذاری» (جدول و نامه با
+ * ai-modes.js:aiEndLocked قفل می‌مانند). روالِ تازه (فاز ۴ب گام ۲): بررسی سوابق و جستجوی هوشمند کارِ خودِ کارشناس است — فهرستِ دعوتِ هر قلم را او می‌چیند.
  */
 export const aiResearchLocked = (owned) => !!owned && !!owned.run_id && owned.flow !== 2 && !owned.handover;
 

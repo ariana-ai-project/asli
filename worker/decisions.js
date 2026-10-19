@@ -27,7 +27,7 @@ import { pushStmt, EXPERT, MANAGER } from "./push.js";
 import { notifyClosed, managerCard } from "./manager.js";
 import { esc } from "./telegram.js";
 import { closureStmt } from "./records.js";
-import { aiOwned } from "./ai-lock.js";
+import { aiOwned, aiRevStmt } from "./ai-lock.js";
 import { rateGaps, gapText } from "./ai-rates.js";
 
 const now = () => Date.now();
@@ -117,7 +117,8 @@ async function manualRequest(env, ex, own, body) {
   const reason = T(body.reason).slice(0, 1000);
   if (!reason) throw new HttpError("برای «انجام دستی» علت را بنویسید تا مدیر تصمیم بگیرد.");
   const o = await aiOwned(env, own.id);
-  if (!o) throw new HttpError("این درخواست در حالت هوشمند نیست؛ کارهایش همین حالا با خودِ شماست.", 409);
+  /* ai_mode: صفحهٔ کارشناس کهنه است (تیک عوض شده) — پنل همان لحظه دوباره می‌خواند (expert.js) */
+  if (!o) throw new HttpError("این درخواست در حالت هوشمند نیست؛ کارهایش همین حالا با خودِ شماست.", 409, { ai_mode: true });
   const want = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : []).map((x) => int(x)).filter(Boolean))];
   if (!want.length) throw new HttpError("دست‌کم یک قلم را برای انجام دستی انتخاب کنید.");
   const rows = (await env.DB.prepare(`SELECT id, frozen_at, ai_off, ai_start_at FROM items WHERE assignment_id=? AND state='open' AND id IN (${want.map(() => "?").join(",")})`)
@@ -243,7 +244,9 @@ async function applyManual(env, actor, aid, payload, t) {
   const r = await env.DB.prepare(`UPDATE items SET ai_off=1, ai_off_at=? WHERE assignment_id=? AND state='open' AND COALESCE(ai_off,0)<>1 AND id IN (${ids.map(() => "?").join(",")})`)
     .bind(t, aid, ...ids).run();
   const c = await context(env, aid);
-  await env.DB.batch([ev(env, actor, "ai_manual", c && c.request_id, { assignment_id: aid, items: ids, reason: (payload && payload.reason) || null })]);
+  /* پنلِ بازِ کارشناس همان لحظه تازه می‌شود (ai-lock.js:aiRevStmt) */
+  await env.DB.batch([ev(env, actor, "ai_manual", c && c.request_id, { assignment_id: aid, items: ids, reason: (payload && payload.reason) || null }),
+    ...(c && c.expert_id ? [aiRevStmt(env, c.expert_id)] : [])]);
   return { manual: (r.meta && r.meta.changes) || 0, closed: 0, fullyClosed: false };
 }
 

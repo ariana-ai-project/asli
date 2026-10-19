@@ -50,7 +50,7 @@ import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
 import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime } from "./ai-agent.js";
-import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, aiResearchLocked, aiRejected, AI_LOCK_MSG, AI_QUOTE_MSG, AI_LIVE_MSG, AI_ASK_SQL } from "./ai-lock.js";
+import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, aiResearchLocked, aiRejected, aiRevStmt, AI_LOCK_MSG, AI_QUOTE_MSG, AI_LIVE_MSG, AI_ASK_SQL, AI_OWNED_SQL } from "./ai-lock.js";
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
@@ -73,7 +73,7 @@ import { crRoute, crSupportRoute } from "./cr-api.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
   tenderBid, tenderFixRequest, tenderMarket } from "./tender.js";
-import { getModes, saveModes, itemModes, aiItemFree, MODE_FA } from "./ai-modes.js";
+import { getModes, saveModes, itemModes, aiItemFree, aiEndLocked, endLockedOf, MODE_FA } from "./ai-modes.js";
 import { cleanLimits, limitsTxt } from "./terms-locks.js";
 import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervise.js";
 import { estimateRun, estimateItem, resetEstimate, EST_PENDING_SQL } from "./estimate.js";
@@ -388,6 +388,10 @@ const COLUMN_MIGRATIONS = [
   ["assignments", "size_cm", "TEXT"],
   /* موجِ دومِ دعوتِ کارشناس هوشمند (ai-agent.js:aiWaves): لحظهٔ گامِ بعد؛ ۰ = بی موج */
   ["items", "wave_due", "INTEGER"],
+  /* تیکِ «🤖 هوشمند / ✋ دستی»ِ پشتیبانی همان لحظه در پنل کارشناس (مهر ۱۴۰۵): نسخهٔ تکلیفِ درخواست‌های کارشناس (ai-lock.js:aiRevStmt — پنل‌ها
+     از /sp/x/inbox می‌فهمند) و لحظهٔ «✋ دستی» شدن (گفت‌وگویی که کارشناس بعد از آن خودش پیش برد، با «🤖» دستِ خودش می‌ماند — ai-agent.js:aiModeSet) */
+  ["ai_agents", "rev", "INTEGER NOT NULL DEFAULT 0"],
+  ["ai_agents", "off_at", "INTEGER"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -706,7 +710,7 @@ function ev(env, actor, kind, request_id, item_id, payload) {
  * قفلِ «کارشناس هوشمند» (فاز ۲ پنل پشتیبانی، ai-lock.js): ارجاعی که دستِ اوست، برای کارشناس — نه مدیر و نه پشتیبانی — قفل
  * است؛ بررسی سوابق، جستجوی هوشمند، ساختار قلم، جدول کمیسیون و نامه را خودش انجام می‌دهد. who: {expert} یا {role: "expert"}.
  * kind «research» (سوابق، جستجو، ساختار): بعد از «واگذاری» (فاز ۳ — مهلتِ حدِ استعلام گذشت) برای کارشناس باز است؛ جدول و
- * نامه تا پایانِ کارِ کارشناس هوشمند قفل می‌مانند.
+ * نامه (بی kind) تا پایانِ کارِ کارشناس هوشمند قفل می‌مانند — فقط اگر کاری هست یا قلمی هنوز به او می‌رسد (ai-modes.js:aiEndLocked).
  */
 async function aiGuard(env, who, assignmentId, kind, item) {
   if (!who || !(who.expert || who.role === "expert") || !assignmentId) return;
@@ -716,7 +720,7 @@ async function aiGuard(env, who, assignmentId, kind, item) {
   /* «norm» (طرح «خرید هوشمند» فاز ۱): ساختارِ قلم کارِ خودِ کارشناس است، پیش از سپردن (کارِ «pending») هم — فقط کارِ زندهٔ
      کارشناس هوشمند (پیش از واگذاری) قفلش می‌کند؛ قلمِ سپرده‌شده را انجماد (frozenGuard) هم نگه می‌دارد */
   /* فاز ۴ب گام ۲: در روالِ تازه (flow 2) ساختار و سوابق و جستجو کارِ خودِ کارشناس است — قلمِ سپرده‌شده را frozenGuard نگه می‌دارد */
-  const locked = kind === "norm" ? !!o && !!o.run_id && o.flow !== 2 && !o.handover : kind === "research" ? aiResearchLocked(o) : !!o;
+  const locked = kind === "norm" ? !!o && !!o.run_id && o.flow !== 2 && !o.handover : kind === "research" ? aiResearchLocked(o) : await aiEndLocked(env, o, assignmentId);
   if (locked) throw new HttpError(AI_LOCK_MSG, 423, { ai_locked: true });
 }
 /** ساختارِ قلمِ سپرده‌شده به کارشناس هوشمند تا کار دستِ اوست منجمد است (worker/structure.js) */
@@ -1298,6 +1302,8 @@ async function setAiTick(env, body) {
   const stmts = [
     env.DB.prepare("UPDATE assignments SET ai_on=?, ai_note=?, ai_set_at=?, ai_set_by='manager' WHERE id=?").bind(on ? 1 : 0, on ? null : note || null, t, aid),
     ev(env, "manager", "ai_tick", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, reason: on ? null : note || null }),
+    /* پنلِ بازِ کارشناس همان لحظه تازه می‌شود (/sp/x/inbox) — ارجاعِ ارسال‌نشده در پنلش نیست */
+    ...(a.dispatched_at ? [aiRevStmt(env, a.expert_id)] : []),
   ];
   if (a.dispatched_at && a.telegram_chat) {
     stmts.push(queueStmt(env, `aitick:${aid}:${t}`, a.telegram_chat, on
@@ -1429,11 +1435,7 @@ async function settingsFor(env, expertId, settings) {
   return thr ? { ...s, thresholds: thr } : s;
 }
 
-/* ارجاعِ دستِ کارشناس هوشمند در یک ستون (همان قاعدهٔ ai-lock.js:aiOwned) — a: assignments؛ کارتابل نشانِ 🤖 می‌زند */
-const AI_OWNED_SQL = `(SELECT CASE WHEN g.mode<>'on' THEN 0 WHEN a.ai_on=0 THEN 0
-    WHEN EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id) THEN (SELECT CASE WHEN x.finished_at IS NULL AND x.expert_id=a.expert_id THEN (CASE WHEN x.handover_at IS NULL THEN 1 ELSE 2 END) ELSE 0 END FROM ai_runs x WHERE x.assignment_id=a.id)
-    WHEN a.dispatched_at>=COALESCE(g.on_at,0) AND a.closed_at IS NULL THEN 1 ELSE 0 END FROM ai_agents g WHERE g.expert_id=a.expert_id)`;
-
+/* ارجاعِ دستِ کارشناس هوشمند در یک ستون: ai-lock.js:AI_OWNED_SQL (همان قاعدهٔ aiOwned، بی قیدِ زمانِ روشن شدن) — کارتابل نشانِ 🤖 می‌زند */
 async function tray(env, ex, url) {
   /* full=1: کارتابل، وضعیت تلگرام و «من» در یک درخواست — پنل کارشناس قبلاً سه‌چهار درخواست
      موازی می‌فرستاد و هر کدام رفت‌وبرگشت شبکه و احراز هویتِ خودش را داشت */
@@ -1515,8 +1517,9 @@ async function assignmentDetail(env, aid, who) {
   /* طرح «خرید هوشمند» فاز ۱: «بررسی سوابق و سپردن به کارشناس هوشمند» — کارِ «pending» (هنوز سپرده نشده) و شمارِ اقلامِ نرمال‌شده */
   const open = items.filter((i) => i.state === "open");
   ai.handoff = { total: open.length, ok: open.filter((i) => normConfirmed(i)).length, frozen: open.filter((i) => i.frozen_at).length, pending: !!(owned && !owned.run_id) };
-  /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر */
-  ai.on = a.ai_on !== 0; ai.note = a.ai_note || null;
+  /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر. set_by: «manager» یا
+     «support» (درخواستی که جدول کمیسیون یا نامه‌اش پیش از «🤖 هوشمند» شدنِ کارشناس ساخته شده بود — ai-agent.js:aiModeSet) */
+  ai.on = a.ai_on !== 0; ai.note = a.ai_note || null; ai.set_by = a.ai_on === 0 ? a.ai_set_by || "manager" : null;
   /* «⏱ با مهلت / 🤖 خودکار»ِ مکاتباتِ کارشناس هوشمند (worker/ai-supervise.js) */
   if (aiMode) ai.sup = { cfg: await getSup(env, a.expert_id) };
   /* ⭐ امتیازهای مانده به کارِ کارشناس هوشمند — «خاتمه» تا صفرشدنش معلق است (worker/ai-rates.js) */
@@ -1538,7 +1541,10 @@ async function assignmentDetail(env, aid, who) {
       return { id: i.id, head: m.head || null, mode: m.mode, mode_fa: MODE_FA[m.mode], supervise: !!m.supervise, manual: Number(i.ai_off) === 1, waiting: waiting.has(i.id), in_run: inRun.has(i.id),
         started_at: i.ai_start_at || null, pick: pk };
     });
+    /* جدول کمیسیون و نامه: قفل فقط اگر کاری هست یا قلمی هنوز به کارشناس هوشمند می‌رسد (همان نگهبانِ سرور، ai-modes.js:aiEndLocked) */
+    if (ai.owned) ai.owned.end = endLockedOf(owned, open, modes);
   }
+  if (ai.owned && ai.owned.end === undefined) ai.owned.end = !!owned.run_id;
   /* فهرستِ دعوت با مسیرِ خودش می‌آید (/items/:id/picks) — جزئیاتِ ارجاع سبک می‌ماند */
   for (const i of items) delete i.pick_json;
   const settings = await settingsFor(env, a.expert_id);
