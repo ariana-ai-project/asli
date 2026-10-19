@@ -14,7 +14,7 @@
  *
  * items.pick_json: {v, at, by, rule, n, msg, list: [{k, name, src, pos, top, on, why, why_at, why_by, grade, rankF, score, buys, last,
  *   ph, sid, add_at, add_by, go}]}
- *   src: grade | exact | type (سوابق، با جایگاهِ pos در قاعدهٔ دعوت) · smart (جستجوی هوشمند، sid) · manual (افزودهٔ کارشناس)
+ *   src: grade | exact | type (سوابق، با جایگاهِ pos در قاعدهٔ دعوت) · smart (جستجوی هوشمند، sid) · disc (کشف‌شدهٔ تحقیق، rsid) · manual (افزودهٔ کارشناس)
  * بی ایمپورت از ai-agent.js، تا ai-agent.js و api.js بی حلقه بپرسند.
  */
 import { HttpError } from "./http.js";
@@ -34,7 +34,7 @@ export const TOP = 5;
 const MAX_LIST = 15;
 /** افزوده‌های کارشناس (جستجوی هوشمند و نام‌های دیگر) برای هر قلم */
 const MAX_ADD = 20;
-export const PICK_SRC_FA = { grade: "عین قلم — ردهٔ برگزیده", exact: "عین قلم", type: "نوع قلم", smart: "جستجوی هوشمند", manual: "افزودهٔ کارشناس", strategy: "استراتژی استعلام" };
+export const PICK_SRC_FA = { grade: "عین قلم — ردهٔ برگزیده", exact: "عین قلم", type: "نوع قلم", smart: "جستجوی هوشمند", disc: "کشف‌شده (تحقیق)", manual: "افزودهٔ کارشناس", strategy: "استراتژی استعلام" };
 /** علتِ تغییرِ تیک پس از «🧭 استراتژی استعلام» (سند طراحی، بخش ۴) — یکی از این‌ها، و برای «دیگر» متن */
 export const WHY_BOXES = ["معتمد است", "شماره یا فعالیتش نامعتبر است", "یال اشتباه است", "بازار دیگری لازم است", "دیگر"];
 const HIST = new Set(["grade", "exact", "type"]);
@@ -88,7 +88,7 @@ export function mergeRebuilt(fresh, old) {
 }
 
 /**
- * تغییرِ کارشناس روی فهرست. body: on {k: true|false}، why {k: متن}، add [{name, src: smart|manual, sid, ph}]، remove [k].
+ * تغییرِ کارشناس روی فهرست. body: on {k: true|false}، why {k: متن}، add [{name, src: smart|disc|manual, sid, rsid, ph}]، remove [k].
  * mode: حالتِ نوع قلم؛ cap: سقفِ تیک (پنل پشتیبانی). تیکِ سپرده‌شده (go) برداشته نمی‌شود؛ تیکِ تازه بعد از شروع تا «دعوت از
  * انتخاب‌های تازه» پیش‌نویس است. خروجی: همان pick، دست‌خورده.
  */
@@ -125,17 +125,21 @@ export function applyEdits(pick, body, { mode, by, cap, at = Date.now() }) {
   for (const a of add) {
     const name = nrm(a && a.name).slice(0, 120), k = nkey(name);
     if (!k) throw new HttpError("نام تأمین‌کننده لازم است.");
-    const src = a.src === "smart" ? "smart" : "manual";
+    /* disc: «🗂 تأمین‌کنندگان کشف‌شده»ِ تحقیق (worker/discovered.js) با شناسهٔ دفتر (rsid، مثل NEW-0143) */
+    const src = a.src === "smart" ? "smart" : a.src === "disc" ? "disc" : "manual";
+    const rsid = src === "disc" ? T(a.rsid).slice(0, 24) || null : null;
     const old = byK.get(k);
     if (old) {
       /* همین نام از قبل در فهرست است (مثلاً از سوابق): تیک می‌خورد */
       old.on = true;
       if (src === "smart" && int(a.sid) && !old.sid) old.sid = int(a.sid);
+      if (rsid && !old.rsid) old.rsid = rsid;
       continue;
     }
     if (L.filter((e) => !HIST.has(e.src)).length >= MAX_ADD) throw new HttpError(`حداکثر ${faN(MAX_ADD)} تأمین‌کنندهٔ افزوده برای هر قلم.`, 422);
     const e = { k, name, src, pos: null, top: false, on: true, why: null, grade: null, rankF: null, score: null, buys: null, last: null,
-      ph: (Array.isArray(a.ph) ? a.ph : []).map((p) => normPhone(p)).filter(Boolean).slice(0, 3), sid: int(a.sid) || null, add_at: at, add_by: by, go: null };
+      ph: (Array.isArray(a.ph) ? a.ph : []).map((p) => normPhone(p)).filter(Boolean).slice(0, 3), sid: src === "disc" ? null : int(a.sid) || null, add_at: at, add_by: by, go: null };
+    if (rsid) e.rsid = rsid;
     L.push(e); byK.set(k, e);
   }
   for (const k of remove) {

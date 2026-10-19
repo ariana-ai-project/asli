@@ -32,6 +32,7 @@ import { historyStatus, itemHistory, supplierBuys, itemSeries, ratesWithShares }
 import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allHeads, guildGroups, guildsOfItems } from "./catalog.js";
 import { normalizeItem, confirmNorm, clearNorm, revertEdit } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
+import { discoveredFor, gateFor, gateMsg } from "./discovered.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
@@ -1614,8 +1615,8 @@ async function quoteCreate(env, ex, body) {
   const fresh = wanted.filter((id) => its.has(id) && !have.has(id));
   if (!fresh.length) throw new HttpError("این تأمین‌کننده برای همین قلم قبلاً اضافه شده است.", 409);
   const t = now();
-  /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو) یا دستی */
-  const origin = ["history", "smart", "manual"].includes(body.origin) ? body.origin : "manual";
+  /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو)، تأمین‌کنندگانِ کشف‌شدهٔ تحقیق یا دستی */
+  const origin = ["history", "smart", "disc", "manual"].includes(body.origin) ? body.origin : "manual";
   const originRef = origin === "smart" ? int(body.search_id) : null;
   /* خطِ دستی (origin=manual) خانه‌هایش را هم همین‌جا می‌گیرد — مشخصات، واحد، مقدار، قیمت و شرایطِ فاکتور — با همان قالبِ ویرایش
      (validateQuote) و همان پخشِ شرایط روی خط‌های دستیِ دیگرِ این تأمین‌کننده (termsSync). هرچه نیامده پیش‌فرض است: واحد و مقدار
@@ -2760,7 +2761,10 @@ async function route(request, env, ctx) {
          پیام‌رسان‌های شماره‌هایشان — پیش از آنکه جستجوی تازه‌ای خرج شود */
       const searches = await itemSearches(env, it);
       const keys = searches.flatMap((s) => ((s.result && s.result.suppliers) || []).flatMap((x) => x.phone_keys || []));
-      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, keys) });
+      /* «🗂 تأمین‌کنندگان کشف‌شده»ِ دادهٔ تحقیق، پیش‌فرض بالای تب، و دروازهٔ «اجرای جستجوی هوشمند» (worker/discovered.js) */
+      const discovered = await discoveredFor(env, it).catch(() => null);
+      const gate = await gateFor(env, who, it, discovered || { count: 0 });
+      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, keys), discovered, gate });
     }
     if (path === "/search/smart" && m === "POST") {
       const who = await requireAny(request, env);
@@ -2768,6 +2772,9 @@ async function route(request, env, ctx) {
       const it = await ownItem(env, who, int(b.item_id));
       /* درخواستِ دستِ کارشناس هوشمند: جستجوی هوشمند را خودش می‌کند (ai-lock.js) */
       await aiGuard(env, who, it.aid, "research", it);
+      /* قلمی که تأمین‌کنندهٔ کشف‌شدهٔ کافی دارد جستجوی وب نمی‌خواهد، مگر پشتیبانی برای همین کارشناس باز کرده باشد */
+      const gate = await gateFor(env, who, it);
+      if (!gate.open) throw new HttpError(gateMsg(gate), 409, { gate });
       if (!env.ANTHROPIC_API_KEY) return NOT_CONNECTED("جستجوی هوشمند تأمین‌کننده");
       /* اجرا چند دقیقه طول می‌کشد: پاسخ جریانی است و تا آماده شدن نتیجه هر ۱۵ ثانیه
          یک فاصله می‌رود تا اتصال بیکار نماند. خطا بعد از شروع جریان وضعیت HTTP را

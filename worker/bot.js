@@ -46,6 +46,7 @@ import { expertDecision, approveDecision, rejectDecision } from "./decisions.js"
 import { itemHistory, activeImport } from "./history.js";
 import { showLayer } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
+import { gateFor, gateShort } from "./discovered.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
@@ -2353,7 +2354,7 @@ async function awaitSupplier(env, api, chat, ex, aid, supplier, mid) {
 /* ------------------------------------------------------------------ */
 
 async function smartItemOf(env, exId, itemId) {
-  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, i.note, i.state,
+  const it = await env.DB.prepare(`SELECT i.id, i.title, i.code, i.hist_code, i.qty, i.unit, i.spec, i.note, i.state, i.norm_json,
       a.id AS aid, a.expert_id, a.request_id, a.dispatched_at, r.party
     FROM items i JOIN assignments a ON a.id=i.assignment_id JOIN requests r ON r.id=a.request_id WHERE i.id=?`).bind(itemId).first();
   return it && it.expert_id === exId ? it : null;
@@ -3520,6 +3521,9 @@ async function onCallback(env, cq, apiIn) {
       if (!(d.markets || []).length) { await ack("دست‌کم یک بازار انتخاب کنید.", true); return { ok: true }; }
       const it = await smartItemOf(env, ex.id, d.itemId);
       if (!it) { await ack("این قلم دیگر در دسترس نیست.", true); return { ok: true }; }
+      /* همان دروازهٔ پنل (worker/discovered.js): با تأمین‌کنندهٔ کشف‌شدهٔ کافی، جستجوی وب نه — مگر پشتیبانی باز کرده باشد */
+      const gate = await gateFor(env, { expert: ex }, it);
+      if (!gate.open) { await ack(gateShort(gate), true); return { ok: true }; }
       /* اجرا در صف: Cron برش می‌دارد (runSmartJobs) — waitUntil برای کار چنددقیقه‌ای کوتاه است */
       const t = now();
       await env.DB.batch([

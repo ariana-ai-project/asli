@@ -213,7 +213,7 @@ export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual", "ai_sup", "ai_sup_item"] },
   work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "ai_wave", "item_terms", "ai_prop_ok", "ai_prop_no", "ai_sup_cfg", "ai_takeover", "ai_handback", "final_call", "offpf", "offpf_applied", "commission_package"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rebase", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes", "commission_result", "size_rules", "final_call_cfg", "supplier_over"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rebase", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes", "commission_result", "size_rules", "final_call_cfg", "smart_gate_cfg", "supplier_over"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -252,13 +252,14 @@ const EV_FA = {
   final_call: "📨 فراخوانِ پیش‌فاکتورِ رسمی — پیامک به تأمین‌کنندگانِ تأییدنهایی", offpf: "🧾 پیش‌فاکتورِ رسمی رسید و سنجیده شد",
   offpf_applied: "🧾 پیش‌فاکتورِ رسمی ثبت شد — قیمت برای کمیسیون قفل", commission_package: "📦 بستهٔ کمیسیون بسته شد",
   final_call_cfg: "📨 تنظیمِ فراخوانِ پیش‌فاکتورِ رسمی عوض شد",
+  smart_gate_cfg: "🔎 تنظیمِ «اجرای جستجوی هوشمند» عوض شد",
   /* «🏷 تأمین‌کنندگان» (worker/supplier-over.js): ردهٔ سوابق و مشخصاتِ تأمین‌کننده به دستِ پشتیبانی */
   supplier_over: "🏷 رده و مشخصاتِ تأمین‌کننده",
 };
 const PROP_KIND_FA = { reply: "پاسخ", final: "تأیید نهایی", act: "تصمیمِ بسته" };
 const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
 const CH_FA = { telegram: "از تلگرام", panel: "از پنل", ai: "کارشناس هوشمند", import: "از فایل", supplier: "از پنل تأمین‌کننده" };
-const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
+const ORIGIN_FA = { history: "از بررسی سوابق", smart: "از جستجوی هوشمند", disc: "از تأمین‌کنندگانِ کشف‌شده", manual: "دستی", proforma: "از پیش‌فاکتور", supplier: "از پنل تأمین‌کننده" };
 const SRC_FA = { panel: "پنل", telegram: "تلگرام", ai: "کارشناس هوشمند", supplier: "پنل تأمین‌کننده", proforma: "خواندن پیش‌فاکتور" };
 const PASS_FA = { setup: "اولین رمز گذاشته شد", reset: "مدیر رمز تازه گذاشت", change: "رمز عوض شد" };
 

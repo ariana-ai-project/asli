@@ -45,6 +45,7 @@ import { smsReady, smsLabel, isMobile } from "./sms.js";
 import { runAiCheck, aiUsable, resolve, acceptable } from "./sp-ai.js";
 import { bundleData, recordCommission } from "./bundle.js";
 import { fcCfg, startCall, closeCall, fcAdmin, saveFcCfg } from "./final-call.js";
+import { sgAdmin, saveSgCfg } from "./discovered.js";
 import { commissionXlsx } from "./sheets.js";
 import { writeLetter } from "./letter.js";
 import { renderLetter } from "./docx.js";
@@ -2460,6 +2461,9 @@ export async function aiAdmin(request, env, ctx, sub, m, url, deps) {
   /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): روشن/خاموش، مهلت و کمینهٔ اعتبار (ساعت)، کمترین قیمت در پیامک و همراهِ کارشناسان */
   if (sub === "/final-call" && m === "GET") return json(await fcAdmin(env));
   if (sub === "/final-call" && m === "PUT") return json({ ok: true, ...(await saveFcCfg(env, await readJson(request), "support")) });
+  /* «🔎 جستجوی هوشمند» (worker/discovered.js): قاعدهٔ «کمتر از n تأمین‌کنندهٔ کشف‌شده» و کارشناسانی که جستجویشان همیشه باز است */
+  if (sub === "/smart-gate" && m === "GET") return json(await sgAdmin(env));
+  if (sub === "/smart-gate" && m === "PUT") return json({ ok: true, ...(await saveSgCfg(env, await readJson(request), "support")) });
   if (sub === "/deliveries" && m === "GET") return json(await deliveries(env, url));
   let dm;
   if ((dm = /^\/deliveries\/(\d+)$/.exec(sub)) && m === "GET") return json(await delivery(env, int(dm[1])));

@@ -136,7 +136,9 @@ await X.rows(SH["تأمین‌کننده × نوع قلم"], (r, rn) => {
   if (rank == null || rank > 40 || DROP.has(o.status)) return;
   rankKept++;
   if (!units.has(o.unit_key)) units.set(o.unit_key, []);
-  units.get(o.unit_key).push([o.supplier_id, o.fit === "اصلی" ? 1 : 0, rank, o.status, num(o.score), num(o.p_top10)]);
+  /* پنج خانهٔ آخر (مهر ۱۴۰۵) برای «🗂 تأمین‌کنندگان کشف‌شده»ِ تب جستجوی هوشمند (worker/discovered.js): بازهٔ امتیاز، مبنای رتبه و شاهدِ تناسب */
+  units.get(o.unit_key).push([o.supplier_id, o.fit === "اصلی" ? 1 : 0, rank, o.status, num(o.score), num(o.p_top10), num(o.score_low), num(o.score_high),
+    nz(o.rank_basis), nz(o.fit_quote) ? String(o.fit_quote).slice(0, 300) : null, nz(o.fit_url)]);
 });
 const unitCov = new Map();
 await X.rows(SH["انواع قلم"], (r, rn) => { if (rn > 1 && r.A) { const o = named("انواع قلم", r); unitCov.set(o.unit_key, o); } });
@@ -153,7 +155,7 @@ const unitRows = [...unitKeys].map((k) => {
   const cov = unitCov.get(k) || {};
   const up = unitProf.get(k) || null;
   return { unit_key: k, head: h.join("|"), cluster, cands: JSON.stringify(cands),
-    unit: JSON.stringify({ ...(up || {}), codes: unitCodes.get(k) || [], route: cov.market_route ?? (up && up.route) ?? null, wave: cov.wave ?? null, segment: cov.segment ?? null,
+    unit: JSON.stringify({ ...(up || {}), codes: unitCodes.get(k) || [], cluster_name: cov.cluster_name ?? null, route: cov.market_route ?? (up && up.route) ?? null, wave: cov.wave ?? null, segment: cov.segment ?? null,
       foreign_markets: cov.foreign_markets ?? null, n_found: num(cov.n_found), n_found_exact: num(cov.n_found_exact), n_confirmed: num(cov.n_confirmed), weight_source: cov.weight_source ?? null }),
     imported_at: NOW };
 });

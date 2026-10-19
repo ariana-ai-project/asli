@@ -2154,6 +2154,9 @@
      تازه‌ترین اول. S.smFresh[itemId] جستجویی است که همین حالا اجرا شد و بالای همه برجسته می‌آید.
      S.chan[phone][platform] وضعیت پیام‌رسان‌های هر شماره است، مشترک بین همه و ذخیره در پایگاه داده. */
   S.smFresh = {}; S.chan = {}; S.chOpen = {}; S.smOpen = {}; S.spPh = {};
+  /* «🗂 تأمین‌کنندگان کشف‌شده»ِ هر قلم و دروازهٔ «اجرای جستجوی هوشمند» (/search/smart GET؛ worker/discovered.js)،
+     «؟»ِ بازِ دلیل، ردیف‌های بازشده، پالایه و جستجوی هر قلم */
+  S.disc = {}; S.gate = {}; S.gateWhy = {}; S.dcOpen = {}; S.dcF = {}; S.dcQ = {};
   const mergeChannels = (ch) => { for (const [ph, v] of Object.entries(ch || {})) S.chan[ph] = { ...(S.chan[ph] || {}), ...v }; };
   const searchOf = (sid) => { const d = S.smart[(item() || {}).id]; return d && d.searches ? d.searches.find((x) => x.search_id === sid) : null; };
   const supOfSearch = (sid, idx) => { const s = searchOf(sid); return s && s.result && (s.result.suppliers || [])[idx]; };
@@ -2167,7 +2170,8 @@
       S.maxMarkets = r.maxMarkets || S.maxMarkets;
       mergeChannels(r.channels);
       S.smart[it.id] = { searches: r.searches || [] };
-    } catch (_) { S.smart[it.id] = { searches: [] }; }
+      S.disc[it.id] = r.discovered || null; S.gate[it.id] = r.gate || null;
+    } catch (_) { S.smart[it.id] = { searches: [] }; S.disc[it.id] = null; S.gate[it.id] = null; }
     render();
   }
 
@@ -2189,6 +2193,8 @@
 
   async function runSmart() {
     const it = item(); if (!it) return;
+    const g = S.gate[it.id];
+    if (g && !g.open) return TP.modal("جستجوی هوشمند بسته است", esc(gateTxt(g)), null, "باشد", "");
     const sm = smOf(it);
     if (!sm.markets.length) return TP.modal("بازار انتخاب نشده", "دست‌کم یک بازار را تیک بزنید — مهم‌ترین قید جستجو همین است.", null, "باشد", "");
     const b = TP.busy("جستجوی هوشمند در حال اجراست…",
@@ -2221,7 +2227,11 @@
 
   /* پیام آماده برای یک تأمین‌کنندهٔ نتیجه: انتخاب قالب → متنِ پرشده → کپی */
   async function smartMessage(sid, idx) {
-    const s = supOfSearch(sid, idx); if (!s) return;
+    const s = supOfSearch(sid, idx); if (s) await msgFor(s.name);
+  }
+  /* همان پنجره برای هر نام — نتیجهٔ جستجو یا «🗂 تأمین‌کنندگان کشف‌شده» */
+  async function msgFor(name) {
+    const s = { name };
     await loadTemplates(item());
     if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(item()); }
     const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
@@ -2298,24 +2308,185 @@
 `;
   }
 
+  /* ---------- «🗂 تأمین‌کنندگان کشف‌شده» (درخواست مالک، مهر ۱۴۰۵) ----------
+     ۴۰ نفرِ برترِ ردنشدهٔ نوع قلم در تحقیقِ کشفِ تأمین‌کننده (worker/discovered.js)، پیش‌فرض بالای تب. کلیک روی هر نفر همهٔ
+     اطلاعاتش را باز می‌کند؛ پالایه و جستجو فقط همین فهرست را کم و زیاد می‌کنند. «اجرای جستجوی هوشمند» برای قلمی که کمتر از حدِ
+     پنل پشتیبانی (پیش‌فرض ۱۰) کشف‌شده دارد باز است؛ بسته که بود، دکمه غیرفعال است و دلیلش در «؟» کنارش. */
+  const gateTxt = (g) => `برای این قلم ${M(g.count)} تأمین‌کنندهٔ کشف‌شده هست؛ «اجرای جستجوی هوشمند» وقتی باز است که کمتر از ${M(g.min)} نفر باشند، تا هزینهٔ جستجوی وب فقط جایی صرف شود که تحقیق کم آورده. اگر لازم است، از پشتیبانی بخواهید جستجوی هوشمندِ شما را باز کند.`;
+  const DC_ST = { "تأییدشده": ["تأییدشده", "ok"], "مرزی": ["مرزی", "warn"], "در ده‌تای اول — منتظر تکمیل دروازه‌ها": ["ده‌تای اول · منتظر دروازه‌ها", "info"], "رقیب (رتبهٔ ۱۱ تا ۴۰)": ["رقیب ۱۱ تا ۴۰", ""] };
+  const DC_VER = { 2: "۲ — همهٔ دروازه‌ها قبول", 1: "۱ — هویت قابل احراز", 0: "۰ — هنوز احراز نشده" };
+  const DC_BASIS = { S2: "امتیاز کامل موتور", S1: "ترتیب غربال اولیه" };
+  /* سرستون‌های فایل ۶ تحقیق (برگهٔ «طرح‌واره») */
+  const DC_GROUPS = [
+    ["تماس", [["phones", "تلفن ثابت"], ["mobiles", "تلفن همراه"], ["fax", "نمابر"], ["email", "ایمیل"], ["website", "وب‌سایت"], ["social", "شبکه‌های اجتماعی"], ["verified_contacts", "تماس تأییدشده (دو منبع)"]]],
+    ["شناسه و ثبت", [["legal_name", "نام رسمی شرکت"], ["brand_name", "نام تجاری / فروشگاه"], ["latin_name", "نام لاتین"], ["supplier_type", "نوع تأمین‌کننده"], ["national_id", "شناسهٔ ملی"],
+      ["registration_no", "شمارهٔ ثبت"], ["registration_place", "محل ثبت"], ["established", "سال تأسیس"], ["registry_status", "وضعیت ثبتی"], ["registered_capital", "سرمایهٔ ثبتی"], ["manager", "مدیرعامل / مدیر"]]],
+    ["مکان", [["country", "کشور"], ["province", "استان"], ["city", "شهر"], ["hub", "بازار / مرکز تجاری"], ["address", "نشانی"], ["postal_code", "کد پستی"]]],
+    ["کسب‌وکار", [["chain_role", "نقش در زنجیره"], ["branches_n", "تعداد شعبه / نمایندگی / انبار"], ["branches", "محل شعبه‌ها و نمایندگی‌ها"], ["brands", "کارخانه‌ها / برندهای عرضه‌شده"],
+      ["products", "محصولات (به نقل از خودش)"], ["enamad", "نماد اعتماد الکترونیکی"], ["certificates", "گواهی‌ها"], ["memberships", "عضویت و رتبه"]]],
+    ["راستی‌آزمایی و فعالیت", [["verification", "سطح راستی‌آزمایی"], ["gates_summary", "وضعیت دروازه‌ها"], ["open_gates", "دروازه‌های باز یا رد (دلیل)"], ["g4_review", "بازبینی نام (G4)"],
+      ["last_activity", "آخرین نشانهٔ فعالیت"], ["last_activity_date", "تاریخ آخرین فعالیت"]]],
+    ["پیشینهٔ تحقیق", [["discovery_channel", "منبع کشف"], ["clusters", "خوشه‌ها"], ["n_units", "شمار انواع قلم مرتبط"], ["n_units_exact", "شمار با تناسب اصلی"], ["n_item_codes", "شمار کد قلم مرتبط"],
+      ["best_rank", "بهترین رتبه"], ["best_rank_unit", "نوع قلمِ بهترین رتبه"], ["n_top10", "شمار انواع قلم در ده‌تای اول"], ["n_top40", "شمار انواع قلم در ۴۰ نفر اول"], ["top10_units", "انواع قلم ده‌تای اول"],
+      ["completeness", "کامل بودن پرونده"], ["other", "سایر"], ["todo", "کارهای مانده"], ["sources", "منابع"], ["checked", "تاریخ بررسی"]]],
+  ];
+  const dcFilled = (v) => v != null && String(v).trim() !== "" && !["—", "-"].includes(String(v).trim());
+  const dcSplit = (v) => String(v).split(/\s*[،,]\s*|\n+/).map((x) => x.trim()).filter(Boolean);
+  const dcUrl = (u) => { const x = String(u).trim(); return /^https?:\/\//i.test(x) ? x : `https://${x}`; };
+  const dcFx = (x) => !!(x.country && String(x.country).trim() !== "ایران");
+  /** مقدارِ یک فیلد: ستون‌های دفتر (با اصلاحِ کارشناس) و بقیه از دادهٔ تحقیق */
+  const dcVal = (x, f) => {
+    const top = { hub: x.hub, province: x.province, city: x.city, country: x.country, phones: x.phones, mobiles: x.mobiles, verification: x.verification, chain_role: x.role }[f];
+    return dcFilled(top) || f === "verification" ? top : (x.d || {})[f];
+  };
+  const dcCopy = (t) => `<button type="button" class="dc-copy" data-dc-copy="${esc(t)}" aria-label="کپی ${esc(t)}">کپی</button>`;
+  const dcDate = (s) => { const d = new Date(`${String(s).trim()}T12:00:00`); return isNaN(d) ? String(s) : d.toLocaleDateString("fa-IR", { year: "numeric", month: "long", day: "numeric" }); };
+  function dcFmt(f, v) {
+    if (!dcFilled(v) && !(f === "verification" && v != null)) return null;
+    if (["phones", "mobiles", "fax", "verified_contacts"].includes(f)) return dcSplit(v).map((p) => `<span class="num" dir="ltr">${esc(p)}</span>${dcCopy(p)}`).join("، ");
+    if (f === "email") return dcSplit(v).map((p) => `<span dir="ltr">${esc(p)}</span>${dcCopy(p)}`).join("، ");
+    if (f === "website") return dcSplit(v).map((p) => `<a href="${esc(dcUrl(p))}" target="_blank" rel="noopener" dir="ltr">${esc(p)}</a>`).join("، ");
+    if (f === "social") return dcSplit(v).map((p) => (/\.[a-z]{2,}\//i.test(p) ? `<a href="${esc(dcUrl(p))}" target="_blank" rel="noopener" dir="ltr">${esc(p)}</a>` : `<span dir="ltr">${esc(p)}</span>`)).join("، ");
+    if (f === "sources") return String(v).split(/\s+/).filter((p) => /^https?:/i.test(p)).map((p) => `<a href="${esc(p)}" target="_blank" rel="noopener" dir="ltr">${esc(p.replace(/^https?:\/\/(www\.)?/, "").slice(0, 52))}</a>`).join("\n") || esc(v);
+    if (f === "verification") return esc(DC_VER[Number(v)] || String(v));
+    if (f === "completeness") return `${M(Math.round(Number(v) * 100))}٪`;
+    if (f === "last_activity_date" || f === "checked") return esc(dcDate(v));
+    if (f === "enamad") { const u = (String(v).match(/https?:\S+/) || [])[0]; return esc(String(v).replace(/\s*·?\s*https?:\S+/, "")) + (u ? ` · <a href="${esc(u)}" target="_blank" rel="noopener">نماد</a>` : ""); }
+    return esc(String(v));
+  }
+  const dcOf = (it) => (it ? S.disc[it.id] : null);
+  const dcSup = (sid) => { const D = dcOf(item()); return D && D.list ? D.list.find((x) => x.sid === sid) : null; };
+  const dcInQuotes = (it, name) => S.d.quotes.some((q) => q.item_id === it.id && TP.nrm(q.supplier_name) === TP.nrm(name));
+  function dcDetail(it, x, D) {
+    const pk = pkEditable(it), inPk = pkHas(it, x.name);
+    const acts = `${pk && !inPk ? `<button class="tp-btn sm primary" data-dc-pick="${esc(x.sid)}">🎯 به فهرست دعوت</button>` : ""}
+      ${dcInQuotes(it, x.name) ? "" : `<button class="tp-btn sm" data-dc-add="${esc(x.sid)}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">➕ به استعلامات</button>`}
+      <button class="tp-btn sm" data-dc-msg="${esc(x.sid)}" title="قالب پیام با نام همین تأمین‌کننده پر می‌شود">✉️ پیام با قالب</button>
+      ${TP.supProfile && S.crReg ? `<button class="tp-btn sm" data-dc-prof="${esc(x.sid)}">👤 پروفایل و گراف</button>` : ""}
+      <button class="tp-btn sm" data-dc-phone="${esc(x.sid)}" title="شماره در دفترچهٔ شماره‌ها با تیکِ «پنل» برای دعوت و پیامک">📇 ثبت شماره</button>`;
+    const why = `<div class="dc-why-box"><dl class="dc-kv">
+      <dt>تناسب با این قلم</dt><dd>${x.fit === "اصلی" ? "<b>اصلی</b> — نام کالا در فهرست محصولات خودش است" : "<b>خانواده</b> — خانوادهٔ این کالا را عرضه می‌کند"}</dd>
+      ${dcFilled(x.quote) ? `<dt>نقل از خودش</dt><dd>«${esc(x.quote)}»${dcFilled(x.url) ? ` · <a href="${esc(dcUrl(x.url))}" target="_blank" rel="noopener">شاهد</a>` : ""}</dd>` : ""}
+      <dt>رتبه در این نوع قلم</dt><dd>${M(x.rank)}${D.n_found ? ` از ${M(D.n_found)} تأمین‌کنندهٔ ردنشده` : ""}</dd>
+      ${x.score != null ? `<dt>امتیاز (از ۴)</dt><dd>${faDigits(x.score)}${x.lo != null && x.hi != null ? ` <span class="dim">(بازهٔ ${faDigits(x.lo)} تا ${faDigits(x.hi)})</span>` : ""}</dd>` : ""}
+      ${x.p10 != null ? `<dt>احتمال ده‌تای اول</dt><dd>${M(Math.round(x.p10 * 100))}٪</dd>` : ""}
+      ${x.basis ? `<dt>مبنای رتبه</dt><dd>${esc(DC_BASIS[x.basis] || x.basis)}</dd>` : ""}
+      <dt>وضعیت</dt><dd>${esc(x.status || "—")}${x.staff_phone ? ` · <span class="chip ok">شمارهٔ اصلاح‌شدهٔ کارشناس</span>` : ""}</dd></dl></div>`;
+    const secs = DC_GROUPS.map(([t, fs]) => {
+      const rows = fs.map(([f, l]) => { const v = dcFmt(f, dcVal(x, f)); return v == null ? "" : `<dt>${esc(l)}</dt><dd>${v}</dd>`; }).join("");
+      return rows ? `<div class="dc-sec"><h5>${esc(t)}</h5><dl class="dc-kv">${rows}</dl></div>` : "";
+    }).join("");
+    return `<div class="dc-det" id="dc-det-${esc(x.sid)}"><div class="toolrow" style="gap:6px;flex-wrap:wrap;padding-top:8px">${acts}</div>${why}<div class="dc-secs">${secs}</div></div>`;
+  }
+  function dcRow(it, x, D) {
+    const st = DC_ST[x.status] || [x.status || "—", ""], open = !!S.dcOpen[x.sid];
+    const ph = dcSplit(x.phones || "")[0] || dcSplit(x.mobiles || "")[0];
+    const place = [x.city, x.hub && x.hub !== x.city ? x.hub : ""].filter(dcFilled).join(" · ");
+    const type = (x.d || {}).supplier_type || "";
+    const pk = pkEditable(it);
+    const act = pk ? (pkHas(it, x.name) ? `<span class="chip info" title="در «🎯 فهرست دعوت»">🎯 در فهرست</span>` : `<button class="tp-btn xs primary" data-dc-pick="${esc(x.sid)}" title="به «🎯 فهرست دعوت»">🎯 دعوت</button>`)
+      : dcInQuotes(it, x.name) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-dc-add="${esc(x.sid)}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">➕ افزودن</button>`;
+    const text = [x.name, (x.d || {}).brand_name, (x.d || {}).legal_name, (x.d || {}).latin_name, x.city, x.hub, x.province, (x.d || {}).products, (x.d || {}).brands].filter(Boolean).join(" ");
+    return `<div class="dc-row" data-dc-text="${esc(TP.nrm(text))}">
+      <div class="dc-h" data-dc-row="${esc(x.sid)}" role="button" tabindex="0" aria-expanded="${open}" aria-controls="dc-det-${esc(x.sid)}">
+        <span class="dc-rk ${x.rank <= 10 ? "top" : ""}" title="رتبه در این نوع قلم">${M(x.rank)}</span>
+        <span class="dc-who"><b>${esc(x.name)}${dcFx(x) ? `<span class="dc-flag">${esc(x.country)}</span>` : ""}</b><small>${esc([x.role, type.indexOf("واحد صنفی") === 0 ? "واحد صنفی" : type].filter(dcFilled).join(" · "))}</small></span>
+        <span class="dc-where">${esc(place || "—")}</span>
+        <span class="dc-tags"><span class="chip ${x.fit === "اصلی" ? "ok" : ""}">${esc(x.fit)}</span><span class="chip ${st[1]}">${esc(st[0])}</span></span>
+        <span class="dc-ct">${ph ? `<span class="num" dir="ltr">${esc(ph)}</span>` : `<span class="no">بی تلفن</span>`}${dcFilled(x.mobiles) ? "<i>همراه</i>" : ""}${dcFilled((x.d || {}).website) ? "<i>سایت</i>" : ""}${dcFilled((x.d || {}).email) ? "<i>ایمیل</i>" : ""}</span>
+        <span class="dc-acts">${act}<span class="dim" aria-hidden="true">${open ? "▴" : "▾"}</span></span>
+      </div>${open ? dcDetail(it, x, D) : ""}</div>`;
+  }
+  function dcBlock(it) {
+    const D = dcOf(it);
+    if (D === undefined) return "";
+    if (!D) return `<div class="dc"><div class="dc-none">فهرستِ تأمین‌کنندگانِ کشف‌شده خوانده نشد؛ صفحه را تازه کنید.</div></div>`;
+    const L = D.list || [], f = S.dcF[it.id] || "all", q = S.dcQ[it.id] || "";
+    const head = `<div class="dc-head"><b>🗂 تأمین‌کنندگان کشف‌شده</b><span class="dim">${D.cluster_name ? `${esc(D.cluster_name)} · ` : ""}${D.head ? `تا ۴۰ نفرِ برترِ ردنشدهٔ نوع قلم «${esc(D.head)}» در تحقیقِ کشفِ تأمین‌کننده` : "تحقیقِ کشفِ تأمین‌کننده"}</span>${TP.ui.info("expert.smart", "راهنمای تأمین‌کنندگان کشف‌شده")}</div>`;
+    if (!L.length) return `<div class="dc">${head}<div class="dc-none">${D.unit_key ? `برای این نوع قلم در تحقیق تأمین‌کننده‌ای پیدا نشد.` : "این قلم در دادهٔ تحقیقِ کشفِ تأمین‌کننده نیست."}</div></div>`;
+    const n = (fn) => L.filter(fn).length;
+    const fxN = n(dcFx), hubs = {};
+    for (const x of L) if (dcFilled(x.hub)) hubs[x.hub] = (hubs[x.hub] || 0) + 1;
+    const topHub = Object.keys(hubs).sort((a, b) => hubs[b] - hubs[a])[0];
+    const sum = `<div class="dc-sum"><span class="chip">${M(L.length)} نفر</span><span class="chip ok">${M(n((x) => x.fit === "اصلی"))} تناسب اصلی</span>
+      ${n((x) => x.status === "تأییدشده") ? `<span class="chip ok">${M(n((x) => x.status === "تأییدشده"))} تأییدشده</span>` : ""}
+      <span class="chip">${M(n((x) => dcFilled(x.phones) || dcFilled(x.mobiles)))} با تلفن</span><span class="chip">${M(n((x) => dcFilled(x.mobiles)))} همراه</span>
+      ${fxN ? `<span class="chip warn">${M(fxN)} خارجی</span>` : ""}${topHub ? `<span class="chip">بازار غالب: ${esc(topHub)}</span>` : ""}</div>`;
+    const segs = [["all", "همه"], ["exact", "تناسب اصلی"], ["phone", "با تلفن"], ...(fxN ? [["fx", "خارجی"]] : [])];
+    const tools = `<div class="dc-tools"><input class="tp-input" type="search" data-dcq value="${esc(q)}" placeholder="جستجو در نام، شهر، بازار یا محصول" aria-label="جستجو در تأمین‌کنندگان کشف‌شده">
+      <div class="tp-seg" role="group" aria-label="پالایهٔ تأمین‌کنندگان کشف‌شده">${segs.map(([k, l]) => `<button type="button" class="${f === k ? "on" : ""}" aria-pressed="${f === k}" data-dc-f="${k}">${l}</button>`).join("")}</div></div>`;
+    const rows = L.filter((x) => f === "all" || (f === "exact" ? x.fit === "اصلی" : f === "phone" ? dcFilled(x.phones) || dcFilled(x.mobiles) : dcFx(x)));
+    return `<div class="dc" data-keep-scroll>${head}${sum}${tools}<div class="dc-rows" role="list">${rows.map((x) => dcRow(it, x, D)).join("") || `<div class="dc-none">با این پالایه کسی نماند.</div>`}</div>
+      <div class="dc-none" data-dc-empty hidden>با این جستجو کسی پیدا نشد.</div></div>`;
+  }
+  /** جستجوی درونِ فهرست بی بازرندر (فوکوسِ کادر نمی‌پرد) */
+  function dcFilterDom(q) {
+    const k = TP.nrm(q || ""), rows = [...document.querySelectorAll(".dc-row")];
+    let shown = 0;
+    for (const r of rows) { const ok = !k || (r.dataset.dcText || "").includes(k); r.hidden = !ok; if (ok) shown++; }
+    const e = document.querySelector("[data-dc-empty]"); if (e) e.hidden = !(rows.length && !shown);
+  }
+  const dcMobile = (x) => [...dcSplit(x.mobiles || ""), ...dcSplit(x.phones || "")].map((p) => p.replace(/[^\d+]/g, "")).find((p) => /^(\+98|0098|98|0)?9\d{9}$/.test(p)) || "";
+  async function dcPickUI(sid) {
+    const it = item(), x = dcSup(sid); if (!it || !x) return;
+    const P = S.picks[it.id];
+    const d = TP.modal(`🎯 «${esc(x.name)}» به فهرست دعوت`, `<p style="margin-top:0">کارشناس هوشمند فقط به شمارهٔ پنلِ تیک‌خورده پیامک می‌دهد. شماره را ببینید یا وارد کنید و تیکِ پنل بزنید (اختیاری — بعد هم از «📱» در فهرست می‌شود).</p>
+      <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px">
+        <label class="tp-field"><b>شمارهٔ همراه</b><input class="tp-input" id="dcp-num" dir="ltr" inputmode="tel" value="${esc(dcMobile(x))}" placeholder="09…" style="width:150px"></label>
+        <label class="tp-field"><b>برچسب</b><input class="tp-input" id="dcp-lab" value="تأمین‌کنندهٔ کشف‌شده" style="width:170px"></label>
+        <label class="chkline"><input type="checkbox" id="dcp-panel" checked> تیکِ پنل</label></div>
+      <p class="dim" style="font-size:.84rem">${P && P.started_at ? "بعد از افزودن، در «بررسی سوابق» «📨 دعوت از انتخاب‌های تازه» را بزنید." : "بعد در «بررسی سوابق» «🚀 شروع» را بزنید."}</p>`, async () => {
+      const num = (d.querySelector("#dcp-num").value || "").trim();
+      try {
+        if (num) await TP.api("/sp/x/phones", { body: { supplier_name: x.name, phone: num, label: d.querySelector("#dcp-lab").value || "تأمین‌کنندهٔ کشف‌شده", panel: d.querySelector("#dcp-panel").checked } });
+        await pkEdit(it, { add: [{ name: x.name, src: "disc", rsid: x.sid, ph: [...dcSplit(x.mobiles || ""), ...dcSplit(x.phones || "")].slice(0, 3) }] });
+      } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "به فهرست بیفزا", "انصراف");
+  }
+  async function dcAddQuote(sid) {
+    const it = item(), x = dcSup(sid); if (!it || !x) return;
+    try {
+      await TP.api("/quotes", { body: { assignment_id: A().id, item_ids: [it.id], supplier_name: x.name, origin: "disc" } });
+      S.tab = "quotes"; await reload();
+    } catch (e) { TP.modal(e.status === 409 ? "قبلاً اضافه شده" : "خطا", esc(e.message), null, "باشد", ""); }
+  }
+  function dcPhoneUI(sid) {
+    const x = dcSup(sid); if (!x) return;
+    const nums = [...dcSplit(x.mobiles || ""), ...dcSplit(x.phones || "")];
+    const d = TP.modal(`📇 شمارهٔ «${esc(x.name)}»`, `<p style="margin-top:0">شماره در دفترچهٔ شماره‌ها ثبت می‌شود؛ با تیکِ «پنل» دعوت و پیامکِ پنلِ تأمین‌کننده به همین شماره می‌رود.</p>
+      <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px">
+        <label class="tp-field"><b>شماره</b><input class="tp-input" id="dcn-num" dir="ltr" inputmode="tel" list="dcn-list" value="${esc(dcMobile(x) || nums[0] || "")}" style="width:170px"></label>
+        <datalist id="dcn-list">${nums.map((p) => `<option value="${esc(p)}">`).join("")}</datalist>
+        <label class="tp-field"><b>برچسب</b><input class="tp-input" id="dcn-lab" value="تأمین‌کنندهٔ کشف‌شده" style="width:170px"></label>
+        <label class="chkline"><input type="checkbox" id="dcn-panel" checked> تیکِ پنل</label></div>`, async () => {
+      const num = (d.querySelector("#dcn-num").value || "").trim(); if (!num) return;
+      try { await TP.api("/sp/x/phones", { body: { supplier_name: x.name, phone: num, label: d.querySelector("#dcn-lab").value || "تأمین‌کنندهٔ کشف‌شده", panel: d.querySelector("#dcn-panel").checked } }); okTick("شماره ثبت شد"); }
+      catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    }, "ثبت", "انصراف");
+  }
+
   function vSmart(it) {
     const d = S.smart[it.id];
     if (d === undefined) { loadSmart(it); }
+    if (S.crReg === undefined && TP.supProfile) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
     const list = d && d !== "loading" ? d.searches || [] : [];
     const fresh = list.find((x) => x.search_id === S.smFresh[it.id]);
     const older = list.filter((x) => x !== fresh);
+    /* دروازهٔ «اجرای جستجوی هوشمند»: بسته ← دکمهٔ غیرفعال و دلیل در «؟» کنارش (با کلیک باز و بسته می‌شود) */
+    const g = S.gate[it.id], shut = !!(g && !g.open), why = shut && !!S.gateWhy[it.id];
     const head = `<div class="toolrow"><b style="font-size:1.02rem">جستجوی هوشمند برای «${esc(it.title)}»</b>
       ${it.smart_done_at ? `<span class="chip ok">اجرا شد — ${TP.fmt(it.smart_done_at)}</span>` : ""}
       <span style="margin-inline-start:auto"></span>
       <button class="tp-btn" data-tpl-open title="قالب‌های پیام موجود را ببینید یا قالب تازه بسازید">ایجاد قالب پیام</button>
-      <button class="tp-btn primary" data-run-smart>${list.length ? "اجرای جستجوی تازه" : "اجرای جستجوی هوشمند"}</button>
-      ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart" title="اگر جستجو را بیرون از سامانه انجام داده‌اید">علامت بزن</button>`}</div>`;
+      <span class="dc-run"><button class="tp-btn primary" data-run-smart ${shut ? 'disabled aria-disabled="true"' : ""}>${shut ? "🔒 " : ""}${list.length ? "اجرای جستجوی تازه" : "اجرای جستجوی هوشمند"}</button>${shut ? `<button type="button" class="tp-info" data-gate-why aria-expanded="${why}" aria-controls="dc-why-${it.id}" title="چرا بسته است؟" aria-label="چرا «اجرای جستجوی هوشمند» بسته است؟">؟</button>` : ""}</span>
+      ${it.smart_done_at ? "" : `<button class="tp-btn" data-mark="smart" title="اگر جستجو را بیرون از سامانه انجام داده‌اید">علامت بزن</button>`}</div>
+      ${why ? `<div class="dc-why" id="dc-why-${it.id}" role="note">${esc(gateTxt(g))}</div>` : ""}`;
     const meta = (x) => `${TP.fmt(x.created_at)} · ${esc(x.expert || "—")}${x.request_id ? ` · درخواست <span class="num">${esc(x.request_id)}</span>` : ""}${x.same_item ? "" : ` <span class="chip info" title="همین قلم در درخواست دیگری جستجو شده بود">درخواست دیگر</span>`}`;
     const count = (x) => ((x.result && x.result.suppliers) || []).length;
 
     let main;
-    if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن جستجوهای قبلی این قلم…</div>`;
-    else if (!list.length) main = `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
+    if (d === undefined || d === "loading") main = `<div class="empty">در حال خواندن تأمین‌کنندگانِ کشف‌شده و جستجوهای قبلی این قلم…</div>`;
+    else if (!list.length) main = shut ? `<div class="empty">جستجوی وب برای این قلم اجرا نشده.</div>` : `<div class="empty"><b>هنوز جستجویی برای این قلم اجرا نشده.</b>
       بازارها را در ستون کنار انتخاب کنید و «اجرای جستجوی هوشمند» را بزنید.</div>`;
     else {
       /* نتیجهٔ تازه بالا و برجسته؛ جستجوهای قبلیِ همین قلم (هر درخواست، هر کارشناس) پایین */
@@ -2336,7 +2507,9 @@
       <div class="grp"><b>ملاحظات <span class="dim" style="font-weight:400">(از ستون «توضیحات» فایل)</span></b>
         <textarea class="tp-textarea" data-sm="notes" style="min-height:64px" placeholder="مثلاً: ترجیحاً تولیدکننده نه واسطه">${esc(sm.notes)}</textarea></div></div>`;
 
-    return `<div class="pad">${head}${smPickNote(it)}<div class="two"><div class="main">${main}</div>${side}</div></div>`;
+    /* کشف‌شده‌ها بالا؛ نتایجِ جستجوی وب زیرش؛ ستونِ قیدها فقط وقتی جستجو باز است */
+    const web = `<h4 class="dc-webh">نتایج جستجوی وب</h4>${main}`;
+    return `<div class="pad">${head}${smPickNote(it)}<div class="two"><div class="main">${dcBlock(it)}${web}</div>${shut ? "" : side}</div></div>`;
   }
 
   /* ---------- تب استعلامات (واقعی) ---------- */
@@ -3364,6 +3537,21 @@
     Q("[data-sm-add]").forEach((b) => b.onclick = () => addFromSmart(...pair(b.dataset.smAdd)));
     Q("[data-sm-msg]").forEach((b) => b.onclick = () => smartMessage(...pair(b.dataset.smMsg)));
     Q("[data-sm-pick]").forEach((b) => b.onclick = () => smPickUI(...pair(b.dataset.smPick)));
+    /* «🗂 تأمین‌کنندگان کشف‌شده» و «؟»ِ دلیلِ بسته بودنِ جستجو */
+    const gw = G("[data-gate-why]"); if (gw) gw.onclick = () => { const it = item(); S.gateWhy[it.id] = !S.gateWhy[it.id]; render(); };
+    Q("[data-dc-row]").forEach((el) => {
+      const flip = (e) => { if (e.target.closest("button, a, input")) return; S.dcOpen[el.dataset.dcRow] = !S.dcOpen[el.dataset.dcRow]; render(); };
+      el.onclick = flip;
+      el.onkeydown = (e) => { if ((e.key === "Enter" || e.key === " ") && e.target === el) { e.preventDefault(); flip(e); } };
+    });
+    Q("[data-dc-f]").forEach((b) => b.onclick = () => { S.dcF[item().id] = b.dataset.dcF; render(); });
+    const dq = G("[data-dcq]"); if (dq) { dq.oninput = () => { S.dcQ[item().id] = dq.value; dcFilterDom(dq.value); }; if (dq.value) dcFilterDom(dq.value); }
+    Q("[data-dc-pick]").forEach((b) => b.onclick = () => dcPickUI(b.dataset.dcPick));
+    Q("[data-dc-add]").forEach((b) => b.onclick = () => dcAddQuote(b.dataset.dcAdd));
+    Q("[data-dc-msg]").forEach((b) => b.onclick = () => { const x = dcSup(b.dataset.dcMsg); if (x) msgFor(x.name); });
+    Q("[data-dc-phone]").forEach((b) => b.onclick = () => dcPhoneUI(b.dataset.dcPhone));
+    Q("[data-dc-prof]").forEach((b) => b.onclick = () => { const x = dcSup(b.dataset.dcProf), D = dcOf(item()); if (x && TP.supProfile) TP.supProfile.open({ sid: x.sid, name: x.name, head: D && D.head }); });
+    Q("[data-dc-copy]").forEach((b) => b.onclick = async () => { const t = b.dataset.dcCopy; try { await navigator.clipboard.writeText(t); okTick("کپی شد"); } catch (_) { TP.modal("کپی نشد", `<span dir="ltr">${esc(t)}</span>`, null, "باشد", ""); } });
     /* باز/بسته کردن جستجوی قبلی نباید با بازرندرِ بعدی برگردد */
     Q("details.smblock").forEach((el) => el.ontoggle = () => { S.smOpen[el.dataset.sid] = el.open; });
     /* استعلامات */

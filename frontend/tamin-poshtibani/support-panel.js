@@ -90,7 +90,7 @@
   const thr = () => (S.settings && S.settings.thresholds) || (CFG.defaults && CFG.defaults.thresholds) || [10, 30, 50, 70, 90, 100];
   const exName = (id) => { const e = S.experts.find((x) => x.id === Number(id)); return e ? e.label || e.name : id ? `کارشناس ${id}` : "—"; };
   const expertOpts = (sel) => S.experts.map((e) => `<option value="${e.id}" ${String(e.id) === String(sel) ? "selected" : ""}>${e.senior ? "★ " : ""}${esc(e.label || e.name)}</option>`).join("");
-  const ORIGIN = { history: "سوابق", smart: "جستجوی هوشمند", manual: "دستی", proforma: "پیش‌فاکتور", supplier: "پنل تأمین‌کننده" };
+  const ORIGIN = { history: "سوابق", smart: "جستجوی هوشمند", disc: "کشف‌شده", manual: "دستی", proforma: "پیش‌فاکتور", supplier: "پنل تأمین‌کننده" };
 
   /* ---------- ورود ---------- */
   async function loadStatus() {
@@ -1027,7 +1027,7 @@
      بررسی یکراست «تأیید نهایی» می‌شود؛ روشن — همان مسیرِ پیشین: تأیید مشخصات، بارگذاری پیش‌فاکتور، خوانش هوشمند و جدول تطابق. */
   async function loadSw() {
     S.swErr = ""; render();
-    try { [S.sw, S.fc] = await Promise.all([api("/ai/switches"), api("/ai/final-call")]); } catch (e) { S.swErr = e.message; }
+    try { [S.sw, S.fc, S.sg] = await Promise.all([api("/ai/switches"), api("/ai/final-call"), api("/ai/smart-gate")]); } catch (e) { S.swErr = e.message; }
     render();
   }
   function swToggle(on) {
@@ -1053,7 +1053,37 @@
         <button class="tp-btn ${on ? "" : "primary"}" data-swtoggle data-on="0" ${!on || S.swBusy ? "disabled" : ""}>⏹ خاموش — پیش‌فاکتورِ سامانه</button>
         <button class="tp-btn ${on ? "primary" : ""}" data-swtoggle data-on="1" ${on || S.swBusy ? "disabled" : ""}>▶️ روشن — خوانش پیش‌فاکتورِ تأمین‌کننده</button>
         <span class="dim">${S.sw.updated_at ? `آخرین تغییر: ${fmtShort(S.sw.updated_at)}` : "هنوز عوض نشده — پیش‌فرض خاموش"}</span></div></div>`;
-    return h + vFc();
+    return h + vFc() + vSg();
+  }
+  /* «🔎 جستجوی هوشمند» (worker/discovered.js): «اجرای جستجوی هوشمند» فقط برای قلمی که کمتر از n تأمین‌کنندهٔ کشف‌شده دارد؛ جستجوی
+     کارشناسانِ تیک‌خورده همیشه باز است (بی توجه به شمار) */
+  function vSg() {
+    if (S.sgErr) return `<div class="tp-note warn">${esc(S.sgErr)}</div>`;
+    if (!S.sg) return "";
+    const c = S.sg.cfg, on = !!c.on, dis = S.sgBusy ? "disabled" : "", open = new Set(c.open || []);
+    const act = S.sg.experts.filter((e) => e.active);
+    return `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">🔎 جستجوی هوشمند
+        <span class="chip ${on ? "ok" : ""}" style="margin-inline-start:8px">${on ? "قاعده روشن (پیش‌فرض)" : "خاموش — برای همه باز"}</span> ${TP.ui.info("support.smartgate", "راهنمای جستجوی هوشمند")}</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="tp-btn ${on ? "primary" : ""}" data-sgtoggle data-on="1" ${on || S.sgBusy ? "disabled" : ""}>▶️ روشن</button>
+        <button class="tp-btn ${on ? "" : "primary"}" data-sgtoggle data-on="0" ${!on || S.sgBusy ? "disabled" : ""}>⏹ خاموش — برای همه باز</button></div>
+      <table class="sup-tbl" style="width:auto"><tbody>
+        <tr><td>${esc(S.sg.fa.min)}</td><td><input class="tp-input num" data-sgmin value="${esc(c.min)}" inputmode="numeric" style="width:80px" aria-label="حدِ تأمین‌کنندگانِ کشف‌شده" ${dis}> تأمین‌کنندهٔ کشف‌شده</td></tr></tbody></table>
+      <h4 style="margin:12px 0 6px">🔓 ${esc(S.sg.fa.open)} <span class="dim" style="font-weight:400;font-size:.85rem">— بی توجه به شمارِ کشف‌شده‌ها</span></h4>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 16px">${act.map((e) => `<label class="chkline"><input type="checkbox" data-sgex="${e.id}" ${open.has(e.id) ? "checked" : ""} ${dis}> ${esc(e.name)}</label>`).join("") || `<span class="dim">کارشناس فعالی نیست.</span>`}</div>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button class="tp-btn primary" data-sgsave ${dis}>ذخیره</button>
+        <span class="dim">${c.updated_at ? `آخرین تغییر: ${fmtShort(c.updated_at)}` : "هنوز عوض نشده — پیش‌فرض: روشن، کمتر از ۱۰ تأمین‌کنندهٔ کشف‌شده"}</span></div></div>`;
+  }
+  async function sgSave(patch) {
+    let cfg = patch;
+    if (!cfg) {
+      /* کارشناسِ غیرفعالی که باز بوده باز می‌ماند — فهرستِ تیک فقط فعال‌ها را نشان می‌دهد */
+      const inactive = (S.sg.cfg.open || []).filter((id) => !S.sg.experts.some((e) => e.id === id && e.active));
+      cfg = { min: (app.querySelector("[data-sgmin]") || {}).value, open: [...inactive, ...[...app.querySelectorAll("[data-sgex]")].filter((i) => i.checked).map((i) => Number(i.dataset.sgex))] };
+    }
+    S.sgBusy = true; S.sgErr = ""; render();
+    try { S.sg = await api("/ai/smart-gate", { method: "PUT", body: { cfg } }); } catch (e) { S.sgErr = e.message; }
+    S.sgBusy = false; render();
   }
   /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): پیش از جدول کمیسیون، پیامک به تأمین‌کنندگانِ تأییدنهایی و «📦 بستهٔ کمیسیون» سرِ مهلت */
   function vFc() {
@@ -1553,6 +1583,8 @@
     if (d.swtoggle !== undefined) return swToggle(d.on === "1");
     if (d.fctoggle !== undefined) return fcSave({ on: d.on === "1" });
     if (d.fcsave !== undefined) return fcSave(null);
+    if (d.sgtoggle !== undefined) return sgSave({ on: d.on === "1" });
+    if (d.sgsave !== undefined) return sgSave(null);
     if (d.rksave !== undefined) return saveRankUi();
     if (d.rkreset !== undefined) { S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } }; S.rankErr = ""; return render(); }
     if (d.usdfetch !== undefined) return usdFetch();
@@ -1575,7 +1607,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-fctoggle],[data-fcsave],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-fctoggle],[data-fcsave],[data-sgtoggle],[data-sgsave],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
