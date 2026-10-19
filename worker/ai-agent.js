@@ -67,7 +67,7 @@ import { TOP, A_MSG, PICK_SRC_FA, pickOf, defaultFrom, buildDefault, mergeRebuil
 import { getSizeRules, SIZE_FA } from "./size.js";
 import { crFlags } from "./cr-api.js";
 import { headPolicy, recipientPlan, VARIANTS } from "./cr-engine.js";
-import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, stdList, listTemplates, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
+import { fmContext, fmChoices, fmTextFor, fmSave, fmCheck, fmDefKey, fmReasons, tplLib, tplSetActive, FAMILY_FA, FM_TOKENS } from "./first-msg.js";
 import { limitsOf, LIMIT_FA, fieldTxt, limitsTxt } from "./terms-locks.js";
 import { PLACEHOLDER_SRC } from "./quote-src.js";
 import { headGuess } from "./ai-modes.js";
@@ -220,6 +220,14 @@ export async function aiHandoff(env, a, actor, { include = [] } = {}) {
     if (md === "handoff") resetToDefault(p);
     if (actor !== "support") startCheck(p, md, { cap: cfg.maxInvites, need: false });
     picks.set(i.id, p);
+  }
+  /* «✉️ پیام اول»: همان دروازهٔ «🚀 شروع»ِ هر قلم (fmGate) — سپردنِ یکجای کارشناس قاعدهٔ علت را دور نمی‌زند؛ ▶️ پشتیبانی فهرست را همان‌طور می‌برد */
+  if (actor !== "support" && picks.size && (await crFlags(env)).firstmsg) {
+    const ex = await env.DB.prepare("SELECT * FROM experts WHERE id=?").bind(a.expert_id).first();
+    for (const [id, p] of picks) {
+      const row = ex ? await env.DB.prepare("SELECT i.*, a.id AS aid FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(id).first() : null;
+      if (row) await fmGate(env, ex, row, p, (p.list || []).filter((e) => e.on && !e.go));
+    }
   }
   const runId = await createRun(env, a, actor === "support" ? "manual" : "handoff", its.map((i) => i.id));
   /* فقط اقلامی که در همین کارند (سقفِ maxItems) منجمد می‌شوند */
@@ -375,7 +383,8 @@ export async function picksRoute(request, env, path, m, deps) {
     const r = await startItem(env, ex, mm[1]);
     return deps.json(r);
   }
-  /* «✉️ پیام اول» (worker/first-msg.js): قالبِ درخواست، قالب یا متنِ هر تأمین‌کننده، و پیش‌نمایش با سنجشِ افشا */
+  /* «✉️ پیام اول» (worker/first-msg.js): قالبِ درخواست، قالب یا متنِ هر تأمین‌کننده، علتِ ردیفِ متفاوت، «فعال»ِ قالب‌های
+     «📚 قالب‌های پیام» و پیش‌نمایش با سنجشِ افشا */
   if ((mm = /^\/items\/(\d+)\/first-msg$/.exec(path)) && (m === "GET" || m === "PUT")) {
     const ex = await deps.requireExpert(request, env);
     if (!(await crFlags(env)).firstmsg) throw new HttpError("«پیام اول با قالب» هنوز در پنل پشتیبانی روشن نشده است.", 409);
@@ -384,12 +393,16 @@ export async function picksRoute(request, env, path, m, deps) {
     if (!pick) throw new HttpError("اول فهرستِ دعوت را باز کنید.", 409);
     const names = (pick.list || []).map((e) => e.name);
     const ctx = await fmContext(env, FM_DEPS, [k.it]);
+    let lib = null;
     if (m === "PUT") {
       const b = await deps.readJson(request);
+      /* «فعال»ِ قالب‌ها پیش از انتخاب‌ها: قالبی که همین حالا روشن شد، در همین درخواست انتخاب‌شدنی است */
+      if (b && b.active && typeof b.active === "object") lib = await tplSetActive(env, ex, b.active, ctx.family);
+      lib = lib || (await tplLib(env, ex.id, ctx.family));
       const nameOf = (kk) => ((pick.list || []).find((e) => e.k === kk) || {}).name;
-      await fmSave(env, { aid: k.it.aid, expert: ex, b, check: (kk, body) => fmCheck(body, { otherNames: names.filter((n) => C.nkey(n) !== kk), family: ctx.family, items: ctx.items, allow: [nameOf(kk), COMPANY(env)] }) });
+      await fmSave(env, { aid: k.it.aid, expert: ex, b, lib, check: (kk, body) => fmCheck(body, { otherNames: names.filter((n) => C.nkey(n) !== kk), family: ctx.family, items: ctx.items, allow: [nameOf(kk), COMPANY(env)] }) });
     }
-    return deps.json(await fmView(env, ex, k.it, pick, ctx));
+    return deps.json(await fmView(env, ex, k.it, pick, ctx, lib));
   }
   /* کادرِ «🚀 شروع»: همان متنی که برای هر تیک‌خورده می‌رود («✉️ پیام اول» یا قالبِ دعوت)، شرایطِ خرید و آهنگِ دعوت */
   if ((mm = /^\/items\/(\d+)\/invite-preview$/.exec(path)) && m === "GET") {
@@ -401,31 +414,76 @@ export async function picksRoute(request, env, path, m, deps) {
     const L = limitsOf(k.it), pfRead = await pfReadOn(env);
     const fm = !!(await crFlags(env)).firstmsg;
     const std = (name) => inviteText(env, name, items, pfRead, !!L);
-    let rows;
+    let rows, fmMissing = [];
     if (fm && on.length) {
       const v = await fmView(env, ex, k.it, pick, await fmContext(env, FM_DEPS, [k.it]));
       rows = on.map((e) => { const r = v.rows.find((x) => x.k === e.k); return { name: e.name, text: r && !r.block.length ? r.text : std(e.name), std: !r || !!r.block.length }; });
+      /* قاعدهٔ علت: کادرِ شروع پیش از «تأیید» می‌گوید کدام ردیف علت ندارد (همان که ai-start با ۴۰۹ نگه می‌دارد) */
+      fmMissing = v.missing.filter((x) => on.some((e) => e.k === x.k));
     } else rows = on.map((e) => ({ name: e.name, text: std(e.name), std: true }));
-    return deps.json({ rows: rows.slice(0, 20), n: on.length, terms: limitsTxt(L) || null, first_msg: fm, per_tick: INVITES_PER_TICK });
+    return deps.json({ rows: rows.slice(0, 20), n: on.length, terms: limitsTxt(L) || null, first_msg: fm, per_tick: INVITES_PER_TICK, fm_missing: fmMissing });
   }
   return null;
 }
 /* وابستگی‌های first-msg.js (تزریق، تا آن پرونده بی حلقه بماند) */
 const FM_DEPS = { lockedLayers: (env, it) => C.lockedLayers(env, it), lineLocks: (it, ly) => C.lineLocks(it, ly), limitsOf, LIMIT_FA, fieldTxt, headPolicy, headOf: (env, it) => headGuess(env, it) };
-/** کادرِ «✉️ پیام اول»: قالب‌ها (استاندارد + مشترک + خودِ کارشناس)، انتخاب‌ها و پیش‌نمایشِ پیامِ هر تیک‌خورده */
-async function fmView(env, ex, it, pick, ctx) {
-  const choices = await fmChoices(env, it.aid);
+/**
+ * کادرِ «✉️ پیام اول»: کتابخانهٔ قالب‌ها با «فعال» (آماده + مشترک + خودِ کارشناس)، انتخاب‌ها و پیش‌نمایشِ پیامِ هر تیک‌خورده به
+ * ترتیبِ فهرستِ دعوت، با قاعدهٔ علت (first-msg.js:fmReasons): diff/need_why روی هر ردیف و missing برای بی‌علت‌ها. ctx: زمینهٔ
+ * پرکردن برای پیش‌نمایشِ زندهٔ ویرایشگرِ قالب در پنل (همان msg-fill.mjs).
+ */
+async function fmView(env, ex, it, pick, ctx, lib0 = null) {
+  const [choices, lib] = await Promise.all([fmChoices(env, it.aid), lib0 ? Promise.resolve(lib0) : tplLib(env, ex.id, ctx.family)]);
   const on = (pick.list || []).filter((e) => e.on);
   const names = (pick.list || []).map((e) => e.name);
+  const def = fmDefKey(choices, lib, ctx.family);
   const rows = [];
   for (let i = 0; i < on.length; i++) {
-    const e = on[i];
-    const r = await fmTextFor(env, { aid: it.aid, expert: ex, supplier: e.name, k: e.k, items: ctx.items, ctx, choices, otherNames: names.filter((n) => C.nkey(n) !== e.k), idx: i, company: COMPANY(env) });
-    rows.push({ k: e.k, name: e.name, tpl: r.tpl, text: r.text, block: r.block, warn: r.warn, custom: !!(choices.per[e.k] && choices.per[e.k].body), own_tpl: !!(choices.per[e.k] && choices.per[e.k].tpl) });
+    const e = on[i], per = choices.per[e.k] || null;
+    const r = await fmTextFor(env, { aid: it.aid, expert: ex, supplier: e.name, k: e.k, ctx, choices, lib, otherNames: names.filter((n) => C.nkey(n) !== e.k), idx: i, company: COMPANY(env) });
+    const own = per && per.tpl && lib.some((t) => t.key === per.tpl) ? per.tpl : "";
+    rows.push({ k: e.k, name: e.name, tpl: r.tpl, base: r.base, eff: r.eff, text: r.text, block: r.block, warn: r.warn, custom: !!(per && per.body),
+      own_tpl: !!own, sel: own, why: (per && per.why) || "", go: !!e.go });
   }
-  const db = (await listTemplates(env, ex.id)).map((t) => ({ key: String(t.id), title: t.title, body: t.body, std: false, own: t.expert_id === ex.id }));
+  const missing = fmReasons(rows, def).map((r) => ({ k: r.k, name: r.name }));
   return { item_id: it.id, family: ctx.family, family_fa: FAMILY_FA[ctx.family], variation: ctx.variation, var_off: choices.varOff || null, must: ctx.must, tokens: FM_TOKENS,
-    templates: [...stdList(), ...db], def: choices.def ? choices.def.tpl : null, rows };
+    templates: lib, def: choices.def ? choices.def.tpl : null, def_eff: def, rows, missing,
+    ctx: { company: COMPANY(env), expertName: ex.label || ex.name, family: ctx.family, must: ctx.must,
+      items: ctx.items.map((x) => ({ title: x.title, qty: x.qty, unit: x.unit, spec: x.spec, fixed: x.fixed, open: x.open, due: x.due })) } };
+}
+/**
+ * دروازهٔ «✉️ پیام اول» پیش از سپردن (کلیدِ firstmsg): ردیفی از همین سپرده‌ها (go) که قالبش با ردیفِ بالایی فرق دارد و علت ندارد ←
+ * ۴۰۹ با همان ردیف‌ها — همان قاعدهٔ کادر، تا با فراخوانیِ مستقیم دور زده نشود. it: ردیفِ کاملِ قلم با aid.
+ */
+async function fmGate(env, ex, it, pick, go) {
+  if (!(await crFlags(env)).firstmsg || !go.length) return;
+  const v = await fmView(env, ex, it, pick, await fmContext(env, FM_DEPS, [it]));
+  const ks = new Set(go.map((e) => e.k));
+  const miss = v.missing.filter((x) => ks.has(x.k));
+  if (miss.length) {
+    throw new HttpError(`«✉️ پیام اول»ِ «${it.title}»: قالبِ ${miss.map((x) => `«${x.name}»`).join("، ")} با ردیفِ بالایی (ردیفِ اول با پیش‌فرض) فرق دارد و علت ندارد — در «✉️ پیام اول» کنارِ همان نام علت را بنویسید.`,
+      409, { need_fm_why: miss, item_id: it.id });
+  }
+}
+/**
+ * زمینهٔ پرکردنِ قالب برای یک قلمِ همین کارشناس بیرون از «✉️ پیام اول» (کتابخانهٔ قالب‌ها و «پیام»ِ جستجوی هوشمند، بات): همان
+ * لایه‌های 🔒/🔓، شرایطِ خرید و تاریخِ تحویلِ fmContext — بی سیاستِ استعلام: مقدارِ کامل (نه بازهٔ محتاط) و «موارد لازم»ِ پیش‌فرض،
+ * چون این پیام را خودِ کارشناس از هر کانالی می‌فرستد. قلمِ دیگران ← null.
+ */
+export async function tplCtx(env, ex, itemId) {
+  const it = await env.DB.prepare("SELECT i.*, a.expert_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(int(itemId)).first();
+  if (!it || !ex || it.expert_id !== ex.id) return null;
+  const c = await fmContext(env, { ...FM_DEPS, headPolicy: null, headOf: async () => null }, [it]).catch(() => null);
+  const items = c && c.items.length ? c.items : [{ title: it.title, qty: it.qty, unit: it.unit, spec: it.spec, fixed: [], open: [], due: T(it.need_date) || null }];
+  return { company: COMPANY(env), expertName: ex.label || ex.name, family: "max", must: [],
+    items: items.map((x) => ({ title: x.title, qty: x.qty, unit: x.unit, spec: x.spec, fixed: x.fixed, open: x.open, due: x.due })) };
+}
+/** نامِ تأمین‌کنندگانِ فهرست‌های دعوتِ ارجاعِ این قلم — سنجشِ افشای متنِ قالب پیش از ذخیره (first-msg.js:tplCheck) */
+export async function tplNames(env, ex, itemId) {
+  const it = await env.DB.prepare("SELECT i.assignment_id AS aid, a.expert_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=?").bind(int(itemId)).first();
+  if (!it || !ex || it.expert_id !== ex.id) return [];
+  const rows = (await env.DB.prepare("SELECT pick_json FROM items WHERE assignment_id=? AND pick_json IS NOT NULL").bind(it.aid).all()).results || [];
+  return [...new Set(rows.flatMap((r) => ((parse(r.pick_json, {}) || {}).list || []).map((e) => e.name)).filter(Boolean))];
 }
 const normConfirmedRow = (it) => { const n = parse(it && it.norm_json, null); return !!(n && T(n.head) && n.source !== "ai"); };
 
@@ -454,6 +512,8 @@ export async function startItem(env, ex, itemId) {
   }
   if (m.mode === "handoff" && !more) resetToDefault(pick);
   const go = startCheck(pick, m.mode, { cap: cfg.maxInvites, more });
+  /* «✉️ پیام اول»: ردیفِ تازه‌ای که قالبش با ردیفِ بالایی فرق دارد بی علت سپرده نمی‌شود (درخواست مالک، مهر ۱۴۰۵) */
+  await fmGate(env, ex, it, pick, go);
   if (!more && run) {
     const n = (parse(run.data_json, {}).items || []).length;
     if (n >= cfg.maxItems) throw new HttpError(`کارِ این درخواست به سقفِ ${faN(cfg.maxItems)} قلم رسیده (پنل پشتیبانی).`, 409);
@@ -929,10 +989,11 @@ async function firstText(env, run, ex, inv, items) {
   /* نامِ دیگر گیرندگانِ همین کار — هرگز در پیام (فهرست‌های دعوتِ اقلامِ این ارجاع) */
   const others = ((await env.DB.prepare("SELECT pick_json FROM items WHERE assignment_id=? AND pick_json IS NOT NULL").bind(run.assignment_id).all()).results || [])
     .flatMap((r) => ((parse(r.pick_json, {}) || {}).list || []).map((e) => e.name)).filter((n) => C.nkey(n) !== k);
-  /* گونهٔ متن همان پیش‌نمایشِ کادر: جایگاهِ این تأمین‌کننده میانِ تیک‌خورده‌های قلمِ نخست */
+  /* گونهٔ متن همان پیش‌نمایشِ کادر: جایگاهِ این تأمین‌کننده میانِ تیک‌خورده‌های قلمِ نخست، با همان قالب‌های فعالِ کارشناس */
   const on = ((parse(rows[0].pick_json, {}) || {}).list || []).filter((e) => e.on);
   const idx = Math.max(0, on.findIndex((e) => e.k === k));
-  const r = await fmTextFor(env, { aid: run.assignment_id, expert: ex, supplier: inv.name, k, items: ctx.items, ctx, otherNames: others, idx, company: COMPANY(env) });
+  const lib = await tplLib(env, ex.id, ctx.family);
+  const r = await fmTextFor(env, { aid: run.assignment_id, expert: ex, supplier: inv.name, k, ctx, lib, otherNames: others, idx, company: COMPANY(env) });
   if (r.block.length) { console.error("first-msg blocked", inv.name, r.block.join(" | ")); return null; }
   return r.text;
 }

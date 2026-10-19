@@ -49,7 +49,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime, tplCtx, tplNames } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, aiResearchLocked, aiRejected, aiRevStmt, AI_LOCK_MSG, AI_QUOTE_MSG, AI_LIVE_MSG, AI_ASK_SQL, AI_OWNED_SQL } from "./ai-lock.js";
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
@@ -66,7 +66,8 @@ import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
 import { GUARD_DDL, ipOf, windowOf, failCountStmt, blockedError, recordFail, guardOpen, codeChangeOpen, codeChangeConflict } from "./auth-guard.js";
 import { CR02_DDL } from "./cr-data.js";
-import { FM_DDL } from "./first-msg.js";
+import { FM_DDL, FM_COLUMNS, stdList, tplCheck } from "./first-msg.js";
+import { TPL_DDL, TPL_COLUMNS, TEMPLATE_TOKENS } from "./templates.js";
 import { DOC_DDL } from "./strategy-doc.js";
 import { TURN_DDL } from "./turn-engine.js";
 import { crRoute, crSupportRoute } from "./cr-api.js";
@@ -261,6 +262,7 @@ ${STRUCT_DDL.trim()}
 ${GUARD_DDL.trim()}
 ${CR02_DDL.trim()}
 ${FM_DDL};
+${TPL_DDL};
 ${DOC_DDL.trim()}
 ${TURN_DDL.trim()}
 ${QUOTE_EDITS_DDL};
@@ -392,6 +394,9 @@ const COLUMN_MIGRATIONS = [
      از /sp/x/inbox می‌فهمند) و لحظهٔ «✋ دستی» شدن (گفت‌وگویی که کارشناس بعد از آن خودش پیش برد، با «🤖» دستِ خودش می‌ماند — ai-agent.js:aiModeSet) */
   ["ai_agents", "rev", "INTEGER NOT NULL DEFAULT 0"],
   ["ai_agents", "off_at", "INTEGER"],
+  /* «📚 قالب‌های پیام» (مهر ۱۴۰۵): «فعال»ِ قالبِ کارشناس در گزینه‌های «✉️ پیام اول» (پیش‌فرض ۱) و علتِ ردیفِ متفاوت (first-msg.js) */
+  ...TPL_COLUMNS,
+  ...FM_COLUMNS,
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -602,6 +607,8 @@ async function deleteRequests(env, ids) {
     /* نتیجهٔ کمیسیون و پیام‌های تشکرِ همان اقلام (commission-result.js) — شناسهٔ قلمِ حذف‌شده دوباره داده می‌شود */
     env.DB.prepare(`DELETE FROM commission_notes WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
     env.DB.prepare(`DELETE FROM commission_results WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
+    /* انتخاب‌ها و علت‌های «✉️ پیام اول» — شناسهٔ ارجاع دوباره داده می‌شود و ارجاعِ تازه نباید قالب و علتِ قدیمی را به ارث ببرد */
+    env.DB.prepare(`DELETE FROM fm_choice WHERE assignment_id IN (${inAsg})`).bind(...args),
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),
@@ -1761,9 +1768,24 @@ async function commission(env, ex, aid) {
 /* ------------------------------------------------------------------ */
 /* مشترک: کانال‌ها، قالب‌ها، امتیازها                                     */
 /* ------------------------------------------------------------------ */
-async function templatesList(env, who) {
+/**
+ * «📚 قالب‌های پیام»: قالب‌های کارشناس (خودش و مشترک)، «قالب‌های آماده»ی «✉️ پیام اول» (فقط‌خواندنی، برای «کپی برای ویرایش»)، همهٔ
+ * جای‌خالی‌ها، و با item_id زمینهٔ پرکردنِ همان قلم برای پیش‌نمایش و «پیام»ِ جستجوی هوشمند (ai-agent.js:tplCtx)
+ */
+async function templatesList(env, who, itemId) {
   const rows = (await env.DB.prepare("SELECT * FROM templates WHERE expert_id IS NULL OR expert_id=? ORDER BY id").bind(who.expert ? who.expert.id : -1).all()).results || [];
-  return { templates: rows };
+  const ctx = who.expert && itemId ? await tplCtx(env, who.expert, itemId).catch(() => null) : null;
+  return { templates: rows, std: stdList(), tokens: TEMPLATE_TOKENS, ctx };
+}
+/**
+ * سنجشِ افشای متنِ قالب پیش از ذخیره (first-msg.js:tplCheck): قالب برای همه می‌رود — نامِ تأمین‌کنندگانِ فهرست‌های دعوتِ همین ارجاع
+ * (با item_id)، شمارِ پیشنهادها، واژه‌های درونی و تعهد ← ۴۲۲. هشدارها (فوریت) برمی‌گردند.
+ */
+async function templateCheck(env, who, b) {
+  const names = who.expert && int(b && b.item_id) ? await tplNames(env, who.expert, int(b.item_id)) : [];
+  const c = tplCheck(T(b && b.body), names);
+  if (c.block.length) throw new HttpError(`این قالب ذخیره نشد: ${c.block.join("، ")}. قالب برای همهٔ گیرندگان می‌رود — نامِ گیرنده را با {تامین‌کننده} بگذارید و متنِ مخصوصِ یک نفر را با «✏️ ویرایشِ متن»ِ همان ردیف بنویسید.`, 422, { block: c.block });
+  return c;
 }
 async function scoresGet(env) {
   const scores = (await env.DB.prepare("SELECT * FROM expert_scores").all()).results || [];
@@ -2652,9 +2674,9 @@ async function route(request, env, ctx) {
       try { return json({ ok: true, phone: T(b.phone), channels: await setPhoneChannel(env, who.expert ? who.expert.id : null, T(b.phone), T(b.platform), T(b.state)) }); }
       catch (e) { throw new HttpError(e.message, e.status || 400); }
     }
-    if (path === "/templates" && m === "GET") { const who = await requireAny(request, env); return json(await templatesList(env, who)); }
-    if (path === "/templates" && m === "POST") { const who = await requireAny(request, env); const b = await readJson(request); const r = await env.DB.prepare("INSERT INTO templates (expert_id,title,body,created_at) VALUES (?,?,?,?)").bind(b.shared && who.role === "manager" ? null : (who.expert ? who.expert.id : null), T(b.title) || "بدون عنوان", T(b.body), now()).run(); return json({ ok: true, id: r.meta.last_row_id }); }
-    if ((mm = /^\/templates\/(\d+)$/.exec(path)) && m === "PUT") { const who = await requireAny(request, env); const b = await readJson(request); await env.DB.prepare("UPDATE templates SET title=?, body=? WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(T(b.title) || "بدون عنوان", T(b.body), int(mm[1]), who.expert ? who.expert.id : -1).run(); return json({ ok: true }); }
+    if (path === "/templates" && m === "GET") { const who = await requireAny(request, env); return json(await templatesList(env, who, int(url.searchParams.get("item_id")))); }
+    if (path === "/templates" && m === "POST") { const who = await requireAny(request, env); const b = await readJson(request); const c = await templateCheck(env, who, b); const r = await env.DB.prepare("INSERT INTO templates (expert_id,title,body,created_at) VALUES (?,?,?,?)").bind(b.shared && who.role === "manager" ? null : (who.expert ? who.expert.id : null), T(b.title) || "بدون عنوان", T(b.body), now()).run(); return json({ ok: true, id: r.meta.last_row_id, warn: c.warn }); }
+    if ((mm = /^\/templates\/(\d+)$/.exec(path)) && m === "PUT") { const who = await requireAny(request, env); const b = await readJson(request); const c = await templateCheck(env, who, b); await env.DB.prepare("UPDATE templates SET title=?, body=? WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(T(b.title) || "بدون عنوان", T(b.body), int(mm[1]), who.expert ? who.expert.id : -1).run(); return json({ ok: true, warn: c.warn }); }
     if ((mm = /^\/templates\/(\d+)$/.exec(path)) && m === "DELETE") { const who = await requireAny(request, env); await env.DB.prepare("DELETE FROM templates WHERE id=? AND (expert_id=? OR (expert_id IS NULL AND ?=1))").bind(int(mm[1]), who.expert ? who.expert.id : -1, who.role === "manager" ? 1 : 0).run(); return json({ ok: true }); }
 
     /* --- زیرساخت اتصال‌های خارجی (مرحلهٔ بعد) --- */

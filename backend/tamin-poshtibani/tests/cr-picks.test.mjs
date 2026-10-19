@@ -211,6 +211,11 @@ test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده
   assert.notEqual(rows[0].text, rows[1].text, "دو گیرندهٔ پیاپی متنِ یکسان نمی‌گیرند");
   assert.ok(rows.every((x) => !x.block.length));
   assert.ok(g.data.templates.some((t) => t.key === "std:max:1") && g.data.templates.some((t) => t.key === "std:cautious:2"));
+  /* «📚 قالب‌های پیام»: آماده‌های همین خانواده (محتاط) فعال‌اند و بقیه خاموش؛ گونه‌های خودکارِ متن «فرق» نیستند — علتی لازم نیست */
+  assert.ok(g.data.templates.filter((t) => t.family === "cautious").every((t) => t.active) && g.data.templates.filter((t) => t.std && t.family !== "cautious").every((t) => !t.active));
+  assert.equal(g.data.def_eff, "std:cautious:1");
+  assert.ok(rows.every((x) => !x.diff && x.eff === "std:cautious:1"), "همه همان پیش‌فرض‌اند، با گونه‌های متفاوت");
+  assert.deepEqual(g.data.missing, []);
   /* متنِ دستیِ یک تأمین‌کننده با نامِ دیگری ← ۴۲۲ */
   const other = rows[1].name;
   const bad = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { per: { [rows[0].k]: { body: `سلام؛ ${other} هم قیمت داده است.` } } } });
@@ -225,15 +230,27 @@ test("«✉️ پیام اول»: پیش‌نمایشِ هر تیک‌خورده
   const von = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { variation: true } });
   assert.equal(von.data.var_off, null);
   assert.notEqual(von.data.rows[0].text, von.data.rows[1].text);
-  /* متنِ دستیِ درست و قالبِ پیش‌فرضِ درخواست */
-  const okp = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { def: "std:max:2", per: { [rows[0].k]: { body: "سلام؛ قیمتِ پیچ M10 را بفرمایید. پاسخ‌ها را دستیار هوشمند خرید ما می‌دهد." } } } });
+  /* متنِ دستیِ درست و قالبِ پیش‌فرضِ درخواست — آمادهٔ «گسترده» در درخواستِ محتاط خاموش است: اول روشن، بعد انتخاب‌شدنی */
+  assert.equal((await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { def: "std:max:2" } })).status, 422, "قالبِ خاموش انتخاب نمی‌شود");
+  const okp = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { active: { "std:max:2": true }, def: "std:max:2", per: { [rows[0].k]: { body: "سلام؛ قیمتِ پیچ M10 را بفرمایید. پاسخ‌ها را دستیار هوشمند خرید ما می‌دهد." } } } });
   assert.equal(okp.status, 200, JSON.stringify(okp.data));
   assert.equal(okp.data.def, "std:max:2");
   assert.equal(okp.data.rows.find((x) => x.k === rows[0].k).custom, true);
   assert.match(okp.data.rows.find((x) => x.k === rows[0].k).text, /پیچ M10 را بفرمایید/);
+  /* قاعدهٔ علت: ردیفِ اول (متنِ دستی) با پیش‌فرض فرق دارد و ردیفِ دوم با برگشت به پیش‌فرض با ردیفِ اول؛ بقیه همان ردیفِ بالایی‌اند */
+  assert.deepEqual(okp.data.missing.map((x) => x.k), [rows[0].k, rows[1].k]);
+  assert.deepEqual(okp.data.rows.map((x) => x.diff), [true, true, false, false]);
   /* «🚀 شروع»: کارشناس هوشمند به دو تیک‌خوردهٔ با شمارهٔ پنل همان متنِ پیش‌نمایش را می‌فرستد */
   const want = okp.data.rows.slice(0, 2);
   for (const [i, x] of want.entries()) assert.equal((await call("/sp/x/phones", { headers: EX, body: { supplier_name: x.name, phone: `0912000020${i}`, label: "فروش", panel: true } })).status, 200);
+  const pv = await call("/items/61/invite-preview", { headers: EX });
+  assert.deepEqual(pv.data.fm_missing.map((x) => x.k), [rows[0].k, rows[1].k], "کادرِ شروع پیش از تأیید می‌گوید");
+  const s0 = await call("/items/61/ai-start", { headers: EX, body: {} });
+  assert.equal(s0.status, 409, "بی علت سپرده نمی‌شود");
+  assert.deepEqual(s0.data.need_fm_why.map((x) => x.k), [rows[0].k, rows[1].k]);
+  const w = await call("/items/61/first-msg", { method: "PUT", headers: EX, body: { why: { [rows[0].k]: "تأمین‌کنندهٔ اصلی است و پیامِ کوتاه می‌خواهد", [rows[1].k]: "برگشت به پیام آماده" } } });
+  assert.deepEqual(w.data.missing, []);
+  assert.equal(w.data.rows[0].why, "تأمین‌کنندهٔ اصلی است و پیامِ کوتاه می‌خواهد");
   const s = await call("/items/61/ai-start", { headers: EX, body: {} });
   assert.equal(s.status, 200, JSON.stringify(s.data));
   assert.ok(await tickUntil(() => threadsOf(3).length >= 2), JSON.stringify(threadsOf(3)));

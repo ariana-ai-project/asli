@@ -48,12 +48,13 @@ import { MARKETS, MAX_MARKETS, smartSearch, searchById } from "./discovery.js";
 import { TEMPLATE_TOKENS, ensureTemplates, listTemplates, ownTemplate, fillTemplate } from "./templates.js";
 import { seenKb, delegateAssignment, teamOf, TEAM_SIZE_SQL } from "./assign.js";
 import { handleTeamCallback, sendTeamMenu, seniorOfChat, teamMenuKb } from "./team.js";
-import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone } from "./sp-core.js";
+import { spSend, normPhone, phonesOfName, DEMO, expertLink, corrLink, maskPhone, COMPANY } from "./sp-core.js";
 import { overrides, srcMap, SRC_FA, PLACEHOLDER_SRC } from "./quote-src.js";
 import { pushMsgs as spPush, appUrl as spAppUrl } from "./sp-push.js";
 import { deliverSms as smsDeliver } from "./sp-sms.js";
 import { BIDI } from "./sms.js";
-import { aiTick, propDecide } from "./ai-agent.js";
+import { aiTick, propDecide, tplCtx } from "./ai-agent.js";
+import { tplCheck } from "./first-msg.js";
 import { usdDaily, usdSlot } from "./usd.js";
 import { aiOwned, aiQuote, aiResearchLocked, AI_LOCK_MSG, AI_QUOTE_MSG } from "./ai-lock.js";
 import { aiEndLocked } from "./ai-modes.js";
@@ -2577,6 +2578,14 @@ async function tplNav(env, ex, ctx, back) {
   return [[{ text: "↩️ بازگشت", callback_data: back }], it ? navRow(it.aid) : [KARTABL_BTN]];
 }
 const tokensLine = () => TEMPLATE_TOKENS.map((t) => `<code>{${t}}</code>`).join(" ");
+/**
+ * متنِ قالب برای یک قلم و تأمین‌کننده — همان msg-fill.mjsِ پنل و «✉️ پیام اول» با زمینهٔ کاملِ قلم (ai-agent.js:tplCtx: لایه‌های
+ * 🔒/🔓، شرایطِ خرید و تاریخِ تحویل)؛ اگر زمینه نشد، فقط خودِ قلم.
+ */
+async function tplText(env, ex, tpl, it, supplier) {
+  const ctx = it && it.id ? await tplCtx(env, ex, it.id).catch(() => null) : null;
+  return fillTemplate(tpl.body, { supplier, item: it, expertName: ex.label || ex.name, company: COMPANY(env), ctx });
+}
 
 /** انتخاب قالب برای یک تأمین‌کنندهٔ نتیجهٔ جستجو (sg:p) */
 async function templatePick(env, api, chat, ex, sr, i, s2, mid, itemId) {
@@ -2590,7 +2599,7 @@ async function templatePick(env, api, chat, ex, sr, i, s2, mid, itemId) {
 
 async function templateList(env, api, chat, ex, ctx, mid, head) {
   const tpls = await ensureTemplates(env, ex.id, env.COMPANY);
-  const list = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}\n   <i>${esc(short(t2.body.replace(/\s+/g, " "), 70))}</i>`).join("\n");
+  const list = tpls.map((t2, k) => `${M(k + 1)}. <b>${esc(t2.title)}</b>${t2.expert_id == null ? " <i>(مشترک)</i>" : ""}${t2.active === 0 ? " <i>(در «✉️ پیام اول» خاموش)</i>" : ""}\n   <i>${esc(short(t2.body.replace(/\s+/g, " "), 70))}</i>`).join("\n");
   const kb = tpls.slice(0, 20).map((t2) => [{ text: `📄 ${short(t2.title, 30)}`, callback_data: `tp:v:${t2.id}${ctx || ""}` }]);
   kb.push([{ text: "➕ قالب جدید", callback_data: `tp:new:0${ctx || ""}` }]);
   /* بازگشت: از نتیجهٔ جستجو ← انتخاب قالب همان تأمین‌کننده؛ از /ghaleb ← راهنمای بات */
@@ -2624,6 +2633,11 @@ const bodyPrompt = (title) => `📝 <b>متن قالب «${esc(title)}»</b> ر�
 
 async function onTemplateText(env, api, chat, ex, f, d, text) {
   if (text.length > 2000) { await api.sendMessage(chat, "خیلی بلند است؛ کوتاه‌ترش کنید.").catch(() => {}); return { ok: true }; }
+  /* همان سنجشِ افشای پنل (first-msg.js:tplCheck): قالب برای همه می‌رود — واژهٔ درونی، شمارِ پیشنهادها و تعهد نه؛ گفت‌وگو باز می‌ماند تا متنِ درست بیاید */
+  if (f.step === "need_body" || f.step === "edit_body") {
+    const c = tplCheck(text);
+    if (c.block.length) { await api.sendMessage(chat, `⛔ این متن ذخیره نشد: ${esc(c.block.join("، "))}.\nمتنِ دیگری بفرستید؛ برای نامِ گیرنده <code>{تامین‌کننده}</code> را بگذارید.`).catch(() => {}); return { ok: true }; }
+  }
   const t = now();
   if (f.step === "need_title") {
     d.title = short(text, 80);
@@ -2756,7 +2770,7 @@ async function spSendConfirm(env, api, chat, ex, f, d, mid) {
   if (!it || !tpl) { await api.sendMessage(chat, "این قلم یا قالب دیگر در دسترس نیست.").catch(() => {}); return { ok: true }; }
   const name = d.demo ? DEMO.name : d.name;
   const o = d.demo ? { phone: DEMO.phone, label: DEMO.label } : d.opts[d.sel];
-  const text = fillTemplate(tpl.body, { supplier: name, item: it, expertName: ex.name });
+  const text = await tplText(env, ex, tpl, it, name);
   return show(api, chat, mid, `📨 <b>ارسال به ${esc(name)}</b>\n📞 ${esc(o.phone)} (${esc(o.label || "—")})\n📦 ${esc(it.title)} — ${M(it.qty)} ${esc(it.unit || "")}\n`
     + "🔒 لایه‌های ویژگی همین قلم قفل‌شده برایش می‌رود؛ مقدار، واحد و قیمت واحد را خودش پر می‌کند.\n\n"
     + `متن پیام:\n<blockquote>${esc(text)}</blockquote>`,
@@ -2774,7 +2788,7 @@ async function spSendGo(env, api, chat, ex, f, d, mid) {
   try {
     r = await spSend(env, ex, {
       assignment_id: it.aid, item_ids: [it.id], demo: !!d.demo, supplier_name: d.name,
-      text: fillTemplate(tpl.body, { supplier: d.demo ? DEMO.name : d.name, item: it, expertName: ex.name }),
+      text: await tplText(env, ex, tpl, it, d.demo ? DEMO.name : d.name),
       ...(o && o.id ? { phone_id: o.id } : { phone: o && o.phone }), label: o && o.label,
     });
   } catch (e) { await api.sendMessage(chat, `⚠️ ${esc(e.message)}`).catch(() => {}); return { ok: true }; }
@@ -3524,9 +3538,8 @@ async function onCallback(env, cq, apiIn) {
       const s2 = sup[i];
       const tpl = await ownTemplate(env, ex.id, tplId);
       if (!s2 || !tpl) { await ack("پیدا نشد.", true); return { ok: true }; }
-      const itRow = sit;
       await ack();
-      const text = fillTemplate(tpl.body, { supplier: s2.name, item: itRow, expertName: ex.name });
+      const text = await tplText(env, ex, tpl, sit, s2.name);
       /* همان «کپی پیام» پنل: دکمهٔ کپیِ تلگرام متن را عیناً در کلیپ‌بورد می‌گذارد (سقف ۲۵۶ نویسه)؛
          متن بلندتر با لمسِ بلوکِ <code> کپی می‌شود. */
       const kb = [];

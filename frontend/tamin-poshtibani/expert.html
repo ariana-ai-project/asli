@@ -304,6 +304,12 @@ ok=busy?0:ok+1;if(ok>1)return done();setTimeout(p,80)})()}})();</script>
     TP.rules = { ...rules, HEAD_RULES };
     TP.canon = canon;
   </script>
+  <script type="module">
+    /* جای‌خالی‌ها و پرکردنِ قالب‌های پیام — همان که Worker برای «✉️ پیام اول»، جستجوی هوشمند و بات می‌خواند (اسکریپتِ جدا: اگر
+       نیامد، قواعدِ بالا سالم می‌مانند و پنل با پرکردنِ ساده کار می‌کند) */
+    import * as msg from "./msg-fill.mjs";
+    (window.TP = window.TP || {}).msg = msg;
+  </script>
   <script src="help-content.js"></script>
   <script src="ui.js"></script>
   <script src="ui-kit.js"></script>

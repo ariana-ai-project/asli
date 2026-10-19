@@ -50,7 +50,7 @@
     teamCard: "all",                       // کارتِ انتخاب‌شده در تب تیم: شناسهٔ کارشناس یا "all"
     teamOpen: {},                          // کشوی اقلام هر درخواست در تب تیم
     marketsMeta: [{ key: "IR", fa: "ایران" }, { key: "TJ", fa: "تاجیکستان" }, { key: "TM", fa: "ترکمنستان" }, { key: "UZ", fa: "ازبکستان" }, { key: "KZ", fa: "قزاقستان" }, { key: "AM", fa: "ارمنستان" }, { key: "CN", fa: "چین" }, { key: "AE", fa: "امارات" }, { key: "TR", fa: "ترکیه" }],
-    templates: [], tpl: 0,
+    templates: [], tpl: 0, tplCtx: {},   /* قالب‌های پیام و زمینهٔ پرکردنِ هر قلم (/templates?item_id) */
     hist: {}, smart: {}, series: {},   // پاسخ endpointها برای هر قلم؛ series = نقاط نمودار
     picks: {}, pickOpen: {},           // فاز ۴ب گام ۲: «🎯 فهرست دعوت»ِ هر قلم (/items/:id/picks) و قلمِ «مستقیم»ی که کارشناس می‌خواهد بسپارد
     pkWarn: {}, pkMsg: {}, pkBusy: {}, // «🧭 چینش گسترده / محتاط»ِ هر قلم: هشدارِ تیکِ دستی، خطِ نتیجه و چیدنِ در جریان
@@ -915,65 +915,142 @@
     pkStratPaint = paint;
     paint();
   }
-  /* «✉️ پیام اول» (سند طراحی، بخش ۱؛ تصمیم‌های ۱ و ۶): قالبِ پیش‌فرضِ درخواست، قالب یا متنِ جدا برای هر تیک‌خورده و پیش‌نمایشِ
-     همان متنی که «🚀 شروع» می‌فرستد؛ متنی که نامِ دیگران یا شمارِ پیشنهادها را لو بدهد ذخیره نمی‌شود (worker/first-msg.js) */
-  async function pkFmUI(it) {
+  /* «✉️ پیام اول» (سند طراحی، بخش ۱؛ تصمیم‌های ۱ و ۶؛ درخواست مالک، مهر ۱۴۰۵): «پیش‌فرض برای همه» بالای فهرست و برای هر
+     تیک‌خورده (به ترتیبِ «🎯 فهرست دعوت») همان پیش‌فرض، قالبِ دیگر یا «✏️ ویرایشِ متن» — فقط قالب‌های فعالِ «📚 قالب‌های پیام»
+     گزینه‌اند. قاعدهٔ علت: از ردیفِ اول به پایین، ردیفی که قالبش با ردیفِ بالایی فرق دارد (ردیفِ اول با پیش‌فرض؛ برگشت به پیش‌فرض
+     هم) علت می‌خواهد و بی آن «✅ تأیید … 🚀 شروع» جلو نمی‌رود — سرور هم با ۴۰۹ نگه می‌دارد؛ گونه‌های خودکارِ متن فرق نیستند. متنی
+     که نامِ دیگران یا شمارِ پیشنهادها را لو بدهد ذخیره نمی‌شود (worker/first-msg.js). o.tried: از کادرِ شروع آمده‌ایم — بی‌علت‌ها
+     همان اول سرخ‌اند. */
+  async function pkFmUI(it, o = {}) {
     const b = TP.busy("✉️ پیام اول", esc(it.title));
     let d;
     try { d = await TP.api(`/items/${it.id}/first-msg`); } catch (e) { b.close(); return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     b.close();
-    const ed = {};   /* ردیف‌هایی که متنشان در حالِ ویرایشِ دستی است: k ← متن */
+    const ed = {};             /* ردیف‌هایی که متنشان در حالِ ویرایشِ دستی است: k ← متن */
+    const why = {};            /* علت‌های نوشته‌شده: k ← متن (با هر ذخیره و با بستن می‌روند) */
+    const opened = new Set();  /* ردیف‌هایی که متنِ پیامشان باز است */
+    let tried = !!o.tried;
     /* دکمهٔ اصلی همین‌جاست: «✅ تأیید پیام و 🚀 شروع» همان کادرِ شروع را با پیش‌نمایش باز می‌کند (پیش از شروع یا با انتخابِ تازه) */
     const P0 = S.picks[it.id], canGo = !!(P0 && P0.list && (!P0.started_at || P0.fresh));
-    const m = TP.modal(`✉️ پیام اول — ${esc(it.title)}`, `<div data-fm></div>`, canGo ? () => pkStartUI(it) : null,
+    const m = TP.modal(`✉️ پیام اول — ${esc(it.title)}`, `<div data-fm></div>`, null,
       canGo ? (P0.started_at ? "✅ تأیید پیام‌ها و دعوت…" : "✅ تأیید پیام و 🚀 شروع…") : "بستن", canGo ? "بستن" : "");
     m.querySelector(".tp-modal").classList.add("fm-modal");
     const box = m.querySelector("[data-fm]");
-    /* متنی که در حالِ ویرایش است و ذخیره نشده، با «تأیید» گم نمی‌شود */
-    const yes = m.querySelector("[data-y]");
-    if (canGo && yes) yes.onclick = () => {
-      if (box.querySelector("[data-fm-body]")) { const n = box.querySelector("[data-fm-msg]"); if (n) n.innerHTML = `<div class="tp-note warn" style="margin:6px 0">متنی در حالِ ویرایش است؛ اول «ذخیرهٔ متن» یا «انصراف» را بزنید.</div>`; return; }
-      m.remove(); pkStartUI(it);
+    const note = (h) => { const n = box.querySelector("[data-fm-msg]"); if (n) n.innerHTML = h || ""; };
+    const warnH = (t) => `<div class="tp-note warn" style="margin:6px 0">${t}</div>`;
+    const missH = () => (tried && (d.missing || []).length ? warnH(`برای ${d.missing.map((x) => `«${esc(x.name)}»`).join("، ")} علت بنویسید؛ قالبشان با ردیفِ بالایی فرق دارد (ردیفِ اول با پیش‌فرض).`) : "");
+    const keep = () => {
+      box.querySelectorAll("[data-fm-body]").forEach((ta) => { ed[ta.dataset.fmBody] = ta.value; });
+      box.querySelectorAll("[data-fm-why]").forEach((x) => { why[x.dataset.fmWhy] = x.value; });
     };
-    const opts = (sel) => {
-      const g = (std) => (d.templates || []).filter((t) => !!t.std === std).map((t) => `<option value="${esc(t.key)}" ${sel === t.key ? "selected" : ""}>${esc(t.title)}</option>`).join("");
-      const own = g(false);
-      return `<optgroup label="استاندارد">${g(true)}</optgroup>${own ? `<optgroup label="قالب‌های پیام">${own}</optgroup>` : ""}`;
+    /** علت‌هایی که با نسخهٔ ذخیره‌شده فرق دارند */
+    const pending = () => {
+      const p = {};
+      for (const [k, v] of Object.entries(why)) { const r = (d.rows || []).find((x) => x.k === k); if (r && String(v).trim() !== (r.why || "")) p[k] = String(v).trim(); }
+      return p;
     };
+    /** هر ذخیره علت‌های نوشته‌شده را هم می‌برد */
+    async function put(body) {
+      const p = pending();
+      d = await TP.api(`/items/${it.id}/first-msg`, { method: "PUT", body: Object.keys(p).length ? { ...body, why: { ...p, ...(body.why || {}) } } : body });
+      for (const k of Object.keys(p)) delete why[k];
+      return d;
+    }
     async function save(body, ok) {
-      try { d = await TP.api(`/items/${it.id}/first-msg`, { method: "PUT", body }); if (ok) ok(); paint(); }
+      keep();
+      try { await put(body); if (ok) ok(); paint(); }
       catch (e) {
-        const n = box.querySelector("[data-fm-msg]"); if (n) n.innerHTML = `<div class="tp-note warn" style="margin:6px 0">⛔ ${esc(e.message)}</div>`;
+        note(warnH(`⛔ ${esc(e.message)}`));
         const k = e.data && e.data.k, row = k && [...box.querySelectorAll("[data-fmk]")].find((x) => x.dataset.fmk === k); if (row) row.classList.add("bad");
       }
     }
+    /* بستن علت‌های نوشته‌شده را گم نمی‌کند */
+    const flush = () => { keep(); const p = pending(); if (Object.keys(p).length) TP.api(`/items/${it.id}/first-msg`, { method: "PUT", body: { why: p } }).catch(() => {}); };
+    const nb = m.querySelector("[data-n]"); if (nb) nb.onclick = () => { flush(); m.remove(); };
+    m.onclick = (e) => { if (e.target === m) { flush(); m.remove(); } };
+    /* «تأیید»: متنِ در حالِ ویرایش اول ذخیره یا رها شود؛ علت‌ها ذخیره و قاعدهٔ علت سنجیده می‌شود */
+    m.querySelector("[data-y]").onclick = async () => {
+      if (!canGo) { flush(); m.remove(); return; }
+      if (box.querySelector("[data-fm-body]")) return note(warnH("متنی در حالِ ویرایش است؛ اول «ذخیرهٔ متن» یا «انصراف» را بزنید."));
+      keep();
+      if (Object.keys(pending()).length) { try { await put({}); } catch (e) { return note(warnH(`⛔ ${esc(e.message)}`)); } }
+      if ((d.missing || []).length) {
+        tried = true; paint();
+        const r0 = box.querySelector(".fm-row.need"); if (r0) { r0.scrollIntoView({ block: "center", behavior: "smooth" }); const x = r0.querySelector("[data-fm-why]"); if (x) x.focus(); }
+        return;
+      }
+      m.remove(); pkStartUI(it);
+    };
+    const tplOf = (k) => (d.templates || []).find((t) => t.key === k);
+    /* فقط قالب‌های فعال؛ انتخابِ پیشینی که بعداً خاموش شده همان‌جا با «غیرفعال» می‌ماند تا بی‌صدا عوض نشود */
+    const opts = (sel) => {
+      const pool = (d.templates || []).filter((t) => t.active || t.key === sel);
+      const g = (std, lab) => {
+        const h = pool.filter((t) => !!t.std === std).map((t) => `<option value="${esc(t.key)}" ${sel === t.key ? "selected" : ""}>${esc(t.title)}${t.active ? "" : " — غیرفعال"}</option>`).join("");
+        return h ? `<optgroup label="${lab}">${h}</optgroup>` : "";
+      };
+      return g(true, "قالب‌های آماده") + g(false, "قالب‌های من");
+    };
+    /* «👁 متن»ِ پیش‌فرض: متنِ نخستین ردیفی که همان را می‌گیرد، وگرنه همان قالب با دادهٔ این درخواست */
+    const peek = () => {
+      const r = (d.rows || []).find((x) => !x.custom && x.eff === d.def_eff), t = tplOf(d.def_eff);
+      const txt = r ? r.text : t ? (TP.msg ? TP.msg.fillMsg(t.body, { ...(d.ctx || {}), supplier: "«تأمین‌کننده»" }) : t.body) : "";
+      TP.modal(`👁 ${esc(t ? t.title : "پیش‌فرض")}`, `<pre class="fm-text" style="max-height:52vh">${esc(txt)}</pre>${r ? `<div class="dim" style="font-size:.8rem;margin-top:6px">نمونهٔ «${esc(r.name)}»${d.variation && !d.var_off ? "؛ گیرندگانِ دیگر گونهٔ دیگری از همین متن را می‌گیرند" : ""}.</div>` : ""}`, null, "بستن", "");
+    };
+    const row = (r, i) => {
+      const editing = ed[r.k] != null;
+      const w = why[r.k] != null ? why[r.k] : r.why || "";
+      const need = !!r.need_why && !String(w).trim();
+      const sel = r.custom ? `<span class="chip info">✏️ متنِ دستی</span>`
+        : `<select class="tp-input" data-fm-tpl="${esc(r.k)}" ${r.go ? "disabled" : ""} aria-label="قالبِ ${esc(r.name)}"><option value="">= پیش‌فرض</option>${opts(r.sel || null)}</select>`;
+      const whyH = r.go ? (r.why ? `<span class="dim fm-same">علت: ${esc(r.why)}</span>` : "")
+        : r.diff ? `<input class="tp-input fm-why" data-fm-why="${esc(r.k)}" value="${esc(w)}" maxlength="300" placeholder="${i ? "چرا با ردیفِ بالایی فرق دارد؟ (اجباری)" : "چرا با پیش‌فرض فرق دارد؟ (اجباری)"}" aria-label="علتِ ${esc(r.name)}">`
+        : `<span class="dim fm-same">همانِ ${i ? "ردیفِ بالایی" : "پیش‌فرض"}</span>`;
+      const used = r.tpl && r.tpl !== "manual" ? tplOf(r.tpl) : null;
+      return `<div class="fm-row ${r.block.length ? "bad" : ""} ${r.diff ? "diff" : ""} ${need && tried ? "need" : ""}" data-fmk="${esc(r.k)}">
+        <div class="toolrow"><span class="fm-n">${M(i + 1)}</span><b>${esc(r.name)}</b>${r.go ? ` <span class="chip ok" title="پیامش رفته است">سپرده شد</span>` : ""}
+          ${sel}
+          <span style="margin-inline-start:auto"></span>
+          ${r.go ? "" : editing ? `<button class="tp-btn xs primary" data-fm-save="${esc(r.k)}">ذخیرهٔ متن</button><button class="tp-btn xs" data-fm-cancel="${esc(r.k)}">انصراف</button>`
+            : `<button class="tp-btn xs" data-fm-edit="${esc(r.k)}">✏️ ویرایشِ متن</button>${r.custom ? `<button class="tp-btn xs" data-fm-reset="${esc(r.k)}" title="متنِ دستی پاک می‌شود و پیش‌فرض می‌رود">↺ برگشت به پیش‌فرض</button>` : ""}`}</div>
+        ${whyH ? `<div class="fm-whyrow">${whyH}</div>` : ""}
+        ${r.block.length ? `<div class="chips" style="margin:4px 0">${r.block.map((x) => `<span class="chip bad" title="این متن نمی‌رود؛ دعوتِ پیشین جایش می‌رود">⛔ ${esc(x)}</span>`).join(" ")}</div>` : ""}
+        ${r.warn.length ? `<div class="chips" style="margin:4px 0">${r.warn.map((x) => `<span class="chip warn">⚠️ ${esc(x)}</span>`).join(" ")}</div>` : ""}
+        ${editing ? `<textarea class="tp-input" data-fm-body="${esc(r.k)}" dir="rtl">${esc(ed[r.k])}</textarea>`
+          : `<details class="fm-det" data-fm-det="${esc(r.k)}" ${opened.has(r.k) || r.block.length ? "open" : ""}><summary>👁 متنِ پیام${used ? ` <span class="dim">— ${esc(used.title)}</span>` : ""}</summary><pre class="fm-text">${esc(r.text)}</pre></details>`}</div>`;
+    };
     function paint() {
-      box.querySelectorAll("[data-fm-body]").forEach((ta) => { ed[ta.dataset.fmBody] = ta.value; });
+      keep();
       const rows = d.rows || [];
       const vary = d.variation ? (d.var_off
         ? ` · متنِ یکسان برای همه <span class="dim">(${esc(d.var_off.by || "")}: «${esc(d.var_off.reason || "")}»)</span> <button class="tp-btn xs" data-fm-var="1">گونه‌ها را برگردان</button>`
         : ` · هر گیرنده گونهٔ دیگری از متن را می‌گیرد <button class="tp-btn xs" data-fm-var="0" title="همه همان یک متن را بگیرند — با دلیل">متنِ یکسان برای همه…</button>`) : "";
-      box.innerHTML = `<div class="dim" style="font-size:.86rem;line-height:1.9">${TP.ui.info("expert.picks", "راهنمای پیام اول")} خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدار با بازهٔ متعارف، نه مقدارِ کامل" : ""}${vary}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
-        <div class="toolrow" style="margin:8px 0;gap:8px;align-items:center;flex-wrap:wrap"><b>قالبِ این درخواست</b>
-          <select class="tp-input" data-fm-def style="min-width:220px;flex:1"><option value="">خودکار (${esc(d.family_fa || "")})</option>${opts(d.def)}</select></div>
-        <div data-fm-msg></div>
-        <div class="fm-box">${rows.map((r) => {
-          const editing = ed[r.k] != null;
-          return `<div class="fm-row ${r.block.length ? "bad" : ""}" data-fmk="${esc(r.k)}">
-            <div class="toolrow"><b>${esc(r.name)}</b>
-              ${r.custom ? `<span class="chip info">✏️ متنِ دستی</span>` : `<select class="tp-input" data-fm-tpl="${esc(r.k)}" style="min-width:170px"><option value="">مثلِ قالبِ درخواست</option>${opts(r.own_tpl ? r.tpl : null)}</select>`}
-              <span style="margin-inline-start:auto"></span>
-              ${editing ? `<button class="tp-btn xs primary" data-fm-save="${esc(r.k)}">ذخیرهٔ متن</button><button class="tp-btn xs" data-fm-cancel="${esc(r.k)}">انصراف</button>`
-                : `<button class="tp-btn xs" data-fm-edit="${esc(r.k)}">✏️ ویرایشِ متن</button>${r.custom ? `<button class="tp-btn xs" data-fm-reset="${esc(r.k)}" title="متنِ دستی پاک می‌شود و قالبِ درخواست می‌رود">↺ برگشت به قالب</button>` : ""}`}</div>
-            ${r.block.length ? `<div class="chips" style="margin:4px 0">${r.block.map((x) => `<span class="chip bad" title="این متن نمی‌رود؛ دعوتِ پیشین جایش می‌رود">⛔ ${esc(x)}</span>`).join(" ")}</div>` : ""}
-            ${r.warn.length ? `<div class="chips" style="margin:4px 0">${r.warn.map((x) => `<span class="chip warn">⚠️ ${esc(x)}</span>`).join(" ")}</div>` : ""}
-            ${editing ? `<textarea class="tp-input" data-fm-body="${esc(r.k)}" dir="rtl">${esc(ed[r.k])}</textarea>` : `<pre class="fm-text">${esc(r.text)}</pre>`}</div>`;
-        }).join("") || `<div class="empty">هنوز تیک‌خورده‌ای نیست.</div>`}</div>`;
-      const Qm = (s) => box.querySelectorAll(s);
-      const defSel = box.querySelector("[data-fm-def]");
-      defSel.onchange = () => save({ def: defSel.value || null });
+      box.innerHTML = `<div class="fm-head"><div class="dim" style="font-size:.86rem;line-height:1.9">${TP.ui.info("expert.picks", "راهنمای پیام اول")} خانوادهٔ پیام: <b>${esc(d.family_fa || "")}</b>${d.family === "cautious" ? " — مقدار با بازهٔ متعارف، نه مقدارِ کامل" : ""}${vary}${(d.must || []).length ? ` · موارد لازم: ${d.must.map(esc).join("، ")}` : ""}</div>
+          <button class="tp-btn sm" data-fm-lib title="قالب‌های من و قالب‌های آماده: ساختن، ویرایش و فعال یا غیرفعال کردن">📚 قالب‌های پیام</button></div>
+        <div class="fm-def"><b>پیش‌فرض برای همه</b><select class="tp-input" data-fm-def aria-label="قالبِ پیش‌فرض">${opts(d.def_eff)}</select>
+          <button class="tp-btn xs" data-fm-peek title="متنِ پیش‌فرض با دادهٔ همین درخواست">👁 متن</button></div>
+        <div data-fm-msg>${missH()}</div>
+        <div class="fm-box">${rows.map(row).join("") || `<div class="empty">هنوز تیک‌خورده‌ای نیست.</div>`}</div>
+        ${rows.length ? `<div class="dim" style="font-size:.78rem;margin-top:8px;line-height:1.8">ردیف‌ها به ترتیبِ «🎯 فهرست دعوت»اند؛ هر ردیفی که قالبش با ردیفِ بالایی فرق دارد (ردیفِ اول با پیش‌فرض) علت می‌خواهد — برگشت به پیش‌فرض هم. «✏️ متنِ دستی» همیشه متفاوت است${d.variation && !d.var_off ? "؛ گونه‌های خودکارِ متن فرق شمرده نمی‌شوند" : ""}.</div>` : ""}`;
+      bind();
+    }
+    function bind() {
+      const Qm = (s) => box.querySelectorAll(s), G1 = (s) => box.querySelector(s);
+      G1("[data-fm-lib]").onclick = () => tplLibUI(it, { fm: () => d, onView: (v) => { d = v; paint(); } });
+      G1("[data-fm-peek]").onclick = peek;
+      const defSel = G1("[data-fm-def]"); defSel.onchange = () => save({ def: defSel.value || null });
       Qm("[data-fm-tpl]").forEach((s) => s.onchange = () => save({ per: { [s.dataset.fmTpl]: s.value ? { tpl: s.value } : null } }));
-      Qm("[data-fm-edit]").forEach((x) => x.onclick = () => { const r = rows.find((y) => y.k === x.dataset.fmEdit); if (r) { ed[r.k] = r.text; paint(); } });
+      Qm("[data-fm-why]").forEach((x) => {
+        x.oninput = () => { why[x.dataset.fmWhy] = x.value; if (x.value.trim()) x.closest(".fm-row").classList.remove("need"); };
+        /* ذخیرهٔ بی‌صدا با ترکِ خانه: فهرست دوباره کشیده نمی‌شود تا فوکوسِ خانهٔ بعدی نپرد */
+        x.onchange = async () => {
+          why[x.dataset.fmWhy] = x.value;
+          if (!Object.keys(pending()).length) return;
+          try { await put({}); note(missH()); } catch (e) { note(warnH(`⛔ ${esc(e.message)}`)); }
+        };
+      });
+      Qm("[data-fm-det]").forEach((x) => x.ontoggle = () => { if (x.open) opened.add(x.dataset.fmDet); else opened.delete(x.dataset.fmDet); });
+      Qm("[data-fm-edit]").forEach((x) => x.onclick = () => { const r = (d.rows || []).find((y) => y.k === x.dataset.fmEdit); if (r) { ed[r.k] = r.text; paint(); } });
       Qm("[data-fm-cancel]").forEach((x) => x.onclick = () => { const ta = [...Qm("[data-fm-body]")].find((t) => t.dataset.fmBody === x.dataset.fmCancel); if (ta) ta.remove(); delete ed[x.dataset.fmCancel]; paint(); });
       Qm("[data-fm-save]").forEach((x) => x.onclick = () => {
         const k = x.dataset.fmSave, ta = [...Qm("[data-fm-body]")].find((t) => t.dataset.fmBody === k);
@@ -984,11 +1061,156 @@
       /* گونه‌های متن (تصمیم ۱): خاموش با دلیل، روشن بی دلیل */
       Qm("[data-fm-var]").forEach((x) => x.onclick = () => {
         if (x.dataset.fmVar === "1") return save({ variation: true });
-        const n = box.querySelector("[data-fm-msg]");
-        n.innerHTML = `<div class="toolrow" style="gap:6px;margin:6px 0;flex-wrap:wrap"><input class="tp-input" data-fm-varwhy placeholder="چرا همه همان یک متن را بگیرند؟ (اجباری)" style="flex:1;min-width:220px"><button class="tp-btn xs primary" data-fm-varok>ثبت</button></div>`;
-        const inp = n.querySelector("[data-fm-varwhy]"); inp.focus();
-        n.querySelector("[data-fm-varok]").onclick = () => save({ variation: false, reason: inp.value });
+        note(`<div class="toolrow" style="gap:6px;margin:6px 0;flex-wrap:wrap"><input class="tp-input" data-fm-varwhy placeholder="چرا همه همان یک متن را بگیرند؟ (اجباری)" style="flex:1;min-width:220px"><button class="tp-btn xs primary" data-fm-varok>ثبت</button></div>`);
+        const inp = box.querySelector("[data-fm-varwhy]"); inp.focus();
+        box.querySelector("[data-fm-varok]").onclick = () => save({ variation: false, reason: inp.value });
       });
+    }
+    paint();
+    /* از کادرِ شروع آمده‌ایم: نخستین ردیفِ بی‌علت پیش چشم و خانهٔ علتش آماده */
+    if (tried) setTimeout(() => { const r0 = box.querySelector(".fm-row.need"); if (r0) { r0.scrollIntoView({ block: "center" }); const x = r0.querySelector("[data-fm-why]"); if (x) x.focus(); } }, 0);
+  }
+  /* «📚 قالب‌های پیام» (درخواست مالک، مهر ۱۴۰۵) — یک کتابخانه برای «✉️ پیام اول»، جستجوی هوشمند و بات: «قالب‌های من» (ساختن،
+     ویرایش و حذف، با دکمه‌های جای‌خالیِ {…} که همان‌جای مکان‌نما می‌نشینند و پیش‌نمایشِ زنده با دادهٔ همین قلم — همان msg-fill.mjsِ
+     سرور) و «قالب‌های آماده»ی پیام اول (فقط‌خواندنی، «کپی برای ویرایش»). از «✉️ پیام اول» (o.fm: نمای همان کادر) کلیدِ «فعال» هم
+     هست: فقط فعال‌ها گزینهٔ پیش‌فرض و ردیف‌ها می‌شوند و دست‌کم یکی فعال می‌ماند؛ خاموش کردنِ قالبی که در همین درخواست انتخاب شده،
+     آن ردیف‌ها را به پیش‌فرض برمی‌گرداند. سرور پیش از ذخیره متن را از نظرِ لو رفتنِ نامِ تأمین‌کنندگان و واژه‌های درونی می‌سنجد. */
+  async function tplLibUI(it, o = {}) {
+    const fm = typeof o.fm === "function" ? o.fm : null;
+    const st = { mode: "", key: "", title: "", body: "", msg: "" };
+    let L = null;
+    const q = () => `/templates${it ? `?item_id=${it.id}` : ""}`;
+    async function load() {
+      if (fm) {
+        const d = fm();
+        L = { list: d.templates || [], tokens: d.tokens || [], ctx: d.ctx || null, who: ((d.rows || [])[0] || {}).name || "" };
+        return;
+      }
+      let r = await TP.api(q());
+      if (!(r.templates || []).length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); r = await TP.api(q()); }
+      S.templates = r.templates || [];
+      if (it) S.tplCtx[it.id] = r.ctx || null;
+      L = { list: [...(r.std || []), ...(r.templates || []).map((t) => ({ key: String(t.id), id: t.id, title: t.title, body: t.body, std: false, own: t.expert_id != null, shared: t.expert_id == null }))],
+        tokens: r.tokens || [], ctx: r.ctx || null, who: "" };
+    }
+    async function refresh() {
+      if (fm) { const v = await TP.api(`/items/${it.id}/first-msg`); if (o.onView) o.onView(v); }
+      await load(); paint();
+    }
+    try { await load(); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
+    const m = TP.modal("📚 قالب‌های پیام", `<div data-tl></div>`, null, "بستن", "");
+    m.querySelector(".tp-modal").classList.add("fm-modal");
+    const box = m.querySelector("[data-tl]");
+    const byKey = (k) => L.list.find((t) => t.key === k);
+    const toks = () => (L.tokens.length ? L.tokens : TP.msg ? TP.msg.TOKENS : ["عنوان قلم", "مقدار", "واحد", "مشخصات فنی", "تامین‌کننده", "نام کارشناس"]);
+    const baseCtx = () => { const x = it || {}; return { company: COMPANY, expertName: (S.expert && (S.expert.label || S.expert.name)) || "", items: [{ title: x.title, qty: x.qty, unit: x.unit, spec: x.spec, due: x.need_date }] }; };
+    /* آمادهٔ «محتاط» همان‌طور که می‌رود: مقدار با بازهٔ متعارف (first-msg.js:fmTextFor) */
+    const fill = (body, t) => {
+      if (!TP.msg) return String(body || "");
+      const c = L.ctx || baseCtx();
+      return TP.msg.fillMsg(body, { ...c, family: t && t.std && t.family === "cautious" ? "cautious" : c.family, supplier: L.who || "«تأمین‌کننده»" });
+    };
+    const pvFor = () => `پیش‌نمایش با دادهٔ ${it ? `«${esc(it.title)}»` : "همین قلم"}${L.who ? ` برای «${esc(L.who)}»` : ""}:`;
+    function editor() {
+      if (!st.mode) return "";
+      const t = byKey(st.key);
+      if (st.mode === "view" && t) {
+        return `<div class="tpl-ed"><div class="toolrow" style="margin:0"><b>${esc(t.title)}</b>${t.std ? ` <span class="chip">آماده</span>` : ""}<span style="margin-inline-start:auto"></span>
+            ${t.std ? `<button type="button" class="tp-btn xs" data-tl-copy="${esc(t.key)}">کپی برای ویرایش</button>` : `<button type="button" class="tp-btn xs" data-tl-edit="${esc(t.key)}">✏️ ویرایش</button>`}</div>
+          <div class="dim" style="font-size:.8rem;margin:4px 0">${pvFor()}</div><pre class="fm-text">${esc(fill(t.body, t))}</pre></div>`;
+      }
+      if (st.mode === "view") return "";
+      return `<div class="tpl-ed"><b>${st.mode === "new" ? "＋ قالبِ تازه" : "✏️ ویرایشِ قالب"}</b>
+        <label class="tp-field" style="margin:6px 0"><b>عنوانِ قالب</b><input class="tp-input" data-tl-title value="${esc(st.title)}" maxlength="80" placeholder="مثلاً «رسمی با برند»" style="width:100%"></label>
+        <div class="tokens" aria-label="جای‌خالی‌ها">${toks().map((x) => `<button type="button" class="tok" data-tl-tok="${esc(x)}" title="${esc((TP.msg && TP.msg.TOKEN_HINT && TP.msg.TOKEN_HINT[x]) || "")}">{${esc(x)}}</button>`).join("")}</div>
+        <textarea class="tp-textarea" data-tl-body dir="rtl" style="min-height:9em">${esc(st.body)}</textarea>
+        <div class="dim" style="font-size:.8rem;margin:6px 0 2px">${pvFor()}</div><pre class="fm-text" data-tl-pv>${esc(fill(st.body))}</pre>
+        <div class="toolrow" style="margin-top:8px;gap:8px;flex-wrap:wrap"><button type="button" class="tp-btn primary" data-tl-save>💾 ذخیره</button><button type="button" class="tp-btn" data-tl-cancel>انصراف</button>
+          <span class="dim" style="font-size:.78rem">پیش از ذخیره، متن از نظرِ لو رفتنِ نامِ تأمین‌کنندگان و واژه‌های درونی سنجیده می‌شود.</span></div></div>`;
+    }
+    function paint() {
+      const own = L.list.filter((t) => !t.std), std = L.list.filter((t) => t.std);
+      const li = (t) => `<li class="tpl-li ${st.key === t.key ? "on" : ""} ${fm && !t.active ? "off" : ""}">
+          <button type="button" class="tpl-t" data-tl-open="${esc(t.key)}" title="دیدنِ متن و پیش‌نمایش">${esc(t.title)}${t.shared ? ` <span class="chip">مشترک</span>` : ""}</button>
+          ${t.std ? `<button type="button" class="tp-btn xs" data-tl-copy="${esc(t.key)}" title="یک کپی در «قالب‌های من» برای ویرایش">کپی برای ویرایش</button>`
+            : `<button type="button" class="tp-btn xs" data-tl-edit="${esc(t.key)}" title="ویرایش">✏️</button>${t.own ? `<button type="button" class="tp-btn xs" data-tl-del="${esc(t.key)}" title="حذف">🗑</button>` : ""}`}
+          ${fm ? TP.ui.switchEl({ on: !!t.active, attrs: `data-tl-sw="${esc(t.key)}" aria-label="فعال بودنِ ${esc(t.title)}"`, title: t.active ? "فعال در «✉️ پیام اول»" : "خاموش — گزینهٔ «✉️ پیام اول» نیست" }) : ""}</li>`;
+      box.innerHTML = `<p class="dim" style="margin:0 0 8px;font-size:.84rem;line-height:1.8">${fm ? "فقط قالب‌های <b>فعال</b> گزینهٔ «پیش‌فرض برای همه» و ردیف‌های «✉️ پیام اول» می‌شوند؛ دست‌کم یکی فعال می‌ماند. "
+          : "همین قالب‌ها در «✉️ پیام اول» هم هستند (فعال یا غیرفعال کردن در همان پنجره). "}جای‌خالی‌های {…} هنگامِ ارسال با دادهٔ همان قلم و تأمین‌کننده پر می‌شوند.</p>
+        <div class="tpl-cols">
+          <section><div class="toolrow" style="margin:0"><b>قالب‌های من</b><span style="margin-inline-start:auto"></span><button type="button" class="tp-btn xs primary" data-tl-new>＋ قالبِ تازه</button></div>
+            <ul class="tpl-list">${own.map(li).join("") || `<li class="dim" style="font-size:.84rem;padding:4px">هنوز قالبی نساخته‌اید.</li>`}</ul></section>
+          <section><div class="toolrow" style="margin:0"><b>قالب‌های آماده</b><span class="dim" style="font-size:.78rem">فقط‌خواندنی — مخصوصِ «✉️ پیام اول»</span></div>
+            <ul class="tpl-list">${std.map(li).join("")}</ul></section></div>
+        <div data-tl-msg>${st.msg ? `<div class="tp-note warn" style="margin:6px 0">${st.msg}</div>` : ""}</div>
+        <div data-tl-ed>${editor()}</div>`;
+      bind();
+    }
+    const focus = (sel) => setTimeout(() => { const x = box.querySelector(sel); if (x) { x.focus(); x.scrollIntoView({ block: "nearest" }); } }, 0);
+    function bind() {
+      const Qb = (s) => box.querySelectorAll(s), G1 = (s) => box.querySelector(s);
+      Qb("[data-tl-open]").forEach((b) => b.onclick = () => { Object.assign(st, { mode: "view", key: b.dataset.tlOpen, msg: "" }); paint(); focus(".tpl-ed"); });
+      Qb("[data-tl-edit]").forEach((b) => b.onclick = () => { const t = byKey(b.dataset.tlEdit); if (!t) return; Object.assign(st, { mode: "edit", key: t.key, title: t.title, body: t.body, msg: "" }); paint(); focus("[data-tl-body]"); });
+      Qb("[data-tl-copy]").forEach((b) => b.onclick = () => { const t = byKey(b.dataset.tlCopy); if (!t) return; Object.assign(st, { mode: "new", key: "", title: `کپیِ ${t.title}`.slice(0, 80), body: t.body, msg: "" }); paint(); focus("[data-tl-title]"); });
+      const nw = G1("[data-tl-new]"); if (nw) nw.onclick = () => { Object.assign(st, { mode: "new", key: "", title: "", body: "سلام، وقت بخیر. از واحد خرید {شرکت} پیام می‌دم.\n", msg: "" }); paint(); focus("[data-tl-title]"); };
+      Qb("[data-tl-del]").forEach((b) => b.onclick = () => delTpl(b.dataset.tlDel));
+      Qb("[data-tl-sw]").forEach((sw) => sw.addEventListener("tp-change", (e) => toggle(sw.dataset.tlSw, !!(e.detail && e.detail.value))));
+      const ta = G1("[data-tl-body]"), pv = G1("[data-tl-pv]"), ti = G1("[data-tl-title]");
+      if (ta) ta.oninput = () => { st.body = ta.value; if (pv) pv.textContent = fill(ta.value); };
+      if (ti) ti.oninput = () => { st.title = ti.value; };
+      Qb("[data-tl-tok]").forEach((b) => b.onclick = () => {
+        if (!ta) return;
+        /* جای‌خالی همان‌جای مکان‌نما می‌نشیند و مکان‌نما بعد از آن و یک فاصله می‌رود */
+        const tk = "{" + b.dataset.tlTok + "} ", s = ta.selectionStart ?? ta.value.length, e = ta.selectionEnd ?? s;
+        ta.value = ta.value.slice(0, s) + tk + ta.value.slice(e); const pos = s + tk.length; ta.focus(); ta.setSelectionRange(pos, pos);
+        st.body = ta.value; if (pv) pv.textContent = fill(ta.value);
+      });
+      const sv = G1("[data-tl-save]"); if (sv) sv.onclick = saveTpl;
+      const cc = G1("[data-tl-cancel]"); if (cc) cc.onclick = () => { Object.assign(st, { mode: st.key ? "view" : "", msg: "" }); paint(); };
+    }
+    async function saveTpl() {
+      const ti = box.querySelector("[data-tl-title]"), ta = box.querySelector("[data-tl-body]");
+      const title = (ti ? ti.value : st.title).trim() || "بدون عنوان", body = ta ? ta.value : st.body;
+      st.title = title; st.body = body;
+      if (!body.trim()) { st.msg = "متنِ قالب خالی است."; return paint(); }
+      const btn = box.querySelector("[data-tl-save]"); if (btn) btn.disabled = true;
+      try {
+        const payload = { title, body, ...(it ? { item_id: it.id } : {}) };
+        const t = st.mode === "edit" ? byKey(st.key) : null;
+        const r = t ? await TP.api(`/templates/${t.id}`, { method: "PUT", body: payload }) : await TP.api("/templates", { body: payload });
+        if (!t) st.key = String(r.id);
+        st.mode = "view"; st.msg = (r.warn || []).length ? `⚠️ ذخیره شد، ولی: ${r.warn.map(esc).join("، ")}` : "";
+        await refresh();
+        okTick("قالب ذخیره شد");
+      } catch (e) { st.msg = `⛔ ${esc(e.message)}`; paint(); }
+    }
+    /* «فعال»: همان PUTِ «✉️ پیام اول» — خاموش کردنِ قالبی که در همین درخواست پیش‌فرض یا قالبِ ردیفی است، آن را به پیش‌فرض برمی‌گرداند */
+    async function toggle(key, on) {
+      if (!fm) return;
+      const d = fm(), body = { active: { [key]: on } };
+      if (!on) {
+        if (d.def === key) body.def = null;
+        const per = {}; for (const r of d.rows || []) if (r.sel === key && !r.go) per[r.k] = null;
+        if (Object.keys(per).length) body.per = per;
+      }
+      try {
+        const v = await TP.api(`/items/${it.id}/first-msg`, { method: "PUT", body });
+        if (o.onView) o.onView(v);
+        await load();
+        st.msg = !on && (body.def === null || body.per) ? `«${esc((byKey(key) || {}).title || "")}» خاموش شد و ردیف‌هایی که در همین درخواست آن را داشتند پیش‌فرض را می‌گیرند.` : "";
+        paint();
+      } catch (e) { st.msg = `⛔ ${esc(e.message)}`; paint(); }
+    }
+    function delTpl(key) {
+      const t = byKey(key); if (!t) return;
+      if (fm && t.active && L.list.filter((x) => x.active).length < 2) { st.msg = "این تنها قالبِ فعال است؛ اول قالبِ دیگری را فعال کنید."; return paint(); }
+      TP.modal("🗑 حذفِ قالب", `قالبِ «${esc(t.title)}» حذف شود؟${fm ? " ردیف‌هایی که در «✉️ پیام اول» آن را داشتند پیش‌فرض را می‌گیرند." : ""}`, async () => {
+        try {
+          await TP.api(`/templates/${t.id}`, { method: "DELETE" });
+          if (st.key === key) Object.assign(st, { mode: "", key: "" });
+          st.msg = ""; await refresh();
+        } catch (e) { st.msg = `⛔ ${esc(e.message)}`; paint(); }
+      }, "حذف", "انصراف");
     }
     paint();
   }
@@ -1245,15 +1467,24 @@
     const msgHtml = rows.length ? `<div style="margin:8px 0"><b>✉️ پیامی که می‌رود</b>${rows.length > 1 ? ` <span class="dim">(نمونهٔ «${esc(rows[0].name)}»${pv.first_msg ? "؛ هر گیرنده متنِ خودش را می‌گیرد" : ""})</span>` : ""}
         <pre class="fm-text" style="max-height:26vh;overflow:auto;margin:4px 0">${esc(rows[0].text)}</pre>
         ${pv.first_msg ? `<button class="tp-btn xs" data-st-fm>✏️ دیدن و ویرایشِ پیامِ هر گیرنده</button>` : ""}</div>` : "";
+    /* «✉️ پیام اول»: ردیفی که قالبش با ردیفِ بالایی فرق دارد و علت ندارد — دکمهٔ اصلی به‌جای شروع، همان کادر را برای نوشتنِ علت باز می‌کند */
+    const fmMiss = (pv && pv.fm_missing) || [];
+    const fmHtml = fmMiss.length ? `<div class="tp-note warn" style="margin:8px 0">✉️ قالبِ پیامِ اولِ ${fmMiss.map((x) => `«${esc(x.name)}»`).join("، ")} با ردیفِ بالایی فرق دارد و علت ندارد؛ پیش از شروع علتش را بنویسید.</div>` : "";
     const d = TP.modal(title, `${started ? "" : `ساختار و شرایطِ «${esc(it.title)}» منجمد می‌شود و این قلم به کارشناس هوشمند می‌رود. `}کارشناس هوشمند از این ${M(go.length)} تأمین‌کننده دعوت می‌کند و مذاکره را پیش می‌برد:
       <div style="margin:8px 0;max-height:22vh;overflow:auto">${go.map((e) => `• ${esc(e.name)}${e.panel ? "" : ` <span class="chip warn">بی شمارهٔ پنل — منتظر می‌ماند</span>`}`).join("<br>")}</div>
       ${noPh ? `<div class="dim">${M(noPh)} نفر هنوز شمارهٔ پنلِ تیک‌خورده ندارند؛ هر وقت شماره‌شان را با تیکِ پنل بزنید، دعوت می‌شوند.</div>` : ""}
-      ${termsHtml}${msgHtml}
+      ${termsHtml}${fmHtml}${msgHtml}
       <div class="dim" style="font-size:.84rem">⏱ دعوت‌ها یکی‌یکی می‌روند (حدوداً هر دقیقه ${M((pv && pv.per_tick) || 1)})؛ زیرِ هر پیام کارتِ استعلام با مشخصات و شرایطِ خرید می‌آید. پاسخ‌ها را در «مکاتبات» می‌بینید.</div>`, async () => {
+      if (fmMiss.length) return pkFmUI(it, { tried: true });
       const b = TP.busy(title, esc(it.title));
       try { const r = await TP.api(`/items/${it.id}/ai-start`, { body: {} }); b.close(); await reload(); S.picks[it.id] = r; render(); okTick(started ? "دعوت شد" : "سپرده شد"); }
-      catch (e) { b.close(); if (e.data && e.data.need_doc) return pkDocUI(it, () => pkStartUI(it)); TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true); }
-    }, started ? "✅ تأیید و دعوت" : P.mode === "handoff" ? "✅ تأیید و سپردن" : "✅ تأیید و 🚀 شروع", "انصراف");
+      catch (e) {
+        b.close();
+        if (e.data && e.data.need_doc) return pkDocUI(it, () => pkStartUI(it));
+        if (e.data && e.data.need_fm_why) return pkFmUI(it, { tried: true });
+        TP.modal("نشد", esc(e.message), null, "باشد", ""); await loadPicks(it, true);
+      }
+    }, fmMiss.length ? "✉️ نوشتنِ علت‌ها…" : started ? "✅ تأیید و دعوت" : P.mode === "handoff" ? "✅ تأیید و سپردن" : "✅ تأیید و 🚀 شروع", "انصراف");
     const st = d.querySelector("[data-st-terms]"); if (st) st.onclick = () => { d.remove(); termsGo(it); };
     const sf = d.querySelector("[data-st-fm]"); if (sf) sf.onclick = () => { d.remove(); pkFmUI(it); };
   }
@@ -2041,8 +2272,8 @@
   /* پیام آماده برای یک تأمین‌کنندهٔ نتیجه: انتخاب قالب → متنِ پرشده → کپی */
   async function smartMessage(sid, idx) {
     const s = supOfSearch(sid, idx); if (!s) return;
-    await loadTemplates();
-    if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(); }
+    await loadTemplates(item());
+    if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(item()); }
     const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
       <textarea class="tp-textarea" id="mtxt" style="min-height:170px"></textarea>
       <div class="tp-acts"><button class="tp-btn primary" data-mcopy>کپی متن</button><span class="dim" data-mmsg style="font-size:.85rem"></span></div>
@@ -2818,35 +3049,21 @@
     { title: "مکان تحویل", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\nدرباره {عنوان قلم} ({مقدار} {واحد}) — امکان تحویل در محل پروژه را دارید یا تحویل درب انبار شماست؟\nهزینه حمل چقدر است؟\n{نام کارشناس}` },
     { title: "رسمی", body: `با سلام و احترام\nشرکت ${COMPANY} در نظر دارد نسبت به تامین {عنوان قلم} به مقدار {مقدار} {واحد} با مشخصات {مشخصات فنی} اقدام نماید.\nخواهشمند است قیمت، شرایط پرداخت و زمان تحویل را اعلام فرمایید.\nبا تشکر — {نام کارشناس}` },
   ];
-  async function loadTemplates() { try { S.templates = (await TP.api("/templates")).templates || []; } catch (_) { S.templates = []; } }
+  /** قالب‌های کارشناس و زمینهٔ پرکردنِ همین قلم (لایه‌های 🔒/🔓، شرایطِ خرید و تاریخِ تحویل — worker/ai-agent.js:tplCtx) */
+  async function loadTemplates(it) {
+    try { const r = await TP.api(`/templates${it ? `?item_id=${it.id}` : ""}`); S.templates = r.templates || []; if (it) S.tplCtx[it.id] = r.ctx || null; }
+    catch (_) { S.templates = []; }
+  }
+  /** همان پرکردنِ «✉️ پیام اول» و بات (msg-fill.mjs، هر سیزده جای‌خالی) — زمینهٔ قلم از سرور، وگرنه خودِ قلم */
   function fillTpl(body, supplier) {
     const it = item() || {};
+    const ctx = S.tplCtx[it.id] || { company: COMPANY, expertName: (S.expert && (S.expert.label || S.expert.name)) || "", items: [{ title: it.title, qty: it.qty, unit: it.unit, spec: it.spec, due: it.need_date }] };
+    if (TP.msg) return TP.msg.fillMsg(body, { ...ctx, supplier });
     return String(body || "").replace(/\{عنوان قلم\}/g, it.title || "").replace(/\{مقدار\}/g, it.qty == null ? "" : M(it.qty)).replace(/\{واحد\}/g, it.unit || "")
       .replace(/\{مشخصات فنی\}/g, it.spec || "—").replace(/\{تامین‌کننده\}/g, supplier || "").replace(/\{نام کارشناس\}/g, S.expert.name);
   }
-  async function pickTemplate() {
-    await loadTemplates();
-    if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(); }
-    S.tpl = Math.min(S.tpl, S.templates.length - 1);
-    const d = TP.modal("قالب‌های پیام", `<p class="muted" style="margin:0 0 8px;font-size:.88rem">قالبی را انتخاب یا ویرایش کنید، یا قالب تازه بسازید. جای‌خالی‌ها هنگام ارسال با دادهٔ همین قلم پر می‌شوند.</p>
-      <div class="tplbar" id="tb"></div><div id="ed"></div>`, null, "بستن", "");
-    const paint = () => {
-      d.querySelector("#tb").innerHTML = S.templates.map((t, i) => `<button class="tplbtn ${i === S.tpl ? "on" : ""}" data-t="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("") + `<button class="tplbtn" data-add><i>&nbsp;</i><b>+ قالب جدید</b></button>`;
-      const t = S.templates[S.tpl]; const toks = ["عنوان قلم", "مقدار", "واحد", "مشخصات فنی", "تامین‌کننده", "نام کارشناس"];
-      d.querySelector("#ed").innerHTML = `<div class="tp-field" style="margin-bottom:8px"><b>عنوان قالب</b><input class="tp-input" id="tt" value="${esc(t.title)}" style="width:100%"></div>
-        <textarea class="tp-textarea" id="tb2">${esc(t.body)}</textarea>
-        <div class="tokens">${toks.map((x) => `<button class="tok" data-k="${x}">{${x}}</button>`).join("")}</div>
-        <div class="tp-note" style="margin:8px 0"><b>پیش‌نمایش برای قلم فعلی:</b><br><span style="white-space:pre-wrap">${esc(fillTpl(t.body, "«تأمین‌کننده»"))}</span></div>
-        <div class="tp-acts"><button class="tp-btn primary" data-save>ذخیره</button><button class="tp-btn" data-del ${S.templates.length < 2 ? "disabled" : ""}>حذف این قالب</button></div>`;
-      const ta = d.querySelector("#tb2");
-      d.querySelectorAll(".tok").forEach((b) => b.onclick = () => { /* جای‌خالی همان‌جای مکان‌نما می‌نشیند و مکان‌نما بعد از آن و یک فاصله می‌رود */ const tk = "{" + b.dataset.k + "} ", s = ta.selectionStart, e = ta.selectionEnd; ta.value = ta.value.slice(0, s) + tk + ta.value.slice(e); const pos = s + tk.length; ta.focus(); ta.setSelectionRange(pos, pos); });
-      d.querySelectorAll("[data-t]").forEach((b) => b.onclick = () => { S.tpl = +b.dataset.t; paint(); });
-      d.querySelector("[data-add]").onclick = async () => { await TP.api("/templates", { body: { title: "قالب جدید", body: `سلام، از شرکت ${COMPANY} تماس می‌گیرم.\n` } }); await loadTemplates(); S.tpl = S.templates.length - 1; paint(); };
-      d.querySelector("[data-save]").onclick = async () => { await TP.api(`/templates/${t.id}`, { method: "PUT", body: { title: d.querySelector("#tt").value || "بدون عنوان", body: ta.value } }); await loadTemplates(); paint(); };
-      d.querySelector("[data-del]").onclick = async () => { if (S.templates.length < 2) return; await TP.api(`/templates/${t.id}`, { method: "DELETE" }); await loadTemplates(); S.tpl = 0; paint(); };
-    };
-    paint();
-  }
+  /** «قالب‌های پیام» (منوی اقدام‌ها و «ایجاد قالب پیام»ِ جستجوی هوشمند): همان کتابخانهٔ «📚 قالب‌های پیام»ِ «✉️ پیام اول» */
+  function pickTemplate() { return tplLibUI(item()); }
 
   /* ---------- بارگیری ---------- */
   /* ---------- اتصال به تلگرام (TG-03) ----------

@@ -661,6 +661,35 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .fm-text { white-space: pre-wrap; font: inherit; font-size: .86rem; line-height: 1.85; margin: 0; padding: 8px 10px; border-radius: 8px; background: rgba(79,140,255,.07); max-height: 30vh; overflow: auto; }
 .fm-row textarea { width: 100%; min-height: 10em; font: inherit; font-size: .86rem; line-height: 1.8; resize: vertical; box-sizing: border-box; }
 :root[data-theme="light"] .fm-text { background: rgba(47,111,228,.06); }
+/* «پیش‌فرض برای همه»، ردیفِ متفاوت با ردیفِ بالایی (نوارِ آبی) و بی‌علت (سرخ) — قاعدهٔ علت، مهر ۱۴۰۵ */
+.fm-head { display: flex; gap: 8px; align-items: flex-start; }
+.fm-head > .dim { flex: 1; min-width: 0; }
+.fm-def { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 8px 0; padding: 8px 10px; border-radius: 10px; background: rgba(79,140,255,.08); }
+.fm-def select { flex: 1; min-width: 200px; }
+.fm-row select { min-width: 170px; max-width: 100%; }
+.fm-row .fm-n { min-width: 1.4em; text-align: center; color: var(--tp-muted); font-size: .82rem; }
+.fm-row.diff { border-inline-start: 3px solid var(--tp-accent); }
+.fm-row.need { border-color: rgba(229,72,77,.75); box-shadow: 0 0 0 2px rgba(229,72,77,.16); }
+.fm-whyrow { margin: 0 0 6px; }
+.fm-why { width: 100%; box-sizing: border-box; }
+.fm-row.need .fm-why { border-color: rgba(229,72,77,.8); }
+.fm-same { font-size: .8rem; }
+.fm-det > summary { cursor: pointer; font-size: .82rem; color: var(--tp-muted); margin: 2px 0 4px; }
+:root[data-theme="light"] .fm-def { background: rgba(47,111,228,.06); }
+/* «📚 قالب‌های پیام»: قالب‌های من و آماده، کلیدِ «فعال» و ویرایشگر (expert.js:tplLibUI) */
+.tpl-cols { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.tpl-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; max-height: 32vh; overflow: auto; }
+.tpl-li { display: flex; align-items: center; gap: 6px; padding: 3px 6px; border: 1px solid var(--tp-line); border-radius: 8px; }
+.tpl-li.on { border-color: var(--tp-accent); }
+.tpl-li.off .tpl-t { opacity: .6; }
+.tpl-t { flex: 1; min-width: 0; text-align: start; background: none; border: 0; color: inherit; font: inherit; font-size: .86rem; cursor: pointer; padding: 4px 2px; }
+.tpl-li .tp-switch { padding: 0; min-height: 0; }
+.tpl-li .tp-switch .tr { width: 38px; height: 22px; }
+.tpl-li .tp-switch .tr i { width: 16px; height: 16px; }
+.tpl-li .tp-switch.on .tr i { inset-inline-start: 18px; }
+.tpl-ed { margin-top: 10px; border-top: 1px solid var(--tp-line); padding-top: 10px; }
+.tpl-ed textarea { width: 100%; box-sizing: border-box; }
+@media (max-width: 720px) { .tpl-cols { grid-template-columns: 1fr; } .fm-head { flex-direction: column; } }
 /* «📘 سند راهبرد» (expert.js:pkDocUI) */
 .doc-sec { border-top: 1px solid var(--tp-line); padding: 8px 0; font-size: .88rem; line-height: 1.85; }
 .doc-sec > b { display: block; margin-bottom: 2px; }

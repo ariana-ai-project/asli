@@ -17,15 +17,25 @@
  * بودجه…) ← نمی‌رود؛ فوریت، و مقدارِ کامل در خانوادهٔ محتاط ← هشدار. مقدار ساختگی هرگز.
  *
  * fm_choice (assignment_id, k): k = «*» برای پیش‌فرضِ درخواست، «~var» برای خاموش کردنِ گونه‌ها (body = دلیل)، وگرنه کلیدِ نامِ
- * تأمین‌کننده (nkey) — tpl: «std:…» یا شناسهٔ قالبِ جدولِ templates؛ body: متنِ دستیِ همان تأمین‌کننده (بر قالب مقدم است).
+ * تأمین‌کننده (nkey) — tpl: «std:…» یا شناسهٔ قالبِ جدولِ templates؛ body: متنِ دستیِ همان تأمین‌کننده (بر قالب مقدم است)؛ why: علتِ
+ * ردیفی که قالبش با ردیفِ بالایی فرق دارد (fmReasons).
+ *
+ * «📚 قالب‌های پیام» (درخواست مالک، مهر ۱۴۰۵): یک کتابخانه با جستجوی هوشمند و بات — قالب‌های کارشناس (templates.js) و همین
+ * آماده‌ها، هر کدام با «فعال» (tplLib)؛ فقط فعال‌ها گزینهٔ پیش‌فرض و ردیف‌ها می‌شوند و دست‌کم یکی فعال می‌ماند. جای‌خالی‌ها و
+ * پرکردن یکی است (frontend/tamin-poshtibani/msg-fill.mjs، همان که پنل برای پیش‌نمایش می‌خواند). قاعدهٔ علت: از ردیفِ اول به پایین،
+ * ردیفی که قالبش با ردیفِ بالایی فرق دارد (ردیفِ اول با پیش‌فرض؛ برگشت به پیش‌فرض هم) علت می‌خواهد و بی آن «🚀 شروع» نمی‌رود.
  */
 import { HttpError } from "./http.js";
-import { listTemplates } from "./templates.js";
+import { listTemplates, tplPrefs } from "./templates.js";
 import { VALIDATOR_RULES } from "./strategy/validator-rules.js";
 import { norm as vnorm, toJsRegex } from "./strategy/validator.js";
+import { TOKENS, fillMsg, qtyRange } from "../frontend/tamin-poshtibani/msg-fill.mjs";
 
 export const FM_DDL = "CREATE TABLE IF NOT EXISTS fm_choice (assignment_id INTEGER NOT NULL, k TEXT NOT NULL, tpl TEXT, body TEXT, by TEXT, at INTEGER NOT NULL, PRIMARY KEY (assignment_id, k)) WITHOUT ROWID";
-export const FM_TOKENS = ["شرکت", "فهرست اقلام", "مشخصات ثابت", "قابل تغییر", "موارد لازم", "تاریخ تحویل", "مهلت پاسخ"];
+/** علتِ ردیفِ متفاوت (درخواست مالک، مهر ۱۴۰۵) */
+export const FM_COLUMNS = [["fm_choice", "why", "TEXT"]];
+/** جای‌خالی‌ها — همان سیزده‌تای جستجوی هوشمند و بات (msg-fill.mjs) */
+export const FM_TOKENS = TOKENS;
 const T = (v) => String(v == null ? "" : v).trim();
 const faN = (s) => String(s).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]);
 
@@ -62,60 +72,18 @@ export const STD = {
   ],
 };
 export const stdKey = (family, v) => `std:${family}:${v + 1}`;
-export const stdList = () => Object.entries(STD).flatMap(([f, vs]) => vs.map((body, i) => ({ key: stdKey(f, i), title: `استاندارد — ${FAMILY_FA[f]} (گونهٔ ${faN(i + 1)})`, body, std: true, family: f, variant: i + 1 })));
-const stdOf = (key) => { const m = /^std:(\w+):(\d+)$/.exec(T(key)); return m && STD[m[1]] && STD[m[1]][+m[2] - 1] ? { family: m[1], v: +m[2] - 1, body: STD[m[1]][+m[2] - 1] } : null; };
+export const stdList = () => Object.entries(STD).flatMap(([f, vs]) => vs.map((body, i) => ({ key: stdKey(f, i), title: `آماده — ${FAMILY_FA[f]} (گونهٔ ${faN(i + 1)})`, body, std: true, family: f, variant: i + 1 })));
 
 /* ------------------------------------------------------------------ */
 /* پر کردن                                                             */
 /* ------------------------------------------------------------------ */
-/**
- * «بازهٔ متعارف» برای موج اولِ استعلامِ محتاط (تصمیم ۱۲؛ rfq_policy.disclosure.quantity و qty_shown در 04_prompts/context_blocks.md):
- * بازه‌ای گرد که مقدارِ واقعی همیشه درونش است و خودش گفته نمی‌شود — نیم تا یک‌ونیم برابر، گرد به گام‌های ۱، ۵ یا ۵×۱۰ⁿ. مقدار
- * ساختگی نه: بی مقدار، null. خروجی {lo, hi}.
- */
-export function qtyRange(qty) {
-  const q = Number(qty);
-  if (!Number.isFinite(q) || q <= 0) return null;
-  const step = (v) => (v < 10 ? 1 : v < 100 ? 5 : 5 * 10 ** (Math.floor(Math.log10(v)) - 1));
-  let lo = Math.max(1, Math.floor((q * 0.5) / step(q * 0.5)) * step(q * 0.5));
-  let hi = Math.ceil((q * 1.5) / step(q * 1.5)) * step(q * 1.5);
-  if (lo >= q && q > 1) lo = Math.max(1, lo - step(lo));
-  if (hi <= q) hi = q + step(q);
-  return { lo, hi };
-}
-const rangeFa = (i) => { const r = qtyRange(i.qty); return r ? `حدود ${faN(r.lo)} تا ${faN(r.hi)} ${i.unit || ""}`.trimEnd() : ""; };
-
+/* «بازهٔ متعارف» و پرکردن در msg-fill.mjs اند (یک منبع با پنل و جستجوی هوشمند)؛ نام‌های پیشین برای turn-engine.js و آزمون‌ها */
+export { qtyRange };
 /**
  * ctx: {company, supplier, expertName, family, items: [{title, qty, unit, spec, fixed: [«ک: م»…], open: [«ک: م»…], due}], must: [...], reply}
  * {فهرست اقلام} در خانوادهٔ محتاط با «بازهٔ متعارف» است، نه مقدارِ کامل («مقدار نهایی پس از جمع‌بندی»)
  */
-export function fillFm(body, ctx) {
-  const it0 = (ctx.items || [])[0] || {};
-  const noQty = ctx.family === "cautious";
-  const list = (ctx.items || []).map((i) => `• ${i.title}${noQty ? (rangeFa(i) ? ` — ${rangeFa(i)}` : "") : ` — ${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}`.trimEnd()}`).join("\n");
-  const join = (k) => [...new Set((ctx.items || []).flatMap((i) => i[k] || []))].join("، ") || "—";
-  const due = [...new Set((ctx.items || []).map((i) => i.due).filter(Boolean))].join("، ") || "—";
-  /* جای‌خالیِ ثابت یا قابل تغییرِ خالی: همان بند (تا «؛» یا پایانِ سطر) نمی‌آید — نه «… در — اگه پیشنهادی دارید» */
-  const empty = [["{مشخصات ثابت}", "fixed"], ["{قابل تغییر}", "open"]].filter(([, k]) => join(k) === "—").map(([tk]) => tk);
-  const pruned = !empty.length ? String(body || "") : String(body || "").split("\n")
-    .map((ln) => { const cl = ln.split("؛ "); const keep = cl.filter((c) => !empty.some((tk) => c.includes(tk))); return keep.length === cl.length ? ln : keep.length ? keep.join("؛ ").replace(/([^.!؟])$/, "$1.") : null; })
-    .filter((ln) => ln !== null).join("\n");
-  return pruned
-    .replace(/\{شرکت\}/g, ctx.company || "")
-    .replace(/\{فهرست اقلام\}/g, list)
-    .replace(/\{مشخصات ثابت\}/g, join("fixed"))
-    .replace(/\{قابل تغییر\}/g, join("open"))
-    .replace(/\{موارد لازم\}/g, (ctx.must || []).join("، ") || "قیمت واحد، زمان تحویل و شرایط تسویه")
-    .replace(/\{تاریخ تحویل\}/g, due)
-    .replace(/\{مهلت پاسخ\}/g, ctx.reply || "پایان روز کاری بعد")
-    /* جای‌خالی‌های قبلیِ قالب‌ها (templates.js:fillTemplate) — قلمِ اول */
-    .replace(/\{تامین‌کننده\}/g, ctx.supplier || "")
-    .replace(/\{عنوان قلم\}/g, it0.title || "")
-    .replace(/\{مقدار\}/g, noQty ? (qtyRange(it0.qty) ? `حدود ${faN(qtyRange(it0.qty).lo)} تا ${faN(qtyRange(it0.qty).hi)}` : "مقدار پس از جمع‌بندی") : it0.qty != null ? faN(it0.qty) : "")
-    .replace(/\{واحد\}/g, noQty && !qtyRange(it0.qty) ? "" : it0.unit || "")
-    .replace(/\{مشخصات فنی\}/g, it0.spec || "—")
-    .replace(/\{نام کارشناس\}/g, ctx.expertName || "");
-}
+export const fillFm = (body, ctx) => fillMsg(body, ctx);
 
 /** سنجشِ افشا: block (نمی‌رود) و warn (هشدار با دلیل) */
 export function fmCheck(text, { otherNames = [], family, items = [], allow = [] } = {}) {
@@ -187,56 +155,140 @@ export async function fmContext(env, deps, items) {
 }
 
 /* ------------------------------------------------------------------ */
+/* «📚 قالب‌های پیام»: کتابخانه و «فعال»                                  */
+/* ------------------------------------------------------------------ */
+/**
+ * کتابخانهٔ قالب‌های یک کارشناس در زمینهٔ خانوادهٔ پیامِ یک درخواست (درخواست مالک، مهر ۱۴۰۵): آماده‌ها (STD، فقط‌خواندنی) و
+ * قالب‌های جدولِ templates (خودِ کارشناس و مشترک)، هر کدام با active. پیش‌فرض: قالب‌های امروزِ کارشناس همه فعال (templates.active)،
+ * مشترک‌ها فعال، آماده‌های همین خانواده فعال و بقیهٔ آماده‌ها خاموش — مگر کارشناس در tpl_prefs عوضش کرده باشد (def_on: پیش‌فرضِ
+ * آمادهٔ همین خانواده). ترتیب: آماده‌های همین خانواده، آماده‌های دیگر، بعد قالب‌های جدول.
+ */
+export async function tplLib(env, expertId, family) {
+  const [rows, prefs] = await Promise.all([listTemplates(env, expertId), tplPrefs(env, expertId)]);
+  const std = stdList().map((t) => ({ ...t, def_on: t.family === family, active: prefs.has(t.key) ? prefs.get(t.key) : t.family === family }));
+  return [...std.filter((t) => t.def_on), ...std.filter((t) => !t.def_on), ...rows.map((t) => {
+    const key = String(t.id), shared = t.expert_id == null;
+    return { key, id: t.id, title: t.title, body: t.body, std: false, own: !shared, shared, active: shared ? (prefs.has(key) ? prefs.get(key) : true) : t.active !== 0 };
+  })];
+}
+
+/**
+ * روشن و خاموش کردنِ قالب‌ها (on: {key: true|false}) در زمینهٔ خانوادهٔ همین درخواست — دست‌کم یک قالب فعال می‌ماند (۴۲۲). قالبِ
+ * خودِ کارشناس در templates.active؛ مشترک و آماده در tpl_prefs، و آن‌که به پیش‌فرضش برگشت ترجیحش پاک می‌شود (آمادهٔ خانوادهٔ
+ * دیگر در درخواستِ دیگر همان پیش‌فرضِ خودش را دارد). خروجی: کتابخانهٔ تازه.
+ */
+export async function tplSetActive(env, expert, on, family) {
+  const lib = await tplLib(env, expert.id, family);
+  const t = Date.now(), stmts = [];
+  for (const [k, v] of Object.entries(on || {})) {
+    const x = lib.find((y) => y.key === String(k));
+    if (!x) throw new HttpError("این قالب پیدا نشد؛ صفحه را تازه کنید.", 422);
+    const want = v === true || v === 1;
+    if (x.active === want) continue;
+    x.active = want;
+    if (x.own) stmts.push(env.DB.prepare("UPDATE templates SET active=? WHERE id=? AND expert_id=?").bind(want ? 1 : 0, x.id, expert.id));
+    else if (want === (x.std ? x.def_on : true)) stmts.push(env.DB.prepare("DELETE FROM tpl_prefs WHERE expert_id=? AND key=?").bind(expert.id, x.key));
+    else stmts.push(env.DB.prepare("INSERT INTO tpl_prefs (expert_id,key,active,at) VALUES (?,?,?,?) ON CONFLICT(expert_id,key) DO UPDATE SET active=excluded.active, at=excluded.at")
+      .bind(expert.id, x.key, want ? 1 : 0, t));
+  }
+  if (!lib.some((x) => x.active)) throw new HttpError("دست‌کم یک قالب باید فعال بماند؛ اول قالبِ دیگری را روشن کنید.", 422, { need_active: true });
+  if (stmts.length) await env.DB.batch(stmts);
+  return lib;
+}
+
+/**
+ * سنجشِ افشای متنِ یک قالب پیش از ذخیره (پنل و بات): قالب برای همهٔ گیرندگان می‌رود، پس نامِ هیچ تأمین‌کننده‌ای از فهرست‌های دعوت
+ * (برای نامِ گیرنده {تامین‌کننده})، شمارِ پیشنهادها، واژه‌های درونی و تعهد نه — همان fmCheck.
+ */
+export const tplCheck = (body, otherNames = []) => fmCheck(body, { otherNames });
+
+/* ------------------------------------------------------------------ */
 /* انتخاب‌ها                                                            */
 /* ------------------------------------------------------------------ */
 const VAR_K = "~var";
 export async function fmChoices(env, aid) {
-  const rows = (await env.DB.prepare("SELECT k, tpl, body, by, at FROM fm_choice WHERE assignment_id=?").bind(aid).all()).results || [];
+  const rows = (await env.DB.prepare("SELECT k, tpl, body, why, by, at FROM fm_choice WHERE assignment_id=?").bind(aid).all()).results || [];
   const per = {};
   let def = null, varOff = null;
   for (const r of rows) {
     if (r.k === "*") def = { tpl: r.tpl, by: r.by, at: r.at };
     else if (r.k === VAR_K) varOff = { reason: r.body || "", by: r.by, at: r.at };
-    else per[r.k] = { tpl: r.tpl || null, body: r.body || null, by: r.by, at: r.at };
+    else per[r.k] = { tpl: r.tpl || null, body: r.body || null, why: r.why || null, by: r.by, at: r.at };
   }
   return { def, per, varOff };
 }
-/** متنِ قالب (استاندارد یا جدولِ templates) — null اگر پیدا نشد یا مالِ این کارشناس نیست */
-export async function fmBody(env, expertId, key) {
-  const s = stdOf(key);
-  if (s) return { body: s.body, std: true, family: s.family, v: s.v };
-  const id = parseInt(key, 10);
-  if (!Number.isFinite(id)) return null;
-  const r = await env.DB.prepare("SELECT body FROM templates WHERE id=? AND (expert_id IS NULL OR expert_id=?)").bind(id, expertId).first();
-  return r ? { body: r.body, std: false } : null;
+
+/**
+ * قالبِ مؤثرِ «پیش‌فرض برای همه»: انتخابِ کارشناس اگر قالبش هنوز هست (حتی اگر بعداً خاموش شده — انتخاب بی‌صدا عوض نمی‌شود و
+ * کادر «غیرفعال» نشانش می‌دهد)؛ وگرنه آمادهٔ اولِ خانوادهٔ پیام اگر فعال است، وگرنه نخستین قالبِ فعال؛ هیچ نبود، همان آمادهٔ اول.
+ */
+export function fmDefKey(choices, lib, family) {
+  const d = choices && choices.def && choices.def.tpl;
+  if (d && lib.some((t) => t.key === d)) return d;
+  const auto = stdKey(STD[family] ? family : "max", 0);
+  if (lib.some((t) => t.key === auto && t.active)) return auto;
+  const first = lib.find((t) => t.active);
+  return first ? first.key : auto;
+}
+/** قالبِ خودِ ردیف اگر هنوز هست (null یعنی همان پیش‌فرض) */
+const ownKey = (per, lib) => (per && per.tpl && lib.some((t) => t.key === per.tpl) ? per.tpl : null);
+
+/**
+ * قاعدهٔ علت (درخواست مالک، مهر ۱۴۰۵): گیرندگان به ترتیبِ «🎯 فهرست دعوت» (تیک‌خورده‌ها)؛ از ردیفِ اول به پایین هر ردیفی که
+ * مقدارش (eff) با ردیفِ بالایی فرق دارد علت می‌خواهد — ردیفِ اول با پیش‌فرض، و برگشت به پیش‌فرض بعد از ردیفِ متفاوت هم. eff:
+ * متنِ دستی همیشه مقدارِ جدایی است؛ وگرنه قالبِ مؤثر پیش از گونه — گونه‌های خودکارِ متن (ضدتبانی) همان قالب‌اند. ردیفِ سپرده‌شده
+ * (go، پیامش رفته) در زنجیره می‌ماند ولی علت نمی‌خواهد. rows: [{k, eff, why, go}] — diff و need_why روی همان‌ها؛ خروجی: بی‌علت‌ها.
+ */
+export function fmReasons(rows, def) {
+  let prev = def;
+  for (const r of rows) { r.diff = r.eff !== prev; r.need_why = r.diff && !r.go; prev = r.eff; }
+  return rows.filter((r) => r.need_why && !T(r.why));
 }
 
 /**
- * متنِ نخستین پیامِ یک تأمین‌کننده: متنِ دستیِ همان تأمین‌کننده ← قالبِ همان تأمین‌کننده ← قالبِ پیش‌فرضِ درخواست ← استانداردِ
- * خانوادهٔ اقلام. idx: جایگاهِ تأمین‌کننده میانِ دعوت‌ها (برای گونهٔ متن وقتی متنِ متفاوت لازم است).
- * خروجی {text, tpl, block, warn, family}
+ * متنِ نخستین پیامِ یک تأمین‌کننده: متنِ دستیِ همان تأمین‌کننده ← قالبِ همان تأمین‌کننده ← قالبِ پیش‌فرضِ درخواست (fmDefKey).
+ * idx: جایگاهِ تأمین‌کننده میانِ دعوت‌ها — ردیفی که پیش‌فرضِ آماده را می‌گیرد و سیاستِ استعلام «متن متفاوت» می‌خواهد، گونهٔ بعدیِ
+ * همان خانواده را می‌گیرد (فقط گونه‌های فعال؛ پایه همیشه). lib: کتابخانهٔ همین درخواست (tplLib) — پیش‌نمایش و ارسال یکی.
+ * خروجی {text, tpl (گونه‌ای که رفت)، base (قالبِ مؤثر پیش از گونه)، eff (مقدارِ قاعدهٔ علت)، block, warn, family}
  */
-export async function fmTextFor(env, { aid, expert, supplier, k, items, ctx, choices, otherNames = [], idx = 0, company }) {
+export async function fmTextFor(env, { aid, expert, supplier, k, ctx, choices, lib, otherNames = [], idx = 0, company }) {
   const c = choices || (await fmChoices(env, aid));
+  const L = lib || (await tplLib(env, expert.id, ctx.family));
   const per = c.per[k] || null;
-  let tpl = (per && per.tpl) || (c.def && c.def.tpl) || null;
-  let body = per && per.body ? per.body : null;
-  let fam = ctx.family;
+  const own = ownKey(per, L);
+  const base = own || fmDefKey(c, L, ctx.family);
+  let tpl = base, body = per && per.body ? per.body : null, fam = ctx.family;
   if (!body) {
-    let b = tpl ? await fmBody(env, expert.id, tpl) : null;
-    if (!b) { tpl = stdKey(ctx.family, 0); b = await fmBody(env, expert.id, tpl); }
-    /* متنِ متفاوت: گونهٔ دیگرِ همان خانوادهٔ استاندارد برای گیرندهٔ بعدی */
-    if (b.std && ctx.variation && !c.varOff && !(per && per.tpl)) { const vs = STD[b.family]; const v = (b.v + idx) % vs.length; tpl = stdKey(b.family, v); b = { ...b, body: vs[v] }; }
+    const t = L.find((x) => x.key === base) || L.find((x) => x.key === stdKey("max", 0));
+    let b = { body: t.body, std: !!t.std, family: t.family, v: (t.variant || 1) - 1 };
+    tpl = t.key;
+    /* متنِ متفاوت: گونهٔ دیگرِ همان خانوادهٔ آماده برای گیرندهٔ بعدی */
+    if (b.std && ctx.variation && !c.varOff && !own) {
+      const vs = STD[b.family].map((_, v) => v).filter((v) => v === b.v || L.some((x) => x.key === stdKey(b.family, v) && x.active));
+      const v = vs[(vs.indexOf(b.v) + idx) % vs.length];
+      tpl = stdKey(b.family, v); b = { ...b, body: STD[b.family][v] };
+    }
     if (b.std) fam = b.family === "cautious" || ctx.family === "cautious" ? "cautious" : b.family;
     body = fillFm(b.body, { company, supplier, expertName: expert.label || expert.name, family: fam, items: ctx.items, must: ctx.must });
   }
   const chk = fmCheck(body, { otherNames: otherNames.filter((n) => n && n !== supplier), family: ctx.family, items: ctx.items, allow: [supplier, company] });
-  return { text: body, tpl: per && per.body ? "manual" : tpl, ...chk, family: fam };
+  return { text: body, tpl: per && per.body ? "manual" : tpl, base, eff: per && per.body ? `✏️:${k}` : base, ...chk, family: fam };
 }
 
-/** ذخیرهٔ انتخاب‌ها — {def: tplKey|null, per: {k: {tpl, body} | null}, variation: false + reason | true}؛ متنِ دستیِ ممنوع ← ۴۲۲ */
-export async function fmSave(env, { aid, expert, b, check }) {
+/**
+ * ذخیرهٔ انتخاب‌ها — {def: key|null, per: {k: {tpl, body} | null}, why: {k: متن}, variation: false + reason | true}. lib: کتابخانهٔ همین
+ * درخواست — انتخابِ تازه فقط از قالب‌های فعال (۴۲۲). متنِ دستیِ ممنوع ← ۴۲۲. برگشتِ ردیف به پیش‌فرض علتش را نگه می‌دارد؛ ردیفی که
+ * نه قالب دارد، نه متن و نه علت پاک می‌شود.
+ */
+export async function fmSave(env, { aid, expert, b: b0, check, lib }) {
   const t = Date.now(), by = expert.label || expert.name, stmts = [];
+  const b = b0 && typeof b0 === "object" ? b0 : {};
+  const L = lib || [];
+  const usable = (key) => {
+    const x = L.find((y) => y.key === key);
+    if (!x) throw new HttpError("این قالب پیدا نشد.", 422);
+    if (!x.active) throw new HttpError(`قالبِ «${x.title}» فعال نیست؛ اول در «📚 قالب‌های پیام» روشنش کنید.`, 422, { inactive: key });
+  };
   /* خاموش کردنِ گونه‌های متن (تصمیم ۱): با دلیل؛ روشن کردن بی دلیل */
   if (b && b.variation === false) {
     const why = T(b.reason).slice(0, 300);
@@ -244,14 +296,14 @@ export async function fmSave(env, { aid, expert, b, check }) {
     stmts.push(env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,by,at) VALUES (?,?,'off',?,?,?) ON CONFLICT(assignment_id,k) DO UPDATE SET body=excluded.body, by=excluded.by, at=excluded.at").bind(aid, VAR_K, why, by, t));
   } else if (b && b.variation === true) stmts.push(env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k=?").bind(aid, VAR_K));
   if (b.def !== undefined) {
-    if (b.def && !(await fmBody(env, expert.id, b.def))) throw new HttpError("این قالب پیدا نشد.", 422);
+    if (b.def) usable(b.def);
     stmts.push(b.def ? env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,by,at) VALUES (?, '*', ?, NULL, ?, ?) ON CONFLICT(assignment_id,k) DO UPDATE SET tpl=excluded.tpl, by=excluded.by, at=excluded.at").bind(aid, b.def, by, t)
       : env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k='*'").bind(aid));
   }
   for (const [k, v] of Object.entries((b && b.per) || {})) {
     if (!k || k === "*" || k === VAR_K) continue;
-    if (!v || (!v.tpl && !T(v.body))) { stmts.push(env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k=?").bind(aid, k)); continue; }
-    if (v.tpl && !(await fmBody(env, expert.id, v.tpl))) throw new HttpError("این قالب پیدا نشد.", 422);
+    if (!v || (!v.tpl && !T(v.body))) { stmts.push(env.DB.prepare("UPDATE fm_choice SET tpl=NULL, body=NULL, by=?, at=? WHERE assignment_id=? AND k=?").bind(by, t, aid, k)); continue; }
+    if (v.tpl) usable(v.tpl);
     const body = T(v.body).slice(0, 3000) || null;
     if (body && check) {
       const c = check(k, body);
@@ -260,7 +312,16 @@ export async function fmSave(env, { aid, expert, b, check }) {
     stmts.push(env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,by,at) VALUES (?,?,?,?,?,?) ON CONFLICT(assignment_id,k) DO UPDATE SET tpl=excluded.tpl, body=excluded.body, by=excluded.by, at=excluded.at")
       .bind(aid, k, v.tpl || null, body, by, t));
   }
-  if (stmts.length) await env.DB.batch(stmts);
+  /* علتِ ردیفِ متفاوت: جدا از قالب و متن، تا با برگشت به پیش‌فرض نرود */
+  for (const [k, v] of Object.entries((b && b.why) || {})) {
+    if (!k || k === "*" || k === VAR_K) continue;
+    stmts.push(env.DB.prepare("INSERT INTO fm_choice (assignment_id,k,tpl,body,why,by,at) VALUES (?,?,NULL,NULL,?,?,?) ON CONFLICT(assignment_id,k) DO UPDATE SET why=excluded.why, by=excluded.by, at=excluded.at")
+      .bind(aid, k, T(v).slice(0, 300) || null, by, t));
+  }
+  if (stmts.length) {
+    stmts.push(env.DB.prepare("DELETE FROM fm_choice WHERE assignment_id=? AND k NOT IN ('*', ?) AND tpl IS NULL AND body IS NULL AND COALESCE(why,'')=''").bind(aid, VAR_K));
+    await env.DB.batch(stmts);
+  }
   return fmChoices(env, aid);
 }
 
