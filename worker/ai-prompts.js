@@ -271,6 +271,9 @@ const propTxt = (p) => `${PROP_KIND[p.kind] || p.kind}${p.bundle_id ? ` ${faN(p.
 /* ⭐ امتیازِ کارشناس (۱ تا ۵) به پیام‌هایی که برای تأمین‌کننده نوشتی — زیرِ سه یعنی جایی از لحن یا محتوا درست نبود؛ علتش را جدی بگیر */
 const rateTxt = (r) => `${"★".repeat(r.stars)}${"☆".repeat(5 - r.stars)} (${faN(r.stars)} از ۵) — پیامِ تو: «${r.body}»${r.note ? ` — نظرِ کارشناس: «${r.note}»` : ""}`;
 
+const pricesFa = (p) => [Number(p.cash) > 0 ? `نقد ${money(p.cash)}` : null,
+  ...[1, 2].map((m) => (Number(p[`c${m}`]) > 0 ? `اعتباریِ ${faN(m)} ماهه ${money(p[`c${m}`])}${p[`r${m}`] != null && Number.isFinite(Number(p[`r${m}`])) ? ` (${faN(Number(p[`r${m}`]))}٪ بالاتر از نقد)` : ""}` : null))]
+  .filter(Boolean).join(" · ") || "—";
 export function negotiationContext(c) {
   /* pf: «خوانش هوشمند پیش‌فاکتور» روشن (مسیرِ پیشین)؛ خاموش (فاز ۴) — 🔒/🔓ِ هر لایه، عنوان و مقدار، و کارهای ممکنِ تازه */
   const pf = c.pfRead !== false;
@@ -288,6 +291,8 @@ export function negotiationContext(c) {
       `  توضیحاتِ خودِ درخواست: ${l.desc || "—"}`,
       ...(l.min ? [`  حداقلِ استعلامِ این قلم: ${faN(l.min.need)} پیشنهادِ تأییدنهایی از تأمین‌کنندگانِ مختلف (${l.min.why}) — تا حالا ${faN(l.min.have)}${l.min.have >= l.min.need ? " ✅ پر شده" : ""}`] : []),
       `  اعلامِ تأمین‌کننده: ${l.qty == null ? "—" : `${qtyTxt(l.qty)} ${l.unit || ""}`} × قیمت واحد ${l.price == null ? "—" : `${money(l.price)} ریال`}${l.qty != null && l.price != null ? ` = ${money(l.qty * l.price)} ریال` : ""}`,
+      /* «قیمتِ نقدی و اعتباری»: وقتی شرکت «اعتباری» را پذیرفته، تأمین‌کننده برای هر شیوهٔ پرداخت قیمتِ جدا می‌دهد */
+      ...(l.prices ? [`  قیمت‌های نقد و اعتباری (ریال، هر کدام برای همان شیوهٔ پرداخت): ${pricesFa(l.prices)}`] : []),
       ...(T(l.note) ? [`  توضیحِ تأمین‌کننده زیرِ همین قلم: ${T(l.note)}`] : []),
       /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت برای همین قلم (🔒 را پنل بیرونش نمی‌پذیرد) */
       ...(l.limits ? [`  شرایطِ شرکت برای این قلم: ${limitsTxt(l.limits)}`] : []),

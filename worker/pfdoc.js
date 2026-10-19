@@ -36,12 +36,27 @@ const layerLine = (l) => [...(l.layers || []), ...(l.extras || [])].filter((x) =
 export function proformaData(d) {
   const lines = (d.lines || []).map((l, i) => {
     const qty = l.qty == null || l.qty === "" ? null : Number(l.qty), price = l.price == null || l.price === "" ? null : Number(l.price);
-    return { ...l, row: i + 1, qty, price, total: qty != null && price != null ? qty * price : null, desc: layerLine(l) };
+    return { ...l, row: i + 1, qty, price, total: qty != null && price != null ? qty * price : null, desc: layerLine(l), ptxt: pricesLine(l.prices) };
   });
   const sum = lines.reduce((a, l) => a + (l.total || 0), 0);
   const t = d.terms || {};
   const vat = t.vat === "دارد" ? Math.round(sum * VAT_RATE) : 0;
-  return { ...d, lines, sum, vat, grand: sum + vat, terms: t };
+  /* «قیمتِ نقدی و اعتباری»: جمعِ هر ماهِ اعتباری فقط وقتی که همهٔ ردیف‌ها همان قیمت را دارند — نیمه‌کاره گمراه می‌کند */
+  const credit = CREDIT_M.map((m) => {
+    if (!lines.length || !lines.every((l) => l.qty != null && Number(l.prices && l.prices[`c${m}`]) > 0)) return null;
+    const s = lines.reduce((a, l) => a + l.qty * Number(l.prices[`c${m}`]), 0);
+    return { m, sum: s, grand: s + (t.vat === "دارد" ? Math.round(s * VAT_RATE) : 0) };
+  }).filter(Boolean);
+  return { ...d, lines, sum, vat, grand: sum + vat, terms: t, credit };
+}
+
+/* ردیف‌های قیمتِ نقد و اعتباری (sp_lines.prices_json): «نقد: ۵۲۰,۰۰۰ · اعتباری ۱ ماهه: ۵۳۵,۶۰۰ (۳٪+)» */
+const CREDIT_M = [1, 2];
+function pricesLine(p) {
+  if (!p || typeof p !== "object") return "";
+  const parts = [Number(p.cash) > 0 ? `نقد: ${money(p.cash)}` : null,
+    ...CREDIT_M.map((m) => (Number(p[`c${m}`]) > 0 ? `اعتباری ${m} ماهه: ${money(p[`c${m}`])}${Number.isFinite(Number(p[`r${m}`])) && p[`r${m}`] !== null ? ` (${Number(p[`r${m}`])}٪+)` : ""}` : null))].filter(Boolean);
+  return parts.length > 1 || (parts.length === 1 && !(Number(p.cash) > 0)) ? `قیمت‌ها (ریال): ${parts.join(" · ")}` : "";
 }
 
 /** شرایط به ترتیبِ چاپ؛ خالی‌ها نمی‌آیند */
@@ -108,12 +123,14 @@ export function proformaDocumentXml(dt) {
   const C = (i, v, o = {}) => tc(v == null ? "" : v, { w: g[i], size: 18, align: "center", ...o });
   const rows = dt.lines.map((l) => tr([
     C(0, String(l.row), { latin: true }),
-    tc({ xml: para(l.title || "", { size: 18, bold: true }) + (l.desc ? para(l.desc, { size: 16 }) : "") + (l.note ? para(`توضیح: ${l.note}`, { size: 16 }) : "") }, { w: g[1] }),
+    tc({ xml: para(l.title || "", { size: 18, bold: true }) + (l.desc ? para(l.desc, { size: 16 }) : "") + (l.ptxt ? para(l.ptxt, { size: 16, bold: true }) : "")
+      + (l.note ? para(`توضیح: ${l.note}`, { size: 16 }) : "") }, { w: g[1] }),
     C(2, qtyTxt(l.qty)), C(3, l.unit || ""), C(4, money(l.price), { bold: true }), C(5, money(l.total), { bold: true }),
   ], { cantSplit: true }));
   const span = g.slice(0, 5).reduce((a, b) => a + b, 0);
   const sumRow = (label, v, bold) => tr([tc(label, { w: span, span: 5, align: "left", bold, size: 18 }), C(5, money(v), { bold })], { cantSplit: true });
-  const items = tbl(g, [hrow, ...rows, sumRow("جمع (بی ارزش افزوده)", dt.sum, true), ...(dt.vat ? [sumRow(`ارزش افزوده (${Math.round(VAT_RATE * 100)}٪)`, dt.vat)] : []), sumRow("جمع کل", dt.grand, true)],
+  const items = tbl(g, [hrow, ...rows, sumRow("جمع (بی ارزش افزوده)", dt.sum, true), ...(dt.vat ? [sumRow(`ارزش افزوده (${Math.round(VAT_RATE * 100)}٪)`, dt.vat)] : []), sumRow("جمع کل", dt.grand, true),
+    ...(dt.credit || []).map((c) => sumRow(`جمع کل با قیمتِ اعتباری ${c.m} ماهه`, c.grand))],
     { top: 8, left: 8, bottom: 8, right: 8, insideH: 4, insideV: 4 });
   const tg = split(USABLE, [0.3]);
   const terms = termRows(dt.terms);
@@ -172,11 +189,12 @@ export function proformaHtml(d, { missing = [] } = {}) {
   return `<div class="pfdoc"><div class="pf-head"><div><div class="pf-ttl">پیش‌فاکتور</div><div>فروشنده: <b>${txt(dt.supplier)}</b></div></div>
     <div class="pf-meta"><div>خریدار: ${txt(dt.company)}</div><div>شمارهٔ درخواست: <span dir="ltr">${escH(dt.request && dt.request.id)}</span></div><div>تاریخ: ${txt(dt.date)}</div>${dt.no ? `<div>شمارهٔ پیش‌فاکتور: ${txt(dt.no)}</div>` : ""}</div></div>
     <table class="pf-items"><thead><tr>${PF_COLUMNS.map(([t]) => `<th>${t}</th>`).join("")}</tr></thead><tbody>
-    ${dt.lines.map((l) => `<tr><td>${faD(l.row)}</td><td class="rt"><b>${txt(l.title)}</b>${l.desc ? `<div class="pf-desc">${txt(l.desc)}</div>` : ""}${l.note ? `<div class="pf-desc">توضیح: ${txt(l.note)}</div>` : ""}</td>
+    ${dt.lines.map((l) => `<tr><td>${faD(l.row)}</td><td class="rt"><b>${txt(l.title)}</b>${l.desc ? `<div class="pf-desc">${txt(l.desc)}</div>` : ""}${l.ptxt ? `<div class="pf-desc"><b>${txt(l.ptxt)}</b></div>` : ""}${l.note ? `<div class="pf-desc">توضیح: ${txt(l.note)}</div>` : ""}</td>
       <td${lack(`qty:${l.no}`)}>${faD(qtyTxt(l.qty))}</td><td>${txt(l.unit)}</td><td class="pf-num${miss.has(`price:${l.no}`) ? " pf-miss" : ""}"><b>${faD(money(l.price))}</b></td><td class="pf-num"><b>${faD(money(l.total))}</b></td></tr>`).join("")}
     <tr class="pf-sum"><td colspan="5">جمع (بی ارزش افزوده)</td><td class="pf-num"><b>${faD(money(dt.sum))}</b></td></tr>
     ${dt.vat ? `<tr class="pf-sum"><td colspan="5">ارزش افزوده (${faD(Math.round(VAT_RATE * 100))}٪)</td><td class="pf-num">${faD(money(dt.vat))}</td></tr>` : ""}
-    <tr class="pf-sum"><td colspan="5">جمع کل</td><td class="pf-num"><b>${faD(money(dt.grand))}</b></td></tr></tbody></table>
+    <tr class="pf-sum"><td colspan="5">جمع کل</td><td class="pf-num"><b>${faD(money(dt.grand))}</b></td></tr>
+    ${(dt.credit || []).map((c) => `<tr class="pf-sum"><td colspan="5">جمع کل با قیمتِ اعتباری ${faD(c.m)} ماهه</td><td class="pf-num">${faD(money(c.grand))}</td></tr>`).join("")}</tbody></table>
     ${terms.length || miss.size ? `<div class="pf-h2">شرایط</div><table class="pf-terms"><tbody>${terms.map(([k, v]) => `<tr><th>${k}</th><td>${txt(v)}</td></tr>`).join("")}
       ${[["valid_days", "اعتبار پیش‌فاکتور"], ["dtime", "زمان تحویل"], ["pay", "شرایط تسویه"], ["invoice", "نوع فاکتور"], ["vat", "ارزش افزوده"]].filter(([k]) => miss.has(k)).map(([, l]) => `<tr class="pf-miss"><th>${l}</th><td>— لازم است</td></tr>`).join("")}</tbody></table>` : ""}
     ${dt.comment ? `<div class="pf-cmt">توضیحات فروشنده: ${txt(dt.comment)}</div>` : ""}

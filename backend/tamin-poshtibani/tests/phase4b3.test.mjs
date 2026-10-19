@@ -86,7 +86,8 @@ async function fill(th, H, prices) {
   for (const l of d.lines) {
     const pr = prices[l.item_id];
     if (pr == null) continue;
-    const r = await call(`/sp/line/${l.id}`, { method: "PUT", headers: H, body: { qty: l.req_qty, price: pr } });
+    /* «قیمتِ نقدی و اعتباری»: شیء یعنی ردیف‌های قیمت ({cash, c1, c2})، عدد یعنی همان یک قیمت */
+    const r = await call(`/sp/line/${l.id}`, { method: "PUT", headers: H, body: typeof pr === "object" ? { qty: l.req_qty, prices: pr } : { qty: l.req_qty, price: pr } });
     assert.equal(r.status, 200, JSON.stringify(r.data));
   }
   return d;
@@ -99,7 +100,7 @@ test("قیدِ شرایط (بی پایگاه داده): پاک‌سازی، اش
   assert.throws(() => cleanLimits({ dtime: { to: "1405/07/31" } }), (e) => e.status === 422, "روزِ نبوده");
   assert.equal(cleanLimits({ pay: { opts: [] } }), null, "بی گزینه یعنی بی قید");
   const A = cleanLimits({ pay: { opts: ["اعتباری", "نقدی"], lock: true }, dtime: { to: "۱۴۰۵/۰۸/۲۰", lock: true } });
-  assert.deepEqual(A, { pay: { opts: ["نقدی", "اعتباری"], lock: true }, dtime: { to: "1405/08/20", lock: true } }, "ترتیبِ فهرستِ سامانه، رقمِ لاتین");
+  assert.deepEqual(A, { pay: { opts: ["نقدی", "اعتباری"], lock: true, credit: [1, 2] }, dtime: { to: "1405/08/20", lock: true } }, "ترتیبِ فهرستِ سامانه، رقمِ لاتین؛ «اعتباری» با مدت‌های ۱ و ۲ ماهه");
   const B = cleanLimits({ pay: { opts: ["نقدی"], lock: true }, vat: { opts: ["دارد"], lock: false }, dtime: { from: "1405/08/01", to: "1405/08/25", lock: true } });
   const c = combineLocks([A, B]);
   assert.deepEqual(c, { lock: { pay: ["نقدی"], dtime: { from: "1405/08/01", to: "1405/08/20" } }, conflict: [] }, "🔓 در قید نیست");
@@ -150,7 +151,13 @@ test("پنلِ تأمین‌کننده: بیرون از 🔒 نه، 🔓 آزا�
   assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { dtime: "1500/01/01" } })).status, 422, "تحویلِ بیرون از بازه");
   r = await call(`/sp/thread/${th}/terms`, { headers: H, body: { pay: "نقدی", vat: "دارد", invoice: "غیر رسمی", dtime: "10 روز کاری", valid_days: 7 } });
   assert.equal(r.status, 200, "«غیر رسمی» با فاکتورِ 🔓 پذیرفته است");
+  /* کابل «نقدی یا اعتباری» 🔒 است: هر سه قیمت الزامی — یک قیمتِ تنها (همان «قیمت نقدی») برای «آمادهٔ ارسال» بس نیست */
   await fill(th, H, { 11: 450000, 12: 120000 });
+  const L11 = d.lines.find((l) => l.item_id === 11);
+  const r11 = await call(`/sp/line/${L11.id}/ready`, { headers: H, body: { on: true } });
+  assert.equal(r11.status, 422);
+  assert.match(r11.data.error, /قیمت اعتباری ۱ ماهه، قیمت اعتباری ۲ ماهه/);
+  await fill(th, H, { 11: { cash: 450000, c1: 463500, c2: 477000 } });
   for (const l of d.lines) assert.equal((await call(`/sp/line/${l.id}/ready`, { headers: H, body: { on: true } })).status, 200);
   const sub = await call(`/sp/thread/${th}/submit`, { headers: H, body: {} });
   assert.equal(sub.status, 200, JSON.stringify(sub.data));
@@ -168,14 +175,17 @@ test("اقلامِ ناسازگار: ثبتِ شرایط آزاد، «آماده
   assert.deepEqual(d.terms_lock.conflict, ["pay"], "سیم فقط نقدی، فیوز فقط اعتباری");
   const L12 = d.lines.find((l) => l.item_id === 12), L13 = d.lines.find((l) => l.item_id === 13);
   assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { pay: "نقدی", vat: "دارد", invoice: "رسمی", dtime: "1405/09/01", valid_days: 5 } })).status, 200, "ناسازگار: این‌جا آزاد");
-  await fill(th, H, { 12: 118000, 13: 95000 });
+  await fill(th, H, { 12: 118000, 13: { c1: 95000 } });
   assert.equal((await call(`/sp/line/${L12.id}/ready`, { headers: H, body: { on: true } })).status, 200);
+  /* «قیمتِ نقدی و اعتباری»: فیوز فقط «اعتباری» 🔒 است — بی قیمتِ ۲ ماهه آماده نمی‌شود؛ تسویه‌اش از خودِ قیمت‌هاست، نه از تسویهٔ نقدیِ گفت‌وگو */
   const r13 = await call(`/sp/line/${L13.id}/ready`, { headers: H, body: { on: true } });
-  assert.equal(r13.status, 422, "فیوز با تسویهٔ نقدی آماده نمی‌شود");
-  assert.match(r13.data.error, /فیوز مینیاتوری[\s\S]*اعتباری/);
-  /* تسویه به اعتباری: فیوز آماده می‌شود، ولی دو قلم با هم نه */
+  assert.equal(r13.status, 422);
+  assert.match(r13.data.error, /قیمت اعتباری ۲ ماهه/);
+  assert.equal((await call(`/sp/line/${L13.id}`, { method: "PUT", headers: H, body: { prices: { r2: 3 } } })).status, 422, "درصد بی قیمتِ نقد حساب نمی‌شود");
+  assert.equal((await call(`/sp/line/${L13.id}`, { method: "PUT", headers: H, body: { prices: { c2: 98000 } } })).status, 200);
+  assert.equal((await call(`/sp/line/${L13.id}/ready`, { headers: H, body: { on: true } })).status, 200, "فیوز با قیمت‌های اعتباری آماده است");
+  /* تسویه به اعتباری؛ ولی دو قلم با هم نه */
   assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { pay: "اعتباری" } })).status, 200);
-  assert.equal((await call(`/sp/line/${L13.id}/ready`, { headers: H, body: { on: true } })).status, 200);
   const both = await call(`/sp/thread/${th}/submit`, { headers: H, body: {} });
   assert.equal(both.status, 422);
   assert.match(both.data.error, /ناسازگار/);

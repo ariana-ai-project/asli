@@ -58,8 +58,11 @@
     const blocks = items.map((x) => {
       const spec = [...(x.layers || []), ...(x.extra || [])].map((y) => `${esc(y.k)}: ${esc(y.v)}${y.u ? ` ${esc(y.u)}` : ""}`).join(" · ");
       const amount = x.price != null ? `${qty(x.qty)} ${esc(x.unit || "")} × ${money(x.price)} = <b>${money(Number(x.qty) * Number(x.price))}</b> ریال` : x.qty != null ? `${qty(x.qty)} ${esc(x.unit || "")}` : "";
+      /* «قیمتِ نقدی و اعتباری»: هر گزینهٔ قیمت با درصدِ تعدیل نسبت به نقد */
+      const pr = x.prices ? [Number(x.prices.cash) > 0 ? `<span>💵 نقد</span><b>${money(x.prices.cash)}</b>` : "",
+        ...[1, 2].map((m) => (Number(x.prices[`c${m}`]) > 0 ? `<span>💳 ${fa(m)} ماهه</span><b>${money(x.prices[`c${m}`])}${x.prices[`r${m}`] != null ? ` <i>${Number(x.prices[`r${m}`]) >= 0 ? "+" : ""}${fa(x.prices[`r${m}`])}٪${m === 2 ? ` · ماهی ${fa(Math.round(Number(x.prices.r2) / 2 * 10) / 10)}٪` : ""}</i>` : ""}</b>` : ""))].join("") : "";
       return `<div class="evi" ${!goto && x.no ? `data-goto-no="${x.no}" role="button" tabindex="0"` : ""}><div class="evt">${x.no ? `<span class="sp-code">کد ${fa(x.no)}</span>` : ""}<span>${esc(x.title)}</span></div>
-        ${amount ? `<div class="evd">${amount}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}${x.lim ? `<div class="evs">📋 شرایط خرید: ${esc(x.lim)}</div>` : ""}</div>`;
+        ${amount ? `<div class="evd">${amount}</div>` : ""}${pr ? `<div class="evp">${pr}</div>` : ""}${spec ? `<div class="evs">${spec}</div>` : ""}${x.lim ? `<div class="evs">📋 شرایط خرید: ${esc(x.lim)}</div>` : ""}</div>`;
     }).join("");
     /* gen (فاز ۴): پیش‌فاکتور را سامانه ساخته؛ پیش‌فاکتورِ خودِ تأمین‌کننده فقط پیوست است */
     const foot = [meta.pf && meta.ev === "submit" ? (meta.gen ? `📎 پیوست: پیش‌فاکتورِ خودِ تأمین‌کننده «${esc(meta.pf)}»` : `📄 همراه با پیش‌فاکتور «${esc(meta.pf)}»`) : "",

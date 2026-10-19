@@ -385,6 +385,9 @@
 .ph-card .evt { display: flex; gap: .4em; align-items: center; font-weight: 700; font-size: .98em; }
 .ph-card .evd { font-size: .88em; margin-top: .15em; }
 .ph-card .evs { font-size: .8em; color: #5a6274; margin-top: .1em; }
+/* «قیمتِ نقدی و اعتباری» در کارتِ پیشنهاد: برچسب و عدد کنارِ هم، درصدِ تعدیل کم‌رنگ */
+.ph-card .evp, .evp { display: grid; grid-template-columns: auto 1fr; gap: 1px 10px; margin-top: .2em; font-size: .86em; font-variant-numeric: tabular-nums; }
+.evp span { opacity: .75; } .evp b { font-weight: 700; } .evp i { font-style: normal; font-weight: 500; opacity: .8; font-size: .9em; }
 .ph-card .sp-code { color: #1c3c8c; border-color: rgba(28, 60, 140, 0.45); font-size: .74em; }
 .ph-card-f { padding: .5em .9em; font-size: .82em; color: #4a5266; border-top: 1px solid rgba(20, 30, 60, 0.07); }
 .ph-card-go { padding: .55em .9em; font-size: .82em; font-weight: 700; color: #1c3c8c; border-top: 1px solid rgba(20, 30, 60, 0.08); }
@@ -634,3 +637,14 @@ html.sp-lock .ph-scroll { overscroll-behavior-y: contain; -webkit-overflow-scrol
 .sp-cobox { margin-top: 10px; padding: 8px 10px; border: 1px dashed var(--tp-line); border-radius: 10px; font-size: .84rem; line-height: 1.9; }
 .sp-cobox > div { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 4px; }
 .sp-co .sp-lim { display: inline; margin: 0 4px; }
+
+/* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵): جعبهٔ قیمت‌ها با ماشین‌حساب — هر ردیف قیمت و، برای اعتباری‌ها، درصدِ تعدیل */
+.sp-prices { grid-column: 1 / -1; margin-top: 10px; border: 1px solid var(--tp-line); border-radius: 12px; padding: 10px; display: grid; gap: 8px; background: rgba(79,140,255,.04); }
+.sp-ptitle { font-weight: 800; font-size: .9rem; }
+.sp-prow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.sp-prow > label { display: flex; flex-direction: column; gap: 3px; font-size: .8rem; color: var(--tp-muted); min-width: 0; }
+.sp-prow .sp-req, .sp-prow .sp-opt { font-style: normal; font-size: .72rem; }
+.sp-prow .sp-opt { opacity: .75; }
+.sp-pct span { display: inline-flex; align-items: center; gap: 4px; }
+.sp-pct input { width: 72px; text-align: center; }
+.sp-calc { font-size: .8rem; color: var(--tp-muted); border-top: 1px dashed var(--tp-line); padding-top: 6px; font-variant-numeric: tabular-nums; }

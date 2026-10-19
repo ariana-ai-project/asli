@@ -15,13 +15,13 @@
 import { telegram, esc, TgError } from "./telegram.js";
 import { tehranParts } from "./time.js";
 import { siteOrigin, PANEL_PATH, CORR_PATH, BUNDLE_FA, LINE_FA, COMPANY, fmtMoney, msgOut, markSeen, threadRow, lineMissing,
-  termsOf, termsMissing, TERM_FIELDS, TERM_FA, clearedUpTo, locksOfLine, lineTitle, lineLayers, layerTxt, bundleOut, proformaInput } from "./sp-core.js";
+  termsOf, termsMissing, TERM_FIELDS, TERM_FA, clearedUpTo, locksOfLine, lineTitle, lineLayers, layerTxt, bundleOut, proformaInput, pricesOf, pricesEff, pricesTxt } from "./sp-core.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { storage } from "./storage.js";
 import { aiThread } from "./ai-lock.js";
 import { pushTo, EXPERT } from "./push.js";
 import { pfReadOn } from "./switches.js";
-import { limitsTxt } from "./terms-locks.js";
+import { limitsTxt, payModes, priceRows, pricesMissing, PRICE_FA } from "./terms-locks.js";
 import { proformaData, termRows } from "./pfdoc.js";
 
 const now = () => Date.now();
@@ -291,11 +291,15 @@ export function itemsCard(env, th, lines, bundles) {
  * نوع قلم و لایه‌های ویژگیِ قفل (و لایه‌های افزوده). «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش»
  * (برگشت به پیش‌نویس) یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر مانده).
  */
+/** دکمهٔ هر ردیفِ قیمت ← همان گامِ پرسشِ ربات (sp-bot.js:VAL_PROMPT) */
+const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" };
 /** opt (فاز ۴ب گام ۳): limits — «📋 شرایط خرید»ِ شرکت برای همین قلم؛ revise — پیشنهادِ تأییدنهایی‌شده اصلاح‌پذیر است */
 export function lineCard(l, files, others, terms, opt = {}) {
   const extra = parse(l.extra_json, []);
   const editable = ["new", "draft", "returned"].includes(l.state);
   const tm = terms || {};
+  /* «قیمتِ نقدی و اعتباری»: وقتی شرکت «اعتباری» را در شرایط تسویه گذاشته، به‌جای یک قیمت، ردیف‌های نقد و ۱ و ۲ ماهه */
+  const pm = payModes(opt.limits);
   /* فاز ۴: 🔒 فقط‌خواندنی، 🔓 قابل تغییر — مقدارِ 🔒 یعنی کلِ مقدار و 🔓 یعنی کمتر هم می‌شود؛ واحد همان واحدِ درخواست */
   const lk = locksOfLine(l);
   const layers = lineLayers(l);
@@ -303,7 +307,8 @@ export function lineCard(l, files, others, terms, opt = {}) {
   if (!lk.legacy) text += `${lk.title ? "🔒 عنوان ثابت است" : `🔓 عنوان: <b>${esc(lineTitle(l))}</b>${lineTitle(l) !== l.title ? " <i>(پیشنهادِ شما)</i>" : ""}`}\n`;
   const qtyLock = lk.legacy ? "" : lk.qty ? " 🔒 <i>(کلِ مقدارِ درخواست)</i>" : ` 🔓 <i>(کمتر هم می‌شود؛ حداکثر ${qty(l.req_qty)})</i>`;
   text += `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}${lk.legacy ? ` <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>` : ""}`
-    + `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
+    + (pm ? `\nقیمت‌ها (ریال، بدون ارزش افزوده): <b>${esc(pricesTxt(pricesOf(l) || {})) || "—"}</b> <i>(${pm.lock ? "🔒 همه الزامی" : "🔓 هر کدام که دارید"})</i>`
+      : `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>`) + `\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
   text += `\n🧾 <b>شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i>\n${termsBlock(tm)}\n`;
   if (opt.limits) text += `<i>📋 شرطِ شرکت: ${esc(limitsTxt(opt.limits))} — 🔒 را پنل بیرونش نمی‌پذیرد.</i>\n`;
   text += `\n🔒 <b>نوع قلم و لایه‌های ویژگی</b>${lk.legacy ? "" : " <i>(🔒 ثابت · 🔓 قابل تغییر)</i>"}\n${l.head ? `نوع قلم: ${esc(l.head)}\n` : ""}`
@@ -318,15 +323,17 @@ export function lineCard(l, files, others, terms, opt = {}) {
     if (others) kb.push([{ text: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, callback_data: `ic:${l.thread_id}` }]);
     return { text, kb };
   }
-  const miss = [...lineMissing(l), ...termsMissing(tm)];
+  /* «قیمتِ نقدی و اعتباری»: در قلمِ چندقیمتی «قیمت واحد» و «شرایط تسویه» جایشان را به ردیف‌های قیمت می‌دهند */
+  const miss = [...lineMissing(l).filter((x) => !(pm && x === "قیمت واحد")), ...pricesMissing(pm, pricesEff(l, pm)).map((k) => PRICE_FA[k]), ...termsMissing(tm).filter((x) => !(pm && x === TERM_FA.pay))];
   if (editable && miss.length) text += `\n\n<i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   if (editable) {
     /* یک دکمهٔ اصلی: «📝 پر کردن اطلاعات» — پرسش‌های نوبتی، همان ترتیبِ پنل وب (sp-bot.js:wizardNext؛ مهر ۱۴۰۵) */
     kb.push([{ text: "📝 پر کردن اطلاعات", callback_data: `wz:${l.id}` }]);
     /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
     kb.push([...(lk.legacy || !lk.qty ? [{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ text: "📏 واحد", callback_data: `sv:${l.id}:u` }] : []),
-      { text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }]);
-    kb.push(["d", "p", "i"].map((k) => ({ text: TERM_BTN[k], callback_data: `tk:${l.id}:${k}` })));
+      ...(pm ? priceRows(pm).map((k) => ({ text: PRICE_FA[k].replace("قیمت ", k === "cash" ? "💵 " : "💳 "), callback_data: `sv:${l.id}:${PR_STEP[k]}` }))
+        : [{ text: "💰 قیمت واحد", callback_data: `sv:${l.id}:p` }])]);
+    kb.push(["d", ...(pm ? [] : ["p"]), "i"].map((k) => ({ text: TERM_BTN[k], callback_data: `tk:${l.id}:${k}` })));
     kb.push(["v", "x"].map((k) => ({ text: TERM_BTN[k], callback_data: `tk:${l.id}:${k}` })));
     /* 🔓ها: عنوان و هر لایهٔ باز (sy:<خط>:<شمارهٔ لایه>) */
     const open = [...(!lk.legacy && !lk.title ? [{ text: "🔓 عنوان", callback_data: `sv:${l.id}:t` }] : []),

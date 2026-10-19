@@ -45,15 +45,34 @@ const ROW_H = 173.4 * SCALE, FIRST_ITEM_H = 212.25 * SCALE, DTIME_H = 248.25 * S
 const W = (w) => +(w * SCALE).toFixed(4);
 
 /** استعلام‌های تأییدنهایی به تفکیک تأمین‌کننده، و فقط قلم‌هایی که دست‌کم یکی‌شان قیمت داده (CM-05) */
-export function commissionData({ items, quotes }) {
+export function commissionData({ items, quotes, offpf }) {
   const groups = [];
+  /* «فراخوانِ پیش‌فاکتورِ رسمی»: offpf — نامِ تأمین‌کنندگانی که هنگامِ ورود به کمیسیون پیش‌فاکتورِ رسمیِ معتبر دارند */
+  const ok = new Set(offpf || []);
   for (const q of (quotes || []).filter((x) => x.final && x.saved)) {
     let g = groups.find((x) => x.name === q.supplier_name);
-    if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat }; groups.push(g); }
+    if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat, offpf: ok.has(q.supplier_name) }; groups.push(g); }
     g.rows[q.item_id] = q;
   }
+  for (const g of groups) g.payTxt = payWithCredit(g);
   return { groups, items: (items || []).filter((it) => groups.some((g) => g.rows[it.id])) };
 }
+
+/* «قیمتِ نقدی و اعتباری» (quotes.prices_json): ردیفِ «شرایط تسویه» درصدِ افزایشِ اعتباری را هم می‌گوید — «نقدی؛ اعتباری ۱ ماهه +۳٪، ۲ ماهه +۶٪» */
+const faNum = (n) => String(n).replace(/\d/g, (x) => "۰۱۲۳۴۵۶۷۸۹"[+x]);
+function payWithCredit(g) {
+  const ps = Object.values(g.rows).map((q) => { try { return q.prices_json ? JSON.parse(q.prices_json) : null; } catch { return null; } }).filter((p) => p && typeof p === "object");
+  if (!ps.length) return g.pay || "";
+  const part = [1, 2].map((m) => {
+    const rs = ps.map((p) => (Number(p[`c${m}`]) > 0 && Number.isFinite(Number(p[`r${m}`])) && p[`r${m}`] !== null ? Math.round(Number(p[`r${m}`]) * 10) / 10 : null)).filter((x) => x != null);
+    if (!rs.length) return null;
+    const lo = Math.min(...rs), hi = Math.max(...rs);
+    return `${faNum(m)} ماهه ${lo === hi ? `+${faNum(lo)}٪` : `+${faNum(lo)} تا +${faNum(hi)}٪`}`;
+  }).filter(Boolean);
+  const cash = ps.some((p) => Number(p.cash) > 0);
+  return [cash ? "نقدی" : g.pay || "", part.length ? `اعتباری ${part.join("، ")}` : ""].filter(Boolean).join("؛ ");
+}
+const OFFPF_FILL = "E2F0D9";  /* سبزِ روشن: پیش‌فاکتورِ رسمیِ معتبر هنگامِ ورود به کمیسیون */
 
 const money = (n) => Math.round(Number(n) || 0);
 /* «ـهٔ» و «ۀ» در B Nazanin دایرهٔ نقطه‌چین جدا می‌شوند (همان مشکلِ docx.js:persianize) — «ه‌ی» همه‌جا درست است */
@@ -116,7 +135,7 @@ export function commissionSheet(d) {
   sh.merge(5, cR, 6, cR, "ردیف", { font: F72n, wrap: true, border: box(t, M, M, t) });
   for (let k = 0; k < nB; k++) {
     const [c1, c2, c3] = blockCols(k), fill = fillOf(k), g = groups[k];
-    sh.merge(5, c1, 5, c3, g ? fa(g.name) : null, { font: F72, fill, wrap: true, border: box(M, t, M, t) });
+    sh.merge(5, c1, 5, c3, g ? fa(g.offpf ? `${g.name} ✓` : g.name) : null, { font: F72, fill: g && g.offpf ? OFFPF_FILL : fill, wrap: true, border: box(M, t, M, t) });
     sh.put(6, c1, "جنس", { font: F48, fill, wrap: true, border: box(M, t, t, t) });
     sh.put(6, c2, "مبلغ کل (ريال)", { font: F48, fill, wrap: true, border: box(t, t, t, t) });
     sh.put(6, c3, "مبلغ واحد (ريال)", { font: F48, fill, wrap: true, border: box(t, k === 0 ? null : M, t, t) });
@@ -158,7 +177,7 @@ export function commissionSheet(d) {
       else if (i === 1) sh.merge(r, c1, r, c3, vat, st, g.vat === "ندارد" ? undefined : `${sumRef}*${vatRate}`);
       else if (i === 2) sh.merge(r, c1, r, c3, sums[k] + vat, st, `${sumRef}+${vatRef}`);
       else if (i === 3) sh.merge(r, c1, r, c3, g.valid ? `${g.valid} روز` : "", st);
-      else if (i === 4) sh.merge(r, c1, r, c3, fa(g.pay || ""), st);
+      else if (i === 4) sh.merge(r, c1, r, c3, fa(g.payTxt || g.pay || ""), st);
       else if (i === 5) sh.merge(r, c1, r, c3, fa(g.dtime || ""), st);
       else sh.merge(r, c1, r, c3, "", st);
     }
@@ -166,7 +185,8 @@ export function commissionSheet(d) {
 
   /* ---- نظرها و امضاها ---- */
   const RT = (h = "right") => ({ font: F72, h, v: "top", wrap: true });
-  const notes = fa(String(d.notes == null ? "" : d.notes).trim());
+  const legend = groups.some((g) => g.offpf) ? `نامِ سبز با ✓ = پیش‌فاکتورِ رسمی با دست‌کم ${faNum(d.offpfHours || 24)} ساعت اعتبار هنگامِ ورود به کمیسیون` : "";
+  const notes = fa([String(d.notes == null ? "" : d.notes).trim(), legend].filter(Boolean).join("\n"));
   sh.merge(rS + 7, 1, rS + 7, X - 9, "نظر کارگاه :", { ...RT(), border: box(M, M, M, M) });
   sh.merge(rS + 7, X - 8, rS + 8, cR, `توضیحات تدارکات و پشتیبانی : \n${notes}`, { ...RT(), border: box(M, M, M, M) });
   sh.merge(rS + 8, 1, rS + 10, X - 17, "نظر واحد فنی:", { ...RT(), border: box(M, t, M, t) });

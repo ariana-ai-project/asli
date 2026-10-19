@@ -20,7 +20,7 @@ import * as C from "./sp-core.js";
 import * as P from "./sp-push.js";
 import { deliverPass } from "./sp-sms.js";
 import { aiKick, autoDecide } from "./ai-agent.js";
-import { rangeTxt } from "./terms-locks.js";
+import { rangeTxt, payModes, priceRows, pricesMissing, PRICE_FA } from "./terms-locks.js";
 import { runAiCheck, aiUsable } from "./sp-ai.js";
 import { ENUMS } from "./quote-rules.js";
 import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
@@ -475,7 +475,21 @@ const VAL_PROMPT = {
   n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):",
   l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه». لایهٔ کمّی را با عدد و واحد بنویسید، مثلاً «وزن: ۵ کیلوگرم».",
   t: "🔓 عنوانِ پیشنهادیِ خودتان را بنویسید (یا «-» برای همان عنوانِ درخواست):",
+  pc: "💵 <b>قیمت نقدیِ</b> واحد را به ریال و بدون ارزش افزوده بنویسید:",
+  p1: "💳 <b>قیمت اعتباری ۱ ماهه</b> — عدد (ریال) یا درصد نسبت به نقد، مثل <code>۳٪</code>:",
+  p2: "💳 <b>قیمت اعتباری ۲ ماهه</b> — عدد (ریال) یا درصد نسبت به نقد، مثل <code>۶٪</code>:",
 };
+/* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵؛ terms-locks.js:payModes): گامِ هر ردیفِ قیمت، و پاسخِ «۳٪» درصد است */
+const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" }, STEP_PR = { pc: "cash", p1: "c1", p2: "c2" };
+const pctOf = (s) => { const x = C.latin(String(s || "")).replace(/[٬,\s]/g, ""); const m = /^(-?\d+(?:[.٫]\d+)?)(?:%|٪|درصد)$/.exec(x); return m ? Number(m[1].replace("٫", ".")) : null; };
+/** حالتِ قیمتِ یک خط (null یعنی همان یک قیمت) */
+const payModesOfLine = async (env, l) => payModes((await C.limitsOfLines(env, [l])).get(l.item_id));
+/** مانده‌های «آمادهٔ ارسال»: در قلمِ چندقیمتی «قیمت واحد» و «شرایط تسویه» جایشان را به ردیف‌های قیمت می‌دهند */
+function missOfLine(l, pm) {
+  const tm = C.termsOf(l);
+  return [...C.lineMissing(l).filter((x) => !(pm && x === "قیمت واحد")), ...pricesMissing(pm, C.pricesEff(l, pm)).map((k) => PRICE_FA[k]),
+    ...C.termsMissing(tm).filter((x) => !(pm && x === C.TERM_FA.pay))];
+}
 /** «وزن: ۵ کیلوگرم» ← لایهٔ کمّی با واحد؛ «برند: 3M» و «اندازه: M8» کیفی می‌مانند (عدد باید با فاصله از واحد جدا باشد) */
 export function extraOf(name, value) {
   const k = T(name), v = T(value);
@@ -491,7 +505,7 @@ async function askValue(env, row, l, f, head, yi, opt) {
   const kb = [];
   if (f === "q" && l.req_qty != null) kb.push([{ text: `✔️ همان مقدار درخواست (${P.qty(l.req_qty)} ${l.req_unit || ""})`, callback_data: `sv:${l.id}:qd` }]);
   if (wz && opt.keep) kb.push([{ text: `⏭ همین که هست (${opt.keep})`, callback_data: `wz:${l.id}:s` }]);
-  else if (wz && opt.skip) kb.push([{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]);
+  else if (wz && opt.skip) kb.push([{ text: opt.skipTxt || "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]);
   kb.push([{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
   let prompt = VAL_PROMPT[f];
   if (f === "q") {
@@ -542,14 +556,15 @@ async function askTerm(env, row, l, k, head, opt) {
    عنوانِ 🔓، مقدار (اگر باز)، واحد (اگر خالی)، قیمت واحد، لایه‌های 🔓، شرایطِ خالیِ فاکتور، توضیح و پیوست (اختیاری).
    هر پرسش که جواب گرفت، پیامش پاک می‌شود و پرسشِ بعدی می‌آید؛ «⏭» رد می‌شود، «✖️ انصراف» بیرون می‌رود.             */
 /* ------------------------------------------------------------------ */
-function wizardSteps(l) {
+function wizardSteps(l, pm) {
   const lk = C.locksOfLine(l), tm = C.termsOf(l), layers = C.lineLayers(l), st = [];
   if (!lk.legacy && !lk.title) st.push({ k: "t" });
   if (lk.legacy || !lk.qty) st.push({ k: "q" });
   if ((lk.legacy || !lk.unit) && !T(l.unit)) st.push({ k: "u" });
-  st.push({ k: "p" });
+  /* «قیمتِ نقدی و اعتباری»: یک گام برای هر ردیفِ قیمت؛ «شرایط تسویه» نه — از خودِ قیمت‌هاست */
+  if (pm) priceRows(pm).forEach((k) => st.push({ k: PR_STEP[k], opt: !pm.lock })); else st.push({ k: "p" });
   layers.forEach((x, i) => { if (lk.layers[x.k] === false) st.push({ k: "y", i }); });
-  for (const k of ["d", "p", "i", "v", "x"]) if (!T(tm[P.TERM_KEY[k]])) st.push({ k: "term", t: k });
+  for (const k of ["d", "p", "i", "v", "x"]) if (!(pm && k === "p") && !T(tm[P.TERM_KEY[k]])) st.push({ k: "term", t: k });
   st.push({ k: "n" }, { k: "a" });
   return st;
 }
@@ -562,7 +577,7 @@ async function wizardNext(env, row, sup, lineId, wz, head) {
   wz.i = (wz.i == null ? -1 : wz.i) + 1;
   if (wz.i >= wz.steps.length) {
     P.setFlow(row, null);
-    const miss = [...C.lineMissing(l), ...C.termsMissing(C.termsOf(l))];
+    const miss = missOfLine(l, await payModesOfLine(env, l));
     return lineCardSend(env, row, sup, l.id, null, `${head ? `${head} ` : ""}🎉 <b>اطلاعاتِ این قلم کامل شد.</b>${miss.length ? ` <i>مانده: ${esc(miss.join("، "))}</i>` : " حالا «✅ آمادهٔ ارسال» را بزنید."}`);
   }
   const s = wz.steps[wz.i];
@@ -578,21 +593,27 @@ async function wizardNext(env, row, sup, lineId, wz, head) {
     return { ok: true };
   }
   const layers = C.lineLayers(l), ly = s.k === "y" ? layers[s.i] : null, title = C.lineTitle(l);
+  const pr = STEP_PR[s.k] ? (C.pricesOf(l) || {})[STEP_PR[s.k]] : null;
   const keep = s.k === "q" && l.qty != null ? `${P.qty(l.qty)} ${l.unit || ""}` : s.k === "p" && l.price != null ? `${P.money(l.price)} ریال` : s.k === "u" && T(l.unit) ? l.unit
-    : s.k === "n" && T(l.note) ? P.short(l.note, 20) : s.k === "t" && title !== l.title ? P.short(title, 20) : s.k === "y" && ly && ly.req != null ? P.short(ly.v, 20) : null;
-  return askValue(env, row, l, s.k, h, s.i, { wz, keep, skip: ["n", "t", "y"].includes(s.k) });
+    : s.k === "n" && T(l.note) ? P.short(l.note, 20) : s.k === "t" && title !== l.title ? P.short(title, 20) : s.k === "y" && ly && ly.req != null ? P.short(ly.v, 20)
+      : Number(pr) > 0 ? `${P.money(pr)} ریال` : null;
+  return askValue(env, row, l, s.k, h, s.i, { wz, keep, skip: ["n", "t", "y"].includes(s.k) || (STEP_PR[s.k] && s.opt), skipTxt: STEP_PR[s.k] ? "⏭ ندارم" : null });
 }
 /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده — مقدار، قیمت یا شرطِ فاکتور — همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
 async function afterSave(env, row, sup, lineId, head) {
   const l = await env.DB.prepare("SELECT l.*, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   const miss = C.lineMissing(l || {});
   const tm = C.termsOf(l);
+  const pm = l ? await payModesOfLine(env, l) : null;
   if (l && C.LINE_EDITABLE.includes(l.state) && l.state !== "ready") {
     if (miss.includes("مقدار")) return askValue(env, row, l, "q", head);
-    if (miss.includes("قیمت واحد")) return askValue(env, row, l, "p", head);
-    for (const k of ["d", "p", "i", "v", "x"]) if (!String(tm[P.TERM_KEY[k]] ?? "").trim()) return askTerm(env, row, l, k, head);
+    /* «قیمتِ نقدی و اعتباری»: ردیفِ قیمتِ لازمی که هنوز خالی است */
+    const pmiss = pricesMissing(pm, C.pricesEff(l, pm));
+    if (pm && pmiss.length) return askValue(env, row, l, PR_STEP[pmiss[0]], head);
+    if (!pm && miss.includes("قیمت واحد")) return askValue(env, row, l, "p", head);
+    for (const k of ["d", "p", "i", "v", "x"]) if (!(pm && k === "p") && !String(tm[P.TERM_KEY[k]] ?? "").trim()) return askTerm(env, row, l, k, head);
   }
-  const all = [...miss, ...C.termsMissing(tm)];
+  const all = l ? missOfLine(l, pm) : [...miss, ...C.termsMissing(tm)];
   return lineCardSend(env, row, sup, lineId, null, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
 }
 
@@ -691,7 +712,9 @@ async function supplierMessage(env, row, msg, text) {
   }
   if (f && f.step === "val" && text) {
     try {
-      const body = f.f === "q" ? { qty: text } : f.f === "p" ? { price: text } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: text === "-" ? "" : text }
+      /* «قیمتِ اعتباری»: «۳٪» درصد است و قیمت را سرور از نقد می‌سازد (sp-core.js:lineSave)؛ بقیه خودِ قیمت */
+      const pk = STEP_PR[f.f], pct = pk && pk !== "cash" ? pctOf(text) : null;
+      const body = pk ? { prices: pct != null ? { [`r${pk.slice(1)}`]: pct } : { [pk]: text } } : f.f === "q" ? { qty: text } : f.f === "p" ? { price: text } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: text === "-" ? "" : text }
         : f.f === "t" ? { title: text === "-" ? "" : text } : null;
       if (f.f === "l") {
         const m = /^(.{1,40}?)\s*[:：=]\s*(.+)$/.exec(text);
@@ -867,7 +890,7 @@ async function onCallback(env, cq, ctx) {
         if (!wz) { P.setFlow(row, null); return await lineCardSend(env, row, sup, l.id, mid); }
         return await wizardNext(env, row, sup, l.id, wz);
       }
-      return await wizardNext(env, row, sup, l.id, { steps: wizardSteps(l), i: -1, mid: null });
+      return await wizardNext(env, row, sup, l.id, { steps: wizardSteps(l, await payModesOfLine(env, l)), i: -1, mid: null });
     }
     if (a === "sv") {
       const f = parts[2];

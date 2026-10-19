@@ -26,7 +26,7 @@ import { telegram } from "./telegram.js";
 import { normOf, dbStruct } from "./normalize.js";
 import { layerText } from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import { canSave, validDtime, normalizeDtime, ENUMS } from "./quote-rules.js";
-import { limitsOf, combineLocks, violations, violationError, LIMIT_FA, limitsTxt, withCompany } from "./terms-locks.js";
+import { limitsOf, combineLocks, violations, violationError, LIMIT_FA, limitsTxt, withCompany, payModes, priceRows, pricesMissing, PRICE_FA, CREDIT_MONTHS } from "./terms-locks.js";
 import { stamp, mergeSrc } from "./quote-src.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
@@ -88,7 +88,9 @@ export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept
      کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد — تیک را فقط انسان می‌زند (worker/ai-agent.js) */
   ["sp_phones", "panel", "INTEGER"], ["sp_phones", "panel_by", "INTEGER"], ["sp_phones", "panel_at", "INTEGER"],
   /* فاز ۴ طرح «خرید هوشمند»: قفل‌های قلم در لحظهٔ ارسال (🔒/🔓ِ عنوان، مقدار و هر لایه) و تغییرهای تأمین‌کننده روی 🔓ها */
-  ["sp_lines", "locks_json", "TEXT"], ["sp_lines", "s_json", "TEXT"]];
+  ["sp_lines", "locks_json", "TEXT"], ["sp_lines", "s_json", "TEXT"],
+  /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵): {cash, c1, c2, r1, r2} — ستونِ price همان قیمتِ اصلی (نقد، وگرنه کوتاه‌ترین اعتباری) می‌ماند */
+  ["sp_lines", "prices_json", "TEXT"]];
 
 /** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
 export async function spBackfill(env) {
@@ -256,6 +258,8 @@ const itemSnap = (l, withPrice) => ({
   no: l.no || null, title: lineTitle(l), head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
   ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: lineLayers(l), extra: extraOf(l),
   ...(withPrice && T(l.note) ? { note: T(l.note).slice(0, 300) } : {}),
+  /* «قیمتِ نقدی و اعتباری»: قیمتِ نقد و هر مدتِ اعتباری با درصدِ تعدیل */
+  ...(withPrice && pricesOf(l) ? { prices: pricesOf(l) } : {}),
   /* «📋 شرایط خرید»ِ شرکت (فقط کارتِ استعلام و یادآوری) — terms-locks.js:limitsTxt */
   ...(!withPrice && T(l.lim) ? { lim: T(l.lim) } : {}),
 });
@@ -264,8 +268,10 @@ const itemBlock = (l, withPrice) => {
   const amount = withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
   const spec = specTxt(l);
   return `▫️ ${codeTxt(l.no)}${lineTitle(l)}\n    ${amount}${spec ? `\n    ${spec}` : ""}${withPrice && T(l.note) ? `\n    📝 ${T(l.note).slice(0, 300)}` : ""}`
-    + `${!withPrice && T(l.lim) ? `\n    📋 شرایط خرید: ${T(l.lim)}` : ""}`;
+    + `${withPrice && pricesOf(l) ? `\n    ${pricesTxt(pricesOf(l))}` : ""}${!withPrice && T(l.lim) ? `\n    📋 شرایط خرید: ${T(l.lim)}` : ""}`;
 };
+/** «💵 نقد ۵۲۰٬۰۰۰ · 💳 ۱ ماهه ۵۳۵٬۶۰۰ (+۳٪) · ۲ ماهه —» */
+export const pricesTxt = (p) => [Number(p.cash) > 0 ? `💵 نقد ${moneyTxt(p.cash)}` : null, ...CREDIT_MONTHS.map((m) => (Number(p[`c${m}`]) > 0 ? `💳 ${faN(m)} ماهه ${moneyTxt(p[`c${m}`])}${p[`r${m}`] != null ? ` (${Number(p[`r${m}`]) >= 0 ? "+" : ""}${faN(p[`r${m}`])}٪)` : ""}` : null))].filter(Boolean).join(" · ");
 const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${faN(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
 /* ------------------------------------------------------------------ */
@@ -688,7 +694,7 @@ export function lineOut(l) {
     layers: parse(l.layers_json, []).map((x) => ({ ...x, lock: lk.layers[x.k] !== false, ...(T(ch[x.k]) && T(ch[x.k]) !== x.v ? { s: T(ch[x.k]) } : {}) })),
     extra: parse(l.extra_json, []), locks: { title: lk.title, qty: lk.qty, unit: lk.unit, legacy: lk.legacy },
     req_qty: l.req_qty, req_unit: l.req_unit, qty, unit: l.unit, price, total: qty != null && price != null ? qty * price : null,
-    note: l.note, state: l.state, state_fa: LINE_FA[l.state] || l.state, bundle_id: l.bundle_id, quote_id: l.quote_id, missing: lineMissing(l),
+    note: l.note, state: l.state, state_fa: LINE_FA[l.state] || l.state, bundle_id: l.bundle_id, quote_id: l.quote_id, missing: lineMissing(l), prices: pricesOf(l),
   };
 }
 /** بسته برای نمایش؛ کارشناس جدول تطابق، پذیرش‌هایش و این‌که تأیید نهایی ممکن است یا چه مانعی مانده را هم می‌بیند */
@@ -712,6 +718,12 @@ export function bundleOut(b, side, opt = {}) {
   };
 }
 export const lineMissing = (l) => [Number(l.qty) > 0 ? null : "مقدار", T(l.unit) ? null : "واحد", Number(l.price) > 0 ? null : "قیمت واحد"].filter(Boolean);
+/** قیمت‌های نقدی و اعتباریِ یک خط ({cash, c1, c2, r1, r2}) یا null */
+export const pricesOf = (l) => { const p = parse(l && l.prices_json, null); return p && typeof p === "object" && Object.keys(p).length ? p : null; };
+/** قیمت‌های مؤثر: prices_json، وگرنه (خطِ پیش از «قیمتِ نقدی و اعتباری» یا کلاینتِ قدیمی که فقط price می‌فرستد) همان یک قیمت در ردیفِ اولِ حالت */
+export const pricesEff = (l, pm) => pricesOf(l) || (pm && Number(l && l.price) > 0 ? { [priceRows(pm)[0]]: Number(l.price) } : null);
+/** شرایط تسویهٔ قلمِ چندقیمتی از خودِ قیمت‌هاست: «نقدی» اگر قیمتِ نقد دارد، وگرنه «اعتباری» */
+const withPay = (t, pm, l) => (pm ? { ...t, pay: Number((pricesEff(l, pm) || {}).cash) > 0 ? "نقدی" : "اعتباری" } : t);
 
 /** حالتِ مکاتباتِ گفت‌وگوی کارشناس هوشمند برای صفحه: مهلتِ کارشناس، و «⏸ بی‌مهلت» با علتش (تنظیمِ خودش یا «حالت کار»ِ نوع قلم) */
 async function watchMode(env, th) {
@@ -1034,6 +1046,30 @@ export async function lineSave(env, sup, lineId, b) {
   }
   if (s) { sets.push("s_json=?"); args.push(Object.keys(s).length ? JSON.stringify(s) : null); }
   if ("extra" in b) { sets.push("extra_json=?"); args.push(JSON.stringify(cleanExtra(b.extra, parse(l.layers_json, []), lk))); }
+  /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵): هر ردیف قیمت یا درصدِ تعدیل نسبت به نقد — اگر فقط درصد آمد (بات: «۳٪»)، قیمت از نقد ساخته
+     می‌شود؛ درصدها همیشه از قیمت‌ها حساب و نگه داشته می‌شوند. price همان قیمتِ اصلی است (نقد، وگرنه کوتاه‌ترین اعتباری) */
+  if (b.prices && typeof b.prices === "object") {
+    const P = { ...(pricesOf(l) || {}) };
+    for (const k of ["cash", "c1", "c2"]) {
+      if (!(k in b.prices)) continue;
+      const n = toNum(b.prices[k]);
+      if (Number.isNaN(n) || (n != null && n <= 0)) throw new HttpError(`${PRICE_FA[k]} باید عددِ مثبت باشد (ریال، بدون ارزش افزوده).`, 422, { field: k });
+      P[k] = n;
+    }
+    for (const m of CREDIT_MONTHS) {
+      const rk = `r${m}`, ck = `c${m}`;
+      if (!(rk in b.prices) || ck in b.prices) continue;
+      const r = toNum(b.prices[rk]);
+      if (r == null) { P[ck] = null; continue; }
+      if (Number.isNaN(r) || r < -50 || r > 300) throw new HttpError("درصدِ تعدیل باید عددی بین ۵۰- و ۳۰۰ باشد.", 422, { field: rk });
+      if (!(Number(P.cash) > 0)) throw new HttpError("برای حسابِ قیمت از درصدِ تعدیل، اول قیمتِ نقدی را بنویسید؛ یا خودِ قیمتِ اعتباری را بنویسید.", 422, { field: rk });
+      P[ck] = Math.round(Number(P.cash) * (1 + r / 100));
+    }
+    for (const m of CREDIT_MONTHS) P[`r${m}`] = Number(P.cash) > 0 && Number(P[`c${m}`]) > 0 ? Math.round((Number(P[`c${m}`]) / Number(P.cash) - 1) * 1000) / 10 : null;
+    const clean = Object.fromEntries(Object.entries(P).filter(([, v]) => v != null && !Number.isNaN(Number(v))));
+    sets.push("prices_json=?"); args.push(["cash", "c1", "c2"].some((k) => clean[k]) ? JSON.stringify(clean) : null);
+    if (!("price" in b)) { sets.push("price=?"); args.push(clean.cash ?? clean.c1 ?? clean.c2 ?? null); }
+  }
   if (!sets.length) return { ok: true };
   if (l.state === "new") sets.push("state='draft'");
   const t = now();
@@ -1090,10 +1126,14 @@ export async function lineReady(env, sup, lineId, on) {
   if (!LINE_EDITABLE.includes(l.state)) throw notEditable(l);
   if (on) {
     const th = await env.DB.prepare("SELECT terms_json FROM sp_threads WHERE id=?").bind(l.thread_id).first();
-    const miss = [...lineMissing(l), ...termsMissing(termsOf(th))];
+    const lim = await limitsOfLines(env, [l]);
+    /* «قیمتِ نقدی و اعتباری»: قیمت‌های لازمِ همین قلم؛ شرایط تسویهٔ این قلم از خودِ قیمت‌ها پیداست */
+    const pm = payModes(lim.get(l.item_id));
+    const tm = withPay(termsOf(th), pm, l);
+    const miss = [...lineMissing(l), ...pricesMissing(pm, pricesEff(l, pm)).map((k) => PRICE_FA[k]), ...termsMissing(tm)];
     if (miss.length) throw new HttpError(`برای «آمادهٔ ارسال» این‌ها را پر کنید: ${miss.join("، ")}`, 422, { missing: miss });
     /* فاز ۴ب گام ۳: شرایطِ اعلامی با قفلِ شرایطِ همین قلم */
-    const v = violations(termsOf(th), lockOfLines([l], await limitsOfLines(env, [l])).lock);
+    const v = violations(tm, lockOfLines([l], lim).lock);
     if (v.length) throw violationError(v, `شرایطِ «${l.title}»`);
   }
   const state = on ? "ready" : (l.state === "ready" ? "draft" : l.state);
@@ -1117,11 +1157,17 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
   if (!lines.length) throw new HttpError("هیچ قلمِ «آمادهٔ ارسال»ی انتخاب نشده است.", 422);
   const bad = lines.filter((l) => lineMissing(l).length);
   if (bad.length) throw new HttpError(`این اقلام کامل نیستند: ${bad.map((l) => `${codeTxt(l.no)}«${l.title}»`).join("، ")}`, 422);
-  const terms = termsOf(th);
+  const lim0 = await limitsOfLines(env, lines);
+  /* «قیمتِ نقدی و اعتباری»: قیمت‌های لازمِ هر قلم؛ شرایط تسویهٔ اقلامِ چندقیمتی از خودِ قیمت‌هاست */
+  const pBad = lines.map((l) => [l, pricesMissing(payModes(lim0.get(l.item_id)), pricesEff(l, payModes(lim0.get(l.item_id))))]).filter(([, m]) => m.length);
+  if (pBad.length) throw new HttpError(`قیمت‌های لازم کامل نیست: ${pBad.map(([l, m]) => `${codeTxt(l.no)}«${l.title}»: ${m.map((k) => PRICE_FA[k]).join("، ")}`).join("؛ ")}`, 422);
+  const multi = lines.filter((l) => payModes(lim0.get(l.item_id)));
+  const terms0 = termsOf(th);
+  const terms = multi.length && (multi.length === lines.length || !T(terms0.pay)) ? withPay(terms0, payModes(lim0.get(multi[0].item_id)), multi[0]) : terms0;
   const tmiss = termsMissing(terms);
   if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
   /* فاز ۴ب گام ۳: شرایطِ بسته با قفلِ همهٔ اقلامِ همین بسته؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
-  const { lock, conflict } = lockOfLines(lines, await limitsOfLines(env, lines));
+  const { lock, conflict } = lockOfLines(lines, lim0);
   if (conflict.length) {
     throw new HttpError(`این اقلام شرایطِ قفلِ ناسازگار دارند (${conflict.map((f) => LIMIT_FA[f]).join("، ")})؛ هر بار فقط اقلامی را بفرستید که شرایطشان با هم می‌خواند.`, 422, { conflict });
   }
@@ -1295,7 +1341,7 @@ export function proformaInput(env, th, lines, terms, { no = null, at = now() } =
   return {
     company: COMPANY(env), supplier: th.supplier_name, request: { id: th.request_id, party: th.party || "" }, date: jStr(at), no,
     lines: lines.map((l) => ({ no: l.no, title: lineTitle(l), layers: lineLayers(l).map(({ k, v }) => ({ k, v })), extras: extraOf(l),
-      qty: l.qty, unit: l.unit, price: l.price, note: l.note })),
+      qty: l.qty, unit: l.unit, price: l.price, prices: pricesOf(l), note: l.note })),
     terms: terms || {},
   };
 }
@@ -1368,7 +1414,7 @@ function supplierRes(lines, terms) {
       ...layersOf(l).map((x) => ({ k: x.k, v: `${x.v}${x.u ? ` ${x.u}` : ""}` })),
       ...(T(l.note) ? [{ k: "توضیح تأمین‌کننده", v: T(l.note).slice(0, 200) }] : []),
     ];
-    return { line_id: l.id, item_id: l.item_id, values: { spec, qty: l.qty == null ? null : Number(l.qty), unit: T(l.unit) || null, price: l.price == null ? null : Number(l.price) } };
+    return { line_id: l.id, item_id: l.item_id, values: { spec, qty: l.qty == null ? null : Number(l.qty), unit: T(l.unit) || null, price: l.price == null ? null : Number(l.price), prices: pricesOf(l) } };
   });
   const tm = termsMissing(terms);
   if (tm.length) problems.push(`شرایط فاکتور: ${tm.join("، ")}`);
@@ -1489,23 +1535,26 @@ async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
   for (const l of lines) {
     const tm = withCompany(res.terms, lim.get(l.item_id));
     const v = byLine.get(l.id) || {};
+    /* «قیمتِ نقدی و اعتباری»: ردیف‌های قیمت همراهِ خطِ استعلام (quotes.prices_json) — جدول کمیسیون و بستهٔ کمیسیون از همین می‌خوانند */
+    const pr = v.prices || pricesEff(l, payModes(lim.get(l.item_id)));
+    const pj = pr ? JSON.stringify(pr) : null;
     const spec = [l.head ? `نوع قلم: ${l.head}` : null, ...(v.spec || []).map((x) => `${x.k}: ${x.v}`)].filter(Boolean).join("، ").slice(0, 500) || null;
     const q = { unit: v.unit || null, qty: v.qty ?? null, price: v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
     const ok = canSave(q) ? 1 : 0;
     const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
       tm.deal || null, tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
     const fromCo = ["deal", "place", "place_other", "ship"].filter((f) => tm[f] != null && T(tm[f]) && !T((res.terms || {})[f]));
-    const filled = COLS.filter((f, i) => vals[i] != null && String(vals[i]) !== "");
+    const filled = [...COLS.filter((f, i) => vals[i] != null && String(vals[i]) !== ""), ...(pj ? ["prices_json"] : [])];
     const src = mergeSrc(have.has(l.item_id) ? have.get(l.item_id).src_json : null,
       { ...stamp(filled.filter((f) => !fromCo.includes(f)), kind, { at: t, ref: `b:${b.id}` }), ...stamp(fromCo.filter((f) => filled.includes(f)), "company", { at: t }) });
     if (have.has(l.item_id)) {
       stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, deal=?, place=?, place_other=?, saved=?,
-          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, src_json=?, updated_at=? WHERE id=?`)
-        .bind(...vals, b.id, src, t, have.get(l.item_id).id));
+          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, src_json=?, prices_json=?, updated_at=? WHERE id=?`)
+        .bind(...vals, b.id, src, pj, t, have.get(l.item_id).id));
     } else {
-      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,src_json,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?,?)`)
-        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, src, t, t));
+      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,src_json,prices_json,created_at,updated_at)
+          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?,?,?)`)
+        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, src, pj, t, t));
     }
   }
   if (gen) {

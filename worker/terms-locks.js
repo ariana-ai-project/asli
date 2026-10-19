@@ -48,6 +48,11 @@ export function cleanLimits(raw) {
     if (bad.length) throw new HttpError(`«${LIMIT_FA[f]}» یکی از این‌ها باشد: ${ENUMS[f].join("، ")}`, 422, { field: f });
     if (!opts.length) continue;
     out[f] = { opts: ENUMS[f].filter((o) => opts.includes(o)), lock: v.lock === true };
+    /* «اعتباری»: مدت‌هایی که قیمتشان خواسته می‌شود (۱ و ۲ ماهه؛ پیش‌فرض هر دو) — تأمین‌کننده برای هر کدام قیمت یا درصدِ تعدیل می‌دهد (payModes) */
+    if (f === "pay" && out.pay.opts.includes("اعتباری")) {
+      const cm = [...new Set((Array.isArray(v.credit) ? v.credit : CREDIT_MONTHS).map((n) => Number(DIG(n))).filter((n) => CREDIT_MONTHS.includes(n)))].sort((a, b) => a - b);
+      out.pay.credit = cm.length ? cm : [...CREDIT_MONTHS];
+    }
   }
   const d = x.dtime;
   if (d && typeof d === "object") {
@@ -74,6 +79,30 @@ export function cleanLimits(raw) {
     out.valid = { min: n, lock: x.valid.lock === true };
   }
   return Object.keys(out).length ? out : null;
+}
+
+/* مدت‌های قیمتِ اعتباری (ماه) */
+export const CREDIT_MONTHS = [1, 2];
+const MONTHS_FA = (cm) => cm.map((m) => `${faN(m)} ماهه`).join(" و ");
+/**
+ * «قیمتِ نقدی و اعتباری» (درخواست مالک، مهر ۱۴۰۵): وقتی کارشناس «اعتباری» را در شرایط تسویه زده، تأمین‌کننده برای هر قلم قیمتِ نقد
+ * (اگر «نقدی» هم خواسته شده) و قیمتِ هر مدتِ اعتباری را می‌دهد — قیمت یا درصدِ تعدیل نسبت به نقد. 🔒 یعنی همه الزامی‌اند، 🔓 یعنی
+ * هر کدام اختیاری (دست‌کم یکی). null یعنی همان یک قیمتِ همیشگی.
+ */
+export function payModes(L) {
+  const p = L && L.pay;
+  if (!p || !Array.isArray(p.opts) || !p.opts.includes("اعتباری")) return null;
+  return { cash: p.opts.includes("نقدی"), credit: Array.isArray(p.credit) && p.credit.length ? p.credit : [...CREDIT_MONTHS], lock: !!p.lock };
+}
+/** ردیف‌های قیمتِ یک حالت: ["cash", "c1", "c2"] */
+export const priceRows = (m) => (m ? [...(m.cash ? ["cash"] : []), ...m.credit.map((n) => `c${n}`)] : []);
+export const PRICE_FA = { cash: "قیمت نقدی", c1: "قیمت اعتباری ۱ ماهه", c2: "قیمت اعتباری ۲ ماهه" };
+/** ردیف‌هایی که هنوز قیمت ندارند و لازم‌اند: 🔒 همه؛ 🔓 فقط وقتی هیچ‌کدام پر نیست (دست‌کم یکی) */
+export function pricesMissing(m, prices) {
+  if (!m) return [];
+  const P = prices || {}, rows = priceRows(m), has = (k) => Number(P[k]) > 0;
+  if (m.lock) return rows.filter((k) => !has(k));
+  return rows.some(has) ? [] : [rows[0]];
 }
 
 /**
@@ -160,7 +189,7 @@ export function violationError(v, what = "شرایط فاکتور") {
 /** مقدارِ یک قید، بی برچسب و 🔒/🔓 (پیام اول: «مشخصات ثابت» و «قابل تغییر») */
 export function fieldTxt(f, v) {
   if (!v || typeof v !== "object") return "";
-  if (ENUM_FIELDS.includes(f)) return (v.opts || []).join(" یا ");
+  if (ENUM_FIELDS.includes(f)) return (v.opts || []).map((o) => (o === "اعتباری" && Array.isArray(v.credit) ? `اعتباری (${MONTHS_FA(v.credit)})` : o)).join(" یا ");
   if (f === "dtime") return [v.from, v.to].filter(Boolean).join(" تا ");
   if (ONE_FIELDS.includes(f)) return v.opt ? `${v.opt}${v.note ? ` (${v.note})` : ""}` : "";
   if (f === "ship") return T(v.text);
@@ -172,7 +201,7 @@ export function fieldTxt(f, v) {
 export function limitsTxt(L) {
   if (!L) return "";
   const parts = [];
-  for (const f of ENUM_FIELDS) if (L[f]) parts.push(`${LIMIT_FA[f]} ${L[f].lock ? "🔒" : "🔓"} ${L[f].opts.map((o) => `«${o}»`).join(" یا ")}`);
+  for (const f of ENUM_FIELDS) if (L[f]) parts.push(`${LIMIT_FA[f]} ${L[f].lock ? "🔒" : "🔓"} ${L[f].opts.map((o) => `«${o}»${o === "اعتباری" && Array.isArray(L[f].credit) ? ` (${MONTHS_FA(L[f].credit)})` : ""}`).join(" یا ")}`);
   if (L.dtime && (L.dtime.from || L.dtime.to)) parts.push(`${LIMIT_FA.dtime} ${L.dtime.lock ? "🔒" : "🔓"} ${rangeTxt(L.dtime)}`);
   if (L.place) parts.push(`${LIMIT_FA.place} ${L.place.lock ? "🔒" : "🔓"} «${L.place.opt}»${L.place.note ? ` (${L.place.note})` : ""}`);
   if (L.deal) parts.push(`${LIMIT_FA.deal} ${L.deal.lock ? "🔒" : "🔓"} «${L.deal.opt}»`);

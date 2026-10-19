@@ -596,7 +596,9 @@
     const row = (f) => {
       const x = D[f] || {};
       let cell;
-      if (TERM_ENUM[f]) cell = TERM_ENUM[f].map((o) => `<label class="chkline" style="margin-inline-end:10px"><input type="checkbox" data-tm-opt="${f}" value="${esc(o)}" ${(x.opts || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("");
+      if (TERM_ENUM[f]) cell = TERM_ENUM[f].map((o) => `<label class="chkline" style="margin-inline-end:10px"><input type="checkbox" data-tm-opt="${f}" value="${esc(o)}" ${(x.opts || []).includes(o) ? "checked" : ""}> ${esc(o)}</label>`).join("")
+        /* «قیمتِ نقدی و اعتباری»: با «اعتباری» از تأمین‌کننده قیمتِ جدا برای نقد (اگر تیک خورده) و اعتباریِ ۱ و ۲ ماهه خواسته می‌شود */
+        + (f === "pay" && (x.opts || []).includes("اعتباری") ? `<div class="dim" style="font-size:.78rem;flex-basis:100%">💳 تأمین‌کننده ${(x.opts || []).includes("نقدی") ? "قیمتِ نقد و " : ""}قیمتِ اعتباریِ ۱ و ۲ ماهه را جدا می‌دهد (با درصدِ افزایش و ماشین‌حساب)؛ ${x.lock ? "🔒 همه الزامی‌اند" : "🔓 هر کدام که دارد"}.</div>` : "");
       else if (f === "dtime") {
         cell = `از <input class="tp-input num" data-tm-dt="from" value="${esc(x.from || "")}" placeholder="اختیاری" style="width:120px" readonly>
           تا <input class="tp-input num" data-tm-dt="to" value="${esc(x.to || "")}" placeholder="📅 انتخاب تاریخ" style="width:130px" readonly>
@@ -2114,6 +2116,15 @@
       <td class="ed">${edSel(q, "deal", DEALS, false, "اختیاری — تصمیم داخلی؛ از پیش‌فاکتور خوانده نمی‌شود")}</td>
       <td class="ed" style="min-width:170px"><div class="stack">${edSel(q, "place", PLACES, false, "اختیاری")}${q.place === "سایر" ? `<input class="tp-input${q.place_other ? "" : " bad"}" data-qf="${q.id}|place_other" value="${esc(q.place_other || "")}" placeholder="محل را بنویسید" title="${esc(q.place_other || "")}" aria-label="${LBL.place_other}">` : ""}</div></td>`;
   }
+  /* «قیمتِ نقدی و اعتباری» (quotes.prices_json): زیرِ قیمت کل، قیمت‌های واحدِ هر شیوهٔ پرداخت با درصدِ افزایش نسبت به نقد */
+  function qPrices(q) {
+    let p = null;
+    try { p = q.prices_json ? JSON.parse(q.prices_json) : null; } catch { p = null; }
+    if (!p || typeof p !== "object") return "";
+    const rows = [Number(p.cash) > 0 ? `💵 نقد ${M(Number(p.cash))}` : null,
+      ...[1, 2].map((m) => (Number(p[`c${m}`]) > 0 ? `💳 ${M(m)} ماهه ${M(Number(p[`c${m}`]))}${p[`r${m}`] != null && Number.isFinite(Number(p[`r${m}`])) ? ` (+${M(Number(p[`r${m}`]))}٪)` : ""}` : null))].filter(Boolean);
+    return rows.length ? `<div class="qpr" title="قیمتِ واحدِ هر شیوهٔ پرداخت (ریال، بی ارزش افزوده)">${rows.map((x) => `<span>${x}</span>`).join("")}</div>` : "";
+  }
   function vQuotes() {
     const r = S.d.request, its = items(), Q = S.d.quotes;
     const itemTitle = (id) => { const x = its.find((i) => i.id === id); return x ? x.title : ""; };
@@ -2131,7 +2142,7 @@
           <td class="rt">${esc(q.supplier_name)}${ed ? `<input class="tp-input qcode num" data-qf="${q.id}|supplier_code" data-opt="1" value="${esc(q.supplier_code || "")}" placeholder="کد (اختیاری)" title="کد تأمین‌کننده — برای همهٔ خط‌های همین تأمین‌کننده" aria-label="کد تأمین‌کننده">` : q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : q.origin === "tender" ? `<div><span class="chip" title="از مناقصهٔ آنلاین">مناقصه</span></div>` : ""}${q.ai_live ? `<div><span class="chip info" title="کارشناس هوشمند همین حالا با این تأمین‌کننده مذاکره می‌کند؛ تا پایانِ مذاکره یا «🚨 باز کردن» دستی عوض نمی‌شود">🤖 در حالِ مذاکره</span></div>` : q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ مذاکره‌اش تمام شده و خانه‌ها دستی هم ویرایش می‌شوند">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
           <td class="ro item">${esc(itemTitle(q.item_id))}</td>
           ${ed ? QF.map(([k, , w, ty, opt]) => edCell(q, k, w, ty, opt)).join("") + edTerms(q) : ro(q)}
-          <td class="num" data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</td>
+          <td class="num"><span data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</span>${qPrices(q)}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : pfCell(q)}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : exCell(q)}</td>
           <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai_live ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>

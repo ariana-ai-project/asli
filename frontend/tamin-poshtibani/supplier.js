@@ -346,8 +346,37 @@
     n: "📝 توضیح را بنویسید (یا «-» برای پاک کردن):",
     l: "➕ لایهٔ تازه را این‌طور بنویسید: «نام لایه: مقدار» — مثلاً «برند: فولاد مبارکه». لایهٔ کمّی را با عدد و واحد بنویسید، مثلاً «وزن: ۵ کیلوگرم».",
     t: "🔓 عنوانِ پیشنهادیِ خودتان را بنویسید (یا «-» برای همان عنوانِ درخواست):",
+    pc: "💵 <b>قیمت نقدیِ</b> واحد را به ریال و بدون ارزش افزوده بنویسید:",
+    p1: "💳 <b>قیمت اعتباری ۱ ماهه</b> — عدد (ریال) یا درصد نسبت به نقد، مثل <b>۳٪</b>:",
+    p2: "💳 <b>قیمت اعتباری ۲ ماهه</b> — عدد (ریال) یا درصد نسبت به نقد، مثل <b>۶٪</b>:",
   };
-  const VAL_PH = { q: "مقدار (عدد)…", u: "واحد…", p: "قیمت واحد به ریال…", n: "توضیح…", l: "نام لایه: مقدار", t: "عنوانِ پیشنهادی…", y: "مقدارِ پیشنهادی…" };
+  const VAL_PH = { q: "مقدار (عدد)…", u: "واحد…", p: "قیمت واحد به ریال…", n: "توضیح…", l: "نام لایه: مقدار", t: "عنوانِ پیشنهادی…", y: "مقدارِ پیشنهادی…",
+    pc: "قیمت نقدی به ریال…", p1: "عدد یا درصد، مثل ۳٪", p2: "عدد یا درصد، مثل ۶٪" };
+  /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵؛ worker/terms-locks.js:payModes): وقتی شرایط تسویهٔ شرکت «اعتباری» دارد، برای هر قلم قیمتِ نقد
+     (اگر «نقدی» هم خواسته شده) و قیمتِ هر مدتِ اعتباری — قیمت یا درصدِ تعدیل نسبت به نقد؛ 🔒 همه الزامی، 🔓 دست‌کم یکی */
+  const payModesOf = (l) => { const p = l && l.limits && l.limits.pay; if (!p || !(p.opts || []).includes("اعتباری")) return null;
+    return { cash: p.opts.includes("نقدی"), credit: p.credit && p.credit.length ? p.credit : [1, 2], lock: !!p.lock }; };
+  const priceRowsOf = (m) => (m ? [...(m.cash ? ["cash"] : []), ...m.credit.map((n) => `c${n}`)] : []);
+  const PR_FA = { cash: "💵 قیمت نقدی", c1: "💳 قیمت اعتباری ۱ ماهه", c2: "💳 قیمت اعتباری ۲ ماهه" };
+  const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" }, STEP_PR = { pc: "cash", p1: "c1", p2: "c2" };
+  /** ردیف‌های قیمتی که هنوز خالی‌اند و لازم‌اند (همان terms-locks.js:pricesMissing) */
+  function prMissing(l) {
+    const m = payModesOf(l); if (!m) return [];
+    /* خطِ پیش از «قیمتِ نقدی و اعتباری» که فقط یک قیمت دارد: همان در ردیفِ اول (sp-core.js:pricesEff) */
+    const rows = priceRowsOf(m), P = l.prices || (Number(l.price) > 0 ? { [rows[0]]: Number(l.price) } : {}), has = (k) => Number(P[k]) > 0;
+    if (m.lock) return rows.filter((k) => !has(k));
+    return rows.some(has) ? [] : [rows[0]];
+  }
+  /** «💵 نقد ۵۲۰٬۰۰۰ · 💳 ۱ ماهه ۵۳۵٬۶۰۰ (+۳٪)» */
+  const pricesLine = (P) => (P ? [Number(P.cash) > 0 ? `💵 نقد ${money(P.cash)}` : "", ...[1, 2].map((m) => (Number(P[`c${m}`]) > 0 ? `💳 ${fa(m)} ماهه ${money(P[`c${m}`])}${P[`r${m}`] != null ? ` (${Number(P[`r${m}`]) >= 0 ? "+" : ""}${fa(P[`r${m}`])}٪)` : ""}` : ""))].filter(Boolean).join(" · ") : "");
+  /** پاسخِ «قیمتِ اعتباری»: «۳٪» یا «۳ درصد» درصد است، بقیه قیمت */
+  const pctOf = (s) => { const x = latin(String(s || "")).replace(/[٬,\s]/g, ""); const m = /^(-?\d+(?:[.٫]\d+)?)(?:%|٪|درصد)$/.exec(x); return m ? Number(m[1].replace("٫", ".")) : null; };
+  /** مانده‌های «آمادهٔ ارسال»ِ یک قلم: در قلمِ چندقیمتی «قیمت واحد» و «شرایط تسویه» جایشان را به ردیف‌های قیمت می‌دهند */
+  function missOf(l) {
+    const pm = payModesOf(l);
+    return [...(l.missing || []).filter((x) => !(pm && x === "قیمت واحد")), ...prMissing(l).map((k) => PR_FA[k].replace(/^\S+ /, "")),
+      ...termsMissing(threadTerms()).filter((x) => !(pm && x === termFa("pay")))];
+  }
   const TERM_KEY = { d: "dtime", p: "pay", i: "invoice", v: "vat", x: "valid_days" };
   const TERM_BTN = { d: "🚚 زمان تحویل", p: "💳 تسویه", i: "🧾 نوع فاکتور", v: "➕ ارزش افزوده", x: "📅 اعتبار" };
   const TERM_PROMPT = { d: "🚚 <b>زمان تحویل</b> را بنویسید — تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری):", x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):" };
@@ -383,7 +412,7 @@
     let h = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}<div class="ph-bot-t">✏️ <b>${esc(tag(l, 80))}</b><br>وضعیت: <i>${esc(l.state_fa)}</i>
         ${lk.legacy ? "" : `<br>${lk.title ? "🔒 عنوان ثابت است" : `🔓 عنوان: <b>${esc(l.s_title || l.title)}</b>${l.s_title ? " <i>(پیشنهادِ شما)</i>" : ""}`}`}</div>
       <div class="ph-bot-sec"><b>📦 مقدار، واحد و قیمت</b>مقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}<br>
-        قیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b><br>قیمت کل: <b>${money(l.total)}</b> ریال</div>
+        ${payModesOf(l) ? `قیمت‌ها (ریال، بدون ارزش افزوده): <b>${esc(pricesLine(l.prices)) || "—"}</b>${payModesOf(l).lock ? " <i>(🔒 همه الزامی)</i>" : " <i>(🔓 هر کدام که دارید)</i>"}` : `قیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>`}<br>قیمت کل: <b>${money(l.total)}</b> ریال</div>
       <div class="ph-bot-sec"><b>🧾 شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i><br>${TERM_FIELDS.map((f) => `${esc(termFa(f))}: <b>${String(tm[f] ?? "").trim() ? esc(fa(tm[f])) : "—"}</b>`).join("<br>")}</div>
       <div class="ph-bot-sec"><b>🔒 نوع قلم و لایه‌های ویژگی</b>${lk.legacy ? "" : " <i>(🔒 ثابت · 🔓 قابل تغییر)</i>"}<br>${l.head ? `نوع قلم: ${esc(l.head)}<br>` : ""}${l.layers.length ? l.layers.map((x) => `${x.lock === false ? "🔓" : "•"} ${esc(x.k)}: ${esc(x.s || x.v)}${x.s ? ` <i>(درخواست: ${esc(x.v)})</i>` : ""}`).join("<br>") : "—"}
         <br>➕ لایه‌های افزودهٔ شما: ${l.extra.length ? l.extra.map((x) => esc(layerTxt(x))).join("، ") : "—"}</div>
@@ -395,7 +424,7 @@
       if (others) kb.push([{ t: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, d: "ic" }]);
       return card(h, kb, replace);
     }
-    const miss = [...(l.missing || []), ...termsMissing(tm)];
+    const miss = missOf(l);
     if (ed && miss.length) h += `<div class="ph-bot-t"><i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i></div>`;
     if (!ed && !EDITABLE.includes(l.state)) h += `<div class="ph-bot-t"><i>${esc(lockedMsg(l))}</i></div>`;
     if (ed) {
@@ -405,8 +434,8 @@
         kb.push([{ t: "✏️ ویرایش یک مورد…", d: `wz:${l.id}:m` }, { t: "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
       } else {
         /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
-        kb.push([...(lk.legacy || !lk.qty ? [{ t: "🔢 مقدار", d: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ t: "📏 واحد", d: `sv:${l.id}:u` }] : []), { t: "💰 قیمت واحد", d: `sv:${l.id}:p` }]);
-        kb.push(["d", "p", "i"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
+        kb.push([...(lk.legacy || !lk.qty ? [{ t: "🔢 مقدار", d: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ t: "📏 واحد", d: `sv:${l.id}:u` }] : []), ...(payModesOf(l) ? priceRowsOf(payModesOf(l)).map((k) => ({ t: PR_FA[k].replace("قیمت ", ""), d: `sv:${l.id}:${PR_STEP[k]}` })) : [{ t: "💰 قیمت واحد", d: `sv:${l.id}:p` }])]);
+        kb.push(["d", ...(payModesOf(l) ? [] : ["p"]), "i"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
         kb.push(["v", "x"].map((k) => ({ t: TERM_BTN[k], d: `tk:${l.id}:${k}` })));
         /* 🔓ها: عنوان و هر لایهٔ باز (sy:<خط>:<شمارهٔ لایه>) */
         const open = [...(!lk.legacy && !lk.title ? [{ t: "🔓 عنوان", d: `sv:${l.id}:t` }] : []),
@@ -479,11 +508,13 @@
     if (!l) return itemsCard(head);
     const tm = threadTerms();
     if (FILLING.includes(l.state)) {
+      const pm = payModesOf(l), pmiss = prMissing(l);
       if ((l.missing || []).includes("مقدار")) return askValue(l, "q", head);
-      if ((l.missing || []).includes("قیمت واحد")) return askValue(l, "p", head);
-      for (const k of ["d", "p", "i", "v", "x"]) if (TERM_REQUIRED.includes(TERM_KEY[k]) && !String(tm[TERM_KEY[k]] ?? "").trim()) return askTerm(l, k, head);
+      if (pm && pmiss.length) return askValue(l, PR_STEP[pmiss[0]], head);
+      if (!pm && (l.missing || []).includes("قیمت واحد")) return askValue(l, "p", head);
+      for (const k of ["d", "p", "i", "v", "x"]) if (!(pm && k === "p") && TERM_REQUIRED.includes(TERM_KEY[k]) && !String(tm[TERM_KEY[k]] ?? "").trim()) return askTerm(l, k, head);
     }
-    const all = [...(l.missing || []), ...termsMissing(tm)];
+    const all = missOf(l);
     return lineCard(l, `${head}${all.length ? "" : " همه‌چیز پر است؛ «✅ آمادهٔ ارسال» را بزنید."}`);
   }
   /* ================================================================
@@ -496,9 +527,11 @@
     if (!lk.legacy && !lk.title) st.push({ k: "t" });
     if (lk.legacy || !lk.qty) st.push({ k: "q" });
     if ((lk.legacy || !lk.unit) && !String(l.unit || "").trim()) st.push({ k: "u" });
-    st.push({ k: "p" });
+    /* «قیمتِ نقدی و اعتباری»: یک گام برای هر ردیفِ قیمت، و «شرایط تسویه» نه — از خودِ قیمت‌هاست */
+    const pm = payModesOf(l);
+    if (pm) priceRowsOf(pm).forEach((k) => st.push({ k: PR_STEP[k], opt: !pm.lock })); else st.push({ k: "p" });
     l.layers.forEach((x, i) => { if (x.lock === false) st.push({ k: "y", i }); });
-    for (const k of ["d", "p", "i", "v", "x"]) if (TERM_REQUIRED.includes(TERM_KEY[k]) && !String(tm[TERM_KEY[k]] ?? "").trim()) st.push({ k: "term", t: k });
+    for (const k of ["d", "p", "i", "v", "x"]) if (!(pm && k === "p") && TERM_REQUIRED.includes(TERM_KEY[k]) && !String(tm[TERM_KEY[k]] ?? "").trim()) st.push({ k: "term", t: k });
     st.push({ k: "n" }, { k: "a" });
     return st;
   }
@@ -516,7 +549,7 @@
     w.i++;
     if (w.i >= w.steps.length) {
       S.wz = null; S.flow = null;
-      const miss = [...(l.missing || []), ...termsMissing(threadTerms())];
+      const miss = missOf(l);
       return lineCard(l, `${msg ? `${msg} ` : ""}🎉 <b>اطلاعاتِ این قلم کامل شد.</b>${miss.length ? ` <i>مانده: ${esc(miss.join("، "))}</i>` : " حالا «✅ آمادهٔ ارسال» را بزنید."}`);
     }
     const s = w.steps[w.i];
@@ -534,7 +567,8 @@
       /* مقدار: اگر همان مقدارِ درخواست است، دکمهٔ «✔️ همان مقدار درخواست» کافی است */
       const extra = s.k === "q" && l.qty != null && !(l.req_qty != null && Number(l.qty) === Number(l.req_qty)) ? [[keep(`${qty(l.qty)} ${l.unit || ""}`)]] : s.k === "p" && l.price != null ? [[keep(`${money(l.price)} ریال`)]]
         : s.k === "u" && l.unit ? [[keep(l.unit)]] : s.k === "n" ? [[l.note ? keep(short(l.note)) : skip]] : s.k === "t" ? [[l.s_title ? keep(short(l.s_title)) : skip]]
-          : s.k === "y" ? [[ly && ly.s ? keep(short(ly.s)) : skip]] : [];
+          : s.k === "y" ? [[ly && ly.s ? keep(short(ly.s)) : skip]]
+            : STEP_PR[s.k] ? (l.prices && Number(l.prices[STEP_PR[s.k]]) > 0 ? [[keep(`${money(l.prices[STEP_PR[s.k]])} ریال`)]] : s.opt ? [[{ t: "⏭ ندارم", d: `wz:${l.id}:s` }]] : []) : [];
       id = askValue(l, s.k, head, s.i, extra);
     }
     if (S.wz) S.wz.cardId = id || null;
@@ -682,7 +716,9 @@
     if (f.step === "val") {
       const clear = text.trim() === "-";
       const lyr = f.f === "y" ? (lineOf(f.line) || { layers: [] }).layers[f.i] : null;
-      const body = f.f === "q" ? { qty: toNum(text) } : f.f === "p" ? { price: toNum(text) } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: clear ? "" : text }
+      /* «قیمتِ اعتباری»: «۳٪» درصد است و قیمت را سرور از نقد می‌سازد؛ بقیه خودِ قیمت */
+      const pk = STEP_PR[f.f], pct = pk && pk !== "cash" ? pctOf(text) : null;
+      const body = pk ? { prices: pct != null ? { [`r${pk.slice(1)}`]: pct } : { [pk]: toNum(text) } } : f.f === "q" ? { qty: toNum(text) } : f.f === "p" ? { price: toNum(text) } : f.f === "u" ? { unit: text } : f.f === "n" ? { note: clear ? "" : text }
         : f.f === "t" ? { title: clear ? "" : text } : f.f === "y" && lyr ? { layers: { [lyr.k]: clear ? "" : text } } : null;
       try {
         if (f.f === "l") {
@@ -693,6 +729,7 @@
           await api(`/sp/line/${f.line}`, { method: "PUT", json: { extra: [...l.extra.filter((y) => y.k !== x.k), x] } });
         } else if (!body) { renderChat(true); return say2("این لایه دیگر نیست."); } else {
           if ((f.f === "q" || f.f === "p") && (body[f.f === "q" ? "qty" : "price"] == null || Number.isNaN(body[f.f === "q" ? "qty" : "price"]))) { renderChat(true); return say2(f.f === "q" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد."); }
+          if (pk && pct == null && (body.prices[pk] == null || Number.isNaN(body.prices[pk]))) { renderChat(true); return say2(pk === "cash" ? "قیمت باید عدد باشد (ریال)." : "قیمت را به ریال یا درصد بنویسید، مثل ۵۳۵۶۰۰ یا ۳٪."); }
           await api(`/sp/line/${f.line}`, { method: "PUT", json: body });
         }
         S.flow = null;
@@ -927,9 +964,9 @@
       <div class="sp-box3 amount"><b class="sp-bt">📦 مقدار، واحد و قیمت</b><div class="sp-grid4">
         <label>مقدار${qLock ? " 🔒" : lk.legacy ? "" : " 🔓"}<input class="tp-input" data-f="qty" inputmode="decimal" value="${l.qty == null ? "" : esc(l.qty)}" ${ed && !qLock ? "" : "readonly"}></label>
         <label>واحد${uLock ? " 🔒" : ""}<input class="tp-input" data-f="unit" value="${esc(l.unit || "")}" ${ed && !uLock ? "" : "readonly"}></label>
-        <label>قیمت واحد (ریال، بدون ارزش افزوده)<input class="tp-input sp-strong" data-f="price" inputmode="numeric" value="${l.price == null ? "" : esc(l.price)}" ${ro}></label>
-        <label>قیمت کل (ریال)<div class="sp-total" data-total>${money(l.total)}</div></label>
-      </div><div class="sp-muted" style="margin-top:4px">${qHint}</div></div>
+        ${payModesOf(l) ? "" : `<label>قیمت واحد (ریال، بدون ارزش افزوده)<input class="tp-input sp-strong" data-f="price" inputmode="numeric" value="${l.price == null ? "" : esc(l.price)}" ${ro}></label>`}
+        <label>قیمت کل (ریال)${payModesOf(l) ? " <span class=\"sp-muted\">— به قیمتِ اصلی</span>" : ""}<div class="sp-total" data-total>${money(l.total)}</div></label>
+      </div>${payModesOf(l) ? pricesBox(l, ed) : ""}<div class="sp-muted" style="margin-top:4px">${qHint}</div></div>
       ${termsBox(l, ed)}
       <div class="sp-box3 layers"><b class="sp-bt">${lk.legacy ? "🔒 نوع قلم و لایه‌های ویژگی" : `نوع قلم و لایه‌های ویژگی <span class="sp-muted">(🔒 ثابت · 🔓 قابل تغییر)</span>`}</b>
         ${l.head ? `<div class="sp-head-name">نوع قلم: <b>${esc(l.head)}</b></div>` : ""}
@@ -985,12 +1022,13 @@
   /** کارتِ خلاصهٔ هر قلم در فرمِ راست (دسکتاپ): چیپ‌های مشخصات، یک خطِ مقدار و قیمت، مانده‌ها و سه دکمه (مهر ۱۴۰۵) */
   function summaryCard(l) {
     const tm = termsFor(l), files = S.d.files.filter((f) => f.line_id === l.id), lk = lockOf(l);
-    const miss = [...(l.missing || []), ...termsMissing(threadTerms())];
+    const miss = missOf(l);
     const extra = S.extra[l.id] || l.extra;
     return `<article class="sp-card sp-sum" data-line="${l.id}" data-line-no="${l.no || ""}">
       <header><h3>${code(l)}${esc(l.s_title || l.title)}</h3><span class="sp-st ${l.state}">${esc(l.state_fa)}</span></header>
       <div class="sp-chips">${l.head ? `<span class="sp-chip lock"><i>نوع قلم:</i> ${esc(l.head)}</span>` : ""}${l.layers.map((x) => `<span class="sp-chip ${x.lock === false ? "add" : "lock"}">${x.lock === false ? "🔓" : "🔒"} <i>${esc(x.k)}:</i> ${esc(x.s || x.v)}</span>`).join("")}${extra.map((x) => `<span class="sp-chip add">➕ <i>${esc(x.k)}:</i> ${esc(x.v)}${x.u ? ` ${esc(x.u)}` : ""}</span>`).join("")}</div>
       <div class="sp-row" style="margin-top:8px"><b>${qty(l.qty)} ${esc(l.unit || "")}</b> × <b>${money(l.price)}</b> = <b>${money(l.total)}</b> ریال <span class="sp-muted">(درخواست${lk.legacy ? "" : lk.qty ? " 🔒" : " 🔓"}: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</span></div>
+      ${payModesOf(l) ? `<div class="sp-limline">💰 ${esc(pricesLine(l.prices)) || "قیمت‌های نقدی و اعتباری هنوز خالی است"} <i class="sp-muted">(${payModesOf(l).lock ? "🔒 همه الزامی" : "🔓 هر کدام که دارید"})</i></div>` : ""}
       <div class="sp-muted">🧾 ${esc(termsLine(tm)) || "شرایط فاکتور: —"}</div>
       ${l.limits_txt ? `<div class="sp-limline">📋 <b>شرایط خریدِ شرکت:</b> ${esc(l.limits_txt)} <i class="sp-muted">(🔒 الزامی · 🔓 خواستهٔ شرکت)</i></div>` : ""}
       ${l.note ? `<div class="sp-muted">📝 ${esc(l.note)}</div>` : ""}${files.length ? `<div class="sp-muted">📎 ${files.map((f) => esc(f.label)).join("، ")}</div>` : ""}
@@ -1038,10 +1076,42 @@
 
   function cardOf(el) { const c = el.closest("[data-line]"); return c ? { c, id: +c.dataset.line } : null; }
   function recalc(c) {
+    /* قلمِ چندقیمتی: قیمت کل به قیمتِ اصلی (نقد، وگرنه کوتاه‌ترین اعتباری) */
+    const pr = ["cash", "c1", "c2"].map((k) => $(`[data-pr="${k}"]`, c)).filter(Boolean).map((i) => toNum(i.value)).find((n) => n != null && !isNaN(n) && n > 0);
     const qi = $('[data-f="qty"]', c), pi = $('[data-f="price"]', c), t = $("[data-total]", c);
-    if (!qi || !pi || !t) return;   /* کارتِ خلاصه فیلد ندارد */
-    const q = toNum(qi.value), p = toNum(pi.value);
+    if (!qi || (!pi && !$("[data-prices]", c)) || !t) return;   /* کارتِ خلاصه فیلد ندارد */
+    const q = toNum(qi.value), p = pi ? toNum(pi.value) : pr;
     t.textContent = q != null && p != null && !isNaN(q) && !isNaN(p) ? money(q * p) : "—";
+  }
+  /* «قیمتِ نقدی و اعتباری»: جعبهٔ قیمت‌ها — برای هر مدتِ اعتباری یا قیمت یا درصدِ تعدیل؛ دیگری همان لحظه حساب می‌شود (ماشین‌حساب) */
+  function pricesBox(l, ed) {
+    const m = payModesOf(l), P = l.prices || {}, ro = ed ? "" : "readonly";
+    const row = (k) => {
+      const n = k === "cash" ? null : k.slice(1);
+      return `<div class="sp-prow" data-prow="${k}"><label>${PR_FA[k]} ${m.lock ? `<i class="sp-req">🔒 الزامی</i>` : `<i class="sp-opt">اختیاری</i>`}
+          <input class="tp-input sp-strong" data-pr="${k}" inputmode="numeric" value="${P[k] == null ? "" : esc(P[k])}" placeholder="ریال" ${ro}></label>
+        ${n ? `<label class="sp-pct">درصدِ تعدیل<span><input class="tp-input" data-rt="${n}" inputmode="decimal" value="${P[`r${n}`] == null ? "" : esc(P[`r${n}`])}" placeholder="مثلاً ۳" ${ro}><b>٪</b></span></label>` : ""}</div>`;
+    };
+    return `<div class="sp-prices" data-prices><div class="sp-ptitle">💰 قیمتِ واحد <span class="sp-muted">(ریال، بدون ارزش افزوده) — ${m.lock ? "همه الزامی‌اند" : "هر کدام که دارید؛ دست‌کم یکی"}</span></div>
+      ${priceRowsOf(m).map(row).join("")}<div class="sp-calc" data-pcalc>${esc(pricesLine(P))}</div></div>`;
+  }
+  /** ماشین‌حساب: نقد عوض شد ← هر ردیفِ اعتباری که درصدش را نوشته‌اند قیمتش، و بقیه درصدشان؛ قیمت یا درصدِ یک ردیف ← دیگری */
+  function pricesCalc(c, src) {
+    const box = $("[data-prices]", c); if (!box) return;
+    const cash = toNum(($('[data-pr="cash"]', box) || {}).value);
+    const r1 = (v) => Math.round(v * 10) / 10;
+    for (const n of [1, 2]) {
+      const pe = $(`[data-pr="c${n}"]`, box), re = $(`[data-rt="${n}"]`, box);
+      if (!pe || !re) continue;
+      if (src === re) pe.dataset.drv = "r"; else if (src === pe) pe.dataset.drv = "p";
+      const ok = cash != null && !isNaN(cash) && cash > 0;
+      if (pe.dataset.drv === "r") { const r = toNum(re.value); if (ok && r != null && !isNaN(r)) pe.value = String(Math.round(cash * (1 + r / 100))); }
+      else { const p = toNum(pe.value); if (ok && p != null && !isNaN(p) && p > 0) re.value = String(r1((p / cash - 1) * 100)); }
+    }
+    const P = { cash: cash > 0 ? cash : null };
+    for (const n of [1, 2]) { const pe = $(`[data-pr="c${n}"]`, box), re = $(`[data-rt="${n}"]`, box); if (pe) { const p = toNum(pe.value); if (p > 0) P[`c${n}`] = p; } if (re && re.value.trim() && P[`c${n}`]) P[`r${n}`] = toNum(re.value); }
+    const calc = $("[data-pcalc]", box); if (calc) calc.textContent = pricesLine(P) || "—";
+    recalc(c);
   }
   /** شناسه‌های اقلامی که کادرِ ارسال برایشان است: جدولِ «ارسال‌ها» (تیک‌خورده‌ها) یا همهٔ آماده‌ها */
   function sendIds(where) {
@@ -1059,6 +1129,7 @@
     Q("[data-form-close]").forEach((b) => { b.onclick = () => { const id = +b.dataset.formClose; if (S.dirty.has(id) && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بسته شود؟")) return; S.dirty.delete(id); delete S.formOpen[id]; rerenderCard(id); }; });
     Q("[data-ready-sum]").forEach((b) => { b.onclick = async () => { const id = cardOf(b).id; try { await api(`/sp/line/${id}/ready`, { json: { on: true } }); await loadThread(); } catch (e) { say(e.message); } }; });
     Q("[data-f], [data-ly]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
+    Q("[data-pr], [data-rt]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); pricesCalc(x.c, i); }; });
     /* شرایط فاکتور در همهٔ کارت‌ها یکی است: نوشتن در یکی، بقیه را هم همان می‌کند */
     Q("[data-t]").forEach((i) => {
       const sync = () => {
@@ -1224,7 +1295,13 @@
     $$("[data-f]", c).forEach((i) => { body[i.dataset.f] = i.value; });
     const ly = $$("[data-ly]", c);
     if (ly.length) { body.layers = {}; ly.forEach((i) => { body.layers[i.dataset.ly] = i.value; }); }
-    for (const f of ["qty", "price"]) { const n = toNum(body[f]); if (Number.isNaN(n)) throw new Error(f === "qty" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد."); body[f] = n; }
+    for (const f of ["qty", "price"]) { if (!(f in body)) continue; const n = toNum(body[f]); if (Number.isNaN(n)) throw new Error(f === "qty" ? "مقدار باید عدد باشد." : "قیمت واحد باید عدد باشد."); body[f] = n; }
+    /* «قیمتِ نقدی و اعتباری»: قیمت‌ها خودشان؛ درصدها را سرور از آن‌ها حساب می‌کند */
+    const pr = $$("[data-pr]", c);
+    if (pr.length) {
+      body.prices = {};
+      for (const i of pr) { const n = toNum(i.value); if (Number.isNaN(n)) throw new Error(`${PR_FA[i.dataset.pr].replace(/^\S+ /, "")} باید عدد باشد.`); body.prices[i.dataset.pr] = n; }
+    }
     if (S.termsDirty) await saveTerms();
     await api(`/sp/line/${id}`, { method: "PUT", json: body });
     S.dirty.delete(id);
