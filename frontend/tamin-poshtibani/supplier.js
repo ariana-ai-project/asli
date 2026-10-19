@@ -677,6 +677,8 @@
       if (a === "sq") {
         const ids = S.d.lines.filter((l) => l.state === "ready").map((l) => l.id);
         if (!ids.length) return say2("هیچ قلمِ «آمادهٔ ارسال»ی نیست.");
+        /* «پیش‌فاکتورِ رسمی 🔒»: پیوستِ بی‌سنجش نه — همان پیش‌فاکتورِ رسمی سنجیده و پیوست می‌شود */
+        if (offpfLocked(ids)) return submitBot(ids, null, cardId);
         if (p[1] === "pf") return pickFile(".pdf,image/*", (f) => submitBot(ids, f, cardId));
         return submitBot(ids, null, cardId);
       }
@@ -693,6 +695,14 @@
     } catch (e) { say2(e.message); }
   }
   async function submitBot(ids, pf, cardId) {
+    /* «پیش‌فاکتورِ رسمی 🔒»: همان مسیرِ پنل — سند، سنجش و بعد ارسال */
+    if (offpfLocked(ids)) return offpfUpload("submit", ids, async (id) => {
+      try {
+        const r = await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids, offpf_id: id } });
+        await loadThread(true); refreshSide();
+        itemsCard(`✅ پیشنهادتان با پیش‌فاکتورِ رسمیِ خودتان برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`, cardId);
+      } catch (e) { say2(e.message); }
+    });
     try {
       const r = pf
         ? await api(`/sp/thread/${S.th}/submit-pf?ids=${ids.join(",")}&filename=${encodeURIComponent(pf.name)}`, { method: "POST", body: pf, headers: { "Content-Type": pf.type || "application/octet-stream" } })
@@ -807,6 +817,57 @@
   /* ================================================================
      فرمِ راست (دسکتاپ): مشخصات اقلام · ارسال‌ها و پیش‌فاکتور
      ================================================================ */
+  /* ---------- «🧾 پیش‌فاکتورِ رسمی» (worker/final-call.js) ----------
+     پنجرهٔ فراخوان: «پیشنهادِ شما با شمارهٔ … وارد کمیسیون می‌شود»، مهلت، کمترین قیمت و بارگذاری؛ و «📤 ارسال» وقتی کارشناس «پیش‌فاکتورِ
+     رسمی 🔒» گذاشته. مدل سند را با پیشنهاد می‌سنجد: ناسازگاری با 🔒 مانع است و ناسازگاریِ 🔓 می‌پرسد «جایگزین شود؟» */
+  function fcBanner() {
+    const f = S.d && S.d.final_call;
+    if (!f) return "";
+    const mins = Math.max(0, Math.round((f.deadline_at - (f.now || Date.now())) / 60000));
+    const left = mins >= 60 ? `${fa(Math.floor(mins / 60))} ساعت${mins % 60 ? ` و ${fa(mins % 60)} دقیقه` : ""} مانده` : `${fa(mins)} دقیقه مانده`;
+    const pf = f.pf;
+    const low = f.lowest && f.lowest.length && f.can_upload ? `<div class="sp-muted">کمترین قیمتِ رسیده: ${f.lowest.map((x) => `«${esc(x.title)}» <b>${money(x.price)}</b> ریال${x.own ? " (پیشنهادِ خودتان)" : ""}`).join("، ")} — قیمتِ نهایی‌تان را با همین پیش‌فاکتورِ رسمی اعلام کنید.</div>` : "";
+    const last = !f.can_upload || !pf ? "" : pf.state === "blocked" ? `<div class="tp-note warn">آخرین پیش‌فاکتور («${esc(pf.filename)}») پذیرفته نشد: ${pf.block.map((x) => esc(x.msg)).join("؛ ")}</div>`
+      : pf.state === "ask" ? `<div class="tp-note">پیش‌فاکتورِ «${esc(pf.filename)}» منتظرِ تصمیمِ شماست. <button class="tp-btn xs" data-fc-ask>ببینم</button></div>` : "";
+    const st = f.status === "valid" ? `✅ پیش‌فاکتورِ رسمیِ شما ثبت شد${f.valid_to ? ` (معتبر تا ${when(f.valid_to)})` : ""}؛ قیمتِ شما برای کمیسیون قفل است.`
+      : f.state !== "open" || !f.can_upload ? "⏹ مهلتِ فرستادنِ پیش‌فاکتورِ رسمی تمام شد." : "";
+    return `<div class="sp-fc ${f.status === "valid" ? "ok" : ""}" role="status"><div class="sp-fc-h">📨 پیشنهادِ شما با شمارهٔ <b>${fa(f.offer_no)}</b> وارد کمیسیون معاملات می‌شود</div>
+      ${f.can_upload ? `<div>تا <b>${when(f.deadline_at)}</b> (${left}) پیش‌فاکتورِ رسمیِ مهر و امضادار با دست‌کم ${fa(f.min_valid_h)} ساعت اعتبار بفرستید.</div>` : `<div>${st}</div>`}
+      ${low}${last}${f.can_upload ? `<div><button class="tp-btn primary" data-fc-up>🧾 بارگذاریِ پیش‌فاکتورِ رسمی</button></div>` : ""}</div>`;
+  }
+  const offpfLocked = (ids) => S.d.lines.some((l) => ids.includes(l.id) && l.limits && l.limits.offpf && l.limits.offpf.lock);
+  /** فایل‌گیر در همان کلیک؛ بعد سنجشِ هوشمند و حکم. done(id): بعد از ثبت (برای «📤 ارسال») */
+  function offpfUpload(stage, ids, done) {
+    pickFile(".pdf,image/*", async (f) => {
+      const w = say("مدل پیش‌فاکتورِ رسمی را با پیشنهادِ شما می‌سنجد — چند لحظه…", "⏳ در حال بررسی");
+      let r;
+      try {
+        r = await api(`/sp/thread/${S.th}/offpf?stage=${stage}&filename=${encodeURIComponent(f.name)}${ids && ids.length ? `&ids=${ids.join(",")}` : ""}`,
+          { method: "POST", body: f, headers: { "Content-Type": f.type || "application/octet-stream" } });
+      } catch (e) { w.remove(); return say(e.message); }
+      w.remove();
+      offpfVerdict(r, stage, done);
+    });
+  }
+  function offpfVerdict(r, stage, done) {
+    const li = (xs) => `<ul class="sp-fcul">${(xs || []).map((x) => `<li>${esc(x.msg)}</li>`).join("")}</ul>`;
+    if (r.state === "blocked") { modal("🧾 این پیش‌فاکتور پذیرفته نیست", `${li(r.block)}<p class="sp-muted">پیش‌فاکتورِ دیگری بفرستید.</p>`, null, "باشد"); return; }
+    const ask = r.state === "ask";
+    const body = ask ? `<p>سند با پیشنهادِ قبلی‌تان فرق دارد — مقدارهای سند جایگزین شود؟${stage === "call" ? " قیمتِ نهایی‌تان همین می‌شود و برای کمیسیون قفل است." : ""}</p>${li(r.ask)}`
+      : `<p>✅ سند با پیشنهادتان می‌خواند${r.valid_to ? ` — معتبر تا ${when(r.valid_to)}` : ""}.${stage === "call" ? " با «ثبت»، قیمتِ شما برای کمیسیون قفل می‌شود." : ""}</p>`;
+    const go = async (yes) => {
+      try {
+        if (stage === "call" || ask) await api(`/sp/offpf/${r.id}/decide`, { json: { replace: yes } });
+        if (!yes) { await loadThread(); return; }
+        if (done) return done(r.id);
+        await loadThread();
+        say("پیش‌فاکتورِ رسمیِ شما ثبت شد؛ قیمتِ شما برای کمیسیون قفل است.", "✓ ثبت شد");
+      } catch (e) { say(e.message); }
+    };
+    const d = modal("🧾 پیش‌فاکتورِ رسمی", body + (r.info && r.info.length ? `<p class="sp-muted">${r.info.map((x) => esc(x.msg)).join("<br>")}</p>` : ""), () => go(true),
+      ask ? "✅ جایگزین شود و ثبت" : stage === "call" ? "✅ ثبت" : "📤 ادامهٔ ارسال", ask ? "✖ نه، سندِ دیگری می‌فرستم" : "انصراف");
+    if (ask) { const n = d.querySelector("[data-n]"); if (n) n.addEventListener("click", () => go(false)); }
+  }
   function sideHtml() {
     const d = S.d, th = d.thread;
     const todo = d.lines.filter((l) => FILLING.includes(l.state)).length;
@@ -817,6 +878,7 @@
       ${S.threads.length > 1 ? `<div class="sp-pills">${S.threads.map((t) => `<button class="sp-pill ${S.th === t.id ? "on" : ""}" data-th="${t.id}">استعلام ${esc(t.request_id)}${t.unread ? ` <span class="sp-badge">${fa(t.unread)}</span>` : ""}${S.pfRead && t.need_pf ? ` <span class="sp-badge wait">پیش‌فاکتور</span>` : ""}</button>`).join("")}</div>` : ""}
       <div class="sup-head"><div><h2>استعلام ${esc(th.request_id)}</h2><div class="sp-muted">کارشناس خرید: ${esc(th.expert)} · شرکت ${esc(S.company)}</div></div>
         ${S.botLogin && !inTg ? `<a class="tp-btn xs" href="${esc(S.botLogin)}" target="_blank" rel="noopener">📲 همین پنل در تلگرام</a>` : ""}</div>
+      ${fcBanner()}
       <nav class="sp-tabs sp-sticky">${tab("spec", "📝 مشخصات اقلام", todo)}${tab("ready", "📤 ارسال‌ها و پیش‌فاکتور", ready + needPf, needPf > 0)}</nav>
       <section id="pane">${S.tab === "spec" ? specPane() : readyPane()}</section></div>`;
   }
@@ -1194,6 +1256,9 @@
     Q("[data-open-pf]").forEach((b) => { b.onclick = () => openUrl(`/sp/bundle/${b.dataset.openPf}/pf-url`); });
     Q("[data-gen-pf]").forEach((b) => { b.onclick = () => bundlePfDialog(+b.dataset.genPf); });
     Q("[data-gen-word]").forEach((b) => { b.onclick = () => downloadDocx(`/sp/bundle/${b.dataset.genWord}/proforma?format=docx`, `پیش‌فاکتور — درخواست ${S.d.thread.request_id} — بستهٔ ${b.dataset.genWord}`); });
+    /* «🧾 پیش‌فاکتورِ رسمی» در پنجرهٔ فراخوان */
+    Q("[data-fc-up]").forEach((b) => { b.onclick = () => offpfUpload("call", null, null); });
+    Q("[data-fc-ask]").forEach((b) => { b.onclick = () => { const p = S.d.final_call && S.d.final_call.pf; if (p) offpfVerdict({ id: p.id, state: p.state, ask: p.ask, info: p.info, valid_to: p.valid_to }, "call", null); }; });
   }
   function submitDialog(ids) {
     if (!ids.length) return say("دست‌کم یک قلم را تیک بزنید.");
@@ -1252,7 +1317,17 @@
     d.classList.add("sp-pfmodal");
     bindPfTools(d, { css: r.css, html: r.html, name: r.name, word: () => downloadDocx(`/sp/bundle/${bid}/proforma?format=docx`, r.name) });
   }
-  async function doSubmit(ids) {
+  async function doSubmit(ids, offpfId) {
+    /* «پیش‌فاکتورِ رسمی 🔒»: اول سند (فایل‌گیر در همان کلیک)، سنجش و حکم، بعد ارسال با همان سند */
+    if (!offpfId && offpfLocked(ids)) return offpfUpload("submit", ids, (id) => doSubmit(ids, id));
+    if (offpfId) {
+      try {
+        const r = await api(`/sp/thread/${S.th}/submit`, { json: { line_ids: ids, offpf_id: offpfId } });
+        S.pfFile = null;
+        await loadThread();
+        return say(`پیشنهادتان با پیش‌فاکتورِ رسمیِ خودتان برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را در همین گفت‌وگو خبر می‌دهیم.`, "✓ فرستاده شد");
+      } catch (e) { return say(e.message); }
+    }
     const pf = S.pfFile;
     try {
       const r = pf

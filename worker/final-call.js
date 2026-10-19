@@ -760,10 +760,16 @@ async function applyToLines(env, o, asks, lineMap) {
  * «📤 ارسال» با «پیش‌فاکتورِ رسمی 🔒»: پیش‌فاکتورِ پذیرفته‌شدهٔ همین گفت‌وگو (state ok) — همان فایل پیوستِ بسته می‌شود.
  * بی 🔒: null (هیچ شرطی نیست).
  */
-export async function submitOffpf(env, th, lines, offpfId) {
+/** «پیش‌فاکتورِ رسمی 🔒» در شرایطِ دست‌کم یکی از این خط‌ها هست؟ */
+export async function offpfRequired(env, lines) {
+  if (!lines || !lines.length) return false;
   const lim = await C.limitsOfLines(env, lines);
-  const need = lines.some((l) => { const L = lim.get(l.item_id); return L && L.offpf && L.offpf.lock; });
-  if (!need) return null;
+  return lines.some((l) => { const L = lim.get(l.item_id); return !!(L && L.offpf && L.offpf.lock); });
+}
+/** «۱۴۰۵/۰۷/۲۸ — ۱۴:۳۰» برای پیام‌های بات */
+export const fcWhen = when;
+export async function submitOffpf(env, th, lines, offpfId) {
+  if (!(await offpfRequired(env, lines))) return null;
   const o = offpfId ? await env.DB.prepare("SELECT * FROM offpf WHERE id=? AND thread_id=? AND stage='submit'").bind(int(offpfId), th.id).first() : null;
   if (!o) throw new HttpError("این استعلام «پیش‌فاکتورِ رسمی 🔒» می‌خواهد: اول پیش‌فاکتورِ مهر و امضادارِ خودتان را بفرستید تا سنجیده شود.", 422, { offpf: "need" });
   if (o.state !== "ok") throw new HttpError(o.state === "blocked" ? "پیش‌فاکتورِ رسمیِ فرستاده‌شده پذیرفته نشد؛ پیش‌فاکتورِ دیگری بفرستید." : "اول دربارهٔ تفاوت‌های پیش‌فاکتورِ رسمی تصمیم بگیرید («جایگزین شود؟»).", 422, { offpf: o.state });

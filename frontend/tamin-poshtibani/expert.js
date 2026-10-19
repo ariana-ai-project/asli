@@ -536,12 +536,13 @@
      می‌شود. در کارِ کارشناس هوشمند، بسته‌ای که در چارچوبِ همین‌ها باشد همان لحظه تأیید نهایی می‌شود. */
   const TERM_ENUM = { pay: PAYS, invoice: INVT, vat: VATS };
   const TERM_ONE = { place: PLACES, deal: DEALS };
-  const TERM_LAB = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل", place: "محل تحویل", deal: "محل معامله", ship: "روش حمل", valid: "اعتبار پیش‌فاکتور" };
+  const TERM_LAB = { pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", dtime: "زمان تحویل", place: "محل تحویل", deal: "محل معامله", ship: "روش حمل", valid: "اعتبار پیش‌فاکتور", offpf: "پیش‌فاکتورِ رسمی" };
   /* ترتیبِ جدولِ کمیسیون: تسویه، تحویل (زمان و محل)، فاکتور، ارزش افزوده، محل معامله، حمل، اعتبار */
-  const TERM_ORDER = ["pay", "dtime", "place", "invoice", "vat", "deal", "ship", "valid"];
+  const TERM_ORDER = ["pay", "dtime", "place", "invoice", "vat", "deal", "ship", "valid", "offpf"];
   /* 🔒 در فیلدهایی که تأمین‌کننده خودش می‌زند یعنی «بیرونش پذیرفته نیست»؛ در شرطِ شرکت (محل، معامله، حمل) یعنی «الزامی»، که پیش‌فاکتور با همان ساخته می‌شود */
   const TERM_LOCK_TIP = { pay: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند", invoice: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند", vat: "🔒: تأمین‌کننده فقط همین گزینه‌ها را می‌تواند بزند",
-    dtime: "🔒: تحویلِ بیرون از بازه پذیرفته نیست", place: "🔒: الزامی — پیش‌فاکتور با همین محل ساخته می‌شود", deal: "🔒: الزامی", ship: "🔒: الزامی", valid: "🔒: اعتبارِ کمتر پذیرفته نیست" };
+    dtime: "🔒: تحویلِ بیرون از بازه پذیرفته نیست", place: "🔒: الزامی — پیش‌فاکتور با همین محل ساخته می‌شود", deal: "🔒: الزامی", ship: "🔒: الزامی", valid: "🔒: اعتبارِ کمتر پذیرفته نیست",
+    offpf: "🔒: هنگامِ «📤 ارسال» الزامی است و هوشمند با پیشنهاد سنجیده می‌شود؛ 🔓: خواستهٔ شرکت (پیش از کمیسیون «📨 فراخوان» به‌هرحال می‌خواهدش)" };
   const termsOfItem = (it) => { try { const x = it && it.terms_json ? JSON.parse(it.terms_json) : null; return x && Object.keys(x).length ? x : null; } catch (_) { return null; } };
   const termsDraftOf = (it) => S.termsEd[it.id] || (S.termsEd[it.id] = JSON.parse(JSON.stringify(termsOfItem(it) || {})));
   const termsFixed = (it) => !!(it.sp_lock || frozen(it));
@@ -554,6 +555,7 @@
     if (TERM_ONE[f]) return v.opt ? `${v.opt}${v.note ? ` — ${v.note}` : ""}` : "";
     if (f === "ship") return String(v.text || "").trim();
     if (f === "valid") return v.min ? `دست‌کم ${M(v.min)} روز` : "";
+    if (f === "offpf") return v.on ? "مهر و امضادار" : "";
     return "";
   }
   function termsSummary(L) {
@@ -569,7 +571,7 @@
       if (!termVal(f, v)) continue;
       const lock = !!v.lock;
       out.push([f, TERM_ENUM[f] ? { opts: v.opts, lock } : f === "dtime" ? { from: v.from || "", to: v.to || "", lock } : TERM_ONE[f] ? { opt: v.opt, note: String(v.note || "").trim(), lock }
-        : f === "ship" ? { text: String(v.text).trim(), lock } : { min: Number(lat(v.min)), lock }]);
+        : f === "ship" ? { text: String(v.text).trim(), lock } : f === "offpf" ? { on: true, lock } : { min: Number(lat(v.min)), lock }]);
     }
     return JSON.stringify(out);
   }
@@ -613,6 +615,7 @@
         cell = `<select class="tp-input" data-tm-one="${f}" style="min-width:140px"><option value="">— بی قید —</option>${TERM_ONE[f].map((o) => `<option ${x.opt === o ? "selected" : ""}>${esc(o)}</option>`).join("")}</select>
           ${f === "place" ? `<input class="tp-input" data-tm-note value="${esc(x.note || "")}" placeholder="نشانی یا توضیح (برای «سایر» لازم)" style="min-width:220px;flex:1">` : ""}`;
       } else if (f === "ship") cell = `<input class="tp-input" data-tm-ship value="${esc(x.text || "")}" placeholder="مثلاً حمل با فروشنده تا محل پروژه" style="min-width:260px;width:100%">`;
+      else if (f === "offpf") cell = `<label class="chkline"><input type="checkbox" data-tm-offpf ${x.on ? "checked" : ""}> مهر و امضای فروشنده لازم است</label>`;
       else cell = `دست‌کم <input class="tp-input num" data-tm-valid value="${esc(x.min == null ? "" : x.min)}" inputmode="numeric" placeholder="۷" style="width:70px"> روز`;
       return `<tr><td class="rt"><b>${TERM_LAB[f]}</b></td><td class="rt"><div class="terms-cell">${cell}</div></td>${lockBtn(f)}</tr>`;
     };
@@ -2655,10 +2658,55 @@
     });
     return { miss, need, ruled: Object.values(by).some((x) => x.ruled), fin: S.d.quotes.filter((q) => q.final && q.saved).length };
   }
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» و «📦 بستهٔ کمیسیون» (worker/final-call.js): پیش از جدول کمیسیون، پیامک به تأمین‌کنندگانِ تأییدنهایی و
+     فرصتِ پیش‌فاکتورِ رسمی؛ جدول بعد از بسته شدنِ بسته. درخواستی که پیش از این روال جدول گرفته (legacy) همان‌طور که بود */
+  const fcOf = () => (S.d && S.d.final_call) || null;
+  const fcBlocks = () => { const f = fcOf(); return !!(f && f.on && !f.legacy && !(f.call && f.call.state === "closed")); };
+  const hoursLeft = (ms) => { const m = Math.max(0, Math.round((ms - Date.now()) / 60000)); return m >= 60 ? `${M(Math.floor(m / 60))} ساعت${m % 60 ? ` و ${M(m % 60)} دقیقه` : ""}` : `${M(m)} دقیقه`; };
+  function vFinalCall(ok) {
+    const f = fcOf();
+    if (!f || f.legacy || (!f.on && !f.call)) return "";
+    const c = f.call;
+    if (!c) {
+      return `<div class="fc-card"><div class="fc-h"><b>📨 فراخوانِ پیش‌فاکتورِ رسمی</b><span class="dim">پیش از جدول کمیسیون — ${M(f.cfg.window_h)} ساعت فرصت</span>${TP.ui.info("expert.finalcall", "راهنمای فراخوان")}</div>
+        ${aiEnd() ? `<div class="dim">🤖 کارشناس هوشمند در پایانِ کار خودش می‌زند.</div>` : `<button class="tp-btn primary" data-fc-start ${ok ? "" : "disabled"}>📨 فراخوانِ پیش‌فاکتورِ رسمی</button>`}</div>`;
+    }
+    const open = c.state === "open";
+    const rows = f.sups.map((s) => {
+      const st = open ? (s.status === "valid" ? `<span class="chip ok">✅ معتبر${s.valid_to ? ` تا ${esc(TP.fmt(s.valid_to))}` : ""}</span>` : `<span class="chip warn">${esc(s.status_fa)}</span>`)
+        : `<span class="chip ${s.final === "ok" ? "ok" : s.final === "short" ? "warn" : ""}">${esc(s.final_fa || "—")}</span>`;
+      const sms = s.sms === "no_phone" ? `<span class="chip warn">☎️ شماره ندارد</span>` : s.sms_fa ? `<span class="dim">${esc(s.sms_fa)}${s.sms_at ? ` · ${esc(TP.fmt(s.sms_at))}` : ""}</span>` : "—";
+      const act = !open || s.status === "valid" ? "" : `${s.sms === "no_phone" || !s.thread_id ? `<button class="tp-btn xs" data-fc-phone="${esc(s.name)}">📱 شماره</button>` : `<button class="tp-btn xs" data-fc-sms="${esc(s.name)}" title="همان پیامک، با رمزِ تازه">🔁 پیامک</button>`}
+        <button class="tp-btn xs" data-fc-up="${esc(s.name)}" title="پیش‌فاکتورِ رسمیِ همین تأمین‌کننده را خودتان بارگذاری کنید (همان سنجش)">📎 بارگذاری</button>`;
+      return `<tr><td class="num">${esc(s.offer_no)}</td><td class="rt">${esc(s.name)}${s.revised ? ` <span class="chip info" title="قیمت با پیش‌فاکتورِ رسمی عوض شد">✏️ نهایی</span>` : ""}</td><td>${st}</td><td>${sms}</td><td class="fc-act">${act}</td></tr>`;
+    }).join("");
+    const head = open ? `<b>📨 فراخوانِ پیش‌فاکتورِ رسمی</b><span class="chip info">تا ${esc(TP.fmt(c.deadline_at))} — ${hoursLeft(c.deadline_at)} مانده</span>`
+      : `<b>📦 بستهٔ کمیسیون بسته شد</b><span class="dim">${esc(TP.fmt(c.closed_at || c.deadline_at))}${c.close_why === "all" ? " — همه پیش‌فاکتورِ معتبر داشتند" : c.close_why === "early" ? " — پایانِ زودهنگام" : ""}</span>`;
+    return `<div class="fc-card"><div class="fc-h">${head}${TP.ui.info("expert.finalcall", "راهنمای فراخوان")}
+        ${open && c.mode !== "ai" ? `<span style="margin-inline-start:auto"></span><button class="tp-btn xs danger" data-fc-close title="بسته همین حالا بسته شود؛ تأمین‌کننده‌ای که هنوز پیش‌فاکتور نفرستاده بی آن به کمیسیون می‌رود">⏹ پایانِ زودهنگام</button>` : ""}</div>
+      <div class="tp-scroll"><table class="tp-table fc-tbl"><thead><tr><th>شمارهٔ پیشنهاد</th><th class="rt">تأمین‌کننده</th><th>${open ? "وضعیت" : "هنگامِ ورود"}</th><th>پیامک</th><th></th></tr></thead><tbody>${rows}</tbody></table></div></div>`;
+  }
+  /** بارگذاریِ خام (TP.api فقط JSON می‌فرستد) */
+  async function uploadRaw(path, file) {
+    const res = await fetch((CFG.apiBase || "/tamin-poshtibani/api") + path, { method: "POST", headers: { "Content-Type": file.type || "application/octet-stream", ...TP.authHeaders() }, body: file });
+    let data = null; const txt = await res.text();
+    try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
+    if (!res.ok) throw new Error((data && data.error) || `خطای سرور ${res.status}`);
+    return data || {};
+  }
+  /** حکمِ پیش‌فاکتورِ رسمی (همان سنجشِ پنلِ تأمین‌کننده): مانع‌ها، «جایگزین شود؟» یا «✅ ثبت» */
+  function fcVerdict(r, decide) {
+    const li = (xs) => xs.map((x) => `<li>${esc(x.msg)}</li>`).join("");
+    if (r.state === "blocked") { TP.modal("🧾 پیش‌فاکتورِ رسمی پذیرفته نیست", `<ul class="fc-ul">${li(r.block)}</ul><div class="dim">پیش‌فاکتورِ دیگری لازم است.</div>`, null, "باشد", ""); return; }
+    const body = r.state === "ask" ? `<p style="margin-top:0">سند با پیشنهادِ قبلی فرق دارد — جایگزین شود؟ (مقدارِ قبلی در سابقه می‌ماند)</p><ul class="fc-ul">${li(r.ask)}</ul>` : `<p style="margin-top:0">✅ سند با پیشنهاد می‌خواند${r.valid_to ? ` — معتبر تا ${esc(TP.fmt(r.valid_to))}` : ""}.</p>`;
+    const d = TP.modal("🧾 پیش‌فاکتورِ رسمی", body + (r.info && r.info.length ? `<div class="dim" style="font-size:.8rem">${r.info.map((x) => esc(x.msg)).join("<br>")}</div>` : ""), () => decide(true), r.state === "ask" ? "✅ جایگزین شود و ثبت" : "✅ ثبت", r.state === "ask" ? "✖ نه" : "انصراف");
+    if (r.state === "ask") { const n = d.querySelector("[data-n]"); if (n) n.addEventListener("click", () => decide(false)); }
+  }
   function vGuard() {
     const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
-    if (aiEnd()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>`;
-    return `<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn primary" data-make-comm ${ok ? "" : "disabled"}>تولید جدول کمیسیون</button>
+    const fc = vFinalCall(ok), block = fcBlocks();
+    if (aiEnd()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>${fc}`;
+    return `${fc}<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn ${block ? "" : "primary"}" data-make-comm ${ok && !block ? "" : "disabled"}${block ? ' title="بعد از بسته شدنِ «📦 بستهٔ کمیسیون»"' : ""}>تولید جدول کمیسیون</button>
       <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
       ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلامِ ردهٔ خود نرسیده‌اند؛ استعلامِ بیشتر بگیرید ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (ردهٔ «${SZ_FA[m.cat] || "جزئی"}»: ${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
   }
@@ -3313,12 +3361,16 @@
     Q("[data-tm-lock]").forEach((b) => b.onclick = () => {
       const it = item(), D = termsDraftOf(it), f = b.dataset.tmLock;
       D[f] = D[f] || (TERM_ENUM[f] ? { opts: [] } : {});
-      D[f].lock = !D[f].lock; render();
+      D[f].lock = !D[f].lock;
+      /* «پیش‌فاکتورِ رسمی 🔒» یعنی خواسته هم هست */
+      if (f === "offpf" && D[f].lock) D[f].on = true;
+      render();
     });
     Q("[data-tm-one]").forEach((s) => s.onchange = () => { const D = termsDraftOf(item()), f = s.dataset.tmOne; D[f] = { ...(D[f] || {}), opt: s.value }; });
     const tmn = G("[data-tm-note]"); if (tmn) tmn.oninput = () => { const D = termsDraftOf(item()); D.place = { ...(D.place || {}), note: tmn.value }; };
     const tmsh = G("[data-tm-ship]"); if (tmsh) tmsh.oninput = () => { const D = termsDraftOf(item()); D.ship = { ...(D.ship || {}), text: tmsh.value }; };
     const tmv = G("[data-tm-valid]"); if (tmv) tmv.oninput = () => { const D = termsDraftOf(item()); D.valid = { ...(D.valid || {}), min: tmv.value.trim() }; };
+    const tmo2 = G("[data-tm-offpf]"); if (tmo2) tmo2.onchange = () => { const D = termsDraftOf(item()); D.offpf = { ...(D.offpf || {}), on: tmo2.checked }; };
     Q("[data-tm-dt]").forEach((x) => x.onclick = () => TP.openDatePicker(x, (v) => {
       const it = item(), D = termsDraftOf(it);
       D.dtime = { ...(D.dtime || {}), [x.dataset.tmDt]: String(v || "").split("،")[0].trim() }; render();
@@ -3420,6 +3472,45 @@
     });
     Q("[data-extract]").forEach((b) => b.onclick = () => showExtract(b.dataset.extract, false));
     Q("[data-h]").forEach((x) => x.onchange = async (e) => { const k = e.target.dataset.h; await TP.api(`/requests/${encodeURIComponent(S.d.request.id)}/head`, { method: "PUT", body: { [k]: e.target.value } }); S.d.request["head_" + k] = e.target.value; S.sheets = null; render(); });
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» */
+    const fcp = (sub) => `/assignments/${A().id}/final-call${sub || ""}`;
+    const fcs = G("[data-fc-start]"); if (fcs) fcs.onclick = () => {
+      const f = fcOf(), n = new Set(S.d.quotes.filter((q) => q.final && q.saved).map((q) => q.supplier_name)).size;
+      TP.modal("📨 فراخوانِ پیش‌فاکتورِ رسمی", `به ${M(n)} تأمین‌کنندهٔ تأییدنهایی پیامک می‌رود و ${M(f.cfg.window_h)} ساعت فرصتِ پیش‌فاکتورِ رسمی دارند${f.cfg.send_lowest ? " (با کمترین قیمتِ رسیده)" : ""}. جدول کمیسیون بعد از بسته شدنِ «📦 بستهٔ کمیسیون» ساخته می‌شود.`, async () => {
+        try { const r = await TP.api(fcp(), { body: {} }); await reload(); okTick(`فراخوان رفت — ${M(r.sent)} پیامک${r.no_phone ? `، ${M(r.no_phone)} بی‌شماره` : ""}`); }
+        catch (e) { TP.modal("📨 فراخوان", esc(e.message), null, "باشد", ""); }
+      }, "📨 بفرست", "انصراف");
+    };
+    const fcc = G("[data-fc-close]"); if (fcc) fcc.onclick = () => TP.modal("⏹ پایانِ زودهنگام", "«📦 بستهٔ کمیسیون» همین حالا بسته شود؟ تأمین‌کننده‌ای که هنوز پیش‌فاکتورِ رسمی نفرستاده بی آن به کمیسیون می‌رود.", async () => {
+      try { await TP.api(fcp("/close"), { body: {} }); await reload(); okTick("بستهٔ کمیسیون بسته شد"); } catch (e) { TP.modal("پایانِ زودهنگام", esc(e.message), null, "باشد", ""); }
+    }, "بسته شود", "انصراف");
+    Q("[data-fc-phone]").forEach((b) => b.onclick = () => {
+      const name = b.dataset.fcPhone;
+      const d = TP.modal("📱 شمارهٔ تأمین‌کننده", `<label class="tp-field"><b>شمارهٔ همراهِ «${esc(name)}»</b><input class="tp-input num" id="fcph" inputmode="tel" placeholder="۰۹۱۲۱۲۳۴۵۶۷" style="width:100%"></label>`, async () => {
+        const phone = (d.querySelector("#fcph").value || "").trim(); if (!phone) return;
+        try { const r = await TP.api(fcp("/phone"), { body: { supplier_name: name, phone } }); await reload(); okTick(r.state === "sent" ? "پیامک رفت" : "ثبت شد"); } catch (e) { TP.modal("شمارهٔ تأمین‌کننده", esc(e.message), null, "باشد", ""); }
+      }, "ثبت و پیامک", "انصراف");
+      setTimeout(() => { const i = d.querySelector("#fcph"); if (i) i.focus(); }, 30);
+    });
+    Q("[data-fc-sms]").forEach((b) => b.onclick = async () => {
+      try { const r = await TP.api(fcp("/phone"), { body: { supplier_name: b.dataset.fcSms } }); await reload(); okTick(r.state === "sent" ? "پیامک دوباره رفت" : "ثبت شد"); } catch (e) { TP.modal("پیامک", esc(e.message), null, "باشد", ""); }
+    });
+    Q("[data-fc-up]").forEach((b) => b.onclick = () => {
+      const name = b.dataset.fcUp;
+      const inp = document.createElement("input"); inp.type = "file"; inp.accept = "application/pdf,image/*";
+      inp.onchange = async () => {
+        const file = inp.files && inp.files[0]; if (!file) return;
+        const busy = TP.busy("سنجشِ هوشمندِ پیش‌فاکتورِ رسمی", "…");
+        try {
+          const r = await uploadRaw(fcp(`/offpf?supplier=${encodeURIComponent(name)}&filename=${encodeURIComponent(file.name)}`), file);
+          busy.close();
+          fcVerdict(r, async (yes) => {
+            try { await TP.api(fcp(`/offpf/${r.id}/decide`), { body: { replace: yes } }); await reload(); if (yes) okTick("پیش‌فاکتورِ رسمی ثبت شد"); } catch (e) { TP.modal("پیش‌فاکتورِ رسمی", esc(e.message), null, "باشد", ""); }
+          });
+        } catch (e) { busy.close(); TP.modal("پیش‌فاکتورِ رسمی", esc(e.message), null, "باشد", ""); }
+      };
+      inp.click();
+    });
     const mc = G("[data-make-comm]"); if (mc) mc.onclick = async () => { try { await TP.api(`/assignments/${A().id}/commission`, { body: {} }); S.tab = "comm"; await reload(); okTick("جدول کمیسیون ساخته شد"); } catch (e) { TP.modal("تولید جدول کمیسیون", esc(e.message) + (e.data && e.data.missing && e.data.missing.length ? `<br><br>${e.data.missing.map((m) => `• ${esc(m.title)} (${m.n} از ${e.data.need})`).join("<br>")}` : ""), null, "باشد", ""); } };
     Q("[data-dl]").forEach((b) => b.onclick = () => downloadSheet(b.dataset.dl));
     Q("[data-zoom]").forEach((b) => b.onclick = () => { S.sheetZoom = Math.min(22, Math.max(6, (S.sheetZoom || 10) + +b.dataset.zoom)); render(); });

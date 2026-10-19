@@ -79,6 +79,8 @@
     rank: null, rankDraft: null, rankErr: "", rankBusy: false,
     /* فاز ۴: «🎛 کلیدها» — خوانش هوشمند پیش‌فاکتور (worker/switches.js، پیش‌فرض خاموش) */
     sw: null, swErr: "", swBusy: false,
+    /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): روشن/خاموش، مهلت و کمینهٔ اعتبار، کمترین قیمت در پیامک و همراهِ کارشناسان */
+    fc: null, fcErr: "", fcBusy: false,
     /* فاز ۴ب: «🧭 حالت اقلام» — حالتِ هر نوع قلم برای کارشناس هوشمند (worker/ai-modes.js) */
     md: null, mdDraft: null, mdErr: "", mdBusy: false, mdQ: "", mdHits: [],
     /* «🧩 تغییرات اقلام» (فاز ۱): یک پیام برای هر قلمِ نرمال‌شده — فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه (worker/structure.js) */
@@ -1025,7 +1027,7 @@
      بررسی یکراست «تأیید نهایی» می‌شود؛ روشن — همان مسیرِ پیشین: تأیید مشخصات، بارگذاری پیش‌فاکتور، خوانش هوشمند و جدول تطابق. */
   async function loadSw() {
     S.swErr = ""; render();
-    try { S.sw = await api("/ai/switches"); } catch (e) { S.swErr = e.message; }
+    try { [S.sw, S.fc] = await Promise.all([api("/ai/switches"), api("/ai/final-call")]); } catch (e) { S.swErr = e.message; }
     render();
   }
   function swToggle(on) {
@@ -1051,7 +1053,35 @@
         <button class="tp-btn ${on ? "" : "primary"}" data-swtoggle data-on="0" ${!on || S.swBusy ? "disabled" : ""}>⏹ خاموش — پیش‌فاکتورِ سامانه</button>
         <button class="tp-btn ${on ? "primary" : ""}" data-swtoggle data-on="1" ${on || S.swBusy ? "disabled" : ""}>▶️ روشن — خوانش پیش‌فاکتورِ تأمین‌کننده</button>
         <span class="dim">${S.sw.updated_at ? `آخرین تغییر: ${fmtShort(S.sw.updated_at)}` : "هنوز عوض نشده — پیش‌فرض خاموش"}</span></div></div>`;
-    return h;
+    return h + vFc();
+  }
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): پیش از جدول کمیسیون، پیامک به تأمین‌کنندگانِ تأییدنهایی و «📦 بستهٔ کمیسیون» سرِ مهلت */
+  function vFc() {
+    if (S.fcErr) return `<div class="tp-note warn">${esc(S.fcErr)}</div>`;
+    if (!S.fc) return "";
+    const c = S.fc.cfg, on = !!c.on, dis = S.fcBusy ? "disabled" : "";
+    const num = (k, v) => `<input class="tp-input num" data-fc${k} value="${esc(v)}" inputmode="numeric" style="width:80px" ${dis}>`;
+    return `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><h3 class="sup-h" style="margin-top:0">📨 فراخوانِ پیش‌فاکتورِ رسمی
+        <span class="chip ${on ? "ok" : ""}" style="margin-inline-start:8px">${on ? "روشن (پیش‌فرض)" : "خاموش"}</span> ${TP.ui.info("support.finalcall", "راهنمای فراخوان")}</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="tp-btn ${on ? "primary" : ""}" data-fctoggle data-on="1" ${on || S.fcBusy ? "disabled" : ""}>▶️ روشن</button>
+        <button class="tp-btn ${on ? "" : "primary"}" data-fctoggle data-on="0" ${!on || S.fcBusy ? "disabled" : ""}>⏹ خاموش — جدول کمیسیون مستقیم</button></div>
+      <table class="sup-tbl" style="width:auto"><tbody>
+        <tr><td>${esc(S.fc.fa.window_h)}</td><td>${num("w", c.window_h)} ساعت</td></tr>
+        <tr><td>${esc(S.fc.fa.min_valid_h)}</td><td>${num("m", c.min_valid_h)} ساعت</td></tr>
+        <tr><td>${esc(S.fc.fa.send_lowest)}</td><td><label class="chkline"><input type="checkbox" data-fcl ${c.send_lowest ? "checked" : ""} ${dis}> بله</label></td></tr></tbody></table>
+      <h4 style="margin:12px 0 6px">📱 همراهِ کارشناسان <span class="dim" style="font-weight:400;font-size:.85rem">— «شمارهٔ تأمین‌کننده نیست» به همین شماره پیامک می‌شود${S.fc.sms ? "" : " (درگاه پیامک وصل نیست؛ فقط تلگرام و اعلان)"}</span></h4>
+      <table class="sup-tbl" style="width:auto"><tbody>${S.fc.experts.filter((e) => e.active).map((e) => `<tr><td>${esc(e.name)}</td><td><input class="tp-input num" data-fcph="${e.id}" value="${esc(e.phone || "")}" inputmode="tel" placeholder="۰۹۱۲…" style="width:150px" ${dis}></td></tr>`).join("")}</tbody></table>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button class="tp-btn primary" data-fcsave ${dis}>ذخیره</button>
+        <span class="dim">${c.updated_at ? `آخرین تغییر: ${fmtShort(c.updated_at)}` : "هنوز عوض نشده — پیش‌فرض: روشن، ۲۴ ساعت مهلت، ۲۴ ساعت اعتبار، با کمترین قیمت"}</span></div></div>`;
+  }
+  async function fcSave(patch) {
+    const q = (sel) => app.querySelector(sel);
+    const cfg = patch || { window_h: (q("[data-fcw]") || {}).value, min_valid_h: (q("[data-fcm]") || {}).value, send_lowest: !!(q("[data-fcl]") || {}).checked };
+    const phones = patch ? [] : [...app.querySelectorAll("[data-fcph]")].map((i) => ({ expert_id: Number(i.dataset.fcph), phone: i.value.trim() }));
+    S.fcBusy = true; S.fcErr = ""; render();
+    try { const r = await api("/ai/final-call", { method: "PUT", body: { cfg, phones } }); S.fc = r; } catch (e) { S.fcErr = e.message; }
+    S.fcBusy = false; render();
   }
 
   /* ---------- «🧭 حالت اقلام» (طرح «خرید هوشمند، کارشناس ناظر»، فاز ۴ب) ----------
@@ -1521,6 +1551,8 @@
     if (d.mdadd) { if (!S.mdDraft.some((x) => x.head === d.mdadd)) S.mdDraft.unshift({ head: d.mdadd, mode: "direct", supervise: false }); return render(); }
     if (d.mddel !== undefined) { S.mdDraft.splice(Number(d.mddel), 1); return render(); }
     if (d.swtoggle !== undefined) return swToggle(d.on === "1");
+    if (d.fctoggle !== undefined) return fcSave({ on: d.on === "1" });
+    if (d.fcsave !== undefined) return fcSave(null);
     if (d.rksave !== undefined) return saveRankUi();
     if (d.rkreset !== undefined) { S.rankDraft = { weights: { ...S.rank.weights }, dispatch: { tier: { ...S.rank.dispatch.tier }, then: S.rank.dispatch.then } }; S.rankErr = ""; return render(); }
     if (d.usdfetch !== undefined) return usdFetch();
@@ -1543,7 +1575,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-fctoggle],[data-fcsave],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);

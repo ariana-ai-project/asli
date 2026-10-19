@@ -577,6 +577,12 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .qsrc.s-pf, .qsrc.s-pf_off { background: rgba(34, 197, 94, 0.14); border-color: rgba(34, 197, 94, 0.4); }
 .qsrc.s-company { background: rgba(242, 194, 48, 0.14); border-color: rgba(242, 194, 48, 0.4); }
 .qsrc-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: .8rem; color: var(--tp-muted); margin: 4px 0 8px; }
+/* «📨 فراخوانِ پیش‌فاکتورِ رسمی» و «📦 بستهٔ کمیسیون» — کارتِ پیش از جدول کمیسیون */
+.fc-card { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--tp-line); border-radius: 12px; background: rgba(79, 140, 255, 0.06); display: grid; gap: 8px; }
+.fc-h { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; }
+.fc-tbl td, .fc-tbl th { white-space: nowrap; }
+.fc-tbl .fc-act { display: flex; gap: 4px; justify-content: flex-end; }
+.fc-ul { margin: 0 0 8px; padding-inline-start: 18px; line-height: 1.9; }
 /* «قیمتِ نقدی و اعتباری»: زیرِ قیمت کلِ خطِ استعلام */
 .tp-table.q .qpr { display: grid; gap: 1px; margin-top: 4px; font-size: .72rem; color: var(--tp-muted); white-space: nowrap; }
 

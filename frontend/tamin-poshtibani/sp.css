@@ -648,3 +648,9 @@ html.sp-lock .ph-scroll { overscroll-behavior-y: contain; -webkit-overflow-scrol
 .sp-pct span { display: inline-flex; align-items: center; gap: 4px; }
 .sp-pct input { width: 72px; text-align: center; }
 .sp-calc { font-size: .8rem; color: var(--tp-muted); border-top: 1px dashed var(--tp-line); padding-top: 6px; font-variant-numeric: tabular-nums; }
+
+/* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): نوارِ بالای استعلام — شمارهٔ پیشنهاد، مهلت، کمترین قیمت و بارگذاری */
+.sp-fc { margin: 10px 0 4px; padding: 10px 12px; border-radius: 12px; border: 1px solid rgba(242, 160, 48, .55); background: rgba(242, 160, 48, .1); display: grid; gap: 6px; line-height: 1.8; }
+.sp-fc.ok { border-color: rgba(34, 197, 94, .5); background: rgba(34, 197, 94, .08); }
+.sp-fc-h { font-weight: 800; }
+.sp-fcul { margin: 0 0 8px; padding-inline-start: 18px; line-height: 1.9; }

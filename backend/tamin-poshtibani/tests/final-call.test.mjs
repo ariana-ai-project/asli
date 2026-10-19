@@ -13,6 +13,7 @@ import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { aiTick } from "../../../worker/ai-agent.js";
+import { handleSpUpdate } from "../../../worker/sp-bot.js";
 import * as SP from "../../../worker/sp-core.js";
 import { validTo, verdictOf, callSmsText, resetFcCache, finalCallTick } from "../../../worker/final-call.js";
 import { bundleData } from "../../../worker/bundle.js";
@@ -22,7 +23,7 @@ import { jStr, jStr2ms, DAY, HOUR } from "../../../worker/time.js";
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
 const env = {
-  DB, MANAGER_CODE: "1234", TG_BOT_TOKEN: "tok", TG_SP_BOT_TOKEN: "sptok", TG_WEBHOOK_SECRET: "sec", TG_API_BASE: "https://tg.test/bot",
+  DB, MANAGER_CODE: "1234", TG_BOT_TOKEN: "tok", TG_SP_BOT_TOKEN: "sptok", TG_WEBHOOK_SECRET: "sec", TG_API_BASE: "https://tg.test/bot", TG_FILE_API_BASE: "https://tgfile.test/bot",
   SUPABASE_URL: "https://sb.test", SUPABASE_SERVICE_KEY: "svc", ANTHROPIC_API_KEY: "k", ANTHROPIC_API_BASE: "https://ai.test", SITE_ORIGIN: "https://site.test",
   TEXTBEE_API_KEY: "tbk", TEXTBEE_API_BASE: "https://sms.test",
 };
@@ -53,8 +54,10 @@ globalThis.fetch = async (url, init = {}) => {
     const rest = u.slice("https://tg.test/bot".length), token = rest.split("/")[0], method = rest.split("/").pop();
     calls.push({ bot: token === "sptok" ? "sp" : "main", method, body: typeof init.body === "string" ? JSON.parse(init.body) : {} });
     if (method === "getMe") return R({ ok: true, result: { id: 77, username: token === "sptok" ? "AriaSupplierBot" : "ArianaSupplyBot" } });
+    if (method === "getFile") return R({ ok: true, result: { file_path: "documents/rasmi.pdf" } });
     return R({ ok: true, result: method === "sendMessage" ? { message_id: calls.length } : true });
   }
+  if (u.startsWith("https://tgfile.test/")) return new Response("PDFDATA");
   if (u.startsWith("https://sb.test/storage/v1/object/sign/")) return R({ signedURL: "/object/sign/proformas/x?token=abc" });
   if (u.startsWith("https://sb.test/")) { calls.push({ bot: "store", method: init.method || "GET", url: u }); return (init.method || "GET") === "GET" ? new Response("nf", { status: 404 }) : R({ Key: "x" }); }
   if (u.startsWith("https://ai.test/")) { const b = JSON.parse(init.body); calls.push({ bot: "ai", body: b }); return R(model(b)); }
@@ -310,4 +313,39 @@ test("کارشناس هوشمند: فراخوان در گامِ پایانی، �
   assert.equal(DB.raw.prepare("SELECT phone FROM experts WHERE id=2").get().phone, "09121111111");
   resetFcCache();
   assert.ok(DB.raw.prepare("SELECT 1 AS x FROM events WHERE kind='final_call_cfg'").get());
+});
+
+test("بات مکاتبات: فایل در پنجرهٔ فراخوان همان پیش‌فاکتورِ رسمی است — حکم با دکمهٔ «جایگزین شود و ثبت»", { skip: SKIP }, async () => {
+  const t = Date.now();
+  /* آزمونِ قبلی فراخوان را در پنل پشتیبانی خاموش کرد؛ دوباره روشن */
+  DB.raw.prepare("UPDATE settings SET value=? WHERE key='finalCall'").run(JSON.stringify({ on: true, window_h: 24, min_valid_h: 24, send_lowest: true }));
+  resetFcCache();
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-B','1405/07/27','پروژهٔ بات')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (4,'R-B',2,5,?,?,?)").run(t, t + 9e8, t);
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (41,'R-B','a',1,'کابل ۴ در ۲٫۵',10,'متر','open',4,?)").run(norm("کابل"));
+  assert.equal((await call("/sp/x/send", { headers: HU, body: { assignment_id: 4, item_ids: [41], supplier_name: "ربات‌فروش", phone: "09120000801", label: "فروش" } })).status, 200);
+  const th = threadOf(4, "ربات‌فروش"), H = await supplierSession("09120000801");
+  assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { pay: "نقدی", vat: "دارد", invoice: "رسمی", dtime: "10", valid_days: 5 } })).status, 200);
+  const d = (await call(`/sp/thread/${th}`, { headers: H })).data;
+  assert.equal((await call(`/sp/line/${d.lines[0].id}`, { method: "PUT", headers: H, body: { qty: 10, price: 450000 } })).status, 200);
+  assert.equal((await call(`/sp/line/${d.lines[0].id}/ready`, { headers: H, body: { on: true } })).status, 200);
+  const sub = await call(`/sp/thread/${th}/submit`, { headers: H, body: {} });
+  assert.equal((await call(`/sp/x/bundle/${sub.data.bundle_id}/decide`, { headers: HU, body: { action: "final" } })).status, 200);
+  for (const n of ["تلفنی یک", "تلفنی دو"]) DB.raw.prepare("INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,dtime,pay,invoice,vat,saved,final,final_at,created_at,updated_at) VALUES (4,41,?,'متر',10,460000,'7','نقدی','رسمی','دارد',1,1,?,?,?)").run(n, t, t, t);
+  assert.equal((await call("/assignments/4/final-call", { headers: HU, body: {} })).status, 200);
+  const ph = DB.raw.prepare("SELECT id FROM sp_phones WHERE phone='09120000801'").get().id;
+  DB.raw.prepare("INSERT INTO sp_tg (chat,role,phone_id,focus,updated_at) VALUES ('8801','s',?,?,?)").run(ph, th, t);
+  model = () => checkOut({ price: 430000, days: 3 });
+  const n0 = calls.length;
+  await handleSpUpdate(env, { update_id: 50, message: { message_id: 60, chat: { id: 8801, type: "private" }, document: { file_id: "OF1", file_size: 10, file_name: "rasmi.pdf", mime_type: "application/pdf" } } });
+  const msgs = calls.slice(n0).filter((c) => c.bot === "sp" && c.method === "sendMessage" && String(c.body.chat_id) === "8801");
+  const last = msgs[msgs.length - 1];
+  assert.match(last.body.text, /سند با پیشنهادِ قبلی‌تان فرق دارد — جایگزین شود؟/);
+  const ok = last.body.reply_markup.inline_keyboard.flat().find((b) => /^oc:\d+:1$/.test(b.callback_data));
+  assert.ok(ok, "دکمهٔ «جایگزین شود و ثبت»");
+  await handleSpUpdate(env, { update_id: 51, callback_query: { id: "cq1", data: ok.callback_data, message: { message_id: 61, chat: { id: 8801 } } } });
+  assert.equal(DB.raw.prepare("SELECT status FROM final_call_sups WHERE assignment_id=4 AND supplier_name='ربات‌فروش'").get().status, "valid");
+  assert.equal(DB.raw.prepare("SELECT price FROM quotes WHERE assignment_id=4 AND supplier_name='ربات‌فروش'").get().price, 430000);
+  const o = DB.raw.prepare("SELECT channel, state FROM offpf WHERE assignment_id=4").get();
+  assert.deepEqual({ ...o }, { channel: "telegram", state: "applied" });
 });

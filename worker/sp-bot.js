@@ -27,6 +27,7 @@ import { ingestVoice, VOICE_MAX } from "./sp-voice.js";
 import * as V from "./sp-voicemode.js";
 import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
+import { callForThread, offpfIngest, offpfDecide, submitOffpf, markSubmitted, offpfRequired, fcWhen } from "./final-call.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -648,6 +649,28 @@ async function supplierMessage(env, row, msg, text) {
     if (f && ["val", "term", "label"].includes(f.step)) { await P.send(env, row, "این‌جا لطفاً بنویسید؛ پیام صوتی برای گفت‌وگو با کارشناس است."); return { ok: true }; }
     return voiceToExpert(env, row, sup, voice);
   }
+  /* «🧾 پیش‌فاکتورِ رسمی»: فایل در پنجرهٔ فراخوان (یا بی دکمه، وقتی فراخوانِ همین گفت‌وگو منتظرِ اوست) یا پیش از «📤 ارسال» با 🔒 */
+  let of = f && f.step === "offpf" ? f : null;
+  if (!of && !f && file && row.focus) {
+    const th0 = await C.threadFor(env, row.focus, { supplier: sup }).catch(() => null);
+    const fc = th0 ? await callForThread(env, th0, "s").catch(() => null) : null;
+    if (fc && fc.can_upload) of = { step: "offpf", th: th0.id, stage: "call" };
+  }
+  if (of) {
+    if (!file) { await P.send(env, row, "فایل پیش‌فاکتورِ رسمی را بفرستید (PDF یا عکس)، یا «انصراف»."); return { ok: true }; }
+    try {
+      const th = await C.threadFor(env, of.th, { supplier: sup });
+      await P.send(env, row, "⏳ مدل پیش‌فاکتورِ رسمی را با پیشنهادِ شما می‌سنجد — چند لحظه…");
+      const key = await storeTgFile(env, th.assignment_id, file);
+      let r;
+      try {
+        r = await offpfIngest(env, { aid: th.assignment_id, name: th.supplier_name, threadId: th.id, file: { skey: key, filename: file.name, mime: file.mime, size: file.size },
+          channel: "telegram", by: `supplier:${sup.supplier_id}`, stage: of.stage, lineIds: of.ids || null });
+      } catch (e) { await storage(env).remove(key).catch(() => {}); throw e; }
+      P.setFlow(row, null);
+      return await offpfReply(env, row, r, of.stage, th.id);
+    } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
+  }
   /* «📤 ارسال» همراه با پیش‌فاکتور: فایل که رسید، مشخصاتِ اقلامِ آماده و پیش‌فاکتور یک‌جا می‌روند */
   if (f && f.step === "subpf") {
     if (!file) { await P.send(env, row, "فایل پیش‌فاکتور را بفرستید (PDF یا عکس)، یا «انصراف»."); return { ok: true }; }
@@ -777,6 +800,36 @@ async function lineCardSend(env, row, sup, lineId, mid, head) {
   return { ok: true };
 }
 
+/* ------------------------------------------------------------------ */
+/* «🧾 پیش‌فاکتورِ رسمی» (worker/final-call.js)                         */
+/* ------------------------------------------------------------------ */
+/** حکمِ سند در بات: مانع‌ها، «جایگزین شود؟» یا «✅ ثبت» — oc:<id>:1|0 */
+async function offpfReply(env, row, r, stage, thId) {
+  const li = (xs) => (xs || []).map((x) => `• ${esc(x.msg)}`).join("\n");
+  if (r.state === "blocked") {
+    return P.send(env, row, `🧾 <b>این پیش‌فاکتور پذیرفته نیست</b>\n${li(r.block)}\n\nپیش‌فاکتورِ دیگری بفرستید.`, [[{ text: "🧾 فرستادنِ سندِ دیگر", callback_data: `op:${thId}:${stage === "submit" ? "s" : "c"}` }]]);
+  }
+  if (r.state === "ask") {
+    return P.send(env, row, `🧾 <b>سند با پیشنهادِ قبلی‌تان فرق دارد — جایگزین شود؟</b>\n${li(r.ask)}${stage === "call" ? "\n\nقیمتِ نهایی‌تان همین می‌شود و برای کمیسیون قفل است." : ""}`,
+      [[{ text: "✅ جایگزین شود و ثبت", callback_data: `oc:${r.id}:1` }], [{ text: "✖ نه، سندِ دیگری می‌فرستم", callback_data: `oc:${r.id}:0` }]]);
+  }
+  return P.send(env, row, `🧾 ✅ <b>سند با پیشنهادتان می‌خواند</b>${r.valid_to ? ` — معتبر تا ${esc(fcWhen(r.valid_to))}` : ""}.${stage === "call" ? "\nبا «✅ ثبت»، قیمتِ شما برای کمیسیون قفل می‌شود." : ""}`,
+    [[{ text: stage === "call" ? "✅ ثبت" : "📤 ارسال با همین پیش‌فاکتور", callback_data: `oc:${r.id}:1` }]]);
+}
+/** ارسالِ اقلامِ آماده با پیش‌فاکتورِ رسمیِ سنجیده (همان مسیرِ «sq»؛ تصمیمِ خودکارِ کارِ کارشناس هوشمند هم) */
+async function submitWithOffpf(env, row, sup, thId, offpfId, mid) {
+  const th = await C.threadFor(env, thId, { supplier: sup });
+  const rl = (await env.DB.prepare("SELECT id, item_id FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th.id).all()).results || [];
+  const op = await submitOffpf(env, th, rl, offpfId);
+  const r = await C.submitLines(env, sup, th.id, null, op ? { skey: op.skey, filename: op.filename, mime: op.mime, size: op.size } : undefined);
+  if (op) await markSubmitted(env, op, r.bundle_id);
+  const auto = await autoDecide(env, r.thread.id).catch(() => null);
+  await P.pushMsgs(env, r.thread, [...r.msgs, ...(auto ? auto.msgs : [])]);
+  aiKick(env, row._ctx, r.thread.id);
+  if (auto && auto.ids.includes(r.bundle_id)) return itemsCardSend(env, row, sup, th.id, mid, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)}). ممنون از همکاری‌تان 🙏`);
+  return itemsCardSend(env, row, sup, th.id, mid, `✅ پیشنهادتان با پیش‌فاکتورِ رسمیِ خودتان برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
+}
+
 async function itemsCardSend(env, row, sup, thId, mid, head) {
   const th = await C.threadFor(env, thId, { supplier: sup });
   if (row.focus !== th.id) { await P.showThread(env, row, th); return { ok: true }; }
@@ -785,7 +838,12 @@ async function itemsCardSend(env, row, sup, thId, mid, head) {
     env.DB.prepare("SELECT * FROM sp_bundles WHERE thread_id=? ORDER BY id").bind(th.id).all(),
   ]);
   const c = P.itemsCard(env, th, L.results || [], B.results || []);
-  await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
+  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی»: شمارهٔ پیشنهاد، مهلت و دکمهٔ بارگذاری */
+  const fc = await callForThread(env, th, "s").catch(() => null);
+  const fcTxt = !fc ? "" : fc.can_upload ? `📨 <b>پیشنهادِ شما با شمارهٔ ${esc(fa(fc.offer_no))} وارد کمیسیون معاملات می‌شود</b> — تا ${esc(fcWhen(fc.deadline_at))} پیش‌فاکتورِ رسمیِ مهر و امضادار با دست‌کم ${fa(fc.min_valid_h)} ساعت اعتبار بفرستید.${fc.lowest && fc.lowest.length ? `\nکمترین قیمتِ رسیده: ${fc.lowest.map((x) => `«${esc(x.title)}» ${esc(fa(Math.round(x.price).toLocaleString("en-US")).replace(/,/g, "٬"))} ریال${x.own ? " (پیشنهادِ خودتان)" : ""}`).join("، ")}` : ""}\n\n`
+    : fc.status === "valid" ? `🧾 پیش‌فاکتورِ رسمیِ شما (پیشنهادِ ${esc(fa(fc.offer_no))}) ثبت شد؛ قیمت برای کمیسیون قفل است.\n\n` : "";
+  const kb = fc && fc.can_upload ? [[{ text: "🧾 بارگذاریِ پیش‌فاکتورِ رسمی", callback_data: `op:${th.id}:c` }], ...(c.kb || [])] : c.kb;
+  await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${fcTxt}${c.text}`, kb);
   return { ok: true };
 }
 
@@ -1012,6 +1070,15 @@ async function onCallback(env, cq, ctx) {
     }
     if (a === "sq") {
       const gen = !(await pfReadOn(env));
+      /* «پیش‌فاکتورِ رسمی 🔒»: پیوستِ بی‌سنجش نه — اول همان سند، سنجش و بعد ارسال (op/oc) */
+      const rl0 = (await env.DB.prepare("SELECT l.id, l.item_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.thread_id=? AND l.state='ready' AND t.supplier_id=?").bind(n(1), sup.supplier_id).all()).results || [];
+      if (rl0.length && (await offpfRequired(env, rl0))) {
+        await ack();
+        P.setFlow(row, { step: "offpf", th: n(1), stage: "submit", ids: rl0.map((l) => l.id) });
+        await P.send(env, row, "🧾 این استعلام «پیش‌فاکتورِ رسمی 🔒» می‌خواهد: فایل پیش‌فاکتورِ مهر و امضادارِ خودتان را بفرستید (PDF یا عکس) تا با پیشنهادتان سنجیده و همراهش فرستاده شود.",
+          [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+        return { ok: true };
+      }
       if (parts[2] === "pf") {
         const th = await C.threadFor(env, n(1), { supplier: sup }).catch(() => null);
         if (!th) { await ack("این استعلام پیدا نشد.", true); return { ok: true }; }
@@ -1031,6 +1098,31 @@ async function onCallback(env, cq, ctx) {
         if (auto && auto.ids.includes(r.bundle_id)) return await itemsCardSend(env, row, sup, n(1), mid, `🏁 پیشنهادتان در چارچوبِ شرایطِ شرکت بود و همان لحظه تأیید نهایی شد (بستهٔ ${fa(r.bundle_id)}). ممنون از همکاری‌تان 🙏`);
         return await itemsCardSend(env, row, sup, n(1), mid, `✅ ${gen ? "پیشنهاد با پیش‌فاکتورِ سامانه" : ""}${gen ? " " : ""}برای کارشناس فرستاده شد (بستهٔ ${fa(r.bundle_id)}). نتیجهٔ بررسی را همین‌جا خبر می‌دهیم.`);
       } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+    }
+    /* «🧾 پیش‌فاکتورِ رسمی»: op:<گفت‌وگو>:c (پنجرهٔ فراخوان) | s (پیش از ارسال) — فایل را می‌خواهد؛ oc:<پیش‌فاکتور>:1|0 — تصمیمِ حکم */
+    if (a === "op") {
+      const th = await C.threadFor(env, n(1), { supplier: sup }).catch(() => null);
+      if (!th) { await ack("این استعلام پیدا نشد.", true); return { ok: true }; }
+      await ack();
+      const stage = parts[2] === "s" ? "submit" : "call";
+      const ids = stage === "submit" ? ((await env.DB.prepare("SELECT id FROM sp_lines WHERE thread_id=? AND state='ready'").bind(th.id).all()).results || []).map((l) => l.id) : null;
+      P.setFlow(row, { step: "offpf", th: th.id, stage, ...(ids ? { ids } : {}) });
+      await P.send(env, row, "🧾 فایل پیش‌فاکتورِ رسمیِ مهر و امضادار را بفرستید (PDF یا عکس) — اعتبارش (مثلاً «۳ روز» یا «معتبر تا …») باید روی سند نوشته باشد.", [[{ text: "✖️ انصراف", callback_data: "xc:0" }]]);
+      return { ok: true };
+    }
+    if (a === "oc") {
+      const o = await env.DB.prepare("SELECT id, stage, thread_id, state FROM offpf WHERE id=?").bind(n(1)).first();
+      if (!o) { await ack("این پیش‌فاکتور پیدا نشد.", true); return { ok: true }; }
+      const yes = parts[2] === "1";
+      try {
+        await offpfDecide(env, o.id, { replace: yes, by: `supplier:${sup.supplier_id}` }, { supplier: sup });
+      } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+      await ack(yes ? "ثبت شد" : "کنار گذاشته شد");
+      if (!yes) { await P.send(env, row, "باشد؛ پیش‌فاکتورِ دیگری بفرستید.", [[{ text: "🧾 فرستادنِ سندِ دیگر", callback_data: `op:${o.thread_id}:${o.stage === "submit" ? "s" : "c"}` }]]); return { ok: true }; }
+      if (o.stage === "submit") {
+        try { return await submitWithOffpf(env, row, sup, o.thread_id, o.id, null); } catch (e) { await P.send(env, row, `⚠️ ${esc(e.message)}`); return { ok: true }; }
+      }
+      return await itemsCardSend(env, row, sup, o.thread_id, null, "🧾 پیش‌فاکتورِ رسمیِ شما ثبت شد؛ قیمتِ شما برای کمیسیون قفل است. ممنون 🙏");
     }
     if (a === "sp") {
       try { await C.proformaTarget(env, sup, n(1)); } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
