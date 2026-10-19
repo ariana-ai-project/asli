@@ -213,7 +213,7 @@ export const GROUPS = {
   asg: { srcs: ["ev", "alog"], kinds: ["import", "delete", "dispatch", "unassign", "reassign", "open", "hold", "stop", "closed", "decision_requested", "decision_approved", "decision_rejected", "ai_tick", "ai_manual", "ai_sup", "ai_sup_item"] },
   work: { srcs: ["ev", "view", "hist", "norm", "smart", "qadd", "qfin", "pf"], kinds: ["close", "commission", "commission_table", "letter", "deliver", "quote_saved", "quote_deleted", "extract_applied", "norm_clear", "norm_revert", "ai_ask", "ai_answer", "ai_handover", "ai_delivery", "ai_handoff", "ai_start", "ai_pick_more", "ai_wave", "item_terms", "ai_prop_ok", "ai_prop_no", "ai_sup_cfg", "ai_takeover", "ai_handback", "final_call", "offpf", "offpf_applied", "commission_package"] },
   chat: { srcs: ["msg", "sms"], kinds: [] },
-  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rebase", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes", "commission_result", "size_rules", "final_call_cfg"] },
+  support: { srcs: ["ev"], kinds: ["commission_ok", "commission_off", "support_login", "support_pass", "ai_on", "ai_off", "ai_rebase", "ai_rules", "ai_reject", "ai_ranking", "ai_switches", "ai_modes", "commission_result", "size_rules", "final_call_cfg", "supplier_over"] },
 };
 const ALL_SRCS = ["ev", "alog", "view", "hist", "norm", "smart", "qadd", "qfin", "pf", "msg", "sms"];
 
@@ -252,6 +252,8 @@ const EV_FA = {
   final_call: "📨 فراخوانِ پیش‌فاکتورِ رسمی — پیامک به تأمین‌کنندگانِ تأییدنهایی", offpf: "🧾 پیش‌فاکتورِ رسمی رسید و سنجیده شد",
   offpf_applied: "🧾 پیش‌فاکتورِ رسمی ثبت شد — قیمت برای کمیسیون قفل", commission_package: "📦 بستهٔ کمیسیون بسته شد",
   final_call_cfg: "📨 تنظیمِ فراخوانِ پیش‌فاکتورِ رسمی عوض شد",
+  /* «🏷 تأمین‌کنندگان» (worker/supplier-over.js): ردهٔ سوابق و مشخصاتِ تأمین‌کننده به دستِ پشتیبانی */
+  supplier_over: "🏷 رده و مشخصاتِ تأمین‌کننده",
 };
 const PROP_KIND_FA = { reply: "پاسخ", final: "تأیید نهایی", act: "تصمیمِ بسته" };
 const PICK_MODE_FA = { handoff: "سپردن یا برگشت", pick: "انتخاب کارشناس", direct: "مستقیم" };
@@ -282,6 +284,16 @@ function evText(r, p) {
   if (["ai_on", "ai_rebase"].includes(r.kind) && (p.idle != null || p.keep || p.items)) bits.push([p.idle ? `${faN(p.idle)} درخواستِ هوشمند` : "", p.keep ? `${faN(p.keep)} دستی ماند` : "", p.items ? `${faN(p.items)} قلمِ «انجام دستی»` : "", p.human ? `${faN(p.human)} گفت‌وگو دستِ کارشناس` : ""].filter(Boolean).join("، "));
   if (r.kind === "ai_off" && (p.open || p.props)) bits.push([p.open ? `${faN(p.open)} درخواستِ باز دستِ کارشناس` : "", p.props ? `${faN(p.props)} پیشنهادِ معطل کنار رفت` : ""].filter(Boolean).join("، "));
   if (r.kind === "commission_result" && Array.isArray(p.items)) bits.push(p.items.map((x) => `${short(x.title, 40)} ← ${short(x.winner, 40)}`).join("، "));
+  if (r.kind === "supplier_over") {
+    /* حرفِ لاتینِ رده جداسازی‌شده (FSI…PDI): «A ← C» وگرنه یک تکهٔ چپ‌به‌راست می‌شد و در متنِ راست‌به‌چپ وارونه خوانده می‌شد، و رقمِ
+       «۲ فیلدِ دیگر» پس از C به آن می‌چسبید */
+    const a = p.after || {}, b = p.before || {}, gv = (v) => (v == null ? "سوابق" : v === "-" ? "بی‌رده" : `\u2068${v}\u2069`);
+    if (p.name) bits.push(`«${short(p.name, 40)}»`);
+    if ("grade" in a) bits.push(`رده ${gv(b.grade)} ← ${gv(a.grade)}`);
+    const rest = Object.keys(a).filter((f) => f !== "grade").length;
+    if (rest) bits.push(`${faN(rest)} فیلدِ دیگر`);
+    if (p.reason) bits.push(`دلیل: ${short(p.reason, 120)}`);
+  }
   if (["ai_start", "ai_pick_more"].includes(r.kind)) {
     bits.push(`${faN(p.n || 0)} تأمین‌کننده${p.mode && PICK_MODE_FA[p.mode] ? ` (${PICK_MODE_FA[p.mode]})` : ""}`);
     if (Array.isArray(p.off_top) && p.off_top.length) bits.push(`برداشتنِ نفراتِ پیش‌تیک: ${p.off_top.map((x) => `${short(x.name, 40)}${x.why ? ` — ${short(x.why, 80)}` : ""}`).join("؛ ")}`);

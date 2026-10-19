@@ -1634,6 +1634,9 @@
 
   const histRows = (d) => [...(d.suppliers || [])].sort((a, b) => a[HSORT[S.hsort] || "rankM"] - b[HSORT[S.hsort] || "rankM"]
     || (b.qtyM || 0) - (a.qtyM || 0) || String(a.name).localeCompare(String(b.name), "fa"));
+  /* چیپِ رده؛ ✎ یعنی پشتیبانی رده را با دلیل عوض کرده («🏷 تأمین‌کنندگان») و عنوانش ردهٔ خودِ فایلِ سوابق را می‌گوید */
+  const gradeChip = (s, pre, tip) => (s.grade || s.gradeOver ? ` <span class="chip grade${s.grade ? ` g${esc(s.grade)}` : ""}" title="${esc(s.gradeOver
+    ? `ردهٔ پشتیبانی — در فایلِ سوابق: ${s.gradeFile || "بی‌رده"}` : tip)}">${pre || ""}${esc(s.grade || "بی‌رده")}${s.gradeOver ? " ✎" : ""}</span>` : "");
 
   /* کارت تأمین‌کننده — بالای جدول، با کلیک روی نام باز می‌شود */
   function vProfile(it) {
@@ -1643,7 +1646,7 @@
     const unit = d.item && d.item.unit ? " " + d.item.unit : "";
     const f = (lab, val, cls) => `<div class="f"><b>${lab}</b><span class="${cls || ""}">${val == null || val === "" ? "—" : esc(val)}</span></div>`;
     const per = d.item && d.item.unit ? ` · هر ${esc(d.item.unit)}` : "";
-    return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${p.grade ? `<span class="chip grade g${esc(p.grade)}" title="ردهٔ تأمین‌کننده">رده ${esc(p.grade)}</span>` : ""}${p.code ? `<span class="chip num" title="کد تأمین‌کننده">${esc(p.code)}</span>` : ""}
+    return `<div class="prof"><div class="top"><h4>${esc(p.name)}</h4>${gradeChip(p, "رده ", "ردهٔ تأمین‌کننده")}${p.code ? `<span class="chip num" title="کد تأمین‌کننده">${esc(p.code)}</span>` : ""}
         ${(() => { /* «👤 پروفایل کامل» (sup-profile.js) — فقط وقتی کلیدِ دفتر تأمین‌کنندگان در پنل پشتیبانی روشن است */
           if (!TP.supProfile) return "";
           if (S.crReg === undefined) { S.crReg = null; TP.supProfile.enabled().then((v) => { S.crReg = v; if (v) render(); }); }
@@ -1937,7 +1940,7 @@
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
           : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="نام تأمین‌کننده به تب استعلامات">افزودن</button>`}${pkHistBtn(it, s.name)}</td>
-        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${s.grade ? ` <span class="chip grade g${esc(s.grade)}" title="رده">${esc(s.grade)}</span>` : ""}${s.code ? ` <span class="dim num" title="کد تأمین‌کننده">${esc(s.code)}</span>` : ""}${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل">${M(s.unconverted)}</span>` : ""}</td>
+        <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${gradeChip(s, "", "رده")}${s.code ? ` <span class="dim num" title="کد تأمین‌کننده">${esc(s.code)}</span>` : ""}${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل">${M(s.unconverted)}</span>` : ""}</td>
         <td class="num">${M(s.n)}${rb(s.rankN)}</td>
         <td class="num">${M(RQ(s.qty))}${rb(s.rankQty)}<div class="dim hx-share">${s.share.toFixed(1)}٪</div></td>
         <td class="num">${M(RQ(s.qtyM))}${rb(s.rankM)}</td>

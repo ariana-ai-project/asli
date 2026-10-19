@@ -14,6 +14,7 @@
  */
 import { HttpError } from "./http.js";
 import { supKey, NATURES } from "./cr-data.js";
+import { mergeGrade } from "./supplier-over.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -81,21 +82,29 @@ const opOut = (o, w) => ({ id: o.id, voice: o.voice, holder: o.holder, holder_ro
 
 /**
  * GET /sreg/profile?sid=|name= — همه چیزِ یک تأمین‌کننده برای کشوی پروفایل: دفتر (با اصلاح‌های کارشناس)، سوابقِ خرید در
- * سامانه، نظرها، روابطِ یک قدمی و ادغام‌ها
+ * سامانه، نظرها، روابطِ یک قدمی و ادغام‌ها. ردهٔ سوابق مؤثر است (grade: با تغییرِ پشتیبانی) و نام رسمی، شمارهٔ ثبت، شناسهٔ ملی و
+ * نشانیِ پشتیبانی بر دفتر می‌نشیند (support: همان تغییرها با نویسنده و زمان — worker/supplier-over.js)؛ ردهٔ تحقیق جداست (research.rank).
  */
 export async function supplierProfile(env, w, q) {
   const sid = await resolveSid(env, q);
   const row = await regRow(env, sid, q.name);
   if (!row) throw new HttpError("این تأمین‌کننده در دفتر نیست.", 404);
-  const [xs, ops, edges, aliases] = await env.DB.batch([
+  const sn = row.name_n || supKey(row.name);
+  const [xs, ops, edges, aliases, gr, ov] = await env.DB.batch([
     env.DB.prepare("SELECT field, value, by_name, at FROM sreg_x WHERE sid=? AND active=1 ORDER BY at").bind(sid),
     env.DB.prepare("SELECT * FROM sreg_ops WHERE sid=? ORDER BY created_at DESC LIMIT 200").bind(sid),
     env.DB.prepare("SELECT * FROM sreg_edges WHERE (a=? OR b=?) AND status<>'ردشده' ORDER BY at DESC LIMIT 200").bind(sid, sid),
     /* sid با نمایه، alias با کلید اصلی (kind, alias) — بی خواندنِ کلِ جدول */
-    env.DB.prepare("SELECT kind, alias, sid, status, note, by_name, at FROM sreg_alias WHERE sid=? UNION SELECT kind, alias, sid, status, note, by_name, at FROM sreg_alias WHERE kind IN ('g4','merge','name') AND alias=?").bind(sid, sid)]);
+    env.DB.prepare("SELECT kind, alias, sid, status, note, by_name, at FROM sreg_alias WHERE sid=? UNION SELECT kind, alias, sid, status, note, by_name, at FROM sreg_alias WHERE kind IN ('g4','merge','name') AND alias=?").bind(sid, sid),
+    /* ردهٔ سوابق و تغییرِ پشتیبانی — هر دو با کلید اصلی */
+    env.DB.prepare("SELECT code, grade FROM supplier_grades WHERE sn=?").bind(sn),
+    env.DB.prepare("SELECT * FROM supplier_over WHERE sn=?").bind(sn)]);
   const data = parse(row.data, {});
   const fix = {};
   for (const x of xs.results || []) fix[x.field] = { value: x.value, by: x.by_name, at: x.at };
+  const g0 = (gr.results || [])[0] || null, o0 = (ov.results || [])[0] || null, grade = mergeGrade(g0, o0);
+  const sup = o0 ? { legal_name: o0.legal_name || null, reg_no: o0.reg_no || null, national_id: o0.national_id || null, address: o0.address || null,
+    phones: o0.phones || null, note: o0.note || null, grade_reason: o0.grade_reason || null, by: o0.by_name || null, at: o0.at } : null;
   const eRows = edges.results || [];
   const others = [...new Set(eRows.map((e) => (e.a === sid ? e.b : e.a)))];
   const names = new Map();
@@ -106,12 +115,17 @@ export async function supplierProfile(env, w, q) {
   /* سوابقِ خرید در سامانه: فقط وقتی نوع قلم معلوم است (کلید اصلیِ purchases با head شروع می‌شود؛ بی آن خواندنِ کلِ جدول بود) */
   const buys = T(q.head) ? await purchaseSummary(env, row, T(q.head)) : null;
   return {
-    sid, kind: row.kind, virtual: !!row.virtual,
+    /* sn: کلیدِ همان تأمین‌کننده در سوابق و «🏷 تأمین‌کنندگان»ِ پشتیبانی (کشو در پنل پشتیبانی دکمهٔ ویرایش را با همین باز می‌کند) */
+    sid, sn, kind: row.kind, virtual: !!row.virtual,
     name: fix.name ? fix.name.value : row.name,
-    identity: { legal_name: data.legal_name || null, brand_name: data.brand_name || null, national_id: data.national_id || null, type: data.supplier_type || data.legal_form || null,
+    /* ردهٔ سوابقِ خرید: {grade (null = بی‌رده)، code، over (تغییرِ پشتیبانی)، imported (ردهٔ خودِ سوابق)، reason (توضیحِ کیفی)} */
+    grade: grade ? { ...grade, reason: (sup && sup.grade_reason) || null, by: grade.over && sup ? sup.by : null, at: grade.over && sup ? sup.at : null } : null,
+    support: sup,
+    identity: { legal_name: (sup && sup.legal_name) || data.legal_name || null, brand_name: data.brand_name || null, national_id: (sup && sup.national_id) || data.national_id || null,
+      reg_no: (sup && sup.reg_no) || data.registration_no || null, type: data.supplier_type || data.legal_form || null,
       role: row.role || data.chain_role || data.role_hint || null, manager: data.manager || null, established: data.established || null, registry_status: data.registry_status || null },
-    contact: { address: fix.address ? fix.address.value : data.address || null, phones: fix.phones ? fix.phones.value : row.phones || null,
-      mobiles: fix.mobiles ? fix.mobiles.value : row.mobiles || null, website: data.website || null, email: data.email || null, social: data.social || null,
+    contact: { address: (sup && sup.address) || (fix.address ? fix.address.value : data.address || null), phones: fix.phones ? fix.phones.value : row.phones || null,
+      mobiles: fix.mobiles ? fix.mobiles.value : row.mobiles || null, support_phones: (sup && sup.phones) || null, website: data.website || null, email: data.email || null, social: data.social || null,
       verified: data.verified_contacts || null, verified_by_staff: fix.phones || fix.mobiles ? true : false },
     market: { country: row.country || null, province: row.province || null, city: row.city || null, hub: row.hub || null, brands: data.brands || null, products: data.products || null },
     verification: { level: row.verification, gates: data.gates_summary || null, open: data.open_gates || null, last_activity: data.last_activity || null, last_activity_date: data.last_activity_date || null,

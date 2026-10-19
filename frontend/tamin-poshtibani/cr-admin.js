@@ -3,6 +3,9 @@
    سرور: worker/cr-api.js (مسیرهای /support/cr، /support/strategy، /support/sreg و /support/graph)
      · 🧭 حالت‌های استعلام: نوع قلم‌های هر حالت و خانواده (حداکثری / محتاط / ویژه)، جابه‌جایی و استثنای شمار با دلیل، و
        جدولِ شمارِ موج اول و سقفِ هر حالت و رده
+     · 🏷 تأمین‌کنندگان: ردهٔ سوابق (A/B/C) و مشخصات (نام رسمی، شمارهٔ ثبت، شناسهٔ ملی، نشانی، تلفن) فیلد به فیلد، با توضیحِ
+       کیفیِ رده، دلیلِ هر تغییر و تاریخچه — worker/supplier-over.js (/support/suppliers، /support/supplier)؛ فقط پشتیبانی. همان
+       پنجره از کشوی پروفایلِ هر تأمین‌کننده در این پنل هم باز می‌شود («🏷 ویرایشِ رده و مشخصات»)
      · 🔁 نام نزدیک (G4): یکی بودنِ کشف‌شده با تأمین‌کنندهٔ سوابق را تأیید یا رد کنید
      · 🕸 گراف: نمای کاملِ روابط با فیلترِ نوع قلم یا بازار؛ روی هر گره پروفایلش باز می‌شود
      · ⚙️ کلیدها و ورود: هر بخشِ طرح پیش‌فرض خاموش است؛ وضعیتِ ورودِ دادهٔ تحقیق
@@ -13,11 +16,18 @@
   const TP = window.TP;
   const esc = TP.esc;
   const fa = (x) => (TP.ui && TP.ui.fa ? TP.ui.fa(x) : String(x == null ? "" : x).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[+d]));
+  const p2 = (n) => String(n).padStart(2, "0");
+  const when = (ms) => { if (!ms) return ""; const t = new Date(ms), [y, m, d] = TP.todayJ ? TP.todayJ(ms) : [t.getFullYear(), t.getMonth() + 1, t.getDate()]; return fa(`${y}/${p2(m)}/${p2(d)} ${p2(t.getHours())}:${p2(t.getMinutes())}`); };
   let C = { api: null, raw: null, render: () => {} };
   const S = { view: "heads", flags: null, names: {}, status: null, hd: null, hF: { family: "", mode: "", q: "", page: 0 }, rfqn: null, rfqnDraft: null,
-    g4: null, g4F: "پیشنهادی", gr: null, grF: { head: "", hub: "" }, err: "", loading: false, seq: 0 };
-  const VIEWS = [["heads", "🧭 حالت‌های استعلام"], ["g4", "🔁 نام نزدیک"], ["graph", "🕸 گراف"], ["flags", "⚙️ کلیدها و ورود"]];
+    g4: null, g4F: "پیشنهادی", gr: null, grF: { head: "", hub: "" }, sq: "", sup: null, supQ: null, supSeq: 0, err: "", loading: false, seq: 0 };
+  const VIEWS = [["heads", "🧭 حالت‌های استعلام"], ["sup", "🏷 تأمین‌کنندگان"], ["g4", "🔁 نام نزدیک"], ["graph", "🕸 گراف"], ["flags", "⚙️ کلیدها و ورود"]];
   const FAM_TONE = { max: "ok", cautious: "warn", special: "info" };
+  /* ردهٔ تأمین‌کننده: A سبز، B آبی، C زرد؛ بی‌رده خاکستری */
+  const GRADE_TONE = { A: "ok", B: "info", C: "warn" };
+  const gChip = (g) => (g ? `<span class="chip ${GRADE_TONE[g] || ""}">${esc(g)}</span>` : `<span class="chip">بی‌رده</span>`);
+  const SRC_FA = { hist: "سوابق خرید", panel: "پنل تأمین‌کننده", reg: "دفتر تحقیق" };
+  const SUP_FIELDS = ["grade", "grade_reason", "legal_name", "reg_no", "national_id", "address", "phones", "note"];
 
   async function boot() {
     try { const r = await C.api("/cr/flags"); S.flags = r.flags; S.names = r.names || {}; } catch (_) { S.flags = S.flags || {}; }
@@ -35,7 +45,8 @@
         const [hd, rq] = await Promise.all([C.api(`/strategy/heads?${q}`), S.rfqn && !force ? Promise.resolve(S.rfqn) : C.api("/strategy/rfqn")]);
         if (seq !== S.seq) return;
         S.hd = hd; S.rfqn = rq;
-      } else if (S.view === "g4") { const r = await C.api(`/sreg/g4?state=${encodeURIComponent(S.g4F)}`); if (seq !== S.seq) return; S.g4 = r; }
+      } else if (S.view === "sup") { const q = S.sq.trim(), r = await C.api(`/suppliers?q=${encodeURIComponent(q)}`); if (seq !== S.seq) return; S.sup = r; S.supQ = q; }
+      else if (S.view === "g4") { const r = await C.api(`/sreg/g4?state=${encodeURIComponent(S.g4F)}`); if (seq !== S.seq) return; S.g4 = r; }
       else if (S.view === "graph") { const q = new URLSearchParams(Object.entries(S.grF).filter(([, v]) => v)); const r = await C.api(`/graph?${q}`); if (seq !== S.seq) return; S.gr = r; }
       else if (S.view === "flags") { const [r, pn] = await Promise.all([C.api("/cr/status"), C.api("/cr/panel").catch(() => null)]); if (seq !== S.seq) return; S.status = r; S.panel = pn; }
     } catch (e) { if (seq === S.seq) S.err = e.message; }
@@ -79,6 +90,98 @@
       <div class="tp-scroll" style="margin-top:8px"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">نوع قلم</th><th>حالت استعلام</th><th title="موج اول / سقف">شمار</th><th>رده</th><th>حالت کار</th><th>اولویت پرسش</th><th>📘 سند</th><th></th></tr></thead>
         <tbody>${rows || `<tr><td colspan="8" class="dim">نوع قلمی نیست — دادهٔ تحقیق هنوز وارد نشده؟</td></tr>`}</tbody></table></div>
       <div class="toolrow" style="margin-top:6px">${S.hF.page > 0 ? `<button class="tp-btn sm" data-cr-page="-1">قبلی</button>` : ""}${d.list.length === d.per ? `<button class="tp-btn sm" data-cr-page="1">بعدی</button>` : ""}</div>${rfq}`;
+  }
+  /**
+   * «🏷 تأمین‌کنندگان»: جستجوی نام ← ردهٔ مؤثر و نشانِ ✎ ِ تغییرِ پشتیبانی؛ بی جستجو، آخرین تغییرها. پاسخِ جستجو فقط فهرست را دوباره
+   * رسم می‌کند (data-cr-suplist)، نه کادرِ جستجو — وگرنه هر رسمِ کاملِ پنل فوکوس و حروفِ تایپ‌شده در میانهٔ پرسش را می‌برد.
+   */
+  function vSup() {
+    return `<div class="toolrow" style="flex-wrap:wrap;gap:8px;align-items:center"><input class="tp-input" data-cr-sq placeholder="نام تأمین‌کننده (دست‌کم دو حرف)…" value="${esc(S.sq)}" style="flex:1;min-width:200px;max-width:420px" autocomplete="off" enterkeyhint="search" aria-label="جستجوی تأمین‌کننده">
+        ${TP.ui.info("support.sup", "راهنمای تأمین‌کنندگان")}</div>
+      <div class="dim" style="font-size:.82rem;margin-top:4px">ردهٔ سوابق از فایلِ مدیر می‌آید؛ تغییرِ پشتیبانی با دلیل همه‌جا جایش را می‌گیرد و با ورودِ دوبارهٔ سوابق نمی‌رود. نام یا «✎ ویرایش» را بزنید.</div>
+      <div data-cr-suplist>${vSupList()}</div>`;
+  }
+  function vSupList() {
+    const d = S.sup;
+    if (!d) return TP.ui.loader("");
+    /* خودِ نام هم پنجرهٔ ویرایش را باز می‌کند — روی گوشی ستونِ دکمه پشتِ لغزشِ جدول است */
+    const rows = d.list.map((x) => `<tr><td class="rt"><button type="button" class="spp-link" data-cr-sup="${esc(x.sn)}" data-name="${esc(x.name)}"><b>${esc(x.name)}</b></button>${x.edited ? ` <span class="chip warn" title="تغییرِ پشتیبانی${x.at ? ` — ${esc(when(x.at))}` : ""}">✎</span>` : ""}${TP.supProfile ? ` ${TP.supProfile.btn(x.name)}` : ""}</td>
+        <td dir="ltr">${esc(x.code || "—")}</td>
+        <td>${gChip(x.grade)}${x.grade_over ? ` <span class="dim" style="font-size:.76rem">سوابق: ${esc(x.imported || "بی‌رده")}</span>` : ""}</td>
+        <td class="dim" style="font-size:.8rem">${esc(x.src.map((s) => SRC_FA[s] || s).join("، ") || "—")}</td>
+        <td><button class="tp-btn xs" data-cr-sup="${esc(x.sn)}" data-name="${esc(x.name)}">✎ ویرایش</button></td></tr>`).join("");
+    return `<div class="tp-scroll" style="margin-top:8px"><table class="tp-table" style="width:100%"><thead><tr><th class="rt">${d.recent ? "آخرین تغییرهای پشتیبانی" : "تأمین‌کننده"}</th><th>کد</th><th>ردهٔ مؤثر</th><th>منبع</th><th></th></tr></thead>
+        <tbody>${rows || `<tr><td colspan="5" class="dim">${d.recent ? "هنوز تغییری ثبت نشده — نام را جستجو کنید." : "تأمین‌کننده‌ای با این نام پیدا نشد."}</td></tr>`}</tbody></table></div>`;
+  }
+  /** جستجوی «🏷 تأمین‌کنندگان» بی رسمِ کاملِ پنل؛ پاسخِ کهنه (پرسشِ پیشین) کنار می‌رود و خطا جای فهرست می‌نشیند (کادرِ جستجو می‌ماند) */
+  async function supSearch() {
+    const seq = ++S.supSeq, q = S.sq.trim();
+    let r, err = "";
+    try { r = await C.api(`/suppliers?q=${encodeURIComponent(q)}`); } catch (e) { err = e.message || "جستجو نشد."; }
+    if (seq !== S.supSeq || S.view !== "sup") return;
+    const box = document.querySelector("[data-cr-suplist]");
+    if (err) { if (box) box.innerHTML = `<div class="tp-note warn" style="margin-top:8px;max-width:none">${esc(err)}</div>`; return; }
+    S.sup = r; S.supQ = q;
+    if (box) box.innerHTML = vSupList(); else C.render();
+  }
+  /* مقدارِ تاریخچه: null یعنی «همان سوابق یا دفتر». هر مقدار در <bdi>: «A ← C» بی جداسازی یک تکهٔ چپ‌به‌راست می‌شد و در متنِ
+     راست‌به‌چپ وارونه خوانده می‌شد (C پیش از A) */
+  const histVal = (f, v) => (v == null ? (f === "grade" ? "سوابق" : "—") : f === "grade" && v === "-" ? "بی‌رده" : String(v).length > 60 ? String(v).slice(0, 59) + "…" : String(v));
+  /** فرمِ ویرایش: مقدارِ خانه‌ها همان تغییرِ پشتیبانی است (خالی = سوابق یا دفتر) و زیرِ هر خانه دادهٔ واردشده. opt.drawer: از کشوی پروفایل باز شده */
+  function supForm(d, opt = {}) {
+    const o = d.over || {}, im = d.imported || {}, ef = d.effective || {};
+    const hint = (v) => `<span class="dim" style="display:block;font-size:.78rem;margin-top:2px">در سوابق یا دفتر: ${v ? esc(v) : "—"}</span>`;
+    const fld = (k, label, val, imp, x = {}) => `<label class="tp-field" style="display:block;flex:1;min-width:180px;margin-bottom:8px"><b>${label}</b>${x.area
+        ? `<textarea class="tp-input" data-so="${k}" rows="${x.rows || 2}" style="width:100%;resize:vertical" ${x.ltr ? 'dir="ltr"' : ""} placeholder="${esc(x.ph || "")}">${esc(val || "")}</textarea>`
+        : `<input class="tp-input" data-so="${k}" value="${esc(val || "")}" style="width:100%" ${x.ltr ? 'dir="ltr"' : ""} placeholder="${esc(x.ph || "")}" autocomplete="off">`}${x.noHint ? "" : hint(imp)}</label>`;
+    const tels = (im.phones || []).map((p) => `${p.phone} (${p.src}${p.label ? `، ${p.label}` : ""})`).join("، ");
+    const gOpt = (v, l) => `<option value="${v}" ${(o.grade || "") === v ? "selected" : ""}>${l}</option>`;
+    const hist = (d.history || []).map((h) => `<div style="border-top:1px solid var(--tp-line);padding:6px 0;font-size:.84rem"><b>${esc(when(h.at))}</b> · ${esc(h.by)} — ${esc(h.reason)}
+        <div class="dim">${h.changes.map((c) => `${esc(c.fa)}: <bdi>${esc(histVal(c.field, c.before))}</bdi> ← <bdi>${esc(histVal(c.field, c.after))}</bdi>`).join(" · ")}</div></div>`).join("");
+    return `<div style="display:flex;flex-direction:column">
+      <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:8px">
+        <span>ردهٔ مؤثر: ${gChip(ef.grade)}${ef.grade_over ? ` <b style="font-size:.8rem">(تغییر پشتیبانی)</b>` : ""}</span>
+        <span class="dim" style="font-size:.82rem">ردهٔ سوابق: ${esc(im.grade || "بی‌رده")}${im.code ? ` · کد <span dir="ltr">${esc(im.code)}</span>` : ""}${im.research_rank ? ` · ردهٔ تحقیق: ${esc(im.research_rank)}` : ""}</span>
+        ${d.sid && TP.supProfile && !opt.drawer ? TP.supProfile.btn(d.name, { sid: d.sid }) : ""}</div>
+      <label class="tp-field" style="display:block;margin-bottom:8px"><b>رده</b><select class="tp-input" data-so="grade">${gOpt("", `همان سوابق (${esc(im.grade || "بی‌رده")})`)}${gOpt("A", "A")}${gOpt("B", "B")}${gOpt("C", "C")}${gOpt("-", "بی‌رده")}</select></label>
+      ${fld("grade_reason", "توضیحِ کیفیِ رده — چرا A، B یا C؟", o.grade_reason, null, { area: true, rows: 3, ph: "کیفیت، خوش‌قولی، قیمت، پاسخ‌گویی، سابقه…", noHint: true })}
+      ${fld("legal_name", "نام رسمی (ثبتی)", o.legal_name, im.legal_name)}
+      <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:start">${fld("reg_no", "شمارهٔ ثبت", o.reg_no, im.reg_no, { ltr: true })}${fld("national_id", "شناسهٔ ملی (اختیاری)", o.national_id, im.national_id, { ltr: true, ph: "۱۰ یا ۱۱ رقم" })}</div>
+      ${fld("address", "نشانی", o.address, im.address, { area: true })}
+      ${fld("phones", "تلفن‌ها — هر شماره در یک خط", (o.phones || "").split(", ").join("\n"), tels, { area: true, rows: 3, ltr: true })}
+      ${fld("note", "یادداشت", o.note, null, { area: true, noHint: true })}
+      <label class="tp-field" style="display:block"><b>دلیلِ این تغییر (اجباری)</b><input class="tp-input" data-so="reason" style="width:100%" placeholder="چرا؟ مثلاً بازدید از کارگاه، شکایت از کیفیت، استعلامِ ثبتی…" autocomplete="off"></label>
+      <div class="dim" style="font-size:.8rem;margin-top:4px">خانهٔ خالی یعنی همان دادهٔ سوابق یا دفتر. ورودِ دوبارهٔ سوابق این تغییرها را پاک نمی‌کند و کارشناسان ردهٔ مؤثر را در پروفایل می‌بینند.</div>
+      <div class="tp-note warn" data-so-err style="display:none;max-width:none"></div>
+      ${hist ? `<details style="margin-top:8px"><summary><b>تاریخچه</b> <span class="dim">(${fa(d.history.length)})</span></summary>${hist}</details>` : ""}</div>`;
+  }
+  /**
+   * پنجرهٔ ویرایش: خطای ذخیره در همان پنجره می‌ماند تا نوشته‌ها از دست نروند. فقط خانه‌هایی که عوض شده‌اند فرستاده می‌شوند — ذخیرهٔ
+   * پشتیبانِ دیگری روی فیلدی که این‌جا دست نخورده، با مقدارِ کهنهٔ همین پنجره پاک نمی‌شود. opt.drawer: از «🏷 ویرایشِ رده و مشخصات»ِ کشو
+   */
+  async function supUI(sn, name, opt = {}) {
+    const wait = TP.busy ? TP.busy("🏷 تأمین‌کننده", TP.ui.loader("")) : null;
+    let d;
+    try { d = await C.api(`/supplier?${new URLSearchParams({ sn, name: name || "" })}`); }
+    catch (e) { if (wait) wait.close(); TP.modal("نشد", esc(e.message), null, "باشد", ""); return; }
+    if (wait) wait.close();
+    const m = TP.modal(`🏷 ${esc(d.name)}`, supForm(d, opt), null, "ذخیره", "بستن");
+    const box = m.querySelector(".tp-modal"); if (box) box.style.maxWidth = "min(760px, 96vw)";
+    const v = (k) => { const x = m.querySelector(`[data-so="${k}"]`); return x ? x.value : ""; };
+    const init = Object.fromEntries(SUP_FIELDS.map((k) => [k, v(k)]));
+    const yes = m.querySelector("[data-y]");
+    yes.onclick = async () => {
+      const body = { sn: d.sn, name: d.name, reason: v("reason") };
+      for (const k of SUP_FIELDS) if (v(k) !== init[k]) body[k] = v(k);
+      const err = m.querySelector("[data-so-err]");
+      yes.disabled = true;
+      try {
+        await C.api("/supplier", { method: "PUT", body }); m.remove(); if (TP.ui && TP.ui.success) TP.ui.success("ذخیره شد");
+        if (TP.supProfile && TP.supProfile.refresh) TP.supProfile.refresh();
+        /* فهرستِ «🏷 تأمین‌کنندگان» اگر پیداست (پنجره از کشو در تبِ دیگری هم باز می‌شود) */
+        if (S.view === "sup" && document.querySelector("[data-cr-suplist]")) await supSearch();
+      } catch (e) { err.textContent = e.message; err.style.display = ""; yes.disabled = false; try { err.scrollIntoView({ block: "center" }); } catch (_) { /* بی‌اهمیت */ } }   /* وسط: دکمه‌های چسبانِ پایینِ پنجره رویش نیفتند */
+    };
   }
   function vG4() {
     const d = S.g4;
@@ -133,7 +236,7 @@
   }
   function view() {
     const sub = VIEWS.map(([k, l]) => `<button class="${S.view === k ? "on" : ""}" data-cr-view="${k}">${l}</button>`).join("");
-    const body = S.err ? `<div class="tp-note warn">${esc(S.err)}</div>` : S.view === "g4" ? vG4() : S.view === "graph" ? vGraph() : S.view === "flags" ? vFlags() : vHeads();
+    const body = S.err ? `<div class="tp-note warn">${esc(S.err)}</div>` : S.view === "sup" ? vSup() : S.view === "g4" ? vG4() : S.view === "graph" ? vGraph() : S.view === "flags" ? vFlags() : vHeads();
     if (TP.supProfile && TP.supProfile.css) TP.supProfile.css();
     setTimeout(drawGraph, 0);
     return `<div class="tp-seg" style="margin-bottom:10px;flex-wrap:wrap">${sub}</div>${body}`;
@@ -172,10 +275,11 @@
     }, "ثبت");
   }
   async function onClick(e) {
-    const t = e.target.closest("[data-cr-view],[data-cr-fam],[data-cr-page],[data-cr-move],[data-cr-rqsave],[data-cr-rqreset],[data-cr-g4f],[data-cr-g4ok],[data-cr-g4no],[data-cr-gload],[data-pn-save]");
+    const t = e.target.closest("[data-cr-view],[data-cr-fam],[data-cr-page],[data-cr-move],[data-cr-rqsave],[data-cr-rqreset],[data-cr-g4f],[data-cr-g4ok],[data-cr-g4no],[data-cr-gload],[data-pn-save],[data-cr-sup]");
     if (!t) return;
     const d = t.dataset;
     if (d.crView) { S.view = d.crView; S.err = ""; return load(); }
+    if (d.crSup) return supUI(d.crSup, d.name);
     if (d.crFam !== undefined) { S.hF.family = d.crFam; S.hF.mode = ""; S.hF.page = 0; return load(); }
     if (d.crPage) { S.hF.page = Math.max(0, S.hF.page + Number(d.crPage)); return load(); }
     if (d.crMove) return moveUI(d.crMove);
@@ -223,9 +327,12 @@
   function onInput(e) {
     const t = e.target;
     if (t.matches("[data-cr-q]")) { clearTimeout(qT); const v = t.value; qT = setTimeout(() => { S.hF.q = v.trim(); S.hF.page = 0; load().then(() => { const x = document.querySelector("[data-cr-q]"); if (x) { x.focus(); x.setSelectionRange(x.value.length, x.value.length); } }); }, 300); }
+    /* «🏷 تأمین‌کنندگان»: متنِ خام همان لحظه در وضعیت (رسمِ دوباره همان را برمی‌گرداند) و پس از مکث فقط فهرست تازه می‌شود */
+    if (t.matches("[data-cr-sq]")) { S.sq = t.value; clearTimeout(qT); qT = setTimeout(() => { if (S.sq.trim() !== S.supQ) supSearch(); }, 300); }
   }
   window.TP_CR = {
-    configure(o) { C = { ...C, ...o }; },
+    /* کشوی پروفایل در پنل پشتیبانی دکمهٔ «🏷 ویرایشِ رده و مشخصات» را با همین پنجره دارد (sup-profile.js: onEdit) */
+    configure(o) { C = { ...C, ...o }; if (TP.supProfile) TP.supProfile.configure({ onEdit: (x) => supUI(x.sn, x.name, { drawer: true }) }); },
     mount(root) { root.addEventListener("click", onClick); root.addEventListener("change", onChange); root.addEventListener("input", onInput); },
     boot, view, load, reg,
   };

@@ -72,6 +72,7 @@ import { FM_DDL, FM_COLUMNS, stdList, tplCheck } from "./first-msg.js";
 import { TPL_DDL, TPL_COLUMNS, TEMPLATE_TOKENS } from "./templates.js";
 import { DOC_DDL } from "./strategy-doc.js";
 import { TURN_DDL } from "./turn-engine.js";
+import { SUPOVER_DDL } from "./supplier-over.js";
 import { crRoute, crSupportRoute } from "./cr-api.js";
 import { TENDER_DDL, TENDER_COLUMNS, tenderSettingsGet, tenderSettingsSave, tenderSmsTest, tenderProxy, tenderAccept, tenderPref, tenderLots, tenderReqItems, tenderToRequest, tenderCsv, tenderList, tenderDetail, tenderCreate, tenderUpdate, tenderSchedule, tenderEnd, tenderCancel, tenderInviteAdd, tenderInviteSet, tenderInviteSend,
   tenderPhonePass, tenderBidFix, tenderItems, tenderSuppliers, tenderBook, tenderDiscoverQueue, tenderPublic, tenderSendPass, tenderLogin, tenderLogout, tenderStateOf, tenderRefer, tenderUnrefer,
@@ -269,6 +270,7 @@ ${DOC_DDL.trim()}
 ${TURN_DDL.trim()}
 ${QUOTE_EDITS_DDL};
 ${FC_DDL}
+${SUPOVER_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -2208,7 +2210,9 @@ async function route(request, env, ctx) {
       /* فراموشیِ رمز: فقط مدیر، با کد مدیر */
       if (path === "/support/reset" && m === "POST") { await requireManager(request, env); return json(await supportReset(env, await readJson(request))); }
       await requireSupport(request, env);
-      if (path.startsWith("/support/cr/") || path.startsWith("/support/sreg/") || path === "/support/graph" || path.startsWith("/support/strategy/")) {
+      /* «🧭 استراتژی و دفتر» و «🏷 تأمین‌کنندگان» (ردهٔ سوابق و مشخصات — فقط همین‌جا، نه زیرِ /sreg/* که کارشناس هم می‌رسد) */
+      if (path.startsWith("/support/cr/") || path.startsWith("/support/sreg/") || path === "/support/graph" || path.startsWith("/support/strategy/")
+        || path === "/support/suppliers" || path === "/support/supplier") {
         return await crSupportRoute(request, env, path, m, url, { json, readJson });
       }
       if (path === "/support/pass" && m === "POST") return json(await supportChangePass(env, await readJson(request)));

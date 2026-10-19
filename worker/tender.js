@@ -24,6 +24,7 @@ import { sendSms, smsReady, isMobile, smsProvider, smsStatus, smsEnvWith, smsChe
 import { queueStmt } from "./queue.js";
 import { pushTo, SUPPORT } from "./push.js";
 import { keyOf, purchaseHeadsOfCode } from "./catalog.js";
+import { gradeMap } from "./supplier-over.js";
 import { raiseAlarm } from "./alarms.js";
 import { telegram } from "./telegram.js";
 import { usdTable } from "./usd.js";
@@ -900,7 +901,7 @@ export async function tenderSuppliers(env, code) {
       FROM purchases WHERE ${w.sql} AND supplier_n IS NOT NULL AND supplier_n<>'' GROUP BY supplier_n ORDER BY n DESC, last DESC LIMIT 60`).bind(...w.args).all()).results || [];
   return { suppliers: await withPhones(env, rows.map((r) => ({ name: r.name, n: r.n, qty: r.qty, last: r.last, unit: r.unit, sn: r.sn, code: c }))) };
 }
-/** رده و شماره‌های هر نام: دفترچهٔ شماره‌های پنل (sp_phones) و دفترچهٔ تأمین‌کنندگان (suppliers) */
+/** ردهٔ مؤثر (سوابق با تغییرِ پشتیبانی — worker/supplier-over.js) و شماره‌های هر نام: دفترچهٔ شماره‌های پنل (sp_phones) و دفترچهٔ تأمین‌کنندگان (suppliers) */
 async function withPhones(env, list) {
   if (!list.length) return list;
   const names = list.map((x) => x.name);
@@ -909,14 +910,14 @@ async function withPhones(env, list) {
     env.DB.prepare(`SELECT s.id AS supplier_id, s.name, p.phone, p.label, p.panel FROM sp_suppliers s JOIN sp_phones p ON p.supplier_id=s.id WHERE s.demo=0 AND s.name_n IN (${q}) ORDER BY p.panel DESC, p.id`)
       .bind(...names.map((n) => nkey(n))).all().then((r) => r.results || []).catch(() => []),
     env.DB.prepare(`SELECT name, phone, tel2, city FROM suppliers WHERE name IN (${q})`).bind(...names).all().then((r) => r.results || []).catch(() => []),
-    env.DB.prepare(`SELECT sn, grade FROM supplier_grades WHERE sn IN (${q})`).bind(...list.map((x) => x.sn || keyOf(x.name))).all().then((r) => r.results || []).catch(() => []),
+    gradeMap(env, list.map((x) => x.sn || keyOf(x.name))).catch(() => new Map()),
   ]);
   return list.map((x) => {
     const mine = sp.filter((p) => nkey(p.name) === nkey(x.name));
     const bk = book.find((b) => keyOf(b.name) === keyOf(x.name));
     const phones = [...mine.map((p) => ({ phone: p.phone, label: p.label, panel: !!p.panel })),
       ...(bk ? [bk.phone, bk.tel2].map((p) => normPhone(p)).filter((p) => p && /^09/.test(p) && !mine.some((m) => m.phone === p)).map((p) => ({ phone: p, label: "دفترچه" })) : [])];
-    const g = grades.find((r) => r.sn === (x.sn || keyOf(x.name)));
+    const g = grades.get(x.sn || keyOf(x.name));
     return { ...x, grade: g ? g.grade : null, city: bk ? bk.city : null, supplier_id: mine[0] ? mine[0].supplier_id : null, phones, phone: phones.length ? phones[0].phone : null };
   });
 }

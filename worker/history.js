@@ -37,6 +37,7 @@ import * as RULES from "../frontend/tamin-poshtibani/catalog-rules.mjs";
 import * as CANON from "../frontend/tamin-poshtibani/catalog-canon.mjs";
 import { usdBounds, usdTable } from "./usd.js";
 import { getRanking, GRADE_SCORE } from "./ranking.js";
+import { gradeMap } from "./supplier-over.js";
 
 export { activeImport } from "./catalog.js";
 
@@ -339,18 +340,14 @@ export async function itemHistory(env, it, opts = {}) {
     per.set(g.sn, s);
   }
 
-  /* ۲) کد و رده، و راه‌های تماس (دفترچهٔ تأمین‌کنندگان هنوز پر نشده و خالی‌بودنش خطا نیست) */
+  /* ۲) کد و ردهٔ مؤثر — سوابق با تغییرِ پشتیبانی (worker/supplier-over.js؛ پس رتبهٔ نهایی و ترتیبِ دعوت هم با همان رده) — و راه‌های
+     تماس (دفترچهٔ تأمین‌کنندگان هنوز پر نشده و خالی‌بودنش خطا نیست) */
   const list = [...per.values()];
-  const grades = new Map(), contacts = new Map();
-  for (let i = 0; i < list.length; i += IN_MAX) {
+  const grades = await gradeMap(env, list.map((s) => s.key)), contacts = new Map();
+  for (let i = 0; i < list.length && !opts.brief; i += IN_MAX) {
     const part = list.slice(i, i + IN_MAX);
-    const q = part.map(() => "?").join(",");
-    ((await env.DB.prepare(`SELECT sn, code, grade FROM supplier_grades WHERE sn IN (${q})`).bind(...part.map((s) => s.key)).all()).results || [])
-      .forEach((r) => grades.set(r.sn, r));
-    if (!opts.brief) {
-      ((await env.DB.prepare(`SELECT * FROM suppliers WHERE name IN (${q})`).bind(...part.map((s) => s.name)).all()).results || [])
-        .forEach((r) => contacts.set(keyOf(r.name), r));
-    }
+    ((await env.DB.prepare(`SELECT * FROM suppliers WHERE name IN (${part.map(() => "?").join(",")})`).bind(...part.map((s) => s.name)).all()).results || [])
+      .forEach((r) => contacts.set(keyOf(r.name), r));
   }
 
   const sumQty = list.reduce((a, s) => a + s.qty, 0), sumM = list.reduce((a, s) => a + s.qtyM, 0);
@@ -358,6 +355,8 @@ export async function itemHistory(env, it, opts = {}) {
     const g = grades.get(s.key) || {}, c = contacts.get(s.key) || null;
     return {
       key: s.key, name: s.name, code: g.code || (c && c.code) || null, grade: g.grade || null,
+      /* ردهٔ پشتیبانی جای ردهٔ فایل نشسته: نشانِ ✎ در جدولِ کارشناس با ردهٔ خودِ فایل (فقط همین ردیف‌ها — بقیه همان شکلِ قبلی) */
+      ...(g.over ? { gradeOver: true, gradeFile: g.imported || null } : {}),
       n: s.n, qty: s.qty, qtyM: s.qtyM,
       share: sumQty ? s.qty / sumQty * 100 : 0, mshare: sumM ? s.qtyM / sumM * 100 : 0,
       firstDate: s.firstDate, lastDate: s.lastDate,

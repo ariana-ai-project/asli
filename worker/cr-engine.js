@@ -13,6 +13,7 @@ import { rfqPolicy, selectRecipients } from "./strategy/rfq.js";
 import * as C from "./strategy/config.js";
 import { crShard, supKey } from "./cr-data.js";
 import { headSrc } from "./catalog.js";
+import { gradeMap } from "./supplier-over.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -208,14 +209,14 @@ export async function recipientPlan(env, head, opts = {}) {
   const unit = await env.DB.prepare("SELECT * FROM cr_units WHERE unit_key=?").bind(unitKey).first().catch(() => null);
   const uinfo = unit ? parse(unit.unit, {}) : {};
   const inc = await incumbentsOf(env, hp.head, uinfo.codes || null);
-  /* شناسهٔ دفترِ تأمین‌کنندگانِ فعلی با نامِ کلیدی؛ رده از supplier_grades */
+  /* شناسهٔ دفترِ تأمین‌کنندگانِ فعلی با نامِ کلیدی؛ ردهٔ مؤثر: supplier_grades با تغییرِ پشتیبانی (worker/supplier-over.js) */
   const keys = inc.map((x) => x.k);
   const [regs, grades] = keys.length ? await Promise.all([
     inChunks(env, "SELECT sid, name_n FROM sreg WHERE kind='old' AND name_n IN (?*)", keys),
-    inChunks(env, "SELECT sn, grade FROM supplier_grades WHERE sn IN (?*)", keys)]) : [[], []];
-  const sidOf = new Map(regs.map((r) => [r.name_n, r.sid])), gradeOf = new Map(grades.map((g) => [g.sn, g.grade]));
+    gradeMap(env, keys)]) : [[], new Map()];
+  const sidOf = new Map(regs.map((r) => [r.name_n, r.sid])), gradeOf = (k) => (grades.get(k) || {}).grade || null;
   const cands = inc.map((x, i) => ({ id: sidOf.get(x.k) || `N:${x.name}`, name: x.name, is_incumbent: true, priority: i, hub: null, role: null, verification: 2,
-    trusted: gradeOf.get(x.k) === "A" && x.last >= YM(1404), source: "سوابق خرید", last_ym: x.last, k: x.k }));
+    trusted: gradeOf(x.k) === "A" && x.last >= YM(1404), source: "سوابق خرید", last_ym: x.last, k: x.k }));
   const seen = new Set(cands.map((c) => c.id));
   const disc = unit ? parse(unit.cands, []) : [];
   const dIds = disc.map((d) => d[0]).filter((s) => !seen.has(s));

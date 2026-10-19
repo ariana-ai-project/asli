@@ -4,13 +4,16 @@
      TP.supProfile.open({ sid, name, head, tab })    — کشو را باز می‌کند (پروفایل، نظرها، روابط، گراف) و مسیرِ برگشت را از نو
      TP.supProfile.enabled()                         — Promise<boolean>: کلیدِ «دفتر تأمین‌کنندگان» در پنل پشتیبانی روشن است؟
      TP.supProfile.btn(name, extra)                  — دکمهٔ کوچکِ 👤 با data-supp (شنونده‌اش را همین فایل می‌گذارد)
-     TP.supProfile.configure({ api })                — پنل پشتیبانی api با نشانهٔ ورود خودش را می‌دهد
+     TP.supProfile.configure({ api, onEdit })        — پنل پشتیبانی api با نشانهٔ ورود خودش را می‌دهد، و onEdit({sn, name, sid}) برای
+                                                       دکمهٔ «🏷 ویرایشِ رده و مشخصات» (فقط همان‌جا؛ cr-admin.js)
+     TP.supProfile.refresh()                         — کشوِ باز دوباره خوانده می‌شود (بعد از ذخیرهٔ همان ویرایش)
      TP.supProfile.graph(svg, data, { onNode })      — رسمِ گراف به اندازهٔ ظرف: با گرهِ root شعاعی، بی آن (نمای کاملِ پشتیبانی) نیرویی
      TP.supProfile.legend(data)                      — راهنمای رنگِ خط‌ها و گره‌ها
      TP.supProfile.lib                               — تابع‌های خالص (فرمِ پیوند، چیدمان) برای آزمون‌ها (tests/sup-profile.test.mjs)
    درونِ کشو فقط یک لایه است: زدنِ گره کارتِ کوچکی می‌دهد («👤 پروفایل» / «🎯 مرکز») و رفتن به تأمین‌کنندهٔ دیگر مسیرِ برگشت (↩) می‌سازد —
    نه کشوِ تازه روی کشو و نه گراف روی گراف.
    نظرها فقط برای کارکنان است؛ کارشناس هوشمند فقط نظرهای همان تأمین‌کننده را، در بخشِ محرمانه، برای سنجیدن می‌بیند و هرگز بازگو نمی‌کند.
+   «ردهٔ سوابق» ردهٔ مؤثرِ سوابقِ خرید است (با «(تغییر پشتیبانی)» وقتی پشتیبانی عوضش کرده — «🏷 تأمین‌کنندگان»)؛ «ردهٔ تحقیق» جداست.
    ============================================================ */
 (function () {
   "use strict";
@@ -23,6 +26,10 @@
   const S = { sid: null, name: "", head: "", tab: "info", d: null, err: "", loading: false, g: null, gL: null, gDepth: 2, gErr: "", gSel: null, seq: 0, gSeq: 0, trail: [], lf: null };
   const VER_FA = { 2: ["ok", "✔ همهٔ دروازه‌ها"], 1: ["info", "هویت قابل احراز"], 0: ["warn", "هنوز راستی‌آزمایی نشده"], "-1": ["bad", "رد در دروازه"] };
   const KIND_FA = { old: "از سوابق خرید", new: "کشف‌شده", loc: "فقط در سامانه" };
+  /* ردهٔ سوابق (A/B/C با تغییرِ پشتیبانی — worker/supplier-over.js)؛ جدا از «ردهٔ تحقیق» */
+  const GRADE_TONE = { A: "ok", B: "info", C: "warn" };
+  const gradeChip = (g) => `<span class="chip ${GRADE_TONE[g && g.grade] || ""}">${esc((g && g.grade) || "بی‌رده")}</span>`;
+  const bySup = (on) => (on ? ` <span class="dim" style="font-size:.76rem">(پشتیبانی)</span>` : "");
   const ymFa = (ym) => { if (!ym) return "—"; const y = Math.floor((ym - 1) / 12), m = ym - y * 12; return fa(`${y}/${String(m).padStart(2, "0")}`); };
   const money = (v) => (v == null ? "—" : fa(Math.round(Number(v) / 1e6).toLocaleString("en-US")).replace(/,/g, "٬") + " م.ر");
   const when = (ms) => { if (!ms) return ""; const [y, m, d] = TP.todayJ ? TP.todayJ(ms) : [0, 0, 0]; return fa(`${y}/${String(m).padStart(2, "0")}/${String(d).padStart(2, "0")}`); };
@@ -481,11 +488,19 @@
   const links = (s) => String(s || "").split(/\s+/).filter((u) => /^https?:\/\//.test(u)).slice(0, 6).map((u) => `<a href="${esc(u)}" target="_blank" rel="noopener noreferrer">${esc(u.replace(/^https?:\/\//, "").slice(0, 40))}</a>`).join("<br>");
   function vInfo(d) {
     const v = VER_FA[String(d.verification.level)] || ["", "—"];
-    const r = d.research || {};
-    return `
-      <div class="spp-sec"><h4>هویت</h4>${kv([["نام رسمی", esc(d.identity.legal_name || "")], ["نام تجاری", esc(d.identity.brand_name || "")], ["شناسهٔ ملی", ltr(d.identity.national_id)],
+    const r = d.research || {}, g = d.grade, sp = d.support || {};
+    /* فقط پنل پشتیبانی onEdit می‌دهد (cr-admin.js): ویرایشِ رده و مشخصات در «🏷 تأمین‌کنندگان»، از همین کشو */
+    const edit = typeof C.onEdit === "function" && d.sn ? `<div style="margin-top:6px"><button type="button" class="tp-btn xs" data-spp-edit>🏷 ویرایشِ رده و مشخصات</button></div>` : "";
+    /* ردهٔ سوابقِ خرید — مؤثر، با نشانِ «تغییر پشتیبانی» و ردهٔ خودِ سوابق کنارش */
+    const gradeSec = g || d.support || edit ? `<div class="spp-sec"><h4>ردهٔ سوابق</h4>${kv([
+      ["رده", `${gradeChip(g)}${g && g.over ? ` <b style="font-size:.8rem">(تغییر پشتیبانی)</b>${g.imported !== g.grade ? ` <span class="dim" style="font-size:.8rem">— در سوابق: ${esc(g.imported || "بی‌رده")}</span>` : ""}` : ""}`],
+      ["چرا این رده", esc((g && g.reason) || "")], ["کد تأمین‌کننده", ltr(g && g.code)], ["تغییرِ پشتیبانی", g && g.over && g.at ? esc(when(g.at)) : ""],
+      ["یادداشتِ پشتیبانی", esc(sp.note || "")]])}${edit}</div>` : "";
+    return `${gradeSec}
+      <div class="spp-sec"><h4>هویت</h4>${kv([["نام رسمی", esc(d.identity.legal_name || "") + bySup(sp.legal_name)], ["نام تجاری", esc(d.identity.brand_name || "")],
+        ["شمارهٔ ثبت", d.identity.reg_no ? ltr(d.identity.reg_no) + bySup(sp.reg_no) : ""], ["شناسهٔ ملی", d.identity.national_id ? ltr(d.identity.national_id) + bySup(sp.national_id) : ""],
         ["نوع", esc(d.identity.type || "")], ["نقش در زنجیره", esc(d.identity.role || "")], ["مدیر", esc(d.identity.manager || "")], ["تأسیس", esc(d.identity.established || "")], ["وضعیت ثبتی", esc(d.identity.registry_status || "")]])}</div>
-      <div class="spp-sec"><h4>تماس</h4>${kv([["نشانی", esc(d.contact.address || "")], ["تلفن", ltr(d.contact.phones)], ["همراه", ltr(d.contact.mobiles)], ["وب‌سایت", d.contact.website ? links(/^https?:/.test(d.contact.website) ? d.contact.website : `https://${d.contact.website}`) : ""],
+      <div class="spp-sec"><h4>تماس</h4>${kv([["تلفن (پشتیبانی)", ltr(d.contact.support_phones)], ["نشانی", esc(d.contact.address || "") + bySup(sp.address)], ["تلفن", ltr(d.contact.phones)], ["همراه", ltr(d.contact.mobiles)], ["وب‌سایت", d.contact.website ? links(/^https?:/.test(d.contact.website) ? d.contact.website : `https://${d.contact.website}`) : ""],
         ["ایمیل", ltr(d.contact.email)], ["تماسِ تأییدشده", ltr(d.contact.verified)]])}</div>
       <div class="spp-sec"><h4>بازار</h4>${kv([["کشور", esc(d.market.country || "")], ["استان و شهر", esc([d.market.province, d.market.city].filter(Boolean).join("، "))], ["بازار یا پاساژ", esc(d.market.hub || "")],
         ["برندها", esc(d.market.brands || "")], ["محصولات (به نقل از خودش)", esc(d.market.products || "")]])}</div>
@@ -493,7 +508,7 @@
         ["آخرین نشانهٔ فعالیت", esc([d.verification.last_activity_date, d.verification.last_activity].filter(Boolean).join(" — "))], ["نام نزدیک (G4)", esc(d.verification.g4 || "")],
         ["کامل بودن پرونده", d.verification.completeness != null ? fa(Math.round(d.verification.completeness * 100)) + "٪" : ""], ["بررسی", esc(d.verification.checked || "")], ["منابع", links(d.verification.sources)]])}</div>
       <div class="spp-sec"><h4>${d.kind === "old" ? "در تحقیق (سوابق ۱۳۹۸ تا ۱۴۰۵)" : "در رتبه‌بندیِ کشف"}</h4>${d.kind === "old"
-        ? kv([["رده", esc(r.rank || "")], ["مبلغ (میلیارد ریال)", r.spend_bn != null ? fa(Math.round(r.spend_bn)) : ""], ["شمار نوع قلم", r.heads != null ? fa(r.heads) : ""], ["سال‌های همکاری", r.years != null ? fa(r.years) : ""],
+        ? kv([["ردهٔ تحقیق", esc(r.rank || "")], ["مبلغ (میلیارد ریال)", r.spend_bn != null ? fa(Math.round(r.spend_bn)) : ""], ["شمار نوع قلم", r.heads != null ? fa(r.heads) : ""], ["سال‌های همکاری", r.years != null ? fa(r.years) : ""],
           ["از تا", r.first_yr ? fa(`${r.first_yr} تا ${r.last_yr || "—"}`) : ""], ["نوع قلم‌های غالب", esc(r.dominant_heads || "")]])
         : kv([["بهترین رتبه", r.best_rank != null ? fa(r.best_rank) : ""], ["در نوع قلمِ", esc(r.best_rank_unit || "")], ["شمار در ده‌تای اول", r.n_top10 != null ? fa(r.n_top10) : ""], ["ده‌تای اولِ", esc(r.top10_units || "")]])}</div>
       ${d.buys ? `<div class="spp-sec"><h4>خرید از او در «${esc(d.buys.head)}»</h4>${d.buys.n ? kv([["شمار خرید", fa(d.buys.n)], ["مبلغ تعدیلی", money(d.buys.value)], ["از تا", `${ymFa(d.buys.first_ym)} تا ${ymFa(d.buys.last_ym)}`]]) : `<div class="dim">در سوابقِ این نوع قلم خریدی نیست.</div>`}</div>` : ""}
@@ -552,7 +567,7 @@
   function draw() {
     if (!root) return;
     const d = S.d;
-    const head = d ? `<h2>${esc(d.name)}<div class="sub"><span class="chip">${esc(KIND_FA[d.kind] || d.kind)}</span>${d.market && d.market.hub ? `<span class="chip">${esc(d.market.hub)}</span>` : ""}${(() => { const v = VER_FA[String(d.verification && d.verification.level)]; return v ? `<span class="chip ${v[0]}">${v[1]}</span>` : ""; })()}</div></h2>`
+    const head = d ? `<h2>${esc(d.name)}<div class="sub"><span class="chip">${esc(KIND_FA[d.kind] || d.kind)}</span>${d.grade ? `<span class="chip ${GRADE_TONE[d.grade.grade] || ""}" title="ردهٔ سوابقِ خرید${d.grade.over ? " — تغییرِ پشتیبانی" : ""}">ردهٔ سوابق ${esc(d.grade.grade || "بی‌رده")}${d.grade.over ? " ✎" : ""}</span>` : ""}${d.market && d.market.hub ? `<span class="chip">${esc(d.market.hub)}</span>` : ""}${(() => { const v = VER_FA[String(d.verification && d.verification.level)]; return v ? `<span class="chip ${v[0]}">${v[1]}</span>` : ""; })()}</div></h2>`
       : `<h2>${esc(S.name || "تأمین‌کننده")}</h2>`;
     const back = S.trail[S.trail.length - 1];
     const crumbs = back ? `<nav class="spp-trail" aria-label="مسیرِ برگشت"><button type="button" class="spp-back" data-trail="${S.trail.length - 1}" title="برگشت به ${esc(back.name || "")}">↩</button>${S.trail.map((t, i) => `<button type="button" class="spp-link" data-trail="${i}">${esc(cut(t.name || t.sid || "", 22))}</button><span aria-hidden="true">←</span>`).join("")}<b>${esc(cut(d ? d.name : S.name, 26))}</b></nav>` : "";
@@ -603,10 +618,11 @@
     paintLink();
   }
   async function onClick(e) {
-    const t = e.target.closest("[data-spp-close],[data-spp-tab],[data-supp],[data-supp-sid],[data-op-edit],[data-op-hide],[data-edge-ok],[data-edge-no],[data-link-save],[data-link-free],[data-link-unpick],[data-gdepth],[data-trail],[data-gopen],[data-gcenter],[data-gclose]");
+    const t = e.target.closest("[data-spp-close],[data-spp-tab],[data-spp-edit],[data-supp],[data-supp-sid],[data-op-edit],[data-op-hide],[data-edge-ok],[data-edge-no],[data-link-save],[data-link-free],[data-link-unpick],[data-gdepth],[data-trail],[data-gopen],[data-gcenter],[data-gclose]");
     if (!t) return;
     const d = t.dataset;
     if (d.sppClose !== undefined) return close();
+    if (d.sppEdit !== undefined) { if (S.d && typeof C.onEdit === "function") C.onEdit({ sn: S.d.sn, name: S.d.name, sid: S.d.sid }); return; }
     if (d.sppTab) { S.tab = d.sppTab; draw(); if (S.tab === "graph" && !S.g) loadGraph(); return; }
     if (d.gdepth) { S.gDepth = Number(d.gdepth); return loadGraph(); }
     if (d.trail !== undefined) { const i = Number(d.trail), x = S.trail[i]; if (x) show({ ...x, head: S.head }, S.trail.slice(0, i)); return; }
@@ -692,6 +708,7 @@
   if (typeof window.addEventListener === "function") window.addEventListener("resize", () => { clearTimeout(rzT); rzT = setTimeout(() => { if (root && S.tab === "graph") paintGraph(); }, 200); });
 
   S.lf = lfInit();
-  TP.supProfile = { open, close, enabled, btn, graph, legend, css, configure(o) { C = { ...C, ...o }; flagsP = null; },
+  /* refresh: کشوِ باز (همان تأمین‌کننده و زبانه) دوباره خوانده می‌شود — مثلاً بعد از ذخیرهٔ «🏷 ویرایشِ رده و مشخصات»ِ پشتیبانی */
+  TP.supProfile = { open, close, enabled, btn, graph, legend, css, refresh: () => (root ? load() : null), configure(o) { C = { ...C, ...o }; flagsP = null; },
     lib: { nk, hitKey, lfInit, lfReduce, linkBody, vLinkForm, vLinkBox, vLinkAct, cut, fitTo, estW, edgeRank, placeLabels, radial, force, paint, legend } };
 })();
