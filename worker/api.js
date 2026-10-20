@@ -33,6 +33,7 @@ import { CATALOG_DDL, EDITS_DDL, catalogBegin, catalogChunk, catalogFinish, allH
 import { normalizeItem, confirmNorm, clearNorm, revertEdit } from "./normalize.js";
 import { MARKETS, MAX_MARKETS, smartSearch } from "./discovery.js";
 import { discoveredFor, gateFor, gateMsg } from "./discovered.js";
+import { usageOverview, usageExpert } from "./usage-report.js";
 import { commissionHtml, commissionXlsx, XLSX_MIME } from "./sheets.js";
 import { renderRequestDoc, requestHtml, REQUEST_CSS } from "./reqdoc.js";
 import { SHEET_CSS } from "./xlsx.js";
@@ -365,6 +366,7 @@ const COLUMN_MIGRATIONS = [
   /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر روی ارجاع (NULL: پیش از فاز ۴ب، یعنی روشن) با توضیحِ برداشتنش، و قلمِ «انجام دستی» که مدیر
      تأیید کرده (worker/ai-modes.js، decisions.js) */
   ["assignments", "ai_on", "INTEGER"],
+  ["requests", "ai_req", "INTEGER"],
   ["assignments", "ai_note", "TEXT"],
   ["assignments", "ai_set_at", "INTEGER"],
   ["assignments", "ai_set_by", "TEXT"],
@@ -528,6 +530,8 @@ async function ensureSchema(env) {
   }
   /* کدهای ورود چهاررقمی و کد مدیر در دیتابیس — یک بار روی هر دیتابیس */
   await migrateCodes4(env, existing).catch((e) => console.error("migrateCodes4", e && e.message));
+  /* آبان ۱۴۰۵: پیش‌فرضِ دستی برای همهٔ درخواست‌ها (فقط دیتابیسِ موجود؛ یک بار) */
+  await migrateAiOptIn(env, existing).catch((e) => console.error("migrateAiOptIn", e && e.message));
   /* گفت‌وگوها و اجراهای یتیمِ درخواست‌های حذف‌شده — یک بار */
   await cleanOrphans(env).catch((e) => console.error("cleanOrphans", e && e.message));
   await env.DB.prepare("INSERT INTO counters (key,value) VALUES ('schema_fp',?) ON CONFLICT(key) DO UPDATE SET value=excluded.value").bind(SCHEMA_FP).run();
@@ -962,6 +966,8 @@ async function desk(env, url) {
     experts: expertRows(expRes.results || []),
     settings: settingsFromRows(setRes.results || []),
     ai_experts: (aiRes.results || []).map((r) => r.expert_id),
+    /* آبان ۱۴۰۵: پیش‌فرضِ دستی — «🤖» روی هر درخواست انتخابِ مدیر است (aiOptIn) */
+    ai_opt_in: (setRes.results || []).some((r) => r.key === AI_OPTIN_KEY && optInOn(r.value)),
     ...(withAll ? { scores: { scores: scRes.results || [], weights: wRes.results || [] }, decisions: decRes.results || [], alarms: almRes.results || [] } : {}),
   };
   if (!reqs.length) return { requests: [], ...extra };
@@ -1078,6 +1084,20 @@ async function freeCode(env, extra) {
   used.add(await managerCode(env)); for (const x of extra || []) used.add(String(x));
   for (let i = 0; i < 500; i++) { const c = String(1000 + (crypto.getRandomValues(new Uint32Array(1))[0] % 9000)); if (!used.has(c)) return c; }
   throw new HttpError("کد ورود آزاد پیدا نشد.", 500);
+}
+/** کد چهاررقمیِ تصادفی و یکتای تازه برای این کارشناسانِ فعال (مدیر، آبان ۱۴۰۵) — با رخداد و پیامِ تلگرام؛ ← [{id, code}] */
+async function randomCodes(env, ids) {
+  const rows = ids.length ? (await env.DB.prepare(`SELECT id, name, telegram_chat FROM experts WHERE active=1 AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all()).results || [] : [];
+  const out = [], stmts = [], t = now(), taken = [];
+  for (const r of rows) {
+    const c = await freeCode(env, taken);
+    taken.push(c); out.push({ id: r.id, code: c });
+    stmts.push(env.DB.prepare("UPDATE experts SET code=? WHERE id=?").bind(c, r.id));
+    stmts.push(env.DB.prepare("INSERT INTO events (at,actor,kind,request_id,item_id,payload_json) VALUES (?,?,?,?,?,?)").bind(t, "manager", "code_reset", null, null, JSON.stringify({ expert_id: r.id, name: r.name, reason: "random" })));
+    if (r.telegram_chat && env.TG_BOT_TOKEN) stmts.push(queueStmt(env, `code:${r.id}:${t}`, r.telegram_chat, `🔑 کد ورودِ تازهٔ پنل کارشناس شما: <b>${c}</b>\nکد قبلی دیگر کار نمی‌کند.`, null, null));
+  }
+  if (stmts.length) await env.DB.batch(stmts);
+  return out;
 }
 /* پنل پشتیبانی تنها جایی است که کدهای ورود دیده و عوض می‌شوند (تصمیم مالک، مهر ۱۴۰۵) */
 async function supportCodes(env) {
@@ -1300,21 +1320,31 @@ async function setAiTick(env, body) {
   const a = await env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.dispatched_at, a.ai_on, e.telegram_chat, g.mode
       FROM assignments a JOIN experts e ON e.id=a.expert_id LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?`).bind(aid).first();
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
-  if (a.mode !== "on") throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ درخواست دستی است.", 409);
+  const optIn = await aiOptIn(env);
+  if (a.mode !== "on" && !optIn) throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ درخواست دستی است.", 409);
   if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(aid).first()) {
     throw new HttpError("کار به کارشناس هوشمند سپرده شده است؛ از این‌جا عوض نمی‌شود — «✋ دستی»ِ پنل پشتیبانی.", 409);
   }
   const note = T(body.reason).slice(0, 1000);
-  if (!on) {
+  /* پیش‌فرضِ دستی (aiOptIn): «🤖» انتخابِ مدیر است — برداشتنش علت نمی‌خواهد و زدنش کارشناس هوشمندِ همان کارشناس را روشن می‌کند */
+  if (optIn) {
+    const cur = a.ai_on === 1;
+    if (cur === on) {
+      /* ارجاعِ هوشمندی که با «تغییر کارشناس» به کارشناسی رسیده که کارشناس هوشمندش خاموش است */
+      if (on && a.mode !== "on") await agentOnStmt(env, a.expert_id, now()).run();
+      return { ok: true, on, changed: false };
+    }
+  } else if (!on) {
     const its = (await env.DB.prepare("SELECT id, code, title, norm_json FROM items WHERE assignment_id=? AND state='open'").bind(aid).all()).results || [];
     const modes = await itemModes(env, its);
     const allDirect = its.length > 0 && its.every((i) => (modes.get(i.id) || {}).mode === "direct");
     if (!allDirect && !note) throw new HttpError("برای برداشتنِ تیکِ «🤖 هوشمند» علت را بنویسید.", 422, { need_reason: true });
   }
-  if ((a.ai_on !== 0) === on) return { ok: true, on, changed: false };
+  if (!optIn && (a.ai_on !== 0) === on) return { ok: true, on, changed: false };
   const t = now();
   const stmts = [
     env.DB.prepare("UPDATE assignments SET ai_on=?, ai_note=?, ai_set_at=?, ai_set_by='manager' WHERE id=?").bind(on ? 1 : 0, on ? null : note || null, t, aid),
+    ...(optIn && on ? [agentOnStmt(env, a.expert_id, t)] : []),
     ev(env, "manager", "ai_tick", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, reason: on ? null : note || null }),
     /* پنلِ بازِ کارشناس همان لحظه تازه می‌شود (/sp/x/inbox) — ارجاعِ ارسال‌نشده در پنلش نیست */
     ...(a.dispatched_at ? [aiRevStmt(env, a.expert_id)] : []),
@@ -1331,11 +1361,59 @@ async function setAiTick(env, body) {
   return { ok: true, on, changed: true };
 }
 
+/* ------------------------------------------------------------------ */
+/* پیش‌فرضِ دستی و «🤖» روی هر درخواست (آبان ۱۴۰۵، ورود به فاز اجرایی)     */
+/* ------------------------------------------------------------------ */
+/* settings.aiOptIn {on}: روشن یعنی هر درخواست دستی است مگر مدیر «🤖»ِ کارتِ درخواست (requests.ai_req) یا ارجاع (assignments.ai_on=1)
+   را بزند؛ ارجاع در لحظهٔ ارسال تکلیفش روشن می‌شود (ai_on = ai_req یا ۰) و زدنِ «🤖» کارشناس هوشمندِ همان کارشناس را روشن می‌کند —
+   ارجاع‌های دیگرش با ai_on=0 دستی می‌مانند (ai-lock.js:aiOwned). دیتابیسِ موجود یک بار به این قاعده می‌آید (migrateAiOptIn). */
+const AI_OPTIN_KEY = "aiOptIn";
+const optInOn = (v) => { try { const x = typeof v === "string" ? JSON.parse(v) : v; return !!(x && x.on); } catch (_) { return false; } };
+let optInCache = null;
+async function aiOptIn(env) {
+  if (optInCache && now() - optInCache.at < 60000) return optInCache.v;
+  const r = await env.DB.prepare("SELECT value FROM settings WHERE key=?").bind(AI_OPTIN_KEY).first().catch(() => null);
+  optInCache = { at: now(), v: optInOn(r && r.value) };
+  return optInCache.v;
+}
+/** روشن کردنِ بی‌صدای کارشناس هوشمندِ یک کارشناس (بی بازسنجی: ارجاع‌های دیگرش ai_on صریح دارند) */
+const agentOnStmt = (env, exId, t) => env.DB.prepare(`INSERT INTO ai_agents (expert_id,mode,on_at,off_at,rev,config_json,updated_at,updated_by) VALUES (?,'on',?,NULL,1,NULL,?,'manager')
+  ON CONFLICT(expert_id) DO UPDATE SET mode='on', on_at=CASE WHEN ai_agents.mode='on' THEN ai_agents.on_at ELSE excluded.on_at END, rev=ai_agents.rev+1, updated_at=excluded.updated_at, updated_by='manager'`).bind(exId, t, t);
+export async function migrateAiOptIn(env, existing) {
+  if (!existing || await env.DB.prepare("SELECT 1 AS x FROM settings WHERE key=?").bind(AI_OPTIN_KEY).first()) return;
+  const t = now();
+  await env.DB.batch([
+    /* کارِ سپرده‌شده ادامه می‌دهد؛ بقیهٔ ارجاع‌های بازِ بی‌تکلیف دستی می‌شوند */
+    env.DB.prepare("UPDATE assignments SET ai_on=1, ai_set_at=?, ai_set_by='default' WHERE ai_on IS NULL AND id IN (SELECT assignment_id FROM ai_runs WHERE finished_at IS NULL)").bind(t),
+    env.DB.prepare("UPDATE assignments SET ai_on=0, ai_set_at=?, ai_set_by='default' WHERE ai_on IS NULL AND closed_at IS NULL").bind(t),
+    env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES (?,?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at").bind(AI_OPTIN_KEY, JSON.stringify({ on: true, at: t }), t),
+    env.DB.prepare("INSERT INTO events (at,actor,kind,payload_json) VALUES (?,?,?,?)").bind(t, "system", "ai_optin", JSON.stringify({ on: true })),
+  ]);
+  optInCache = null;
+}
+/** «🤖» روی کارتِ درخواست: request.ai_req و تکلیفِ ارجاع‌هایی که هنوز سپرده نشده‌اند (ارسال‌شده‌ها با همان setAiTick و خبرش) */
+async function setAiReq(env, body) {
+  const rid = T(body.request_id); if (!rid) throw new HttpError("request_id لازم است.");
+  if (!(await aiOptIn(env))) throw new HttpError("«🤖» روی درخواست فقط وقتی پیش‌فرض دستی است.", 409);
+  const on = body.on === true || body.on === 1;
+  const r = await env.DB.prepare("SELECT id FROM requests WHERE id=?").bind(rid).first();
+  if (!r) throw new HttpError("درخواست پیدا نشد.", 404);
+  const t = now();
+  await env.DB.batch([
+    env.DB.prepare("UPDATE requests SET ai_req=? WHERE id=?").bind(on ? 1 : 0, rid),
+    env.DB.prepare("UPDATE assignments SET ai_on=?, ai_set_at=?, ai_set_by='manager', ai_note=NULL WHERE request_id=? AND dispatched_at IS NULL").bind(on ? 1 : 0, t, rid),
+    ev(env, "manager", "ai_tick", rid, null, { request: true, on }),
+  ]);
+  const sent = ((await env.DB.prepare("SELECT a.id FROM assignments a WHERE a.request_id=? AND a.dispatched_at IS NOT NULL AND a.closed_at IS NULL AND NOT EXISTS (SELECT 1 FROM ai_runs x WHERE x.assignment_id=a.id)").bind(rid).all()).results || []);
+  for (const a of sent) await setAiTick(env, { assignment_id: a.id, on });
+  return { ok: true, on };
+}
+
 /* ارسال: ساعت‌شمار شروع می‌شود + رویداد اعلان برای هر کارشناس */
 async function dispatch(env, body) {
   const ids = (body.assignment_ids || []).map((x) => int(x)).filter(Boolean);
   if (!ids.length) throw new HttpError("هیچ ارجاعی انتخاب نشده.");
-  const rows = (await env.DB.prepare(`SELECT a.*, e.name, e.label, e.telegram_chat, e.senior, ${TEAM_SIZE_SQL} AS team_n, r.party,
+  const rows = (await env.DB.prepare(`SELECT a.*, e.name, e.label, e.telegram_chat, e.senior, ${TEAM_SIZE_SQL} AS team_n, r.party, r.ai_req,
       (SELECT COUNT(*) FROM items i WHERE i.assignment_id=a.id) AS item_count
     FROM assignments a JOIN experts e ON e.id=a.expert_id JOIN requests r ON r.id=a.request_id
     WHERE a.id IN (${ids.map(() => "?").join(",")}) AND a.dispatched_at IS NULL AND a.days>0`).bind(...ids).all()).results || [];
@@ -1354,8 +1432,15 @@ async function dispatch(env, body) {
       WHERE assignment_id IN (${aids.map(() => "?").join(",")}) AND state='open' ORDER BY assignment_id, line_no`).bind(...aids).all()).results || [];
     for (const i of its) { if (!itemsBy.has(i.assignment_id)) itemsBy.set(i.assignment_id, []); itemsBy.get(i.assignment_id).push(i); }
   }
+  const optIn = rows.length ? await aiOptIn(env) : false;
   for (const a of rows) {
     stmts.push(env.DB.prepare("UPDATE assignments SET dispatched_at=? WHERE id=?").bind(t, a.id));
+    /* پیش‌فرضِ دستی: ارجاعِ بی‌تکلیف با «🤖»ِ درخواست هوشمند، وگرنه دستی */
+    if (optIn && a.ai_on == null) {
+      const aiOn = a.ai_req === 1 ? 1 : 0;
+      stmts.push(env.DB.prepare("UPDATE assignments SET ai_on=?, ai_set_at=?, ai_set_by='manager' WHERE id=?").bind(aiOn, t, a.id));
+      if (aiOn) stmts.push(agentOnStmt(env, a.expert_id, t));
+    } else if (optIn && a.ai_on === 1) stmts.push(agentOnStmt(env, a.expert_id, t));
     const thr = thrBy.get(a.expert_id) || settings.thresholds;
     const sched = alertStatements(env, a, thr, isHoliday, t);
     stmts.push(...sched);
@@ -2147,6 +2232,16 @@ async function route(request, env, ctx) {
       const sent = await propsRetime(env, ex.id, cfg);
       return json({ ok: true, cfg, sent });
     }
+    /* کارهای سمتِ مرورگرِ کارشناس که سرور نمی‌بیند (کپیِ پیام) — برای «📊 کارکرد کارشناسان»ِ پنل پشتیبانی */
+    if (path === "/me/activity" && m === "POST") {
+      const ex = await requireExpert(request, env);
+      const b = await readJson(request);
+      if (b.kind !== "msg_copy") throw new HttpError("نوعِ کار ناشناخته است.", 422);
+      const it = int(b.item_id) ? await env.DB.prepare("SELECT i.id, i.request_id FROM items i JOIN assignments a ON a.id=i.assignment_id WHERE i.id=? AND a.expert_id=?").bind(int(b.item_id), ex.id).first() : null;
+      await ev(env, `expert:${ex.id}`, "msg_copy", it ? it.request_id : null, it ? it.id : null,
+        { supplier: T(b.supplier).slice(0, 120) || null, template: T(b.template).slice(0, 120) || null, chars: int(b.chars) || 0 }).run();
+      return json({ ok: true });
+    }
     /* کارشناس کد ورود خودش را عوض می‌کند (صفحهٔ «حساب من»): کد فعلی لازم است */
     if (path === "/me/code" && m === "PUT") {
       const ex = await requireExpert(request, env);
@@ -2270,6 +2365,9 @@ async function route(request, env, ctx) {
       }
       if ((mm = /^\/support\/experts\/(\d+)$/.exec(path)) && m === "GET") return json(await supportExpert(env, int(mm[1])));
       if (path === "/support/activity" && m === "GET") return json(await supportActivity(env, url));
+      /* «📊 کارکرد کارشناسان» (worker/usage-report.js) */
+      if (path === "/support/usage" && m === "GET") return json(await usageOverview(env, url));
+      if ((mm = /^\/support\/usage\/(\d+)$/.exec(path)) && m === "GET") { const u = await usageExpert(env, int(mm[1]), url); if (!u) throw new HttpError("کارشناس پیدا نشد.", 404); return json(u); }
       if (path === "/support/threads" && m === "GET") return json(await supportThreads(env, url));
       if ((mm = /^\/support\/threads\/(\d+)$/.exec(path)) && m === "GET") return json(await supportThread(env, int(mm[1])));
       /* صدای پیامِ صوتی برای گفت‌وگوی قابِ گوشیِ پنل پشتیبانی (فقط‌خواندنی؛ مهر ۱۴۰۵) */
@@ -2318,6 +2416,25 @@ async function route(request, env, ctx) {
       const eb = await readJson(request);
       if ("code" in eb) throw new HttpError("کد ورود کارشناس فقط از پنل پشتیبانی تغییر می‌کند.", 403);
       return json(await updateExpert(env, int(mm[1]), eb));
+    }
+    /* آبان ۱۴۰۵ (خواستهٔ مالک، ورود به فاز اجرایی): مدیر کد ورودِ هر کارشناس را از منوی «⋯» می‌بیند و کد تصادفیِ تازه می‌دهد؛
+       «🎲 کد تصادفی برای همه» همهٔ کارشناسانِ فعال را یک‌جا کد تازه می‌دهد. کد تازه به تلگرامِ وصلِ کارشناس هم می‌رود. */
+    if ((mm = /^\/experts\/(\d+)\/code$/.exec(path)) && m === "GET") {
+      await requireManager(request, env);
+      const e = await env.DB.prepare("SELECT id, name, code FROM experts WHERE id=? AND active=1").bind(int(mm[1])).first();
+      if (!e) throw new HttpError("کارشناس پیدا نشد.", 404);
+      return json({ id: e.id, code: String(e.code) });
+    }
+    if ((mm = /^\/experts\/(\d+)\/code$/.exec(path)) && m === "POST") {
+      await requireManager(request, env);
+      const r = await randomCodes(env, [int(mm[1])]);
+      if (!r.length) throw new HttpError("کارشناس پیدا نشد.", 404);
+      return json({ id: r[0].id, code: r[0].code });
+    }
+    if (path === "/experts/codes/random" && m === "POST") {
+      await requireManager(request, env);
+      const ids = ((await env.DB.prepare("SELECT id FROM experts WHERE active=1").all()).results || []).map((x) => x.id);
+      return json({ ok: true, n: (await randomCodes(env, ids)).length });
     }
     /* تنظیم اعلانات خودِ کارشناس ارشد (تیک مرحله‌ها) و لینک اتصال گروه تیمش */
     /* تنظیم اعلانات کارشناس ارشد — همان تب مدیر برای تیم خودش: تیک مرحله‌هایی که در تلگرام تیمی
@@ -2385,6 +2502,7 @@ async function route(request, env, ctx) {
     if (path === "/assign" && m === "POST") { await requireManager(request, env); return json(await assign(env, await readJson(request))); }
     if (path === "/assign/days" && m === "POST") { await requireManager(request, env); return json(await setDays(env, await readJson(request))); }
     if (path === "/assign/ai" && m === "POST") { await requireManager(request, env); const r = await setAiTick(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
+    if (path === "/assign/ai-req" && m === "POST") { await requireManager(request, env); const r = await setAiReq(env, await readJson(request)); flush(env, ctx, 1); return json(r); }
     if (path === "/dispatch" && m === "POST") { await requireManager(request, env); const r = await dispatch(env, await readJson(request)); flush(env, ctx, r.notified); return json(r); }
     if (path === "/reassign" && m === "POST") { await requireManager(request, env); const r = await reassign(env, await readJson(request)); flush(env, ctx, r.notified ? 1 : 0); return json(r); }
     if (path === "/unassign" && m === "POST") { await requireManager(request, env); return json(await unassign(env, await readJson(request))); }
@@ -2764,6 +2882,16 @@ async function route(request, env, ctx) {
       /* «🗂 تأمین‌کنندگان کشف‌شده»ِ دادهٔ تحقیق، پیش‌فرض بالای تب، و دروازهٔ «اجرای جستجوی هوشمند» (worker/discovered.js) */
       const discovered = await discoveredFor(env, it).catch(() => null);
       const gate = await gateFor(env, who, it, discovered || { count: 0 });
+      /* جستجوی وب بسته است چون تحقیق تأمین‌کنندهٔ کافی دارد: دیدنِ «🗂 تأمین‌کنندگان کشف‌شده» همان مرحلهٔ «جستجو» است — وگرنه یادآوریِ
+         مرحله سرِ آستانه برای کاری می‌رفت که کارشناس نمی‌تواند بکند (بازبینیِ ماتریس هشدار، آبان ۱۴۰۵) */
+      if (who.expert && !gate.open && gate.by === "count" && it.aid) {
+        const t = now();
+        const r = await env.DB.prepare("UPDATE items SET smart_done_at=? WHERE id=? AND smart_done_at IS NULL").bind(t, it.id).run();
+        if (r.meta && r.meta.changes) await env.DB.batch([
+          env.DB.prepare("UPDATE alerts SET canceled_at=? WHERE assignment_id=? AND kind='stage' AND stage=2 AND fired_at IS NULL").bind(t, it.aid),
+          ev(env, actorOf(who), "smart", it.request_id, it.id, { assignment_id: it.aid, via: "discovered", count: gate.count }),
+        ]);
+      }
       return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, keys), discovered, gate });
     }
     if (path === "/search/smart" && m === "POST") {
@@ -2831,6 +2959,8 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       /* model: کارشناس هزینهٔ تقریبی را دیده و تأیید کرده — بی آن مدل صدا زده نمی‌شود */
       const p = await normalizeItem(env, it, { force: !!b.force, model: b.model === true });
+      /* گزارشِ کارکرد (پنل پشتیبانی): نرمال‌سازی با مدل به پای همین کارشناس */
+      if (b.model === true && who.expert) await ev(env, actorOf(who), "norm_ai", it.request_id, it.id, { assignment_id: it.aid }).run().catch(() => {});
       /* «پیشنهادِ سامانه»: اولین پیشنهادی که کارشناس برای همین قلم دید — مبنای پیامِ «تغییرات اقلام» (یک بار برای هر قلم) */
       const sg = !it.sugg_json && who.role === "expert" ? suggOf(p) : null;
       if (sg) await env.DB.prepare("UPDATE items SET sugg_json=? WHERE id=? AND sugg_json IS NULL").bind(JSON.stringify(sg), it.id).run();

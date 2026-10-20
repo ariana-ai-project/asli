@@ -65,12 +65,13 @@ export const FC_DDL = [
 /* تنظیمات (پنل پشتیبانی — «🎛 کلیدها»)                                   */
 /* ------------------------------------------------------------------ */
 export const FC_KEY = "finalCall";
-export const FC_DEFAULT = { on: true, window_h: 24, min_valid_h: 24, send_lowest: true };
+export const FC_DEFAULT = { on: true, window_h: 24, min_valid_h: 24, send_lowest: true, scope: "all" };
 export const FC_FA = {
   on: "فراخوانِ پیش‌فاکتورِ رسمی پیش از کمیسیون — روشن (پیش‌فرض): با رسیدن به حداقلِ استعلام، به تأمین‌کنندگانِ تأییدنهایی پیامک می‌رود و جدول کمیسیون بعد از بسته شدنِ «📦 بستهٔ کمیسیون» ساخته می‌شود؛ خاموش: جدول کمیسیون مستقیم.",
   window_h: "مهلتِ فرستادنِ پیش‌فاکتورِ رسمی پس از لحظهٔ تصمیم (ساعت)",
   min_valid_h: "کمینهٔ اعتبارِ پیش‌فاکتورِ رسمی پس از ورود به کمیسیون (ساعت)",
   send_lowest: "کمترین قیمتِ رسیده در پیامک («می‌توانید قیمت نهایی‌تان را اعلام کنید»)",
+  scope: "فقط درخواست‌های هوشمند — درخواستِ دستی جدول کمیسیون را مستقیم می‌سازد (روالِ سادهٔ کارشناس، آبان ۱۴۰۵)",
 };
 const hrs = (v, d, lo, hi) => {
   const s = v == null ? "" : String(v).replace(/[۰-۹]/g, (x) => FA.indexOf(x)).trim();
@@ -79,7 +80,18 @@ const hrs = (v, d, lo, hi) => {
 };
 function cleanCfg(x) {
   const v = x && typeof x === "object" ? x : {};
-  return { on: v.on !== false, window_h: hrs(v.window_h, FC_DEFAULT.window_h, 1, 240), min_valid_h: hrs(v.min_valid_h, FC_DEFAULT.min_valid_h, 0, 720), send_lowest: v.send_lowest !== false };
+  return { on: v.on !== false, window_h: hrs(v.window_h, FC_DEFAULT.window_h, 1, 240), min_valid_h: hrs(v.min_valid_h, FC_DEFAULT.min_valid_h, 0, 720), send_lowest: v.send_lowest !== false,
+    scope: v.scope === "ai" ? "ai" : "all" };
+}
+/** درخواستِ دستِ کارشناس هوشمند؟ (همان قاعدهٔ ai-lock.js:AI_OWNED_SQL، بی ایمپورت) — برای scope «ai» */
+async function aiAsg(env, aid) {
+  const r = await env.DB.prepare("SELECT a.ai_on, g.mode FROM assignments a LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?").bind(aid).first().catch(() => null);
+  return !!(r && r.mode === "on" && (r.ai_on == null ? 1 : Number(r.ai_on)) === 1);
+}
+/** فراخوان برای این ارجاع لازم است؟ — روشن و (همه، یا فقط هوشمند و این هوشمند است) */
+async function callNeeded(env, cfg, aid) {
+  if (!cfg.on) return false;
+  return cfg.scope !== "ai" || await aiAsg(env, aid);
 }
 let cache = null;
 /** {on, window_h, min_valid_h, send_lowest, updated_at, by} — ۶۰ ثانیه در حافظهٔ isolate */
@@ -153,7 +165,7 @@ export async function callView(env, aid) {
   const sups = c ? await supsOf(env, c.id) : [];
   const pfs = c ? ((await env.DB.prepare("SELECT id, supplier_name, state, filename, valid_to, at, channel, verdict_json FROM offpf WHERE assignment_id=? AND call_id=? ORDER BY id DESC").bind(aid, c.id).all()).results || []) : [];
   return {
-    on: cfg.on, cfg, now: now(), sms: smsReady(env), legacy: !!(asg && asg.commission_no && !c),
+    on: cfg.on && (!!c || await callNeeded(env, cfg, aid)), cfg, now: now(), sms: smsReady(env), legacy: !!(asg && asg.commission_no && !c),
     call: callOut(c), sups: sups.map((s) => supOut(s, c)),
     pfs: pfs.slice(0, 30).map((p) => ({ id: p.id, name: p.supplier_name, state: p.state, filename: p.filename, valid_to: p.valid_to, at: p.at, channel: p.channel, verdict: parse(p.verdict_json, null) })),
   };
@@ -196,7 +208,7 @@ export async function callGuard(env, aid) {
   const c = await lastCall(env, aid).catch(() => null);
   if (c && c.state === "closed") return c;
   const cfg = await fcCfg(env);
-  if (!cfg.on) return null;
+  if (!(await callNeeded(env, cfg, aid))) return null;
   const a = await env.DB.prepare("SELECT commission_no FROM assignments WHERE id=?").bind(aid).first();
   if (a && a.commission_no && !c) return null;
   if (!c || c.state !== "open") {

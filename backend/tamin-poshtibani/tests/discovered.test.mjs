@@ -103,6 +103,8 @@ test("فهرستِ کشف‌شده‌ها: ترتیبِ رتبه، رکوردِ 
 test("دروازه: ۱۰ کشف‌شده ← بسته (۴۰۹ با دلیل)؛ ۳ و صفر ← باز", { skip: SKIP }, async () => {
   const g = (await call("/search/smart?item_id=91", { headers: EX1 })).data.gate;
   assert.deepEqual(g, { open: false, count: 10, min: 10, by: "count" });
+  assert.ok(DB.raw.prepare("SELECT smart_done_at FROM items WHERE id=91").get().smart_done_at, "دیدنِ کشف‌شده‌ها مرحلهٔ «جستجو» را انجام‌شده می‌کند");
+  assert.equal(DB.raw.prepare("SELECT smart_done_at FROM items WHERE id=92").get().smart_done_at, null);
   const p = await call("/search/smart", { headers: EX1, body: { item_id: 91, markets: ["IR"] } });
   assert.equal(p.status, 409);
   assert.equal(p.data.error, gateMsg(g));

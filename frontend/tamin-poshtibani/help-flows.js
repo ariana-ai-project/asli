@@ -14,7 +14,7 @@ window.TP_FLOWS = {
     ex: ["کارشناس", "#4f8cff"], mg: ["مدیر", "#ff8c42"], sp: ["پشتیبانی", "#eab308"],
     ai: ["کارشناس هوشمند", "#a78bfa"], su: ["تأمین‌کننده", "#22c55e"], sy: ["سامانه", "#94a3b8"],
   },
-  alias: { "expert.terms": "expert.history", "support.finalcall": "support.sw", "support.smartgate": "support.sw" },
+  alias: { "expert.terms": "expert.history", "support.finalcall": "support.sw", "support.smartgate": "support.sw", "support.use": "support.log" },
   flows: {
     /* ---------- ورود ---------- */
     "login.expert": {

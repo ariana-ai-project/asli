@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>راهنمای کارشناس خرید</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+  /* یک برگهٔ A4 برای چاپ (آبان ۱۴۰۵): روالِ دستیِ سادهٔ کارشناس خرید، از ورود تا چاپِ جدول کمیسیون */
+  @page { size: A4; margin: 11mm 12mm; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #e9edf3; font-family: "Vazirmatn", Tahoma, sans-serif; color: #14213d; font-size: 10.6pt; line-height: 1.75; }
+  .page { width: 210mm; min-height: 297mm; margin: 12px auto; background: #fff; padding: 11mm 12mm; box-shadow: 0 6px 24px rgba(20, 40, 80, .15); }
+  h1 { font-size: 16pt; margin: 0 0 2mm; font-weight: 800; }
+  .sub { color: #4a5a78; margin: 0 0 5mm; font-size: 9.6pt; }
+  ol { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; gap: 2.6mm; }
+  li { display: grid; grid-template-columns: 9mm 1fr; gap: 3mm; align-items: start; }
+  li::before { counter-increment: s; content: counter(s, persian); width: 8mm; height: 8mm; border-radius: 2mm; background: #2f6fe4; color: #fff; display: grid; place-items: center; font-weight: 800; }
+  li b { font-weight: 800; }
+  .k { background: #eef3fd; border: 1px solid #c9d8f6; border-radius: 1.5mm; padding: 0 1.5mm; white-space: nowrap; }
+  .tips { margin-top: 5mm; border-top: 1px solid #d5ddeb; padding-top: 3mm; display: grid; grid-template-columns: 1fr 1fr; gap: 1.5mm 6mm; font-size: 9.4pt; color: #33415c; }
+  .tips div::before { content: "• "; color: #2f6fe4; }
+  .print { position: fixed; inset-inline-start: 16px; bottom: 16px; font: inherit; padding: 8px 16px; border-radius: 10px; border: 0; background: #2f6fe4; color: #fff; cursor: pointer; }
+  @media print { body { background: #fff; } .page { margin: 0; box-shadow: none; padding: 0; width: auto; min-height: 0; } .print { display: none; } }
+  @media (max-width: 820px) { .page { width: auto; min-height: 0; margin: 0; padding: 18px 16px; } .tips { grid-template-columns: 1fr; } }
+</style>
+</head>
+<body>
+<main class="page">
+  <h1>راهنمای کارشناس خرید — روالِ دستی، از ورود تا جدول کمیسیون</h1>
+  <p class="sub">هر درخواست دستی است مگر مدیر کنارش «🤖 هوشمند» زده باشد. هرجا گیر کردید، دکمهٔ «؟ راهنما» گوشهٔ صفحه را بزنید.</p>
+  <ol>
+    <li><div><b>ورود:</b> پنل کارشناس را باز کنید و <span class="k">کد ورودِ چهاررقمی</span> را که مدیر داده بزنید. کد را به کسی ندهید؛ از «حساب من» عوضش کنید.</div></li>
+    <li><div><b>تلگرام (فقط خبر):</b> در «حساب من» بات تلگرام را وصل کنید تا ارجاعِ تازه و یادآوریِ مهلت برسد. کارِ اصلی در پنل است.</div></li>
+    <li><div><b>کارتابل:</b> روی کارتِ درخواست بزنید. مهلت و نوارِ مراحل بالای صفحه است؛ هر مرحله که انجام شود سبز می‌شود.</div></li>
+    <li><div><b>بررسی سوابق:</b> برای هر قلم <span class="k">تأیید ساختار و بررسی سوابق</span> را بزنید. تأمین‌کنندگانِ قبلی با رتبه می‌آیند؛ با «افزودن» هر کدام به استعلامات می‌رود.</div></li>
+    <li><div><b>جستجوی هوشمند:</b> فهرستِ <span class="k">🗂 تأمین‌کنندگان کشف‌شده</span> را ببینید. روی هر نفر بزنید تا تلفن و همهٔ اطلاعاتش بیاید. با «✉️ پیام با قالب» متنِ آماده را کپی و برایش بفرستید یا تماس بگیرید. اگر کمتر از ۱۰ نفر بود، «اجرای جستجوی هوشمند» هم باز است.</div></li>
+    <li><div><b>استعلامات:</b> برای هر تأمین‌کننده یک ردیف (<span class="k">افزودن تأمین‌کننده</span>). خانه‌های قرمز اجباری‌اند: واحد، مقدار، قیمت واحد (ریال، بی ارزش افزوده)، زمان تحویل (عدد روز یا 📅 تقویم)، شرایط تسویه، نوع فاکتور و ارزش افزوده. اگر تسویه «اعتباری» است، قیمتِ نقد و اعتباری را جدا بنویسید.</div></li>
+    <li><div><b>پیش‌فاکتور و ثبت:</b> فایلِ پیش‌فاکتور را در همان ردیف بارگذاری کنید، بعد <span class="k">ثبت موقت</span> و برای برگزیده‌ها تیکِ <span class="k">تأیید نهایی</span>. ردیفِ ثبت‌نشده در جدول حساب نمی‌شود.</div></li>
+    <li><div><b>حد نصاب:</b> کنارِ دکمهٔ جدول کمیسیون نوشته هر قلم چند تأمین‌کنندهٔ مختلف دارد و چند لازم است (پیش‌فرض: جزئی ۳، متوسط ۵، بزرگ ۵، عمده ۷).</div></li>
+    <li><div><b>جدول کمیسیون:</b> <span class="k">تولید جدول کمیسیون</span> را بزنید و فایل Excel را چاپ کنید. اگر پیامِ «فراخوانِ پیش‌فاکتورِ رسمی» آمد، اول همان را بزنید (درخواستِ هوشمند).</div></li>
+    <li><div><b>نامهٔ کمیسیون:</b> تب «نامهٔ کمیسیون»: توضیح را با صدا ضبط یا تایپ کنید، متن را اصلاح و تأیید کنید، نامهٔ رسمی (Word) را بگیرید و چاپ کنید.</div></li>
+    <li><div><b>تحویل:</b> جدول و نامهٔ چاپی را برای کمیسیون بفرستید. نتیجهٔ کمیسیون در تلگرام می‌رسد؛ بعد «خاتمه»ی اقلام را بزنید.</div></li>
+  </ol>
+  <div class="tips">
+    <div>رنگ نوارِ مهلت: زرد و نارنجی یعنی نزدیکِ پایان، قرمز یعنی گذشته.</div>
+    <div>هر خانهٔ استعلام با Enter یا رفتن از خانه ذخیره می‌شود.</div>
+    <div>درخواستِ «🤖 هوشمند»: کارشناس هوشمند پیامک و مذاکره را می‌کند؛ شما ناظرید.</div>
+    <div>مشکل یا سؤال: به پشتیبانی خبر دهید؛ کدِ فراموش‌شده را مدیر از منوی «⋯» کنارِ نامتان می‌بیند.</div>
+  </div>
+</main>
+<button class="print" type="button" onclick="window.print()">چاپ</button>
+</body>
+</html>

@@ -2247,6 +2247,9 @@
       const ta = dlg.querySelector("#mtxt");
       try { await navigator.clipboard.writeText(ta.value); dlg.querySelector("[data-mmsg]").textContent = "کپی شد ✓"; }
       catch (_) { ta.select(); document.execCommand("copy"); dlg.querySelector("[data-mmsg]").textContent = "کپی شد ✓"; }
+      /* گزارشِ کارکرد در پنل پشتیبانی (آبان ۱۴۰۵): کپیِ پیام با نامِ تأمین‌کننده و قالب ثبت می‌شود؛ ثبت‌نشدن مانعِ کار نیست */
+      const it = item(), mt = dlg.querySelector("[data-mt].on");
+      TP.api("/me/activity", { body: { kind: "msg_copy", supplier: s.name, item_id: it ? it.id : null, template: mt ? (S.templates[+mt.dataset.mt] || {}).title || null : null, chars: ta.value.length } }).catch(() => {});
     };
     paint(0);
   }

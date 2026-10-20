@@ -756,3 +756,7 @@ details.doc-st p { margin: 4px 0 6px; font-size: .88rem; line-height: 1.85; colo
 .terms-box { border: 1px dashed var(--tp-line); border-radius: 12px; padding: 8px 12px; margin: 10px 0; }
 .terms-box .terms-cell { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .terms-box .terms-ro td { padding: 4px 10px; }
+
+/* «🤖»ِ درخواست و ارجاع در پیش‌فرضِ دستی (آبان ۱۴۰۵): خاموش کم‌رنگ، روشن پررنگ */
+.ai-req:not(.on) { opacity: .55; filter: grayscale(.8); }
+.ai-req.on { border-color: var(--tp-accent); box-shadow: 0 0 0 1px var(--tp-accent) inset; }

@@ -361,7 +361,8 @@
   function deskCard(r, i) {
     const un = unassignedOpen(r), st = reqState(r), STL = TP.STATES[st];
     /* وضعیتِ مؤثر (بسته/در جریان/ثبت شده…) — همان که فیلتر وضعیت روی آن کار می‌کند */
-    const chips = [...new Set(r.items.map((x) => statusOf(r, x)))].map((s) => `<span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span>`).join(" ");
+    const chips = [...new Set(r.items.map((x) => statusOf(r, x)))].map((s) => `<span class="st ${TP.SRC_CLS[s] || (s === "در جریان" ? "st-run" : "st-reg")}">${esc(s)}</span>`).join(" ")
+      + (optIn() ? ` <button type="button" class="tp-btn xs ai-req ${r.ai_req === 1 ? "on" : ""}" data-aireq="${esc(r.id)}" data-on="${r.ai_req === 1 ? 0 : 1}" aria-pressed="${r.ai_req === 1}" title="${r.ai_req === 1 ? "این درخواست با کارشناس هوشمند جلو می‌رود — برای دستی کردن بزنید" : "دستی (پیش‌فرض) — بزنید تا بعد از ارجاع، کارشناس هوشمند از اول کار را پیش ببرد"}">🤖${r.ai_req === 1 ? " هوشمند" : ""}</button>` : "");
     const need = r.items.map((x) => x.need_date).filter(Boolean).sort()[0] || "";
     const units = r.assignments.map((a) => deskUnit(r, a, STL));
     if (un.length) units.push(unassignedUnit(r, un, STL));
@@ -406,6 +407,7 @@
     const seniors = S.data.experts.filter((s) => s.active && s.senior && s.id !== e.id && s.id !== e.senior_id);
     const menu = TP.ui.menu({ cls: "start", btn: moreBtn(`گزینه‌های ${exName(e)}`), items: [
       { label: "ویرایش نام", icon: "edit", attrs: `data-ename-edit="${e.id}"` },
+      { label: "کد ورود", icon: "key", attrs: `data-ecode="${e.id}"` },
       { label: "کارشناس ارشد شود", icon: "users", attrs: `data-estar="${e.id}"` },
       ...(seniors.length ? [{ cap: "انتقال به تیمِ" }, ...seniors.map((s) => ({ label: esc(exName(s)), icon: "users", attrs: `data-eteam="${e.id}|${s.id}"` }))] : []),
       ...(inTeam ? [{ label: "خروج از تیم", icon: "back", attrs: `data-eteam="${e.id}|${e.senior_id}"` }] : []),
@@ -428,6 +430,7 @@
     const load = members.reduce((n, m) => n + (m.open_load || 0), s.open_load || 0);
     const menu = TP.ui.menu({ btn: moreBtn(`گزینه‌های تیم ${exName(s)}`), items: [
       { label: "ویرایش نام", icon: "edit", attrs: `data-ename-edit="${s.id}"` },
+      { label: "کد ورود", icon: "key", attrs: `data-ecode="${s.id}"` },
       { label: "برداشتن ارشدی", icon: "x", attrs: `data-estar="${s.id}"` },
       "-", { label: "حذف از فهرست", icon: "x", attrs: `data-edel="${s.id}"`, cls: "danger" }] });
     return `<section class="ex-team" data-drop-team="${s.id}" style="--i:${Math.min(i, 10)}" aria-label="تیم ${esc(exName(s))}">
@@ -445,12 +448,24 @@
     return `<div class="ex-board ${TP.ui.once("mgr.ex")}">
       <section class="tp-box ex-head"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.users}</span><h2>کارشناسان</h2>${TP.ui.info("manager.experts", "راهنمای کارشناسان")}
         <span class="end"><label class="ex-search">${TP.ui.ICON.search}<input class="tp-input" data-exq value="${esc(S.exQ || "")}" placeholder="جستجوی نام…" aria-label="جستجوی کارشناس"></label>
+        <button class="tp-btn" data-ecodes-all title="کد ورودِ همهٔ کارشناسانِ فعال تصادفی و تازه می‌شود؛ کد تازه به تلگرامِ وصلِ هر کارشناس هم می‌رود">🎲 کد تصادفی برای همه</button>
         <button class="tp-btn primary" data-eadd>${TP.ui.ICON.plus} کارشناس جدید</button></span></div>
         <div class="tp-stats">${k("کارشناس فعال", M(all.length), "users")}${k("تیم", M(seniors.length), "flag", "info")}${k("بی‌سرپرست", M(pool.length), "user", pool.length ? "warn" : "ok")}${k("درخواست باز", M(all.reduce((n, e) => n + (e.open_load || 0), 0)), "box")}</div></section>
       <div class="ex-teams">${teams.filter(showTeam).map(([s, m], i) => exTeam(s, m.filter((x) => !S.exQ || exHit(s) || exHit(x)), i)).join("")}
         <section class="ex-team pool" data-drop-team="0" aria-label="بی‌سرپرست"><header><span class="ex-av lg pool" aria-hidden="true">${TP.ui.ICON.user}</span><div class="ex-th"><b class="big">بی‌سرپرست</b><small>${M(pool.length)} کارشناس · اعلان‌هایشان برای شما می‌آید</small></div></header>
           <div class="ex-members">${pool.filter(exHit).map((e) => exChip(e, false)).join("") || `<div class="ex-empty">${S.exQ ? "کسی با این نام نیست" : "همه در تیم‌اند"}</div>`}</div></section></div>
       ${seniors.length ? "" : `<div class="ex-hint">${TP.ui.ICON.users} هنوز تیمی ساخته نشده ${TP.ui.info("manager.experts", "راهنمای تیم‌ها")}</div>`}</div>`;
+  }
+  /* «🔑 کد ورود» در منوی «⋯» (آبان ۱۴۰۵): کد را نشان می‌دهد و «🎲 کد تصادفیِ تازه» */
+  async function expertCodeUI(id) {
+    const e = S.data.experts.find((x) => x.id === id); if (!e) return;
+    let r; try { r = await TP.api(`/experts/${id}/code`); } catch (er) { return TP.modal("نشد", esc(er.message), null, "باشد", ""); }
+    const body = (c) => `<p style="margin-top:0">کد ورودِ «${esc(exName(e))}» به پنل کارشناس:</p><div style="font-size:2rem;font-weight:800;letter-spacing:.3em;text-align:center" dir="ltr" class="num" data-ecv>${esc(c)}</div>
+      <p class="dim" style="font-size:.85rem">«🎲 کد تازه» کد را تصادفی عوض می‌کند و کدِ قبلی دیگر کار نمی‌کند.</p>`;
+    const d = TP.modal("🔑 کد ورود", body(r.code), async () => {
+      try { const n = await TP.api(`/experts/${id}/code`, { body: {} }); TP.modal("🔑 کد تازه", body(n.code), null, "باشد", ""); } catch (er) { TP.modal("نشد", esc(er.message), null, "باشد", ""); }
+    }, "🎲 کد تازه", "بستن");
+    return d;
   }
   async function expertPatch(id, body) {
     try { await TP.api(`/experts/${id}`, { method: "PUT", body }); S.data.experts = (await TP.api("/experts")).experts; render(); return true; }
@@ -1182,6 +1197,9 @@
       i.onblur = done;
     });
     Q("[data-estar]").forEach((b) => b.onclick = async () => { const e = S.data.experts.find((x) => x.id === +b.dataset.estar); if (await expertPatch(e.id, { senior: !e.senior })) TP.ui.success(e.senior ? "ارشدی برداشته شد" : "کارشناس ارشد شد"); });
+    Q("[data-ecode]").forEach((b) => b.onclick = () => expertCodeUI(+b.dataset.ecode));
+    const eca = G("[data-ecodes-all]"); if (eca) eca.onclick = () => TP.modal("🎲 کد تصادفی برای همه", "کد ورودِ همهٔ کارشناسانِ فعال عوض می‌شود و کدهای قبلی دیگر کار نمی‌کنند. کد تازهٔ هر نفر از منوی «⋯» کنارِ نامش دیده می‌شود و به تلگرامِ وصلش هم می‌رود.",
+      async () => { try { const r = await TP.api("/experts/codes/random", { body: {} }); TP.ui.success(`${M(r.n)} کد تازه ساخته شد`); } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); } }, "کد تازه بساز", "انصراف");
     Q("[data-edel]").forEach((b) => b.onclick = () => { const e = S.data.experts.find((x) => x.id === +b.dataset.edel);
       TP.modal("حذف کارشناس", `<b>${esc(e.label || e.name)}</b> از فهرست کارشناسان برداشته می‌شود و دیگر نمی‌تواند وارد پنل شود؛ ارجاع‌های فعلی‌اش می‌مانند تا شما به دیگری بدهید.`, async () => { if (await expertPatch(e.id, { active: false })) TP.ui.success("کارشناس حذف شد"); }, "حذف"); });
     Q("[data-eteam]").forEach((b) => b.onclick = async () => { const [eid, sid] = b.dataset.eteam.split("|").map(Number); const e = S.data.experts.find((x) => x.id === eid); S.exPick = null; S.exLand = eid; expertMove(eid, { senior_id: e.senior_id === sid ? null : sid }); });
@@ -1242,6 +1260,7 @@
     Q("[data-unrefer]").forEach((b) => b.onclick = () => unreferTender(b.dataset.unrefer));
     Q("[data-move]").forEach((b) => b.onclick = () => moveDialog(+b.dataset.move));
     Q("[data-aitick]").forEach((b) => b.onclick = () => aiTickSet(+b.dataset.aitick, b.dataset.on === "1"));
+    Q("[data-aireq]").forEach((b) => b.onclick = async (ev) => { ev.stopPropagation(); try { await TP.api("/assign/ai-req", { body: { request_id: b.dataset.aireq, on: b.dataset.on === "1" } }); await refresh(); } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); } });
     /* اعلانات — ذخیرهٔ خودکار بعد از مکث؛ هر چهار مقدار از settings() یک‌جا (یک تایمر برای همه) */
     const saveAlerts = () => autoSave("alerts", () => { const s = settings(); return saveQuiet({ thresholds: s.thresholds, dispatchDays: s.dispatchDays, capacity: s.capacity }); });
     const thrTrack = G("[data-thr-track]");
@@ -1366,7 +1385,14 @@
      قاعدهٔ پنل کارشناس (worker/ai-lock.js:aiOwned، بی قیدِ زمانِ روشن شدن)؛ ✋ِ «پشتیبانی»: جدول کمیسیون یا نامه پیش از «🤖 هوشمند» شدنِ
      کارشناس ساخته شده بود (ai_set_by='support') و مدیر می‌تواند تیک را بزند. */
   const aiExpert = (a) => (S.data.ai_experts || []).includes(a.expert_id);
+  /* آبان ۱۴۰۵ (پیش‌فرضِ دستی، ai_opt_in): «🤖» برای هر ارجاع هست و فقط با زدنِ مدیر (یا «🤖»ِ کارتِ درخواست) هوشمند است */
+  const optIn = () => !!S.data.ai_opt_in;
+  const reqAi = (rid) => { const r = S.data.requests.find((x) => x.id === rid); return !!(r && r.ai_req === 1); };
   function aiTick(a) {
+    if (optIn()) {
+      const on = a.ai_on === 1 || (a.ai_on == null && !a.dispatched_at && reqAi(a.request_id));
+      return ` <button class="tp-btn xs ai-req ${on ? "on" : ""}" data-aitick="${a.id}" data-on="${on ? 0 : 1}" title="${on ? "🤖 کارشناس هوشمند — برای دستی کردن بزنید" : "✋ دستی (پیش‌فرض) — برای سپردن به کارشناس هوشمند بزنید"}">${on ? "🤖" : "✋"}</button>`;
+    }
     if (!aiExpert(a)) return "";
     const on = a.ai_on !== 0;
     return ` <button class="tp-btn xs ${on ? "" : "warn"}" data-aitick="${a.id}" data-on="${on ? 0 : 1}" title="${on ? "🤖 هوشمند — برای دستی کردن بزنید (با توضیح)" : `✋ دستی${a.ai_set_by === "support" ? " (پشتیبانی)" : ""}${a.ai_note ? ` — ${esc(a.ai_note)}` : ""} — برای هوشمند کردن بزنید`}">${on ? "🤖" : "✋"}</button>`;

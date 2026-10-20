@@ -206,7 +206,7 @@ export async function reassign(env, body, actor = "manager") {
   const days = int(body.days, a.days);
   let b = await env.DB.prepare("SELECT * FROM assignments WHERE request_id=? AND expert_id=?").bind(a.request_id, eid).first();
   const existed = !!b;
-  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at) VALUES (?,?,?,?,?)").bind(a.request_id, eid, days, a.dispatched_at ? t : null, t).run(); b = { id: r.meta.last_row_id, days }; }
+  if (!b) { const r = await env.DB.prepare("INSERT INTO assignments (request_id,expert_id,days,dispatched_at,created_at,ai_on,ai_set_at,ai_set_by) VALUES (?,?,?,?,?,?,?,?)").bind(a.request_id, eid, days, a.dispatched_at ? t : null, t, a.ai_on ?? null, a.ai_on == null ? null : t, a.ai_on == null ? null : "manager").run(); b = { id: r.meta.last_row_id, days }; }
   const items = (await env.DB.prepare("SELECT id, title, qty, unit FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all()).results || [];
   /* ساعت‌شمار کارشناس جدید از نو شروع می‌شود، پس زمان‌بندی هشدارها هم از نو ساخته می‌شود —
      با آستانه‌های مؤثرِ کارشناسِ تازه (ارشدش اگر گذاشته باشد) */

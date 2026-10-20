@@ -55,7 +55,7 @@
   }
 
   /* ---------- وضعیت ---------- */
-  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["td", "🔨 مناقصه"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["fb", "⭐ ارزیابی ربات"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"], ["cr", "🧭 استراتژی و دفتر"]];
+  const TABS = [["req", "درخواست‌ها"], ["exp", "کارشناسان"], ["chat", "مکاتبات"], ["cm", "تأیید کمیسیون"], ["td", "🔨 مناقصه"], ["ai", "🤖 کارشناس هوشمند"], ["dl", "📥 تحویل‌های هوشمند"], ["fb", "⭐ ارزیابی ربات"], ["use", "📊 کارکرد کارشناسان"], ["log", "رخدادها"], ["chg", "🧩 تغییرات اقلام"], ["cr", "🧭 استراتژی و دفتر"]];
   const tabOfHash = () => { const h = location.hash.slice(1); return TABS.some(([k]) => k === h) ? h : null; };
   const S = {
     view: "boot", status: null, mode: "login", err: "", busy: false,
@@ -170,6 +170,7 @@
     else if (S.tab === "exp") { if (S.exId) loadExpert(S.exId); else if (force) loadExperts().catch(() => {}); }
     else if (S.tab === "chat" && (force || !S.th)) loadThreads();
     else if (S.tab === "log" && (force || !S.log)) loadLog();
+    else if (S.tab === "use" && (force || !S.use)) loadUse();
     else if (S.tab === "cm" && (force || !S.cm)) loadCm();
     else if (S.tab === "chg" && (force || !S.chg)) loadChg();
     else if (S.tab === "td" && window.TP_TENDER) window.TP_TENDER.load(force);
@@ -187,7 +188,7 @@
 
   /* ---------- سرآیند ---------- */
   /* نوار بالا با منوی پروفایل و کپسولِ بخش‌ها — مثلِ پنل مدیر: چهار بخشِ روزمره و دو گروهِ ▾ (مهر ۱۴۰۵) */
-  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", td: "🔨 مناقصه", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", fb: "⭐ ارزیابی ربات", log: "رخدادها", chg: "🧩 تغییرات اقلام", cr: "🧭 استراتژی و دفتر" };
+  const TAB_FA = { req: "درخواست‌ها", exp: "کارشناسان", chat: "مکاتبات", cm: "تأیید کمیسیون", td: "🔨 مناقصه", ai: "🤖 کارشناس هوشمند", dl: "📥 تحویل‌های هوشمند", fb: "⭐ ارزیابی ربات", use: "📊 کارکرد کارشناسان", log: "رخدادها", chg: "🧩 تغییرات اقلام", cr: "🧭 استراتژی و دفتر" };
   function vTop() {
     return TP.ui.topbar({ title: "پنل پشتیبانی تدارکات", sub: esc(CFG.company || ""),
       user: { name: "پشتیبانی", sub: esc(CFG.company || ""), initial: "پ" },
@@ -207,7 +208,7 @@
     const grp = (label, keys) => TP.ui.menu({ cls: keys.includes(S.tab) ? "on start" : "start",
       btn: `<button type="button" data-menu-toggle aria-haspopup="menu" aria-expanded="false">${keys.includes(S.tab) ? TAB_FA[S.tab] : label}${cnt(keys.reduce((a, k) => a + (N[k] || 0), 0))}${chev}</button>`,
       items: keys.map((k) => ({ label: TAB_FA[k], attrs: `data-tab="${k}"`, cnt: N[k] || null })) });
-    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${tab("td", window.TP_TENDER && window.TP_TENDER.live() ? "●" : 0)}${grp("هوشمند", ["ai", "dl", "fb", "cr"])}${grp("گزارش‌ها", ["log", "chg"])}</div>
+    return `<div class="tp-subbar"><div class="tp-seg" role="tablist">${tab("req")}${tab("exp")}${tab("chat")}${tab("cm", wait)}${tab("td", window.TP_TENDER && window.TP_TENDER.live() ? "●" : 0)}${grp("هوشمند", ["ai", "dl", "fb", "cr"])}${grp("گزارش‌ها", ["use", "log", "chg"])}</div>
       <span class="spacer"></span>${TP.ui.info(S.tab === "ai" ? aiHelp() : `support.${S.tab}`, "راهنمای این بخش")}</div>`;
   }
 
@@ -1074,6 +1075,41 @@
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button class="tp-btn primary" data-sgsave ${dis}>ذخیره</button>
         <span class="dim">${c.updated_at ? `آخرین تغییر: ${fmtShort(c.updated_at)}` : "هنوز عوض نشده — پیش‌فرض: روشن، کمتر از ۱۰ تأمین‌کنندهٔ کشف‌شده"}</span></div></div>`;
   }
+  /* ---------- «📊 کارکرد کارشناسان» (آبان ۱۴۰۵، worker/usage-report.js): ساده و جدولی ---------- */
+  async function loadUse() {
+    S.useErr = ""; S.use = null; render();
+    const days = S.useDays == null ? 30 : S.useDays;
+    try { S.use = await api(S.useEx ? `/usage/${S.useEx}?days=${days}` : `/usage?days=${days}`); } catch (e) { S.useErr = e.message; }
+    render();
+  }
+  function vUse() {
+    const days = S.useDays == null ? 30 : S.useDays;
+    const bar = `<div class="tp-seg" role="group" aria-label="بازه">${[[7, "۷ روز"], [30, "۳۰ روز"], [90, "۹۰ روز"], [0, "همه"]].map(([d, l]) => `<button class="${days === d ? "on" : ""}" data-use-days="${d}">${l}</button>`).join("")}</div>`;
+    const head = `<div class="tp-card" style="padding:12px 14px;margin:12px 0"><div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">${S.useEx ? `<button class="tp-btn sm" data-use-back>→ همهٔ کارشناسان</button>` : ""}<h3 style="margin:0">📊 کارکرد کارشناسان${S.use && S.use.expert ? ` — ${esc(S.use.expert.name)}` : ""}</h3><span class="spacer" style="flex:1"></span>${bar}</div>`;
+    if (S.useErr) return head + `<div class="tp-note warn">${esc(S.useErr)}</div></div>`;
+    if (!S.use) return head + TP.ui.loader() + "</div>";
+    const n = (v) => (v ? M(v) : `<span class="dim">۰</span>`);
+    const tbl = (cols, rows) => `<div class="tp-scroll"><table class="sup-tbl" style="width:100%"><thead><tr>${cols.map((c) => `<th>${c}</th>`).join("")}</tr></thead><tbody>${rows.join("") || `<tr><td colspan="${cols.length}" class="dim">—</td></tr>`}</tbody></table></div>`;
+    if (!S.useEx) {
+      return head + `<p class="dim" style="margin:6px 0">روی نامِ هر کارشناس بزنید تا ریزِ کارهایش بیاید. هزینهٔ دلاری فقط در داشبوردِ کارشناس هوشمند است.</p>`
+        + tbl(["کارشناس", "درخواستِ ارجاع‌شده", "کارشناس هوشمند (فراخوانی مدل)", "جستجوی هوشمند", "خوانشِ پیش‌فاکتور", "نرمال‌سازی با مدل", "نامهٔ کمیسیون", "ElevenLabs نامه (ثانیه)", "بات صوتی (بار / ثانیه)", "پیامک", "قالبِ پیام", "کپیِ پیام"],
+          S.use.experts.map((e) => `<tr><td><button class="tp-btn xs" data-use-ex="${e.id}">${esc(e.name)}</button></td><td>${n(e.requests)}</td><td>${n(e.ai.agent)}</td><td>${n(e.ai.search)}</td><td>${n(e.ai.proforma)}</td><td>${n(e.ai.normalize)}</td><td>${n(e.ai.letter)}</td><td>${n(e.el.letter_secs)}</td><td>${n(e.el.voice_bot)} / ${n(e.el.voice_bot_secs)}</td><td>${n(e.sms)}</td><td>${n(e.templates)}</td><td>${n(e.copies)}</td></tr>`)) + "</div>";
+    }
+    const U = S.use, at = (t) => (t ? esc(fmtShort(t)) : "—"), rid = (r) => (r ? `<span class="num">${esc(r)}</span>` : "—");
+    const sec = (title, cnt, html) => `<h4 style="margin:16px 0 6px">${title} <span class="dim" style="font-weight:400">(${M(cnt)})</span></h4>${html}`;
+    return head
+      + sec("📥 درخواست‌های ارجاع‌شده", U.requests.length, tbl(["زمان ارسال", "درخواست", "طرف مقابل", "اقلام", "روال", "کمیسیون"], U.requests.map((r) => `<tr><td>${at(r.dispatched_at)}</td><td>${rid(r.request_id)}</td><td>${esc(r.party || "")}</td><td>${M(r.items)}</td><td>${r.ai_on === 1 ? "🤖 هوشمند" : "✋ دستی"}</td><td>${r.commission_no ? esc(r.commission_no) : "—"}</td></tr>`)))
+      + sec("🤖 کارشناس هوشمند — فراخوانیِ مدل", U.ai_agent.length, tbl(["زمان", "درخواست", "کار", "مدل", "توکن (ورودی / خروجی)", "وضعیت"], U.ai_agent.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.purpose)}</td><td class="dim">${esc(c.model || "")}</td><td class="num">${M(c.in_tok || 0)} / ${M(c.out_tok || 0)}</td><td>${esc(c.status || "")}</td></tr>`)))
+      + sec("🔎 جستجوی هوشمند (Claude و وب)", U.ai_search.length, tbl(["زمان", "درخواست", "قلم", "توکن (ورودی / خروجی)"], U.ai_search.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.title || "")}</td><td class="num">${M(c.in_tokens || 0)} / ${M(c.out_tokens || 0)}</td></tr>`)))
+      + sec("📄 خوانشِ هوشمندِ پیش‌فاکتور", U.ai_proforma.length, tbl(["زمان", "درخواست", "تأمین‌کننده", "نتیجه"], U.ai_proforma.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.supplier_name)}</td><td>${esc(c.extract_state || "")}</td></tr>`)))
+      + sec("🧩 نرمال‌سازی با مدل", U.ai_normalize.length, tbl(["زمان", "درخواست", "قلم"], U.ai_normalize.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.title || "")}</td></tr>`)))
+      + sec("📝 نامهٔ کمیسیون (صدا با ElevenLabs، متن با Claude)", U.letters.length, tbl(["زمان", "درخواست", "صدا (ثانیه)", "نامه ساخته شد", "وضعیت"], U.letters.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td class="num">${c.voice_secs ? M(Math.round(c.voice_secs)) : "—"}</td><td>${c.made ? "✓" : "—"}</td><td>${esc(c.state || "")}</td></tr>`)))
+      + sec("🎙 بات صوتی (ElevenLabs)", U.voice_bot.length, tbl(["زمان", "بات", "ثانیه", "وضعیت"], U.voice_bot.map((c) => `<tr><td>${at(c.at)}</td><td>${esc(c.bot)}</td><td class="num">${c.secs ? M(Math.round(c.secs)) : "—"}</td><td>${esc(c.state || "")}</td></tr>`)))
+      + sec("💬 پیامک‌ها", U.sms.length, tbl(["زمان", "درخواست", "تأمین‌کننده", "شماره", "نوع"], U.sms.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.supplier || "")}</td><td class="num" dir="ltr">${esc(c.phone || "")}</td><td>${esc(c.kind)}</td></tr>`)))
+      + sec("📚 قالب‌های پیامی که ساخت", U.templates.length, tbl(["زمان", "عنوان", "متن"], U.templates.map((c) => `<tr><td>${at(c.at)}</td><td>${esc(c.title)}</td><td class="dim">${esc(c.body || "")}</td></tr>`)))
+      + sec("📋 پیام‌هایی که کپی کرد", U.copies.length, tbl(["زمان", "درخواست", "تأمین‌کننده", "قالب", "طول متن"], U.copies.map((c) => `<tr><td>${at(c.at)}</td><td>${rid(c.request_id)}</td><td>${esc(c.supplier || "")}</td><td>${esc(c.template || "")}</td><td class="num">${M(c.chars)}</td></tr>`)))
+      + "</div>";
+  }
   async function sgSave(patch) {
     let cfg = patch;
     if (!cfg) {
@@ -1099,7 +1135,8 @@
       <table class="sup-tbl" style="width:auto"><tbody>
         <tr><td>${esc(S.fc.fa.window_h)}</td><td>${num("w", c.window_h)} ساعت</td></tr>
         <tr><td>${esc(S.fc.fa.min_valid_h)}</td><td>${num("m", c.min_valid_h)} ساعت</td></tr>
-        <tr><td>${esc(S.fc.fa.send_lowest)}</td><td><label class="chkline"><input type="checkbox" data-fcl ${c.send_lowest ? "checked" : ""} ${dis}> بله</label></td></tr></tbody></table>
+        <tr><td>${esc(S.fc.fa.send_lowest)}</td><td><label class="chkline"><input type="checkbox" data-fcl ${c.send_lowest ? "checked" : ""} ${dis}> بله</label></td></tr>
+        <tr><td>${esc(S.fc.fa.scope || "فقط درخواست‌های هوشمند")}</td><td><label class="chkline"><input type="checkbox" data-fcs ${c.scope === "ai" ? "checked" : ""} ${dis}> بله</label></td></tr></tbody></table>
       <h4 style="margin:12px 0 6px">📱 همراهِ کارشناسان <span class="dim" style="font-weight:400;font-size:.85rem">— «شمارهٔ تأمین‌کننده نیست» به همین شماره پیامک می‌شود${S.fc.sms ? "" : " (درگاه پیامک وصل نیست؛ فقط تلگرام و اعلان)"}</span></h4>
       <table class="sup-tbl" style="width:auto"><tbody>${S.fc.experts.filter((e) => e.active).map((e) => `<tr><td>${esc(e.name)}</td><td><input class="tp-input num" data-fcph="${e.id}" value="${esc(e.phone || "")}" inputmode="tel" placeholder="۰۹۱۲…" style="width:150px" ${dis}></td></tr>`).join("")}</tbody></table>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button class="tp-btn primary" data-fcsave ${dis}>ذخیره</button>
@@ -1107,7 +1144,7 @@
   }
   async function fcSave(patch) {
     const q = (sel) => app.querySelector(sel);
-    const cfg = patch || { window_h: (q("[data-fcw]") || {}).value, min_valid_h: (q("[data-fcm]") || {}).value, send_lowest: !!(q("[data-fcl]") || {}).checked };
+    const cfg = patch || { window_h: (q("[data-fcw]") || {}).value, min_valid_h: (q("[data-fcm]") || {}).value, send_lowest: !!(q("[data-fcl]") || {}).checked, scope: (q("[data-fcs]") || {}).checked ? "ai" : "all" };
     const phones = patch ? [] : [...app.querySelectorAll("[data-fcph]")].map((i) => ({ expert_id: Number(i.dataset.fcph), phone: i.value.trim() }));
     S.fcBusy = true; S.fcErr = ""; render();
     try { const r = await api("/ai/final-call", { method: "PUT", body: { cfg, phones } }); S.fc = r; } catch (e) { S.fcErr = e.message; }
@@ -1484,6 +1521,7 @@
     if (S.tab === "exp") return S.exId ? vExpert() : vExperts();
     if (S.tab === "chat") return vChat();
     if (S.tab === "log") return vLog();
+    if (S.tab === "use") return vUse();
     return vCm();
   }
   function render() {
@@ -1583,6 +1621,9 @@
     if (d.swtoggle !== undefined) return swToggle(d.on === "1");
     if (d.fctoggle !== undefined) return fcSave({ on: d.on === "1" });
     if (d.fcsave !== undefined) return fcSave(null);
+    if (d.useEx) { S.useEx = Number(d.useEx); return loadUse(); }
+    if (d.useDays) { S.useDays = Number(d.useDays); return loadUse(); }
+    if (d.useBack !== undefined) { S.useEx = null; return loadUse(); }
     if (d.sgtoggle !== undefined) return sgSave({ on: d.on === "1" });
     if (d.sgsave !== undefined) return sgSave(null);
     if (d.rksave !== undefined) return saveRankUi();
@@ -1607,7 +1648,7 @@
     return null;
   }
   app.addEventListener("click", (e) => {
-    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-fctoggle],[data-fcsave],[data-sgtoggle],[data-sgsave],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref]");
+    const t = e.target.closest("[data-tab],[data-thback],[data-thinfo],[data-thre],[data-rfopen],[data-rst],[data-rwin],[data-rdrop],[data-rclear],[data-rtog],[data-lfopen],[data-ldrop],[data-lg],[data-cscope],[data-szopen],[data-refresh],[data-logout],[data-pass],[data-do],[data-mode],[data-asg],[data-cmprev],[data-cmdl],[data-goto],[data-ex],[data-exback],[data-codes],[data-th],[data-th-open],[data-thf-clear],[data-rid-clear],[data-lookup],[data-lmore],[data-lclear],[data-lrid-set],[data-ld],[data-csel],[data-cok],[data-cone],[data-cres],[data-alarm-ack],[data-alerts],[data-smsgw],[data-aiex],[data-aiback],[data-aitoggle],[data-aiview],[data-radd],[data-rdel],[data-rsave],[data-rreset],[data-dlopen],[data-dlst],[data-dlback],[data-dlok],[data-dlrej],[data-dlrq],[data-dlrqf],[data-dlletter],[data-dlmd],[data-usdfetch],[data-usdman],[data-chglog],[data-chgmore],[data-rksave],[data-rkreset],[data-swtoggle],[data-fctoggle],[data-fcsave],[data-sgtoggle],[data-sgsave],[data-mdsave],[data-mdreset],[data-mdadd],[data-mddel],[data-tref],[data-tunref],[data-use-ex],[data-use-days],[data-use-back]");
     if (!t || !app.contains(t) || t.disabled) return;
     /* ردیفِ کارشناس قابل کلیک است؛ کلیکِ دکمهٔ «جزئیات» همان کار را می‌کند */
     act(t);
