@@ -406,6 +406,8 @@ const COLUMN_MIGRATIONS = [
   /* «📚 قالب‌های پیام» (مهر ۱۴۰۵): «فعال»ِ قالبِ کارشناس در گزینه‌های «✉️ پیام اول» (پیش‌فرض ۱) و علتِ ردیفِ متفاوت (first-msg.js) */
   ...TPL_COLUMNS,
   ...FM_COLUMNS,
+  /* ایتا در بررسیِ پیام‌رسان‌های هر شماره (آبان ۱۴۰۵، records.js:PLATFORMS) */
+  ["phone_channels", "eitaa", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -1592,7 +1594,8 @@ async function assignmentDetail(env, aid, who) {
   const owned = await aiOwned(env, aid);
   const ai = { owned: owned ? { run_id: owned.run_id, state: owned.state, handover: owned.handover || null, flow: owned.flow || 1 } : null, asks: 0 };
   const names = await aiQuoteNames(env, aid);
-  const aiMode = !!owned || names.size > 0 || !!(await env.DB.prepare("SELECT 1 AS x FROM ai_agents WHERE expert_id=? AND mode='on'").bind(a.expert_id).first());
+  const agentOn = !!(await env.DB.prepare("SELECT 1 AS x FROM ai_agents WHERE expert_id=? AND mode='on'").bind(a.expert_id).first());
+  const aiMode = !!owned || names.size > 0 || agentOn;
   /* فاز ۳: تحویلِ ردشده در پنل پشتیبانی درخواست را کامل به کارشناس برمی‌گرداند — خط‌های کارشناس هوشمند هم آزاد */
   const rv = aiMode ? await env.DB.prepare("SELECT review_json FROM ai_runs WHERE assignment_id=?").bind(aid).first() : null;
   const released = !!rv && aiRejected(rv.review_json);
@@ -1619,6 +1622,8 @@ async function assignmentDetail(env, aid, who) {
   /* فاز ۴ب: تیکِ «🤖 هوشمند»ِ مدیر و حالتِ هر قلم (worker/ai-modes.js) — «انجام دستی»ِ تأییدشده یا در انتظارِ مدیر. set_by: «manager» یا
      «support» (درخواستی که جدول کمیسیون یا نامه‌اش پیش از «🤖 هوشمند» شدنِ کارشناس ساخته شده بود — ai-agent.js:aiModeSet) */
   ai.on = a.ai_on !== 0; ai.note = a.ai_note || null; ai.set_by = a.ai_on === 0 ? a.ai_set_by || "manager" : null;
+  /* آبان ۱۴۰۵: درخواستِ هوشمند (ai-lock.js:aiReqOn) — دستی فراخوان ندارد و جدولش با حداقلِ «ثبت موقت» باز می‌شود */
+  ai.req = agentOn && a.ai_on !== 0;
   /* «⏱ با مهلت / 🤖 خودکار»ِ مکاتباتِ کارشناس هوشمند (worker/ai-supervise.js) */
   if (aiMode) ai.sup = { cfg: await getSup(env, a.expert_id) };
   /* ⭐ امتیازهای مانده به کارِ کارشناس هوشمند — «خاتمه» تا صفرشدنش معلق است (worker/ai-rates.js) */
@@ -1849,7 +1854,7 @@ async function commission(env, ex, aid) {
   await aiGuard(env, { expert: ex }, aid);
   /* همان نگهبانی که بات هم دارد (bundle.js) */
   const g = await commissionGuard(env, aid, await getSettings(env));
-  if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
+  if (!g.finals && !g.manual) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
   if (g.missing.length) throw new HttpError(`هر قلم باید به حداقلِ استعلامِ ردهٔ خودش از تأمین‌کنندگانِ مختلف برسد؛ استعلامِ بیشتر بگیرید — کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
   /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): جدول فقط بعد از بسته شدنِ «📦 بستهٔ کمیسیون» — درخواستِ پیش از این روال همان‌طور که بود */
   await callGuard(env, aid);
@@ -2535,6 +2540,8 @@ async function route(request, env, ctx) {
         /* درخواستِ دستِ کارشناس هوشمند: فراخوان را خودش می‌زند */
         await aiGuard(env, { expert: ex }, aid);
         const g = await commissionGuard(env, aid, await getSettings(env));
+        /* آبان ۱۴۰۵ (خواستهٔ مالک): درخواستِ دستی فراخوانِ پیش‌فاکتورِ رسمی ندارد */
+        if (g.manual) throw new HttpError("درخواستِ دستی فراخوانِ پیش‌فاکتورِ رسمی ندارد؛ جدول کمیسیون را مستقیم بسازید.", 409);
         if (!g.finals) throw new HttpError("حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.", 422, { missing: g.missing, need: g.need });
         if (g.missing.length) throw new HttpError(`فراخوان وقتی است که هر قلم به حداقلِ استعلامِ ردهٔ خودش رسیده باشد — کم دارند: ${missingText(g.missing)}.`, 422, { missing: g.missing, need: g.need });
         const r = await startCall(env, aid, { by: `expert:${ex.id}`, mode: "manual" });
@@ -2892,7 +2899,9 @@ async function route(request, env, ctx) {
           ev(env, actorOf(who), "smart", it.request_id, it.id, { assignment_id: it.aid, via: "discovered", count: gate.count }),
         ]);
       }
-      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, keys), discovered, gate });
+      /* پیام‌رسان‌های شماره‌های کشف‌شده هم (همان تیکِ — ✓ ✗ برای هر شماره) */
+      const dKeys = ((discovered && discovered.list) || []).flatMap((x) => (x.tel || []).map((p) => p.key));
+      return json({ markets: MARKETS.map(({ key, fa }) => ({ key, fa })), maxMarkets: MAX_MARKETS, searches, channels: await phoneChannels(env, [...keys, ...dKeys]), discovered, gate });
     }
     if (path === "/search/smart" && m === "POST") {
       const who = await requireAny(request, env);

@@ -78,6 +78,17 @@ export async function aiModeOn(env, expertId) {
 }
 
 /**
+ * درخواستِ «هوشمند» است؟ — کارشناسش «هوشمند» است و تیکِ «🤖»ِ ارجاع برداشته نشده (همان شرطِ discover)؛ برخلافِ aiOwned، پایانِ کارِ
+ * کارشناس هوشمند درخواست را دستی نمی‌کند. آبان ۱۴۰۵ (خواستهٔ مالک): درخواستِ دستی «📨 فراخوانِ پیش‌فاکتورِ رسمی» ندارد و جدول
+ * کمیسیونش با حداقلِ «ثبت موقت» باز می‌شود (final-call.js:callNeeded، bundle.js:commissionGuard).
+ */
+export async function aiReqOn(env, assignmentId) {
+  if (!assignmentId) return false;
+  const r = await env.DB.prepare("SELECT a.ai_on, g.mode FROM assignments a LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?").bind(assignmentId).first().catch(() => null);
+  return !!(r && r.mode === "on" && r.ai_on !== 0);
+}
+
+/**
  * ارجاعِ دستِ کارشناس هوشمند: کارشناسش «هوشمند» است، مدیر تیکِ «🤖»ِ ارجاع را برنداشته (COALESCE(ai_on,1)=1) و یا کارِ زنده (ai_runs بی
  * finished_at) روی همین ارجاع هست، یا ارجاع ارسال شده و هنوز بسته نیست — هر وقت که رسیده باشد (on_at فقط برای نمایشِ «هوشمند از …»).
  * خروجی {run_id, state, handover} یا null. handover: مهلتِ حدِ استعلام گذشت و کار به کارشناس واگذار شد — فقط قفلِ جدول و نامه می‌ماند

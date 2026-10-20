@@ -708,12 +708,12 @@
   /* مسیرِ جدول کمیسیونِ هر ارجاع: کدام گام انجام شده و قدمِ بعد با کیست */
   function cmPath(its, a) {
     const n = its.length, q = its.filter((x) => x.saved >= needOf(x)).length, f = its.filter((x) => x.finals > 0).length, ok = its.filter((x) => x.commission_ok).length;
-    const st = [["استعلام به حد", `${M(q)}/${M(n)}`, q === n], ["تأیید نهایی", `${M(f)}/${M(n)}`, f === n],
+    const st = [["استعلام به حد", `${M(q)}/${M(n)}`, q === n], ["تأیید نهایی", `${M(f)}/${M(n)}`, f === n || !!a.commission_no],
       ["جدول کمیسیون", a.commission_no ? "ساخته شد" : "ساخته نشده", !!a.commission_no], ["نتیجه و تأیید", `${M(ok)}/${M(n)}`, ok === n], ["خاتمه", "کارشناس", false]];
     const cur = st.findIndex((x) => !x[2]);
     const next = !a.commission_no
       ? (q < n ? ["کارشناس", `${M(n - q)} قلم هنوز به حداقل استعلام نرسیده؛ استعلامِ بیشتر از «💬 مکاتبات» یا «استعلامات».`]
-        : !f ? ["کارشناس", "برندهٔ هر قلم را «تأیید نهایی» کند و «تولید جدول کمیسیون» را بزند."]
+        : !f ? ["کارشناس", "«تولید جدول کمیسیون» را بزند — درخواستِ دستی با «ثبت موقت» کافی است؛ درخواستِ هوشمند برندهٔ هر قلم را «تأیید نهایی» می‌خواهد."]
         : ["کارشناس", "«تولید جدول کمیسیون» را در تب «استعلامات» بزند (درخواستِ هوشمند را کارشناس هوشمند خودش می‌سازد)."])
       : ok < n ? ["شما", "«🏆 نتیجه و تأیید»: برنده و علتِ هر قلم را ثبت کنید."]
       : ["کارشناس", "«خاتمه» از منوی «⋯ اقدام‌ها»؛ با آن اقلام بسته می‌شوند."];
@@ -1135,8 +1135,7 @@
       <table class="sup-tbl" style="width:auto"><tbody>
         <tr><td>${esc(S.fc.fa.window_h)}</td><td>${num("w", c.window_h)} ساعت</td></tr>
         <tr><td>${esc(S.fc.fa.min_valid_h)}</td><td>${num("m", c.min_valid_h)} ساعت</td></tr>
-        <tr><td>${esc(S.fc.fa.send_lowest)}</td><td><label class="chkline"><input type="checkbox" data-fcl ${c.send_lowest ? "checked" : ""} ${dis}> بله</label></td></tr>
-        <tr><td>${esc(S.fc.fa.scope || "فقط درخواست‌های هوشمند")}</td><td><label class="chkline"><input type="checkbox" data-fcs ${c.scope === "ai" ? "checked" : ""} ${dis}> بله</label></td></tr></tbody></table>
+        <tr><td>${esc(S.fc.fa.send_lowest)}</td><td><label class="chkline"><input type="checkbox" data-fcl ${c.send_lowest ? "checked" : ""} ${dis}> بله</label></td></tr></tbody></table>
       <h4 style="margin:12px 0 6px">📱 همراهِ کارشناسان <span class="dim" style="font-weight:400;font-size:.85rem">— «شمارهٔ تأمین‌کننده نیست» به همین شماره پیامک می‌شود${S.fc.sms ? "" : " (درگاه پیامک وصل نیست؛ فقط تلگرام و اعلان)"}</span></h4>
       <table class="sup-tbl" style="width:auto"><tbody>${S.fc.experts.filter((e) => e.active).map((e) => `<tr><td>${esc(e.name)}</td><td><input class="tp-input num" data-fcph="${e.id}" value="${esc(e.phone || "")}" inputmode="tel" placeholder="۰۹۱۲…" style="width:150px" ${dis}></td></tr>`).join("")}</tbody></table>
       <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:10px"><button class="tp-btn primary" data-fcsave ${dis}>ذخیره</button>
@@ -1144,7 +1143,7 @@
   }
   async function fcSave(patch) {
     const q = (sel) => app.querySelector(sel);
-    const cfg = patch || { window_h: (q("[data-fcw]") || {}).value, min_valid_h: (q("[data-fcm]") || {}).value, send_lowest: !!(q("[data-fcl]") || {}).checked, scope: (q("[data-fcs]") || {}).checked ? "ai" : "all" };
+    const cfg = patch || { window_h: (q("[data-fcw]") || {}).value, min_valid_h: (q("[data-fcm]") || {}).value, send_lowest: !!(q("[data-fcl]") || {}).checked };
     const phones = patch ? [] : [...app.querySelectorAll("[data-fcph]")].map((i) => ({ expert_id: Number(i.dataset.fcph), phone: i.value.trim() }));
     S.fcBusy = true; S.fcErr = ""; render();
     try { const r = await api("/ai/final-call", { method: "PUT", body: { cfg, phones } }); S.fc = r; } catch (e) { S.fcErr = e.message; }

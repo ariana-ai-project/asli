@@ -18,7 +18,7 @@
   /** دایره و تیکِ سبزِ وسطِ صفحه پس از هر تأیید (اصلِ طراحی مالک، مهر ۱۴۰۵) */
   const okTick = (label) => { if (TP.ui && TP.ui.success) TP.ui.success(label); };
   const COMPANY = CFG.company || "تونل سد آریانا";
-  const PLATS = [["telegram", "تلگرام"], ["whatsapp", "واتساپ"], ["bale", "بله"], ["rubika", "روبیکا"]];
+  const PLATS = [["telegram", "تلگرام"], ["whatsapp", "واتساپ"], ["bale", "بله"], ["eitaa", "ایتا"], ["rubika", "روبیکا"]];
   const PLACES = ["محل پروژه", "انبار شرکت", "سایر"], PAYS = ["نقدی", "اعتباری", "۵۰٪ پیش‌پرداخت", "سایر"], DEALS = ["کارگاه", "دفتر مرکزی"], INVT = ["رسمی", "غیر رسمی"];
   /* ارزش افزوده: انتخابی و اجباری. قیمتِ ردیف همیشه بدون ارزش افزوده است و
      ارزش افزوده جداگانه ته جدول کمیسیون حساب می‌شود. */
@@ -1835,6 +1835,7 @@
       <div class="hx-bar"><div class="tp-seg sm" role="radiogroup" aria-label="حالت جستجو">
           ${[["head", "نوع قلم", "همهٔ اقلام همین نوع (پیش‌فرض)"], ["pick", "قلم انتخابی", "همین نوع با لایه‌ها و واحدهای تیک‌خورده"], ["exact", "عین قلم", "همان نوع با دقیقاً همان لایه‌ها"]].map(([k, l, t]) => `<button type="button" class="${S.hmode === k ? "on" : ""}" aria-pressed="${S.hmode === k}" data-hmode="${k}" title="${t}">${l}</button>`).join("")}</div>
         <span class="spacer"></span>
+        <button class="tp-btn" data-tpl-open title="قالب‌های پیام را ببینید یا قالب تازه بسازید؛ جای‌خالی‌های {…} با اطلاعات همین درخواست پر می‌شوند">ایجاد قالب پیام</button>
         <button class="tp-btn primary" data-run-hist>${d ? "بررسی دوباره" : ok ? "بررسی سوابق" : "تأییدِ ساختار و بررسی سوابق"}</button>${tools}</div>
       <details class="tp-more hx-opts"><summary>تنظیماتِ جستجو</summary><div class="hx-optsb">
         <label class="hx-mom" title="۱ = گذشتهٔ دور تقریباً هم‌وزن امروز · ۱۰ = فقط خریدهای تازه وزن دارند"><b>ضریب اهمیت گشتاور</b>
@@ -1883,7 +1884,8 @@
         <th title="قیمت واحدِ میانگین به ازای واحد مرجع — ${u ? "به قیمت روز با نرخ دلار" : "با تعدیلِ مرکز آمار (زمستان ۱۴۰۴)"}">قیمت واحد</th>${th("v", "ارزش خرید")}${th("f", "امتیاز نهایی", "میانگینِ وزنیِ رتبه‌ها و رده — ترتیبِ دعوتِ کارشناس هوشمند")}<th>خریدها</th></tr></thead><tbody>
       ${rows.map((s) => `<tr class="${S.prof === s.key ? "sel" : ""}">
         <td>${added.has(TP.nrm(s.name)) ? `<span class="chip ok">در استعلامات</span>`
-          : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="نام تأمین‌کننده به تب استعلامات">افزودن</button>`}${pkHistBtn(it, s.name)}</td>
+          : `<button class="tp-btn xs" data-to-quote="${esc(s.key)}" title="نام تأمین‌کننده به تب استعلامات">افزودن</button>`}${pkHistBtn(it, s.name)}
+          <button class="tp-btn xs" data-hist-msg="${esc(s.key)}" title="پیام با قالب: نامِ همین تأمین‌کننده و اطلاعاتِ درخواست پر می‌شود؛ متن را کپی کنید">✉️ پیام</button></td>
         <td class="rt"><span class="supname" data-prof="${esc(s.key)}">${esc(s.name)}</span>${gradeChip(s, "", "رده")}${s.code ? ` <span class="dim num" title="کد تأمین‌کننده">${esc(s.code)}</span>` : ""}${s.unconverted ? ` <span class="chip warn" title="خریدهایی با واحدِ بی‌نرخ تبدیل">${M(s.unconverted)}</span>` : ""}</td>
         <td class="num">${M(s.n)}${rb(s.rankN)}</td>
         <td class="num">${M(RQ(s.qty))}${rb(s.rankQty)}<div class="dim hx-share">${s.share.toFixed(1)}٪</div></td>
@@ -2236,8 +2238,9 @@
     if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(item()); }
     const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
       <textarea class="tp-textarea" id="mtxt" style="min-height:170px"></textarea>
-      <div class="tp-acts"><button class="tp-btn primary" data-mcopy>کپی متن</button><span class="dim" data-mmsg style="font-size:.85rem"></span></div>
-      <div class="tp-note" style="margin-top:8px">جای‌خالی‌ها با نام تأمین‌کننده و مشخصات همین قلم پر شده‌اند؛ متن را کپی کنید و در هر کانالی که خواستید بفرستید.</div>`, null, "بستن", "");
+      <div class="tp-acts"><button class="tp-btn primary" data-mcopy>کپی متن</button><button class="tp-btn" data-mlib title="قالب تازه بسازید یا قالب‌های خودتان را ویرایش کنید">📚 تعریف یا ویرایش قالب</button><span class="dim" data-mmsg style="font-size:.85rem"></span></div>
+      <div class="tp-note" style="margin-top:8px">جای‌خالی‌های {…} با نام تأمین‌کننده و اطلاعات همین درخواست (قلم، مقدار، واحد، مشخصات، مهلت و کارشناس) پر شده‌اند؛ متن را کپی کنید و در هر کانالی که خواستید بفرستید.</div>`, null, "بستن", "");
+    dlg.querySelector("[data-mlib]").onclick = () => { dlg.remove(); pickTemplate(); };
     const paint = (i) => {
       dlg.querySelectorAll("[data-mt]").forEach((x) => x.classList.toggle("on", +x.dataset.mt === i));
       dlg.querySelector("#mtxt").value = fillTpl(S.templates[i].body, s.name);
@@ -2361,10 +2364,9 @@
   const dcSup = (sid) => { const D = dcOf(item()); return D && D.list ? D.list.find((x) => x.sid === sid) : null; };
   const dcInQuotes = (it, name) => S.d.quotes.some((q) => q.item_id === it.id && TP.nrm(q.supplier_name) === TP.nrm(name));
   function dcDetail(it, x, D) {
-    const pk = pkEditable(it), inPk = pkHas(it, x.name);
-    const acts = `${pk && !inPk ? `<button class="tp-btn sm primary" data-dc-pick="${esc(x.sid)}">🎯 به فهرست دعوت</button>` : ""}
-      ${dcInQuotes(it, x.name) ? "" : `<button class="tp-btn sm" data-dc-add="${esc(x.sid)}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">➕ به استعلامات</button>`}
-      <button class="tp-btn sm" data-dc-msg="${esc(x.sid)}" title="قالب پیام با نام همین تأمین‌کننده پر می‌شود">✉️ پیام با قالب</button>
+    /* «✉️ پیام» و «🎯 دعوت» / «➕ افزودن» در خودِ ردیف‌اند؛ این‌جا فقط آنچه ردیف ندارد */
+    const pk = pkEditable(it);
+    const acts = `${pk && !dcInQuotes(it, x.name) ? `<button class="tp-btn sm" data-dc-add="${esc(x.sid)}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">➕ به استعلامات</button>` : ""}
       ${TP.supProfile && S.crReg ? `<button class="tp-btn sm" data-dc-prof="${esc(x.sid)}">👤 پروفایل و گراف</button>` : ""}
       <button class="tp-btn sm" data-dc-phone="${esc(x.sid)}" title="شماره در دفترچهٔ شماره‌ها با تیکِ «پنل» برای دعوت و پیامک">📇 ثبت شماره</button>`;
     const why = `<div class="dc-why-box"><dl class="dc-kv">
@@ -2381,24 +2383,33 @@
     }).join("");
     return `<div class="dc-det" id="dc-det-${esc(x.sid)}"><div class="toolrow" style="gap:6px;flex-wrap:wrap;padding-top:8px">${acts}</div>${why}<div class="dc-secs">${secs}</div></div>`;
   }
+  /* جدولِ کشف‌شده‌ها (آبان ۱۴۰۵، خواستهٔ مالک): ستون‌های جدا با عرضِ متناسب و بی اطلاعاتِ اضافه — رتبه، تأمین‌کننده، شهر/بازار، تناسب،
+     شماره‌ها (هر شماره در یک خط، با ☰ برای تیکِ تلگرام، واتساپ، بله، ایتا و روبیکا — همان مدلِ نتایج جستجو) و عمل‌ها (✉️ کپی پیام با
+     قالبِ پرشده، 🎯 دعوت یا ➕ افزودن). همهٔ اطلاعات با کلیک روی ردیف زیرش باز می‌شود. */
+  const dcPlace = (x) => {
+    const hub = dcFilled(x.hub) && !/^(شهر|استان)\s*:/.test(x.hub) ? x.hub : "";
+    return [x.city || (hub ? "" : x.province), hub && hub !== x.city ? hub : "", dcFx(x) ? x.country : ""].filter(dcFilled).join(" · ");
+  };
   function dcRow(it, x, D) {
-    const st = DC_ST[x.status] || [x.status || "—", ""], open = !!S.dcOpen[x.sid];
-    const ph = dcSplit(x.phones || "")[0] || dcSplit(x.mobiles || "")[0];
-    const place = [x.city, x.hub && x.hub !== x.city ? x.hub : ""].filter(dcFilled).join(" · ");
-    const type = (x.d || {}).supplier_type || "";
+    const open = !!S.dcOpen[x.sid], ck = `dc:${x.sid}`, tel = x.tel || [], chOpen = !!S.chOpen[ck];
     const pk = pkEditable(it);
-    const act = pk ? (pkHas(it, x.name) ? `<span class="chip info" title="در «🎯 فهرست دعوت»">🎯 در فهرست</span>` : `<button class="tp-btn xs primary" data-dc-pick="${esc(x.sid)}" title="به «🎯 فهرست دعوت»">🎯 دعوت</button>`)
+    const add = pk ? (pkHas(it, x.name) ? `<span class="chip info" title="در «🎯 فهرست دعوت»">🎯 در فهرست</span>` : `<button class="tp-btn xs primary" data-dc-pick="${esc(x.sid)}" title="به «🎯 فهرست دعوت»">🎯 دعوت</button>`)
       : dcInQuotes(it, x.name) ? `<span class="chip ok">در استعلامات</span>` : `<button class="tp-btn xs" data-dc-add="${esc(x.sid)}" title="نام تأمین‌کننده وارد تب استعلامات می‌شود">➕ افزودن</button>`;
+    const marks = (k) => PLATS.filter(([p]) => ["ok", "no"].includes((S.chan[k] || {})[p])).map(([p, l]) => `<span class="chm ${S.chan[k][p]}" title="${l}">${S.chan[k][p] === "ok" ? "✓" : "✗"}${l}</span>`).join("");
+    const tri = (k, p, l) => { const st = TRI[(S.chan[k] || {})[p]] ? S.chan[k][p] : "unk"; return `<button class="tri ${TRI[st][1]}" data-ch="${esc(k)}|${p}" title="${l}">${TRI[st][0]}</button>`; };
+    const phones = tel.length ? `<div class="phcell"><button class="tp-btn xs hamb ${chOpen ? "on" : ""}" data-chopen="${esc(ck)}" title="بررسی تلگرام، واتساپ، بله، ایتا و روبیکا">☰</button><div>${tel.map((p) => `<div class="num" dir="ltr" title="${esc(p.raw)}">${esc(p.disp)}</div>${marks(p.key) ? `<div class="chms">${marks(p.key)}</div>` : ""}`).join("")}</div></div>` : `<span class="dim">—</span>`;
+    const checks = chOpen && tel.length ? `<tr class="chrow"><td></td><td colspan="5"><table class="chx"><thead><tr><th class="rt">شماره</th>${PLATS.map(([, l]) => `<th>${l}</th>`).join("")}<th class="rt"></th></tr></thead><tbody>
+      ${tel.map((p) => { const c = S.chan[p.key] || {}; return `<tr><td class="num rt" dir="ltr">${esc(p.disp)}</td>${PLATS.map(([pl, l]) => `<td>${tri(p.key, pl, l)}</td>`).join("")}<td class="dim rt" style="font-size:.72rem">${c.updated_by ? `آخرین بررسی: ${esc(c.updated_by)}${c.updated_at ? " — " + TP.fmt(c.updated_at) : ""}` : ""}</td></tr>`; }).join("")}
+      </tbody></table></td></tr>` : "";
     const text = [x.name, (x.d || {}).brand_name, (x.d || {}).legal_name, (x.d || {}).latin_name, x.city, x.hub, x.province, (x.d || {}).products, (x.d || {}).brands].filter(Boolean).join(" ");
-    return `<div class="dc-row" data-dc-text="${esc(TP.nrm(text))}">
-      <div class="dc-h" data-dc-row="${esc(x.sid)}" role="button" tabindex="0" aria-expanded="${open}" aria-controls="dc-det-${esc(x.sid)}">
-        <span class="dc-rk ${x.rank <= 10 ? "top" : ""}" title="رتبه در این نوع قلم">${M(x.rank)}</span>
-        <span class="dc-who"><b>${esc(x.name)}${dcFx(x) ? `<span class="dc-flag">${esc(x.country)}</span>` : ""}</b><small>${esc([x.role, type.indexOf("واحد صنفی") === 0 ? "واحد صنفی" : type].filter(dcFilled).join(" · "))}</small></span>
-        <span class="dc-where">${esc(place || "—")}</span>
-        <span class="dc-tags"><span class="chip ${x.fit === "اصلی" ? "ok" : ""}">${esc(x.fit)}</span><span class="chip ${st[1]}">${esc(st[0])}</span></span>
-        <span class="dc-ct">${ph ? `<span class="num" dir="ltr">${esc(ph)}</span>` : `<span class="no">بی تلفن</span>`}${dcFilled(x.mobiles) ? "<i>همراه</i>" : ""}${dcFilled((x.d || {}).website) ? "<i>سایت</i>" : ""}${dcFilled((x.d || {}).email) ? "<i>ایمیل</i>" : ""}</span>
-        <span class="dc-acts">${act}<span class="dim" aria-hidden="true">${open ? "▴" : "▾"}</span></span>
-      </div>${open ? dcDetail(it, x, D) : ""}</div>`;
+    return `<tbody class="dc-row" data-dc-text="${esc(TP.nrm(text))}"><tr class="dc-tr ${open ? "on" : ""}" data-dc-row="${esc(x.sid)}" tabindex="0" aria-expanded="${open}" aria-controls="dc-det-${esc(x.sid)}">
+        <td class="num"><span class="dc-rk ${x.rank <= 10 ? "top" : ""}" title="رتبه در این نوع قلم">${M(x.rank)}</span></td>
+        <td class="rt"><b>${esc(x.name)}</b></td>
+        <td class="rt dim">${esc(dcPlace(x) || "—")}</td>
+        <td><span class="chip ${x.fit === "اصلی" ? "ok" : ""}">${esc(x.fit)}</span></td>
+        <td class="rt">${phones}</td>
+        <td class="dc-acts"><button class="tp-btn xs" data-dc-msg="${esc(x.sid)}" title="قالب‌های پیام با نامِ همین تأمین‌کننده و اطلاعاتِ درخواست پر می‌شوند؛ متن را کپی کنید">✉️ پیام</button>${add}<span class="dim" aria-hidden="true">${open ? "▴" : "▾"}</span></td></tr>
+      ${checks}${open ? `<tr class="dc-dtr"><td colspan="6">${dcDetail(it, x, D)}</td></tr>` : ""}</tbody>`;
   }
   function dcBlock(it) {
     const D = dcOf(it);
@@ -2408,18 +2419,17 @@
     const head = `<div class="dc-head"><b>🗂 تأمین‌کنندگان کشف‌شده</b><span class="dim">${D.cluster_name ? `${esc(D.cluster_name)} · ` : ""}${D.head ? `تا ۴۰ نفرِ برترِ ردنشدهٔ نوع قلم «${esc(D.head)}» در تحقیقِ کشفِ تأمین‌کننده` : "تحقیقِ کشفِ تأمین‌کننده"}</span>${TP.ui.info("expert.smart", "راهنمای تأمین‌کنندگان کشف‌شده")}</div>`;
     if (!L.length) return `<div class="dc">${head}<div class="dc-none">${D.unit_key ? `برای این نوع قلم در تحقیق تأمین‌کننده‌ای پیدا نشد.` : "این قلم در دادهٔ تحقیقِ کشفِ تأمین‌کننده نیست."}</div></div>`;
     const n = (fn) => L.filter(fn).length;
-    const fxN = n(dcFx), hubs = {};
-    for (const x of L) if (dcFilled(x.hub)) hubs[x.hub] = (hubs[x.hub] || 0) + 1;
-    const topHub = Object.keys(hubs).sort((a, b) => hubs[b] - hubs[a])[0];
+    const fxN = n(dcFx), hasTel = (x) => (x.tel || []).length > 0;
     const sum = `<div class="dc-sum"><span class="chip">${M(L.length)} نفر</span><span class="chip ok">${M(n((x) => x.fit === "اصلی"))} تناسب اصلی</span>
-      ${n((x) => x.status === "تأییدشده") ? `<span class="chip ok">${M(n((x) => x.status === "تأییدشده"))} تأییدشده</span>` : ""}
-      <span class="chip">${M(n((x) => dcFilled(x.phones) || dcFilled(x.mobiles)))} با تلفن</span><span class="chip">${M(n((x) => dcFilled(x.mobiles)))} همراه</span>
-      ${fxN ? `<span class="chip warn">${M(fxN)} خارجی</span>` : ""}${topHub ? `<span class="chip">بازار غالب: ${esc(topHub)}</span>` : ""}</div>`;
+      <span class="chip">${M(n(hasTel))} با تلفن</span>${fxN ? `<span class="chip warn">${M(fxN)} خارجی</span>` : ""}</div>`;
     const segs = [["all", "همه"], ["exact", "تناسب اصلی"], ["phone", "با تلفن"], ...(fxN ? [["fx", "خارجی"]] : [])];
     const tools = `<div class="dc-tools"><input class="tp-input" type="search" data-dcq value="${esc(q)}" placeholder="جستجو در نام، شهر، بازار یا محصول" aria-label="جستجو در تأمین‌کنندگان کشف‌شده">
       <div class="tp-seg" role="group" aria-label="پالایهٔ تأمین‌کنندگان کشف‌شده">${segs.map(([k, l]) => `<button type="button" class="${f === k ? "on" : ""}" aria-pressed="${f === k}" data-dc-f="${k}">${l}</button>`).join("")}</div></div>`;
-    const rows = L.filter((x) => f === "all" || (f === "exact" ? x.fit === "اصلی" : f === "phone" ? dcFilled(x.phones) || dcFilled(x.mobiles) : dcFx(x)));
-    return `<div class="dc" data-keep-scroll>${head}${sum}${tools}<div class="dc-rows" role="list">${rows.map((x) => dcRow(it, x, D)).join("") || `<div class="dc-none">با این پالایه کسی نماند.</div>`}</div>
+    const rows = L.filter((x) => f === "all" || (f === "exact" ? x.fit === "اصلی" : f === "phone" ? hasTel(x) : dcFx(x)));
+    return `<div class="dc" data-keep-scroll>${head}${sum}${tools}
+      ${rows.length ? `<div class="tp-scroll"><table class="tp-table dct"><colgroup><col style="width:48px"><col style="width:24%"><col style="width:18%"><col style="width:80px"><col style="width:23%"><col style="width:190px"></colgroup>
+        <thead><tr><th>رتبه</th><th class="rt">تأمین‌کننده</th><th class="rt">شهر / بازار</th><th>تناسب</th><th class="rt">شماره تماس</th><th>عمل</th></tr></thead>
+        ${rows.map((x) => dcRow(it, x, D)).join("")}</table></div>` : `<div class="dc-none">با این پالایه کسی نماند.</div>`}
       <div class="dc-none" data-dc-empty hidden>با این جستجو کسی پیدا نشد.</div></div>`;
   }
   /** جستجوی درونِ فهرست بی بازرندر (فوکوسِ کادر نمی‌پرد) */
@@ -2676,7 +2686,7 @@
         <span class="dim" style="font-size:.85rem">${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
       ${Q.length ? `<div class="qsrc-legend" aria-label="منبعِ خانه‌ها"><span><i class="qsrc s-manual">✋</i> دستی</span><span><i class="qsrc s-bundle_ai">🤖</i> بستهٔ مذاکرهٔ هوشمند</span><span><i class="qsrc s-bundle">📦</i> بستهٔ پنلِ تأمین‌کننده</span><span><i class="qsrc s-pf">📄</i> خوانشِ پیش‌فاکتور</span><span><i class="qsrc s-pf_off">🧾</i> پیش‌فاکتورِ رسمی</span><span><i class="qsrc s-tender">🏷</i> مناقصه</span><span><i class="qsrc s-company">🏢</i> شرطِ شرکت</span></div>
         <div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
-        <th>تأیید نهایی</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
+        <th${manualA() ? ' title="اختیاری: بی تیک، همهٔ «ثبت موقت»ها به جدول کمیسیون می‌روند؛ اگر برای قلمی تیک بزنید، فقط تیک‌خورده‌های همان قلم"' : ""}>تأیید نهایی${manualA() ? OPTL : ""}</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => { const ed = qEditable(q); return `<tr>
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""} ${q.ai ? "disabled title=\"خطِ کارشناس هوشمند — تأیید نهایی‌اش با خودِ اوست\"" : ""}></td>
           <td class="rt">${esc(q.supplier_name)}${ed ? `<input class="tp-input qcode num" data-qf="${q.id}|supplier_code" data-opt="1" value="${esc(q.supplier_code || "")}" placeholder="کد (اختیاری)" title="کد تأمین‌کننده — برای همهٔ خط‌های همین تأمین‌کننده" aria-label="کد تأمین‌کننده">` : q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : q.origin === "tender" ? `<div><span class="chip" title="از مناقصهٔ آنلاین">مناقصه</span></div>` : ""}${q.ai_live ? `<div><span class="chip info" title="کارشناس هوشمند همین حالا با این تأمین‌کننده مذاکره می‌کند؛ تا پایانِ مذاکره یا «🚨 باز کردن» دستی عوض نمی‌شود">🤖 در حالِ مذاکره</span></div>` : q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ مذاکره‌اش تمام شده و خانه‌ها دستی هم ویرایش می‌شوند">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
@@ -2826,12 +2836,15 @@
     const d = TP.modal("🧾 پیش‌فاکتورِ رسمی", body + (r.info && r.info.length ? `<div class="dim" style="font-size:.8rem">${r.info.map((x) => esc(x.msg)).join("<br>")}</div>` : ""), () => decide(true), r.state === "ask" ? "✅ جایگزین شود و ثبت" : "✅ ثبت", r.state === "ask" ? "✖ نه" : "انصراف");
     if (r.state === "ask") { const n = d.querySelector("[data-n]"); if (n) n.addEventListener("click", () => decide(false)); }
   }
+  /* درخواستِ دستی (آبان ۱۴۰۵، خواستهٔ مالک): رسیدن به حداقلِ «ثبت موقت» کافی است؛ «تأیید نهایی» اختیاری است و اگر برای قلمی بخورد فقط
+     تیک‌خورده‌های همان قلم به جدول می‌روند (worker/sheets.js:commissionData) */
+  const manualA = () => !(S.d && S.d.ai && S.d.ai.req);
   function vGuard() {
-    const g = guardCheck(), ok = !g.miss.length && g.fin > 0;
+    const g = guardCheck(), ok = !g.miss.length && (g.fin > 0 || manualA());
     const fc = vFinalCall(ok), block = fcBlocks();
     if (aiEnd()) return `<div class="tp-status" style="margin-top:14px"><b>🤖 جدول کمیسیون با کارشناس هوشمند</b><span class="sp">در پایانِ کار، با خط‌های تأییدنهایی‌شده — از جمله خط‌های دستیِ شما.</span>${TP.ui.info("expert.ai")}</div>${fc}`;
     return `${fc}<div class="toolrow" style="margin-top:14px;align-items:flex-start"><button class="tp-btn ${block ? "" : "primary"}" data-make-comm ${ok && !block ? "" : "disabled"}${block ? ' title="بعد از بسته شدنِ «📦 بستهٔ کمیسیون»"' : ""}>تولید جدول کمیسیون</button>
-      <div style="font-size:.9rem">${g.fin ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
+      <div style="font-size:.9rem">${g.fin || manualA() ? "" : `<div style="color:#fca5a5">حداقل یک استعلام باید تیک «تأیید نهایی» بخورد.</div>`}
       ${g.miss.length ? `<div style="color:#fca5a5">این اقلام هنوز به حداقلِ استعلامِ ردهٔ خود نرسیده‌اند؛ استعلامِ بیشتر بگیرید ${TP.ui.info("expert.quotes", "راهنمای حداقل استعلام")}</div><div class="muted">${g.miss.map((m) => `• ${esc(m.t)} (ردهٔ «${SZ_FA[m.cat] || "جزئی"}»: ${m.n} از ${m.k})${m.why ? ` <span class="dim" style="font-size:.8rem">— ${esc(m.why)}</span>` : ""}`).join("<br>")}</div>` : `<div style="color:#6ee7b7">همه ${openItems().length} قلم باز به حداقل استعلامشان رسیده‌اند.</div>`}</div></div>`;
   }
 
@@ -2839,7 +2852,8 @@
      پیش‌نمایش، دانلود و چاپ هر سه از سرور می‌آیند — از همان مدلی که فایل اکسل و Word را
      می‌سازد — تا آنچه دیده و چاپ می‌شود عیناً همان فایل‌ها باشد. */
   function commData() {
-    const sup = []; S.d.quotes.filter((q) => q.final && q.saved).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {} }; sup.push(g); } g.rows[q.item_id] = q; });
+    const picked = new Set(S.d.quotes.filter((q) => q.final && q.saved).map((q) => q.item_id));
+    const sup = []; S.d.quotes.filter((q) => q.saved && (q.final || (manualA() && !picked.has(q.item_id)))).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {} }; sup.push(g); } g.rows[q.item_id] = q; });
     return { sup };
   }
   const sheetsFor = () => (S.sheets && S.d && S.sheets.aid === A().id && S.sheets.at === S.d.loadedAt ? S.sheets : null);
@@ -2854,7 +2868,7 @@
   }
   function vComm() {
     const a = A(), r = S.d.request;
-    if (!a.commission_at) return `<div class="pad"><div class="empty"><b>جدول کمیسیون هنوز ساخته نشده.</b>از تب استعلامات، تأمین‌کنندگان منتخب را «تأیید نهایی» کنید و «تولید جدول کمیسیون» را بزنید.</div></div>`;
+    if (!a.commission_at) return `<div class="pad"><div class="empty"><b>جدول کمیسیون هنوز ساخته نشده.</b>${manualA() ? "در تب استعلامات خط‌ها را «ثبت موقت» کنید؛ وقتی هر قلم به حداقلِ استعلامش رسید «تولید جدول کمیسیون» را بزنید." : "از تب استعلامات، تأمین‌کنندگان منتخب را «تأیید نهایی» کنید و «تولید جدول کمیسیون» را بزنید."}</div></div>`;
     const d = commData();
     if (!d.sup.length) return `<div class="pad"><div class="empty">هیچ استعلام تأییدنهایی‌شده‌ای نیست.</div></div>`;
     const sh = sheetsFor();
@@ -3517,6 +3531,7 @@
     const ppa = G("[data-pp-add]"); if (ppa) ppa.onclick = () => addSpPhone(ppa);
     Q("[data-buys]").forEach((b) => b.onclick = () => showBuys(b.dataset.buys));
     Q("[data-to-quote]").forEach((b) => b.onclick = () => addFromHistory(b.dataset.toQuote));
+    Q("[data-hist-msg]").forEach((b) => b.onclick = () => { const x = supOf(b.dataset.histMsg); if (x) msgFor(x.name); });
     const rs = G("[data-run-smart]"); if (rs) rs.onclick = runSmart;
     Q("[data-mark]").forEach((b) => b.onclick = async () => { const it = item(); try { await TP.api(`/items/${it.id}/progress`, { body: { stage: b.dataset.mark } }); await reload(); okTick("انجام‌شده ثبت شد"); } catch (e) { TP.modal("نشد", esc(e.message), null, "باشد", ""); } });
     /* قیدهای جستجوی هوشمند — بدون بازرندر حین تایپ تا فوکوس نپرد؛ state همان لحظه به‌روز است */

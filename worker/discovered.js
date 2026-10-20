@@ -14,6 +14,28 @@
 import { HttpError } from "./http.js";
 import { researchHead, codeRow } from "./cr-engine.js";
 import { headGuess } from "./ai-modes.js";
+import { phoneKey } from "./records.js";
+
+/* شماره‌های دفتر: «۰۲۱-۶۶۶۴۴۹۹۹، ۰۹۱۲…» ← [{raw, disp, key}] — key همان کلیدِ پیام‌رسان‌های هر شماره (records.js:phoneKey) و disp
+   نمایشِ یکدست (همراه «0912 508 1351»، ثابت «021 6664 4999»، بقیه همان رقم‌ها) */
+const MARKET = (country) => { const c = T(country); return !c || c === "ایران" ? "ایران" : c.startsWith("امارات") ? "امارات" : c; };
+const latin = (s) => String(s).replace(/[۰-۹]/g, (d) => String(d.charCodeAt(0) - 1776)).replace(/[٠-٩]/g, (d) => String(d.charCodeAt(0) - 1632));
+export function phoneList(raw, country) {
+  const out = [], seen = new Set();
+  for (const part of latin(raw == null ? "" : raw).split(/\s*[،,؛;/\n]+\s*/)) {
+    const p = part.trim();
+    if (!/\d{5,}/.test(p.replace(/[\s\-()]/g, ""))) continue;
+    const key = phoneKey(p, MARKET(country));
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    const d = p.replace(/[^\d+]/g, "");
+    const disp = /^09\d{9}$/.test(d) ? `${d.slice(0, 4)} ${d.slice(4, 7)} ${d.slice(7)}`
+      : /^0\d{10}$/.test(d) ? `${d.slice(0, 3)} ${d.slice(3, 7)} ${d.slice(7)}`
+      : /^\+\d{8,}$/.test(d) ? d : p;
+    out.push({ raw: p, disp, key });
+  }
+  return out;
+}
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -117,7 +139,10 @@ export async function discoveredFor(env, it) {
     const v = status === "تأییدشده" ? 2 : Number(r.verification ?? 0);
     if (v < 0) continue;
     const f = fix.get(r.sid) || {};
-    out.list.push({ sid: r.sid, name: T(f.name) || r.name, fit: fit ? "اصلی" : "خانواده", rank: rank ?? null, status: status || null, score: score ?? null, p10: p10 ?? null,
+    const phones = f.phones != null ? T(f.phones) || null : r.phones || null, mobiles = f.mobiles != null ? T(f.mobiles) || null : r.mobiles || null;
+    out.list.push({
+      /* شماره‌های همراه اول، بعد ثابت — هر کدام با کلیدِ پیام‌رسان‌ها */
+      tel: [...phoneList(mobiles, r.country), ...phoneList(phones, r.country)].filter((x, i, a) => a.findIndex((y) => y.key === x.key) === i), sid: r.sid, name: T(f.name) || r.name, fit: fit ? "اصلی" : "خانواده", rank: rank ?? null, status: status || null, score: score ?? null, p10: p10 ?? null,
       lo: lo ?? null, hi: hi ?? null, basis: basis || null, quote: quote || null, url: url || null,
       hub: r.hub || null, province: r.province || null, city: r.city || null, role: r.role || null, country: r.country || null, verification: v,
       phones: f.phones != null ? T(f.phones) || null : r.phones || null, mobiles: f.mobiles != null ? T(f.mobiles) || null : r.mobiles || null,

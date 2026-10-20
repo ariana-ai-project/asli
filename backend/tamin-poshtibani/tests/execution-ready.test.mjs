@@ -101,7 +101,7 @@ test("درخواستِ بی «🤖» دستی ارسال می‌شود؛ با «
   assert.ok(await aiOwned(env, aid("R-A")));
 });
 
-test("روالِ دستیِ ساده: سه خطِ دستی ← ثبت موقت و تأیید نهایی ← جدول کمیسیون و فایلش", { skip: SKIP }, async () => {
+test("روالِ دستیِ ساده: سه خطِ دستی ← فقط «ثبت موقت» ← جدول کمیسیون و فایلش، بی «تأیید نهایی» و بی فراخوان", { skip: SKIP }, async () => {
   const EX = { "X-Expert-Code": code(1) };
   const aid = DB.raw.prepare("SELECT id FROM assignments WHERE request_id='R-M'").get().id;
   const det = await call(`/assignments/${aid}`, { headers: EX });
@@ -113,22 +113,25 @@ test("روالِ دستیِ ساده: سه خطِ دستی ← ثبت موقت �
     assert.equal(q.status, 200, JSON.stringify(q.data));
     ids.push(DB.raw.prepare("SELECT id FROM quotes WHERE assignment_id=? AND supplier_name=?").get(aid, name).id);
   }
+  /* آبان ۱۴۰۵ (خواستهٔ مالک): در دستی حداقلِ «ثبت موقت» کافی است — «تأیید نهایی» اختیاری و «📨 فراخوانِ پیش‌فاکتورِ رسمی» نیست */
   for (const id of ids) {
-    const s = await call(`/quotes/${id}`, { method: "PUT", headers: EX, body: { save: true, final: 1 } });
+    const s = await call(`/quotes/${id}`, { method: "PUT", headers: EX, body: { save: true } });
     assert.equal(s.status, 200, JSON.stringify(s.data));
   }
-  /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» پیش‌فرض روشن است: جدول تا فراخوان نیست باز نمی‌شود (اصطکاکِ ثبت‌شده در گزارش کنترل کیفیت) */
-  const blocked = await call(`/assignments/${aid}/commission`, { headers: EX, body: {} });
-  assert.equal(blocked.status, 409, JSON.stringify(blocked.data));
-  /* «فقط درخواست‌های هوشمند»: دستی مستقیم به جدول می‌رسد، هوشمند هنوز فراخوان لازم دارد */
-  assert.equal((await call("/support/ai/final-call", { method: "PUT", headers: SUP, body: { cfg: { scope: "ai" } } })).status, 200);
+  const d2 = (await call(`/assignments/${aid}`, { headers: EX })).data;
+  assert.equal(d2.ai.req, false, "درخواستِ دستی");
+  assert.equal(d2.final_call.on, false, "کارتِ فراخوان برای دستی پنهان");
+  assert.equal(await callGuard(env, aid), null);
+  const fc = await call(`/assignments/${aid}/final-call`, { headers: EX, body: {} });
+  assert.equal(fc.status, 409);
+  assert.match(fc.data.error, /دستی فراخوانِ پیش‌فاکتورِ رسمی ندارد/);
+  /* درخواستِ هوشمند هنوز فراخوان لازم دارد */
   const aiAid = DB.raw.prepare("SELECT id FROM assignments WHERE request_id='R-A'").get().id;
   await assert.rejects(callGuard(env, aiAid), /فراخوان/);
-  assert.equal(await callGuard(env, aid), null);
-  assert.equal((await call(`/assignments/${aid}`, { headers: EX })).data.final_call.on, false, "کارتِ فراخوان برای دستی پنهان");
   const ok = await call(`/assignments/${aid}/commission`, { headers: EX, body: {} });
   assert.equal(ok.status, 200, JSON.stringify(ok.data));
   assert.ok(ok.data.commission_no);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM quotes WHERE assignment_id=? AND commission_at IS NOT NULL").get(aid).n, 3, "هر سه «ثبت موقت» در جدول");
   const f = await call(`/assignments/${aid}/sheet/commission`, { headers: EX });
   assert.equal(f.status, 200);
   assert.ok(f.data.byteLength > 1000, "فایل جدول کمیسیون");

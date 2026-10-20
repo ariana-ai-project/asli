@@ -34,6 +34,7 @@ import * as P from "./sp-push.js";
 import * as C from "./sp-core.js";
 import { combineLocks, violations, PRICE_FA, CREDIT_MONTHS } from "./terms-locks.js";
 import { mergeSrc } from "./quote-src.js";
+import { aiReqOn } from "./ai-lock.js";
 import { normalizeDtime, validDtime } from "./quote-rules.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
@@ -65,13 +66,12 @@ export const FC_DDL = [
 /* تنظیمات (پنل پشتیبانی — «🎛 کلیدها»)                                   */
 /* ------------------------------------------------------------------ */
 export const FC_KEY = "finalCall";
-export const FC_DEFAULT = { on: true, window_h: 24, min_valid_h: 24, send_lowest: true, scope: "all" };
+export const FC_DEFAULT = { on: true, window_h: 24, min_valid_h: 24, send_lowest: true };
 export const FC_FA = {
-  on: "فراخوانِ پیش‌فاکتورِ رسمی پیش از کمیسیون — روشن (پیش‌فرض): با رسیدن به حداقلِ استعلام، به تأمین‌کنندگانِ تأییدنهایی پیامک می‌رود و جدول کمیسیون بعد از بسته شدنِ «📦 بستهٔ کمیسیون» ساخته می‌شود؛ خاموش: جدول کمیسیون مستقیم.",
+  on: "فراخوانِ پیش‌فاکتورِ رسمی پیش از کمیسیون، فقط برای درخواست‌های هوشمند (درخواستِ دستی فراخوان ندارد) — روشن (پیش‌فرض): با رسیدن به حداقلِ استعلام، به تأمین‌کنندگانِ تأییدنهایی پیامک می‌رود و جدول کمیسیون بعد از بسته شدنِ «📦 بستهٔ کمیسیون» ساخته می‌شود؛ خاموش: جدول کمیسیون مستقیم.",
   window_h: "مهلتِ فرستادنِ پیش‌فاکتورِ رسمی پس از لحظهٔ تصمیم (ساعت)",
   min_valid_h: "کمینهٔ اعتبارِ پیش‌فاکتورِ رسمی پس از ورود به کمیسیون (ساعت)",
   send_lowest: "کمترین قیمتِ رسیده در پیامک («می‌توانید قیمت نهایی‌تان را اعلام کنید»)",
-  scope: "فقط درخواست‌های هوشمند — درخواستِ دستی جدول کمیسیون را مستقیم می‌سازد (روالِ سادهٔ کارشناس، آبان ۱۴۰۵)",
 };
 const hrs = (v, d, lo, hi) => {
   const s = v == null ? "" : String(v).replace(/[۰-۹]/g, (x) => FA.indexOf(x)).trim();
@@ -80,18 +80,12 @@ const hrs = (v, d, lo, hi) => {
 };
 function cleanCfg(x) {
   const v = x && typeof x === "object" ? x : {};
-  return { on: v.on !== false, window_h: hrs(v.window_h, FC_DEFAULT.window_h, 1, 240), min_valid_h: hrs(v.min_valid_h, FC_DEFAULT.min_valid_h, 0, 720), send_lowest: v.send_lowest !== false,
-    scope: v.scope === "ai" ? "ai" : "all" };
+  return { on: v.on !== false, window_h: hrs(v.window_h, FC_DEFAULT.window_h, 1, 240), min_valid_h: hrs(v.min_valid_h, FC_DEFAULT.min_valid_h, 0, 720), send_lowest: v.send_lowest !== false };
 }
-/** درخواستِ دستِ کارشناس هوشمند؟ (همان قاعدهٔ ai-lock.js:AI_OWNED_SQL، بی ایمپورت) — برای scope «ai» */
-async function aiAsg(env, aid) {
-  const r = await env.DB.prepare("SELECT a.ai_on, g.mode FROM assignments a LEFT JOIN ai_agents g ON g.expert_id=a.expert_id WHERE a.id=?").bind(aid).first().catch(() => null);
-  return !!(r && r.mode === "on" && (r.ai_on == null ? 1 : Number(r.ai_on)) === 1);
-}
-/** فراخوان برای این ارجاع لازم است؟ — روشن و (همه، یا فقط هوشمند و این هوشمند است) */
+/** فراخوان برای این ارجاع لازم است؟ — روشن و درخواستِ هوشمند؛ درخواستِ دستی فراخوان ندارد (آبان ۱۴۰۵، خواستهٔ مالک) */
 async function callNeeded(env, cfg, aid) {
   if (!cfg.on) return false;
-  return cfg.scope !== "ai" || await aiAsg(env, aid);
+  return aiReqOn(env, aid);
 }
 let cache = null;
 /** {on, window_h, min_valid_h, send_lowest, updated_at, by} — ۶۰ ثانیه در حافظهٔ isolate */

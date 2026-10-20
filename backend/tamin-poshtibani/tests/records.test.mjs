@@ -29,5 +29,5 @@ test("هر تأمین‌کننده کلید شماره‌هایش را هم‌ر
 test("کلید قلم: کد استاندارد، کد راهکاران و عنوان نرمال", () => {
   assert.equal(titleKey("  سيمان‌ فله  M400 "), "سیمان فله m400");
   assert.deepEqual(itemKeys({ title: "سیمان فله", code: "1010", hist_code: null }), { item_code: "1010", hist_code: null, title_n: "سیمان فله" });
-  assert.deepEqual(PLATFORMS, ["telegram", "whatsapp", "bale", "rubika"]);
+  assert.deepEqual(PLATFORMS, ["telegram", "whatsapp", "bale", "eitaa", "rubika"]);
 });

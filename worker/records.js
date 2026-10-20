@@ -143,7 +143,8 @@ export async function backfillSearchKeys(env) {
 /* پیام‌رسان‌های هر شماره                                                */
 /* ------------------------------------------------------------------ */
 
-export const PLATFORMS = ["telegram", "whatsapp", "bale", "rubika"];
+/* ایتا (آبان ۱۴۰۵، خواستهٔ مالک) میانِ بله و روبیکا — همان ترتیبِ ستون‌های پنل */
+export const PLATFORMS = ["telegram", "whatsapp", "bale", "eitaa", "rubika"];
 const STATES = ["ok", "no", "unk"];
 
 /** وضعیت ثبت‌شدهٔ شماره‌ها: { "+98912…": { telegram:"ok", whatsapp:"no", …, updated_at, updated_by } } */
@@ -258,21 +259,24 @@ export async function deleteQuotes(env, { ids, expertId, assignmentId, channel }
 }
 
 /**
- * عکسِ یک جدول کمیسیونِ ساخته‌شده: شماره، زمان، کارشناس، خط‌های تأییدنهایی و توضیحات.
+ * عکسِ یک جدول کمیسیونِ ساخته‌شده: شماره، زمان، کارشناس، خط‌های جدول و توضیحات — همان قاعدهٔ sheets.js:commissionData (درخواستِ دستی:
+ * «ثبت موقت»ها، یا فقط تیک‌خورده‌های قلمی که «تأیید نهایی» دارد؛ هوشمند: تأییدنهایی‌ها).
  * روی خود خط‌ها هم commission_at می‌نشیند — خطِ داخل آخرین جدول تاریخ دارد و بقیه NULL.
  */
-export async function commissionRecordStmts(env, aid, { no, expertId, channel, t }) {
+export async function commissionRecordStmts(env, aid, { no, expertId, channel, t, manual }) {
   const at = t || now();
   const [a, lines] = await Promise.all([
     env.DB.prepare("SELECT request_id, notes FROM assignments WHERE id=?").bind(aid).first(),
-    env.DB.prepare(`SELECT q.id, q.item_id, q.supplier_name, q.price, q.qty, q.unit, q.vat, q.origin, i.title
-      FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? AND q.saved=1 AND q.final=1 ORDER BY q.supplier_name, i.line_no`).bind(aid).all(),
+    env.DB.prepare(`SELECT q.id, q.item_id, q.supplier_name, q.price, q.qty, q.unit, q.vat, q.origin, q.final, i.title
+      FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? AND q.saved=1 ORDER BY q.supplier_name, i.line_no`).bind(aid).all(),
   ]);
-  const rows = lines.results || [];
+  const all = lines.results || [];
+  const picked = new Set(all.filter((r) => r.final).map((r) => r.item_id));
+  const rows = all.filter((r) => r.final || (manual && !picked.has(r.item_id))).map(({ final, ...r }) => r);
   return [
     env.DB.prepare("INSERT INTO commission_tables (assignment_id,request_id,commission_no,expert_id,at,channel,quote_ids_json,lines_json,notes) VALUES (?,?,?,?,?,?,?,?,?)")
       .bind(aid, a ? a.request_id : null, no || null, expertId || null, at, channel || "panel", JSON.stringify(rows.map((r) => r.id)), JSON.stringify(rows), a ? a.notes || null : null),
-    env.DB.prepare("UPDATE quotes SET commission_at=CASE WHEN saved=1 AND final=1 THEN ? ELSE NULL END WHERE assignment_id=?").bind(at, aid),
+    env.DB.prepare("UPDATE quotes SET commission_at=CASE WHEN id IN (SELECT value FROM json_each(?)) THEN ? ELSE NULL END WHERE assignment_id=?").bind(JSON.stringify(rows.map((r) => r.id)), at, aid),
   ];
 }
 

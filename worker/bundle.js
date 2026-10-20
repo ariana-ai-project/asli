@@ -18,6 +18,7 @@ import { jStr, fmtFa } from "./time.js";
 import { commissionRecordStmts } from "./records.js";
 import { itemNeeds } from "./ai-rules.js";
 import { getSizeRules, minQOf, sizeOfRial, SIZE_FA } from "./size.js";
+import { aiReqOn } from "./ai-lock.js";
 
 /** همهٔ داده‌های لازم برای برگه‌ها، با یک بار خواندن از دیتابیس */
 export async function bundleData(env, aid, settings, company) {
@@ -43,6 +44,8 @@ export async function bundleData(env, aid, settings, company) {
 
   return {
     assignment: a,
+    /* درخواستِ دستی: جدول کمیسیون از «ثبت موقت»ها (sheets.js:commissionData) */
+    manual: !(await aiReqOn(env, aid)),
     request: {
       id: a.req_id, date: a.req_date, party: a.party, party_type: a.party_type,
       center: a.center, requester: a.requester, buy_type: a.buy_type, buy_flow: a.buy_flow,
@@ -102,7 +105,10 @@ export async function commissionGuard(env, aid, settings) {
   const needs = await itemNeeds(env, [aid], its, need, null, sr);
   const missing = its.map((i) => ({ i, n: byItem.get(i.id) || 0, nd: needs.get(i.id) }))
     .filter((x) => x.n < x.nd.need).map((x) => ({ title: x.i.title, n: x.n, need: x.nd.need, cat: x.nd.cat, cat_fa: SIZE_FA[x.nd.cat], why: x.nd.why }));
-  return { need, missing, finals: (fin && fin.n) || 0 };
+  /* درخواستِ دستی (آبان ۱۴۰۵، خواستهٔ مالک): رسیدن به حداقلِ «ثبت موقت» کافی است و تیکِ «تأیید نهایی» لازم نیست — بی تیک، همهٔ
+     ثبت‌موقت‌ها به جدول می‌روند (sheets.js:commissionData)؛ درخواستِ هوشمند همچنان با خط‌های تأییدنهایی */
+  const manual = !(await aiReqOn(env, aid));
+  return { need, missing, finals: (fin && fin.n) || 0, manual };
 }
 /** «… (ردهٔ «بزرگ»: ۱ از ۵)، …» — اقلامِ کم برای پیام‌های خطا */
 const faD = (n) => String(n).replace(/\d/g, (d) => "۰۱۲۳۴۵۶۷۸۹"[d]);
@@ -156,7 +162,8 @@ export async function recordCommission(env, aid, { expertId, channel } = {}) {
   const t = Date.now();
   const no = await markCommission(env, aid, t);
   const size = await commissionSize(env, aid).catch((e) => { console.error("commission size", e && e.message); return null; });
-  await env.DB.batch([...await commissionRecordStmts(env, aid, { no, expertId, channel, t }),
+  const manual = !(await aiReqOn(env, aid));
+  await env.DB.batch([...await commissionRecordStmts(env, aid, { no, expertId, channel, t, manual }),
     ...(size ? [env.DB.prepare("UPDATE assignments SET size_cm=? WHERE id=?").bind(JSON.stringify(size), aid)] : [])]);
   return no;
 }

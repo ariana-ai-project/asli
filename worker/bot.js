@@ -1420,7 +1420,8 @@ async function makeTable(env, api, chat, ex, aid, messageId) {
   const d = await bundleData(env, aid, settings, env.COMPANY || "تونل سد آریانا");
   if (d.assignment.expert_id !== ex.id) { await api.sendMessage(chat, "این ارجاع متعلق به شما نیست."); return { ok: true }; }
   const g = await commissionGuard(env, aid, settings);
-  if (!g.finals) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
+  /* درخواستِ دستی: بی تیک هم همهٔ «ثبت موقت»ها به جدول می‌روند (worker/bundle.js:commissionGuard) */
+  if (!g.finals && !g.manual) return tableSelect(env, api, chat, ex, aid, messageId, "⛔ هیچ خطی انتخاب نشده؛ دست‌کم یکی را تیک بزنید.");
   if (g.missing.length) {
     return tableSelect(env, api, chat, ex, aid, messageId,
       `⛔ هر قلم باید به حداقلِ استعلامِ ردهٔ خودش (جزئی، متوسط، بزرگ، عمده — از بالاترین پیشنهادِ کل) از تأمین‌کنندگانِ مختلف برسد. این‌ها کم دارند؛ استعلامِ بیشتر بگیرید:\n`
@@ -2441,7 +2442,7 @@ const supPriceBot = (s) => (s.price && typeof s.price === "object" ? [s.price.te
  * نتیجهٔ یک جستجو: فقط فهرست تأمین‌کنندگان (هزینه به کاربر گفته نمی‌شود — تصمیم مدیر، مهر ۱۴۰۵). هیچ ردیفی کنار
  * گذاشته نمی‌شود؛ اگر در یک پیام جا نشد (سقف ۴۰۹۶ نویسهٔ تلگرام)، در پیام بعدی می‌آید.
  */
-const PLAT_FA = { telegram: "تلگرام", whatsapp: "واتساپ", bale: "بله", rubika: "روبیکا" };
+const PLAT_FA = { telegram: "تلگرام", whatsapp: "واتساپ", bale: "بله", eitaa: "ایتا", rubika: "روبیکا" };
 
 async function smartResultsMessage(env, api, chat, ex, it, params, out, opts = {}) {
   const result = withPhoneKeys(out.result) || {};

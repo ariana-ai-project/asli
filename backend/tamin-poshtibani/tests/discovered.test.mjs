@@ -12,7 +12,7 @@ import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { applyEdits, PICK_SRC_FA } from "../../../worker/ai-picks.js";
 import { supKey } from "../../../worker/cr-data.js";
-import { resetSgCache, gateMsg } from "../../../worker/discovered.js";
+import { resetSgCache, gateMsg, phoneList } from "../../../worker/discovered.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -98,6 +98,20 @@ test("فهرستِ کشف‌شده‌ها: ترتیبِ رتبه، رکوردِ 
   assert.equal(six.phones, "021-99998888");
   assert.equal(six.staff_phone, true);
   assert.ok(!D.list.some((x) => x.sid === "NEW-0005"));
+  /* آبان ۱۴۰۵: هر شماره جدا، با نمایشِ خوانا و کلیدِ یکتا؛ تیکِ پیام‌رسان‌ها (ایتا هم) روی همان کلید و برای همه پیش‌پر */
+  assert.deepEqual(a.tel.map((p) => [p.disp, p.key]), [["0912 111 0001", "+989121110001"], ["021 5555 0001", "+982155550001"]]);
+  assert.deepEqual(six.tel.map((p) => p.key), ["+982199998888"], "شمارهٔ اصلاح‌شدهٔ کارشناس");
+  const put = await call("/phones/channels", { method: "PUT", headers: EX1, body: { phone: a.tel[0].key, platform: "eitaa", state: "ok" } });
+  assert.equal(put.status, 200, JSON.stringify(put.data));
+  assert.equal((await call("/search/smart?item_id=91", { headers: EX1 })).data.channels["+989121110001"].eitaa, "ok");
+});
+
+test("شماره‌های کشف‌شده: جداکردن، رقمِ فارسی، تکراری و شمارهٔ خارجی", () => {
+  assert.deepEqual(phoneList("۰۹۱۲۱۲۳۴۵۶۷، 021-88776655 / 09121234567", "ایران").map((p) => [p.disp, p.key]),
+    [["0912 123 4567", "+989121234567"], ["021 8877 6655", "+982188776655"]]);
+  assert.deepEqual(phoneList("+971 4 123 4567", "امارات متحده عربی").map((p) => [p.disp, p.key]), [["+97141234567", "+97141234567"]]);
+  assert.deepEqual(phoneList("—", "ایران"), []);
+  assert.deepEqual(phoneList(null, null), []);
 });
 
 test("دروازه: ۱۰ کشف‌شده ← بسته (۴۰۹ با دلیل)؛ ۳ و صفر ← باز", { skip: SKIP }, async () => {

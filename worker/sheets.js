@@ -44,12 +44,17 @@ const HEAD_H = [0, 173.4, 100.2, 173.4, 120, 226.95, 213.6].map((h) => h * SCALE
 const ROW_H = 173.4 * SCALE, FIRST_ITEM_H = 212.25 * SCALE, DTIME_H = 248.25 * SCALE;
 const W = (w) => +(w * SCALE).toFixed(4);
 
-/** استعلام‌های تأییدنهایی به تفکیک تأمین‌کننده، و فقط قلم‌هایی که دست‌کم یکی‌شان قیمت داده (CM-05) */
-export function commissionData({ items, quotes, offpf }) {
+/**
+ * استعلام‌های جدول به تفکیک تأمین‌کننده، و فقط قلم‌هایی که دست‌کم یکی‌شان قیمت داده (CM-05). درخواستِ هوشمند: خط‌های «ثبت موقت + تأیید
+ * نهایی». درخواستِ دستی (manual، آبان ۱۴۰۵): «ثبت موقت»ها — قلمی که کارشناس برایش «تأیید نهایی» زده فقط با همان تیک‌خورده‌ها.
+ */
+export function commissionData({ items, quotes, offpf, manual }) {
   const groups = [];
   /* «فراخوانِ پیش‌فاکتورِ رسمی»: offpf — نامِ تأمین‌کنندگانی که هنگامِ ورود به کمیسیون پیش‌فاکتورِ رسمیِ معتبر دارند */
   const ok = new Set(offpf || []);
-  for (const q of (quotes || []).filter((x) => x.final && x.saved)) {
+  const picked = new Set((quotes || []).filter((x) => x.final && x.saved).map((x) => x.item_id));
+  const inTable = (x) => x.saved && (x.final || (manual && !picked.has(x.item_id)));
+  for (const q of (quotes || []).filter(inTable)) {
     let g = groups.find((x) => x.name === q.supplier_name);
     if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat, offpf: ok.has(q.supplier_name) }; groups.push(g); }
     g.rows[q.item_id] = q;

@@ -42,6 +42,10 @@ if (DB) {
   ins.run(11, "R-F", "a", 1, "کابل ۴ در ۲٫۵", 10, "متر", 1, norm("کابل"));
   ins.run(21, "R-L", "a", 1, "فیوز مینیاتوری", 5, "عدد", 2, norm("فیوز"));
   ins.run(31, "R-A", "a", 1, "پیچ M8", 20, "عدد", 3, norm("پیچ"));
+  /* آبان ۱۴۰۵: فراخوان فقط برای درخواستِ هوشمند است — کارشناسِ «انسانی» هم «هوشمند» است و همهٔ اقلامش «انجام دستی» (ai_off)، پس
+     فراخوان و جدول را خودش می‌زند؛ قلمِ منجمدی ندارد که کارِ تازه بسازد */
+  DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (2,'on',?,?)").run(t, t);
+  DB.raw.prepare("UPDATE items SET ai_off=1 WHERE assignment_id IN (1,2)").run();
 }
 
 /* ---------- دنیای بیرونِ بدلی ---------- */
@@ -128,7 +132,7 @@ test("قاعده (بی پایگاه داده): «معتبر تا» از سند،
   assert.doesNotMatch(callSmsText({ company: "x", offer_no: "1", deadline_at: at, min_valid_h: 24, lowest: [{ title: "a", price: 1 }], sendLowest: false }), /کمترین/);
 });
 
-test("کارِ دستی: حداقلِ استعلام ← جدول ۴۰۹ ← «📨 فراخوان»: پیامک با شمارهٔ پیشنهاد و کمترین قیمت، «شماره ندارم» برای کارشناس", { skip: SKIP }, async () => {
+test("کارِ کارشناس (درخواستِ هوشمند، اقلامِ «انجام دستی»): حداقلِ استعلام ← جدول ۴۰۹ ← «📨 فراخوان»: پیامک با شمارهٔ پیشنهاد و کمترین قیمت، «شماره ندارم» برای کارشناس", { skip: SKIP }, async () => {
   /* دو تأمین‌کنندهٔ پنل و یک تأمین‌کنندهٔ دستی (بی شماره) — هر سه تأیید نهایی */
   for (const [name, phone, price] of [["تأمین برق", "09120000601", 450000], ["برق دوم", "09120000602", 470000]]) {
     assert.equal((await call("/sp/x/send", { headers: HU, body: { assignment_id: 1, item_ids: [11], supplier_name: name, phone, label: "فروش" } })).status, 200);
@@ -281,7 +285,7 @@ test("«📤 ارسال» با «پیش‌فاکتورِ رسمی 🔒»: بی �
 
 test("کارشناس هوشمند: فراخوان در گامِ پایانی، منتظرِ مهلت، بعد بستن و ادامهٔ «شرح و نامه»؛ پنل پشتیبانی خاموش/روشن", { skip: SKIP }, async () => {
   const t = Date.now();
-  DB.raw.prepare("INSERT INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 60000, t);
+  DB.raw.prepare("INSERT OR REPLACE INTO ai_agents (expert_id,mode,on_at,updated_at) VALUES (1,'on',?,?)").run(t - 60000, t);
   DB.raw.prepare("INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,dtime,pay,invoice,vat,saved,final,final_at,source,origin,created_at,updated_at) VALUES (3,31,'پیچ‌سازان','عدد',20,3500,'7','نقدی','رسمی','دارد',1,1,?,'supplier','supplier',?,?)").run(t, t, t);
   DB.raw.prepare("INSERT INTO ai_runs (id,assignment_id,expert_id,request_id,state,data_json,next_at,created_at,updated_at) VALUES (9,3,1,'R-A','closing',?,0,?,?)")
     .run(JSON.stringify({ flow: 2, items: [{ id: 31, title: "پیچ M8" }], closing: { step: "call", why: "test" } }), t, t);
@@ -322,7 +326,7 @@ test("بات مکاتبات: فایل در پنجرهٔ فراخوان همان 
   resetFcCache();
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-B','1405/07/27','پروژهٔ بات')").run();
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (4,'R-B',2,5,?,?,?)").run(t, t + 9e8, t);
-  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (41,'R-B','a',1,'کابل ۴ در ۲٫۵',10,'متر','open',4,?)").run(norm("کابل"));
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json,ai_off) VALUES (41,'R-B','a',1,'کابل ۴ در ۲٫۵',10,'متر','open',4,?,1)").run(norm("کابل"));
   assert.equal((await call("/sp/x/send", { headers: HU, body: { assignment_id: 4, item_ids: [41], supplier_name: "ربات‌فروش", phone: "09120000801", label: "فروش" } })).status, 200);
   const th = threadOf(4, "ربات‌فروش"), H = await supplierSession("09120000801");
   assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { pay: "نقدی", vat: "دارد", invoice: "رسمی", dtime: "10", valid_days: 5 } })).status, 200);
@@ -354,7 +358,7 @@ test("تأمین‌کنندهٔ دستی با شماره در دفترچه: فر
   const t = Date.now();
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-K','1405/07/27','پروژهٔ دفترچه')").run();
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,deadline_at,created_at) VALUES (5,'R-K',2,5,?,?,?)").run(t, t + 9e8, t);
-  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (51,'R-K','a',1,'لوله ۲ اینچ',4,'شاخه','open',5,?)").run(norm("لوله"));
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json,ai_off) VALUES (51,'R-K','a',1,'لوله ۲ اینچ',4,'شاخه','open',5,?,1)").run(norm("لوله"));
   assert.equal((await call("/sp/x/phones", { headers: HU, body: { supplier_name: "لوله‌گستر", phone: "09120000951", label: "فروش", panel: true } })).status, 200);
   for (const [n, p] of [["لوله‌گستر", 900000], ["لوله دو", 920000], ["لوله سه", 950000]]) {
     DB.raw.prepare("INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,price,dtime,pay,invoice,vat,saved,final,final_at,created_at,updated_at) VALUES (5,51,?,'شاخه',4,?,'7','نقدی','رسمی','دارد',1,1,?,?,?)").run(n, p, t, t, t);
