@@ -753,8 +753,19 @@ export const lineMissing = (l) => [Number(l.qty) > 0 ? null : "مقدار", T(l.
 export const pricesOf = (l) => { const p = parse(l && l.prices_json, null); return p && typeof p === "object" && Object.keys(p).length ? p : null; };
 /** قیمت‌های مؤثر: prices_json، وگرنه (خطِ پیش از «قیمتِ نقدی و اعتباری» یا کلاینتِ قدیمی که فقط price می‌فرستد) همان یک قیمت در ردیفِ اولِ حالت */
 export const pricesEff = (l, pm) => pricesOf(l) || (pm && Number(l && l.price) > 0 ? { [priceRows(pm)[0]]: Number(l.price) } : null);
-/** شرایط تسویهٔ قلمِ چندقیمتی از خودِ قیمت‌هاست: «نقدی» اگر قیمتِ نقد دارد، وگرنه «اعتباری» */
-const withPay = (t, pm, l) => (pm ? { ...t, pay: Number((pricesEff(l, pm) || {}).cash) > 0 ? "نقدی" : "اعتباری" } : t);
+/** شرایط تسویهٔ قلمِ چندقیمتی از خودِ قیمت‌هاست: «نقدی» اگر نقد خواسته شده و قیمتش آمده، وگرنه «اعتباری» — تأمین‌کننده واردش نمی‌کند
+    (آبان ۱۴۰۵: پیش‌تر قیمتِ نقدِ قلمی که فقط «اعتباری» بود، تسویه را «نقدی» می‌کرد و ارسال با قفل گیر می‌کرد) */
+const withPay = (t, pm, l) => (pm ? { ...t, pay: pm.cash && Number((pricesEff(l, pm) || {}).cash) > 0 ? "نقدی" : "اعتباری" } : t);
+/** قفلِ اقلام برای شرایطِ گفت‌وگو: تسویهٔ اقلامِ چندقیمتی از قیمت‌های خودشان است، پس قفلِ «تسویه» فقط از اقلامِ تک‌قیمتی می‌آید */
+function lockForTerms(lines, lim) {
+  const r = lockOfLines(lines, lim);
+  if (!lines.some((l) => payModes(lim.get(l.item_id)))) return r;
+  const single = lines.filter((l) => !payModes(lim.get(l.item_id)));
+  const sp = single.length ? lockOfLines(single, lim) : { lock: {}, conflict: [] };
+  const lock = { ...r.lock };
+  if (sp.lock.pay) lock.pay = sp.lock.pay; else delete lock.pay;
+  return { lock, conflict: r.conflict.filter((f) => f !== "pay" || sp.conflict.includes("pay")) };
+}
 
 /** حالتِ مکاتباتِ گفت‌وگوی کارشناس هوشمند برای صفحه: مهلتِ کارشناس، و «⏸ بی‌مهلت» با علتش (تنظیمِ خودش یا «حالت کار»ِ نوع قلم) */
 async function watchMode(env, th) {
@@ -1103,6 +1114,10 @@ export async function lineSave(env, sup, lineId, b) {
       P[ck] = Math.round(Number(P.cash) * (1 + r / 100));
     }
     for (const m of CREDIT_MONTHS) P[`r${m}`] = Number(P.cash) > 0 && Number(P[`c${m}`]) > 0 ? Math.round((Number(P[`c${m}`]) / Number(P.cash) - 1) * 1000) / 10 : null;
+    /* ردیفی که این قلم نخواسته (مثلاً قیمتِ نقد برای قلمِ «فقط اعتباری») نگه داشته نمی‌شود — همان که ارسال را گیر می‌انداخت */
+    const pmL = payModes((await limitsOfLines(env, [l])).get(l.item_id));
+    if (pmL) for (const k of ["cash", "c1", "c2"]) if (!priceRows(pmL).includes(k)) delete P[k];
+    for (const m of CREDIT_MONTHS) if (pmL && !priceRows(pmL).includes(`c${m}`)) delete P[`r${m}`];
     const clean = Object.fromEntries(Object.entries(P).filter(([, v]) => v != null && !Number.isNaN(Number(v))));
     sets.push("prices_json=?"); args.push(["cash", "c1", "c2"].some((k) => clean[k]) ? JSON.stringify(clean) : null);
     if (!("price" in b)) { sets.push("price=?"); args.push(clean.cash ?? clean.c1 ?? clean.c2 ?? null); }
@@ -1148,7 +1163,10 @@ export async function termsSave(env, sup, thId, b) {
      اقلامش با هم نمی‌خوانند این‌جا آزاد است و هنگامِ «ارسال» برای همان اقلامِ ارسالی سنجیده می‌شود */
   const ls = ((await env.DB.prepare("SELECT item_id, state FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).filter((l) => LINE_EDITABLE.includes(l.state));
   if (ls.length) {
-    const { lock, conflict } = lockOfLines(ls, await limitsOfLines(env, ls));
+    /* گفت‌وگوی دارای قلمِ چندقیمتی: «تسویه» این‌جا آزاد است و هنگامِ «ارسال» با اقلامِ تک‌قیمتیِ همان بسته سنجیده می‌شود */
+    const lim1 = await limitsOfLines(env, ls);
+    let { lock, conflict } = lockOfLines(ls, lim1);
+    if (!conflict.includes("pay")) lock = lockForTerms(ls, lim1).lock;
     const sent = Object.fromEntries(TERM_FIELDS.filter((f) => f in (b || {}) && t[f] != null).map((f) => [f, t[f]]));
     const v = violations(sent, Object.fromEntries(Object.entries(lock).filter(([f]) => !conflict.includes(f))));
     if (v.length) throw violationError(v);
@@ -1200,11 +1218,14 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
   if (pBad.length) throw new HttpError(`قیمت‌های لازم کامل نیست: ${pBad.map(([l, m]) => `${codeTxt(l.no)}«${l.title}»: ${m.map((k) => PRICE_FA[k]).join("، ")}`).join("؛ ")}`, 422);
   const multi = lines.filter((l) => payModes(lim0.get(l.item_id)));
   const terms0 = termsOf(th);
+  /* تسویهٔ بسته: اگر همه چندقیمتی‌اند یا تسویه‌ای اعلام نشده، از قیمت‌های خودِ اقلام؛ هر قلمِ چندقیمتی در خطِ استعلامش تسویهٔ خودش را دارد */
   const terms = multi.length && (multi.length === lines.length || !T(terms0.pay)) ? withPay(terms0, payModes(lim0.get(multi[0].item_id)), multi[0]) : terms0;
   const tmiss = termsMissing(terms);
   if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
   /* فاز ۴ب گام ۳: شرایطِ بسته با قفلِ همهٔ اقلامِ همین بسته؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
-  const { lock, conflict } = lockOfLines(lines, lim0);
+  /* ناسازگاری با قیدِ همهٔ اقلام؛ تخلفِ «تسویه» فقط با اقلامِ تک‌قیمتی (چندقیمتی‌ها تسویهٔ خودشان را از قیمت‌ها دارند) */
+  const { conflict } = lockOfLines(lines, lim0);
+  const { lock } = lockForTerms(lines, lim0);
   if (conflict.length) {
     throw new HttpError(`این اقلام شرایطِ قفلِ ناسازگار دارند (${conflict.map((f) => LIMIT_FA[f]).join("، ")})؛ هر بار فقط اقلامی را بفرستید که شرایطشان با هم می‌خواند.`, 422, { conflict });
   }

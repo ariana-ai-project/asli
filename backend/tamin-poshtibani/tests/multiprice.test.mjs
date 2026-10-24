@@ -128,6 +128,24 @@ test("پنل: درصدِ تعدیل قیمت می‌سازد، 🔓 با یک ق
   assert.ok(ad.quotes.find((x) => x.item_id === 32).prices_json);
 });
 
+test("آبان ۱۴۰۵: قلمِ «فقط اعتباری» با قیمتِ نقد و اعتباری از تأمین‌کننده گیر نمی‌کند — نقد کنار می‌رود و تسویه «اعتباری» است", { skip: SKIP }, async () => {
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (33,'R-M','c',3,'تیرآهن ۱۴',20,'شاخه','open',1,?)").run(norm("تیرآهن"));
+  assert.equal((await call("/items/33/terms", { method: "PUT", headers: HU, body: { pay: { opts: ["اعتباری"], lock: true } } })).status, 200);
+  const s = await call("/sp/x/send", { headers: HU, body: { assignment_id: 1, item_ids: [33], supplier_name: "فولاد ج", phone: "09120000502", label: "فروش" } });
+  assert.equal(s.status, 200, JSON.stringify(s.data));
+  const th = s.data.thread_id, H = await supplierSession("09120000502");
+  const L = (await call(`/sp/thread/${th}`, { headers: H })).data.lines.find((l) => l.item_id === 33);
+  assert.equal((await call(`/sp/thread/${th}/terms`, { headers: H, body: { vat: "دارد", invoice: "رسمی", dtime: "7", valid_days: 5 } })).status, 200);
+  const r = await call(`/sp/line/${L.id}`, { method: "PUT", headers: H, body: { qty: 20, prices: { cash: 900000, c1: 930000, c2: 960000 } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal(r.data.line.prices.cash, undefined, "نقدِ ناخواسته نگه داشته نمی‌شود");
+  const ready = await call(`/sp/line/${L.id}/ready`, { headers: H, body: { on: true } });
+  assert.equal(ready.status, 200, JSON.stringify(ready.data));
+  const sub = await call(`/sp/thread/${th}/submit`, { headers: H, body: {} });
+  assert.equal(sub.status, 200, JSON.stringify(sub.data));
+  assert.equal(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_bundles WHERE id=?").get(sub.data.bundle_id).terms_json).pay, "اعتباری");
+});
+
 test("پیش‌فاکتورِ سامانه و جدول کمیسیون: ردیف‌های قیمت، جمعِ اعتباری، درصد در «شرایط تسویه» و نامِ سبزِ پیش‌فاکتورِ رسمی", () => {
   const P = { cash: 600000, c1: 610000, c2: 640000, r1: 1.7, r2: 6.7 };
   const dt = proformaData({ lines: [{ title: "سیم", qty: 50, unit: "کیلوگرم", price: 600000, prices: P }], terms: { vat: "دارد" } });
