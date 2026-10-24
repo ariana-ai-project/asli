@@ -1220,14 +1220,20 @@
       ${e.phones.length ? `<div style="display:flex;flex-direction:column;gap:6px;margin:8px 0">${e.phones.map((p) => `<div class="toolrow" style="margin:0"><span class="num" dir="ltr">${esc(p.phone)}</span>${p.label ? ` <span class="dim">${esc(p.label)}</span>` : ""}
         ${p.panel ? `<span class="chip ok">☑️ پنل</span>` : `<button class="tp-btn xs primary" data-pph-tick="${esc(p.phone)}">☑️ تیکِ پنل بزن</button>`}</div>`).join("")}</div>` : `<div class="dim">هنوز شماره‌ای برای این تأمین‌کننده ثبت نشده.</div>`}
       <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px;margin-top:10px">
-        <label class="tp-field"><b>شمارهٔ تازه</b><input class="tp-input" id="pph-num" dir="ltr" inputmode="tel" value="${esc((e.found || [])[0] || "")}" placeholder="09…" style="width:150px"></label>
+        <label class="tp-field"><b>شمارهٔ تازه (چندتا: با «،» یا فاصله)</b><input class="tp-input" id="pph-num" dir="ltr" inputmode="tel" value="${esc((e.found || []).slice(0, 4).join("، "))}" placeholder="09…، 09…" style="width:260px;max-width:100%"></label>
         <label class="tp-field"><b>برچسب</b><input class="tp-input" id="pph-lab" value="${e.src === "smart" ? "جستجوی هوشمند" : ""}" placeholder="همراه، فروش…" style="width:150px"></label>
         <label class="chkline"><input type="checkbox" id="pph-panel" checked> تیکِ پنل</label></div>
       ${(e.found || []).length > 1 ? `<div class="dim" style="font-size:.82rem">شماره‌های پیداشده: ${e.found.map((p) => `<span dir="ltr">${esc(p)}</span>`).join("، ")}</div>` : ""}`,
       async () => {
-        const num = (d.querySelector("#pph-num").value || "").trim(); if (!num) return;
-        try { await TP.api("/sp/x/phones", { body: { supplier_name: e.name, phone: num, label: d.querySelector("#pph-lab").value, panel: d.querySelector("#pph-panel").checked } }); await done(); }
-        catch (er) { TP.modal("ثبت نشد", esc(er.message), null, "باشد", ""); }
+        /* چند شماره در یک بار (آبان ۱۴۰۵): هر کدام جدا ثبت می‌شود؛ شماره‌ای که ثبت نشد با علتش گفته می‌شود */
+        const nums = (d.querySelector("#pph-num").value || "").split(/[\s,،;؛]+/).map((x) => x.trim()).filter(Boolean).slice(0, 10); if (!nums.length) return;
+        const bad = [];
+        for (const num of nums) {
+          try { await TP.api("/sp/x/phones", { body: { supplier_name: e.name, phone: num, label: d.querySelector("#pph-lab").value, panel: d.querySelector("#pph-panel").checked } }); }
+          catch (er) { bad.push(`${esc(num)}: ${esc(er.message)}`); }
+        }
+        await done();
+        if (bad.length) TP.modal("بعضی شماره‌ها ثبت نشد", bad.join("<br>"), null, "باشد", "");
       }, "ثبت شماره", "بستن");
     d.querySelectorAll("[data-pph-tick]").forEach((b) => b.onclick = async () => {
       try { await TP.api("/sp/x/phones", { body: { supplier_name: e.name, phone: b.dataset.pphTick, panel: true } }); d.remove(); await done(); }

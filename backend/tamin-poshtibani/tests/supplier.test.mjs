@@ -355,8 +355,10 @@ test("تأمین‌کنندهٔ واقعی: کد از ۱ در پنل خودش؛ 
   const r = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت نمونه", phone: "۰۹۱۲۱۲۳۴۵۶۷", label: "فروش", text: "سلام" } });
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.phone.label, "فروش");
-  const clash = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [11], supplier_name: "شرکت دیگر", phone: "09121234567", label: "x" } });
-  assert.equal(clash.status, 409, "یک شماره مال یک تأمین‌کننده");
+  /* آبان ۱۴۰۵: یک شماره برای چند تأمین‌کننده هم ثبت می‌شود — ردیفِ جدا با کلیدِ ورودِ خودش */
+  const shared = await call("/sp/x/phones", { headers: EX, body: { supplier_name: "شرکت دیگر", phone: "09121234567", label: "x" } });
+  assert.equal(shared.status, 200, JSON.stringify(shared.data));
+  assert.notEqual(shared.data.phone.id, r.data.phone.id, "ردیفِ جدا");
   const s = (await call("/sp/login", { body: { k: keyOf(r.data.sms.text), password: passOf(r.data.sms.text) } })).data.session;
   const H = { "X-SP-Session": s };
   const th = (await call(`/sp/thread/${r.data.thread_id}`, { headers: H })).data;

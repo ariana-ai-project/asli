@@ -56,8 +56,10 @@ export const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) =
 export const SP_DDL = `
 CREATE TABLE IF NOT EXISTS sp_suppliers (id INTEGER PRIMARY KEY, name TEXT NOT NULL, name_n TEXT NOT NULL, demo INTEGER NOT NULL DEFAULT 0, created_by INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_spsup_name ON sp_suppliers(name_n);
-CREATE TABLE IF NOT EXISTS sp_phones (id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, phone TEXT NOT NULL UNIQUE, label TEXT, k TEXT NOT NULL UNIQUE, pass_hash TEXT, pass_at INTEGER, fails INTEGER NOT NULL DEFAULT 0, lock_until INTEGER, resend_at INTEGER, created_by INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS sp_phones (id INTEGER PRIMARY KEY, supplier_id INTEGER NOT NULL, phone TEXT NOT NULL, label TEXT, k TEXT NOT NULL UNIQUE, pass_hash TEXT, pass_at INTEGER, fails INTEGER NOT NULL DEFAULT 0, lock_until INTEGER, resend_at INTEGER, created_by INTEGER, created_at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_spph_sup ON sp_phones(supplier_id);
+CREATE UNIQUE INDEX IF NOT EXISTS ux_spph_supphone ON sp_phones(supplier_id, phone);
+CREATE INDEX IF NOT EXISTS ix_spph_phone ON sp_phones(phone);
 CREATE TABLE IF NOT EXISTS sp_threads (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, supplier_id INTEGER NOT NULL, phone_id INTEGER, created_by INTEGER, e_seen INTEGER NOT NULL DEFAULT 0, s_seen INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL, created_at INTEGER NOT NULL, e_clear INTEGER, s_clear INTEGER, terms_json TEXT, UNIQUE(assignment_id, supplier_id));
 CREATE INDEX IF NOT EXISTS ix_spth_sup ON sp_threads(supplier_id);
 CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, no INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(thread_id, item_id));
@@ -494,9 +496,30 @@ async function insertPhone(env, supplierId, phone, label, by) {
 
 /**
  * دفترچهٔ شماره‌ها (تب «کارشناس هوشمند»): شمارهٔ تازه برای یک تأمین‌کننده یا ویرایشِ برچسب و تیکِ «پنل» روی شمارهٔ
- * موجود. هر شماره مالِ یک تأمین‌کننده است؛ یک تأمین‌کننده می‌تواند چند شمارهٔ تیک‌خورده داشته باشد.
+ * موجود. یک تأمین‌کننده چند شماره دارد و از آبان ۱۴۰۵ (خواستهٔ مالک) یک شماره هم می‌تواند برای چند تأمین‌کننده ثبت شود —
+ * یکتایی فقط (تأمین‌کننده، شماره) است؛ ورودِ پنل با کلیدِ k همان ردیف است، پس دو ردیفِ یک شماره با هم قاطی نمی‌شوند.
  * panel: true/false — فقط انسان می‌زندش؛ کارشناس هوشمند فقط به شماره‌های تیک‌خورده پیامک می‌دهد.
  */
+/**
+ * یک بار روی دیتابیسِ موجود (آبان ۱۴۰۵): یکتاییِ ستونیِ phone در sp_phones برداشته می‌شود — جدول با همان ستون‌ها و شناسه‌ها از نو
+ * ساخته می‌شود (SQLite یکتاییِ ستونی را با ALTER برنمی‌دارد) و نمایه‌هایش برمی‌گردند؛ یکتایی فقط (تأمین‌کننده، شماره).
+ */
+export async function migratePhonesMulti(env) {
+  const t = await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='sp_phones'").first();
+  if (!t || !/phone\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i.test(t.sql)) return false;
+  const idx = ((await env.DB.prepare("SELECT sql FROM sqlite_master WHERE type='index' AND tbl_name='sp_phones' AND sql IS NOT NULL").all()).results || []).map((r) => r.sql);
+  const create = t.sql.replace(/phone\s+TEXT\s+NOT\s+NULL\s+UNIQUE/i, "phone TEXT NOT NULL").replace(/CREATE TABLE\s+(IF NOT EXISTS\s+)?"?sp_phones"?/i, "CREATE TABLE sp_phones_x");
+  await env.DB.batch([
+    env.DB.prepare("DROP TABLE IF EXISTS sp_phones_x"),
+    env.DB.prepare(create),
+    env.DB.prepare("INSERT INTO sp_phones_x SELECT * FROM sp_phones"),
+    env.DB.prepare("DROP TABLE sp_phones"),
+    env.DB.prepare("ALTER TABLE sp_phones_x RENAME TO sp_phones"),
+    ...idx.map((sql) => env.DB.prepare(sql.replace(/CREATE (UNIQUE )?INDEX\s+(?!IF NOT EXISTS)/i, (m0, u) => `CREATE ${u || ""}INDEX IF NOT EXISTS `))),
+  ]);
+  return true;
+}
+
 export async function savePhone(env, by, b) {
   let sup = int(b.supplier_id) ? await env.DB.prepare("SELECT * FROM sp_suppliers WHERE id=? AND demo=0").bind(int(b.supplier_id)).first() : null;
   if (!sup) {
@@ -507,11 +530,7 @@ export async function savePhone(env, by, b) {
   if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
   if (num === RESERVED_PHONE) throw new HttpError(RESERVED_MSG);
   const label = nrm(b.label).slice(0, 30);
-  let ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
-  if (ph && ph.supplier_id !== sup.id) {
-    const other = await env.DB.prepare("SELECT name FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first();
-    throw new HttpError(`این شماره قبلاً برای «${other ? other.name : "تأمین‌کنندهٔ دیگر"}» ثبت شده است.`, 409);
-  }
+  let ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=? AND supplier_id=?").bind(num, sup.id).first();
   if (!ph) {
     if (!label) throw new HttpError("برای شمارهٔ تازه یک برچسب بزنید (مثلاً «همراه مدیر فروش»).");
     ph = await insertPhone(env, sup.id, num, label, by);
@@ -571,11 +590,7 @@ export async function spSend(env, ex, b) {
     const num = normPhone(b.phone);
     if (!num) throw new HttpError("شمارهٔ تلفن معتبر نیست (مثل 09121234567).");
     if (num === RESERVED_PHONE) throw new HttpError(RESERVED_MSG);
-    ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=?").bind(num).first();
-    if (ph && ph.supplier_id !== sup.id) {
-      const other = await env.DB.prepare("SELECT name FROM sp_suppliers WHERE id=?").bind(ph.supplier_id).first();
-      throw new HttpError(`این شماره قبلاً برای «${other ? other.name : "تأمین‌کنندهٔ دیگر"}» ثبت شده است.`, 409);
-    }
+    ph = await env.DB.prepare("SELECT * FROM sp_phones WHERE phone=? AND supplier_id=?").bind(num, sup.id).first();
     if (!ph) {
       if (!label) throw new HttpError("برای شمارهٔ تازه یک برچسب بزنید (مثلاً «فروش» یا «همراه مدیر»).");
       ph = await insertPhone(env, sup.id, num, label, ex.id);

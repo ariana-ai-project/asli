@@ -47,7 +47,7 @@ import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reas
 import { queueStmt } from "./queue.js";
 import { missingRequired, INVOICE_DEFAULT, validateQuote, normalizeDtime, toNumber, PER_SUPPLIER, PER_LINE, LABELS as QUOTE_LABELS } from "./quote-rules.js";
 import { stamp, mergeSrc, manualStamp, overrides, srcMap, srcView, SRC_FA, QUOTE_EDITS_DDL } from "./quote-src.js";
-import { SP_DDL, SP_COLUMNS, spBackfill, itemLocks, sameAsLock, LOCK_MSG } from "./sp-core.js";
+import { SP_DDL, SP_COLUMNS, spBackfill, itemLocks, sameAsLock, LOCK_MSG, migratePhonesMulti } from "./sp-core.js";
 import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
@@ -519,6 +519,8 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  /* یک شماره برای چند تأمین‌کننده (آبان ۱۴۰۵) — یک بار */
+  await migratePhonesMulti(env).catch((e) => console.error("migratePhonesMulti", e && e.message));
   for (const sql of READ_INDEXES) await env.DB.exec(sql).catch((e) => console.error("read index", sql.slice(27, 60), e && e.message));
   /* قلم‌های پنل تأمین‌کننده که پیش از ستونِ «no» ساخته شدند، به ترتیب کد می‌گیرند */
   await spBackfill(env).catch((e) => console.error("spBackfill", e && e.message));
