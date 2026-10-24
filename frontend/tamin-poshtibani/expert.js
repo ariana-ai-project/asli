@@ -2244,8 +2244,36 @@
     if (!S.templates.length) { for (const t of DEFAULT_TPL) await TP.api("/templates", { body: t }); await loadTemplates(item()); }
     const dlg = TP.modal(`پیام برای ${esc(s.name)}`, `<div class="tplbar">${S.templates.map((t, i) => `<button class="tplbtn ${i === 0 ? "on" : ""}" data-mt="${i}"><i>قالب ${i + 1}</i><b>${esc(t.title)}</b></button>`).join("")}</div>
       <textarea class="tp-textarea" id="mtxt" style="min-height:170px"></textarea>
-      <div class="tp-acts"><button class="tp-btn primary" data-mcopy>کپی متن</button><button class="tp-btn" data-mlib title="قالب تازه بسازید یا قالب‌های خودتان را ویرایش کنید">📚 تعریف یا ویرایش قالب</button><span class="dim" data-mmsg style="font-size:.85rem"></span></div>
-      <div class="tp-note" style="margin-top:8px">جای‌خالی‌های {…} با نام تأمین‌کننده و اطلاعات همین درخواست (قلم، مقدار، واحد، مشخصات، مهلت و کارشناس) پر شده‌اند؛ متن را کپی کنید و در هر کانالی که خواستید بفرستید.</div>`, null, "بستن", "");
+      <div class="toolrow" style="align-items:end;flex-wrap:wrap;gap:8px;margin:8px 0 0">
+        <label class="tp-field"><b>شمارهٔ تأمین‌کننده</b><select class="tp-input" data-mph style="min-width:190px"><option value="">شمارهٔ تازه…</option></select></label>
+        <label class="tp-field" data-mnew><b>شمارهٔ تازه</b><input class="tp-input" data-mnum dir="ltr" inputmode="tel" placeholder="09…" style="width:150px"></label>
+        <label class="tp-field" data-mnew><b>برچسب</b><input class="tp-input" data-mlab placeholder="همراه، فروش…" style="width:130px"></label></div>
+      <div class="tp-acts"><button class="tp-btn primary" data-msend title="گفت‌وگوی تازه در «💬 مکاتبات» با همین متن، و پیامکِ ورود به پنل برای همین شماره">📨 ارسال پیام</button><button class="tp-btn" data-mcopy>کپی متن</button><button class="tp-btn" data-mlib title="قالب تازه بسازید یا قالب‌های خودتان را ویرایش کنید">📚 تعریف یا ویرایش قالب</button>${TP.ui.info("expert.history", "پیام به تأمین‌کننده")}<span class="dim" data-mmsg style="font-size:.85rem"></span></div>`, null, "بستن", "");
+    /* «📨 ارسال پیام» (آبان ۱۴۰۵): همان مسیرِ «ارسال استعلام»ِ مکاتبات (/sp/x/send) — گفت‌وگوی تازه برای همین قلم و همین تأمین‌کننده با متنِ قالب */
+    const mph = dlg.querySelector("[data-mph]");
+    const showNew = () => dlg.querySelectorAll("[data-mnew]").forEach((x) => { x.style.display = mph.value ? "none" : ""; });
+    TP.api(`/sp/x/phones?name=${encodeURIComponent(s.name)}`).then((r) => {
+      const ph = (r && r.phones) || [];
+      mph.insertAdjacentHTML("afterbegin", ph.map((p) => `<option value="${p.id}">${esc(p.phone)}${p.label ? ` — ${esc(p.label)}` : ""}${p.panel ? " ☑️" : ""}</option>`).join(""));
+      if (ph.length) mph.value = String((ph.find((p) => p.panel) || ph[0]).id);
+      showNew();
+    }).catch(() => showNew());
+    mph.onchange = showNew;
+    dlg.querySelector("[data-msend]").onclick = async (ev) => {
+      const it = item(), text = dlg.querySelector("#mtxt").value.trim(), msg = dlg.querySelector("[data-mmsg]");
+      if (!it || !A()) return;
+      if (!text) { msg.textContent = "متن خالی است."; return; }
+      const body = { assignment_id: A().id, item_ids: [it.id], supplier_name: s.name, text };
+      if (mph.value) body.phone_id = +mph.value; else { body.phone = dlg.querySelector("[data-mnum]").value.trim(); body.label = dlg.querySelector("[data-mlab]").value.trim(); }
+      if (!body.phone_id && !body.phone) { msg.textContent = "شمارهٔ تأمین‌کننده را بنویسید."; return; }
+      ev.target.disabled = true; msg.textContent = "در حالِ ارسال…";
+      try {
+        const r = await TP.api("/sp/x/send", { body });
+        dlg.remove();
+        TP.modal("📨 پیام رفت", `<p>گفت‌وگو با «${esc(s.name)}» در «💬 مکاتبات» باز شد و همین متن اولین پیامِ آن است.</p><p class="dim">${esc((r.sms && r.sms.note) || "")}</p>`,
+          () => { try { sessionStorage.setItem("sp.th.e", String(r.thread_id)); sessionStorage.setItem("sp.aid", String(A().id)); } catch (_) { /* حالت خصوصی */ } location.href = "correspond"; }, "💬 رفتن به گفت‌وگو", "بستن");
+      } catch (e) { ev.target.disabled = false; msg.textContent = e.message; }
+    };
     dlg.querySelector("[data-mlib]").onclick = () => { dlg.remove(); pickTemplate(); };
     const paint = (i) => {
       dlg.querySelectorAll("[data-mt]").forEach((x) => x.classList.toggle("on", +x.dataset.mt === i));
