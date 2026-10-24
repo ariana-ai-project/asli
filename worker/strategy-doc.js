@@ -16,8 +16,7 @@
  * در زمینهٔ هر پیامِ کارشناس هوشمند برای همان قلم می‌رود (docBlock). قاعدهٔ صداقت بالاتر از هر راهبرد است. پشتِ کلیدِ doc.
  */
 import { HttpError } from "./http.js";
-import { callModel, AiError, modelOk, AGENT_MODELS } from "./ai-prompts.js";
-import { estimateCost } from "./ai-fetch.js";
+import { AiError, modelOk, AGENT_MODELS } from "./ai-prompts.js";
 import { headRow, headPolicy, recipientPlan, codeRow, MODE_FA } from "./cr-engine.js";
 import { crShard } from "./cr-data.js";
 import { planNegotiation, nextOffer, referencePrice } from "./strategy/negotiation.js";

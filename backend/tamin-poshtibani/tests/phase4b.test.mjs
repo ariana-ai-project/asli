@@ -185,6 +185,16 @@ test("سپردن فقط اقلامِ هوشمند: نه «انجام دستی»�
   const ho3 = await call("/assignments/3/handoff", { headers: EX, body: { include: [61] } });
   assert.equal(ho3.status, 200, JSON.stringify(ho3.data));
   assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT data_json FROM ai_runs WHERE assignment_id=3").get().data_json).items.map((x) => x.id), [61, 62]);
-  /* بعد از سپردن، تیکِ مدیر عوض نمی‌شود */
-  assert.equal((await call("/assign/ai", { headers: MGR, body: { assignment_id: 3, on: false, reason: "x" } })).status, 409);
+  /* آبان ۱۴۰۵: بعد از سپردن هم مدیر «✋ دستی» می‌کند — کار می‌ایستد و همه‌چیز دستِ کارشناس؛ «🤖» دوباره همان کار را ادامه می‌دهد */
+  const off = await call("/assign/ai", { headers: MGR, body: { assignment_id: 3, on: false, reason: "خریدِ فوری با خودِ کارشناس" } });
+  assert.equal(off.status, 200, JSON.stringify(off.data));
+  const r3 = DB.raw.prepare("SELECT finished_at, review_json FROM ai_runs WHERE assignment_id=3").get();
+  assert.ok(r3.finished_at, "کار ایستاد");
+  assert.deepEqual([JSON.parse(r3.review_json).state, JSON.parse(r3.review_json).manual], ["rejected", 1]);
+  assert.equal(DB.raw.prepare("SELECT ai_on FROM assignments WHERE id=3").get().ai_on, 0);
+  const back = await call("/assign/ai", { headers: MGR, body: { assignment_id: 3, on: true } });
+  assert.equal(back.status, 200, JSON.stringify(back.data));
+  const r4 = DB.raw.prepare("SELECT finished_at, review_json FROM ai_runs WHERE assignment_id=3").get();
+  assert.deepEqual([r4.finished_at, r4.review_json], [null, null], "همان کار ادامه می‌یابد");
+  assert.equal(DB.raw.prepare("SELECT ai_on FROM assignments WHERE id=3").get().ai_on, 1);
 });

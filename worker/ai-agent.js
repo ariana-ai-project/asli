@@ -2342,6 +2342,30 @@ const propsOffStmts = (env, exId, t) => [
   env.DB.prepare(`UPDATE ai_threads SET retry_at=?2 WHERE state NOT IN ('closed','ask','human') AND thread_id IN (SELECT p.thread_id FROM ai_props p WHERE ${RB_PROPS})`).bind(exId, t),
   env.DB.prepare(`UPDATE ai_props SET state='off', decided_at=?2, decided_by='support' WHERE id IN (SELECT p.id FROM ai_props p WHERE ${RB_PROPS})`).bind(exId, t),
 ];
+/**
+ * «✋ دستی»ِ مدیر برای ارجاعی که کارِ کارشناس هوشمند دارد (آبان ۱۴۰۵، خواستهٔ مالک: «هوشمند هم هر لحظه باید دستی شود»): کار می‌ایستد و
+ * «ردشده با دستِ مدیر» می‌شود (review_json.manual — همان قاعدهٔ aiRejected که گفت‌وگوها، خط‌ها و جدول را آزاد می‌کند)، گفت‌وگوهای زنده
+ * دستِ کارشناس می‌آیند (state='human') و پیشنهادهای معطل کنار می‌روند. ساختارِ منجمد و فهرستِ دعوت دست نمی‌خورند. برگشت با
+ * aiResumeStmts — فقط کاری که با همین دکمه دستی شده بود.
+ */
+const MANUAL_NOTE = "✋ مدیر این درخواست را «دستی» کرد؛ گفت‌وگو دستِ کارشناس است.";
+export const aiReleaseStmts = (env, aid, t) => [
+  env.DB.prepare(`UPDATE ai_props SET state='off', decided_at=?2, decided_by='manager' WHERE state='pending' AND run_id IN (SELECT id FROM ai_runs WHERE assignment_id=?1)`).bind(aid, t),
+  env.DB.prepare(`INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT x.run_id, x.thread_id, ?2, 'takeover', ?3 FROM ai_threads x
+      WHERE x.run_id IN (SELECT id FROM ai_runs WHERE assignment_id=?1) AND x.state NOT IN ('closed','final','declined','human')`).bind(aid, t, MANUAL_NOTE),
+  env.DB.prepare(`UPDATE ai_threads SET state='human', lock_until=NULL, updated_at=?2,
+      ask_json=json_set(COALESCE(ask_json,'{}'),'$.takeover',json_object('by','manager','at',?2,'reason',?3,'from',state))
+      WHERE run_id IN (SELECT id FROM ai_runs WHERE assignment_id=?1) AND state NOT IN ('closed','final','declined','human')`).bind(aid, t, MANUAL_NOTE),
+  env.DB.prepare(`UPDATE ai_runs SET review_json=json_object('state','rejected','manual',1,'by','manager','at',?2,'prev',review_json,'prev_fin',finished_at),
+      finished_at=COALESCE(finished_at,?2), updated_at=?2 WHERE assignment_id=?1 AND COALESCE(json_extract(review_json,'$.state'),'')<>'rejected'`).bind(aid, t),
+  env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT id, NULL, ?2, 'run', ?3 FROM ai_runs WHERE assignment_id=?1").bind(aid, t, "✋ مدیر درخواست را «دستی» کرد — کار ایستاد و همه‌چیز دستِ کارشناس است."),
+];
+/** «🤖» دوباره برای کاری که مدیر «دستی» کرده بود: کار از همان‌جا ادامه می‌یابد؛ گفت‌وگوهایی که دستِ کارشناس آمد دستِ او می‌ماند («🤖 برگرداندن» در مکاتبات) */
+export const aiResumeStmts = (env, aid, t) => [
+  env.DB.prepare(`UPDATE ai_runs SET finished_at=json_extract(review_json,'$.prev_fin'), review_json=json_extract(review_json,'$.prev'), next_at=?2, updated_at=?2
+      WHERE assignment_id=?1 AND json_extract(review_json,'$.manual')=1`).bind(aid, t),
+  env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT id, NULL, ?2, 'run', ?3 FROM ai_runs WHERE assignment_id=?1").bind(aid, t, "🤖 مدیر درخواست را دوباره «هوشمند» کرد — کار ادامه دارد."),
+];
 const runLogStmt = (env, exId, t, body) => env.DB.prepare("INSERT INTO ai_log (run_id,thread_id,at,kind,body) SELECT r.id, NULL, ?2, 'run', ?3 FROM ai_runs r WHERE r.expert_id=?1 AND r.finished_at IS NULL")
   .bind(exId, t, body);
 

@@ -52,7 +52,7 @@ import { spRoute } from "./sp-api.js";
 import { handleSpUpdate, ensureSpWebhook } from "./sp-bot.js";
 import { expertOfInit } from "./tg-auth.js";
 import { NAV_DDL } from "./tg-nav.js";
-import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime, tplCtx, tplNames } from "./ai-agent.js";
+import { AI_DDL, aiRoute, aiAdmin, aiHandoff, picksRoute, propsRetime, tplCtx, tplNames, aiReleaseStmts, aiResumeStmts } from "./ai-agent.js";
 import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, aiResearchLocked, aiRejected, aiRevStmt, AI_LOCK_MSG, AI_QUOTE_MSG, AI_LIVE_MSG, AI_ASK_SQL, AI_OWNED_SQL } from "./ai-lock.js";
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
@@ -1324,9 +1324,11 @@ async function setAiTick(env, body) {
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
   const optIn = await aiOptIn(env);
   if (a.mode !== "on" && !optIn) throw new HttpError("کارشناس هوشمند برای این کارشناس خاموش است (پنل پشتیبانی)؛ درخواست دستی است.", 409);
-  if (await env.DB.prepare("SELECT 1 AS x FROM ai_runs WHERE assignment_id=?").bind(aid).first()) {
-    throw new HttpError("کار به کارشناس هوشمند سپرده شده است؛ از این‌جا عوض نمی‌شود — «✋ دستی»ِ پنل پشتیبانی.", 409);
-  }
+  /* کارِ کارشناس هوشمند روی این ارجاع (آبان ۱۴۰۵): «✋ دستی» هر لحظه — کار می‌ایستد و همه‌چیز دستِ کارشناس می‌آید (aiReleaseStmts)؛
+     «🤖» دوباره فقط کاری را برمی‌گرداند که با همین دکمه دستی شده بود (aiResumeStmts) */
+  const run = await env.DB.prepare("SELECT id, review_json FROM ai_runs WHERE assignment_id=?").bind(aid).first();
+  const rv = run ? (() => { try { return JSON.parse(run.review_json || "{}") || {}; } catch (_) { return {}; } })() : {};
+  if (run && on && rv.state === "rejected" && !rv.manual) throw new HttpError("تحویلِ کارشناس هوشمند در این درخواست رد شده است؛ ادامه با خودِ کارشناس است.", 409);
   const note = T(body.reason).slice(0, 1000);
   /* پیش‌فرضِ دستی (aiOptIn): «🤖» انتخابِ مدیر است — برداشتنش علت نمی‌خواهد و زدنش کارشناس هوشمندِ همان کارشناس را روشن می‌کند */
   if (optIn) {
@@ -1347,6 +1349,7 @@ async function setAiTick(env, body) {
   const stmts = [
     env.DB.prepare("UPDATE assignments SET ai_on=?, ai_note=?, ai_set_at=?, ai_set_by='manager' WHERE id=?").bind(on ? 1 : 0, on ? null : note || null, t, aid),
     ...(optIn && on ? [agentOnStmt(env, a.expert_id, t)] : []),
+    ...(run ? (on ? aiResumeStmts(env, aid, t) : aiReleaseStmts(env, aid, t)) : []),
     ev(env, "manager", "ai_tick", a.request_id, null, { assignment_id: aid, expert_id: a.expert_id, on, reason: on ? null : note || null }),
     /* پنلِ بازِ کارشناس همان لحظه تازه می‌شود (/sp/x/inbox) — ارجاعِ ارسال‌نشده در پنلش نیست */
     ...(a.dispatched_at ? [aiRevStmt(env, a.expert_id)] : []),
