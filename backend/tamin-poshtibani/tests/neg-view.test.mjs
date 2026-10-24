@@ -431,7 +431,7 @@ test("مذاکرهٔ همیشگی: عددهای درونیِ سند؛ نسخهٔ
   /* نسخهٔ تازه‌ترِ سند (هنوز تأییدنشده): کارشناس هوشمند تا تأییدش با نسخهٔ ۱ است */
   assert.equal((await call("/cr/doc/build", { headers: EX, body: { head: "پیچ", code: "1003", force: true } })).data.queued, true);
   const n2 = (await call(`/sp/x/thread/${TH}/neg`, { headers: EX })).data.neg;
-  assert.deepEqual([n2.doc.version, n2.doc.newer && n2.doc.newer.version, n2.doc.newer && n2.doc.newer.state], [1, 2, "queued"]);
+  assert.deepEqual([n2.doc.version, n2.doc.newer && n2.doc.newer.version, n2.doc.newer && n2.doc.newer.state], [1, 2, "draft"], "سندِ الگو بی‌درنگ ساخته می‌شود (آبان ۱۴۰۵)");
   assert.equal((await call("/support/cr/flags", { method: "PUT", headers: SUP, body: { doc: false } })).status, 200);
   const n3 = (await call(`/sp/x/thread/${TH}/neg`, { headers: EX })).data.neg;
   assert.deepEqual([n3.doc, n3.plan], [null, null], "کلیدِ doc خاموش: کارشناس هوشمند هم سند و عددی در زمینه ندارد");

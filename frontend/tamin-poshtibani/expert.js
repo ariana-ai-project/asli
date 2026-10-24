@@ -1318,7 +1318,7 @@
       const close = `<button type="button" class="tp-btn ghost" data-dclose>بستن</button>`;
       if (st.mode !== "view" || !ready()) return `<div data-dfmsg></div><div class="doc-bar"><span class="sp"></span>${close}</div>`;
       const more = TP.ui.menu({ cls: "up", btn: `<button type="button" class="tp-icon-btn" data-menu-toggle aria-haspopup="menu" aria-expanded="false" aria-label="کارهای بیشتر" title="کارهای بیشتر">${TP.ui.ICON.more}</button>`,
-        items: [{ label: "🧱 سازندهٔ پارامتری", attrs: "data-dbuild" }, { label: "↻ ساختِ دوباره با مدل", attrs: "data-drebuild-ask" }] });
+        items: [{ label: "🧱 سازندهٔ پارامتری", attrs: "data-dbuild" }, { label: "↻ ساختِ دوباره", attrs: "data-drebuild-ask" }] });
       return `<div data-dfmsg></div>${critique()}<div class="doc-bar"><span class="dim">امتیاز:</span>${stars()}
         <button type="button" class="tp-btn primary" data-dok>✅ تأیید</button><button type="button" class="tp-btn" data-dedit>✏️ ویرایش</button>${more}<span class="sp"></span>${close}</div>`;
     }
@@ -1327,7 +1327,7 @@
       let h = `${TP.stratView.docHead(L)}<div data-docmsg></div>`;
       if (st.mode === "builder") h += builderHtml();
       else if (st.mode === "edit" && x) h += editHtml(x);
-      else if (!L || ["queued", "building"].includes(L.state)) h += `<div class="tp-note" style="margin:8px 0">⏳ سند در صفِ ساخت است (یکی دو دقیقه). <button type="button" class="tp-btn xs" data-dreload>↻ تازه کن</button></div><div class="toolrow"><button type="button" class="tp-btn" data-dbuild>🧱 همین حالا با سازندهٔ پارامتری</button></div>`;
+      else if (!L || ["queued", "building"].includes(L.state)) h += `<div class="tp-note" style="margin:8px 0">⏳ سند در حالِ ساخت است. <button type="button" class="tp-btn xs" data-dreload>↻ تازه کن</button></div><div class="toolrow"><button type="button" class="tp-btn" data-dbuild>🧱 همین حالا با سازندهٔ پارامتری</button></div>`;
       else if (L.state === "failed") h += `<div class="tp-note warn">ساخت نشد: ${esc(L.error || "")}</div><div class="toolrow" style="gap:8px"><button type="button" class="tp-btn primary" data-drebuild>↻ دوباره بساز</button><button type="button" class="tp-btn" data-dbuild>🧱 سازندهٔ پارامتری</button></div>`;
       else h += docHtml(x, d.numbers);
       box.innerHTML = h;
@@ -1353,8 +1353,8 @@
       Qd("[data-dbuild]").forEach((b) => b.onclick = () => { keep(); st.mode = "builder"; paint(); });
       const drl = G1("[data-dreload]"); if (drl) drl.onclick = reload;
       const drb = G1("[data-drebuild]"); if (drb) drb.onclick = rebuild;
-      /* «↻ ساختِ دوباره با مدل» (منوی ⋯): نسخهٔ تازه با هزینهٔ مدل — پیش از رفتن می‌پرسد */
-      const dra = G1("[data-drebuild-ask]"); if (dra) dra.onclick = () => TP.modal("↻ ساختِ دوبارهٔ سند", `نسخهٔ تازهٔ سندِ «${esc(d.head)}» با مدل ساخته می‌شود (یکی دو دقیقه، با هزینهٔ مدل). نسخه‌های قبلی می‌مانند و نسخهٔ تأییدشده تا تأییدِ نسخهٔ تازه معتبر است.`, rebuild, "↻ بساز", "انصراف");
+      /* «↻ ساختِ دوباره» (منوی ⋯): نسخهٔ تازه از الگوی آماده (بی مدل، آبان ۱۴۰۵) — پیش از رفتن می‌پرسد */
+      const dra = G1("[data-drebuild-ask]"); if (dra) dra.onclick = () => TP.modal("↻ ساختِ دوبارهٔ سند", `نسخهٔ تازهٔ سندِ «${esc(d.head)}» از الگوی آمادهٔ همین نوع قلم ساخته می‌شود. نسخه‌های قبلی می‌مانند و نسخهٔ تأییدشده تا تأییدِ نسخهٔ تازه معتبر است.`, rebuild, "↻ بساز", "انصراف");
       const dcl = G1("[data-dclose]"); if (dcl) dcl.onclick = () => m.remove();
       const ec = G1("[data-ecancel]"); if (ec) ec.onclick = () => { keep(); st.mode = "view"; paint(); };
       const es = G1("[data-esave]"); if (es) es.onclick = () => {

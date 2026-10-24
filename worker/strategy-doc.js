@@ -226,6 +226,38 @@ export function normalizeDoc(out, input) {
   return doc;
 }
 
+/**
+ * سندِ الگو (آبان ۱۴۰۵، سیاستِ مالک: «سند راهبرد بی API — متنِ آماده و پارامترها برای هر نوع قلم»): همان شکلِ خروجیِ مدل، فقط از
+ * داده‌های آمادهٔ همین سامانه — پروفایلِ نوع قلم، سیاستِ استعلامِ موتور، درصدهای مذاکره، گزینه‌های معاوضه با قیمتِ مؤثر، پاسخ‌های
+ * آمادهٔ وضعیت‌ها (STATES[].reply) و کارت‌های دانش (KB). بی فراخوانِ مدل، بی هزینه و در یک لحظه.
+ */
+const PH = { months: "یک یا دو", eval_date: "پایانِ مهلتِ استعلام" };
+const fillReply = (s) => T(s).replace(/^\[[^\]]*\]\s*/, "").replace(/\{(\w+)\}/g, (_, k) => PH[k] || "…");
+const moveOf = (st) => (st.group === "E" ? "M-ESCALATE" : st.group === "C" ? "M-CLOSE" : "M-ASK");
+const pctFa = (x) => `${x >= 0 ? "+" : "−"}${Math.abs(Math.round(x * 1000) / 10)}٪`;
+export function templateDoc(input) {
+  const e = input.engine, pol = e.rfq_policy || {}, n = e.negotiation || {}, prof = input.item_profile || {}, nd = prof.negotiation_defaults || {};
+  const head = input.request.item_head;
+  const better = (e.package_options.options || []).filter((o) => o.better).sort((a, b) => a.effect_pct - b.effect_pct).slice(0, 3);
+  const facts = input.kb.map((k) => KB[k] && T(KB[k].summary || KB[k].title)).filter(Boolean).slice(0, 6);
+  const states = Object.entries(input.states).map(([id, st]) => ({ state_id: id, move: moveOf(st), prepared_reply_fa: fillReply((st.reply || [])[0] || "") }))
+    .filter((s) => s.prepared_reply_fa);
+  const out = {
+    summary_fa: [`سندِ آمادهٔ «${head}» (الگوی ثابتِ سامانه، بی مدل).`,
+      `استعلام: ${MODE_FA[pol.mode] || pol.mode || "—"}${pol.n_wave1 ? `، موجِ اول ${pol.n_wave1} تأمین‌کننده` : ""}${pol.n_max ? `، سقف ${pol.n_max}` : ""}.`,
+      `مذاکره: هدف ${pctFa(n.target_vs_ref || 0)} و حد ${pctFa(n.rv_tol || 0)} نسبت به قیمت مرجع، در ${n.rounds || 1} دور.`].join("\n"),
+    market_view: { key_facts: facts },
+    rfq: { distribution_explained: [], anti_leak_measures: ["نام و قیمتِ تأمین‌کنندگانِ دیگر گفته نمی‌شود.", "بودجه، هدف و حد درونی است."],
+      timing: T(pol.timing), quote_fields: pol.quote_must_include || [], spec_clarification: pol.spec_clarification || [], why: pol.why || [] },
+    negotiation: { anchor_rule: `هدف = قیمت مرجع × (۱ ${pctFa(n.target_vs_ref || 0)})، و نه بالاتر از بهترین پیشنهادِ واقعی`,
+      reservation_rule: `حد = کمینهٔ قیمت مرجع × (۱ ${pctFa(n.rv_tol || 0)}) و بهترین جایگزینِ واقعی`, parallel_with: 1,
+      packages: better.map((o) => ({ option_id: o.option_id, description_fa: o.fa })), hard_constraints: (nd.hard_constraints || []).map((x) => T(x)).filter(Boolean) },
+    anticipated_states: states, runtime_states: [], risks: [], expert_questions: [], needs_approval: [],
+    sources: ["الگوی سامانه", ...input.kb], notes_for_buyer: null,
+  };
+  return normalizeDoc(out, input);
+}
+
 /* ------------------------------------------------------------------ */
 /* نسخه‌ها و صف                                                          */
 /* ------------------------------------------------------------------ */
@@ -258,19 +290,11 @@ export async function buildDoc(env, row, { company } = {}) {
   if (!claim.meta.changes) return null;
   try {
     const di = await docInput(env, row.head, { itemCode: row.item_code || null });
-    const model = await docModel(env);
-    const { system, user } = docPrompt(env, di.input, company);
-    const res = await callModel(env, { system, user, schema: DOC_API_SCHEMA, model, effort: "high", maxTokens: 16000, timeoutMs: 600000 });
-    const doc = normalizeDoc(res.out, di.input);
-    const cost = estimateCost(res.model, res.usage);
-    /* فقط اگر هنوز «در حالِ ساخت» است — کارشناس شاید در همین فاصله با سازندهٔ پارامتری تأییدش کرده باشد */
-    await env.DB.batch([
-      env.DB.prepare("UPDATE cr_docs SET state='draft', model=?, input_sha=?, doc_json=?, cost_usd=?, error=NULL, built_at=? WHERE id=? AND state='building'")
-        .bind(res.model, di.sha, JSON.stringify(doc), cost, now(), row.id),
-      env.DB.prepare("INSERT INTO ai_calls (purpose,model,in_tok,out_tok,cost_usd,ms,status,at) VALUES ('doc',?,?,?,?,?,'ok',?)")
-        .bind(res.model, (res.usage || {}).input_tokens || 0, (res.usage || {}).output_tokens || 0, cost, now() - t, now()),
-    ]);
-    return { id: row.id, state: "draft", cost };
+    /* بی مدل (آبان ۱۴۰۵): سندِ الگو از داده‌های آمادهٔ نوع قلم — templateDoc. فقط اگر هنوز «در حالِ ساخت» است */
+    const doc = templateDoc(di.input);
+    await env.DB.prepare("UPDATE cr_docs SET state='draft', source='template', model=NULL, input_sha=?, doc_json=?, cost_usd=NULL, error=NULL, built_at=? WHERE id=? AND state='building'")
+      .bind(di.sha, JSON.stringify(doc), now(), row.id).run();
+    return { id: row.id, state: "draft", cost: 0 };
   } catch (e) {
     const msg = clip((e && e.message) || e, 400);
     await env.DB.prepare("UPDATE cr_docs SET state='failed', error=?, built_at=? WHERE id=? AND state='building'").bind(msg, now(), row.id).run().catch(() => {});
@@ -287,6 +311,7 @@ export async function crDocTick(env, { company } = {}) {
   if (!(await docOn(env))) return null;
   await env.DB.prepare("UPDATE cr_docs SET state='failed', error='ساخت بیش از ۱۵ دقیقه طول کشید' WHERE state='building' AND built_at<?").bind(now() - 15 * 60000).run().catch(() => {});
   if (await env.DB.prepare("SELECT 1 AS x FROM cr_docs WHERE state='building' LIMIT 1").first()) return { busy: true };
+  await retryFailedOnce(env);
   let row = await env.DB.prepare("SELECT * FROM cr_docs WHERE state='queued' ORDER BY prio DESC, id LIMIT 1").first();
   if (!row) {
     const head = await nextPregen(env);
@@ -295,6 +320,22 @@ export async function crDocTick(env, { company } = {}) {
     if (!row || row.state !== "queued") return { skipped: head };
   }
   return buildDoc(env, row, { company });
+}
+/** یک بار پس از رفتن به سندِ الگو: نسخه‌هایی که با مدل «ساخت نشد» (خطای ۵۲۴ و …) نسخهٔ تازه در صف می‌گیرند تا با الگو ساخته شوند */
+async function retryFailedOnce(env) {
+  if (await env.DB.prepare("SELECT 1 AS x FROM cr_cache WHERE k='docTplRetry'").first().catch(() => null)) return;
+  await env.DB.prepare("INSERT INTO cr_cache (k,v,at) VALUES ('docTplRetry','1',?) ON CONFLICT(k) DO NOTHING").bind(now()).run().catch(() => {});
+  const rows = (await env.DB.prepare(`SELECT d.head, d.variant, d.item_code FROM cr_docs d WHERE d.state='failed'
+      AND NOT EXISTS (SELECT 1 FROM cr_docs x WHERE x.head=d.head AND x.variant=d.variant AND x.version>d.version)`).all().catch(() => ({ results: [] }))).results || [];
+  for (const r of rows) await enqueueDoc(env, r.head, { itemCode: r.item_code || null, prio: 1, by: "الگو", force: true }).catch(() => null);
+}
+/** سندِ قلم همین حالا: اگر نیست یا «ساخت نشد»، با الگو بی‌درنگ ساخته می‌شود (بی مدل، در یک لحظه) */
+async function ensureDoc(env, head, variant, itemCode, by) {
+  const last = await latestDoc(env, head, variant);
+  if (last && last.state !== "failed" && last.state !== "queued") return last;
+  const q = last && last.state === "queued" ? { row: last } : await enqueueDoc(env, head, { itemCode, prio: 1, by, force: !!last });
+  if (q && q.row && q.row.state === "queued") await buildDoc(env, q.row);
+  return latestDoc(env, head, variant);
 }
 /**
  * نوع قلمِ بعدیِ پیش‌ساخت با نشانگری در cr_cache: فهرستِ ۱۳۸ پرهزینه یک بار خوانده می‌شود (cr_heads نمایهٔ spend_rank ندارد و
@@ -448,7 +489,7 @@ export async function reviewDoc(env, who, id, b = {}) {
   const note = clip(b.note, 800);
   let boxes = [];
   /* امتیاز به سندِ مدل؛ سازندهٔ پارامتری بی سندِ مدل (هنوز ساخته نشده یا نشد) امتیاز نمی‌خواهد */
-  if (r.doc_json || action !== "builder") {
+  if ((r.doc_json && r.source !== "template") || action !== "builder") {
     if (!score || score < 1 || score > 5) throw new HttpError("امتیازِ سند از ۱ تا ۵ است.", 422, { field: "score" });
     boxes = boxesIn(b.boxes, { strategy: true, need: score <= 3, what: "برای امتیازِ ۱ تا ۳" });
     if (score <= 3 && note.length < 3) throw new HttpError("برای امتیازِ ۱ تا ۳ بنویسید چه چیزِ این سند درست نبود.", 422, { need_note: true });
@@ -494,7 +535,7 @@ export async function docView(env, head, { itemCode = null, urgent = false, enqu
   const hp = await headPolicy(env, head, { itemCode });
   if (!hp) return { available: false };
   const variant = variantOf(hp.code);
-  if (enqueue && !(await latestDoc(env, hp.head, variant))) await enqueueDoc(env, hp.head, { itemCode, prio: 1, by }).catch((e) => console.error("doc enqueue", e && e.message));
+  if (enqueue && (await docOn(env))) await ensureDoc(env, hp.head, variant, itemCode, by).catch((e) => console.error("doc ensure", e && e.message));
   const [last, ok, row] = await Promise.all([latestDoc(env, hp.head, variant), approvedDoc(env, hp.head, variant), headRow(env, hp.head)]);
   const nd = (row && row.rec && row.rec.negotiation_defaults) || {};
   /* عددهای درونی با قاعده‌های همان نسخه‌ای که دیده می‌شود: numbers برای آخرین نسخه (بازبینی)، numbers_approved برای نسخهٔ تأییدشده وقتی
@@ -548,8 +589,7 @@ export async function docGate(env, head, itemCode) {
   if (!hp) return { ok: true };
   const variant = variantOf(hp.code);
   if (await approvedDoc(env, hp.head, variant)) return { ok: true };
-  const last = await latestDoc(env, hp.head, variant);
-  if (!last) await enqueueDoc(env, hp.head, { itemCode, prio: 1, by: "شروع" }).catch(() => null);
+  const last = await ensureDoc(env, hp.head, variant, itemCode, "شروع").catch(() => null);
   const st = last ? last.state : "queued";
   return { ok: false, state: st, head: hp.head,
     msg: st === "draft" ? `سندِ راهبردِ «${hp.head}» آماده است؛ اول در «📘 سند راهبرد» بازبینی و تأییدش کنید، بعد «🚀 شروع».`

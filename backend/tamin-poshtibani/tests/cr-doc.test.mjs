@@ -164,18 +164,16 @@ test("کلیدِ doc: «🚀 شروع» تا تأییدِ سند معلق؛ Cron
   assert.equal((await call("/sp/x/phones", { headers: EX, body: { supplier_name: "پیچ‌سازان", phone: "09120000901", label: "فروش", panel: true } })).status, 200);
   const s0 = await call("/items/61/ai-start", { headers: EX, body: {} });
   assert.equal(s0.status, 409);
-  assert.deepEqual([s0.data.need_doc, s0.data.doc_state], [true, "queued"], "در صفِ ساخت");
-  /* Cron: ساخت با مدل */
-  const r = await crDocTick(env);
-  assert.equal(r.state, "draft", JSON.stringify(r));
-  assert.ok(r.cost > 0);
-  const docCall = calls.find((c) => c.kind === "doc");
-  assert.equal(docCall.body.model, "claude-opus-5-5");
-  assert.match(docCall.body.messages[0].content[0].text, /<engine>[\s\S]*package_options[\s\S]*<kb>\n### S-04/);
-  assert.ok(DB.raw.prepare("SELECT 1 AS x FROM ai_calls WHERE purpose='doc'").get());
+  /* سندِ الگو (آبان ۱۴۰۵، بی مدل): همان لحظهٔ «🚀 شروع» ساخته می‌شود و منتظرِ بازبینی است */
+  assert.deepEqual([s0.data.need_doc, s0.data.doc_state], [true, "draft"], "سندِ الگو آماده، منتظرِ بازبینی");
+  assert.equal(calls.filter((c) => c.kind === "doc").length, 0, "هیچ فراخوانِ مدل");
+  assert.equal(DB.raw.prepare("SELECT 1 AS x FROM ai_calls WHERE purpose='doc'").get(), undefined);
   const v1 = await call(`/cr/doc?head=${head}&code=1003`, { headers: EX });
-  assert.equal(v1.data.latest.state, "draft");
-  assert.deepEqual(v1.data.latest.doc.negotiation.packages.map((x) => x.option_id), ["pay2_half"], "با نرخِ پنل: فقط بستهٔ بهتر");
+  assert.deepEqual([v1.data.latest.state, v1.data.latest.source, v1.data.latest.model], ["draft", "template", null]);
+  const d1 = v1.data.latest.doc;
+  assert.ok(d1.negotiation.packages.length && d1.negotiation.packages.every((x) => x.effective_price_better), "فقط بسته‌های بهتر");
+  assert.ok(d1.anticipated_states.length && d1.anticipated_states.every((s) => s.prepared_reply_fa && !/\{\w+\}/.test(s.prepared_reply_fa)), "پاسخ‌های آمادهٔ وضعیت‌ها پر");
+  assert.match(d1.negotiation.anchor_rule, /قیمت مرجع/);
   const id = v1.data.latest.id;
   assert.equal((await call("/items/61/ai-start", { headers: EX, body: {} })).data.doc_state, "draft");
   /* بازبینی: ۱ تا ۳ توضیح و جعبهٔ راهبرد */
@@ -189,7 +187,7 @@ test("کلیدِ doc: «🚀 شروع» تا تأییدِ سند معلق؛ Cron
   assert.equal(ok.data.state, "approved");
   assert.equal(ok.data.final.summary_fa, "خلاصهٔ ویرایش‌شدهٔ کارشناس.");
   assert.ok(!ok.data.final.anticipated_states.find((s) => s.state_id === "ST-N02").blocked, "پاسخِ ویرایش‌شده پاک است");
-  assert.equal(ok.data.doc.summary_fa, DOC_OUT.summary_fa, "نسخهٔ اولِ مدل می‌ماند");
+  assert.equal(ok.data.doc.summary_fa, d1.summary_fa, "نسخهٔ اولِ مدل می‌ماند");
   const fb = DB.raw.prepare("SELECT stars, boxes, outcome FROM ai_feedback WHERE kind='doc' AND ref=?").get(id);
   assert.deepEqual({ ...fb }, { stars: 3, boxes: '["s_packages"]', outcome: "no" });
   /* حالا «🚀 شروع» */

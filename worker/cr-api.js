@@ -21,7 +21,7 @@ import { supplierProfile, addOpinion, editOpinion, hideOpinion, addLinks, review
 import { headPolicy, recipientPlan, rfqNTable, MODE_FA, FAMILY, VARIANTS } from "./cr-engine.js";
 import * as C from "./strategy/config.js";
 import { WORKFLOWS, WORKFLOW_SUP, SUP_FA } from "./ai-supervise.js";
-import { docView, enqueueDoc, reviewDoc, docOut, docStates, docProgress, panelSettings, savePanel, docModel } from "./strategy-doc.js";
+import { docView, enqueueDoc, buildDoc, reviewDoc, docOut, docStates, docProgress, panelSettings, savePanel, docModel } from "./strategy-doc.js";
 import { AGENT_MODELS } from "./ai-prompts.js";
 import { turnModels, saveTurnModels, TURN_MODEL_OPTS } from "./turn-engine.js";
 import { supplierSearch, supplierInfo, supplierSave } from "./supplier-over.js";
@@ -76,7 +76,9 @@ export async function crRoute(request, env, path, m, url, { json, readJson, who 
     if (path === "/cr/doc/build" && m === "POST") {
       const b = await readJson(request);
       const r = await enqueueDoc(env, T(b.head), { itemCode: T(b.code) || null, prio: 2, by: w.name, force: !!b.force });
-      return json({ queued: r.queued, doc: docOut(r.row) });
+      /* سندِ الگو بی مدل در یک لحظه ساخته می‌شود (آبان ۱۴۰۵) — نه صف و انتظارِ Cron */
+      const built = r.queued && r.row ? await buildDoc(env, r.row).then(() => env.DB.prepare("SELECT * FROM cr_docs WHERE id=?").bind(r.row.id).first()) : r.row;
+      return json({ queued: r.queued, doc: docOut(built) });
     }
     if ((mm = /^\/cr\/doc\/(\d+)\/review$/.exec(path)) && m === "POST") return json(await reviewDoc(env, w, int(mm[1]), await readJson(request)));
   }

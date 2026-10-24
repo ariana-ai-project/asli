@@ -214,7 +214,7 @@
         ${!st.heads ? `<div class="tp-note warn" style="margin-top:8px">دادهٔ تحقیق هنوز وارد نشده است (ابزارِ tools/cr02-import.mjs).</div>` : ""}`}</div>
       ${vPanel()}`;
   }
-  /** «📘 سند راهبرد»: مدلِ سند، تنظیم‌های قیمتِ مؤثر (نرخِ ماهانهٔ پنل…) و پیشرفتِ پیش‌ساختِ نوع قلم‌های پرهزینه */
+  /** «📘 سند راهبرد» (از آبان ۱۴۰۵ بی مدل، از الگو): تنظیم‌های قیمتِ مؤثر (نرخِ ماهانهٔ پنل…) و پیشرفتِ پیش‌ساختِ نوع قلم‌های پرهزینه */
   function vPanel() {
     const pn = S.panel;
     if (!pn) return "";
@@ -223,7 +223,6 @@
     const inp = (k, label, v, hint) => `<label class="tp-field"><b>${label}</b><input class="tp-input num" data-pn="${k}" value="${v}" style="width:90px" dir="ltr" placeholder="${hint || ""}"></label>`;
     return `<div class="tp-card" style="padding:12px 16px;margin-top:12px"><h4 style="margin:0 0 6px">📘 سند راهبرد و قیمتِ مؤثر ${TP.ui.info("support.cr", "راهنمای استراتژی و دفتر")}</h4>
       <div class="toolrow" style="gap:8px;flex-wrap:wrap;align-items:end">
-        <label class="tp-field"><b>مدلِ سند</b><select class="tp-input" data-pn-model>${Object.entries(pn.models || {}).map(([k, v]) => `<option value="${k}" ${k === pn.model ? "selected" : ""}>${esc(v)}</option>`).join("")}</select></label>
         ${inp("panel_rate", "نرخِ ماهانهٔ پنل (٪)", pc(p.panel_rate), "مثلاً ۳")}${inp("fx_growth", "رشدِ ماهانهٔ دلار (٪)", pc(p.fx_growth), "اختیاری")}${inp("vat_rate", "ارزش افزوده (٪)", pc(p.vat_rate))}${inp("no_invoice_premium", "ریسکِ بی صورتحساب (٪)", pc(p.no_invoice_premium))}
         <label class="tp-field"><b>مبنای تنزیل</b><select class="tp-input" data-pn-basis>${[["max", "بیشینهٔ نرخ پنل و دلار"], ["panel", "نرخ پنل"], ["fx", "رشد دلار"]].map(([k, v]) => `<option value="${k}" ${k === p.basis ? "selected" : ""}>${v}</option>`).join("")}</select></label></div>
       <label class="chkline"><input type="checkbox" data-pn-flag="vat_creditable" ${p.vat_creditable ? "checked" : ""}> ارزش افزوده قابلِ استرداد است</label>
