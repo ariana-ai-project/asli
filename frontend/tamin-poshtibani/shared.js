@@ -367,7 +367,21 @@
     const base = CFG.apiBase || "/tamin-poshtibani/api";
     const headers = { "Accept": "application/json", ...TP.authHeaders(), ...(opt.headers || {}) };
     if (opt.body !== undefined) headers["Content-Type"] = "application/json";
-    const res = await fetch(base + path, { method: opt.method || (opt.body !== undefined ? "POST" : "GET"), headers, body: opt.body !== undefined ? JSON.stringify(opt.body) : undefined });
+    const method = opt.method || (opt.body !== undefined ? "POST" : "GET");
+    /* «Failed to fetch» (آبان ۱۴۰۵): پاسخی نرسید — اینترنت یا مسیرِ تا Cloudflare لحظه‌ای قطع شد. خواندن (GET) یک بار دوباره امتحان
+       می‌شود؛ نوشتن نه (شاید به سرور رسیده باشد). پیامِ فارسی به‌جای متنِ خامِ مرورگر؛ e.network برای صفحه‌ها */
+    const go = () => fetch(base + path, { method, headers, body: opt.body !== undefined ? JSON.stringify(opt.body) : undefined });
+    let res;
+    try { res = await go(); }
+    catch (e0) {
+      if (method === "GET") { await new Promise((r) => setTimeout(r, 900)); try { res = await go(); } catch (_) { res = null; } }
+      if (!res) {
+        const e = new Error(method === "GET" ? "ارتباط با سامانه برقرار نشد (اینترنت قطع یا ناپایدار است)؛ چند لحظهٔ دیگر دوباره امتحان کنید."
+          : "پاسخِ سامانه نرسید (اینترنت قطع یا ناپایدار بود). صفحه را تازه کنید و ببینید کار ثبت شده یا نه، بعد اگر لازم بود دوباره بزنید.");
+        e.status = 0; e.network = true;
+        throw e;
+      }
+    }
     let data = null; const txt = await res.text();
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 300) }; }
     if (!res.ok) {

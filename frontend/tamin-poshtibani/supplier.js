@@ -111,7 +111,15 @@
     opt = opt || {};
     const headers = { Accept: "application/json", ...(opt.headers || {}), ...authHeaders() };
     if (opt.json !== undefined) headers["Content-Type"] = "application/json";
-    const res = await fetch(API + path, { method: opt.method || (opt.json !== undefined || opt.body ? "POST" : "GET"), headers, body: opt.json !== undefined ? JSON.stringify(opt.json) : opt.body });
+    const method = opt.method || (opt.json !== undefined || opt.body ? "POST" : "GET");
+    /* «Failed to fetch» (آبان ۱۴۰۵): همان قاعدهٔ shared.js:TP.api — خواندن یک بار دوباره، و پیامِ فارسی */
+    const go = () => fetch(API + path, { method, headers, body: opt.json !== undefined ? JSON.stringify(opt.json) : opt.body });
+    let res;
+    try { res = await go(); }
+    catch (_) {
+      if (method === "GET") { await new Promise((r) => setTimeout(r, 900)); try { res = await go(); } catch (__) { res = null; } }
+      if (!res) { const e = new Error(method === "GET" ? "ارتباط با سامانه برقرار نشد (اینترنت قطع یا ناپایدار است)؛ چند لحظهٔ دیگر دوباره امتحان کنید." : "پاسخِ سامانه نرسید (اینترنت قطع یا ناپایدار بود). صفحه را تازه کنید و ببینید ثبت شده یا نه."); e.status = 0; e.network = true; throw e; }
+    }
     const txt = await res.text();
     let data = null;
     try { data = txt ? JSON.parse(txt) : null; } catch (_) { data = { error: txt.slice(0, 200) }; }
