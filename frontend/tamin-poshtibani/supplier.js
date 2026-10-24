@@ -207,6 +207,9 @@
     /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» باز است: کارتِ بارگذاری همان اول در گفت‌وگوی گوشی (در دسکتاپ نوارِ بالای استعلام هم هست)؛
        «st» خودش کارتِ اقلام را می‌آورد */
     if (!noCard && S.d && S.d.final_call && S.d.final_call.can_upload) itemsCard();
+    /* «📝 فرم قیمت و شرایط»ِ بات تلگرام (…?form=1&line=…): مینی‌اپ همان اول فرم را باز می‌کند (یک بار) */
+    const qp = new URLSearchParams(location.search);
+    if (qp.get("form") === "1" && !S.formAuto && !phoneMode && S.d && S.d.lines.some((l) => FILLING.includes(l.state))) { S.formAuto = true; openFormSheet(+qp.get("line") || null); }
     return true;
   }
   /** خواندنِ دوبارهٔ استعلام؛ quiet: فقط داده (کارِ بات خودش کارت می‌گذارد و یک بار رسم می‌کند) */
@@ -237,6 +240,8 @@
       ? `${top()}<div class="sp-full"><div class="sup-cols"><section class="sup-side" id="side">${sideHtml()}</section>
           <section class="ph-stage">${PH.frame(screenHtml(true))}</section></div></div>`
       : `<div class="sp-full sup-mobile">${screenHtml(false)}</div>`;
+    /* موبایل: «📝 فرم قیمت و شرایط»ِ باز با همان داده‌های تازه دوباره رسم می‌شود (نیمه‌نوشته‌ها را keepSide برمی‌گرداند) */
+    const sheetSide = !phoneMode && $("#spSheet #side"); if (sheetSide) sheetSide.innerHTML = sideHtml();
     bindSide(); bindChat();
     /* راهنما: در دسکتاپ گوشی سمت چپ است، پس دکمهٔ «؟» سمت راست؛ در موبایل دکمهٔ «؟» داخلِ نوارِ گفت‌وگوست */
     UI.help.set("sup.panel", phoneMode ? { side: "right" } : { fab: false });
@@ -414,8 +419,9 @@
     const html = `${head ? `<div class="ph-bot-t">${head}</div>` : ""}${fcCardTxt()}<div class="ph-bot-t">📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i></div><ul class="ph-bot-l">${rows}</ul>
       <div class="ph-bot-t">🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${miss.length ? `<br><i>مانده: ${esc(miss.join("، "))}</i>` : ""}</div>
       ${waitPf.length ? `<div class="ph-bot-t">📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.</div>` : ""}
-      <div class="ph-bot-t"><i>روی هر قلم بزنید و «📝 پر کردن اطلاعات» را بزنید؛ بعد «آمادهٔ ارسال».</i></div>`;
+      <div class="ph-bot-t"><i>قیمت و شرایطِ همهٔ اقلام را یک‌جا در «📝 فرم قیمت و شرایط» بنویسید — یا روی هر قلم بزنید و گام‌به‌گام پر کنید؛ بعد «آمادهٔ ارسال».</i></div>`;
     const kb = L.slice(0, 30).map((l) => [{ t: `${FILLING.includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${tag(l, 30)}`, d: `si:${l.id}` }]);
+    if (!phoneMode && L.some((l) => FILLING.includes(l.state))) kb.unshift([{ t: "📝 فرم قیمت و شرایط (همه یک‌جا)", d: "fm" }]);
     if (fc && fc.can_upload) kb.unshift([{ t: "🧾 بارگذاریِ پیش‌فاکتورِ رسمی", d: "fc" }]);
     if (ready.length) kb.push([{ t: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, d: "ss" }]);
     for (const b of waitPf) kb.push([{ t: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, d: `sp:${b.id}` }]);
@@ -449,7 +455,7 @@
     if (!ed && !EDITABLE.includes(l.state)) h += `<div class="ph-bot-t"><i>${esc(lockedMsg(l))}</i></div>`;
     if (ed) {
       /* یک دکمهٔ اصلی: «📝 پر کردن اطلاعات» — کارت‌های نوبتی (مهر ۱۴۰۵)؛ دکمه‌های تک‌فیلد زیرِ «✏️ ویرایش یک مورد…» */
-      kb.push([{ t: "📝 پر کردن اطلاعات", d: `wz:${l.id}` }]);
+      kb.push(phoneMode ? [{ t: "📝 پر کردن اطلاعات", d: `wz:${l.id}` }] : [{ t: "📝 فرم کامل", d: `fm:${l.id}` }, { t: "🪜 گام‌به‌گام", d: `wz:${l.id}` }]);
       if (!S.kbFull[l.id]) {
         kb.push([{ t: "✏️ ویرایش یک مورد…", d: `wz:${l.id}:m` }, { t: "✅ آمادهٔ ارسال", d: `sr:${l.id}:1` }]);
       } else {
@@ -615,6 +621,7 @@
     const p = String(data).split(":"), a = p[0], n = (i) => parseInt(p[i], 10) || 0;
     try {
       if (a === "ic") { S.flow = null; S.wz = null; return itemsCard("", cardId); }
+      if (a === "fm") return openFormSheet(n(1) || null);
       /* «🧾 پیش‌فاکتورِ رسمی» (فراخوان): فایل‌گیر در همان کلیک؛ بعد سنجش و حکم */
       if (a === "fc") return offpfUpload("call", null, null);
       if (a === "list") return threadsCard();
@@ -908,6 +915,27 @@
   const fieldsOf = (c) => $$("[data-f], [data-ly]", c);
   const fkey = (i) => (i.dataset.f ? `f:${i.dataset.f}` : `y:${i.dataset.ly}`);
   /** پیش از رسمِ دوبارهٔ فرم: مقدارهای نیمه‌نوشتهٔ کارت‌های تغییرکرده و جای اسکرول */
+  /**
+   * موبایل (آبان ۱۴۰۵، خواستهٔ مالک): «📝 فرم قیمت و شرایط» — همان فرمِ کنارِ دسکتاپ (مشخصات اقلام، قیمت‌ها، شرایط فاکتور، ارسال)
+   * تمام‌صفحه روی گفت‌وگو؛ تأمین‌کننده همان اول در فیلدها می‌نویسد و به گفت‌وگوی گام‌به‌گام وابسته نیست. «✕ بستن» کارت‌ها را تازه می‌کند.
+   */
+  function openFormSheet(lineId) {
+    let w = $("#spSheet");
+    if (!w) {
+      document.body.insertAdjacentHTML("beforeend", `<div class="sp-sheet" id="spSheet" role="dialog" aria-modal="true" aria-label="فرم قیمت و شرایط">
+        <div class="sp-sheet-h"><b>📝 فرم قیمت و شرایط</b><button class="tp-btn sm" data-sheet-close>✕ بستن</button></div>
+        <section class="sup-side" id="side"></section></div>`);
+      w = $("#spSheet");
+      $("[data-sheet-close]", w).onclick = () => {
+        if (S.dirty.size && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بسته شود؟")) return;
+        S.dirty.clear(); w.remove(); document.body.classList.remove("sp-sheet-on"); loadThread().catch(() => {});
+      };
+    }
+    document.body.classList.add("sp-sheet-on");
+    S.tab = "spec";
+    $("#side").innerHTML = sideHtml(); bindSide();
+    if (lineId) jumpTo(`[data-line="${lineId}"]`);
+  }
   function keepSideState() {
     const side = $("#side");
     const y = side ? side.scrollTop : 0;
@@ -1025,8 +1053,8 @@
    */
   function formCard(l) {
     const ed = FILLING.includes(l.state);
-    /* پیش‌فرض: خلاصه با «📝 پر کردن اطلاعات»؛ فرمِ کامل فقط با «ویرایش جزئی» */
-    if (ed && !S.formOpen[l.id]) return summaryCard(l);
+    /* آبان ۱۴۰۵ (خواستهٔ مالک): فرمِ کامل پیش‌فرض است — قیمت و شرایط همان اول در فیلدها، بی گفت‌وگوی گام‌به‌گام؛ «↩ خلاصه» جمعش می‌کند */
+    if (ed && S.formOpen[l.id] === false) return summaryCard(l);
     const ro = ed ? "" : "readonly";
     const lk = lockOf(l);
     const files = S.d.files.filter((f) => f.line_id === l.id);
@@ -1210,7 +1238,7 @@
     /* کارتِ خلاصه: «📝 پر کردن اطلاعات» کارت‌های نوبتی را در گوشی می‌آورد؛ «ویرایش جزئی» فرمِ کامل را باز می‌کند */
     Q("[data-wz]").forEach((b) => { b.onclick = () => { bot(`wz:${b.dataset.wz}`); const ph = $(".ph-screen"); if (ph) ph.scrollIntoView({ block: "nearest", behavior: "smooth" }); }; });
     Q("[data-form-open]").forEach((b) => { b.onclick = () => { S.formOpen[+b.dataset.formOpen] = true; rerenderCard(+b.dataset.formOpen); }; });
-    Q("[data-form-close]").forEach((b) => { b.onclick = () => { const id = +b.dataset.formClose; if (S.dirty.has(id) && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بسته شود؟")) return; S.dirty.delete(id); delete S.formOpen[id]; rerenderCard(id); }; });
+    Q("[data-form-close]").forEach((b) => { b.onclick = () => { const id = +b.dataset.formClose; if (S.dirty.has(id) && !confirm("تغییرات ذخیره‌نشده دارید. بی ذخیره بسته شود؟")) return; S.dirty.delete(id); S.formOpen[id] = false; rerenderCard(id); }; });
     Q("[data-ready-sum]").forEach((b) => { b.onclick = async () => { const id = cardOf(b).id; try { await api(`/sp/line/${id}/ready`, { json: { on: true } }); await loadThread(); } catch (e) { say(e.message); } }; });
     Q("[data-f], [data-ly]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
     Q("[data-pr], [data-rt]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); pricesCalc(x.c, i); }; });

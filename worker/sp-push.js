@@ -278,10 +278,12 @@ export function itemsCard(env, th, lines, bundles) {
   text += `\n\n🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${tmiss.length ? `\n<i>مانده: ${esc(tmiss.join("، "))}</i>` : ""}`;
   const waitPf = bundles.filter((b) => b.state === "approved");
   if (waitPf.length) text += `\n\n📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.`;
-  text += "\n\n<i>روی هر قلم بزنید تا قیمت واحد و شرایط را ثبت کنید؛ بعد «آمادهٔ ارسال». لایه‌های 🔒 ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید و ارسال کنید.</i>";
+  text += "\n\n<i>قیمت و شرایطِ همهٔ اقلام را یک‌جا در «📝 فرم قیمت و شرایط» بنویسید — یا روی هر قلم بزنید و گام‌به‌گام ثبت کنید؛ بعد «آمادهٔ ارسال». لایه‌های 🔒 ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید و ارسال کنید.</i>";
   const kb = L.slice(0, 30).map((l) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${lineTag(l, 30)}`, callback_data: `si:${l.id}` }]);
   if (ready.length) kb.push([{ text: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, callback_data: `ss:${th.id}` }]);
   for (const b of waitPf) kb.push([{ text: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, callback_data: `sp:${b.id}` }]);
+  /* آبان ۱۴۰۵ (خواستهٔ مالک): قیمت و شرایطِ همهٔ اقلام یک‌جا در فیلدهای فرم (مینی‌اپ)، بی پرسش‌های گام‌به‌گام */
+  if (L.some((l) => ["new", "draft", "returned"].includes(l.state))) kb.unshift([{ text: "📝 فرم قیمت و شرایط (همه یک‌جا)", web_app: { url: `${appUrl(env, "s")}&form=1` } }]);
   kb.push([{ text: "🧩 باز کردن در پنل", web_app: { url: appUrl(env, "s") } }]);
   return { text, kb };
 }
@@ -328,7 +330,8 @@ export function lineCard(l, files, others, terms, opt = {}) {
   if (editable && miss.length) text += `\n\n<i>مانده برای «آمادهٔ ارسال»: ${esc(miss.join("، "))}</i>`;
   if (editable) {
     /* یک دکمهٔ اصلی: «📝 پر کردن اطلاعات» — پرسش‌های نوبتی، همان ترتیبِ پنل وب (sp-bot.js:wizardNext؛ مهر ۱۴۰۵) */
-    kb.push([{ text: "📝 پر کردن اطلاعات", callback_data: `wz:${l.id}` }]);
+    kb.push(opt.env ? [{ text: "📝 فرم کامل", web_app: { url: `${appUrl(opt.env, "s")}&form=1&line=${l.id}` } }, { text: "🪜 گام‌به‌گام", callback_data: `wz:${l.id}` }]
+      : [{ text: "📝 پر کردن اطلاعات", callback_data: `wz:${l.id}` }]);
     /* مقدارِ 🔒 و واحدِ ثابت دکمه ندارند */
     kb.push([...(lk.legacy || !lk.qty ? [{ text: "🔢 مقدار", callback_data: `sv:${l.id}:q` }] : []), ...(lk.legacy || !lk.unit ? [{ text: "📏 واحد", callback_data: `sv:${l.id}:u` }] : []),
       ...(pm ? priceRows(pm).map((k) => ({ text: PRICE_FA[k].replace("قیمت ", k === "cash" ? "💵 " : "💳 "), callback_data: `sv:${l.id}:${PR_STEP[k]}` }))

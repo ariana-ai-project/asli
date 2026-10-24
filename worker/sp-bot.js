@@ -803,7 +803,7 @@ async function lineCardSend(env, row, sup, lineId, mid, head) {
   /* فاز ۴ب گام ۳: شرطِ شرکت برای همین قلم، و «✏️ اصلاحِ پیشنهاد» برای تأییدنهاییِ کارِ کارشناس هوشمند */
   const lim = (await C.limitsOfLines(env, [l])).get(l.item_id) || null;
   const revise = l.state === "final" ? await C.revisable(env, l.thread_id) : false;
-  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l), { limits: lim, revise });
+  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l), { limits: lim, revise, env });
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }

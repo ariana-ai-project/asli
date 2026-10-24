@@ -1001,7 +1001,9 @@ test("بات تأمین‌کننده: «📝 پر کردن اطلاعات» — 
   const line = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=?").get(th).id;
   let n = calls.length;
   await cb(`si:${line}`);
-  assert.ok(btns(lastTo(n)).some((b) => b.callback_data === `wz:${line}` && /پر کردن اطلاعات/.test(b.text)), "کارت قلم دکمهٔ «📝 پر کردن اطلاعات» دارد");
+  /* آبان ۱۴۰۵: «📝 فرم کامل» (مینی‌اپ با فیلدها) کنارِ «🪜 گام‌به‌گام» */
+  assert.ok(btns(lastTo(n)).some((b) => b.callback_data === `wz:${line}` && /گام‌به‌گام/.test(b.text)), "کارت قلم دکمهٔ «🪜 گام‌به‌گام» دارد");
+  assert.ok(btns(lastTo(n)).some((b) => b.web_app && /form=1&line=/.test(b.web_app.url) && /فرم کامل/.test(b.text)), "و «📝 فرم کامل» در مینی‌اپ");
   const n0 = calls.length;
   await cb(`wz:${line}`);
   const q1 = lastTo(n0);
