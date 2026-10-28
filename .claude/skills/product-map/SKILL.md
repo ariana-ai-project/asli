@@ -10,7 +10,8 @@ description: Use before and after ANY change to the tamin-poshtibani system (wor
 ## پیش از ویرایش
 
 1. **یافتن.** از درخواست کاربر، قابلیت یا فایل را پیدا کن:
-   - `product-map/generated/INDEX.md` (جریان‌های کار و فهرست قابلیت‌ها)، یا `FILES.md` (فایل ← قابلیت)، یا `ENDPOINTS.md` (مسیر ← قابلیت). با Grep بخش لازم را پیدا کن؛ کلِ فایل را نخوان.
+   - `product-map/generated/INDEX.md` (جریان‌های کار و فهرست قابلیت‌ها)، `PANELS.md` (پنل ← تب ← قابلیت؛ وقتی کاربر از جایی در رابط حرف می‌زند)، `BOTS.md` (دستور و دکمهٔ بات ← پاسخ‌گو، Cron)، `FILES.md` (فایل ← قابلیت) یا `ENDPOINTS.md` (مسیر ← قابلیت). با Grep بخش لازم را پیدا کن؛ کلِ فایل را نخوان.
+   - جریانِ کامل (مثلاً «از بارگذاری تا تأیید کمیسیون»): `product-map/generated/workflows/<wf.*>.md`.
    - کارتِ قابلیت: `product-map/generated/features/<شناسه>.md`.
 2. **اثر.** `node scripts/map/impact.mjs <هدف>`. هدف یکی از این‌هاست:
    - فایل: `worker/discovered.js`
@@ -25,6 +26,7 @@ description: Use before and after ANY change to the tamin-poshtibani system (wor
 
 - **بستهٔ پنل پشتیبانی.** `api()` در `support-panel.js` و تب‌هایش (`cr-admin.js`، `fb-admin.js`، `tender-admin.js`، `cm-result.js`، `expert-ai.js`) خودش `/support` می‌چسباند.
 - **پنل مناقصه.** `tender.js` با `api("/x")` مسیرِ `/tender/{code}/x` را می‌زند.
+- **دکمهٔ بات.** پیشوندِ `callback_data` (`"xd:…"`) باید پاسخ‌گو داشته باشد: `action === "xd"`، `/^xd:/` یا `startsWith("xd:")`. ابزارِ اثر سازنده‌ها و پاسخ‌گوی هر دکمه را با شمارهٔ خط می‌دهد.
 - **مسیر تازه در سرور.** به همان شکلِ فعلی بنویس: `if (path === "/x" && m === "GET")` یا `(mm = /^\/x\/(\d+)$/.exec(path)) && m === "POST"`. اسکنر همین الگوها را می‌شناسد.
 
 ## پس از ویرایش
@@ -34,7 +36,8 @@ description: Use before and after ANY change to the tamin-poshtibani system (wor
    - صاحبش را در `product-map/taxonomy.mjs` بنویس:
      - `files` برای فایل (هر فایل یک صاحب)؛
      - `endpoints` برای مسیر (`"METHOD /path"`؛ `*` یعنی پیشوند و `{}` یعنی بخش متغیر)؛
-     - قابلیتِ رابط کاربریِ تازه اول کلیدش را در `help-content.js` می‌گیرد.
+     - قابلیتِ رابط کاربریِ تازه اول کلیدش را در `help-content.js` می‌گیرد، بعد جایش در درختِ `PANELS`؛
+     - تبِ تغییرنام‌داده: `key`ِ همان بخش در `PANELS`؛ گامِ تازهٔ جریان کار: `WORKFLOWS` با `who`.
    - `node scripts/map/build.mjs` و بعد `node scripts/map/check.mjs`. هر دو باید بی خطا باشند.
    - زیرمسیرِ تازه‌ای که مسیرِ بریده‌شده می‌گیرد: `MOUNTS` در `scripts/map/scan.mjs`. بسته‌بندِ تازهٔ api در پنل‌ها: `FRONT_PREFIX`.
 3. **اگر رفتار یا متنِ رابط عوض شد**، موضوعِ همان کلید را در `help-content.js` اصلاح کن و `node backend/tamin-poshtibani/tools/build-help-knowledge.mjs` را بزن.
@@ -46,6 +49,8 @@ description: Use before and after ANY change to the tamin-poshtibani system (wor
 - **«فایل/مسیرِ بی‌صاحب».** در `taxonomy.mjs` صاحبش را بنویس.
 - **«خروجی‌های نقشه کهنه‌اند».** `node scripts/map/build.mjs`.
 - **«تستی که به هیچ قابلیتی نرسید»** (هشدار). در `TEST_FEATURES` بنویس.
+- **«قابلیتِ رابط در هیچ پنلی نیامده» / «کلیدِ بخش … نیست».** درختِ `PANELS` را با کد هم‌خوان کن.
+- **«دکمهٔ بات بی‌پاسخ‌گو».** دکمه‌ای ساخته‌ای که کسی جوابش را نمی‌دهد: باگِ واقعی است. پاسخ‌گو بساز، یا اگر دانسته است در `KNOWN_DEAD_BUTTONS` بنویس.
 
 ## کی کافی نیست
 

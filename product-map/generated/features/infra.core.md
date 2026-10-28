@@ -5,7 +5,7 @@
 > worker.js، مسیریاب api.js (ensureSchema و مهاجرت‌ها)، خطا، زمان کاری، تنظیمات، ذخیره‌سازی و نگهبان D1.
 
 ## فایل‌های این قابلیت (صاحب)
-- `worker.js` — voiceBots
+- `worker.js` — voiceBots، fetch، scheduled
 - `worker/api.js` — cleanOrphans، ensureSchema، migrateAiOptIn، migrateCodes4، route
 - `worker/d1-guard.js` — HEAVY، guardEnv
 - `worker/http.js` — HttpError
@@ -22,10 +22,10 @@
 | `* /reviews` | w/api.js › route | — | — |
 | `GET /selftest` | w/api.js › route | w/selftest.js#selfTest | — |
 
-## فراخوان در پنل‌ها (3)
-- expert.js › loadTemplates → `* /health`، `* /reviews`، `GET /selftest` (صفحه: expert.html)
-- manager.js › refresh → `* /health`، `* /reviews`، `GET /selftest` (صفحه: manager.html)
-- support-panel.js › api → `* /health`، `* /reviews`، `GET /selftest` (صفحه: support.html)
+## فراخوان در پنل‌ها (0)
+—
+
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_KEY، ASSETS، COMPANY، D1_GUARD، ELEVENLABS_API_KEY، FILES، MANAGER_CODE، STT_MODEL، SUPABASE_BUCKET، SUPABASE_SERVICE_KEY، SUPABASE_URL، TG_BOT_TOKEN، TG_BOT_USERNAME، TG_SP_BOT_TOKEN، TG_TEAM_BOT_TOKEN، TG_TEAM_BOT_USERNAME، TG_VB_BOT_TOKEN، TG_WEBHOOK_SECRET
 
 ## جدول‌ها
 نوشتن: ai_agents، ai_calls، ai_log، ai_props، ai_runs، ai_threads، alarms، alerts، assignments، commission_notes، commission_results، counters، cr_facts، cr_turns، decisions، events، expert_scores، experts، fm_choice، holidays، imports، item_changes، items، letters، outbox، proformas، quote_edits، quotes، req_hist، requests، search_suppliers، settings، smart_jobs، smart_searches، sp_bundles، sp_files، sp_lines، sp_msgs، sp_sms، sp_tg، sp_threads، templates، tg_flows، tg_nav، tg_seen، tg_uploads، weights

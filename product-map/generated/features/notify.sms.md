@@ -11,6 +11,8 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+متغیرهای Worker (نام): IPPANEL_API_BASE، IPPANEL_API_KEY، SMS_PROVIDER، TEXTBEE_API_BASE
+
 ## جدول‌ها
 نوشتن: —
 خواندن: —

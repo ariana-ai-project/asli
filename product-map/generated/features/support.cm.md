@@ -4,6 +4,9 @@
 
 > تأیید کمیسیون فقط در همین پنل است و با «🏆 نتیجه و تأیید» ثبت می‌شود: برای هر قلم برنده و علتِ انتخابش را می‌گذارید؛ کارشناسِ همان درخواست در تلگرام خبردار می‌شود و «خاتمه»ی همان اقلام را می‌زند، و به تأمین‌کنندگانی که برنده نشدند پیامِ تشکر می‌رود.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › تأیید کمیسیون
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/cm-result.js` — fa، money، open، close، onKey، quoteCard، itemCard، losers، paint، load
 - `worker/commission-result.js` — CR_DDL، REASONS، commissionResultGet، commissionResultSave، regretText
@@ -16,11 +19,12 @@
 | `POST /support/commission` | w/api.js › route | w/support.js#setCommission | ✓ |
 | `POST /support/commission/result` | w/api.js › route | w/commission-result.js#commissionResultSave | ✓ |
 
-## فراخوان در پنل‌ها (4)
+## فراخوان در پنل‌ها (3)
 - cm-result.js › load → `GET /support/commission/result`، `POST /support/commission/result` (صفحه: support.html)
-- support-panel.js › cmSet → `GET /support/commission`، `POST /support/commission` (صفحه: support.html)
+- support-panel.js › cmSet → `POST /support/commission` (صفحه: support.html)
 - support-panel.js › loadCm → `GET /support/commission`، `POST /support/commission` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/commission`، `POST /support/commission` (صفحه: support.html)
+
+جای راهنما در کد: support-panel.js › vCm
 
 ## جدول‌ها
 نوشتن: commission_notes، commission_results، events، items، sp_msgs، sp_threads

@@ -16,6 +16,14 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+## در بات‌ها
+
+| دکمه | پاسخ‌گو | سازنده‌ها |
+|---|---|---|
+| `cm:` | w/bot.js › onCallback | w/bot.js › requestMenu، w/bot.js › makeTable، w/bot.js › closeCard، w/bot.js › deliverSend، w/support.js › setCommission |
+
+متغیرهای Worker (نام): MANAGER_CODE، SUPPORT_SECRET، TG_WEBHOOK_SECRET
+
 ## جدول‌ها
 نوشتن: events، items، settings
 خواندن: ai_agents، ai_threads، assignments، commission_results، experts، proformas، quotes، requests، sp_bundles، sp_files، sp_lines، sp_msgs، sp_suppliers، sp_threads

@@ -14,6 +14,8 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+متغیرهای Worker (نام): ANTHROPIC_API_KEY، DISCOVERY_MODEL، TG_SP_BOT_TOKEN
+
 ## جدول‌ها
 نوشتن: assignments، events، items، quotes، settings، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders
 خواندن: cat_heads، experts، purchases، requests، sp_phones، sp_suppliers، sp_tg، supplier_grades، suppliers

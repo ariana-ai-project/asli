@@ -27,6 +27,8 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+متغیرهای Worker (نام): ANTHROPIC_API_BASE، ANTHROPIC_API_KEY
+
 ## جدول‌ها
 نوشتن: counters، legal_calls، legal_chats، legal_files، legal_turns
 خواندن: —

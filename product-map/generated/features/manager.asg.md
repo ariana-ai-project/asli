@@ -4,6 +4,9 @@
 
 > پیشنهاد برای همهٔ درخواست‌های بی‌کارشناس با هم ساخته می‌شود، با این فرض که مدیر همه را تأیید می‌کند: هر درخواستی که به کسی داده می‌شود، بار او را برای درخواست بعدی بیشتر می‌کند. هدف تعادل دقیق بار کاری است — با حساب تعداد درخواست، تعداد اقلام، سختی گروه‌های اصناف، ضریب پروژه و ظرفیت هر کارشناس — و در همان حال تخصص و سابقهٔ پروژه.
 
+محل در رابط:
+- پنل مدیر تدارکات (میز ارجاع) › ارجاع هوشمند
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/assign-rules.mjs` — speedOf، num، projectKey، guildKey، tables، effortOf، unitEffort، capOf، limitsOf، buildLoads، planAssign، pen، fits، fill، move، room، deadlineOf، f، …
 
@@ -14,15 +17,12 @@
 | `POST /assign/ai-req` | w/api.js › route | — | ✓ |
 | `POST /dispatch` | w/api.js › route | — | ✓ |
 
-## فراخوان در پنل‌ها (6)
-- expert.js › loadTemplates → `POST /dispatch` (صفحه: expert.html)
+## فراخوان در پنل‌ها (3)
 - manager.js › doDispatch → `POST /dispatch` (صفحه: manager.html)
 - manager.js › go → `POST /assign/ai` (صفحه: manager.html)
-- manager.js › refresh → `POST /dispatch` (صفحه: manager.html)
 - manager.js › wire → `POST /assign/ai-req` (صفحه: manager.html)
-- support-panel.js › api → `POST /dispatch` (صفحه: support.html)
 
-جای راهنما: manager.js (پویا)
+جای راهنما در کد: manager.js (پویا)، manager.js › knobL
 
 ## جدول‌ها
 نوشتن: assignments، items، requests

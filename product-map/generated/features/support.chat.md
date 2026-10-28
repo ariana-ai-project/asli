@@ -4,6 +4,9 @@
 
 > گفت‌وگوهای همهٔ کارشناسان با تأمین‌کنندگان، فقط‌خواندنی؛ باز کردنشان «خوانده‌شده» ثبت نمی‌کند.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › مکاتبات
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -14,12 +17,11 @@
 | `GET /support/threads` | w/api.js › route | w/support.js#supportThreads | ✓ |
 | `GET /support/threads/{}` | w/api.js › route | w/support.js#supportThread | ✓ |
 
-## فراخوان در پنل‌ها (3)
+## فراخوان در پنل‌ها (2)
 - support-panel.js › loadThreads → `GET /support/threads` (صفحه: support.html)
 - support-panel.js › openThread → `GET /support/threads/{}` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/threads` (صفحه: support.html)
 
-جای راهنما: support-panel.js
+جای راهنما در کد: support-panel.js › render
 
 ## جدول‌ها
 نوشتن: —

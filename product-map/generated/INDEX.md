@@ -5,40 +5,42 @@
 
 آمار: 77 قابلیت در 13 بخش | 155 فایل | 343 مسیر (258 در تست صدا زده می‌شوند) | 362 فراخوان پنل | 115 جدول | 86 تست
 
+نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
+
 ## جریان‌های کار
 
-### wf.request — چرخهٔ درخواست خرید (دستی)
-1. بارگذاری اکسل درخواست‌ها → manager.import
-2. ارجاع به کارشناس و مهلت (دستی یا هوشمند) → manager.desk، manager.asg، manager.dl
-3. مشاهده در کارتابل → expert.tray، expert.detail
-4. تأیید ساختار قلم و بررسی سوابق → expert.detail، engine.structure، expert.history
-5. جستجوی هوشمند تأمین‌کنندهٔ تازه → expert.smart، expert.msgtpl
-6. استعلام و مکاتبه؛ پاسخ تأمین‌کننده در پنل یا بات → corr.main، login.supplier، sup.panel، bot.sp، expert.terms
-7. پیش‌فاکتور و استعلامات → expert.quotes
-8. جدول کمیسیون و نامهٔ کمیسیون → expert.comm، expert.letter
-9. تأیید کمیسیون و خاتمه → support.cm، expert.detail
+### [wf.request](workflows/wf.request.md) — چرخهٔ درخواست خرید (دستی)
+1. (مدیر) بارگذاری اکسل درخواست‌ها → manager.import
+2. (مدیر) ارجاع به کارشناس و مهلت (دستی یا هوشمند) → manager.desk، manager.asg، manager.dl
+3. (کارشناس) مشاهده در کارتابل → expert.tray، expert.detail
+4. (کارشناس) تأیید ساختار قلم و بررسی سوابق → expert.detail، engine.structure، expert.history
+5. (کارشناس) جستجوی هوشمند تأمین‌کنندهٔ تازه → expert.smart، expert.msgtpl
+6. (کارشناس ↔ تأمین‌کننده) استعلام و مکاتبه؛ پاسخ تأمین‌کننده در پنل یا بات → corr.main، login.supplier، sup.panel، bot.sp، expert.terms
+7. (کارشناس) پیش‌فاکتور و استعلامات → expert.quotes
+8. (کارشناس) جدول کمیسیون و نامهٔ کمیسیون → expert.comm، expert.letter
+9. (پشتیبانی) تأیید کمیسیون و خاتمه → support.cm، expert.detail
 
-### wf.smart — درخواست هوشمند (کارشناس هوشمند، کارشناس ناظر)
-1. روشن کردن 🤖 برای کارشناس و تنظیم‌ها → support.ai، support.md، support.sw، support.rules، support.rank
-2. تأیید ساختار و بررسی سوابق → expert.detail، expert.history
-3. 🎯 فهرست دعوت و 🚀 شروع → expert.picks، expert.ai، engine.strategy
-4. مذاکرهٔ خودکار با تأمین‌کنندگان → engine.ai، sup.panel، bot.sp
-5. 👁 نظارت کارشناس و پیشنهادها → expert.ai، corr.main
-6. 📨 فراخوان پیش‌فاکتور رسمی → expert.finalcall، support.finalcall
-7. جدول کمیسیون، تحویل و تأیید → expert.comm، support.dl، support.cm
+### [wf.smart](workflows/wf.smart.md) — درخواست هوشمند (کارشناس هوشمند، کارشناس ناظر)
+1. (پشتیبانی) روشن کردن 🤖 برای کارشناس و تنظیم‌ها → support.ai، support.md، support.sw، support.rules، support.rank
+2. (کارشناس) تأیید ساختار و بررسی سوابق → expert.detail، expert.history
+3. (کارشناس) 🎯 فهرست دعوت و 🚀 شروع → expert.picks، expert.ai، engine.strategy
+4. (کارشناس هوشمند ↔ تأمین‌کننده) مذاکرهٔ خودکار با تأمین‌کنندگان → engine.ai، sup.panel، bot.sp
+5. (کارشناس) 👁 نظارت کارشناس و پیشنهادها → expert.ai، corr.main
+6. (کارشناس هوشمند) 📨 فراخوان پیش‌فاکتور رسمی → expert.finalcall، support.finalcall
+7. (کارشناس هوشمند ← پشتیبانی) جدول کمیسیون، تحویل و تأیید → expert.comm، support.dl، support.cm
 
-### wf.tender — مناقصهٔ برخط (معکوس)
-1. ارجاع درخواست به مناقصه → manager.desk، support.td
-2. ساخت، زمان‌بندی و دعوت با پیامک → support.td، engine.tender، notify.sms
-3. ورود تأمین‌کننده با رمز پیامکی → login.tender
-4. ثبت پیشنهادهای کاهشی → tender.page، engine.tender
-5. پایان، نتیجه و برگشت به کمیسیون → support.td، expert.comm
+### [wf.tender](workflows/wf.tender.md) — مناقصهٔ برخط (معکوس)
+1. (مدیر یا پشتیبانی) ارجاع درخواست به مناقصه → manager.desk، support.td
+2. (پشتیبانی) ساخت، زمان‌بندی و دعوت با پیامک → support.td، engine.tender، notify.sms
+3. (تأمین‌کننده) ورود تأمین‌کننده با رمز پیامکی → login.tender
+4. (تأمین‌کننده) ثبت پیشنهادهای کاهشی → tender.page، engine.tender
+5. (پشتیبانی ← کارشناس) پایان، نتیجه و برگشت به کمیسیون → support.td، expert.comm
 
-### wf.supplier — پاسخ تأمین‌کننده به استعلام
-1. ارسال استعلام با پیامک و لینک بات → corr.main، notify.sms
-2. ورود با رمز پیامکی یا از بات → login.supplier، bot.sp
-3. پر کردن قیمت و شرایط هر قلم و ارسال → sup.panel، expert.terms
-4. تصمیم کارشناس روی بسته‌ها → corr.main، expert.quotes
+### [wf.supplier](workflows/wf.supplier.md) — پاسخ تأمین‌کننده به استعلام
+1. (کارشناس) ارسال استعلام با پیامک و لینک بات → corr.main، notify.sms
+2. (تأمین‌کننده) ورود با رمز پیامکی یا از بات → login.supplier، bot.sp
+3. (تأمین‌کننده) پر کردن قیمت و شرایط هر قلم و ارسال → sup.panel، expert.terms
+4. (کارشناس) تصمیم کارشناس روی بسته‌ها → corr.main، expert.quotes
 
 ## قابلیت‌ها
 

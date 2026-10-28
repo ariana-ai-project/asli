@@ -4,7 +4,8 @@
      (frontend/tamin-poshtibani/help-content.js، مثل expert.smart)؛ عنوان و توضیحشان از همان‌جا خوانده می‌شود.
    • files: فایل‌هایی که «صاحبشان» این قابلیت است — هر فایل فقط یک صاحب دارد (الگوی * مجاز است).
    • endpoints: مسیرهای سرور که این قابلیت پاسخ‌گویشان است: «METHOD /path» یا «/path»؛ «*» در انتها یعنی پیشوند؛ «{}» یعنی بخش متغیر.
-   • بقیه (تابع‌ها، فراخوان‌های پنل، جدول‌ها، تست‌ها، وابستگی‌ها) را scripts/map/build.mjs از خودِ کد درمی‌آورد.
+   • PANELS: درختِ هشت صفحه ← تب ← قابلیت (محلِ هر قابلیت در رابط). WORKFLOWS: جریان‌های کار با کننده‌ی هر گام.
+   • بقیه (تابع‌ها، فراخوان‌های پنل، دکمه‌ها و دستورهای بات، Cron، جدول‌ها، تست‌ها، وابستگی‌ها) را scripts/map/build.mjs از خودِ کد درمی‌آورد.
    بعد از هر تغییر: node scripts/map/build.mjs — و اگر مسیر/فایل تازه‌ای ساختید، همین‌جا صاحبش را بنویسید.
    ============================================================ */
 
@@ -151,45 +152,149 @@ export const FEATURES = [
     files: [`${W}legal.js`, `${W}legal-prompts.js`], endpoints: ["legal:*"] },
 ];
 
-/* جریان‌های کار: هر گام به یک یا چند قابلیت اشاره می‌کند (ترتیبِ راهنمای «روند کار» و «میز ارجاع») */
+/* پنل‌ها: هر صفحه و درختِ بخش‌هایش (تب، زیرتب، قسمتِ درونِ صفحه) با قابلیتِ هر بخش.
+   • key: مقدارِ همان بخش در کدِ پنل (S.tab، S.screen، S.aiView، …)؛ باید به شکلِ "key" در اسکریپت‌های همان صفحه باشد.
+   • هر قابلیتِ رابط (موضوعِ راهنما) دست‌کم یک جا در این درخت است؛ تبِ تازه = موضوعِ راهنمای تازه + یک بخش همین‌جا.
+   • who: نقشی که پنل را باز می‌کند. */
+export const PANELS = [
+  { id: "p.portal", page: `${F}index.html`, title: "درگاه تدارکات", who: "همه", sections: [
+    { title: "انتخاب پنل (کارشناس، مدیر، پشتیبانی)", f: "infra.site" },
+  ] },
+  { id: "p.expert", page: `${F}expert.html`, title: "پنل کارشناس خرید", who: "کارشناس خرید و کارشناس ارشد", sections: [
+    { key: "login", title: "ورود کارشناس", f: "login.expert" },
+    { key: "list", title: "کارتابل من", f: "expert.tray" },
+    { key: "detail", title: "صفحهٔ درخواست", f: "expert.detail", sections: [
+      { title: "🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت", f: "expert.ai" },
+      { title: "📋 شرایط خرید هر قلم", f: "expert.terms" },
+      { title: "📘 سند راهبرد", f: "engine.strategy" },
+      { key: "history", title: "بررسی سوابق", f: "expert.history", sections: [
+        { title: "🎯 فهرست دعوت", f: "expert.picks" },
+        { title: "✉️ قالب پیام", f: "expert.msgtpl" },
+      ] },
+      { key: "smart", title: "جستجوی هوشمند", f: "expert.smart" },
+      { key: "quotes", title: "استعلامات", f: "expert.quotes" },
+      { key: "comm", title: "جدول کمیسیون", f: "expert.comm", sections: [
+        { title: "📨 فراخوان پیش‌فاکتور رسمی و 📦 بستهٔ کمیسیون", f: "expert.finalcall" },
+      ] },
+      { key: "letter", title: "نامهٔ کمیسیون", f: "expert.letter" },
+    ] },
+    { key: "team", title: "تیم کارشناسی", f: "expert.team" },
+    { key: "alerts", title: "تنظیم اعلانات تیم", f: "expert.alerts" },
+    { key: "account", title: "حساب من", f: "expert.account" },
+    { title: "راهنمای «روند کار روی یک درخواست»", f: "expert.flow" },
+  ] },
+  { id: "p.corr", page: `${F}correspond.html`, title: "مکاتبات با تأمین‌کنندگان", who: "کارشناس خرید", sections: [
+    { title: "ورود (همان ورود کارشناس)", f: "login.expert" },
+    { key: "req", title: "درخواست‌ها", f: "corr.main" },
+    { key: "sup", title: "تأمین‌کنندگانِ یک درخواست", f: "corr.main" },
+    { key: "chat", title: "گفت‌وگو", f: "corr.main", sections: [
+      { key: "items", title: "اقلام، پیش‌فاکتور و تأیید بسته", f: "corr.main" },
+      { title: "✉️ قالب پیام", f: "expert.msgtpl" },
+    ] },
+  ] },
+  { id: "p.manager", page: `${F}manager.html`, title: "پنل مدیر تدارکات (میز ارجاع)", who: "مدیر تدارکات", sections: [
+    { title: "ورود مدیر", f: "login.manager" },
+    { key: "desk", title: "میز ارجاع", f: "manager.desk", sections: [
+      { title: "بارگذاری درخواست‌های روزانه (اکسل)", f: "manager.import" },
+    ] },
+    { key: "experts", title: "کارشناسان", f: "manager.experts" },
+    { key: "alerts", title: "تنظیم اعلانات", f: "manager.alerts" },
+    { key: "asg", title: "ارجاع هوشمند", f: "manager.asg" },
+    { key: "dl", title: "مهلت هوشمند", f: "manager.dl" },
+    { key: "reports", title: "گزارش‌ها", f: "manager.reports" },
+    { key: "log", title: "تصمیم‌ها و رویدادها", f: "manager.log" },
+  ] },
+  { id: "p.support", page: `${F}support.html`, title: "پنل پشتیبانی تدارکات", who: "پشتیبانی (مالک سامانه)", sections: [
+    { key: "login", title: "ورود پشتیبانی", f: "login.support" },
+    { key: "req", title: "درخواست‌ها", f: "support.req" },
+    { key: "exp", title: "کارشناسان", f: "support.exp" },
+    { key: "chat", title: "مکاتبات", f: "support.chat" },
+    { key: "cm", title: "تأیید کمیسیون", f: "support.cm", sections: [
+      { title: "📏 برچسب اندازه و حداقل استعلام", f: "support.size" },
+    ] },
+    { key: "td", title: "🔨 مناقصه", f: "support.td" },
+    { key: "ai", title: "🤖 کارشناس هوشمند", f: "support.ai", sections: [
+      { key: "list", title: "👥 کارشناسان و کارها (و داشبورد هر کارشناس)", f: "support.ai" },
+      { key: "rules", title: "⏱ مهلتِ رسیدن به حد", f: "support.rules" },
+      { key: "rank", title: "🏅 رتبه‌بندی و دعوت", f: "support.rank" },
+      { key: "usd", title: "💵 نرخ دلار", f: "support.usd" },
+      { key: "md", title: "🧭 حالت اقلام", f: "support.md" },
+      { key: "sw", title: "🎛 کلیدها", f: "support.sw", sections: [
+        { title: "📨 فراخوان پیش‌فاکتور رسمی", f: "support.finalcall" },
+        { title: "🔎 جستجوی هوشمند", f: "support.smartgate" },
+      ] },
+    ] },
+    { key: "dl", title: "📥 تحویل‌های هوشمند", f: "support.dl" },
+    { key: "fb", title: "⭐ ارزیابی ربات", f: "support.fb" },
+    { key: "use", title: "📊 کارکرد کارشناسان", f: "support.use" },
+    { key: "log", title: "رخدادها", f: "support.log" },
+    { key: "chg", title: "🧩 تغییرات اقلام", f: "support.chg" },
+    { key: "cr", title: "🧭 استراتژی و دفتر", f: "support.cr", sections: [
+      { title: "🏷 تأمین‌کنندگان — رده و مشخصات", f: "support.sup" },
+    ] },
+  ] },
+  { id: "p.supplier", page: `${F}supplier.html`, title: "پنل تأمین‌کنندگان", who: "تأمین‌کننده (لینک پیامک یا بات)", sections: [
+    { title: "ورود با رمز پیامکی", f: "login.supplier" },
+    { title: "پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو", f: "sup.panel" },
+  ] },
+  { id: "p.tender", page: `${F}tender.html`, title: "مناقصهٔ خرید", who: "تأمین‌کنندهٔ دعوت‌شده", sections: [
+    { title: "ورود به مناقصه", f: "login.tender" },
+    { title: "ثبت پیشنهاد و جدول زنده", f: "tender.page" },
+  ] },
+  { id: "p.guide", page: `${F}guide-a4.html`, title: "راهنمای چاپی کارشناس (A4)", who: "کارشناس خرید", sections: [
+    { title: "راهنمای چاپی", f: "infra.help" },
+  ] },
+  { id: "p.all", page: null, title: "در همهٔ پنل‌ها", who: "همه", sections: [
+    { title: "«؟» کشوی راهنما", f: "infra.help" },
+    { title: "💬 دستیار سامانه", f: "bot.help" },
+    { title: "🔔 اعلان مرورگر", f: "notify.push" },
+    { title: "نوار بالا، اعلان‌ها و کیت مشترک", f: "infra.ui" },
+  ] },
+];
+
+/* جریان‌های کار: هر گام به یک یا چند قابلیت اشاره می‌کند (ترتیبِ راهنمای «روند کار» و «میز ارجاع»).
+   who: نقشِ انجام‌دهنده. محلِ هر گام در رابط از PANELS می‌آید (همان قابلیت‌ها). */
 export const WORKFLOWS = [
   { id: "wf.request", title: "چرخهٔ درخواست خرید (دستی)", steps: [
-    { t: "بارگذاری اکسل درخواست‌ها", f: ["manager.import"] },
-    { t: "ارجاع به کارشناس و مهلت (دستی یا هوشمند)", f: ["manager.desk", "manager.asg", "manager.dl"] },
-    { t: "مشاهده در کارتابل", f: ["expert.tray", "expert.detail"] },
-    { t: "تأیید ساختار قلم و بررسی سوابق", f: ["expert.detail", "engine.structure", "expert.history"] },
-    { t: "جستجوی هوشمند تأمین‌کنندهٔ تازه", f: ["expert.smart", "expert.msgtpl"] },
-    { t: "استعلام و مکاتبه؛ پاسخ تأمین‌کننده در پنل یا بات", f: ["corr.main", "login.supplier", "sup.panel", "bot.sp", "expert.terms"] },
-    { t: "پیش‌فاکتور و استعلامات", f: ["expert.quotes"] },
-    { t: "جدول کمیسیون و نامهٔ کمیسیون", f: ["expert.comm", "expert.letter"] },
-    { t: "تأیید کمیسیون و خاتمه", f: ["support.cm", "expert.detail"] },
+    { who: "مدیر", t: "بارگذاری اکسل درخواست‌ها", f: ["manager.import"] },
+    { who: "مدیر", t: "ارجاع به کارشناس و مهلت (دستی یا هوشمند)", f: ["manager.desk", "manager.asg", "manager.dl"] },
+    { who: "کارشناس", t: "مشاهده در کارتابل", f: ["expert.tray", "expert.detail"] },
+    { who: "کارشناس", t: "تأیید ساختار قلم و بررسی سوابق", f: ["expert.detail", "engine.structure", "expert.history"] },
+    { who: "کارشناس", t: "جستجوی هوشمند تأمین‌کنندهٔ تازه", f: ["expert.smart", "expert.msgtpl"] },
+    { who: "کارشناس ↔ تأمین‌کننده", t: "استعلام و مکاتبه؛ پاسخ تأمین‌کننده در پنل یا بات", f: ["corr.main", "login.supplier", "sup.panel", "bot.sp", "expert.terms"] },
+    { who: "کارشناس", t: "پیش‌فاکتور و استعلامات", f: ["expert.quotes"] },
+    { who: "کارشناس", t: "جدول کمیسیون و نامهٔ کمیسیون", f: ["expert.comm", "expert.letter"] },
+    { who: "پشتیبانی", t: "تأیید کمیسیون و خاتمه", f: ["support.cm", "expert.detail"] },
   ] },
   { id: "wf.smart", title: "درخواست هوشمند (کارشناس هوشمند، کارشناس ناظر)", steps: [
-    { t: "روشن کردن 🤖 برای کارشناس و تنظیم‌ها", f: ["support.ai", "support.md", "support.sw", "support.rules", "support.rank"] },
-    { t: "تأیید ساختار و بررسی سوابق", f: ["expert.detail", "expert.history"] },
-    { t: "🎯 فهرست دعوت و 🚀 شروع", f: ["expert.picks", "expert.ai", "engine.strategy"] },
-    { t: "مذاکرهٔ خودکار با تأمین‌کنندگان", f: ["engine.ai", "sup.panel", "bot.sp"] },
-    { t: "👁 نظارت کارشناس و پیشنهادها", f: ["expert.ai", "corr.main"] },
-    { t: "📨 فراخوان پیش‌فاکتور رسمی", f: ["expert.finalcall", "support.finalcall"] },
-    { t: "جدول کمیسیون، تحویل و تأیید", f: ["expert.comm", "support.dl", "support.cm"] },
+    { who: "پشتیبانی", t: "روشن کردن 🤖 برای کارشناس و تنظیم‌ها", f: ["support.ai", "support.md", "support.sw", "support.rules", "support.rank"] },
+    { who: "کارشناس", t: "تأیید ساختار و بررسی سوابق", f: ["expert.detail", "expert.history"] },
+    { who: "کارشناس", t: "🎯 فهرست دعوت و 🚀 شروع", f: ["expert.picks", "expert.ai", "engine.strategy"] },
+    { who: "کارشناس هوشمند ↔ تأمین‌کننده", t: "مذاکرهٔ خودکار با تأمین‌کنندگان", f: ["engine.ai", "sup.panel", "bot.sp"] },
+    { who: "کارشناس", t: "👁 نظارت کارشناس و پیشنهادها", f: ["expert.ai", "corr.main"] },
+    { who: "کارشناس هوشمند", t: "📨 فراخوان پیش‌فاکتور رسمی", f: ["expert.finalcall", "support.finalcall"] },
+    { who: "کارشناس هوشمند ← پشتیبانی", t: "جدول کمیسیون، تحویل و تأیید", f: ["expert.comm", "support.dl", "support.cm"] },
   ] },
   { id: "wf.tender", title: "مناقصهٔ برخط (معکوس)", steps: [
-    { t: "ارجاع درخواست به مناقصه", f: ["manager.desk", "support.td"] },
-    { t: "ساخت، زمان‌بندی و دعوت با پیامک", f: ["support.td", "engine.tender", "notify.sms"] },
-    { t: "ورود تأمین‌کننده با رمز پیامکی", f: ["login.tender"] },
-    { t: "ثبت پیشنهادهای کاهشی", f: ["tender.page", "engine.tender"] },
-    { t: "پایان، نتیجه و برگشت به کمیسیون", f: ["support.td", "expert.comm"] },
+    { who: "مدیر یا پشتیبانی", t: "ارجاع درخواست به مناقصه", f: ["manager.desk", "support.td"] },
+    { who: "پشتیبانی", t: "ساخت، زمان‌بندی و دعوت با پیامک", f: ["support.td", "engine.tender", "notify.sms"] },
+    { who: "تأمین‌کننده", t: "ورود تأمین‌کننده با رمز پیامکی", f: ["login.tender"] },
+    { who: "تأمین‌کننده", t: "ثبت پیشنهادهای کاهشی", f: ["tender.page", "engine.tender"] },
+    { who: "پشتیبانی ← کارشناس", t: "پایان، نتیجه و برگشت به کمیسیون", f: ["support.td", "expert.comm"] },
   ] },
   { id: "wf.supplier", title: "پاسخ تأمین‌کننده به استعلام", steps: [
-    { t: "ارسال استعلام با پیامک و لینک بات", f: ["corr.main", "notify.sms"] },
-    { t: "ورود با رمز پیامکی یا از بات", f: ["login.supplier", "bot.sp"] },
-    { t: "پر کردن قیمت و شرایط هر قلم و ارسال", f: ["sup.panel", "expert.terms"] },
-    { t: "تصمیم کارشناس روی بسته‌ها", f: ["corr.main", "expert.quotes"] },
+    { who: "کارشناس", t: "ارسال استعلام با پیامک و لینک بات", f: ["corr.main", "notify.sms"] },
+    { who: "تأمین‌کننده", t: "ورود با رمز پیامکی یا از بات", f: ["login.supplier", "bot.sp"] },
+    { who: "تأمین‌کننده", t: "پر کردن قیمت و شرایط هر قلم و ارسال", f: ["sup.panel", "expert.terms"] },
+    { who: "کارشناس", t: "تصمیم کارشناس روی بسته‌ها", f: ["corr.main", "expert.quotes"] },
   ] },
 ];
 
 /* فراخوان‌هایی از پنل که هنوز به مسیری نمی‌رسند و دانسته رها شده‌اند (هر یک با دلیل؛ بعد از اصلاح پاکشان کنید) */
 export const KNOWN_UNMATCHED = [];
+
+/* دکمه‌های بات (پیشوندِ callback_data) که دانسته پاسخ‌گو ندارند: { prefix, why } */
+export const KNOWN_DEAD_BUTTONS = [];
 
 /* تست‌هایی که از راه import یا مسیر به قابلیتی نمی‌رسند (مثلاً پارسر مرورگر را از راه run.mjs#loadTP اجرا می‌کنند) */
 export const TEST_FEATURES = {

@@ -21,6 +21,15 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+## در بات‌ها
+
+| دکمه | پاسخ‌گو | سازنده‌ها |
+|---|---|---|
+| `go:` | w/sp-bot.js › onCallback | w/ai-agent.js › tellExpert، w/sp-push.js › pushMsgs، w/sp-push.js › deliverSms |
+| `prop:` | w/bot.js › onCallback | w/ai-agent.js › propKb |
+
+متغیرهای Worker (نام): AI_AGENT_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، TG_BOT_TOKEN، TG_IGNORE_HOURS، TG_SP_BOT_TOKEN
+
 ## جدول‌ها
 نوشتن: ai_agents، ai_calls، ai_log، ai_props، ai_rates، ai_runs، ai_threads، alerts، assignments، events، experts، items، letters، outbox، quotes، sp_phones
 خواندن: cr_facts، cr_head_x، cr_heads، cr_turns، decisions، final_calls، requests، settings، smart_searches، sp_bundles، sp_lines، sp_msgs، sp_sms، sp_suppliers، sp_tg، sp_threads، supplier_phones

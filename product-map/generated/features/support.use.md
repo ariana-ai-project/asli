@@ -4,6 +4,9 @@
 
 > برای هر کارشناس در بازهٔ انتخابی: درخواست‌هایی که برایش فرستاده شد، هر استفاده از هوش مصنوعی (کارشناس هوشمند، جستجوی هوشمند، خوانشِ پیش‌فاکتور، نرمال‌سازی با مدل، نامهٔ کمیسیون)، ElevenLabs (صدای نامه و بات صوتی)، پیامک‌ها، قالب‌های پیامی که ساخت و پیام‌هایی که کپی کرد.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 📊 کارکرد کارشناسان
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/usage-report.js` — usageExpert، usageOverview
 
@@ -14,9 +17,8 @@
 | `GET /support/usage` | w/api.js › route | w/usage-report.js#usageOverview | ✓ |
 | `GET /support/usage/{}` | w/api.js › route | w/usage-report.js#usageExpert | ✓ |
 
-## فراخوان در پنل‌ها (2)
+## فراخوان در پنل‌ها (1)
 - support-panel.js › loadLog → `GET /support/activity` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/activity`، `GET /support/usage` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: —

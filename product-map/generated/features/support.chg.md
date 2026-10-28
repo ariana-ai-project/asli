@@ -4,6 +4,9 @@
 
 > نرمال‌سازی اجباری است و اول از همه: کارشناس ساختارِ هر قلم را می‌بیند، اصلاح یا تأیید می‌کند و کنارِ عنوان، مقدار و هر لایه 🔒 یا 🔓 می‌گذارد. این‌جا برای هر قلمِ نرمال‌شده یک پیام است: فرقِ ساختارِ تأییدشده با پیشنهادِ سامانه، با تاریخچه.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 🧩 تغییرات اقلام
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -13,10 +16,9 @@
 | `GET /support/changes` | w/api.js › route | w/structure.js#changesList | ✓ |
 | `GET /support/changes/{}` | w/api.js › route | w/structure.js#changeLog | ✓ |
 
-## فراخوان در پنل‌ها (3)
+## فراخوان در پنل‌ها (2)
 - support-panel.js › chgLog → `GET /support/changes/{}` (صفحه: support.html)
 - support-panel.js › loadChg → `GET /support/changes` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/changes` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: —

@@ -4,6 +4,9 @@
 
 > هر کاری که کارشناس هوشمند تمام می‌کند — جدول کمیسیون، برگهٔ درخواست خرید و نامه — این‌جا می‌آید. بازش کنید، اسناد را ببینید و کمیسیون را تأیید یا با دلیل رد کنید. تأیید = تیکِ کمیسیونِ همهٔ اقلام؛ رد، درخواست را کامل به کارشناس برمی‌گرداند.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 📥 تحویل‌های هوشمند
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -14,17 +17,14 @@
 | `GET /support/ai/deliveries/{}` | w/ai-agent.js › aiAdmin | — | ✓ |
 | `POST /support/ai/deliveries/{}/review` | w/ai-agent.js › aiAdmin | — | ✓ |
 
-## فراخوان در پنل‌ها (10)
-- expert-ai.js › Q → `GET /support/ai/deliveries/{}` (صفحه: support.html)
-- expert-ai.js › load → `GET /support/ai/deliveries/{}`، `POST /support/ai/deliveries/{}/review` (صفحه: support.html)
-- expert-ai.js › phoneDialog → `GET /support/ai/deliveries/{}` (صفحه: support.html)
-- expert-ai.js › ul → `GET /support/ai/deliveries/{}`، `POST /support/ai/deliveries/{}/review` (صفحه: support.html)
-- expert-ai.js › wire → `GET /support/ai/deliveries/{}`، `POST /support/ai/deliveries/{}/review` (صفحه: support.html)
-- support-panel.js › aiToggle → `GET /support/ai/deliveries/{}` (صفحه: support.html)
+## فراخوان در پنل‌ها (5)
+- expert-ai.js › load → `GET /support/ai/deliveries/{}` (صفحه: support.html)
 - support-panel.js › dlSend → `POST /support/ai/deliveries/{}/review` (صفحه: support.html)
 - support-panel.js › loadAi → `GET /support/ai/deliveries` (صفحه: support.html)
 - support-panel.js › loadDl → `GET /support/ai/deliveries/{}` (صفحه: support.html)
 - support-panel.js › loadDls → `GET /support/ai/deliveries` (صفحه: support.html)
+
+جای راهنما در کد: support-panel.js › vDlOne
 
 ## جدول‌ها
 نوشتن: ai_runs، events

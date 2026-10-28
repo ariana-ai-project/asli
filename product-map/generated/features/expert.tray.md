@@ -4,6 +4,9 @@
 
 > هر درخواستی که مدیر به شما ارجاع و ارسال کرده، یک کارت است — تازه‌ترها اول. خاتمه‌یافته، معلق و متوقف در کارتابل نیستند.
 
+محل در رابط:
+- پنل کارشناس خرید › کارتابل من
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -13,12 +16,11 @@
 | `GET /tray` | w/api.js › route | — | ✓ |
 | `POST /assignments/{}/viewed` | w/api.js › route | — | — |
 
-## فراخوان در پنل‌ها (5)
-- expert.js › loadTemplates → `GET /tray` (صفحه: expert.html)
+## فراخوان در پنل‌ها (2)
 - expert.js › loadTray → `GET /tray` (صفحه: expert.html)
 - expert.js › openDetail → `POST /assignments/{}/viewed` (صفحه: expert.html)
-- manager.js › refresh → `GET /tray` (صفحه: manager.html)
-- support-panel.js › api → `GET /tray` (صفحه: support.html)
+
+جای راهنما در کد: expert.js › vList
 
 ## جدول‌ها
 نوشتن: assignments

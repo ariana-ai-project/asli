@@ -4,6 +4,9 @@
 
 > کلیدهای سراسریِ مسیرِ خرید — برای همهٔ کارشناسان، کارشناس هوشمند، پنل تأمین‌کننده و بات‌ها، همان لحظه (تا یک دقیقه).
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🎛 کلیدها
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/switches.js` — SWITCH_DEFAULT، SWITCH_FA، SWITCH_KEY، getSwitches، pfReadOn، resetSwitchCache، saveSwitches
 
@@ -13,11 +16,10 @@
 | `GET /support/ai/switches` | w/ai-agent.js › aiAdmin | w/switches.js#SWITCH_FA، w/switches.js#getSwitches | ✓ |
 | `PUT /support/ai/switches` | w/ai-agent.js › aiAdmin | w/switches.js#saveSwitches | ✓ |
 
-## فراخوان در پنل‌ها (4)
-- support-panel.js › go → `GET /support/ai/switches`، `PUT /support/ai/switches` (صفحه: support.html)
+## فراخوان در پنل‌ها (3)
+- support-panel.js › go → `PUT /support/ai/switches` (صفحه: support.html)
 - support-panel.js › loadAi → `GET /support/ai/switches`، `PUT /support/ai/switches` (صفحه: support.html)
-- support-panel.js › loadDls → `GET /support/ai/switches`، `PUT /support/ai/switches` (صفحه: support.html)
-- support-panel.js › loadSw → `GET /support/ai/switches`، `PUT /support/ai/switches` (صفحه: support.html)
+- support-panel.js › loadSw → `GET /support/ai/switches` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: events، settings

@@ -4,6 +4,9 @@
 
 > نظارت بر کار کارشناسان: بازه، پروژه، کارشناس و وضعیت؛ شش باکس پایش هر ارجاع و جزئیاتش با کلیک؛ و «🔨 ارجاع به مناقصه» برای اقلامِ ارسال‌نشده.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › درخواست‌ها
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -15,12 +18,11 @@
 | `GET /support/assignments/{}/sheet/request` | w/api.js › route | — | ✓ |
 | `GET /support/desk` | w/api.js › route | w/support.js#pubExpert | ✓ |
 
-## فراخوان در پنل‌ها (5)
+## فراخوان در پنل‌ها (4)
 - support-panel.js › cmPreview → `GET /support/assignments/{}/sheet/commission` (صفحه: support.html)
 - support-panel.js › loadDesk → `GET /support/desk` (صفحه: support.html)
 - support-panel.js › openAsg → `GET /support/assignments/{}` (صفحه: support.html)
 - support-panel.js › reqPreview → `GET /support/assignments/{}/sheet/request` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/desk` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: —

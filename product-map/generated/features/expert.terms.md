@@ -4,6 +4,9 @@
 
 > کنارِ نوع قلم و لایه‌ها، برای هر قلم شرایطِ خرید را می‌گذارید — مثلِ ستون‌های جدول کمیسیون: شرایط تسویه، زمان تحویل (تاریخ از تقویم)، محل تحویل، نوع فاکتور، ارزش افزوده، محل معامله، روش حمل و کمینهٔ اعتبار پیش‌فاکتور؛ هر کدام 🔒 الزامی یا 🔓 خواستهٔ شرکت.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › 📋 شرایط خرید هر قلم
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/terms-locks.js` — CREDIT_MONTHS، ENUM_FIELDS، LIMIT_ENUMS، LIMIT_FA، LIMIT_FIELDS، ONE_FIELDS، PRICE_FA، cleanLimits، combineLocks، dtimeDate، fieldTxt، limitsOf، limitsTxt، payModes، priceRows، pricesMissing، rangeTxt، violationError، …
 
@@ -14,6 +17,8 @@
 
 ## فراخوان در پنل‌ها (1)
 - expert.js › saveTermsUI → `PUT /items/{}/terms` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › row
 
 ## جدول‌ها
 نوشتن: events، items

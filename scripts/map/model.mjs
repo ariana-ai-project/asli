@@ -1,6 +1,7 @@
 /* ============================================================
    مدلِ نقشهٔ محصول = واقعیت‌های کد (scan.mjs) + طبقه‌بندی (product-map/taxonomy.mjs)
-   • buildModel: صاحبِ هر فایل، قابلیتِ هر مسیر، فراخوان‌های پنل، جدول‌ها، تست‌ها، خطاها و هشدارها
+   • buildModel: صاحبِ هر فایل، قابلیتِ هر مسیر، فراخوان‌های پنل، جدول‌ها، تست‌ها، محلِ هر قابلیت در پنل‌ها (PANELS)،
+     دستورها و دکمه‌های بات‌ها، کارهای Cron، خطاها و هشدارها
    • render: خروجی‌های product-map/generated — فقط ساختار (بی شمارهٔ خط) تا با هر ویرایشِ کوچک عوض نشوند
    • check: خطاها + کهنه بودنِ خروجی‌ها (همان چیزی که تستِ product-map.test.mjs می‌سنجد)
    ============================================================ */
@@ -48,7 +49,7 @@ export function buildModel(facts, tx) {
   for (const f of feats.values()) {
     const h = help.topics[f.id];
     Object.assign(f, { help: !!h, title: f.title || (h && h.title) || f.id, summary: (h && h.summary) || f.desc || "", related: ((h && h.related) || []).filter((x) => x !== f.id && !x.startsWith("gl.")),
-      files: [], endpoints: [], callers: [], tests: new Set(), tables: { r: new Set(), w: new Set() }, modules: new Set(), helpSites: [] });
+      files: [], endpoints: [], callers: [], tests: new Set(), tables: { r: new Set(), w: new Set() }, modules: new Set(), helpSites: [], places: [], env: new Set() });
     if (!areaIds.has(f.area)) errors.push(`قابلیت ${f.id}: بخش «${f.area}» در AREAS نیست`);
     if (f.auto) warnings.push(`موضوع راهنمای «${f.id}» در taxonomy نیامده (قابلیت خودکار، بی فایل و مسیر)`);
   }
@@ -97,7 +98,10 @@ export function buildModel(facts, tx) {
   const calls = [];
   for (const fr of facts.front) for (const c of fr.calls) {
     const alts = [c.path, ...(supScripts.has(fr.file) && !c.path.startsWith("/support") ? ["/support" + c.path] : [])];
-    const hits = routes.filter((r) => alts.some((a) => samePath(r.path, a)));
+    /* روشِ فراخوان اگر معلوم باشد (method صریح، body ← POST، بی گزینه ← GET) مسیرهای همان روش؛ اگر هیچ‌کدام نخورد همهٔ روش‌ها */
+    const byPath = routes.filter((r) => alts.some((a) => samePath(r.path, a)));
+    const byM = c.method ? byPath.filter((r) => r.method === "*" || r.method.split("|").includes(c.method)) : byPath;
+    const hits = byM.length ? byM : byPath;
     const call = { file: fr.file, fn: c.where, line: c.line, path: c.path, method: c.method, routes: [...new Set(hits.map((r) => r.key))].sort() };
     calls.push(call);
     if (!hits.length) {
@@ -109,12 +113,52 @@ export function buildModel(facts, tx) {
   }
   for (const k of tx.KNOWN_UNMATCHED || []) if (!calls.some((c) => c.file === k.file && c.path === k.path && !c.routes.length)) warnings.push(`KNOWN_UNMATCHED کهنه است (اصلاح شده؟): ${k.file} ${k.path}`);
 
-  /* جای TP.ui.help.set(key) */
+  /* جای TP.ui.help.set(key) و TP.ui.info(key) */
   for (const fr of facts.front) for (const h of fr.help) {
     const ids = h.key.includes("{}") ? [...feats.keys()].filter((id) => samePath(h.key.replace(/\./g, "/"), id.replace(/\./g, "/"))) : [h.key];
     if (!ids.length || ids.some((id) => !feats.has(id))) { errors.push(`کلید راهنمای ناشناخته: ${h.key} (${fr.file}:${h.line})`); continue; }
-    for (const id of ids) feats.get(id).helpSites.push({ file: fr.file, line: h.line, dynamic: h.key.includes("{}") });
+    for (const id of ids) feats.get(id).helpSites.push({ file: fr.file, line: h.line, dynamic: h.key.includes("{}"), kind: h.kind, where: h.where });
   }
+
+  /* پنل‌ها: درختِ بخش‌ها ← محلِ هر قابلیت در رابط */
+  const srcOf = new Map();
+  const pageText = (pg) => [pg.file, ...pg.scripts].filter((f) => existsSync(join(ROOT, f))).map((f) => { if (!srcOf.has(f)) srcOf.set(f, readFileSync(join(ROOT, f), "utf8")); return srcOf.get(f); }).join("\n");
+  const panels = (tx.PANELS || []).map((p) => {
+    const pg = p.page ? facts.pages.find((x) => x.file === p.page) : null;
+    if (p.page && !pg) errors.push(`پنل ${p.id}: صفحهٔ ${p.page} پیدا نشد`);
+    const text = pg ? pageText(pg) : "";
+    const walkS = (secs, trail) => (secs || []).map((s) => {
+      if (!feats.has(s.f)) errors.push(`پنل ${p.id} › ${s.title}: قابلیت ناشناخته ${s.f}`);
+      if (s.key && pg && !text.includes(`"${s.key}"`)) errors.push(`پنل ${p.id} › ${s.title}: کلیدِ بخش "${s.key}" در اسکریپت‌های ${p.page} نیست — تب عوض شده؟ PANELSِ taxonomy.mjs را اصلاح کنید`);
+      const path = [...trail, s.title];
+      if (feats.has(s.f)) feats.get(s.f).places.push({ panel: p.id, path: [p.title, ...path], key: s.key || null });
+      return { key: s.key || null, title: s.title, f: s.f, path, sections: walkS(s.sections, path) };
+    });
+    return { id: p.id, page: p.page, title: p.title, who: p.who, files: pg ? pg.scripts : [], sections: walkS(p.sections, []) };
+  });
+  if (panels.length) for (const f of feats.values()) if (f.help && !f.places.length) errors.push(`قابلیتِ رابطِ «${f.id}» در هیچ پنلی نیامده — جایش را در PANELSِ product-map/taxonomy.mjs بنویسید`);
+  for (const f of feats.values()) for (const h of f.helpSites) if (!h.dynamic && f.places.length && !f.places.some((pl) => { const pn = panels.find((x) => x.id === pl.panel); return pn && (pn.page === h.file || pn.files.includes(h.file)); }))
+    warnings.push(`راهنمای «${f.id}» در ${h.file} هست ولی در PANELS برای صفحهٔ آن فایل نیامده`);
+
+  /* بات‌ها: دکمه (callback_data) ← پاسخ‌گو؛ دستورها */
+  const bot = { buttons: [], handlers: [], commands: [] };
+  for (const w of facts.worker) for (const k of ["buttons", "handlers", "commands"]) for (const x of w.bot[k]) bot[k].push({ ...x, file: w.file, feature: owner[w.file] || null });
+  const produced = new Set(bot.buttons.map((b) => b.prefix));
+  bot.handlers = bot.handlers.filter((h) => produced.has(h.prefix));
+  const handled = new Set(bot.handlers.map((h) => h.prefix));
+  const deadOk = new Map((tx.KNOWN_DEAD_BUTTONS || []).map((k) => [k.prefix, k.why]));
+  for (const p of [...produced].sort()) if (!handled.has(p)) {
+    const where = [...new Set(bot.buttons.filter((b) => b.prefix === p).map((b) => `${b.file}:${b.line}`))].join("، ");
+    if (deadOk.has(p)) warnings.push(`دکمهٔ شناخته‌شدهٔ بی‌پاسخ‌گو «${p}:» — ${deadOk.get(p)}`);
+    else errors.push(`دکمهٔ بات بی‌پاسخ‌گو: «${p}:» (${where}) — پاسخ‌گو بسازید (action === "${p}"، /^${p}:/ یا startsWith("${p}:")) یا در KNOWN_DEAD_BUTTONS با دلیل بنویسید`);
+  }
+
+  /* متغیرهای env که فایل‌های هر قابلیت می‌خوانند (فقط نام) */
+  for (const w of facts.worker) if (owner[w.file]) for (const fn of w.functions) fn.env.forEach((e) => feats.get(owner[w.file]).env.add(e));
+
+  /* Cron: scheduled در worker.js و هر فایلِ دیگر ← تابع‌هایی که صدا می‌زند */
+  const cron = facts.worker.flatMap((w) => w.functions.filter((f) => f.name === "scheduled").map((f) => ({ entry: `${w.file}#scheduled`, feature: owner[w.file] || null,
+    runs: [...f.uses.filter((u) => u.startsWith("worker")).map((u) => ({ ref: u, feature: owner[u.split("#")[0]] || null })), ...f.calls.map((c) => ({ ref: `${w.file}#${c}`, feature: owner[w.file] || null }))] })));
 
   /* تست‌ها */
   const tests = facts.tests.map((t) => {
@@ -135,12 +179,14 @@ export function buildModel(facts, tx) {
   for (const f of feats.values()) for (const x of f.related) if (!feats.has(x)) warnings.push(`قابلیت ${f.id}: مرتبطِ ناشناخته ${x}`);
   for (const wf of tx.WORKFLOWS) for (const s of wf.steps) for (const id of s.f) if (!feats.has(id)) errors.push(`جریان ${wf.id}: قابلیت ناشناخته ${id}`);
 
-  return { feats, files, owner, routes, calls, tests, tables: facts.tables, pages: facts.pages, workflows: tx.WORKFLOWS, areas: tx.AREAS, errors, warnings, facts };
+  return { feats, files, owner, routes, calls, tests, tables: facts.tables, pages: facts.pages, workflows: tx.WORKFLOWS, areas: tx.AREAS, panels, bot, cron, errors, warnings, facts };
 }
 
 /* ---------------- خروجی‌ها (ساختار، بی شمارهٔ خط) ---------------- */
 const list = (xs) => (xs.length ? xs.join("، ") : "—");
 const short = (p) => p.replace(/^frontend\/tamin-poshtibani\//, "").replace(/^worker\//, "w/");
+const uniq = (xs) => [...new Set(xs)];
+const fnList = (xs, n = 99) => { const u = uniq(xs.map((x) => `${short(x.file)} › ${x.fn || "—"}`)); return u.length ? u.slice(0, n).join("، ") + (u.length > n ? `، … (+${u.length - n})` : "") : "—"; };
 export function render(m) {
   const out = {}, F = [...m.feats.values()].sort((a, b) => a.id.localeCompare(b.id));
   const wfOf = (id) => m.workflows.flatMap((w) => w.steps.map((s, i) => (s.f.includes(id) ? `${w.id} (گام ${i + 1})` : null)).filter(Boolean));
@@ -155,6 +201,7 @@ export function render(m) {
     const L = [`# ${f.id} — ${f.title}`, ""];
     L.push(`بخش: ${(m.areas.find((a) => a.id === f.area) || {}).title || f.area}${f.help ? ` | راهنما: help-content.js «${f.id}»` : ""}${wfOf(f.id).length ? ` | جریان کار: ${wfOf(f.id).join("، ")}` : ""}`);
     if (f.summary) L.push("", `> ${f.summary}`);
+    if (f.places.length) L.push("", "محل در رابط:", ...uniq(f.places.map((pl) => `- ${pl.path.join(" › ")}`)));
     L.push("", "## فایل‌های این قابلیت (صاحب)");
     if (!f.files.length) L.push("— (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)");
     for (const file of f.files) { const ex = exportsOf(file), fn = ex.length ? ex : fnsOf(file); L.push(`- \`${file}\`${fn.length ? ` — ${fn.slice(0, 18).join("، ")}${fn.length > 18 ? "، …" : ""}` : ""}`); }
@@ -168,7 +215,14 @@ export function render(m) {
     L.push("", `## فراخوان در پنل‌ها (${cs.length})`);
     for (const k of cs) { const [file, fn] = k.split("|"); const ps = [...new Set(f.callers.filter((c) => c.file === file && (c.fn || "—") === fn).flatMap((c) => c.routes))]; L.push(`- ${short(file)} › ${fn} → ${ps.filter((p) => f.endpoints.some((r) => r.key === p)).map((p) => `\`${p}\``).join("، ")}${pagesOf(file).length ? ` (صفحه: ${pagesOf(file).join("، ")})` : ""}`); }
     if (!cs.length) L.push("—");
-    if (f.helpSites.length) L.push("", `جای راهنما: ${[...new Set(f.helpSites.map((h) => `${short(h.file)}${h.dynamic ? " (پویا)" : ""}`))].join("، ")}`);
+    if (f.helpSites.length) L.push("", `جای راهنما در کد: ${uniq(f.helpSites.map((h) => `${short(h.file)}${h.dynamic ? " (پویا)" : h.where ? ` › ${h.where}` : ""}`)).join("، ")}`);
+    const bc = m.bot.commands.filter((c) => f.files.includes(c.file)), bp = uniq([...m.bot.handlers, ...m.bot.buttons].filter((x) => f.files.includes(x.file)).map((x) => x.prefix)).sort();
+    if (bc.length || bp.length) {
+      L.push("", "## در بات‌ها");
+      if (bc.length) L.push(`دستورها: ${uniq(bc.map((c) => `/${c.cmd} (${short(c.file)} › ${c.fn || "—"})`)).join("، ")}`);
+      if (bp.length) L.push("", "| دکمه | پاسخ‌گو | سازنده‌ها |", "|---|---|---|", ...bp.map((p) => `| \`${p}:\` | ${tab(fnList(m.bot.handlers.filter((h) => h.prefix === p)))} | ${tab(fnList(m.bot.buttons.filter((b) => b.prefix === p), 5))} |`));
+    }
+    if (f.env.size) L.push("", `متغیرهای Worker (نام): ${[...f.env].sort().join("، ")}`);
     L.push("", "## جدول‌ها", `نوشتن: ${list([...f.tables.w].sort())}`, `خواندن: ${list([...f.tables.r].filter((t) => !f.tables.w.has(t)).sort())}`);
     /* جدول‌های عمومی (events، settings، ...) که بیش از ۶ قابلیت می‌نویسند هم‌نویس به حساب نمی‌آیند */
     const shared = [...new Set([...f.tables.w].filter((t) => (writers.get(t) || new Set()).size <= 6).flatMap((t) => [...writers.get(t)]).filter((x) => x !== f.id))].sort();
@@ -184,8 +238,9 @@ export function render(m) {
   const I = ["# نقشهٔ محصول — فهرست", "", "> خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.", "> اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.", ""];
   const keys = [...new Set(m.routes.map((r) => r.key))], tested = new Set(m.routes.filter((r) => r.tested).map((r) => r.key));
   I.push(`آمار: ${F.length} قابلیت در ${m.areas.length} بخش | ${m.files.length} فایل | ${keys.length} مسیر (${tested.size} در تست صدا زده می‌شوند) | ${m.calls.length} فراخوان پنل | ${m.tables.length} جدول | ${m.tests.length} تست`, "");
+  I.push("نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md", "");
   I.push("## جریان‌های کار", "");
-  for (const w of m.workflows) { I.push(`### ${w.id} — ${w.title}`); w.steps.forEach((s, i) => I.push(`${i + 1}. ${s.t} → ${s.f.join("، ")}`)); I.push(""); }
+  for (const w of m.workflows) { I.push(`### [${w.id}](workflows/${w.id}.md) — ${w.title}`); w.steps.forEach((s, i) => I.push(`${i + 1}. ${s.who ? `(${s.who}) ` : ""}${s.t} → ${s.f.join("، ")}`)); I.push(""); }
   I.push("## قابلیت‌ها", "");
   for (const a of m.areas) {
     const fs = F.filter((f) => f.area === a.id); if (!fs.length) continue;
@@ -209,12 +264,59 @@ export function render(m) {
   for (const t of m.tables) { const w = F.filter((f) => f.tables.w.has(t.name)).map((f) => f.id), r = F.filter((f) => f.tables.r.has(t.name) && !f.tables.w.has(t.name)).map((f) => f.id); T.push(`| ${t.name} | ${list(w)} | ${list(r)} |`); }
   out[`${OUT}/TABLES.md`] = T.join("\n") + "\n";
 
+  /* پنل ← بخش ← قابلیت */
+  const P = ["# پنل‌ها و بخش‌ها ← قابلیت", "", "> خودکار. منبع: PANELSِ product-map/taxonomy.mjs (درخت) + جای راهنمای هر قابلیت در کد (help.set / ui.info).", "> `key` همان مقدارِ بخش در کدِ پنل است (S.tab، S.screen، S.aiView، …).", ""];
+  const secLine = (pn, s, depth) => {
+    const f = m.feats.get(s.f), anchors = f ? uniq(f.helpSites.filter((h) => pn.page === h.file || pn.files.includes(h.file)).map((h) => `${short(h.file)}${h.where ? ` › ${h.where}` : ""}`)) : [];
+    const eps = f ? new Set(f.endpoints.map((r) => r.key)).size : 0;
+    P.push(`${"  ".repeat(depth)}- ${s.title}${s.key ? ` \`${s.key}\`` : ""} → [${s.f}](features/${s.f}.md) — ${eps} مسیر، ${f ? f.tests.size : 0} تست${anchors.length ? ` | کد: ${anchors.slice(0, 4).join("، ")}${anchors.length > 4 ? "، …" : ""}` : ""}`);
+    for (const c of s.sections) secLine(pn, c, depth + 1);
+  };
+  for (const pn of m.panels) {
+    P.push(`## ${pn.title} (${pn.id})`, "", `${pn.page ? `صفحه: \`${pn.page}\`` : "بخش‌های مشترکِ همهٔ صفحه‌ها"} | کاربر: ${pn.who || "—"}`, "");
+    for (const s of pn.sections) secLine(pn, s, 0);
+    P.push("");
+  }
+  out[`${OUT}/PANELS.md`] = P.join("\n");
+
+  /* بات‌ها و Cron */
+  const B = ["# بات‌ها: دستورها، دکمه‌ها و کارهای زمان‌بندی‌شده", "", "> خودکار. دکمه = پیشوندِ callback_data؛ پاسخ‌گو جایی است که همان پیشوند را می‌گیرد (action === \"x\"، /^x:/، startsWith(\"x:\")).", "> دکمه‌ای که پاسخ‌گو نداشته باشد خطای نقشه است.", ""];
+  const byF = (xs) => uniq(xs.map((x) => x.feature || "—")).sort();
+  B.push("## دستورها", "", "| دستور | پاسخ‌گو | قابلیت |", "|---|---|---|");
+  for (const c of uniq(m.bot.commands.map((c) => c.cmd)).sort()) { const cs = m.bot.commands.filter((x) => x.cmd === c); B.push(`| /${c} | ${tab(fnList(cs))} | ${byF(cs).join("، ")} |`); }
+  const prefixes = uniq(m.bot.buttons.map((b) => b.prefix)).sort();
+  B.push("", `## دکمه‌ها (${prefixes.length})`, "", "| دکمه | پاسخ‌گو | قابلیتِ پاسخ‌گو | سازنده‌ها |", "|---|---|---|---|");
+  for (const p of prefixes) { const hs = m.bot.handlers.filter((h) => h.prefix === p); B.push(`| \`${p}:\` | ${tab(fnList(hs))} | ${byF(hs).join("، ")} | ${tab(fnList(m.bot.buttons.filter((b) => b.prefix === p), 5))} |`); }
+  B.push("", "## کارهای زمان‌بندی‌شده (Cron؛ wrangler.toml › [triggers])", "");
+  for (const c of m.cron) { B.push(`### ${c.entry} (${c.feature || "—"})`, ""); for (const r of c.runs) B.push(`- ${short(r.ref.replace("#", " › "))}${r.feature ? ` — ${r.feature}` : ""}`); B.push(""); }
+  out[`${OUT}/BOTS.md`] = B.join("\n");
+
+  /* کارتِ هر جریان کار */
+  for (const w of m.workflows) {
+    const WL = [`# ${w.id} — ${w.title}`, "", "> خودکار. گام‌ها از WORKFLOWSِ product-map/taxonomy.mjs؛ محلِ هر گام از PANELS؛ مسیر و تست از کد.", ""];
+    const all = new Set(), wt = new Set();
+    w.steps.forEach((s, i) => {
+      WL.push(`## گام ${i + 1} — ${s.t}`, "");
+      if (s.who) WL.push(`کننده: ${s.who}`);
+      const pl = uniq(s.f.flatMap((id) => (m.feats.get(id)?.places || []).map((x) => x.path.join(" › "))));
+      if (pl.length) WL.push(`محل: ${pl.slice(0, 6).join(" | ")}${pl.length > 6 ? " | …" : ""}`);
+      WL.push("", "| قابلیت | عنوان | مسیر | تست |", "|---|---|---|---|");
+      for (const id of s.f) { const f = m.feats.get(id); if (!f) continue; f.tests.forEach((x) => all.add(x)); f.tables.w.forEach((x) => wt.add(x)); WL.push(`| [${id}](../features/${id}.md) | ${tab(f.title)} | ${new Set(f.endpoints.map((r) => r.key)).size} | ${f.tests.size} |`); }
+      WL.push("");
+    });
+    WL.push("## جدول‌هایی که این جریان می‌نویسد", "", list([...wt].sort()), "", `## همهٔ تست‌های این جریان (${all.size})`, "", "```", `node --test ${[...all].sort().join(" ")}`, "```", "");
+    out[`${OUT}/workflows/${w.id}.md`] = WL.join("\n");
+  }
+
   /* گراف ماشین‌خوان */
   const graph = {
     note: "generated by scripts/map/build.mjs — structure only (no line numbers); line numbers come live from scripts/map/impact.mjs",
     areas: m.areas,
-    features: F.map((f) => ({ id: f.id, area: f.area, title: f.title, help: f.help, files: f.files, endpoints: [...new Set(f.endpoints.map((r) => r.key))].sort(), tests: [...f.tests].sort(), tables: { w: [...f.tables.w].sort(), r: [...f.tables.r].sort() }, related: f.related })),
+    features: F.map((f) => ({ id: f.id, area: f.area, title: f.title, help: f.help, places: uniq(f.places.map((pl) => pl.path.join(" › "))), files: f.files, endpoints: [...new Set(f.endpoints.map((r) => r.key))].sort(), tests: [...f.tests].sort(), tables: { w: [...f.tables.w].sort(), r: [...f.tables.r].sort() }, related: f.related })),
     workflows: m.workflows,
+    panels: m.panels.map(function strip(p) { return p.sections ? { ...(p.id ? { id: p.id, page: p.page, title: p.title, who: p.who } : { key: p.key, title: p.title, f: p.f }), sections: p.sections.map(strip) } : p; }),
+    bot: { commands: uniq(m.bot.commands.map((c) => `${c.cmd}|${c.file}#${c.fn}`)).sort(), buttons: uniq(m.bot.buttons.map((b) => b.prefix)).sort().map((p) => ({ prefix: p, handlers: uniq(m.bot.handlers.filter((h) => h.prefix === p).map((h) => `${h.file}#${h.fn}`)), producers: uniq(m.bot.buttons.filter((b) => b.prefix === p).map((b) => `${b.file}#${b.fn}`)) })) },
+    cron: m.cron.map((c) => ({ entry: c.entry, runs: c.runs.map((r) => r.ref) })),
     files: m.owner,
     endpoints: [...new Map(m.routes.map((r) => [`${r.key}|${r.file}|${r.fn}`, { key: r.key, file: r.file, fn: r.fn, features: r.features, uses: r.handler.uses, tables: r.tables }])).values()].sort((a, b) => a.key.localeCompare(b.key) || a.file.localeCompare(b.file)),
     calls: [...new Map(m.calls.map((c) => [`${c.file}#${c.fn}|${c.path}`, { from: `${c.file}#${c.fn}`, path: c.path, routes: c.routes }])).values()].sort((a, b) => a.from.localeCompare(b.from) || a.path.localeCompare(b.path)),
@@ -228,7 +330,9 @@ const norm = (s) => s.replace(/\r\n/g, "\n");
 export async function check() {
   const tx = await loadTaxonomy(), model = buildModel(scan(), tx), out = render(model);
   const stale = Object.entries(out).filter(([p, c]) => !existsSync(join(ROOT, p)) || norm(readFileSync(join(ROOT, p), "utf8")) !== c).map(([p]) => p);
-  const dir = join(ROOT, OUT, "features");
-  if (existsSync(dir)) for (const n of readdirSync(dir)) if (!out[`${OUT}/features/${n}`]) stale.push(`${OUT}/features/${n} (اضافه)`);
+  for (const sub of ["features", "workflows"]) {
+    const dir = join(ROOT, OUT, sub);
+    if (existsSync(dir)) for (const n of readdirSync(dir)) if (!out[`${OUT}/${sub}/${n}`]) stale.push(`${OUT}/${sub}/${n} (اضافه)`);
+  }
   return { model, out, errors: model.errors, warnings: model.warnings, stale };
 }

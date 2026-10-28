@@ -4,6 +4,9 @@
 
 > دادهٔ تحقیقِ اقلام و تأمین‌کنندگان: حالتِ استعلامِ هر نوع قلم (حداکثری، محتاط یا ویژه)، شمارِ موج اول، ردهٔ سوابق و مشخصاتِ تأمین‌کنندگان، دفترِ تأمین‌کنندگان با «نام نزدیک»، گرافِ روابط، و کلیدهای روشن و خاموشِ هر بخشِ این طرح.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 🧭 استراتژی و دفتر
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/cr-admin.js` — fa، p2، when، gChip، boot، reg، load، wfCell، docCell، vHeads، fam، vSup، vSupList، supSearch، histVal، supForm، hint، fld، …
 - `worker/cr-api.js` — FLAG_KEYS، crFlags، crRoute، crSupportRoute
@@ -41,21 +44,22 @@
 | `PUT /support/strategy/heads/{}` | w/cr-api.js › crSupportRoute | — | ✓ |
 | `PUT /support/strategy/rfqn` | w/cr-api.js › crSupportRoute | — | ✓ |
 
-## فراخوان در پنل‌ها (14)
-- cr-admin.js › boot → `GET /support/cr/flags`، `PUT /support/cr/flags` (صفحه: support.html)
-- cr-admin.js › load → `GET /support/cr/flags`، `PUT /support/cr/flags`، `GET /support/strategy/heads`، `GET /support/strategy/rfqn`، `PUT /support/strategy/rfqn`، `GET /support/sreg/g4`، `* /support/graph`، `GET /support/graph`، `GET /support/cr/status`، `GET /support/cr/panel`، `PUT /support/cr/panel` (صفحه: support.html)
+## فراخوان در پنل‌ها (13)
+- cr-admin.js › boot → `GET /support/cr/flags` (صفحه: support.html)
+- cr-admin.js › load → `GET /support/cr/flags`، `GET /support/strategy/heads`، `GET /support/strategy/rfqn`، `GET /support/sreg/g4`، `* /support/graph`، `GET /support/graph`، `GET /support/cr/status`، `GET /support/cr/panel` (صفحه: support.html)
 - cr-admin.js › moveUI → `PUT /support/strategy/heads/{}` (صفحه: support.html)
-- cr-admin.js › onChange → `GET /support/cr/flags`، `PUT /support/cr/flags` (صفحه: support.html)
-- cr-admin.js › onClick → `GET /support/strategy/rfqn`، `PUT /support/strategy/rfqn`، `GET /support/cr/panel`، `PUT /support/cr/panel`، `POST /support/sreg/g4/{}` (صفحه: support.html)
+- cr-admin.js › onChange → `PUT /support/cr/flags` (صفحه: support.html)
+- cr-admin.js › onClick → `PUT /support/strategy/rfqn`، `PUT /support/cr/panel`، `POST /support/sreg/g4/{}` (صفحه: support.html)
 - expert.js › rebuild → `POST /cr/doc/build` (صفحه: expert.html)
 - expert.js › review → `POST /cr/doc/{}/review` (صفحه: expert.html)
-- sup-profile.js › enabled → `GET /cr/flags`، `GET /support/cr/flags`، `PUT /support/cr/flags` (صفحه: correspond.html، expert.html، support.html)
+- sup-profile.js › enabled → `GET /cr/flags`، `GET /support/cr/flags` (صفحه: correspond.html، expert.html، support.html)
 - sup-profile.js › load → `GET /sreg/profile` (صفحه: correspond.html، expert.html، support.html)
 - sup-profile.js › loadGraph → `GET /sreg/graph` (صفحه: correspond.html، expert.html، support.html)
 - sup-profile.js › onClick → `PUT /sreg/opinions/{}`، `POST /sreg/opinions/{}/hide`، `POST /sreg/edges/{}/review`، `POST /sreg/links` (صفحه: correspond.html، expert.html، support.html)
 - sup-profile.js › searchLinks → `GET /sreg/search` (صفحه: correspond.html، expert.html، support.html)
 - sup-profile.js › v → `POST /sreg/opinions` (صفحه: correspond.html، expert.html، support.html)
-- tender-admin.js › loadList → `* /support/graph`، `GET /support/graph` (صفحه: support.html)
+
+جای راهنما در کد: cr-admin.js › inp
 
 ## جدول‌ها
 نوشتن: ai_feedback، cr_cache، cr_docs، cr_head_x، events، settings، sreg، sreg_alias، sreg_edges، sreg_ops

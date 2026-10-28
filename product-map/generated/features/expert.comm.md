@@ -4,6 +4,9 @@
 
 > پیش‌نمایش، فایل اکسل و فایل Word از یک مدل ساخته می‌شوند و عیناً قالب فرم‌های شرکت‌اند: جدول کمیسیون مثل «مقایسه استعلام بها» (TSA-PS-FO-02) و برگهٔ درخواست مثل چاپ راهکاران.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › جدول کمیسیون
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/bundle.js` — buildFiles، bundleData، commissionCode، commissionGuard، commissionSize، markCommission، missingText، readiness، recordCommission
 - `worker/sheets.js` — XLSX_MIME، commissionData، commissionHtml، commissionSheet، commissionXlsx
@@ -20,6 +23,8 @@
 ## فراخوان در پنل‌ها (2)
 - expert.js › loadSheets → `GET /assignments/{}/sheet/request`، `GET /assignments/{}/sheet/commission` (صفحه: expert.html)
 - expert.js › wire → `POST /assignments/{}/commission` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › vComm
 
 ## جدول‌ها
 نوشتن: assignments، counters

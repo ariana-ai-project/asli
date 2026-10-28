@@ -4,6 +4,9 @@
 
 > فقط درخواستِ هوشمند (درخواستِ دستی فراخوان ندارد): وقتی هر قلم به حداقلِ استعلامِ ردهٔ خودش رسید، به هر تأمین‌کنندهٔ تأییدنهایی پیامک می‌رود: «پیشنهاد شما با شمارهٔ … وارد کمیسیون معاملات شرکت می‌شود؛ تا [۲۴ ساعت بعد] فرصت دارید پیش‌فاکتورِ رسمی با حداقل ۲۴ ساعت اعتبار ارسال کنید» — با کمترین قیمتِ رسیده (اگر پشتیبانی روشن گذاشته). سرِ مهلت «📦 بستهٔ کمیسیون» بسته می‌شود و بعد جدول کمیسیون ساخته می‌شود.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › جدول کمیسیون › 📨 فراخوان پیش‌فاکتور رسمی و 📦 بستهٔ کمیسیون
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/final-call.js` — FC_DDL، FC_DEFAULT، FC_FA، FC_KEY، callForThread، callGuard، callPhone، callSmsText، callText، callView، closeCall، closeEarly، fcAdmin، fcCfg، fcWhen، finalCallTick، lastCall، markSubmitted، …
 
@@ -20,6 +23,10 @@
 
 ## فراخوان در پنل‌ها (0)
 —
+
+جای راهنما در کد: expert.js › vFinalCall
+
+متغیرهای Worker (نام): TG_BOT_TOKEN
 
 ## جدول‌ها
 نوشتن: ai_runs، commission_packages، events، experts، final_call_sups، final_calls، offpf، quote_edits، quotes، settings، sp_lines، sp_msgs، sp_sms، sp_threads

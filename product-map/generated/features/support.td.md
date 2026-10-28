@@ -4,6 +4,9 @@
 
 > مزایدهٔ معکوس زنده برای خرید یک قلم: تأمین‌کنندگان دعوت‌شده قیمت واحد را پایین می‌آورند و کمترین قیمت در پایان برنده است.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 🔨 مناقصه
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/tender-admin.js` — ICON، faD، now، rerender، nameKey، sw، loadCfg، loadList، loadOne، loops، timeLine، card، vList، cnt، formOf، n0، rulesBody، m، …
 
@@ -40,19 +43,21 @@
 - support-panel.js › unreferTender → `POST /support/tender-unrefer` (صفحه: support.html)
 - tender-admin.js › addItem → `GET /support/tender-suppliers` (صفحه: support.html)
 - tender-admin.js › addSup → `* /support/tenders/{}/invites` (صفحه: support.html)
-- tender-admin.js › create → `GET /support/tenders`، `POST /support/tenders`، `* /support/tenders/{}/schedule`، `* /support/tenders/{}/invite` (صفحه: support.html)
+- tender-admin.js › create → `POST /support/tenders`، `* /support/tenders/{}/schedule`، `* /support/tenders/{}/invite` (صفحه: support.html)
 - tender-admin.js › endDialog → `* /support/tenders/{}/end` (صفحه: support.html)
 - tender-admin.js › fixDialog → `POST /support/tenders/{}/bids/{}` (صفحه: support.html)
-- tender-admin.js › loadCfg → `GET /support/tender-settings`، `PUT /support/tender-settings` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/tender-book`، `GET /support/tender-items`، `GET /support/tender-req-items`، `GET /support/tender-settings`، `GET /support/tender-suppliers`، `GET /support/tenders`، `POST /support/tender-refer`، `POST /support/tender-unrefer`، `POST /support/tenders`، `PUT /support/tender-settings` (صفحه: support.html)
+- tender-admin.js › loadCfg → `GET /support/tender-settings` (صفحه: support.html)
+- tender-admin.js › loadList → `GET /support/tenders` (صفحه: support.html)
 - tender-admin.js › loadOne → `* /support/tenders/{}` (صفحه: support.html)
 - tender-admin.js › onChange → `* /support/tenders/{}/invites/{}` (صفحه: support.html)
 - tender-admin.js › onClick → `* /support/tenders/{}`، `* /support/tenders/{}/unrefer`، `* /support/tenders/{}/invite`، `* /support/tenders/{}/cancel`، `POST /support/tenders/{}/bids/{}`، `* /support/tenders/{}/invites/{}/pass`، `* /support/tenders/{}/discover`، `GET /support/tender-req-items`، `* /support/tenders/{}/link` (صفحه: support.html)
 - tender-admin.js › rulesDialog → `* /support/tenders/{}` (صفحه: support.html)
 - tender-admin.js › searchBook → `GET /support/tender-book` (صفحه: support.html)
 - tender-admin.js › searchItems → `GET /support/tender-items` (صفحه: support.html)
-- tender-admin.js › settingsDialog → `GET /support/tender-settings`، `PUT /support/tender-settings`، `POST /support/tender-settings/test` (صفحه: support.html)
+- tender-admin.js › settingsDialog → `PUT /support/tender-settings`، `POST /support/tender-settings/test` (صفحه: support.html)
 - tender-admin.js › startDialog → `* /support/tenders/{}/schedule` (صفحه: support.html)
+
+جای راهنما در کد: tender-admin.js › vWizard، tender-admin.js › linkHtml
 
 ## جدول‌ها
 نوشتن: assignments، events، items، quotes، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders

@@ -4,6 +4,9 @@
 
 > فهرستِ تأمین‌کنندگانی که کارشناس هوشمند برای این قلم دعوت می‌کند — بعد از تأییدِ ساختارِ همین قلم از سوابق ساخته می‌شود؛ به ترتیبِ رتبهٔ نهایی و «قاعدهٔ دعوت»، به شمارِ حداقلِ استعلامِ ردهٔ همین قلم (جزئی ۳، متوسط ۵، بزرگ ۵، عمده ۷ — از برآوردِ کلِ قلم) از پیش تیک می‌خورند.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق › 🎯 فهرست دعوت
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/ai-picks.js` — A_MSG، PICK_SRC_FA، TOP، WHY_BOXES، applyEdits، applyStrategy، buildDefault، defaultFrom، mergeRebuilt، pickCands، pickOf، pickSummary، pickView، release، resetToDefault، startCheck، strategyDeviations، threadSrc، …
 
@@ -19,6 +22,8 @@
 - expert.js › pkFlushWhy → `GET|PUT /items/{}/picks` (صفحه: expert.html)
 - expert.js › pkStartUI → `GET /items/{}/invite-preview` (صفحه: expert.html)
 - expert.js › pkVarApply → `GET|PUT /items/{}/picks` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › vPicks، expert.js › paint، expert.js › smPickNote
 
 ## جدول‌ها
 نوشتن: items

@@ -4,6 +4,12 @@
 
 > هر گفت‌وگو = یک درخواست × یک تأمین‌کننده. راست: درخواست‌ها و تأمین‌کنندگانِ درخواستِ انتخاب‌شده (با شمار نخوانده)؛ وسط: «اقلام و تصمیم‌ها»؛ چپ: گفت‌وگو داخل گوشی. در صفحهٔ باریک، همان گفت‌وگو تمام‌صفحه است و «اقلام و تصمیم‌ها» با دکمهٔ 📦 بالای گفت‌وگو باز می‌شود.
 
+محل در رابط:
+- مکاتبات با تأمین‌کنندگان › درخواست‌ها
+- مکاتبات با تأمین‌کنندگان › تأمین‌کنندگانِ یک درخواست
+- مکاتبات با تأمین‌کنندگان › گفت‌وگو
+- مکاتبات با تأمین‌کنندگان › گفت‌وگو › اقلام، پیش‌فاکتور و تأیید بسته
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/correspond.html`
 - `frontend/tamin-poshtibani/correspond.js` — $، $$، fa، money، short، cut، qty، code، when، onPhoneMode، api، termsLine، dlg، close، say، top، renderLogin، loadList، …
@@ -45,19 +51,19 @@
 - correspond.js › rateThread → `POST /sp/x/rate` (صفحه: correspond.html)
 - correspond.js › refreshNeg → `GET /sp/x/thread/{}/neg` (صفحه: correspond.html)
 - correspond.js › send → `POST /sp/x/rate` (صفحه: correspond.html)
-- correspond.js › sendDialog → `GET /sp/x/items`، `POST /sp/x/send`، `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: correspond.html)
+- correspond.js › sendDialog → `GET /sp/x/items`، `POST /sp/x/send`، `GET /sp/x/phones` (صفحه: correspond.html)
 - correspond.js › takeoverDialog → `POST /sp/x/thread/{}/takeover` (صفحه: correspond.html)
-- expert.js › addSpPhone → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
-- expert.js › dcPhoneUI → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
-- expert.js › dcPickUI → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
-- expert.js › loadSpPhones → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
-- expert.js › pkPhoneUI → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
+- expert.js › addSpPhone → `POST /sp/x/phones` (صفحه: expert.html)
+- expert.js › dcPhoneUI → `POST /sp/x/phones` (صفحه: expert.html)
+- expert.js › dcPickUI → `POST /sp/x/phones` (صفحه: expert.html)
+- expert.js › loadSpPhones → `GET /sp/x/phones` (صفحه: expert.html)
+- expert.js › pkPhoneUI → `POST /sp/x/phones` (صفحه: expert.html)
 - expert.js › reqCommentUI → `POST /sp/x/rate` (صفحه: expert.html)
 - expert.js › saveLetterRate → `POST /sp/x/rate` (صفحه: expert.html)
-- expert.js › showNew → `GET /sp/x/phones`، `POST /sp/x/phones`، `POST /sp/x/send` (صفحه: expert.html)
-- expert.js › smPickUI → `GET /sp/x/phones`، `POST /sp/x/phones` (صفحه: expert.html)
+- expert.js › showNew → `GET /sp/x/phones`، `POST /sp/x/send` (صفحه: expert.html)
+- expert.js › smPickUI → `POST /sp/x/phones` (صفحه: expert.html)
 
-جای راهنما: correspond.js
+جای راهنما در کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، correspond.js › propCard، correspond.js › manualCard، correspond.js › watchNote، correspond.js › autoNote، correspond.js › rateNote، correspond.js › bundleCard
 
 ## جدول‌ها
 نوشتن: ai_log، ai_props، ai_rates، ai_runs، ai_threads، events، settings، sp_bundles، sp_lines، sp_links، sp_phones، sp_sms، sp_tg، sp_threads

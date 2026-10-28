@@ -5,7 +5,8 @@
      • تابع‌های هر فایل، importها و ارجاع هر تابع به تابع‌های فایل‌های دیگر
      • جدول‌های D1 که هر تابع می‌خواند (FROM/JOIN) یا می‌نویسد (INSERT/UPDATE/DELETE) — فقط نام‌های شناخته‌شده
      • فراخوان‌های پنل‌ها: api("/x") و TP.api(`/x/${id}`) با صفحه و تابعِ صدازننده
-     • کلیدهای راهنما (help-content.js) و جای TP.ui.help.set(key) در پنل‌ها
+     • کلیدهای راهنما (help-content.js) و جای TP.ui.help.set(key) / TP.ui.info(key) در پنل‌ها (محلِ هر قابلیت در رابط)
+     • بات‌ها: دستورها (/start، …)، دکمه‌ها (callback_data) و پاسخ‌گوی هر پیشوندِ دکمه
      • تست‌ها: فایل‌هایی که import می‌کنند و مسیرهایی که صدا می‌زنند
    خروجی: یک شیء facts که build.mjs با taxonomy.mjs ترکیبش می‌کند.
    ============================================================ */
@@ -70,7 +71,8 @@ export function functions(lines, maxIndent) {
     const m = DECL.exec(l);
     if (m) {
       const ind = (m[1] ?? m[3] ?? m[5] ?? m[7] ?? "").replace(/\t/g, "  ").length;
-      if (ind <= maxIndent) decls.push({ name: m[2] || m[4] || m[6] || m[9], line: i + 1, ind, fn: true });
+      /* fetch/scheduled/queue درونِ export default { … } (تورفتگیِ ۲) هم تابعِ ورودی است */
+      if (ind <= maxIndent || (m[9] && ind <= 2)) decls.push({ name: m[2] || m[4] || m[6] || m[9], line: i + 1, ind, fn: true });
       return;
     }
     const b = BOUND.exec(l);
@@ -138,8 +140,11 @@ export function expandRegex(src) {
 export function samePath(a, b) {
   const A = a.split("/"), B = b.split("/");
   if (A.length !== B.length) return false;
-  return A.every((x, k) => x === B[k] || x.includes("{}") || B[k].includes("{}"));
+  return A.every((x, k) => seg(x, B[k]) || seg(B[k], x));
 }
+/* «{}» درونِ یک بخش فقط همان‌جا متغیر است: «tenders{}» (از `/tenders${qs}`) با «tenders» می‌خورد، نه با هر بخشی */
+const segRe = (s) => new RegExp("^" + s.split("{}").map((p) => p.replace(/[.*+?^$()|[\]\\]/g, "\\$&")).join("[^/]*") + "$");
+const seg = (x, y) => x === y || (x.includes("{}") && segRe(x).test(y.replace(/\{\}/g, "")));
 export function normCall(s) {
   return s.replace(/\$\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}/g, "{}").replace(/[?#].*$/, "").replace(/(\{\})+/g, "{}").replace(/\/+$/, "") || "/";
 }
@@ -244,7 +249,23 @@ function scanWorker(file, known) {
     r.handler = { uses: [...uses].sort(), calls: [...calls].filter((c) => c !== r.fn).sort() };
     r.tables = sqlTables(lines.slice(r.line - 1, to).join("\n"), known);
   }
-  return { file, lines: lines.length, functions: fnInfo, imports: imps.map(({ mod, names, dynamic, reexport }) => ({ mod, names: names.map((n) => n.name), dynamic: !!dynamic, reexport: !!reexport })), exports: [...new Set(exports)].sort(), routes, mounts };
+  return { file, lines: lines.length, functions: fnInfo, imports: imps.map(({ mod, names, dynamic, reexport }) => ({ mod, names: names.map((n) => n.name), dynamic: !!dynamic, reexport: !!reexport })), exports: [...new Set(exports)].sort(), routes, mounts, bot: scanBot(text, fns) };
+}
+
+/* ---------- بات‌ها ----------
+   • دکمه: callback_data: "xd:…" یا `xd:${id}` ← پیشوندِ پیش از «:» (دکمه‌ای که با ${…} شروع شود پیشوندِ ثابت ندارد و شمرده نمی‌شود)
+   • پاسخ‌گو: action === "xd" (یا a/act/cd/data)، /^xd:/ و startsWith("xd:")
+   • دستور: /^\/start…/.test(text) یا text === "/kartabl" یا text.startsWith("/start") (متغیرِ text/gtext) */
+function scanBot(text, fns) {
+  const st = lineStarts(text), at = (i) => { const line = lineAt(st, i); return { line, fn: fnAt(fns, line)?.name || null }; };
+  const buttons = [], handlers = [], commands = [];
+  for (const m of text.matchAll(/callback_data\s*:\s*(["'`])([a-z][\w-]*)(?=[:"'`])/g)) buttons.push({ prefix: m[2], ...at(m.index) });
+  for (const m of text.matchAll(/\b(?:action|a|act|cd|data)\s*===\s*"([a-z][\w-]*)(?::[^"]*)?"/g)) handlers.push({ prefix: m[1], ...at(m.index) });
+  for (const m of text.matchAll(/\/\^\(?([a-z][\w-]*)(?:\\:|:)/g)) handlers.push({ prefix: m[1], ...at(m.index) });
+  for (const m of text.matchAll(/startsWith\(\s*"([a-z][\w-]*):"\s*\)/g)) handlers.push({ prefix: m[1], ...at(m.index) });
+  for (const m of text.matchAll(/\/\^\\\/([a-z]\w*)[^\n]*?\/[a-z]*\.(?:test|exec)\(\s*(?:text|gtext|t)\s*\)/g)) commands.push({ cmd: m[1], ...at(m.index) });
+  for (const m of text.matchAll(/\b(?:text|gtext)\s*(?:===\s*"\/([a-z]\w*)"|\.startsWith\(\s*"\/([a-z]\w*)"\s*\))/g)) commands.push({ cmd: m[1] || m[2], ...at(m.index) });
+  return { buttons, handlers, commands };
 }
 
 /* ---------- پنل‌ها ---------- */
@@ -267,9 +288,11 @@ function callSites(text, file) {
     }
     if (!s.startsWith("/") && !s.startsWith("${")) continue;
     const after = text.slice(j + 1, j + 400), concat = /^\s*\+/.test(after);
-    const mm = /^[^;]*?method\s*:\s*["']([A-Z]+)["']/.exec(after.split("\n")[0]);
+    /* روش: صریح (method: "PUT")، یا مثل TP.api: با body ← POST، بی گزینه ← GET؛ گزینهٔ متغیر ← نامعلوم */
+    const first = after.split("\n")[0], mm = /^[^;]*?method\s*:\s*["']([A-Z]+)["']/.exec(first);
+    const method = mm ? mm[1] : /^\s*\)/.test(after) ? "GET" : /^\s*,\s*\{[^;]*?\bbody\b/.test(first) ? "POST" : "";
     const path = normCall(m[1] === "TP.api" ? s + (concat ? "{}" : "") : wrap(m[1], s + (concat ? "{}" : "")));
-    out.push({ fn: m[1], path, method: mm ? mm[1] : "", line: lineAt(st, m.index), partial: concat || s.startsWith("${") });
+    out.push({ fn: m[1], path, method, line: lineAt(st, m.index), partial: concat || s.startsWith("${") });
   }
   return out;
 }
@@ -277,8 +300,12 @@ function scanFront(file) {
   const raw = read(file), text = blankComments(raw), lines = text.split("\n");
   const fns = functions(lines, 6);
   const calls = callSites(text, file).map((c) => ({ ...c, where: fnAt(fns, c.line)?.name || null }));
-  const help = [];
-  for (const m of text.matchAll(/help\.set\(\s*(["'`])([^"'`]+)\1/g)) help.push({ key: m[2].replace(/\$\{[^}]*\}/g, "{}"), line: lineAt(lineStarts(text), m.index) });
+  /* نشانیِ راهنما: help.set (بخشی که الان روی صفحه است) و ui.info / help.open (دکمهٔ «؟» کنارِ یک قسمت) */
+  const help = [], st = lineStarts(text);
+  for (const m of text.matchAll(/\b(help\.set|ui\.info|help\.open)\(\s*(["'`])([^"'`]+)\2/g)) {
+    const line = lineAt(st, m.index);
+    help.push({ key: m[3].replace(/\$\{[^}]*\}/g, "{}"), line, kind: m[1] === "help.set" ? "set" : "info", where: fnAt(fns, line)?.name || null });
+  }
   return { file, lines: lines.length, functions: fns.map(({ name, start, end }) => ({ name, start, end })), calls, help };
 }
 function scanPages() {

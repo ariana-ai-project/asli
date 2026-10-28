@@ -4,6 +4,9 @@
 
 > هر کارشناس ارشد یک کارتِ تیم است و اعضایش تراشه‌هایی زیرِ آن؛ کارتِ «بی‌سرپرست» کارشناسانی‌اند که زیر نظر هیچ ارشدی نیستند (اعلان‌هایشان همیشه برای شما می‌آید). هر کارشناس فقط زیر نظر یک ارشد است.
 
+محل در رابط:
+- پنل مدیر تدارکات (میز ارجاع) › کارشناسان
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -21,23 +24,20 @@
 | `PUT /experts/{}` | w/api.js › route | — | ✓ |
 | `PUT /scores` | w/api.js › route | — | — |
 
-## فراخوان در پنل‌ها (14)
-- expert.js › loadTemplates → `GET /axes`، `GET /experts`، `GET /scores`، `GET /workload`، `POST /experts`، `PUT /scores` (صفحه: expert.html)
-- manager.js › addExpertDialog → `GET /experts`، `POST /experts` (صفحه: manager.html)
+## فراخوان در پنل‌ها (11)
+- manager.js › addExpertDialog → `POST /experts`، `GET /experts` (صفحه: manager.html)
 - manager.js › applyAssignAll → `GET /axes` (صفحه: manager.html)
 - manager.js › applyDeadlineAll → `GET /axes` (صفحه: manager.html)
 - manager.js › expertCodeUI → `GET /experts/{}/code`، `POST /experts/{}/code` (صفحه: manager.html)
 - manager.js › expertMove → `PUT /experts/{}` (صفحه: manager.html)
-- manager.js › expertPatch → `PUT /experts/{}`، `GET /experts`، `POST /experts` (صفحه: manager.html)
+- manager.js › expertPatch → `PUT /experts/{}`، `GET /experts` (صفحه: manager.html)
 - manager.js › loadWorkload → `GET /workload` (صفحه: manager.html)
 - manager.js › needAxes → `GET /axes` (صفحه: manager.html)
 - manager.js › needWorkload → `GET /workload` (صفحه: manager.html)
-- manager.js › refresh → `GET /axes`، `GET /experts`، `GET /scores`، `GET /workload`، `POST /experts`، `PUT /scores` (صفحه: manager.html)
-- manager.js › setW → `GET /scores`، `PUT /scores`، `PUT /experts/{}` (صفحه: manager.html)
+- manager.js › setW → `PUT /scores`، `PUT /experts/{}` (صفحه: manager.html)
 - manager.js › wire → `POST /experts/codes/random` (صفحه: manager.html)
-- support-panel.js › api → `GET /axes`، `GET /experts`، `GET /scores`، `GET /workload`، `POST /experts`، `PUT /scores` (صفحه: support.html)
 
-جای راهنما: manager.js (پویا)
+جای راهنما در کد: manager.js (پویا)، manager.js › k
 
 ## جدول‌ها
 نوشتن: events، expert_scores، experts، weights

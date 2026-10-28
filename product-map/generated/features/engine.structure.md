@@ -15,6 +15,8 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY
+
 ## جدول‌ها
 نوشتن: counters، item_changes، item_edits، items، norm_cache، settings
 خواندن: assignments، requests

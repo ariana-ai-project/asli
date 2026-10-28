@@ -4,6 +4,9 @@
 
 > درخواست‌های کارشناسان که منتظر تأیید شماست — تعلیق، توقف، خاتمه، و «انجام دستی» (چند قلم و علتِ کارشناس؛ با رد، اقلام دستِ کارشناس هوشمند می‌مانند) — هر کدام یک کارت با «تأیید» و «رد»؛ و خطِ زمانِ رویدادهای اخیر سامانه، روز به روز.
 
+محل در رابط:
+- پنل مدیر تدارکات (میز ارجاع) › تصمیم‌ها و رویدادها
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/decisions.js` — applyDecision، approveDecision، expertDecision، rejectDecision
 
@@ -17,14 +20,17 @@
 | `POST /decisions/{}/approve` | w/api.js › route | w/decisions.js#approveDecision، w/decisions.js#rejectDecision | ✓ |
 | `POST /decisions/{}/reject` | w/api.js › route | w/decisions.js#approveDecision، w/decisions.js#rejectDecision | ✓ |
 
-## فراخوان در پنل‌ها (5)
-- expert.js › loadTemplates → `GET /alarms`، `GET /decisions`، `GET /events` (صفحه: expert.html)
+## فراخوان در پنل‌ها (2)
 - manager.js › loadEvents → `GET /events` (صفحه: manager.html)
-- manager.js › refresh → `GET /alarms`، `GET /decisions`، `GET /events` (صفحه: manager.html)
 - manager.js › wire → `POST /alarms/{}/ack`، `POST /decisions/{}/reject`، `POST /decisions/{}/approve` (صفحه: manager.html)
-- support-panel.js › api → `GET /alarms`، `GET /decisions`، `GET /events` (صفحه: support.html)
 
-جای راهنما: manager.js (پویا)
+جای راهنما در کد: manager.js (پویا)، manager.js › decCard
+
+## در بات‌ها
+
+| دکمه | پاسخ‌گو | سازنده‌ها |
+|---|---|---|
+| `mdec:` | w/bot.js › onCallback | w/decisions.js › decisionRequestStmt |
 
 ## جدول‌ها
 نوشتن: alarms، alerts، assignments، decisions، events، items

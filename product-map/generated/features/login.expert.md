@@ -4,6 +4,10 @@
 
 > کد ورود، رمز پنل شماست: چهار رقم. هر رقم را در یک خانه بنویسید. کد اولیه را پشتیبانی می‌دهد و از «حساب من» می‌توانید عوضش کنید.
 
+محل در رابط:
+- پنل کارشناس خرید › ورود کارشناس
+- مکاتبات با تأمین‌کنندگان › ورود (همان ورود کارشناس)
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -12,15 +16,12 @@
 |---|---|---|---|
 | `POST /login` | w/api.js › route | — | ✓ |
 
-## فراخوان در پنل‌ها (6)
+## فراخوان در پنل‌ها (3)
 - correspond.js › renderLogin → `POST /login` (صفحه: correspond.html)
-- expert.js › loadTemplates → `POST /login` (صفحه: expert.html)
 - expert.js › wire → `POST /login` (صفحه: expert.html)
-- manager.js › refresh → `POST /login` (صفحه: manager.html)
 - manager.js › wire → `POST /login` (صفحه: manager.html)
-- support-panel.js › api → `POST /login` (صفحه: support.html)
 
-جای راهنما: correspond.js
+جای راهنما در کد: correspond.js › renderLogin
 
 ## جدول‌ها
 نوشتن: —

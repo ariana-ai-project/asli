@@ -4,6 +4,9 @@
 
 > همهٔ رخدادها با زمان دقیق تا ثانیه — رویدادها، زمان‌های خودِ جدول‌ها، پیام‌ها و پیامک‌ها — با فیلتر تاریخ، کارشناس، درخواست و نوع، و صفحه‌بندی.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › رخدادها
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -17,13 +20,12 @@
 | `POST /support/sms/check` | w/api.js › route | w/sms.js#smsCheck | ✓ |
 | `PUT /support/alert-contacts` | w/api.js › route | w/alarms.js#alertContactsSave | ✓ |
 
-## فراخوان در پنل‌ها (6)
+## فراخوان در پنل‌ها (5)
 - support-panel.js › alarmAckUi → `POST /support/alarms/{}/ack` (صفحه: support.html)
-- support-panel.js › alertsDialog → `GET /support/alert-contacts`، `PUT /support/alert-contacts` (صفحه: support.html)
+- support-panel.js › alertsDialog → `GET /support/alert-contacts` (صفحه: support.html)
 - support-panel.js › loadAlarms → `GET /support/alarms` (صفحه: support.html)
 - support-panel.js › smsGwDialog → `GET /support/sms`، `POST /support/sms/check` (صفحه: support.html)
-- support-panel.js › v → `GET /support/alert-contacts`، `PUT /support/alert-contacts` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/alarms`، `GET /support/alert-contacts`، `GET /support/sms`، `PUT /support/alert-contacts` (صفحه: support.html)
+- support-panel.js › v → `PUT /support/alert-contacts` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: alarms، settings

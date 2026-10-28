@@ -18,6 +18,11 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+## در بات‌ها
+دستورها: /start (w/voice-bot.js › onMessage)، /cancel (w/voice-bot.js › onMessage)
+
+متغیرهای Worker (نام): ELEVENLABS_API_BASE، ELEVENLABS_API_KEY، ELEVENLABS_STT_LANG، ELEVENLABS_STT_MODEL، TG_VB_BOT_TOKEN، TG_WEBHOOK_SECRET، VOICE_PASS
+
 ## جدول‌ها
 نوشتن: settings، tg_seen، vb_chats، voice_jobs
 خواندن: —

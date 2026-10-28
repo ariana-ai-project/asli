@@ -4,6 +4,9 @@
 
 > برای هر قلم قیمت واحد (ریال، بدون ارزش افزوده) و شرایط فاکتور را بدهید — قیمت کل خودکار است — و «آمادهٔ ارسال» و «📤 ارسال» را بزنید. تازه‌ترها بالا هستند.
 
+محل در رابط:
+- پنل تأمین‌کنندگان › پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/sp.css`
 - `frontend/tamin-poshtibani/sup.css`
@@ -45,19 +48,19 @@
 - correspond.js › bind → `POST /sp/thread/{}/clear` (صفحه: correspond.html)
 - correspond.js › go → `POST /sp/thread/{}/msg` (صفحه: correspond.html)
 - correspond.js › loadThread → `GET /sp/thread/{}` (صفحه: correspond.html)
-- correspond.js › pfDialog → `GET /sp/bundle/{}/proforma`، `POST /sp/bundle/{}/proforma` (صفحه: correspond.html)
+- correspond.js › pfDialog → `GET /sp/bundle/{}/proforma` (صفحه: correspond.html)
 - correspond.js › poll → `GET /sp/poll` (صفحه: correspond.html)
 - supplier.js › Q → `POST /sp/line/{}/ready` (صفحه: supplier.html)
 - supplier.js › bindChat → `POST /sp/thread/{}/msg`، `POST /sp/thread/{}/clear` (صفحه: supplier.html)
 - supplier.js › boot → `GET /sp/me` (صفحه: supplier.html)
 - supplier.js › bot → `PUT /sp/line/{}`، `POST /sp/line/{}/revise`، `POST|PUT /sp/thread/{}/terms`، `POST /sp/line/{}/ready` (صفحه: supplier.html)
-- supplier.js › bundlePfDialog → `GET /sp/bundle/{}/proforma`، `POST /sp/bundle/{}/proforma` (صفحه: supplier.html)
+- supplier.js › bundlePfDialog → `GET /sp/bundle/{}/proforma` (صفحه: supplier.html)
 - supplier.js › doSubmit → `POST /sp/thread/{}/submit`، `POST /sp/thread/{}/submit-pf` (صفحه: supplier.html)
 - supplier.js › flowInput → `PUT /sp/line/{}`، `POST|PUT /sp/thread/{}/terms` (صفحه: supplier.html)
 - supplier.js › go → `POST /sp/offpf/{}/decide` (صفحه: supplier.html)
 - supplier.js › loadThread → `GET /sp/thread/{}` (صفحه: supplier.html)
 - supplier.js › offpfUpload → `POST /sp/thread/{}/offpf` (صفحه: supplier.html)
-- supplier.js › pfBot → `GET /sp/bundle/{}/proforma`، `POST /sp/bundle/{}/proforma` (صفحه: supplier.html)
+- supplier.js › pfBot → `POST /sp/bundle/{}/proforma` (صفحه: supplier.html)
 - supplier.js › poll → `GET /sp/poll`، `GET /sp/me` (صفحه: supplier.html)
 - supplier.js › previewDialog → `POST /sp/thread/{}/preview` (صفحه: supplier.html)
 - supplier.js › reviseLine → `POST /sp/line/{}/revise` (صفحه: supplier.html)
@@ -69,9 +72,11 @@
 - supplier.js › upd → `POST /sp/line/{}/ready`، `DELETE /sp/file/{}` (صفحه: supplier.html)
 - supplier.js › uploadAttach → `POST /sp/line/{}/file` (صفحه: supplier.html)
 - supplier.js › uploadFile → `POST /sp/line/{}/file` (صفحه: supplier.html)
-- supplier.js › uploadPf → `GET /sp/bundle/{}/proforma`، `POST /sp/bundle/{}/proforma` (صفحه: supplier.html)
+- supplier.js › uploadPf → `POST /sp/bundle/{}/proforma` (صفحه: supplier.html)
 
-جای راهنما: supplier.js
+جای راهنما در کد: supplier.js › renderAll
+
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، COMPANY، SITE_ORIGIN، TG_BOT_TOKEN، TG_SP_BOT_TOKEN، TG_SP_BOT_USERNAME، TG_WEBHOOK_SECRET
 
 ## جدول‌ها
 نوشتن: ai_runs، events، final_call_sups، offpf، outbox، proformas، quotes، settings، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads

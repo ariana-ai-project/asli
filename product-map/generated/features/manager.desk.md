@@ -4,6 +4,9 @@
 
 > هر کارت یک درخواست است (شماره، تاریخ، نزدیک‌ترین تاریخ نیاز، پروژه/طرف مقابل و اقلام) و زیرش برای هر «ارجاع» (درخواست × کارشناس) یک ردیف: کارشناس، مهلت، نوار مهلت، نوار شش مرحله، وضعیت و منوی ⋯؛ اقلامِ بی‌کارشناس هم یک ردیف با انتخاب خالی می‌گیرند. رنگ کارت از بدترین ارجاعش می‌آید: زرد، نارنجی، قرمز. «n قلم» روی کارت فهرست کامل اقلام را زیرش باز می‌کند.
 
+محل در رابط:
+- پنل مدیر تدارکات (میز ارجاع) › میز ارجاع
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/assign.js` — TEAM_SIZE_SQL، alertStatements، delegateAssignment، dispatchText، holidayFn، parseThresholds، reassign، rescheduleTeam، resetHolidayCache، seenKb، stateText، teamOf، thresholdsByExpert
 - `worker/manager.js` — DOT، RECIPIENT_COLS، RECIPIENT_JOIN، managerCard، markManagerSeen، notifyClosed، pushRecipients، recipients، stageWatch، statusBar
@@ -21,20 +24,26 @@
 | `POST /tender-unrefer` | w/api.js › route | w/tender.js#tenderUnrefer | ✓ |
 | `POST /unassign` | w/api.js › route | — | — |
 
-## فراخوان در پنل‌ها (11)
-- expert.js › loadTemplates → `GET /desk`، `POST /assign`، `POST /reassign`، `POST /tender-refer`، `POST /tender-unrefer`، `POST /unassign` (صفحه: expert.html)
+## فراخوان در پنل‌ها (9)
 - manager.js › applyAssignAll → `POST /assign` (صفحه: manager.html)
 - manager.js › applyDeadlineAll → `POST /assign/days` (صفحه: manager.html)
 - manager.js › askDelete → `POST /requests/delete` (صفحه: manager.html)
 - manager.js › doAct → `POST /items/state` (صفحه: manager.html)
 - manager.js › moveDialog → `POST /reassign` (صفحه: manager.html)
 - manager.js › referTender → `POST /tender-refer` (صفحه: manager.html)
-- manager.js › refresh → `GET /desk`، `POST /assign`، `POST /reassign`، `POST /tender-refer`، `POST /tender-unrefer`، `POST /unassign` (صفحه: manager.html)
+- manager.js › refresh → `GET /desk` (صفحه: manager.html)
 - manager.js › unreferTender → `POST /tender-unrefer` (صفحه: manager.html)
 - manager.js › wire → `GET /desk`، `POST /reassign`، `POST /unassign`، `POST /assign`، `POST /assign/days` (صفحه: manager.html)
-- support-panel.js › api → `GET /desk`، `POST /assign`، `POST /reassign`، `POST /tender-refer`، `POST /tender-unrefer`، `POST /unassign` (صفحه: support.html)
 
-جای راهنما: manager.js (پویا)
+جای راهنما در کد: manager.js (پویا)
+
+## در بات‌ها
+
+| دکمه | پاسخ‌گو | سازنده‌ها |
+|---|---|---|
+| `dg:` | w/bot.js › onCallback | w/assign.js › seenKb، w/bot.js › firstStepsKb، w/bot.js › requestMenu |
+| `mseen:` | w/bot.js › onCallback | w/manager.js › notifyClosed |
+| `seen:` | w/bot.js › onCallback | w/assign.js › seenKb |
 
 ## جدول‌ها
 نوشتن: alerts، assignments، commission_notes، commission_results، decisions، events، fm_choice، items، letters، outbox، proformas، quotes، req_hist، requests، smart_jobs، smart_searches، tenders، tg_flows، tg_nav، tg_uploads

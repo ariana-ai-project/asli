@@ -4,6 +4,9 @@
 
 > این پنل رمز مشترک دارد. اولین بازدیدکننده رمز را می‌گذارد و از آن پس همه با همان رمز وارد می‌شوند. رمز مثل همهٔ کدهای ورود ۴ رقم است و نباید همان کد مدیر باشد. اگر فراموش شد، مدیر با کد مدیر رمز تازه می‌گذارد. پنج رمز غلط، ورود را ۱۵ دقیقه می‌بندد.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › ورود پشتیبانی
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -16,13 +19,12 @@
 | `POST /support/reset` | w/api.js › route | w/support.js#requireSupport، w/support.js#supportReset | ✓ |
 | `POST /support/setup` | w/api.js › route | w/support.js#supportSetup | ✓ |
 
-## فراخوان در پنل‌ها (4)
+## فراخوان در پنل‌ها (3)
 - support-panel.js › doAuth → `POST /support/setup`، `POST /support/login`، `POST /support/reset` (صفحه: support.html)
 - support-panel.js › g → `POST /support/pass` (صفحه: support.html)
 - support-panel.js › loadStatus → `GET /support/status` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/status`، `POST /support/login`، `POST /support/pass`، `POST /support/reset`، `POST /support/setup` (صفحه: support.html)
 
-جای راهنما: support-panel.js
+جای راهنما در کد: support-panel.js › render
 
 ## جدول‌ها
 نوشتن: settings

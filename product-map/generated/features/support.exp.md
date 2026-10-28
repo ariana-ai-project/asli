@@ -4,6 +4,9 @@
 
 > بار باز، از مهلت گذشته، دیده‌نشده و منتظر تأیید کمیسیونِ هر کارشناس؛ کلیک ← ارجاع‌ها و رخدادهای او.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › کارشناسان
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -15,12 +18,13 @@
 | `GET /support/experts/{}` | w/api.js › route | w/support.js#supportExpert | ✓ |
 | `PUT /support/codes` | w/api.js › route | — | ✓ |
 
-## فراخوان در پنل‌ها (5)
-- support-panel.js › loadCodes → `GET /support/codes`، `PUT /support/codes` (صفحه: support.html)
+## فراخوان در پنل‌ها (4)
+- support-panel.js › loadCodes → `GET /support/codes` (صفحه: support.html)
 - support-panel.js › loadExpert → `GET /support/experts/{}` (صفحه: support.html)
 - support-panel.js › loadExperts → `GET /support/experts` (صفحه: support.html)
-- support-panel.js › saveCode → `GET /support/codes`، `PUT /support/codes` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/codes`، `GET /support/experts`، `PUT /support/codes` (صفحه: support.html)
+- support-panel.js › saveCode → `PUT /support/codes` (صفحه: support.html)
+
+جای راهنما در کد: support-panel.js › inp
 
 ## جدول‌ها
 نوشتن: experts

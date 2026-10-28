@@ -4,6 +4,9 @@
 
 > تأمین‌کنندگانی که این قلم (یا این نوع قلم) را قبلاً از آن‌ها خریده‌ایم، با دفعات، مقدار، گشتاورِ مقدار، ارزش خرید و رتبهٔ نهایی. رتبه‌بندی به مدل زبانی نیاز ندارد.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/history.js` — BASE_YM، GRADE_ORDER، MAX_DROP، activeImport، clampK، decayPerMonth، excludedWhy، finalRank، gradeKey، historyStatus، itemHistory، itemSeries، momentWeight، rankBy، ratesWithShares، resolveScope، supplierBuys، unitShares
 
@@ -22,6 +25,8 @@
 - expert.js › runHist → `GET /suppliers/history` (صفحه: expert.html)
 - expert.js › showBuys → `GET /suppliers/history/buys` (صفحه: expert.html)
 - manager.js › importFile → `GET /import/history`، `POST /import/history` (صفحه: manager.html)
+
+جای راهنما در کد: expert.js › vNorm، expert.js › msgFor
 
 ## جدول‌ها
 نوشتن: req_hist

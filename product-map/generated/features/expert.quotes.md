@@ -4,6 +4,9 @@
 
 > هر ردیف، یک خط استعلام از یک تأمین‌کننده برای یک قلم است. مقدارها از پنل تأمین‌کننده (تأیید نهایی)، «استخراج» پیش‌فاکتور یا مناقصه می‌آیند و هر خانه را دستی هم می‌توانید پر یا ویرایش کنید؛ منبعِ هر خانه با نشانِ کوچکِ کنارش ثبت و دیده می‌شود.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › استعلامات
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/extract.js` — ExtractError، MODEL، PROMPT_VERSION، REFUSAL_FA، SCHEMA، SYSTEM، extractProforma، toRial، userContent
 - `worker/proforma.js` — applyExtraction، extractFor، idList، lineUnitPrice، proformaOf، runExtraction، saveExtraction
@@ -24,17 +27,18 @@
 | `PUT /phones/channels` | w/api.js › route | w/records.js#setPhoneChannel | ✓ |
 | `PUT /quotes/{}` | w/api.js › route | — | ✓ |
 
-## فراخوان در پنل‌ها (10)
+## فراخوان در پنل‌ها (7)
 - expert.js › addFromHistory → `POST /quotes` (صفحه: expert.html)
 - expert.js › addFromSmart → `POST /quotes` (صفحه: expert.html)
 - expert.js › dcAddQuote → `POST /quotes` (صفحه: expert.html)
-- expert.js › loadTemplates → `POST /proformas`، `POST /quotes` (صفحه: expert.html)
-- expert.js › saveField → `DELETE /quotes/{}`، `PUT /quotes/{}` (صفحه: expert.html)
+- expert.js › saveField → `PUT /quotes/{}` (صفحه: expert.html)
 - expert.js › showExtract → `POST /proformas/{}/extract`، `POST /proformas/{}/apply` (صفحه: expert.html)
-- expert.js › toggleChannel → `GET /phones/channels`، `PUT /phones/channels` (صفحه: expert.html)
-- expert.js › wire → `POST /quotes`، `DELETE /quotes/{}`، `PUT /quotes/{}` (صفحه: expert.html)
-- manager.js › refresh → `POST /proformas`، `POST /quotes` (صفحه: manager.html)
-- support-panel.js › api → `POST /proformas`، `POST /quotes` (صفحه: support.html)
+- expert.js › toggleChannel → `PUT /phones/channels` (صفحه: expert.html)
+- expert.js › wire → `POST /quotes`، `PUT /quotes/{}`، `DELETE /quotes/{}` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › ro، expert.js › vGuard
+
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY
 
 ## جدول‌ها
 نوشتن: events، phone_channel_log، phone_channels، proformas، quote_edits، quotes

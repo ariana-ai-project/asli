@@ -4,6 +4,9 @@
 
 > خواندن فایل خروجی راهکاران در مرورگر، نمایش تعارض‌ها و ثبت درخواست‌ها و اقلام.
 
+محل در رابط:
+- پنل مدیر تدارکات (میز ارجاع) › میز ارجاع › بارگذاری درخواست‌های روزانه (اکسل)
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/import.js` — T، mapHeader، readRows، build، get، fnv32، cnt
 
@@ -17,15 +20,12 @@
 | `POST /import/chunk` | w/api.js › route | — | — |
 | `POST /import/finish` | w/api.js › route | — | — |
 
-## فراخوان در پنل‌ها (6)
-- expert.js › loadTemplates → `GET /imports` (صفحه: expert.html)
+## فراخوان در پنل‌ها (3)
 - manager.js › estimateLoop → `POST /estimate/run` (صفحه: manager.html)
 - manager.js › importFile → `POST /import/begin`، `POST /import/chunk`، `POST /import/finish` (صفحه: manager.html)
-- manager.js › refresh → `GET /imports` (صفحه: manager.html)
 - manager.js › showConflicts → `POST /import/apply` (صفحه: manager.html)
-- support-panel.js › api → `GET /imports` (صفحه: support.html)
 
-جای راهنما: manager.js (پویا)
+جای راهنما در کد: manager.js (پویا)
 
 ## جدول‌ها
 نوشتن: counters، imports، items، requests

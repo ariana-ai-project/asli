@@ -4,6 +4,9 @@
 
 > راهبرد هر نوع قلم، سند راهبرد، نوبت‌های مذاکره و داده‌های تحقیق CR-02.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › 📘 سند راهبرد
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/strategy-view.js` — fa، glq، rial، pctS، paceFa، glanceOf، faM، faNum، when، det، helpBtn، docBody، ul، dh، tile، docHead، roHtml، openDoc، …
 - `worker/cr-data.js` — CR02_DDL، CR_SHARDS، NATURES، crShard، fnv32، natureOfEvidence، supKey

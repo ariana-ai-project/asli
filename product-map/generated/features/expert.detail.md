@@ -4,6 +4,9 @@
 
 > بالای صفحه، شمارهٔ درخواست، پروژه، اقلام و مهلت تحویل است؛ زیرش نوار مهلت و نوار شش مرحله با رنگِ هر مرحله (سبز انجام‌شده، زرد هشدار، نارنجی دیر، قرمز مهلت گذشته).
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -35,6 +38,8 @@
 - expert.js › tqToggle → `PUT /items/{}/locks` (صفحه: expert.html)
 - expert.js › wire → `POST /items/{}/progress`، `PUT /requests/{}/head`، `PUT /assignments/{}/notes` (صفحه: expert.html)
 - manager.js › openDetail → `GET /assignments/{}` (صفحه: manager.html)
+
+جای راهنما در کد: expert.js › vDetail
 
 ## جدول‌ها
 نوشتن: assignments، decisions، events، item_changes، item_edits، items، requests

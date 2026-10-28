@@ -4,6 +4,9 @@
 
 > تیکِ «🤖 هوشمند / ✋ دستی» هر کارشناس در پنل پشتیبانی است. درخواستی که دستِ کارشناس هوشمند است: بررسی سوابق، جستجوی هوشمند، مذاکره با تأمین‌کنندگان، جدول کمیسیون و نامه را خودش انجام می‌دهد و این کارها برای شما قفل است؛ گفت‌وگوهایش هم بسته‌اند مگر وقتی از شما سؤال دارد.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › 🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/first-msg.js` — FAMILY_FA، FAMILY_OF_MODE، FM_COLUMNS، FM_DDL، FM_TOKENS، STD، fillFm، fmCheck، fmChoices، fmContext، fmDefKey، fmReasons، fmSave، fmTextFor، listTemplates، qtyRange، stdKey، stdList، …
 
@@ -25,6 +28,8 @@
 - expert.js › refresh → `GET|PUT /items/{}/first-msg` (صفحه: expert.html)
 - expert.js › saveSupCfg → `GET|PUT /me/supervise` (صفحه: expert.html)
 - expert.js › toggle → `GET|PUT /items/{}/first-msg` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › vRateBar، expert.js › vAiBar، expert.js › vAiLocked، expert.js › vGuard، expert.js › reqCommentUI
 
 ## جدول‌ها
 نوشتن: ai_props، ai_runs، events، experts، fm_choice، items، templates، tpl_prefs

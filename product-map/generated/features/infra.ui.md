@@ -4,6 +4,9 @@
 
 > TP.api، ui.js (کشوی راهنما، اعلان، ...)، ui-kit، حرکت‌ها و سبک‌های مشترک همهٔ پنل‌ها.
 
+محل در رابط:
+- در همهٔ پنل‌ها › نوار بالا، اعلان‌ها و کیت مشترک
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/config.js`
 - `frontend/tamin-poshtibani/panel.css`

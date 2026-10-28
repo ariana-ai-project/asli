@@ -4,6 +4,9 @@
 
 > امتیازها و نظرهای کارشناسان به کارشناس هوشمند در یک صفحه: میانگینِ پیام‌ها، مکاتبه‌ها و نامه‌ها، سرنوشتِ پیشنهادهای «⏱ با مهلت» (فرستاد، رد، خودکار)، پخشِ ستاره‌ها، روند، جدولِ کارشناسان و فهرستِ همهٔ نظرها — برای پیدا کردنِ ایرادهای ربات و اصلاحِ دستورالعمل و قواعدش.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › ⭐ ارزیابی ربات
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/fb-admin.js` — fa، M، boxFa، boxChips، fa1، pct، stars، p2، dShort، when، sumKey، qs، load، kpis، tile، distBox، rows، trendBox، …
 - `worker/ai-feedback.js` — FB_DDL، FB_KIND_FA، FB_OUT_FA، feedbackExport، feedbackOne، feedbackStats، feedbackSummary، recordGuard، recordProp، recordRate
@@ -16,18 +19,14 @@
 | `GET /support/ai/feedback/export` | w/api.js › route | w/ai-feedback.js#feedbackExport | ✓ |
 | `POST /support/ai/feedback/summary` | w/api.js › route | w/ai-feedback.js#feedbackSummary | ✓ |
 
-## فراخوان در پنل‌ها (11)
-- expert-ai.js › Q → `GET /support/ai/feedback/{}` (صفحه: support.html)
-- expert-ai.js › load → `GET /support/ai/feedback/{}`، `GET /support/ai/feedback/export`، `POST /support/ai/feedback/summary` (صفحه: support.html)
-- expert-ai.js › phoneDialog → `GET /support/ai/feedback/{}` (صفحه: support.html)
-- expert-ai.js › ul → `GET /support/ai/feedback/{}` (صفحه: support.html)
-- expert-ai.js › wire → `GET /support/ai/feedback/{}` (صفحه: support.html)
+## فراخوان در پنل‌ها (5)
+- expert-ai.js › load → `GET /support/ai/feedback/{}` (صفحه: support.html)
 - fb-admin.js › load → `GET /support/ai/feedback` (صفحه: support.html)
-- fb-admin.js › runSum → `GET /support/ai/feedback/{}`، `POST /support/ai/feedback/summary` (صفحه: support.html)
-- fb-admin.js › showCtx → `GET /support/ai/feedback/export`، `GET /support/ai/feedback/{}`، `POST /support/ai/feedback/summary` (صفحه: support.html)
-- support-panel.js › aiToggle → `GET /support/ai/feedback/{}` (صفحه: support.html)
+- fb-admin.js › runSum → `POST /support/ai/feedback/summary` (صفحه: support.html)
+- fb-admin.js › showCtx → `GET /support/ai/feedback/export`، `GET /support/ai/feedback/{}` (صفحه: support.html)
 - support-panel.js › loadAi → `GET /support/ai/feedback` (صفحه: support.html)
-- support-panel.js › loadDls → `GET /support/ai/feedback` (صفحه: support.html)
+
+جای راهنما در کد: fb-admin.js › aiBox، fb-admin.js › boxesBox، fb-admin.js › c، fb-admin.js › view
 
 ## جدول‌ها
 نوشتن: ai_agents، ai_calls، ai_feedback، ai_runs، ai_threads، sp_phones

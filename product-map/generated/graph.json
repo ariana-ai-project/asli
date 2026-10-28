@@ -60,6 +60,9 @@
    "area": "bot",
    "title": "دستیار سامانه",
    "help": false,
+   "places": [
+    "در همهٔ پنل‌ها › 💬 دستیار سامانه"
+   ],
    "files": [
     "worker/help-bot.js",
     "worker/help-knowledge.js"
@@ -91,6 +94,7 @@
    "area": "bot",
    "title": "ربات تأمین‌کنندگان",
    "help": false,
+   "places": [],
    "files": [
     "worker/sp-bot.js",
     "worker/sp-push.js",
@@ -136,6 +140,7 @@
    "area": "bot",
    "title": "ربات کارشناسان و تیم",
    "help": false,
+   "places": [],
    "files": [
     "worker/bot.js",
     "worker/tg-nav.js"
@@ -208,6 +213,7 @@
    "area": "bot",
    "title": "ربات صدا به متن",
    "help": false,
+   "places": [],
    "files": [
     "worker/stt.js",
     "worker/voice-bot.js",
@@ -241,6 +247,12 @@
    "area": "corr",
    "title": "مکاتبات با تأمین‌کنندگان",
    "help": true,
+   "places": [
+    "مکاتبات با تأمین‌کنندگان › درخواست‌ها",
+    "مکاتبات با تأمین‌کنندگان › تأمین‌کنندگانِ یک درخواست",
+    "مکاتبات با تأمین‌کنندگان › گفت‌وگو",
+    "مکاتبات با تأمین‌کنندگان › گفت‌وگو › اقلام، پیش‌فاکتور و تأیید بسته"
+   ],
    "files": [
     "frontend/tamin-poshtibani/correspond.html",
     "frontend/tamin-poshtibani/correspond.js",
@@ -342,6 +354,7 @@
    "area": "doc",
    "title": "ساخت Word و Excel",
    "help": false,
+   "places": [],
    "files": [
     "frontend/tamin-poshtibani/vendor/xlsx.full.min.js",
     "worker/docx.js",
@@ -370,6 +383,7 @@
    "area": "engine",
    "title": "موتور کارشناس هوشمند",
    "help": false,
+   "places": [],
    "files": [
     "worker/ai-agent.js",
     "worker/ai-fetch.js",
@@ -464,6 +478,7 @@
    "area": "engine",
    "title": "کاتالوگ و قواعد یکسان‌سازی",
    "help": false,
+   "places": [],
    "files": [
     "frontend/tamin-poshtibani/catalog-canon.mjs",
     "frontend/tamin-poshtibani/catalog-head-rules.mjs",
@@ -521,6 +536,7 @@
    "area": "engine",
    "title": "ثبت سوابق جستجو، کانال‌ها و کمیسیون",
    "help": false,
+   "places": [],
    "files": [
     "worker/records.js"
    ],
@@ -563,6 +579,9 @@
    "area": "engine",
    "title": "موتور راهبرد خرید (CR-02)",
    "help": false,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › 📘 سند راهبرد"
+   ],
    "files": [
     "frontend/tamin-poshtibani/strategy-view.js",
     "worker/cr-data.js",
@@ -636,6 +655,7 @@
    "area": "engine",
    "title": "ساختار و یکسان‌سازی اقلام",
    "help": false,
+   "places": [],
    "files": [
     "worker/estimate.js",
     "worker/normalize.js",
@@ -676,6 +696,7 @@
    "area": "engine",
    "title": "موتور مناقصه",
    "help": false,
+   "places": [],
    "files": [
     "worker/tender-core.js",
     "worker/tender.js"
@@ -726,6 +747,9 @@
    "area": "expert",
    "title": "حساب من",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › حساب من"
+   ],
    "files": [],
    "endpoints": [
     "* /me",
@@ -760,6 +784,9 @@
    "area": "expert",
    "title": "کارشناس هوشمند",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › 🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت"
+   ],
    "files": [
     "worker/first-msg.js"
    ],
@@ -821,6 +848,9 @@
    "area": "expert",
    "title": "تنظیم اعلانات تیم",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › تنظیم اعلانات تیم"
+   ],
    "files": [],
    "endpoints": [
     "PUT /me/alerts"
@@ -850,6 +880,7 @@
    "area": "expert",
    "title": "پوستهٔ پنل کارشناس",
    "help": false,
+   "places": [],
    "files": [
     "frontend/tamin-poshtibani/expert.html",
     "frontend/tamin-poshtibani/expert.js",
@@ -872,6 +903,9 @@
    "area": "expert",
    "title": "جدول کمیسیون",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › جدول کمیسیون"
+   ],
    "files": [
     "worker/bundle.js",
     "worker/sheets.js"
@@ -923,6 +957,9 @@
    "area": "expert",
    "title": "صفحهٔ درخواست",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست"
+   ],
    "files": [],
    "endpoints": [
     "DELETE /items/{}/edit",
@@ -998,6 +1035,9 @@
    "area": "expert",
    "title": "📨 فراخوانِ پیش‌فاکتورِ رسمی و 📦 بستهٔ کمیسیون",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › جدول کمیسیون › 📨 فراخوان پیش‌فاکتور رسمی و 📦 بستهٔ کمیسیون"
+   ],
    "files": [
     "worker/final-call.js"
    ],
@@ -1059,6 +1099,9 @@
    "area": "expert",
    "title": "روند کار روی یک درخواست",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › راهنمای «روند کار روی یک درخواست»"
+   ],
    "files": [],
    "endpoints": [],
    "tests": [],
@@ -1079,6 +1122,9 @@
    "area": "expert",
    "title": "بررسی سوابق",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق"
+   ],
    "files": [
     "worker/history.js"
    ],
@@ -1126,6 +1172,9 @@
    "area": "expert",
    "title": "نامهٔ کمیسیون",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › نامهٔ کمیسیون"
+   ],
    "files": [
     "worker/letter.js"
    ],
@@ -1174,6 +1223,10 @@
    "area": "expert",
    "title": "قالب‌های پیام",
    "help": false,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق › ✉️ قالب پیام",
+    "مکاتبات با تأمین‌کنندگان › گفت‌وگو › ✉️ قالب پیام"
+   ],
    "files": [
     "frontend/tamin-poshtibani/msg-fill.mjs",
     "worker/templates.js"
@@ -1204,6 +1257,9 @@
    "area": "expert",
    "title": "🎯 فهرست دعوت",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق › 🎯 فهرست دعوت"
+   ],
    "files": [
     "worker/ai-picks.js"
    ],
@@ -1258,6 +1314,9 @@
    "area": "expert",
    "title": "استعلامات",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › استعلامات"
+   ],
    "files": [
     "worker/extract.js",
     "worker/proforma.js",
@@ -1318,6 +1377,9 @@
    "area": "expert",
    "title": "جستجوی هوشمند",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › جستجوی هوشمند"
+   ],
    "files": [
     "worker/discovered.js",
     "worker/discovery.js"
@@ -1362,6 +1424,9 @@
    "area": "expert",
    "title": "تیم کارشناسی",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › تیم کارشناسی"
+   ],
    "files": [
     "worker/team.js"
    ],
@@ -1398,6 +1463,9 @@
    "area": "expert",
    "title": "📋 شرایط خرید هر قلم",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › صفحهٔ درخواست › 📋 شرایط خرید هر قلم"
+   ],
    "files": [
     "worker/terms-locks.js"
    ],
@@ -1434,6 +1502,9 @@
    "area": "expert",
    "title": "کارتابل من",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › کارتابل من"
+   ],
    "files": [],
    "endpoints": [
     "GET /tray",
@@ -1477,6 +1548,7 @@
    "area": "infra",
    "title": "ورود با کد و تلگرام",
    "help": false,
+   "places": [],
    "files": [
     "worker/auth-guard.js",
     "worker/tg-auth.js"
@@ -1502,6 +1574,7 @@
    "area": "infra",
    "title": "مسیریاب و هستهٔ سرور",
    "help": false,
+   "places": [],
    "files": [
     "worker.js",
     "worker/api.js",
@@ -1631,6 +1704,10 @@
    "area": "infra",
    "title": "متن‌های راهنما",
    "help": false,
+   "places": [
+    "راهنمای چاپی کارشناس (A4) › راهنمای چاپی",
+    "در همهٔ پنل‌ها › «؟» کشوی راهنما"
+   ],
    "files": [
     "frontend/tamin-poshtibani/guide-a4.html",
     "frontend/tamin-poshtibani/help-content.js",
@@ -1653,6 +1730,9 @@
    "area": "infra",
    "title": "دروازهٔ سایت",
    "help": false,
+   "places": [
+    "درگاه تدارکات › انتخاب پنل (کارشناس، مدیر، پشتیبانی)"
+   ],
    "files": [
     "frontend/tamin-poshtibani/index.html",
     "worker/site.js"
@@ -1685,6 +1765,9 @@
    "area": "infra",
    "title": "کیت رابط کاربری مشترک",
    "help": false,
+   "places": [
+    "در همهٔ پنل‌ها › نوار بالا، اعلان‌ها و کیت مشترک"
+   ],
    "files": [
     "frontend/tamin-poshtibani/config.js",
     "frontend/tamin-poshtibani/panel.css",
@@ -1717,6 +1800,7 @@
    "area": "legal",
    "title": "سامانهٔ حقوقی",
    "help": false,
+   "places": [],
    "files": [
     "worker/legal-prompts.js",
     "worker/legal.js"
@@ -1759,6 +1843,10 @@
    "area": "login",
    "title": "ورود کارشناس",
    "help": true,
+   "places": [
+    "پنل کارشناس خرید › ورود کارشناس",
+    "مکاتبات با تأمین‌کنندگان › ورود (همان ورود کارشناس)"
+   ],
    "files": [],
    "endpoints": [
     "POST /login"
@@ -1783,6 +1871,9 @@
    "area": "login",
    "title": "ورود مدیر تدارکات",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › ورود مدیر"
+   ],
    "files": [],
    "endpoints": [],
    "tests": [],
@@ -1799,6 +1890,9 @@
    "area": "login",
    "title": "ورود به پنل تأمین‌کنندگان",
    "help": true,
+   "places": [
+    "پنل تأمین‌کنندگان › ورود با رمز پیامکی"
+   ],
    "files": [],
    "endpoints": [
     "GET /sp/info",
@@ -1842,6 +1936,9 @@
    "area": "login",
    "title": "ورود پشتیبانی",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › ورود پشتیبانی"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/status",
@@ -1905,6 +2002,9 @@
    "area": "login",
    "title": "ورود به مناقصه",
    "help": true,
+   "places": [
+    "مناقصهٔ خرید › ورود به مناقصه"
+   ],
    "files": [],
    "endpoints": [
     "* /tender/{}/info",
@@ -1945,6 +2045,9 @@
    "area": "manager",
    "title": "تنظیم اعلانات",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › تنظیم اعلانات"
+   ],
    "files": [],
    "endpoints": [
     "GET /holidays",
@@ -1977,6 +2080,7 @@
    "area": "manager",
    "title": "پوستهٔ پنل مدیر",
    "help": false,
+   "places": [],
    "files": [
     "frontend/tamin-poshtibani/manager.html",
     "frontend/tamin-poshtibani/manager.js",
@@ -1998,6 +2102,9 @@
    "area": "manager",
    "title": "ارجاع هوشمند",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › ارجاع هوشمند"
+   ],
    "files": [
     "frontend/tamin-poshtibani/assign-rules.mjs"
    ],
@@ -2036,6 +2143,9 @@
    "area": "manager",
    "title": "میز ارجاع",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › میز ارجاع"
+   ],
    "files": [
     "worker/assign.js",
     "worker/manager.js"
@@ -2133,6 +2243,9 @@
    "area": "manager",
    "title": "مهلت هوشمند",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › مهلت هوشمند"
+   ],
    "files": [],
    "endpoints": [],
    "tests": [],
@@ -2149,6 +2262,9 @@
    "area": "manager",
    "title": "کارشناسان",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › کارشناسان"
+   ],
    "files": [],
    "endpoints": [
     "GET /axes",
@@ -2196,6 +2312,9 @@
    "area": "manager",
    "title": "بارگذاری اکسل درخواست‌ها",
    "help": false,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › میز ارجاع › بارگذاری درخواست‌های روزانه (اکسل)"
+   ],
    "files": [
     "frontend/tamin-poshtibani/import.js"
    ],
@@ -2235,6 +2354,9 @@
    "area": "manager",
    "title": "تصمیم‌ها و رویدادها",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › تصمیم‌ها و رویدادها"
+   ],
    "files": [
     "worker/decisions.js"
    ],
@@ -2283,6 +2405,9 @@
    "area": "manager",
    "title": "گزارش‌ها",
    "help": true,
+   "places": [
+    "پنل مدیر تدارکات (میز ارجاع) › گزارش‌ها"
+   ],
    "files": [
     "worker/reports.js"
    ],
@@ -2325,6 +2450,7 @@
    "area": "notify",
    "title": "هشدارها",
    "help": false,
+   "places": [],
    "files": [
     "worker/alarms.js"
    ],
@@ -2350,6 +2476,9 @@
    "area": "notify",
    "title": "اعلان مرورگر (Push)",
    "help": false,
+   "places": [
+    "در همهٔ پنل‌ها › 🔔 اعلان مرورگر"
+   ],
    "files": [
     "frontend/tamin-poshtibani/push-sw.js",
     "worker/push.js"
@@ -2386,6 +2515,7 @@
    "area": "notify",
    "title": "پیامک",
    "help": false,
+   "places": [],
    "files": [
     "worker/sms.js"
    ],
@@ -2405,6 +2535,7 @@
    "area": "notify",
    "title": "ارسال تلگرام و صف پیام",
    "help": false,
+   "places": [],
    "files": [
     "worker/queue.js",
     "worker/telegram.js"
@@ -2428,6 +2559,9 @@
    "area": "sup",
    "title": "پاسخ به استعلام",
    "help": true,
+   "places": [
+    "پنل تأمین‌کنندگان › پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو"
+   ],
    "files": [
     "frontend/tamin-poshtibani/sp.css",
     "frontend/tamin-poshtibani/sup.css",
@@ -2553,6 +2687,10 @@
    "area": "support",
    "title": "🤖 کارشناس هوشمند",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند",
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 👥 کارشناسان و کارها (و داشبورد هر کارشناس)"
+   ],
    "files": [
     "frontend/tamin-poshtibani/expert-ai.js"
    ],
@@ -2633,6 +2771,7 @@
    "area": "support",
    "title": "پوستهٔ پنل پشتیبانی",
    "help": false,
+   "places": [],
    "files": [
     "frontend/tamin-poshtibani/manifest-support.webmanifest",
     "frontend/tamin-poshtibani/support-panel.js",
@@ -2673,6 +2812,9 @@
    "area": "support",
    "title": "مکاتبات",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › مکاتبات"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/msg/{}/voice",
@@ -2707,6 +2849,9 @@
    "area": "support",
    "title": "🧩 تغییرات اقلام",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🧩 تغییرات اقلام"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/changes",
@@ -2731,6 +2876,9 @@
    "area": "support",
    "title": "تأیید کمیسیون",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › تأیید کمیسیون"
+   ],
    "files": [
     "frontend/tamin-poshtibani/cm-result.js",
     "worker/commission-result.js"
@@ -2777,6 +2925,9 @@
    "area": "support",
    "title": "🧭 استراتژی و دفتر",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🧭 استراتژی و دفتر"
+   ],
    "files": [
     "frontend/tamin-poshtibani/cr-admin.js",
     "worker/cr-api.js",
@@ -2865,6 +3016,9 @@
    "area": "support",
    "title": "📥 تحویل‌های هوشمند",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 📥 تحویل‌های هوشمند"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/ai/deliveries",
@@ -2897,6 +3051,9 @@
    "area": "support",
    "title": "کارشناسان",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › کارشناسان"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/codes",
@@ -2932,6 +3089,9 @@
    "area": "support",
    "title": "⭐ ارزیابی ربات",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › ⭐ ارزیابی ربات"
+   ],
    "files": [
     "frontend/tamin-poshtibani/fb-admin.js",
     "worker/ai-feedback.js"
@@ -2987,6 +3147,9 @@
    "area": "support",
    "title": "📨 فراخوانِ پیش‌فاکتورِ رسمی",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🎛 کلیدها › 📨 فراخوان پیش‌فاکتور رسمی"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/ai/final-call",
@@ -3015,6 +3178,9 @@
    "area": "support",
    "title": "گزارش رخدادها",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › رخدادها"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/alarms",
@@ -3046,6 +3212,9 @@
    "area": "support",
    "title": "🧭 حالت اقلام",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🧭 حالت اقلام"
+   ],
    "files": [
     "worker/ai-modes.js"
    ],
@@ -3079,6 +3248,9 @@
    "area": "support",
    "title": "🏅 رتبه‌بندی و دعوت",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🏅 رتبه‌بندی و دعوت"
+   ],
    "files": [
     "worker/ranking.js"
    ],
@@ -3109,6 +3281,9 @@
    "area": "support",
    "title": "درخواست‌ها",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › درخواست‌ها"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/assignments/{}",
@@ -3154,6 +3329,9 @@
    "area": "support",
    "title": "⏱ مهلتِ رسیدن به حد",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › ⏱ مهلتِ رسیدن به حد"
+   ],
    "files": [
     "worker/ai-rules.js"
    ],
@@ -3189,6 +3367,9 @@
    "area": "support",
    "title": "📏 برچسبِ اندازهٔ درخواست",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › تأیید کمیسیون › 📏 برچسب اندازه و حداقل استعلام"
+   ],
    "files": [
     "worker/size.js"
    ],
@@ -3218,6 +3399,9 @@
    "area": "support",
    "title": "🔎 جستجوی هوشمند",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🎛 کلیدها › 🔎 جستجوی هوشمند"
+   ],
    "files": [],
    "endpoints": [
     "GET /support/ai/smart-gate",
@@ -3245,6 +3429,9 @@
    "area": "support",
    "title": "🏷 تأمین‌کنندگان — رده و مشخصات",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🧭 استراتژی و دفتر › 🏷 تأمین‌کنندگان — رده و مشخصات"
+   ],
    "files": [
     "frontend/tamin-poshtibani/sup-profile.js",
     "worker/supplier-over.js"
@@ -3287,6 +3474,9 @@
    "area": "support",
    "title": "🎛 کلیدها",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 🎛 کلیدها"
+   ],
    "files": [
     "worker/switches.js"
    ],
@@ -3317,6 +3507,9 @@
    "area": "support",
    "title": "🔨 مناقصه",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🔨 مناقصه"
+   ],
    "files": [
     "frontend/tamin-poshtibani/tender-admin.js"
    ],
@@ -3394,6 +3587,9 @@
    "area": "support",
    "title": "💵 نرخ دلار",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 💵 نرخ دلار"
+   ],
    "files": [
     "worker/usd.js"
    ],
@@ -3426,6 +3622,9 @@
    "area": "support",
    "title": "📊 کارکرد کارشناسان",
    "help": true,
+   "places": [
+    "پنل پشتیبانی تدارکات › 📊 کارکرد کارشناسان"
+   ],
    "files": [
     "worker/usage-report.js"
    ],
@@ -3472,6 +3671,9 @@
    "area": "tender",
    "title": "مناقصهٔ خرید",
    "help": true,
+   "places": [
+    "مناقصهٔ خرید › ثبت پیشنهاد و جدول زنده"
+   ],
    "files": [
     "frontend/tamin-poshtibani/tender-ui.js",
     "frontend/tamin-poshtibani/tender.css",
@@ -3522,12 +3724,14 @@
    "title": "چرخهٔ درخواست خرید (دستی)",
    "steps": [
     {
+     "who": "مدیر",
      "t": "بارگذاری اکسل درخواست‌ها",
      "f": [
       "manager.import"
      ]
     },
     {
+     "who": "مدیر",
      "t": "ارجاع به کارشناس و مهلت (دستی یا هوشمند)",
      "f": [
       "manager.desk",
@@ -3536,6 +3740,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "مشاهده در کارتابل",
      "f": [
       "expert.tray",
@@ -3543,6 +3748,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "تأیید ساختار قلم و بررسی سوابق",
      "f": [
       "expert.detail",
@@ -3551,6 +3757,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "جستجوی هوشمند تأمین‌کنندهٔ تازه",
      "f": [
       "expert.smart",
@@ -3558,6 +3765,7 @@
      ]
     },
     {
+     "who": "کارشناس ↔ تأمین‌کننده",
      "t": "استعلام و مکاتبه؛ پاسخ تأمین‌کننده در پنل یا بات",
      "f": [
       "corr.main",
@@ -3568,12 +3776,14 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "پیش‌فاکتور و استعلامات",
      "f": [
       "expert.quotes"
      ]
     },
     {
+     "who": "کارشناس",
      "t": "جدول کمیسیون و نامهٔ کمیسیون",
      "f": [
       "expert.comm",
@@ -3581,6 +3791,7 @@
      ]
     },
     {
+     "who": "پشتیبانی",
      "t": "تأیید کمیسیون و خاتمه",
      "f": [
       "support.cm",
@@ -3594,6 +3805,7 @@
    "title": "درخواست هوشمند (کارشناس هوشمند، کارشناس ناظر)",
    "steps": [
     {
+     "who": "پشتیبانی",
      "t": "روشن کردن 🤖 برای کارشناس و تنظیم‌ها",
      "f": [
       "support.ai",
@@ -3604,6 +3816,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "تأیید ساختار و بررسی سوابق",
      "f": [
       "expert.detail",
@@ -3611,6 +3824,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "🎯 فهرست دعوت و 🚀 شروع",
      "f": [
       "expert.picks",
@@ -3619,6 +3833,7 @@
      ]
     },
     {
+     "who": "کارشناس هوشمند ↔ تأمین‌کننده",
      "t": "مذاکرهٔ خودکار با تأمین‌کنندگان",
      "f": [
       "engine.ai",
@@ -3627,6 +3842,7 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "👁 نظارت کارشناس و پیشنهادها",
      "f": [
       "expert.ai",
@@ -3634,6 +3850,7 @@
      ]
     },
     {
+     "who": "کارشناس هوشمند",
      "t": "📨 فراخوان پیش‌فاکتور رسمی",
      "f": [
       "expert.finalcall",
@@ -3641,6 +3858,7 @@
      ]
     },
     {
+     "who": "کارشناس هوشمند ← پشتیبانی",
      "t": "جدول کمیسیون، تحویل و تأیید",
      "f": [
       "expert.comm",
@@ -3655,6 +3873,7 @@
    "title": "مناقصهٔ برخط (معکوس)",
    "steps": [
     {
+     "who": "مدیر یا پشتیبانی",
      "t": "ارجاع درخواست به مناقصه",
      "f": [
       "manager.desk",
@@ -3662,6 +3881,7 @@
      ]
     },
     {
+     "who": "پشتیبانی",
      "t": "ساخت، زمان‌بندی و دعوت با پیامک",
      "f": [
       "support.td",
@@ -3670,12 +3890,14 @@
      ]
     },
     {
+     "who": "تأمین‌کننده",
      "t": "ورود تأمین‌کننده با رمز پیامکی",
      "f": [
       "login.tender"
      ]
     },
     {
+     "who": "تأمین‌کننده",
      "t": "ثبت پیشنهادهای کاهشی",
      "f": [
       "tender.page",
@@ -3683,6 +3905,7 @@
      ]
     },
     {
+     "who": "پشتیبانی ← کارشناس",
      "t": "پایان، نتیجه و برگشت به کمیسیون",
      "f": [
       "support.td",
@@ -3696,6 +3919,7 @@
    "title": "پاسخ تأمین‌کننده به استعلام",
    "steps": [
     {
+     "who": "کارشناس",
      "t": "ارسال استعلام با پیامک و لینک بات",
      "f": [
       "corr.main",
@@ -3703,6 +3927,7 @@
      ]
     },
     {
+     "who": "تأمین‌کننده",
      "t": "ورود با رمز پیامکی یا از بات",
      "f": [
       "login.supplier",
@@ -3710,6 +3935,7 @@
      ]
     },
     {
+     "who": "تأمین‌کننده",
      "t": "پر کردن قیمت و شرایط هر قلم و ارسال",
      "f": [
       "sup.panel",
@@ -3717,12 +3943,1316 @@
      ]
     },
     {
+     "who": "کارشناس",
      "t": "تصمیم کارشناس روی بسته‌ها",
      "f": [
       "corr.main",
       "expert.quotes"
      ]
     }
+   ]
+  }
+ ],
+ "panels": [
+  {
+   "id": "p.portal",
+   "page": "frontend/tamin-poshtibani/index.html",
+   "title": "درگاه تدارکات",
+   "who": "همه",
+   "sections": [
+    {
+     "key": null,
+     "title": "انتخاب پنل (کارشناس، مدیر، پشتیبانی)",
+     "f": "infra.site",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.expert",
+   "page": "frontend/tamin-poshtibani/expert.html",
+   "title": "پنل کارشناس خرید",
+   "who": "کارشناس خرید و کارشناس ارشد",
+   "sections": [
+    {
+     "key": "login",
+     "title": "ورود کارشناس",
+     "f": "login.expert",
+     "sections": []
+    },
+    {
+     "key": "list",
+     "title": "کارتابل من",
+     "f": "expert.tray",
+     "sections": []
+    },
+    {
+     "key": "detail",
+     "title": "صفحهٔ درخواست",
+     "f": "expert.detail",
+     "sections": [
+      {
+       "key": null,
+       "title": "🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت",
+       "f": "expert.ai",
+       "sections": []
+      },
+      {
+       "key": null,
+       "title": "📋 شرایط خرید هر قلم",
+       "f": "expert.terms",
+       "sections": []
+      },
+      {
+       "key": null,
+       "title": "📘 سند راهبرد",
+       "f": "engine.strategy",
+       "sections": []
+      },
+      {
+       "key": "history",
+       "title": "بررسی سوابق",
+       "f": "expert.history",
+       "sections": [
+        {
+         "key": null,
+         "title": "🎯 فهرست دعوت",
+         "f": "expert.picks",
+         "sections": []
+        },
+        {
+         "key": null,
+         "title": "✉️ قالب پیام",
+         "f": "expert.msgtpl",
+         "sections": []
+        }
+       ]
+      },
+      {
+       "key": "smart",
+       "title": "جستجوی هوشمند",
+       "f": "expert.smart",
+       "sections": []
+      },
+      {
+       "key": "quotes",
+       "title": "استعلامات",
+       "f": "expert.quotes",
+       "sections": []
+      },
+      {
+       "key": "comm",
+       "title": "جدول کمیسیون",
+       "f": "expert.comm",
+       "sections": [
+        {
+         "key": null,
+         "title": "📨 فراخوان پیش‌فاکتور رسمی و 📦 بستهٔ کمیسیون",
+         "f": "expert.finalcall",
+         "sections": []
+        }
+       ]
+      },
+      {
+       "key": "letter",
+       "title": "نامهٔ کمیسیون",
+       "f": "expert.letter",
+       "sections": []
+      }
+     ]
+    },
+    {
+     "key": "team",
+     "title": "تیم کارشناسی",
+     "f": "expert.team",
+     "sections": []
+    },
+    {
+     "key": "alerts",
+     "title": "تنظیم اعلانات تیم",
+     "f": "expert.alerts",
+     "sections": []
+    },
+    {
+     "key": "account",
+     "title": "حساب من",
+     "f": "expert.account",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "راهنمای «روند کار روی یک درخواست»",
+     "f": "expert.flow",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.corr",
+   "page": "frontend/tamin-poshtibani/correspond.html",
+   "title": "مکاتبات با تأمین‌کنندگان",
+   "who": "کارشناس خرید",
+   "sections": [
+    {
+     "key": null,
+     "title": "ورود (همان ورود کارشناس)",
+     "f": "login.expert",
+     "sections": []
+    },
+    {
+     "key": "req",
+     "title": "درخواست‌ها",
+     "f": "corr.main",
+     "sections": []
+    },
+    {
+     "key": "sup",
+     "title": "تأمین‌کنندگانِ یک درخواست",
+     "f": "corr.main",
+     "sections": []
+    },
+    {
+     "key": "chat",
+     "title": "گفت‌وگو",
+     "f": "corr.main",
+     "sections": [
+      {
+       "key": "items",
+       "title": "اقلام، پیش‌فاکتور و تأیید بسته",
+       "f": "corr.main",
+       "sections": []
+      },
+      {
+       "key": null,
+       "title": "✉️ قالب پیام",
+       "f": "expert.msgtpl",
+       "sections": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "p.manager",
+   "page": "frontend/tamin-poshtibani/manager.html",
+   "title": "پنل مدیر تدارکات (میز ارجاع)",
+   "who": "مدیر تدارکات",
+   "sections": [
+    {
+     "key": null,
+     "title": "ورود مدیر",
+     "f": "login.manager",
+     "sections": []
+    },
+    {
+     "key": "desk",
+     "title": "میز ارجاع",
+     "f": "manager.desk",
+     "sections": [
+      {
+       "key": null,
+       "title": "بارگذاری درخواست‌های روزانه (اکسل)",
+       "f": "manager.import",
+       "sections": []
+      }
+     ]
+    },
+    {
+     "key": "experts",
+     "title": "کارشناسان",
+     "f": "manager.experts",
+     "sections": []
+    },
+    {
+     "key": "alerts",
+     "title": "تنظیم اعلانات",
+     "f": "manager.alerts",
+     "sections": []
+    },
+    {
+     "key": "asg",
+     "title": "ارجاع هوشمند",
+     "f": "manager.asg",
+     "sections": []
+    },
+    {
+     "key": "dl",
+     "title": "مهلت هوشمند",
+     "f": "manager.dl",
+     "sections": []
+    },
+    {
+     "key": "reports",
+     "title": "گزارش‌ها",
+     "f": "manager.reports",
+     "sections": []
+    },
+    {
+     "key": "log",
+     "title": "تصمیم‌ها و رویدادها",
+     "f": "manager.log",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.support",
+   "page": "frontend/tamin-poshtibani/support.html",
+   "title": "پنل پشتیبانی تدارکات",
+   "who": "پشتیبانی (مالک سامانه)",
+   "sections": [
+    {
+     "key": "login",
+     "title": "ورود پشتیبانی",
+     "f": "login.support",
+     "sections": []
+    },
+    {
+     "key": "req",
+     "title": "درخواست‌ها",
+     "f": "support.req",
+     "sections": []
+    },
+    {
+     "key": "exp",
+     "title": "کارشناسان",
+     "f": "support.exp",
+     "sections": []
+    },
+    {
+     "key": "chat",
+     "title": "مکاتبات",
+     "f": "support.chat",
+     "sections": []
+    },
+    {
+     "key": "cm",
+     "title": "تأیید کمیسیون",
+     "f": "support.cm",
+     "sections": [
+      {
+       "key": null,
+       "title": "📏 برچسب اندازه و حداقل استعلام",
+       "f": "support.size",
+       "sections": []
+      }
+     ]
+    },
+    {
+     "key": "td",
+     "title": "🔨 مناقصه",
+     "f": "support.td",
+     "sections": []
+    },
+    {
+     "key": "ai",
+     "title": "🤖 کارشناس هوشمند",
+     "f": "support.ai",
+     "sections": [
+      {
+       "key": "list",
+       "title": "👥 کارشناسان و کارها (و داشبورد هر کارشناس)",
+       "f": "support.ai",
+       "sections": []
+      },
+      {
+       "key": "rules",
+       "title": "⏱ مهلتِ رسیدن به حد",
+       "f": "support.rules",
+       "sections": []
+      },
+      {
+       "key": "rank",
+       "title": "🏅 رتبه‌بندی و دعوت",
+       "f": "support.rank",
+       "sections": []
+      },
+      {
+       "key": "usd",
+       "title": "💵 نرخ دلار",
+       "f": "support.usd",
+       "sections": []
+      },
+      {
+       "key": "md",
+       "title": "🧭 حالت اقلام",
+       "f": "support.md",
+       "sections": []
+      },
+      {
+       "key": "sw",
+       "title": "🎛 کلیدها",
+       "f": "support.sw",
+       "sections": [
+        {
+         "key": null,
+         "title": "📨 فراخوان پیش‌فاکتور رسمی",
+         "f": "support.finalcall",
+         "sections": []
+        },
+        {
+         "key": null,
+         "title": "🔎 جستجوی هوشمند",
+         "f": "support.smartgate",
+         "sections": []
+        }
+       ]
+      }
+     ]
+    },
+    {
+     "key": "dl",
+     "title": "📥 تحویل‌های هوشمند",
+     "f": "support.dl",
+     "sections": []
+    },
+    {
+     "key": "fb",
+     "title": "⭐ ارزیابی ربات",
+     "f": "support.fb",
+     "sections": []
+    },
+    {
+     "key": "use",
+     "title": "📊 کارکرد کارشناسان",
+     "f": "support.use",
+     "sections": []
+    },
+    {
+     "key": "log",
+     "title": "رخدادها",
+     "f": "support.log",
+     "sections": []
+    },
+    {
+     "key": "chg",
+     "title": "🧩 تغییرات اقلام",
+     "f": "support.chg",
+     "sections": []
+    },
+    {
+     "key": "cr",
+     "title": "🧭 استراتژی و دفتر",
+     "f": "support.cr",
+     "sections": [
+      {
+       "key": null,
+       "title": "🏷 تأمین‌کنندگان — رده و مشخصات",
+       "f": "support.sup",
+       "sections": []
+      }
+     ]
+    }
+   ]
+  },
+  {
+   "id": "p.supplier",
+   "page": "frontend/tamin-poshtibani/supplier.html",
+   "title": "پنل تأمین‌کنندگان",
+   "who": "تأمین‌کننده (لینک پیامک یا بات)",
+   "sections": [
+    {
+     "key": null,
+     "title": "ورود با رمز پیامکی",
+     "f": "login.supplier",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو",
+     "f": "sup.panel",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.tender",
+   "page": "frontend/tamin-poshtibani/tender.html",
+   "title": "مناقصهٔ خرید",
+   "who": "تأمین‌کنندهٔ دعوت‌شده",
+   "sections": [
+    {
+     "key": null,
+     "title": "ورود به مناقصه",
+     "f": "login.tender",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "ثبت پیشنهاد و جدول زنده",
+     "f": "tender.page",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.guide",
+   "page": "frontend/tamin-poshtibani/guide-a4.html",
+   "title": "راهنمای چاپی کارشناس (A4)",
+   "who": "کارشناس خرید",
+   "sections": [
+    {
+     "key": null,
+     "title": "راهنمای چاپی",
+     "f": "infra.help",
+     "sections": []
+    }
+   ]
+  },
+  {
+   "id": "p.all",
+   "page": null,
+   "title": "در همهٔ پنل‌ها",
+   "who": "همه",
+   "sections": [
+    {
+     "key": null,
+     "title": "«؟» کشوی راهنما",
+     "f": "infra.help",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "💬 دستیار سامانه",
+     "f": "bot.help",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "🔔 اعلان مرورگر",
+     "f": "notify.push",
+     "sections": []
+    },
+    {
+     "key": null,
+     "title": "نوار بالا، اعلان‌ها و کیت مشترک",
+     "f": "infra.ui",
+     "sections": []
+    }
+   ]
+  }
+ ],
+ "bot": {
+  "commands": [
+   "azmayesh|worker/bot.js#onMessage",
+   "cancel|worker/sp-bot.js#onMessage",
+   "cancel|worker/sp-voicemode.js#voiceUpdate",
+   "cancel|worker/voice-bot.js#onMessage",
+   "ghaleb|worker/bot.js#onMessage",
+   "kartabl|worker/bot.js#onMessage",
+   "manager|worker/bot.js#onMessage",
+   "start|worker/bot.js#handleTeamUpdate",
+   "start|worker/bot.js#onMessage",
+   "start|worker/sp-bot.js#onMessage",
+   "start|worker/voice-bot.js#onMessage",
+   "stop|worker/bot.js#handleTeamUpdate",
+   "stop|worker/bot.js#onMessage",
+   "support|worker/bot.js#onMessage"
+  ],
+  "buttons": [
+   {
+    "prefix": "ai",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#bundleAction"
+    ],
+    "producers": [
+     "worker/bot.js#attachProforma",
+     "worker/bot.js#presentExtraction",
+     "worker/bot.js#onExtract"
+    ]
+   },
+   {
+    "prefix": "aw",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#awaitedProforma",
+     "worker/bot.js#awaitStatus"
+    ]
+   },
+   {
+    "prefix": "cc",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#onCallback",
+     "worker/sp-push.js#showThread"
+    ]
+   },
+   {
+    "prefix": "cm",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#makeTable",
+     "worker/bot.js#closeCard",
+     "worker/bot.js#deliverSend",
+     "worker/support.js#setCommission"
+    ]
+   },
+   {
+    "prefix": "ct",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#quoteCard",
+     "worker/bot.js#tableSelect",
+     "worker/bot.js#makeTable",
+     "worker/bot.js#qtabRender"
+    ]
+   },
+   {
+    "prefix": "dg",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/assign.js#seenKb",
+     "worker/bot.js#firstStepsKb",
+     "worker/bot.js#requestMenu"
+    ]
+   },
+   {
+    "prefix": "dgt",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#delegateMenu"
+    ]
+   },
+   {
+    "prefix": "dv",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#makeLetter",
+     "worker/bot.js#deliverCard",
+     "worker/bot.js#deliverNext",
+     "worker/bot.js#addAttachment"
+    ]
+   },
+   {
+    "prefix": "dvo",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#makeTable",
+     "worker/bot.js#closeCard",
+     "worker/bot.js#makeLetter"
+    ]
+   },
+   {
+    "prefix": "fc",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#makeTable"
+    ]
+   },
+   {
+    "prefix": "fl",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#askFieldText",
+     "worker/bot.js#notesAsk",
+     "worker/bot.js#templateAsk",
+     "worker/bot.js#onTemplateText"
+    ]
+   },
+   {
+    "prefix": "go",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/ai-agent.js#tellExpert",
+     "worker/sp-push.js#pushMsgs",
+     "worker/sp-push.js#deliverSms"
+    ]
+   },
+   {
+    "prefix": "hb",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#hubKb"
+    ]
+   },
+   {
+    "prefix": "hm",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histModeCard",
+     "worker/bot.js#histPicker"
+    ]
+   },
+   {
+    "prefix": "hp",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histPicker"
+    ]
+   },
+   {
+    "prefix": "hq",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histItemRender"
+    ]
+   },
+   {
+    "prefix": "hs",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#firstStepsKb",
+     "worker/bot.js#requestMenu"
+    ]
+   },
+   {
+    "prefix": "hv",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histPicker",
+     "worker/bot.js#spSupPick",
+     "worker/bot.js#spSendGo"
+    ]
+   },
+   {
+    "prefix": "hx",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histModeCard",
+     "worker/bot.js#histSelCard",
+     "worker/bot.js#histRun",
+     "worker/bot.js#histPicker"
+    ]
+   },
+   {
+    "prefix": "hz",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#histItemRender"
+    ]
+   },
+   {
+    "prefix": "ic",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard",
+     "worker/sp-push.js#actionKb"
+    ]
+   },
+   {
+    "prefix": "kt",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/tg-nav.js#stripNav"
+    ],
+    "producers": [
+     "worker/bot.js#firstStepsKb",
+     "worker/bot.js#null"
+    ]
+   },
+   {
+    "prefix": "ls",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#letterSubjectRender"
+    ]
+   },
+   {
+    "prefix": "lt",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#startLetter",
+     "worker/bot.js#letterConfirmKb",
+     "worker/bot.js#letterEdit"
+    ]
+   },
+   {
+    "prefix": "mdec",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/decisions.js#decisionRequestStmt"
+    ]
+   },
+   {
+    "prefix": "mn",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#manualStart",
+     "worker/bot.js#manualItems"
+    ]
+   },
+   {
+    "prefix": "mseen",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/manager.js#notifyClosed"
+    ]
+   },
+   {
+    "prefix": "oc",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#offpfReply"
+    ]
+   },
+   {
+    "prefix": "op",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#offpfReply",
+     "worker/sp-bot.js#itemsCardSend",
+     "worker/sp-bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "pb",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#propAfterReason"
+    ]
+   },
+   {
+    "prefix": "pbx",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#boxKb"
+    ]
+   },
+   {
+    "prefix": "pf",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#bundleAction"
+    ],
+    "producers": [
+     "worker/bot.js#dropFileKb",
+     "worker/bot.js#freeProforma",
+     "worker/bot.js#uploadItems",
+     "worker/bot.js#uploadSupplier",
+     "worker/bot.js#awaitedProforma"
+    ]
+   },
+   {
+    "prefix": "prop",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/ai-agent.js#propKb"
+    ]
+   },
+   {
+    "prefix": "qc",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#askEnum",
+     "worker/bot.js#editMenu",
+     "worker/bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "qe",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#quoteCard"
+    ]
+   },
+   {
+    "prefix": "qf",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#quoteCard",
+     "worker/bot.js#editMenu"
+    ]
+   },
+   {
+    "prefix": "qk",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#attachProforma",
+     "worker/bot.js#presentExtraction",
+     "worker/bot.js#onExtract"
+    ]
+   },
+   {
+    "prefix": "qs",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#quoteCard"
+    ]
+   },
+   {
+    "prefix": "qt",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#hubKb",
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#quoteCard",
+     "worker/bot.js#tableSelect",
+     "worker/bot.js#presentExtraction",
+     "worker/bot.js#awaitStatus",
+     "worker/bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "qv",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#askEnum"
+    ]
+   },
+   {
+    "prefix": "qw",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#quoteCard"
+    ]
+   },
+   {
+    "prefix": "qx",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#qtabRender",
+     "worker/bot.js#qtabDeleteConfirm",
+     "worker/bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "rq",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/tg-nav.js#stripNav"
+    ],
+    "producers": [
+     "worker/bot.js#reqBtn",
+     "worker/bot.js#reqKb",
+     "worker/bot.js#kartabl",
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#makeTable"
+    ]
+   },
+   {
+    "prefix": "rs",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#startSupplier",
+     "worker/sp-bot.js#pendingPass",
+     "worker/sp-bot.js#supplierMessage"
+    ]
+   },
+   {
+    "prefix": "rv",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "sa",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#wizardNext",
+     "worker/sp-bot.js#onCallback",
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "seen",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/assign.js#seenKb"
+    ]
+   },
+   {
+    "prefix": "sf",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#smartPrefsKb",
+     "worker/bot.js#smartMarketMenu"
+    ]
+   },
+   {
+    "prefix": "sg",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#smartChoiceKb",
+     "worker/bot.js#templatePick",
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "si",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#askValue",
+     "worker/sp-bot.js#askTerm",
+     "worker/sp-bot.js#wizardNext",
+     "worker/sp-bot.js#onCallback",
+     "worker/sp-push.js#itemsCard"
+    ]
+   },
+   {
+    "prefix": "sl",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "sm",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#firstStepsKb",
+     "worker/bot.js#hubKb",
+     "worker/bot.js#requestMenu",
+     "worker/bot.js#smartPickItem"
+    ]
+   },
+   {
+    "prefix": "sp",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#itemsCard",
+     "worker/sp-push.js#actionKb"
+    ]
+   },
+   {
+    "prefix": "spf",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#spSupPick",
+     "worker/bot.js#spTplPick",
+     "worker/bot.js#spSendPick",
+     "worker/bot.js#spSendLabel",
+     "worker/bot.js#spSendConfirm",
+     "worker/bot.js#spSendAction"
+    ]
+   },
+   {
+    "prefix": "sq",
+    "handlers": [
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#smartChoiceKb",
+     "worker/sp-bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "sr",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "ss",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#itemsCard",
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "st",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#listSupplierThreads"
+    ]
+   },
+   {
+    "prefix": "sv",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#askValue",
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "sy",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "tk",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "tp",
+    "handlers": [
+     "worker/bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/bot.js#templatePick",
+     "worker/bot.js#templateList",
+     "worker/bot.js#templateView",
+     "worker/bot.js#onTemplateAction",
+     "worker/bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "tq",
+    "handlers": [
+     "worker/team.js#teamPageFor",
+     "worker/team.js#handleTeamCallback"
+    ],
+    "producers": [
+     "worker/team.js#teamPage",
+     "worker/team.js#expertPage",
+     "worker/team.js#assignPage",
+     "worker/team.js#teamMenuKb"
+    ]
+   },
+   {
+    "prefix": "tv",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#askTerm"
+    ]
+   },
+   {
+    "prefix": "vo",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-voicemode.js#null",
+     "worker/sp-voicemode.js#askKb"
+    ]
+   },
+   {
+    "prefix": "wz",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#askValue",
+     "worker/sp-bot.js#askTerm",
+     "worker/sp-bot.js#wizardNext",
+     "worker/sp-bot.js#onCallback",
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
+    "prefix": "xa",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#bundleCard"
+    ]
+   },
+   {
+    "prefix": "xc",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#bundleAction",
+     "worker/sp-bot.js#supplierMessage",
+     "worker/sp-bot.js#onCallback"
+    ]
+   },
+   {
+    "prefix": "xd",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#decideAndShow",
+     "worker/sp-push.js#bundleCard",
+     "worker/sp-push.js#aiConfirmKb"
+    ]
+   },
+   {
+    "prefix": "xl",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#listSuppliersOfRequest",
+     "worker/sp-bot.js#listRequestsOfSupplier"
+    ]
+   },
+   {
+    "prefix": "xr",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#listRequests"
+    ]
+   },
+   {
+    "prefix": "xs",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#listSuppliers"
+    ]
+   },
+   {
+    "prefix": "xt",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-bot.js#listSuppliersOfRequest",
+     "worker/sp-bot.js#listRequestsOfSupplier"
+    ]
+   }
+  ]
+ },
+ "cron": [
+  {
+   "entry": "worker.js#scheduled",
+   "runs": [
+    "worker/api.js#ensureSchema",
+    "worker/bot.js#scheduled",
+    "worker/d1-guard.js#guardEnv",
+    "worker/legal.js#legalCleanup",
+    "worker/push.js#drainPush",
+    "worker/sp-bot.js#ensureSpWebhook",
+    "worker/strategy-doc.js#crDocTick",
+    "worker/tender.js#tenderDiscoverTick",
+    "worker/tender.js#tenderTick",
+    "worker/voice-bot.js#ensureVbWebhook",
+    "worker/voice-core.js#VOICE_CRON",
+    "worker/voice-core.js#runVoiceJobs",
+    "worker.js#voiceBots"
+   ]
+  },
+  {
+   "entry": "worker/bot.js#scheduled",
+   "runs": [
+    "worker/ai-agent.js#aiTick",
+    "worker/estimate.js#estimateRun",
+    "worker/final-call.js#finalCallTick",
+    "worker/manager.js#stageWatch",
+    "worker/settings.js#getSettings",
+    "worker/telegram.js#telegram",
+    "worker/tg-nav.js#pushNavMenus",
+    "worker/usd.js#usdDaily",
+    "worker/usd.js#usdSlot",
+    "worker/bot.js#drainOutbox",
+    "worker/bot.js#runAlerts",
+    "worker/bot.js#runSmartJobs",
+    "worker/bot.js#settingValue"
    ]
   }
  ],
@@ -9523,7 +11053,6 @@
    "from": "frontend/tamin-poshtibani/cm-result.js#load",
    "path": "/support/commission/result",
    "routes": [
-    "GET /support/commission/result",
     "POST /support/commission/result"
    ]
   },
@@ -9636,8 +11165,7 @@
    "from": "frontend/tamin-poshtibani/correspond.js#pfDialog",
    "path": "/sp/bundle/{}/proforma",
    "routes": [
-    "GET /sp/bundle/{}/proforma",
-    "POST /sp/bundle/{}/proforma"
+    "GET /sp/bundle/{}/proforma"
    ]
   },
   {
@@ -9700,8 +11228,7 @@
    "from": "frontend/tamin-poshtibani/correspond.js#sendDialog",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
-    "POST /sp/x/phones"
+    "GET /sp/x/phones"
    ]
   },
   {
@@ -9729,24 +11256,21 @@
    "from": "frontend/tamin-poshtibani/cr-admin.js#boot",
    "path": "/support/cr/flags",
    "routes": [
-    "GET /support/cr/flags",
-    "PUT /support/cr/flags"
+    "GET /support/cr/flags"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/cr-admin.js#load",
    "path": "/support/cr/flags",
    "routes": [
-    "GET /support/cr/flags",
-    "PUT /support/cr/flags"
+    "GET /support/cr/flags"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/cr-admin.js#load",
    "path": "/support/cr/panel",
    "routes": [
-    "GET /support/cr/panel",
-    "PUT /support/cr/panel"
+    "GET /support/cr/panel"
    ]
   },
   {
@@ -9782,8 +11306,7 @@
    "from": "frontend/tamin-poshtibani/cr-admin.js#load",
    "path": "/support/strategy/rfqn",
    "routes": [
-    "GET /support/strategy/rfqn",
-    "PUT /support/strategy/rfqn"
+    "GET /support/strategy/rfqn"
    ]
   },
   {
@@ -9805,7 +11328,6 @@
    "from": "frontend/tamin-poshtibani/cr-admin.js#onChange",
    "path": "/support/cr/flags",
    "routes": [
-    "GET /support/cr/flags",
     "PUT /support/cr/flags"
    ]
   },
@@ -9813,7 +11335,6 @@
    "from": "frontend/tamin-poshtibani/cr-admin.js#onClick",
    "path": "/support/cr/panel",
    "routes": [
-    "GET /support/cr/panel",
     "PUT /support/cr/panel"
    ]
   },
@@ -9828,7 +11349,6 @@
    "from": "frontend/tamin-poshtibani/cr-admin.js#onClick",
    "path": "/support/strategy/rfqn",
    "routes": [
-    "GET /support/strategy/rfqn",
     "PUT /support/strategy/rfqn"
    ]
   },
@@ -9845,7 +11365,6 @@
    "path": "/support/supplier",
    "routes": [
     "* /support/supplier",
-    "GET /support/supplier",
     "PUT /support/supplier"
    ]
   },
@@ -9861,18 +11380,8 @@
    "path": "/support/ai/{}/calls{}",
    "routes": [
     "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/export",
     "GET /support/ai/feedback/{}",
-    "GET /support/ai/{}/calls",
-    "GET /support/ai/{}/phones",
-    "GET /support/ai/{}/sms",
-    "GET /support/ai/{}/state",
-    "POST /support/ai/feedback/summary",
-    "POST /support/ai/{}/phones",
-    "POST /support/ai/{}/rebase",
-    "POST /support/ai/{}/runs",
-    "PUT /support/ai/{}/config",
-    "PUT /support/ai/{}/mode"
+    "GET /support/ai/{}/calls"
    ]
   },
   {
@@ -9880,26 +11389,15 @@
    "path": "/support/ai/{}/phones{}",
    "routes": [
     "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/export",
     "GET /support/ai/feedback/{}",
-    "GET /support/ai/{}/calls",
-    "GET /support/ai/{}/phones",
-    "GET /support/ai/{}/sms",
-    "GET /support/ai/{}/state",
-    "POST /support/ai/feedback/summary",
-    "POST /support/ai/{}/phones",
-    "POST /support/ai/{}/rebase",
-    "POST /support/ai/{}/runs",
-    "PUT /support/ai/{}/config",
-    "PUT /support/ai/{}/mode"
+    "GET /support/ai/{}/phones"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/expert-ai.js#load",
    "path": "/support/ai/{}/runs/{}",
    "routes": [
-    "GET /support/ai/{}/runs/{}",
-    "POST /support/ai/deliveries/{}/review"
+    "GET /support/ai/{}/runs/{}"
    ]
   },
   {
@@ -9924,9 +11422,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#phoneDialog",
    "path": "/support/ai/{}/phones",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
-    "GET /support/ai/{}/phones",
     "POST /support/ai/{}/phones"
    ]
   },
@@ -9934,8 +11429,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#Q",
    "path": "/support/ai/{}/mode",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "PUT /support/ai/{}/mode"
    ]
   },
@@ -9943,9 +11436,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#ul",
    "path": "/support/ai/{}/phones",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
-    "GET /support/ai/{}/phones",
     "POST /support/ai/{}/phones"
    ]
   },
@@ -9953,7 +11443,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#ul",
    "path": "/support/ai/{}/phones/{}",
    "routes": [
-    "POST /support/ai/deliveries/{}/review",
     "PUT /support/ai/{}/phones/{}"
    ]
   },
@@ -9961,8 +11450,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#ul",
    "path": "/support/ai/{}/rebase",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "POST /support/ai/{}/rebase"
    ]
   },
@@ -9970,8 +11457,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#ul",
    "path": "/support/ai/{}/runs",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "POST /support/ai/{}/runs"
    ]
   },
@@ -9986,16 +11471,13 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#wire",
    "path": "/support/ai/{}/calls/{}",
    "routes": [
-    "GET /support/ai/{}/calls/{}",
-    "POST /support/ai/deliveries/{}/review"
+    "GET /support/ai/{}/calls/{}"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/expert-ai.js#wire",
    "path": "/support/ai/{}/config",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "PUT /support/ai/{}/config"
    ]
   },
@@ -10003,9 +11485,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#wire",
    "path": "/support/ai/{}/phones",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
-    "GET /support/ai/{}/phones",
     "POST /support/ai/{}/phones"
    ]
   },
@@ -10013,8 +11492,6 @@
    "from": "frontend/tamin-poshtibani/expert-ai.js#wire",
    "path": "/support/ai/{}/rebase",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "POST /support/ai/{}/rebase"
    ]
   },
@@ -10043,7 +11520,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#addSpPhone",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
     "POST /sp/x/phones"
    ]
   },
@@ -10079,7 +11555,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#dcPhoneUI",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
     "POST /sp/x/phones"
    ]
   },
@@ -10087,7 +11562,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#dcPickUI",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
     "POST /sp/x/phones"
    ]
   },
@@ -10102,8 +11576,7 @@
    "from": "frontend/tamin-poshtibani/expert.js#delTpl",
    "path": "/templates/{}",
    "routes": [
-    "DELETE /templates/{}",
-    "PUT /templates/{}"
+    "DELETE /templates/{}"
    ]
   },
   {
@@ -10131,7 +11604,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#letterStart",
    "path": "/assignments/{}/letter",
    "routes": [
-    "GET /assignments/{}/letter",
     "POST /assignments/{}/letter"
    ]
   },
@@ -10160,7 +11632,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#load",
    "path": "/templates",
    "routes": [
-    "GET /templates",
     "POST /templates"
    ]
   },
@@ -10175,8 +11646,7 @@
    "from": "frontend/tamin-poshtibani/expert.js#loadLetter",
    "path": "/assignments/{}/letter",
    "routes": [
-    "GET /assignments/{}/letter",
-    "POST /assignments/{}/letter"
+    "GET /assignments/{}/letter"
    ]
   },
   {
@@ -10204,16 +11674,14 @@
    "from": "frontend/tamin-poshtibani/expert.js#loadSmart",
    "path": "/search/smart",
    "routes": [
-    "GET /search/smart",
-    "POST /search/smart"
+    "GET /search/smart"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/expert.js#loadSpPhones",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
-    "POST /sp/x/phones"
+    "GET /sp/x/phones"
    ]
   },
   {
@@ -10234,40 +11702,7 @@
    "from": "frontend/tamin-poshtibani/expert.js#loadTemplates",
    "path": "/templates{}",
    "routes": [
-    "* /health",
-    "* /me",
-    "* /reviews",
-    "GET /alarms",
-    "GET /axes",
-    "GET /decisions",
-    "GET /desk",
-    "GET /events",
-    "GET /experts",
-    "GET /holidays",
-    "GET /imports",
-    "GET /scores",
-    "GET /selftest",
-    "GET /settings",
-    "GET /site",
-    "GET /team",
-    "GET /templates",
-    "GET /tray",
-    "GET /workload",
-    "POST /assign",
-    "POST /dispatch",
-    "POST /experts",
-    "POST /login",
-    "POST /proformas",
-    "POST /quotes",
-    "POST /reassign",
-    "POST /templates",
-    "POST /tender-refer",
-    "POST /tender-unrefer",
-    "POST /unassign",
-    "PUT /holidays",
-    "PUT /scores",
-    "PUT /settings",
-    "PUT /site"
+    "GET /templates"
    ]
   },
   {
@@ -10288,7 +11723,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#msgFor",
    "path": "/templates",
    "routes": [
-    "GET /templates",
     "POST /templates"
    ]
   },
@@ -10345,7 +11779,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#pkPhoneUI",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
     "POST /sp/x/phones"
    ]
   },
@@ -10437,7 +11870,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#runSmart",
    "path": "/search/smart",
    "routes": [
-    "GET /search/smart",
     "POST /search/smart"
    ]
   },
@@ -10452,7 +11884,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#saveField",
    "path": "/quotes/{}",
    "routes": [
-    "DELETE /quotes/{}",
     "PUT /quotes/{}"
    ]
   },
@@ -10488,7 +11919,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#saveTpl",
    "path": "/templates",
    "routes": [
-    "GET /templates",
     "POST /templates"
    ]
   },
@@ -10496,7 +11926,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#saveTpl",
    "path": "/templates/{}",
    "routes": [
-    "DELETE /templates/{}",
     "PUT /templates/{}"
    ]
   },
@@ -10525,8 +11954,7 @@
    "from": "frontend/tamin-poshtibani/expert.js#showNew",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
-    "POST /sp/x/phones"
+    "GET /sp/x/phones"
    ]
   },
   {
@@ -10540,7 +11968,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#smPickUI",
    "path": "/sp/x/phones",
    "routes": [
-    "GET /sp/x/phones",
     "POST /sp/x/phones"
    ]
   },
@@ -10569,7 +11996,6 @@
    "from": "frontend/tamin-poshtibani/expert.js#toggleChannel",
    "path": "/phones/channels",
    "routes": [
-    "GET /phones/channels",
     "PUT /phones/channels"
    ]
   },
@@ -10626,8 +12052,7 @@
    "from": "frontend/tamin-poshtibani/expert.js#wire",
    "path": "/quotes/{}",
    "routes": [
-    "DELETE /quotes/{}",
-    "PUT /quotes/{}"
+    "DELETE /quotes/{}"
    ]
   },
   {
@@ -10648,7 +12073,6 @@
    "from": "frontend/tamin-poshtibani/fb-admin.js#runSum",
    "path": "/support/ai/feedback/summary",
    "routes": [
-    "GET /support/ai/feedback/{}",
     "POST /support/ai/feedback/summary"
    ]
   },
@@ -10661,21 +12085,14 @@
     "GET /support/ai/{}/calls",
     "GET /support/ai/{}/phones",
     "GET /support/ai/{}/sms",
-    "GET /support/ai/{}/state",
-    "POST /support/ai/feedback/summary",
-    "POST /support/ai/{}/phones",
-    "POST /support/ai/{}/rebase",
-    "POST /support/ai/{}/runs",
-    "PUT /support/ai/{}/config",
-    "PUT /support/ai/{}/mode"
+    "GET /support/ai/{}/state"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/manager.js#addExpertDialog",
    "path": "/experts",
    "routes": [
-    "GET /experts",
-    "POST /experts"
+    "GET /experts"
    ]
   },
   {
@@ -10738,7 +12155,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#expertCodeUI",
    "path": "/experts/{}/code",
    "routes": [
-    "GET /experts/{}/code",
     "POST /experts/{}/code"
    ]
   },
@@ -10753,8 +12169,7 @@
    "from": "frontend/tamin-poshtibani/manager.js#expertPatch",
    "path": "/experts",
    "routes": [
-    "GET /experts",
-    "POST /experts"
+    "GET /experts"
    ]
   },
   {
@@ -10775,8 +12190,7 @@
    "from": "frontend/tamin-poshtibani/manager.js#genSeason",
    "path": "/reports/team",
    "routes": [
-    "GET /reports/team",
-    "PUT /reports/team"
+    "GET /reports/team"
    ]
   },
   {
@@ -10811,7 +12225,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#importFile",
    "path": "/import/history",
    "routes": [
-    "GET /import/history",
     "POST /import/history"
    ]
   },
@@ -10833,13 +12246,8 @@
    "from": "frontend/tamin-poshtibani/manager.js#loadRepStatus",
    "path": "/reports/status{}",
    "routes": [
-    "GET /reports/meta",
     "GET /reports/status",
-    "GET /reports/status.xlsx",
-    "GET /reports/team",
-    "POST /reports/season",
-    "POST /reports/season.xlsx",
-    "PUT /reports/team"
+    "GET /reports/status.xlsx"
    ]
   },
   {
@@ -10888,7 +12296,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#pickTeam",
    "path": "/reports/team",
    "routes": [
-    "GET /reports/team",
     "PUT /reports/team"
    ]
   },
@@ -10896,7 +12303,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#projectsDialog",
    "path": "/settings",
    "routes": [
-    "GET /settings",
     "PUT /settings"
    ]
   },
@@ -10911,47 +12317,13 @@
    "from": "frontend/tamin-poshtibani/manager.js#refresh",
    "path": "/desk{}",
    "routes": [
-    "* /health",
-    "* /me",
-    "* /reviews",
-    "GET /alarms",
-    "GET /axes",
-    "GET /decisions",
-    "GET /desk",
-    "GET /events",
-    "GET /experts",
-    "GET /holidays",
-    "GET /imports",
-    "GET /scores",
-    "GET /selftest",
-    "GET /settings",
-    "GET /site",
-    "GET /team",
-    "GET /templates",
-    "GET /tray",
-    "GET /workload",
-    "POST /assign",
-    "POST /dispatch",
-    "POST /experts",
-    "POST /login",
-    "POST /proformas",
-    "POST /quotes",
-    "POST /reassign",
-    "POST /templates",
-    "POST /tender-refer",
-    "POST /tender-unrefer",
-    "POST /unassign",
-    "PUT /holidays",
-    "PUT /scores",
-    "PUT /settings",
-    "PUT /site"
+    "GET /desk"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/manager.js#save",
    "path": "/settings",
    "routes": [
-    "GET /settings",
     "PUT /settings"
    ]
   },
@@ -10959,7 +12331,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#saveQuiet",
    "path": "/settings",
    "routes": [
-    "GET /settings",
     "PUT /settings"
    ]
   },
@@ -10974,7 +12345,6 @@
    "from": "frontend/tamin-poshtibani/manager.js#setW",
    "path": "/scores",
    "routes": [
-    "GET /scores",
     "PUT /scores"
    ]
   },
@@ -11074,8 +12444,7 @@
    "path": "/cr/flags",
    "routes": [
     "GET /cr/flags",
-    "GET /support/cr/flags",
-    "PUT /support/cr/flags"
+    "GET /support/cr/flags"
    ]
   },
   {
@@ -11187,8 +12556,7 @@
    "from": "frontend/tamin-poshtibani/supplier.js#bundlePfDialog",
    "path": "/sp/bundle/{}/proforma",
    "routes": [
-    "GET /sp/bundle/{}/proforma",
-    "POST /sp/bundle/{}/proforma"
+    "GET /sp/bundle/{}/proforma"
    ]
   },
   {
@@ -11251,7 +12619,6 @@
    "from": "frontend/tamin-poshtibani/supplier.js#pfBot",
    "path": "/sp/bundle/{}/proforma",
    "routes": [
-    "GET /sp/bundle/{}/proforma",
     "POST /sp/bundle/{}/proforma"
    ]
   },
@@ -11385,7 +12752,6 @@
    "from": "frontend/tamin-poshtibani/supplier.js#uploadPf",
    "path": "/sp/bundle/{}/proforma",
    "routes": [
-    "GET /sp/bundle/{}/proforma",
     "POST /sp/bundle/{}/proforma"
    ]
   },
@@ -11400,8 +12766,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#aiToggle",
    "path": "/support/ai/{}/mode",
    "routes": [
-    "GET /support/ai/deliveries/{}",
-    "GET /support/ai/feedback/{}",
     "PUT /support/ai/{}/mode"
    ]
   },
@@ -11416,49 +12780,13 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#alertsDialog",
    "path": "/support/alert-contacts",
    "routes": [
-    "GET /support/alert-contacts",
-    "PUT /support/alert-contacts"
+    "GET /support/alert-contacts"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#api",
    "path": "/support{}",
-   "routes": [
-    "* /health",
-    "* /me",
-    "* /reviews",
-    "GET /alarms",
-    "GET /axes",
-    "GET /decisions",
-    "GET /desk",
-    "GET /events",
-    "GET /experts",
-    "GET /holidays",
-    "GET /imports",
-    "GET /scores",
-    "GET /selftest",
-    "GET /settings",
-    "GET /site",
-    "GET /team",
-    "GET /templates",
-    "GET /tray",
-    "GET /workload",
-    "POST /assign",
-    "POST /dispatch",
-    "POST /experts",
-    "POST /login",
-    "POST /proformas",
-    "POST /quotes",
-    "POST /reassign",
-    "POST /templates",
-    "POST /tender-refer",
-    "POST /tender-unrefer",
-    "POST /unassign",
-    "PUT /holidays",
-    "PUT /scores",
-    "PUT /settings",
-    "PUT /site"
-   ]
+   "routes": []
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#chgLog",
@@ -11478,7 +12806,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#cmSet",
    "path": "/support/commission",
    "routes": [
-    "GET /support/commission",
     "POST /support/commission"
    ]
   },
@@ -11486,10 +12813,7 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#dlSend",
    "path": "/support/ai/deliveries/{}/review",
    "routes": [
-    "GET /support/ai/{}/calls/{}",
-    "GET /support/ai/{}/runs/{}",
-    "POST /support/ai/deliveries/{}/review",
-    "PUT /support/ai/{}/phones/{}"
+    "POST /support/ai/deliveries/{}/review"
    ]
   },
   {
@@ -11517,7 +12841,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#fcSave",
    "path": "/support/ai/final-call",
    "routes": [
-    "GET /support/ai/final-call",
     "PUT /support/ai/final-call"
    ]
   },
@@ -11539,7 +12862,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#go",
    "path": "/support/ai/switches",
    "routes": [
-    "GET /support/ai/switches",
     "PUT /support/ai/switches"
    ]
   },
@@ -11598,8 +12920,7 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#loadCodes",
    "path": "/support/codes",
    "routes": [
-    "GET /support/codes",
-    "PUT /support/codes"
+    "GET /support/codes"
    ]
   },
   {
@@ -11617,34 +12938,14 @@
     "GET /support/ai/{}/calls",
     "GET /support/ai/{}/phones",
     "GET /support/ai/{}/sms",
-    "GET /support/ai/{}/state",
-    "POST /support/ai/{}/phones",
-    "POST /support/ai/{}/rebase",
-    "POST /support/ai/{}/runs",
-    "PUT /support/ai/{}/config",
-    "PUT /support/ai/{}/mode"
+    "GET /support/ai/{}/state"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadDls",
    "path": "/support/ai/deliveries{}",
    "routes": [
-    "GET /support/ai/deliveries",
-    "GET /support/ai/experts",
-    "GET /support/ai/feedback",
-    "GET /support/ai/final-call",
-    "GET /support/ai/heads",
-    "GET /support/ai/modes",
-    "GET /support/ai/ranking",
-    "GET /support/ai/rules",
-    "GET /support/ai/smart-gate",
-    "GET /support/ai/switches",
-    "PUT /support/ai/final-call",
-    "PUT /support/ai/modes",
-    "PUT /support/ai/ranking",
-    "PUT /support/ai/rules",
-    "PUT /support/ai/smart-gate",
-    "PUT /support/ai/switches"
+    "GET /support/ai/deliveries"
    ]
   },
   {
@@ -11672,32 +12973,28 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#loadMd",
    "path": "/support/ai/modes",
    "routes": [
-    "GET /support/ai/modes",
-    "PUT /support/ai/modes"
+    "GET /support/ai/modes"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadRank",
    "path": "/support/ai/ranking",
    "routes": [
-    "GET /support/ai/ranking",
-    "PUT /support/ai/ranking"
+    "GET /support/ai/ranking"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadRules",
    "path": "/support/ai/rules",
    "routes": [
-    "GET /support/ai/rules",
-    "PUT /support/ai/rules"
+    "GET /support/ai/rules"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadSize",
    "path": "/support/size-rules",
    "routes": [
-    "GET /support/size-rules",
-    "PUT /support/size-rules"
+    "GET /support/size-rules"
    ]
   },
   {
@@ -11711,24 +13008,21 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#loadSw",
    "path": "/support/ai/final-call",
    "routes": [
-    "GET /support/ai/final-call",
-    "PUT /support/ai/final-call"
+    "GET /support/ai/final-call"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadSw",
    "path": "/support/ai/smart-gate",
    "routes": [
-    "GET /support/ai/smart-gate",
-    "PUT /support/ai/smart-gate"
+    "GET /support/ai/smart-gate"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadSw",
    "path": "/support/ai/switches",
    "routes": [
-    "GET /support/ai/switches",
-    "PUT /support/ai/switches"
+    "GET /support/ai/switches"
    ]
   },
   {
@@ -11791,7 +13085,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#saveCode",
    "path": "/support/codes",
    "routes": [
-    "GET /support/codes",
     "PUT /support/codes"
    ]
   },
@@ -11799,7 +13092,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#saveMdUi",
    "path": "/support/ai/modes",
    "routes": [
-    "GET /support/ai/modes",
     "PUT /support/ai/modes"
    ]
   },
@@ -11807,7 +13099,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#saveRankUi",
    "path": "/support/ai/ranking",
    "routes": [
-    "GET /support/ai/ranking",
     "PUT /support/ai/ranking"
    ]
   },
@@ -11815,7 +13106,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#saveRulesUi",
    "path": "/support/ai/rules",
    "routes": [
-    "GET /support/ai/rules",
     "PUT /support/ai/rules"
    ]
   },
@@ -11823,7 +13113,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#saveSizeSoon",
    "path": "/support/size-rules",
    "routes": [
-    "GET /support/size-rules",
     "PUT /support/size-rules"
    ]
   },
@@ -11831,7 +13120,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#sgSave",
    "path": "/support/ai/smart-gate",
    "routes": [
-    "GET /support/ai/smart-gate",
     "PUT /support/ai/smart-gate"
    ]
   },
@@ -11867,7 +13155,6 @@
    "from": "frontend/tamin-poshtibani/support-panel.js#v",
    "path": "/support/alert-contacts",
    "routes": [
-    "GET /support/alert-contacts",
     "PUT /support/alert-contacts"
    ]
   },
@@ -11889,7 +13176,6 @@
    "from": "frontend/tamin-poshtibani/tender-admin.js#create",
    "path": "/support/tenders",
    "routes": [
-    "GET /support/tenders",
     "POST /support/tenders"
    ]
   },
@@ -11925,53 +13211,14 @@
    "from": "frontend/tamin-poshtibani/tender-admin.js#loadCfg",
    "path": "/support/tender-settings",
    "routes": [
-    "GET /support/tender-settings",
-    "PUT /support/tender-settings"
+    "GET /support/tender-settings"
    ]
   },
   {
    "from": "frontend/tamin-poshtibani/tender-admin.js#loadList",
    "path": "/support/tenders{}",
    "routes": [
-    "* /support/graph",
-    "* /support/supplier",
-    "* /support/suppliers",
-    "* /support/usd",
-    "GET /support/activity",
-    "GET /support/alarms",
-    "GET /support/alert-contacts",
-    "GET /support/changes",
-    "GET /support/codes",
-    "GET /support/commission",
-    "GET /support/desk",
-    "GET /support/experts",
-    "GET /support/graph",
-    "GET /support/size-rules",
-    "GET /support/sms",
-    "GET /support/status",
-    "GET /support/supplier",
-    "GET /support/suppliers",
-    "GET /support/tender-book",
-    "GET /support/tender-items",
-    "GET /support/tender-req-items",
-    "GET /support/tender-settings",
-    "GET /support/tender-suppliers",
-    "GET /support/tenders",
-    "GET /support/threads",
-    "GET /support/usage",
-    "POST /support/commission",
-    "POST /support/login",
-    "POST /support/pass",
-    "POST /support/reset",
-    "POST /support/setup",
-    "POST /support/tender-refer",
-    "POST /support/tender-unrefer",
-    "POST /support/tenders",
-    "PUT /support/alert-contacts",
-    "PUT /support/codes",
-    "PUT /support/size-rules",
-    "PUT /support/supplier",
-    "PUT /support/tender-settings"
+    "GET /support/tenders"
    ]
   },
   {
@@ -12076,7 +13323,6 @@
    "from": "frontend/tamin-poshtibani/tender-admin.js#settingsDialog",
    "path": "/support/tender-settings",
    "routes": [
-    "GET /support/tender-settings",
     "PUT /support/tender-settings"
    ]
   },
@@ -12192,8 +13438,7 @@
    "path": "/help/chat",
    "routes": [
     "* /help/chat",
-    "GET /help/chat",
-    "POST /help/chat"
+    "GET /help/chat"
    ]
   },
   {

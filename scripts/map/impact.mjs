@@ -7,7 +7,8 @@
      node scripts/map/impact.mjs smart_searches                   ← جدول
      node scripts/map/impact.mjs expert.smart                     ← قابلیت
      node scripts/map/impact.mjs --changed [base]                 ← همهٔ تغییرهای کارِ جاری نسبت به HEAD (یا base)
-   خروجی: قابلیت‌های درگیر، تابع‌ها و خط‌هایی که باید خواند، مسیرها، فراخوان‌های پنل، جدول‌ها، تست‌ها با دستورِ اجرا.
+   خروجی: قابلیت‌های درگیر و محلشان در رابط، تابع‌ها و خط‌هایی که باید خواند، مسیرها، فراخوان‌های پنل،
+   دکمه‌های بات (سازنده ↔ پاسخ‌گو)، جدول‌ها، تست‌ها با دستورِ اجرا.
    شماره‌خط‌ها زنده از کد خوانده می‌شوند؛ نقشهٔ ثبت‌شده بی شماره‌خط است.
    ============================================================ */
 import { execSync } from "node:child_process";
@@ -52,7 +53,7 @@ function touches() {
 }
 
 /* ---------- انباشت نتیجه ---------- */
-const R = { feats: new Map(), fns: new Map(), routes: new Map(), calls: new Map(), tables: { r: new Set(), w: new Set() }, tests: new Map(), pages: new Set(), notes: [], all: false, rebuild: false };
+const R = { feats: new Map(), fns: new Map(), routes: new Map(), calls: new Map(), tables: { r: new Set(), w: new Set() }, tests: new Map(), pages: new Set(), notes: [], all: false, rebuild: false, direct: new Set() };
 const why = (map, k, w) => { if (!map.has(k)) map.set(k, new Set()); map.get(k).add(w); };
 const addF = (id, w) => { if (id) why(R.feats, id, w); };
 const addT = (file, w) => why(R.tests, file, w);
@@ -62,6 +63,7 @@ const addFn = (file, fn, w, { direct = false, ref = null } = {}) => {
   const k = `${file}#${fn.name}`;
   if (!R.fns.has(k)) R.fns.set(k, { file, name: fn.name, start: fn.start, end: fn.end, why: new Set(), refs: new Set() });
   const e = R.fns.get(k); e.why.add(w);
+  if (direct || w === "تغییرکرده") R.direct.add(k);
   if (ref) { const re = new RegExp(`\\b${ref}\\b`), ls = linesOf(file); for (let i = fn.start; i <= fn.end && e.refs.size < 6; i++) if (re.test(ls[i - 1] || "")) e.refs.add(i); }
   if (direct && fn.tables) { fn.tables.r.forEach((t) => R.tables.r.add(t)); fn.tables.w.forEach((t) => R.tables.w.add(t)); }
 };
@@ -135,6 +137,7 @@ function onWorker(t) {
   }
 }
 function onWholeFile(t, w) {
+  for (const fn of w.functions) R.direct.add(`${t.file}#${fn.name}`);
   for (const tt of m.tests) if (tt.imports.includes(t.file) && !HUB.has(t.file)) addT(tt.file, "import فایل");
   for (const n of w.exports) { const u = usersOf(`${t.file}#${n}`); for (const r of u.routes) addRoute(r, `از ${n}`); for (const { file } of u.fns) if (file !== t.file) addF(m.owner[file], `از ${n}`); }
   if (HUB.has(t.file)) { R.all = true; R.notes.push(`${t.file} مسیریابِ مرکزی است: برای تغییرِ نقطه‌ای، خط یا تابع بدهید (${t.file}:از-تا).`); }
@@ -185,6 +188,12 @@ for (const t of touches()) {
   else { R.outside = (R.outside || 0) + 1; continue; }
   if (!m.owner[f] && (W.has(f) || f.startsWith("frontend/tamin-poshtibani/"))) { R.rebuild = true; R.notes.push(`${f} صاحب ندارد: در product-map/taxonomy.mjs به یک قابلیت بدهید.`); }
 }
+/* دکمه‌های بات: تابعِ تغییرکرده‌ای که دکمه‌ای می‌سازد یا پاسخ می‌دهد ← طرفِ دیگرِ همان دکمه و تست‌هایی که پیشوندش را دارند */
+const touchedBtn = new Set([...m.bot.buttons, ...m.bot.handlers].filter((x) => R.direct.has(`${x.file}#${x.fn}`)).map((x) => x.prefix));
+if (touchedBtn.size) {
+  const tt = new Map(m.tests.map((x) => [x.file, readFileSync(join(ROOT, x.file), "utf8")]));
+  for (const p of touchedBtn) for (const [file, text] of tt) if (new RegExp(`["'\`]${p}:`).test(text)) addT(file, `دکمهٔ ${p}:`);
+}
 addT(MAP_TEST, "همیشه: نقشه با کد بخواند");
 
 /* ---------- چاپ ---------- */
@@ -194,6 +203,8 @@ const L = [`# اثرِ تغییر: ${args.join(" ")}`, ""];
 const feats = [...R.feats.keys()].filter((id) => m.feats.has(id)).sort();
 L.push(`## قابلیت‌های درگیر (${feats.length})`);
 L.push(...cap(feats, 30, (id) => `- ${id} — ${m.feats.get(id).title} — دلیل: ${[...R.feats.get(id)].slice(0, 3).join("؛ ")} — کارت: ${OUT}/features/${id}.md`));
+const places = [...new Set(feats.flatMap((id) => m.feats.get(id).places.map((pl) => pl.path.join(" › "))))];
+if (places.length) { L.push("", `## محل در رابط (برای دیدن در مرورگر)`); L.push(...cap(places, 15, (p) => `- ${p}`)); }
 const fns = [...R.fns.values()].sort((a, b) => a.file.localeCompare(b.file) || a.start - b.start);
 const blocks = [...R.routes.values()].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 L.push("", `## کدی که باید خواند (${fns.length} تابع، ${blocks.length} بلوکِ مسیر)`);
@@ -202,10 +213,15 @@ L.push(...cap(blocks, 40, (r) => `- ${short(r.file)}:${r.line}-${r.end} › \`${
 const calls = [...R.calls.values()].sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line);
 if (calls.length) { L.push("", `## فراخوان در پنل‌ها (${calls.length})`); L.push(...cap(calls, 30, (c) => `- ${short(c.file)}:${c.line} › ${c.fn || "—"} → ${c.routes.join("، ") || "بی‌مسیر!"}`)); }
 if (R.pages.size) L.push("", `صفحه‌هایی که باید در مرورگر دید: ${[...R.pages].map((p) => short(p)).sort().join("، ")}`);
+if (touchedBtn.size) {
+  const at = (xs) => [...new Set(xs.map((x) => `${short(x.file)}:${x.line} › ${x.fn || "—"}`))].slice(0, 6).join("، ") || "— (بی‌پاسخ‌گو!)";
+  L.push("", `## دکمه‌های بات درگیر (${touchedBtn.size})`);
+  for (const p of [...touchedBtn].sort()) L.push(`- \`${p}:\` پاسخ‌گو: ${at(m.bot.handlers.filter((h) => h.prefix === p))} | سازنده‌ها: ${at(m.bot.buttons.filter((b) => b.prefix === p))}`);
+}
 if (R.tables.w.size || R.tables.r.size) L.push("", "## جدول‌ها", `نوشتن: ${[...R.tables.w].sort().join("، ") || "—"}`, `خواندن: ${[...R.tables.r].filter((x) => !R.tables.w.has(x)).sort().join("، ") || "—"}`);
 const tests = [...R.tests.keys()].sort();
 L.push("", R.all ? "## تست‌ها: همه (تغییرِ مشترک)" : `## تست‌ها (${tests.length})`);
-if (R.all) L.push("```", `node --test ${TEST_DIR}/`, "```");
+if (R.all) L.push("```", `node --test "${TEST_DIR}/*.test.mjs"`, "```");
 else { L.push(...cap(tests, 40, (t) => `- ${t.split("/").pop()} — ${[...R.tests.get(t)].slice(0, 2).join("؛ ")}`)); L.push("```", `node --test ${tests.join(" ")}`, "```"); }
 const helps = feats.filter((id) => m.feats.get(id).help);
 L.push("", "## پس از ویرایش");

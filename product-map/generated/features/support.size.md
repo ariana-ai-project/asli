@@ -4,6 +4,9 @@
 
 > هر درخواست بر پایهٔ جمعِ برآوردِ کلِ اقلامش یکی از چهار رده است: جزئی، متوسط، بزرگ، عمده. سه مرزِ میانِ رده‌ها به تومان است و روی نوار با کشیدنِ دستگیره‌ها عوض می‌شود (هر دستگیره فقط میانِ همسایه‌هایش). ذخیره خودکار است.
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › تأیید کمیسیون › 📏 برچسب اندازه و حداقل استعلام
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/size.js` — SIZES، SIZE_DEFAULT، SIZE_FA، SIZE_KEY، cleanSizeRules، getSizeRules، itemEstTotal، minQOf، reqSize، reqSizeAgg، rialToToman، saveSizeRules، sizeCat، sizeOfRial، sizeRulesOf، tomanTxt
 
@@ -13,10 +16,11 @@
 | `GET /support/size-rules` | w/api.js › route | w/size.js#getSizeRules | ✓ |
 | `PUT /support/size-rules` | w/api.js › route | w/size.js#saveSizeRules | ✓ |
 
-## فراخوان در پنل‌ها (3)
-- support-panel.js › loadSize → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
-- support-panel.js › saveSizeSoon → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
-- tender-admin.js › loadList → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
+## فراخوان در پنل‌ها (2)
+- support-panel.js › loadSize → `GET /support/size-rules` (صفحه: support.html)
+- support-panel.js › saveSizeSoon → `PUT /support/size-rules` (صفحه: support.html)
+
+جای راهنما در کد: support-panel.js › vSize
 
 ## جدول‌ها
 نوشتن: events، settings

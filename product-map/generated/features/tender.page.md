@@ -4,6 +4,9 @@
 
 > قیمت واحد را پایین می‌آورید و کمترین قیمت در پایان برنده است. بالای صفحه زمان باقی‌مانده، کمترین قیمت فعلی و جایگاه شما را می‌بینید.
 
+محل در رابط:
+- مناقصهٔ خرید › ثبت پیشنهاد و جدول زنده
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/tender-ui.js` — fa، esc، latin، money، parseAmt، short، three، words، clock، dtf، hms، when، stChip، ring، tickRing، chart، x، line، …
 - `frontend/tamin-poshtibani/tender.css`
@@ -30,7 +33,7 @@
 - tender.js › poll → `* /tender/{}/state` (صفحه: tender.html)
 - tender.js › sendBid → `* /tender/{}/bid` (صفحه: tender.html)
 
-جای راهنما: tender.js
+جای راهنما در کد: tender.js › renderMain
 
 ## جدول‌ها
 نوشتن: events، sp_tg، tender_invites، tender_sessions

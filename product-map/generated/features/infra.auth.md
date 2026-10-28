@@ -14,6 +14,8 @@
 ## فراخوان در پنل‌ها (0)
 —
 
+متغیرهای Worker (نام): TG_BOT_TOKEN، TG_SP_BOT_TOKEN
+
 ## جدول‌ها
 نوشتن: auth_fails
 خواندن: experts، sp_tg

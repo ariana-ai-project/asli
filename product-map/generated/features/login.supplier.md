@@ -4,6 +4,9 @@
 
 > رمز ۶ رقمیِ پیامک را وارد کنید. همین پنل را در تلگرام هم دارید (لینک دوم پیامک).
 
+محل در رابط:
+- پنل تأمین‌کنندگان › ورود با رمز پیامکی
+
 ## فایل‌های این قابلیت (صاحب)
 — (کدِ جدا ندارد؛ از راه مسیرها و فایل‌های مشترک)
 
@@ -19,7 +22,7 @@
 - supplier.js › logout → `POST /sp/logout` (صفحه: supplier.html)
 - supplier.js › renderLogin → `POST /sp/login`، `POST /sp/resend` (صفحه: supplier.html)
 
-جای راهنما: supplier.js
+جای راهنما در کد: supplier.js › renderLogin
 
 ## جدول‌ها
 نوشتن: settings، sp_passes، sp_phones، sp_sessions، sp_sms، sp_tg

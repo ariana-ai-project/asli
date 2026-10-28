@@ -4,6 +4,9 @@
 
 > «قیمت روز»ِ سوابق خرید با نسبتِ نرخ دلارِ امروز به نرخِ روزِ خرید حساب می‌شود و رتبهٔ «ارزش خرید» هم بر همین پایه است (تیکِ «مرکز آمار» در سوابق، تعدیلِ فصلیِ زمستان ۱۴۰۴ را نشان می‌دهد).
 
+محل در رابط:
+- پنل پشتیبانی تدارکات › 🤖 کارشناس هوشمند › 💵 نرخ دلار
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/usd.js` — CHANNEL، HOW_FA، USD_DDL، dayNo، dayStr، interpStmts، interpolate، isMarker، jDay، markerDay، normText، numbers، parsePosts، putRates، resetUsdCache، selectDays، shiftDay، summaryLastTrade، …
 
@@ -14,12 +17,11 @@
 | `POST /support/usd/fetch` | w/usd.js › usdAdmin | — | ✓ |
 | `POST /support/usd/rows` | w/usd.js › usdAdmin | — | ✓ |
 
-## فراخوان در پنل‌ها (5)
+## فراخوان در پنل‌ها (4)
 - support-panel.js › g → `POST /support/usd/rows` (صفحه: support.html)
 - support-panel.js › loadUsd → `* /support/usd` (صفحه: support.html)
 - support-panel.js › num → `POST /support/usd/rows` (صفحه: support.html)
 - support-panel.js › usdFetch → `POST /support/usd/fetch` (صفحه: support.html)
-- tender-admin.js › loadList → `* /support/usd` (صفحه: support.html)
 
 ## جدول‌ها
 نوشتن: settings، usd_rates

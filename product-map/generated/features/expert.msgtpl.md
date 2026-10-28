@@ -4,6 +4,10 @@
 
 > متن آمادهٔ پیام به تأمین‌کننده (✉️) با جای‌گذاری نام و اقلام؛ در جستجوی هوشمند، بررسی سوابق و مکاتبات.
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › بررسی سوابق › ✉️ قالب پیام
+- مکاتبات با تأمین‌کنندگان › گفت‌وگو › ✉️ قالب پیام
+
 ## فایل‌های این قابلیت (صاحب)
 - `frontend/tamin-poshtibani/msg-fill.mjs` — faN، joinFa، canon، qtyRange، step، rangeFa، fillMsg، join
 - `worker/templates.js` — TEMPLATE_TOKENS، TPL_COLUMNS، TPL_DDL، defaultTemplates، ensureTemplates، fillTemplate، listTemplates، ownTemplate، tplPrefs
@@ -16,14 +20,12 @@
 | `POST /templates` | w/api.js › route | — | ✓ |
 | `PUT /templates/{}` | w/api.js › route | — | ✓ |
 
-## فراخوان در پنل‌ها (7)
-- expert.js › delTpl → `DELETE /templates/{}`، `PUT /templates/{}` (صفحه: expert.html)
-- expert.js › load → `GET /templates`، `POST /templates` (صفحه: expert.html)
-- expert.js › loadTemplates → `GET /templates`، `POST /templates` (صفحه: expert.html)
-- expert.js › msgFor → `GET /templates`، `POST /templates` (صفحه: expert.html)
-- expert.js › saveTpl → `DELETE /templates/{}`، `PUT /templates/{}`، `GET /templates`، `POST /templates` (صفحه: expert.html)
-- manager.js › refresh → `GET /templates`، `POST /templates` (صفحه: manager.html)
-- support-panel.js › api → `GET /templates`، `POST /templates` (صفحه: support.html)
+## فراخوان در پنل‌ها (5)
+- expert.js › delTpl → `DELETE /templates/{}` (صفحه: expert.html)
+- expert.js › load → `POST /templates` (صفحه: expert.html)
+- expert.js › loadTemplates → `GET /templates` (صفحه: expert.html)
+- expert.js › msgFor → `POST /templates` (صفحه: expert.html)
+- expert.js › saveTpl → `PUT /templates/{}`، `POST /templates` (صفحه: expert.html)
 
 ## جدول‌ها
 نوشتن: templates

@@ -8,7 +8,7 @@
 
 برای هر ویرایش اسکیلِ **product-map** را دنبال کن (`.claude/skills/product-map/SKILL.md`):
 
-1. `product-map/generated/INDEX.md` (یا `FILES.md`) → کارتِ قابلیت در `product-map/generated/features/<شناسه>.md`
+1. `product-map/generated/INDEX.md`، `PANELS.md` (پنل ← تب)، `BOTS.md` یا `FILES.md` → کارتِ قابلیت در `product-map/generated/features/<شناسه>.md` (جریانِ کامل: `workflows/<wf.*>.md`)
 2. `node scripts/map/impact.mjs <فایل|فایل#تابع|فایل:از-تا|"GET /path"|جدول|قابلیت>`. فقط تابع‌ها و خط‌هایی را بخوان که می‌گوید.
 3. بعد از ویرایش: `node scripts/map/impact.mjs --changed` و اجرای همان تست‌ها.
 4. اگر مسیر، فایل یا جدولِ تازه ساختی: صاحبش را در `product-map/taxonomy.mjs` بنویس، بعد `node scripts/map/build.mjs`.

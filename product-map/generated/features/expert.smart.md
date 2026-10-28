@@ -4,6 +4,9 @@
 
 > بالای تب، «🗂 تأمین‌کنندگان کشف‌شده» است: ۴۰ نفرِ برترِ ردنشدهٔ همین نوع قلم در تحقیقِ کشفِ تأمین‌کننده (مهر ۱۴۰۵)، با همهٔ اطلاعاتی که از هر کدام پیدا شده. زیرش جستجوی تازه در بازارهای انتخابی (ایران و همسایه‌ها، چین، امارات، ترکیه) با مدل زبانی و جستجوی وب. «اجرای جستجوی هوشمند» فقط برای قلمی باز است که کمتر از ۱۰ تأمین‌کنندهٔ کشف‌شده دارد (عدد را پنل پشتیبانی می‌گذارد).
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › جستجوی هوشمند
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/discovered.js` — SG_DEFAULT، SG_FA، SG_KEY، discoveredFor، gateFor، gateMsg، gateShort، phoneList، resetSgCache، saveSgCfg، sgAdmin، sgCfg
 - `worker/discovery.js` — DISCOVERY_PROMPT_VERSION، LIMITS، MARKETS، MAX_MARKETS، MODEL، buildPrompt، fillTemplate، parseResult، runCost، runDiscovery، searchById، shapeResult، smartSearch
@@ -15,8 +18,12 @@
 | `POST /search/smart` | w/api.js › route | w/discovered.js#gateFor، w/discovered.js#gateMsg، w/discovery.js#smartSearch، w/records.js#phoneChannels، w/records.js#withPhoneKeys | ✓ |
 
 ## فراخوان در پنل‌ها (2)
-- expert.js › loadSmart → `GET /search/smart`، `POST /search/smart` (صفحه: expert.html)
-- expert.js › runSmart → `GET /search/smart`، `POST /search/smart` (صفحه: expert.html)
+- expert.js › loadSmart → `GET /search/smart` (صفحه: expert.html)
+- expert.js › runSmart → `POST /search/smart` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › dcBlock، expert.js › vSmart
+
+متغیرهای Worker (نام): ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، DISCOVERY_MODEL، SMART_SEARCH_FILTER، WEB_FETCH_TOOL، WEB_SEARCH_TOOL
 
 ## جدول‌ها
 نوشتن: alerts، events، items، settings، smart_searches

@@ -4,6 +4,9 @@
 
 > گفت‌وگوی راهنما در همهٔ پنل‌ها، با دانشِ ساخته‌شده از متن‌های راهنما.
 
+محل در رابط:
+- در همهٔ پنل‌ها › 💬 دستیار سامانه
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/help-bot.js` — HELP_DDL، HELP_MODEL، helpAsk، helpClear، helpHistory، helpRequest
 - `worker/help-knowledge.js` — HELP_KNOWLEDGE، HELP_KNOWLEDGE_FP
@@ -19,8 +22,10 @@
 
 ## فراخوان در پنل‌ها (3)
 - ui.js › clearChat → `* /help/chat/clear`، `POST /help/chat/clear` (صفحه: correspond.html، expert.html، manager.html، supplier.html، support.html، tender.html)
-- ui.js › loadChat → `* /help/chat`، `GET /help/chat`، `POST /help/chat` (صفحه: correspond.html، expert.html، manager.html، supplier.html، support.html، tender.html)
+- ui.js › loadChat → `* /help/chat`، `GET /help/chat` (صفحه: correspond.html، expert.html، manager.html، supplier.html، support.html، tender.html)
 - ui.js › send → `* /help/chat`، `GET /help/chat`، `POST /help/chat` (صفحه: correspond.html، expert.html، manager.html، supplier.html، support.html، tender.html)
+
+متغیرهای Worker (نام): ANTHROPIC_API_BASE، ANTHROPIC_API_KEY
 
 ## جدول‌ها
 نوشتن: help_msgs

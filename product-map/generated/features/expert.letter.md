@@ -4,6 +4,9 @@
 
 > گزارش خرید برای کمیسیون: توضیح بدهید در جریان این خرید چه اتفاقی افتاده — چه چالشی داشت، چرا این تأمین‌کننده، چه چیزی طول کشید — صدا به متن می‌شود و متن به نامهٔ رسمی (همان مسیر بات تلگرام).
 
+محل در رابط:
+- پنل کارشناس خرید › صفحهٔ درخواست › نامهٔ کمیسیون
+
 ## فایل‌های این قابلیت (صاحب)
 - `worker/letter.js` — LETTER_PROMPT_VERSION، LETTER_SALUTATION، LETTER_THANKS، LETTER_TO، deleteTranscript، fillLetter، getTranscript، letterData، letterSubject، sttFields، transcribe، transcriptGone، writeLetter
 
@@ -21,10 +24,14 @@
 
 ## فراخوان در پنل‌ها (5)
 - expert.js › letterCancel → `POST /assignments/{}/letter/cancel` (صفحه: expert.html)
-- expert.js › letterStart → `GET /assignments/{}/letter`، `POST /assignments/{}/letter` (صفحه: expert.html)
+- expert.js › letterStart → `POST /assignments/{}/letter` (صفحه: expert.html)
 - expert.js › letterTyped → `PUT /assignments/{}/letter/transcript` (صفحه: expert.html)
 - expert.js › letterWrite → `PUT /assignments/{}/letter/transcript`، `POST /assignments/{}/letter/write` (صفحه: expert.html)
-- expert.js › loadLetter → `GET /assignments/{}/letter`، `POST /assignments/{}/letter` (صفحه: expert.html)
+- expert.js › loadLetter → `GET /assignments/{}/letter` (صفحه: expert.html)
+
+جای راهنما در کد: expert.js › vLetterIntro، expert.js › vLetterAsk، expert.js › vLetterDone، expert.js › st
+
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، ELEVENLABS_API_KEY، STT_MODEL
 
 ## جدول‌ها
 نوشتن: events، letters
