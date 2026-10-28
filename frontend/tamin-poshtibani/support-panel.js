@@ -863,7 +863,7 @@
   if (TP.ui.trackFmt) TP.ui.trackFmt.szToman = (p) => fmtT(szVal(p));
   async function loadSize() {
     S.szErr = ""; render();
-    try { S.sz = (await api("/support/size-rules")).rules; } catch (e) { S.szErr = e.message; }
+    try { S.sz = (await api("/size-rules")).rules; } catch (e) { S.szErr = e.message; }
     render();
   }
   let szTimer = null;
@@ -871,7 +871,7 @@
     clearTimeout(szTimer);
     szTimer = setTimeout(async () => {
       try {
-        S.sz = (await api("/support/size-rules", { method: "PUT", body: S.sz })).rules; S.szErr = "";
+        S.sz = (await api("/size-rules", { method: "PUT", body: S.sz })).rules; S.szErr = "";
         if (S.tab === "cm") loadCm();
         const ok = app.querySelector("[data-szsaved]"); if (ok) { ok.classList.remove("flash"); void ok.offsetWidth; ok.classList.add("flash"); }
       } catch (e) { S.szErr = e.message; render(); }

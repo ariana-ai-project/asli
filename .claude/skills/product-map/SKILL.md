@@ -38,7 +38,7 @@ description: Use before and after ANY change to the tamin-poshtibani system (wor
    - `node scripts/map/build.mjs` و بعد `node scripts/map/check.mjs`. هر دو باید بی خطا باشند.
    - زیرمسیرِ تازه‌ای که مسیرِ بریده‌شده می‌گیرد: `MOUNTS` در `scripts/map/scan.mjs`. بسته‌بندِ تازهٔ api در پنل‌ها: `FRONT_PREFIX`.
 3. **اگر رفتار یا متنِ رابط عوض شد**، موضوعِ همان کلید را در `help-content.js` اصلاح کن و `node backend/tamin-poshtibani/tools/build-help-knowledge.mjs` را بزن.
-4. **پیش از commit یا استقرار**، همهٔ تست‌ها: `node --test backend/tamin-poshtibani/tests/`.
+4. **پیش از commit یا استقرار**، همهٔ تست‌ها: `node --test "backend/tamin-poshtibani/tests/*.test.mjs"`.
 
 ## خطاهای نقشه و معنی‌شان
 

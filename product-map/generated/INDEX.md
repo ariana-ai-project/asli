@@ -173,7 +173,7 @@
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
 | [infra.auth](features/infra.auth.md) | ورود با کد و تلگرام | w/auth-guard.js، w/tg-auth.js | 0 | 1 |
-| [infra.core](features/infra.core.md) | مسیریاب و هستهٔ سرور | worker.js، w/api.js، w/d1-guard.js، w/http.js (+4) | 4 (4) | 8 |
+| [infra.core](features/infra.core.md) | مسیریاب و هستهٔ سرور | worker.js، w/api.js، w/d1-guard.js، w/http.js (+4) | 4 (4) | 9 |
 | [infra.help](features/infra.help.md) | متن‌های راهنما | guide-a4.html، help-content.js، help-flows.js | 0 | 3 |
 | [infra.site](features/infra.site.md) | دروازهٔ سایت | index.html، w/site.js | 3 | 4 |
 | [infra.ui](features/infra.ui.md) | کیت رابط کاربری مشترک | config.js، panel.css، shared.js، ui-kit.js (+3) | 0 | 9 |
@@ -185,9 +185,3 @@
 | [legal.app](features/legal.app.md) | سامانهٔ حقوقی | w/legal-prompts.js، w/legal.js | 12 (12) | 0 |
 
 فهرست‌های دیگر: [FILES.md](FILES.md) فایل ← قابلیت | [ENDPOINTS.md](ENDPOINTS.md) مسیر ← قابلیت | [TABLES.md](TABLES.md) جدول ← قابلیت | graph.json همه برای ماشین
-
-## هشدارها
-
-- فراخوانِ شناخته‌شدهٔ بی‌مسیر: frontend/tamin-poshtibani/support-panel.js:866 /support/support/size-rules — باگ: api() پنل پشتیبانی خودش /support می‌چسباند و این فراخوان /support/size-rules می‌دهد ← ۴۰۴ (تب 📏 برچسب اندازه). اصلاح: api("/size-rules").
-- فراخوانِ شناخته‌شدهٔ بی‌مسیر: frontend/tamin-poshtibani/support-panel.js:874 /support/support/size-rules — باگ: api() پنل پشتیبانی خودش /support می‌چسباند و این فراخوان /support/size-rules می‌دهد ← ۴۰۴ (تب 📏 برچسب اندازه). اصلاح: api("/size-rules").
-- تستی که به هیچ قابلیتی نرسید: backend/tamin-poshtibani/tests/product-map.test.mjs

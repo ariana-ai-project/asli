@@ -13,7 +13,9 @@
 | `GET /support/size-rules` | w/api.js › route | w/size.js#getSizeRules | ✓ |
 | `PUT /support/size-rules` | w/api.js › route | w/size.js#saveSizeRules | ✓ |
 
-## فراخوان در پنل‌ها (1)
+## فراخوان در پنل‌ها (3)
+- support-panel.js › loadSize → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
+- support-panel.js › saveSizeSoon → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
 - tender-admin.js › loadList → `GET /support/size-rules`، `PUT /support/size-rules` (صفحه: support.html)
 
 ## جدول‌ها

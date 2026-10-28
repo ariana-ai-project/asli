@@ -1,0 +1,23 @@
+# بررسیِ هر push و PR: نقشهٔ محصول با کد بخواند و همهٔ تست‌های سامانهٔ تأمین سبز باشند.
+# استقرار را Workers Builds جدا انجام می‌دهد؛ این فقط خبر می‌دهد (✔/✖ کنار commit در گیت‌هاب).
+name: tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      TZ: Asia/Tehran
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: نقشهٔ محصول
+        run: node scripts/map/check.mjs --warnings
+      - name: تست‌ها
+        run: node --test "backend/tamin-poshtibani/tests/*.test.mjs"

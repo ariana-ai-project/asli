@@ -1523,6 +1523,7 @@
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
     "backend/tamin-poshtibani/tests/phase4b3.test.mjs",
+    "backend/tamin-poshtibani/tests/product-map.test.mjs",
     "backend/tamin-poshtibani/tests/reports.test.mjs",
     "backend/tamin-poshtibani/tests/review-fixes.test.mjs",
     "backend/tamin-poshtibani/tests/storage.test.mjs",
@@ -11693,8 +11694,11 @@
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadSize",
-   "path": "/support/support/size-rules",
-   "routes": []
+   "path": "/support/size-rules",
+   "routes": [
+    "GET /support/size-rules",
+    "PUT /support/size-rules"
+   ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#loadStatus",
@@ -11817,8 +11821,11 @@
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#saveSizeSoon",
-   "path": "/support/support/size-rules",
-   "routes": []
+   "path": "/support/size-rules",
+   "routes": [
+    "GET /support/size-rules",
+    "PUT /support/size-rules"
+   ]
   },
   {
    "from": "frontend/tamin-poshtibani/support-panel.js#sgSave",
@@ -13074,7 +13081,9 @@
   },
   {
    "file": "backend/tamin-poshtibani/tests/product-map.test.mjs",
-   "features": [],
+   "features": [
+    "infra.core"
+   ],
    "imports": [
     "scripts/map/model.mjs"
    ]

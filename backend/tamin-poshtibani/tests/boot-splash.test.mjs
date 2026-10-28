@@ -8,7 +8,8 @@ import { dirname, join } from "node:path";
 import { PAGES, JS, CSS, inject, LOGO } from "../tools/build-boot-splash.mjs";
 
 const FE = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "frontend");
-const read = (rel) => readFileSync(join(FE, rel), "utf8");
+/* CRLF: نسخهٔ ویندوزیِ مخزن (core.autocrlf) همان فایلِ LF گیت است */
+const read = (rel) => readFileSync(join(FE, rel), "utf8").replace(/\r\n/g, "\n");
 
 test("هر صفحهٔ ورود تکهٔ تازهٔ صفحهٔ بارگذاری را دارد (دوباره بسازید: node backend/tamin-poshtibani/tools/build-boot-splash.mjs)", () => {
   for (const [rel, mode] of PAGES) {

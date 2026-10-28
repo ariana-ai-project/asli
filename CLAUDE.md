@@ -15,7 +15,7 @@
 
 ## دستورها
 
-- تست‌ها (Node ≥ 22.5، با node:sqlite): `node --test backend/tamin-poshtibani/tests/`. تستِ `product-map.test.mjs` هم سالم بودنِ نقشه را می‌سنجد.
+- تست‌ها (Node ≥ 22.5، با node:sqlite): `node --test "backend/tamin-poshtibani/tests/*.test.mjs"`. تستِ `product-map.test.mjs` هم سالم بودنِ نقشه را می‌سنجد.
 - نقشه: `node scripts/map/build.mjs` (بازسازی)، `node scripts/map/check.mjs` (بررسی)، `node scripts/map/impact.mjs …` (اثر).
 
 ## قاعده‌ها

@@ -189,16 +189,14 @@ export const WORKFLOWS = [
 ];
 
 /* فراخوان‌هایی از پنل که هنوز به مسیری نمی‌رسند و دانسته رها شده‌اند (هر یک با دلیل؛ بعد از اصلاح پاکشان کنید) */
-export const KNOWN_UNMATCHED = [
-  { file: `${F}support-panel.js`, path: "/support/support/size-rules",
-    why: "باگ: api() پنل پشتیبانی خودش /support می‌چسباند و این فراخوان /support/size-rules می‌دهد ← ۴۰۴ (تب 📏 برچسب اندازه). اصلاح: api(\"/size-rules\")." },
-];
+export const KNOWN_UNMATCHED = [];
 
 /* تست‌هایی که از راه import یا مسیر به قابلیتی نمی‌رسند (مثلاً پارسر مرورگر را از راه run.mjs#loadTP اجرا می‌کنند) */
 export const TEST_FEATURES = {
   "import.test.mjs": ["manager.import"],
   "closed-items.test.mjs": ["manager.import"],
   "boot-splash.test.mjs": ["infra.ui"],
+  "product-map.test.mjs": ["infra.core"],
 };
 
 /* محدودهٔ نقشه: فایل‌هایی که باید صاحب داشته باشند */

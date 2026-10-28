@@ -34,7 +34,7 @@
 3. **ویرایش.**
 4. **پس از ویرایش.** `node scripts/map/impact.mjs --changed` و اجرای تست‌هایی که فهرست می‌کند (دستورِ آماده در خروجی هست).
 5. **اگر مسیر، فایل یا جدول تازه ساختید یا جابه‌جا کردید.** صاحبش را در `taxonomy.mjs` بنویسید، بعد `node scripts/map/build.mjs` و `node scripts/map/check.mjs`.
-6. **پیش از استقرار.** همهٔ تست‌ها: `node --test backend/tamin-poshtibani/tests/`
+6. **پیش از استقرار.** همهٔ تست‌ها: `node --test "backend/tamin-poshtibani/tests/*.test.mjs"`
 
 اگر رفتار یا متنِ رابط عوض شد، متن راهنمای همان کلید در `help-content.js` را هم اصلاح کنید و `node backend/tamin-poshtibani/tools/build-help-knowledge.mjs` را بزنید.
 
