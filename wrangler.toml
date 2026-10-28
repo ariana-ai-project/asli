@@ -42,10 +42,10 @@ SITE_ORIGIN = "https://arianaai.website"
 TG_BOT_USERNAME = "ArianaSupplyBot"
 # بات تیمیِ کارشناسان ارشد (اعلان‌های پایش تیم). توکنش راز است: wrangler secret put TG_TEAM_BOT_TOKEN
 TG_TEAM_BOT_USERNAME = "Supply_SeniorBot"
-# درگاه پیامک (worker/sms.js): "textbee" (پیش‌فرض، همان گوشیِ اندرویدی) یا "ippanel" (پنل پیامکِ IPPanel — رازها بالا).
-# برای رفتن به IPPanel: wrangler secret put IPPANEL_API_KEY، بعد IPPANEL_FROM؛ «🔌 تستِ IPPanel» در «درگاه پیامک»ِ پنل پشتیبانی کلید
-# و اعتبار را پیش از عوض کردن (بی پیامک) می‌سنجد؛ بعد این‌جا "ippanel". نامِ ناشناخته یعنی هیچ پیامکی نرود
-SMS_PROVIDER = "textbee"
+# درگاه پیامک (worker/sms.js): "textbee" (گوشیِ اندرویدی) یا "ippanel" (پنل پیامکِ IPPanel — رازها بالا). نامِ ناشناخته یعنی هیچ پیامکی نرود.
+# از آبان ۱۴۰۵ IPPanel از سرورِ شرکت می‌رود (RELAY_KEY و IPPANEL_FROM ست است؛ کلیدِ IPPanel فقط روی همان سرور). وضعیتِ پل و
+# «📨 پیامک آزمایشی» در «درگاه پیامک»ِ پنل پشتیبانی.
+SMS_PROVIDER = "ippanel"
 
 # انبار فایل پیش‌فاکتور — سطل خصوصی روی Supabase. آدرس راز نیست؛ کلید سرویس
 # با wrangler secret put SUPABASE_SERVICE_KEY ست می‌شود. تا وقتی کلید نباشد،
