@@ -128,7 +128,8 @@ export const FEATURES = [
 
   /* ---------------- اعلان‌ها ---------------- */
   { id: "notify.push", title: "اعلان مرورگر (Push)", files: [`${W}push.js`, `${F}push-sw.js`], endpoints: ["/push/*"] },
-  { id: "notify.sms", title: "پیامک", files: [`${W}sms.js`] },
+  { id: "notify.sms", title: "پیامک", desc: "درگاه‌های پیامک و پلِ سرورِ شرکت: صفِ پیامکِ IPPanel، تپشِ پل و پشتیبان‌گیریِ شبانهٔ پایگاه داده.",
+    files: [`${W}sms.js`, `${W}relay.js`], endpoints: ["/relay/*"] },
   { id: "notify.alarms", title: "هشدارها", files: [`${W}alarms.js`] },
   { id: "notify.telegram", title: "ارسال تلگرام و صف پیام", files: [`${W}telegram.js`, `${W}queue.js`], endpoints: ["/notify/telegram"] },
 

@@ -27,7 +27,7 @@
 ## جدول‌ها
 نوشتن: settings، sp_passes، sp_phones، sp_sessions، sp_sms، sp_tg
 خواندن: assignments، experts، sp_suppliers، sp_threads
-هم‌نویس‌های همین جدول‌ها: corr.main، engine.ai، expert.finalcall، infra.core، sup.panel، support.ai، support.fb
+هم‌نویس‌های همین جدول‌ها: corr.main، engine.ai، expert.finalcall، infra.core، notify.sms، sup.panel، support.ai، support.fb
 
 ## تست‌ها (4)
 - ai-agent.test.mjs

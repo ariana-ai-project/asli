@@ -26,12 +26,18 @@
  * رازها: IPPANEL_API_KEY و IPPANEL_FROM (خطِ فرستنده)؛ اختیاری IPPANEL_PATTERN_OTP (کدِ الگوی رمز) و IPPANEL_PATTERN_VAR (نامِ متغیرِ
  * همان الگو، پیش‌فرض code). IPPANEL_API_BASE فقط آزمون.
  *
+ * پل (آبان ۱۴۰۵): IPPanel از IPِ خارجی (و Cloudflare) جواب نمی‌دهد. با RELAY_KEY درگاهِ ippanel همان بدنه را در صفِ sms_outbox
+ * می‌گذارد و برنامهٔ پل روی سرورِ شرکت آن را با کلیدِ خودش می‌فرستد (worker/relay.js)؛ آن‌وقت IPPANEL_API_KEY در Worker لازم نیست،
+ * «تستِ درگاه» تپش و اعتبارِ گزارش‌شدهٔ پل را می‌سنجد و کلیدِ جدای مناقصه کنار می‌رود (فقط خطِ فرستنده‌اش می‌ماند).
+ *
  * رمزِ ورود (OTP): صدازننده opts.otp می‌دهد («ارسال رمز» پنل تأمین‌کننده و رمزِ مناقصه). اگر درگاه الگوی رمز دارد (IPPanel با
  * IPPANEL_PATTERN_OTP) فقط همان رمز با الگو می‌رود — پیامکِ الگو در پنل‌های ایرانی خدماتی حساب می‌شود و فهرستِ سیاهِ تبلیغاتی جلویش
  * را نمی‌گیرد — وگرنه همان متنِ کامل. کلیدها هرگز در کد یا wrangler.toml نمی‌نشینند (مخزن عمومی است): wrangler secret put.
  */
+import { relayOn, relayEnqueue, relayCheck } from "./relay.js";
+
 const T = (v) => String(v == null ? "" : v).trim();
-const FA = "۰۱۲۳۴۵۶۷۸۹", AR = "٠١٢٣٤٥٦٧٨٩";
+const FA ="۰۱۲۳۴۵۶۷۸۹", AR = "٠١٢٣٤٥٦٧٨٩";
 const latin = (s) => String(s == null ? "" : s).replace(/[۰-۹]/g, (d) => String(FA.indexOf(d))).replace(/[٠-٩]/g, (d) => String(AR.indexOf(d)));
 
 /**
@@ -144,13 +150,21 @@ function ipFail(r, d) {
 }
 const odd = (s) => new SmsError(`${IP_WHY.error} (پاسخِ نامفهومِ IPPanel)`, "error", s);
 const ippanel = {
-  label: "IPPanel", key: "IPPANEL_API_KEY", dev: "IPPANEL_FROM", devFa: "خط فرستنده", need: ["IPPANEL_API_KEY", "IPPANEL_FROM"],
-  info: (env) => ({ from: lineE164(env.IPPANEL_FROM) || null, pattern: T(env.IPPANEL_PATTERN_OTP) || null, pattern_var: T(env.IPPANEL_PATTERN_VAR) || "code" }),
+  label: "IPPanel", key: "IPPANEL_API_KEY", dev: "IPPANEL_FROM", devFa: "خط فرستنده",
+  /* با پل، کلید فقط روی سرورِ شرکت است */
+  need: (env) => (relayOn(env) ? ["IPPANEL_FROM"] : ["IPPANEL_API_KEY", "IPPANEL_FROM"]),
+  info: (env) => ({ from: lineE164(env.IPPANEL_FROM) || null, pattern: T(env.IPPANEL_PATTERN_OTP) || null, pattern_var: T(env.IPPANEL_PATTERN_VAR) || "code", relay: relayOn(env) }),
   async send(env, num, text, opts) {
     const from = lineE164(env.IPPANEL_FROM), pat = T(env.IPPANEL_PATTERN_OTP), otp = T(opts.otp);
     const body = otp && pat
       ? { sending_type: "pattern", from_number: from, code: pat, recipients: [num], params: { [T(env.IPPANEL_PATTERN_VAR) || "code"]: otp } }
       : { sending_type: "webservice", from_number: from, message: text, params: { recipients: [num] } };
+    if (relayOn(env)) {
+      let id;
+      try { id = await relayEnqueue(env, num, body, opts); }
+      catch (e) { throw new SmsError(String((e && e.message) || e).slice(0, 200), (e && e.code) || "error"); }
+      return { ok: true, provider: "ippanel", ref: `q${id}`, to: num, relay: true, ...(body.sending_type === "pattern" ? { pattern: true } : {}) };
+    }
     const { r, d } = await req(`${IP(env)}/api/send`, { method: "POST", headers: ipHead(env), body: JSON.stringify(body) }, IP_WHY);
     const m = ipMeta(d), ids = d.data && Array.isArray(d.data.message_outbox_ids) ? d.data.message_outbox_ids : [];
     if (!r.ok || m.status === false) throw ipFail(r, d);
@@ -160,6 +174,7 @@ const ippanel = {
   },
   /** اعتبارِ حساب: کلید درست است و چیزی برای فرستادن مانده؟ */
   async check(env) {
+    if (relayOn(env)) return relayCheck(env);
     const { r, d } = await req(`${IP(env)}/api/payment/credit/mine`, { headers: ipHead(env) }, IP_WHY);
     if (!r.ok || ipMeta(d).status === false) throw ipFail(r, d);
     const c = typeof d.data === "object" && d.data ? d.data : null;
@@ -188,8 +203,10 @@ export const viaLabel = (via) => (Object.prototype.hasOwnProperty.call(PROVIDERS
 /** پیامک به درگاه رفت؟ via نامِ درگاه است، sim (شبیه‌سازی) و hold (نگه داشته) یعنی نه */
 export const viaSent = (via) => !!via && via !== "sim" && via !== "hold";
 
+/** متغیرهای لازمِ یک درگاه — IPPanel با پل کلید نمی‌خواهد */
+const needOf = (d, env) => (typeof d.need === "function" ? d.need(env || {}) : d.need);
 /** درگاه وصل است؟ (درگاهِ شناخته و همهٔ متغیرهای لازمش ست شده) */
-export const smsReady = (env) => { const p = smsProvider(env); return !!p && PROVIDERS[p].need.every((k) => !!T((env || {})[k])); };
+export const smsReady = (env) => { const p = smsProvider(env); return !!p && needOf(PROVIDERS[p], env).every((k) => !!T((env || {})[k])); };
 
 /**
  * وضعیتِ فقط‌خواندنی برای پنل پشتیبانی — بی هیچ کلید: {provider, label, known, ready, missing: [نامِ متغیرهای ست‌نشده], others, …}
@@ -199,13 +216,13 @@ export const smsReady = (env) => { const p = smsProvider(env); return !!p && PRO
 export function smsStatus(env) {
   const p = smsProvider(env), e = env || {};
   const others = Object.keys(PROVIDERS).filter((k) => k !== p).map((k) => {
-    const need = PROVIDERS[k].need, missing = need.filter((v) => !T(e[v]));
+    const need = needOf(PROVIDERS[k], e), missing = need.filter((v) => !T(e[v]));
     return { provider: k, label: PROVIDERS[k].label, ready: !missing.length, set: missing.length < need.length, missing };
   });
   if (!p) return { provider: rawName(env), label: rawName(env), known: false, ready: false, missing: [], dev_fa: "", others,
     note: `SMS_PROVIDER=«${rawName(env)}» شناخته نیست (textbee یا ippanel)؛ پیامکی نمی‌رود.` };
   const d = PROVIDERS[p];
-  const missing = d.need.filter((k) => !T(e[k]));
+  const missing = needOf(d, e).filter((k) => !T(e[k]));
   return { provider: p, label: d.label, known: true, ready: !missing.length, missing, dev_fa: d.devFa, ...d.info(e), others };
 }
 

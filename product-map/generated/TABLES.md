@@ -76,10 +76,11 @@
 | requests | expert.detail، infra.core، manager.asg، manager.desk، manager.import | bot.team، corr.main، engine.ai، engine.structure، engine.tender، expert.comm، expert.finalcall، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.log، manager.reports، sup.panel، support.ai، support.app، support.chat، support.chg، support.cm، support.dl، support.exp، support.fb، support.req، support.td، support.use |
 | scores_history | engine.records | — |
 | search_suppliers | engine.records، infra.core | — |
-| settings | bot.sp، bot.team، bot.voice، corr.main، engine.catalog، engine.strategy، engine.structure، engine.tender، expert.finalcall، expert.smart، expert.team، infra.core، infra.site، login.supplier، login.support، manager.alerts، manager.reports، notify.alarms، notify.push، sup.panel، support.app، support.cr، support.finalcall، support.log، support.md، support.rank، support.rules، support.size، support.smartgate، support.sw، support.usd | engine.ai، engine.records، expert.ai، expert.comm، expert.letter، expert.picks، manager.desk، manager.log، support.cm، support.req |
+| settings | bot.sp، bot.team، bot.voice، corr.main، engine.catalog، engine.strategy، engine.structure، engine.tender، expert.finalcall، expert.smart، expert.team، infra.core، infra.site، login.supplier، login.support، manager.alerts، manager.reports، notify.alarms، notify.push، notify.sms، sup.panel، support.app، support.cr، support.finalcall، support.log، support.md، support.rank، support.rules، support.size، support.smartgate، support.sw، support.usd | engine.ai، engine.records، expert.ai، expert.comm، expert.letter، expert.picks، manager.desk، manager.log، support.cm، support.req |
 | settings_history | engine.records | — |
 | smart_jobs | bot.team، infra.core، manager.desk | — |
 | smart_searches | engine.records، expert.smart، infra.core، manager.desk | engine.ai، support.use |
+| sms_outbox | notify.sms | support.log |
 | sp_bundles | corr.main، infra.core، sup.panel | bot.sp، engine.ai، engine.strategy، support.ai، support.app، support.chat، support.cm |
 | sp_files | infra.core، sup.panel | bot.sp، support.app، support.chat |
 | sp_lines | corr.main، expert.finalcall، infra.core، sup.panel | bot.sp، engine.ai، engine.strategy، expert.detail، expert.picks، expert.terms، login.tender، support.ai، support.app، support.chat، support.fb، support.rules، tender.page |
@@ -89,7 +90,7 @@
 | sp_phones | corr.main، engine.ai، login.supplier، sup.panel، support.ai، support.fb | bot.sp، engine.tender، expert.finalcall، expert.picks، support.cm، support.sup، support.use |
 | sp_phones_x | sup.panel | — |
 | sp_sessions | login.supplier، sup.panel | — |
-| sp_sms | corr.main، expert.finalcall، infra.core، login.supplier، sup.panel | engine.ai، support.ai، support.fb، support.use |
+| sp_sms | corr.main، expert.finalcall، infra.core، login.supplier، notify.sms، sup.panel | engine.ai، support.ai، support.fb، support.use |
 | sp_suppliers | sup.panel | bot.sp، corr.main، engine.ai، engine.strategy، engine.tender، expert.detail، expert.finalcall، expert.picks، expert.terms، login.supplier، support.ai، support.app، support.chat، support.cm، support.cr، support.exp، support.fb، support.sup، support.td، support.use |
 | sp_tg | bot.sp، corr.main، infra.core، login.supplier، login.tender، sup.panel، tender.page | engine.ai، engine.tender، infra.auth |
 | sp_threads | corr.main، expert.finalcall، infra.core، sup.panel، support.cm | bot.sp، bot.team، engine.ai، engine.strategy، expert.ai، expert.detail، expert.picks، expert.terms، login.supplier، manager.desk، support.ai، support.app، support.chat، support.exp، support.fb، support.req، support.rules، support.use |

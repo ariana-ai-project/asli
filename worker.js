@@ -20,6 +20,8 @@ import { tenderTick, tenderDiscoverTick } from "./worker/tender.js";
 import { drainPush } from "./worker/push.js";
 import { guardEnv } from "./worker/d1-guard.js";
 import { crDocTick } from "./worker/strategy-doc.js";
+import { relayOn, relayWatch } from "./worker/relay.js";
+import { raiseAlarm } from "./worker/alarms.js";
 
 /* وبهوکِ بات مکاتبات تأمین‌کنندگان (و بات ویس) یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
    ثبت نشده، دامنه یا توکن عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار یا ست کردنِ راز کار دستی لازم نیست. */
@@ -68,6 +70,13 @@ export default {
       (r) => r && r.rows && console.log("push drain", JSON.stringify(r)),
       (e) => console.error("push drain failed", e && e.message),
     ));
+    /* پلِ پیامکِ سرورِ شرکت (worker/relay.js): هر ۵ دقیقه صفِ مانده منقضی و قطعیِ پل یک بار هشدار */
+    if (relayOn(env) && new Date(event.scheduledTime || Date.now()).getUTCMinutes() % 5 === 0) {
+      ctx.waitUntil(ensureSchema(env).then(() => relayWatch(env, raiseAlarm, ctx)).then(
+        (r) => r && (r.expired || r.stale || r.down) && console.log("sms relay", JSON.stringify(r)),
+        (e) => console.error("sms relay watch failed", e && e.message),
+      ));
+    }
     /* «📘 سند راهبرد» (worker/strategy-doc.js، کلیدِ doc): یک سند در هر دقیقه — صفِ درخواست‌ها، بعد پیش‌ساختِ ۱۳۸ نوع قلمِ پرهزینه.
        فراخوانِ مدل بیش از مهلتِ waitUntilِ یک درخواست طول می‌کشد؛ Cron تا ۱۵ دقیقه وقت دارد */
     ctx.waitUntil(ensureSchema(env).then(() => crDocTick(env, { company: env.COMPANY })).then(

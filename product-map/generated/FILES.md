@@ -108,6 +108,7 @@
 | worker/quote-src.js | expert.quotes |
 | worker/ranking.js | support.rank |
 | worker/records.js | engine.records |
+| worker/relay.js | notify.sms |
 | worker/reports.js | manager.reports |
 | worker/reqdoc.js | doc.office |
 | worker/selftest.js | infra.core |

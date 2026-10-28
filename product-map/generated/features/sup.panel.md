@@ -81,7 +81,7 @@
 ## جدول‌ها
 نوشتن: ai_runs، events، final_call_sups، offpf، outbox، proformas، quotes، settings، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads
 خواندن: ai_agents، ai_props، ai_threads، assignments، cr_facts، cr_turns، experts، final_calls، items، requests
-هم‌نویس‌های همین جدول‌ها: bot.sp، bot.team، corr.main، engine.ai، expert.finalcall، expert.quotes، infra.core، login.supplier، manager.desk، notify.telegram، support.ai، support.cm، support.fb
+هم‌نویس‌های همین جدول‌ها: bot.sp، bot.team، corr.main، engine.ai، expert.finalcall، expert.quotes، infra.core، login.supplier، manager.desk، notify.sms، notify.telegram، support.ai، support.cm، support.fb
 
 ## تست‌ها (25)
 - ai-agent.test.mjs

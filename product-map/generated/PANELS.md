@@ -61,7 +61,7 @@
 
 صفحه: `frontend/tamin-poshtibani/support.html` | کاربر: پشتیبانی (مالک سامانه)
 
-- ورود پشتیبانی `login` → [login.support](features/login.support.md) — 5 مسیر، 38 تست | کد: support-panel.js › render
+- ورود پشتیبانی `login` → [login.support](features/login.support.md) — 5 مسیر، 39 تست | کد: support-panel.js › render
 - درخواست‌ها `req` → [support.req](features/support.req.md) — 4 مسیر، 4 تست
 - کارشناسان `exp` → [support.exp](features/support.exp.md) — 4 مسیر، 3 تست | کد: support-panel.js › inp
 - مکاتبات `chat` → [support.chat](features/support.chat.md) — 3 مسیر، 5 تست | کد: support-panel.js › render
@@ -80,7 +80,7 @@
 - 📥 تحویل‌های هوشمند `dl` → [support.dl](features/support.dl.md) — 3 مسیر، 2 تست | کد: support-panel.js › vDlOne
 - ⭐ ارزیابی ربات `fb` → [support.fb](features/support.fb.md) — 4 مسیر، 4 تست | کد: fb-admin.js › aiBox، fb-admin.js › boxesBox، fb-admin.js › c، fb-admin.js › view
 - 📊 کارکرد کارشناسان `use` → [support.use](features/support.use.md) — 3 مسیر، 8 تست
-- رخدادها `log` → [support.log](features/support.log.md) — 6 مسیر، 3 تست
+- رخدادها `log` → [support.log](features/support.log.md) — 7 مسیر، 4 تست
 - 🧩 تغییرات اقلام `chg` → [support.chg](features/support.chg.md) — 2 مسیر، 1 تست
 - 🧭 استراتژی و دفتر `cr` → [support.cr](features/support.cr.md) — 28 مسیر، 9 تست | کد: cr-admin.js › inp
   - 🏷 تأمین‌کنندگان — رده و مشخصات → [support.sup](features/support.sup.md) — 5 مسیر، 3 تست | کد: cr-admin.js › vSup

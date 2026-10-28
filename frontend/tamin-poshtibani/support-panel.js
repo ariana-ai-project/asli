@@ -1470,6 +1470,13 @@
     let s; try { s = await api("/sms"); } catch (e) { return TP.modal("نشد", esc(e.message), null, "باشد", ""); }
     const row = (k, v) => `<div class="al-row"><b>${k}</b><div>${v}</div></div>`;
     const vars = (xs) => xs.map((x) => `<code dir="ltr">${esc(x)}</code>`).join(" ");
+    /* پلِ سرورِ شرکت (worker/relay.js): IPPanel از سرورِ داخلی می‌رود؛ تپشِ پل و آخرین پشتیبان‌گیریِ شبانه */
+    const ago = (x) => (x == null ? "—" : x < 90 ? `${M(x)} ثانیه پیش` : x < 5400 ? `${M(Math.round(x / 60))} دقیقه پیش` : `${M(Math.round(x / 3600))} ساعت پیش`);
+    const R = s.relay, bk = R && R.backup;
+    const relayRows = !R ? "" : row("پل پیامک", `سرورِ شرکت ${R.live ? `<span class="chip ok">✅ وصل است</span>` : `<span class="chip warn">${R.seen ? "قطع است" : "هنوز وصل نشده"}</span>`}
+        <span class="dim">آخرین تماس: ${ago(R.age_s)}${R.queued ? ` · در صف: ${M(R.queued)}` : ""}</span>`)
+      + row("پشتیبان‌گیری", bk && bk.at ? `${bk.ok ? "✅" : "⚠️"} ${esc(new Date(bk.at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }))} <span class="dim">${bk.ok
+          ? `· ${M(bk.tables || 0)} جدول · ${M(bk.rows || 0)} ردیف` : esc(bk.error || "")}</span>` : `<span class="dim">هنوز انجام نشده؛ هر شب روی سرورِ شرکت</span>`);
     const alt = (s.others || []).filter((o) => o.set).map((o) => row(`${esc(o.label)} <span class="dim">— فعال نیست</span>`, o.ready
       ? `<button type="button" class="tp-btn sm" data-smschk="${esc(o.provider)}">🔌 تستِ ${esc(o.label)}</button> <span class="dim" data-smsres="${esc(o.provider)}">پیش از عوض کردنِ <span dir="ltr">SMS_PROVIDER</span> — بی پیامک</span>`
       : `<span class="dim">ست نشده:</span> ${vars(o.missing)}`)).join("");
@@ -1478,7 +1485,10 @@
         ${(s.missing || []).length ? row("ست نشده", vars(s.missing)) : ""}${s.note ? `<div class="dim">${esc(s.note)}</div>` : ""}
         ${s.from ? row("خط فرستنده", `<span dir="ltr">${esc(s.from)}</span>`) : ""}${s.device ? row("دستگاه", `<span dir="ltr">${esc(s.device)}</span>`) : ""}
         ${s.provider === "ippanel" ? row("الگوی رمز", s.pattern ? `<code dir="ltr">${esc(s.pattern)}</code> · متغیر <code dir="ltr">${esc(s.pattern_var)}</code>` : `<span class="dim">ندارد — رمزها با متنِ ساده می‌روند</span>`) : ""}
+        ${relayRows}
         <div class="al-row"><button type="button" class="tp-btn sm" data-smschk="" ${s.ready ? "" : "disabled"}>🔌 تستِ درگاه</button><span class="dim" data-smsres="">بی فرستادنِ پیامک — ${s.provider === "ippanel" ? "اعتبارِ حساب" : "گوشی‌های حساب"} سنجیده می‌شود.</span></div>
+        <div class="al-row"><b>📨 پیامک آزمایشی</b><div><input class="tp-input" data-smsto inputmode="tel" dir="ltr" placeholder="۰۹۱۲…">
+          <button type="button" class="tp-btn sm" data-smstest ${s.ready ? "" : "disabled"}>بفرست</button> <span class="dim" data-smstestres>یک پیامکِ واقعی از درگاهِ فعال</span></div></div>
         ${alt}
         <div class="dim">درگاه با متغیرهای Worker عوض می‌شود (<span dir="ltr">SMS_PROVIDER</span>)، نه از این پنل.</div></div>`, null, "بستن", "");
     d.querySelectorAll("[data-smschk]").forEach((b) => {
@@ -1489,6 +1499,15 @@
         b.disabled = false;
       };
     });
+    const tb = d.querySelector("[data-smstest]"), tout = d.querySelector("[data-smstestres]");
+    if (tb) tb.onclick = async () => {
+      const to = (d.querySelector("[data-smsto]") || {}).value || "";
+      if (!to.trim()) { tout.textContent = "شماره را بنویسید."; return; }
+      tb.disabled = true; tout.textContent = "…";
+      try { const r = await api("/sms/test", { body: { to } }); tout.innerHTML = r.relay ? "✅ به صفِ پلِ سرورِ شرکت رفت؛ چند ثانیهٔ دیگر می‌رسد." : "✅ فرستاده شد."; }
+      catch (e) { tout.textContent = `⚠️ ${e.message}`; }
+      tb.disabled = false;
+    };
   }
   /* متنِ تأییدِ تیک — همان در داشبوردِ هر کارشناس (expert-ai.js)؛ رفتار: worker/ai-agent.js:aiModeSet */
   function aiToggle(id, on) {

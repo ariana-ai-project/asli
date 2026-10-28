@@ -68,7 +68,7 @@
 ## جدول‌ها
 نوشتن: ai_log، ai_props، ai_rates، ai_runs، ai_threads، events، settings، sp_bundles، sp_lines، sp_links، sp_phones، sp_sms، sp_tg، sp_threads
 خواندن: ai_agents، assignments، cr_facts، cr_turns، items، letters، proformas، quotes، requests، sp_msgs، sp_suppliers
-هم‌نویس‌های همین جدول‌ها: bot.sp، engine.ai، expert.ai، expert.finalcall، infra.core، login.supplier، sup.panel، support.ai، support.cm، support.fb
+هم‌نویس‌های همین جدول‌ها: bot.sp، engine.ai، expert.ai، expert.finalcall، infra.core، login.supplier، notify.sms، sup.panel، support.ai، support.cm، support.fb
 
 ## تست‌ها (23)
 - ai-feedback.test.mjs

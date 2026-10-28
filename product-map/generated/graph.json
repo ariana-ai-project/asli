@@ -1973,6 +1973,7 @@
     "backend/tamin-poshtibani/tests/phase4b2.test.mjs",
     "backend/tamin-poshtibani/tests/push-hooks.test.mjs",
     "backend/tamin-poshtibani/tests/ranking.test.mjs",
+    "backend/tamin-poshtibani/tests/relay.test.mjs",
     "backend/tamin-poshtibani/tests/sec-p0.test.mjs",
     "backend/tamin-poshtibani/tests/size-estimate.test.mjs",
     "backend/tamin-poshtibani/tests/sms-provider.test.mjs",
@@ -2517,16 +2518,30 @@
    "help": false,
    "places": [],
    "files": [
+    "worker/relay.js",
     "worker/sms.js"
    ],
-   "endpoints": [],
+   "endpoints": [
+    "GET /relay/backup/rows",
+    "GET /relay/backup/schema",
+    "POST /relay/sync",
+    "POST /relay/test"
+   ],
    "tests": [
+    "backend/tamin-poshtibani/tests/relay.test.mjs",
     "backend/tamin-poshtibani/tests/sms-provider.test.mjs",
     "backend/tamin-poshtibani/tests/supplier.test.mjs"
    ],
    "tables": {
-    "w": [],
-    "r": []
+    "w": [
+     "settings",
+     "sms_outbox",
+     "sp_sms"
+    ],
+    "r": [
+     "settings",
+     "sms_outbox"
+    ]
    },
    "related": []
   },
@@ -3188,10 +3203,12 @@
     "GET /support/sms",
     "POST /support/alarms/{}/ack",
     "POST /support/sms/check",
+    "POST /support/sms/test",
     "PUT /support/alert-contacts"
    ],
    "tests": [
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
+    "backend/tamin-poshtibani/tests/relay.test.mjs",
     "backend/tamin-poshtibani/tests/sms-provider.test.mjs",
     "backend/tamin-poshtibani/tests/takeover.test.mjs"
    ],
@@ -3202,7 +3219,8 @@
     ],
     "r": [
      "alarms",
-     "experts"
+     "experts",
+     "sms_outbox"
     ]
    },
    "related": []
@@ -5222,11 +5240,14 @@
   {
    "entry": "worker.js#scheduled",
    "runs": [
+    "worker/alarms.js#raiseAlarm",
     "worker/api.js#ensureSchema",
     "worker/bot.js#scheduled",
     "worker/d1-guard.js#guardEnv",
     "worker/legal.js#legalCleanup",
     "worker/push.js#drainPush",
+    "worker/relay.js#relayOn",
+    "worker/relay.js#relayWatch",
     "worker/sp-bot.js#ensureSpWebhook",
     "worker/strategy-doc.js#crDocTick",
     "worker/tender.js#tenderDiscoverTick",
@@ -5361,6 +5382,7 @@
   "worker/quote-src.js": "expert.quotes",
   "worker/ranking.js": "support.rank",
   "worker/records.js": "engine.records",
+  "worker/relay.js": "notify.sms",
   "worker/reports.js": "manager.reports",
   "worker/reqdoc.js": "doc.office",
   "worker/selftest.js": "infra.core",
@@ -6735,6 +6757,36 @@
    }
   },
   {
+   "key": "GET /relay/backup/rows",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "notify.sms"
+   ],
+   "uses": [
+    "worker/relay.js#relayBackupRows"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "GET /relay/backup/schema",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "notify.sms"
+   ],
+   "uses": [
+    "worker/relay.js#relayBackupSchema"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "GET /reports/meta",
    "file": "worker/api.js",
    "fn": "route",
@@ -7852,7 +7904,8 @@
     "support.log"
    ],
    "uses": [
-    "worker/sms.js#smsStatus"
+    "worker/relay.js#relayOn",
+    "worker/relay.js#relayStatus"
    ],
    "tables": {
     "r": [],
@@ -9139,6 +9192,39 @@
    }
   },
   {
+   "key": "POST /relay/sync",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "notify.sms"
+   ],
+   "uses": [
+    "worker/relay.js#relaySync"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /relay/test",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "notify.sms"
+   ],
+   "uses": [
+    "worker/http.js#HttpError",
+    "worker/relay.js#relayAuth",
+    "worker/relay.js#relayTestText",
+    "worker/sms.js#sendSms"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "POST /reports/season",
    "file": "worker/api.js",
    "fn": "route",
@@ -9991,6 +10077,23 @@
    ],
    "uses": [
     "worker/sms.js#smsCheck"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /support/sms/test",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "support.log"
+   ],
+   "uses": [
+    "worker/http.js#HttpError",
+    "worker/relay.js#relayTestText",
+    "worker/sms.js#sendSms"
    ],
    "tables": {
     "r": [],
@@ -13138,6 +13241,13 @@
    ]
   },
   {
+   "from": "frontend/tamin-poshtibani/support-panel.js#smsGwDialog",
+   "path": "/support/sms/test",
+   "routes": [
+    "POST /support/sms/test"
+   ]
+  },
+  {
    "from": "frontend/tamin-poshtibani/support-panel.js#unreferTender",
    "path": "/support/tender-unrefer",
    "routes": [
@@ -14392,6 +14502,20 @@
    ],
    "imports": [
     "worker/records.js"
+   ]
+  },
+  {
+   "file": "backend/tamin-poshtibani/tests/relay.test.mjs",
+   "features": [
+    "login.support",
+    "notify.sms",
+    "support.log"
+   ],
+   "imports": [
+    "backend/tamin-poshtibani/tests/run.mjs",
+    "worker/api.js",
+    "worker/relay.js",
+    "worker/sms.js"
    ]
   },
   {

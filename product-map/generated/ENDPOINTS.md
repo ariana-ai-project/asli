@@ -75,6 +75,8 @@
 | `GET /phones/channels` | expert.quotes | w/api.js › route |
 | `GET /proformas/{}/file` | expert.quotes | w/api.js › route |
 | `GET /push/key` | notify.push | w/api.js › route |
+| `GET /relay/backup/rows` | notify.sms | w/api.js › route |
+| `GET /relay/backup/schema` | notify.sms | w/api.js › route |
 | `GET /reports/meta` | manager.reports | w/api.js › route |
 | `GET /reports/status` | manager.reports | w/api.js › route |
 | `GET /reports/status.xlsx` | manager.reports | w/api.js › route |
@@ -228,6 +230,8 @@
 | `POST /push/unsubscribe` | notify.push | w/api.js › route |
 | `POST /quotes` | expert.quotes | w/api.js › route |
 | `POST /reassign` | manager.desk | w/api.js › route |
+| `POST /relay/sync` | notify.sms | w/api.js › route |
+| `POST /relay/test` | notify.sms | w/api.js › route |
 | `POST /reports/season` | manager.reports | w/api.js › route |
 | `POST /reports/season.xlsx` | manager.reports | w/api.js › route |
 | `POST /reports/season/experts` | manager.reports | w/api.js › route |
@@ -279,6 +283,7 @@
 | `POST /support/reset` | login.support | w/api.js › route |
 | `POST /support/setup` | login.support | w/api.js › route |
 | `POST /support/sms/check` | support.log | w/api.js › route |
+| `POST /support/sms/test` | support.log | w/api.js › route |
 | `POST /support/sreg/g4/{}` | support.cr | w/cr-api.js › crSupportRoute |
 | `POST /support/tender-refer` | support.td | w/api.js › route |
 | `POST /support/tender-settings/test` | support.td | w/api.js › route |

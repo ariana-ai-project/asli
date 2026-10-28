@@ -30,7 +30,7 @@
 ## جدول‌ها
 نوشتن: ai_agents، ai_calls، ai_log، ai_props، ai_runs، ai_threads، alarms، alerts، assignments، commission_notes، commission_results، counters، cr_facts، cr_turns، decisions، events، expert_scores، experts، fm_choice، holidays، imports، item_changes، items، letters، outbox، proformas، quote_edits، quotes، req_hist، requests، search_suppliers، settings، smart_jobs، smart_searches، sp_bundles، sp_files، sp_lines، sp_msgs، sp_sms، sp_tg، sp_threads، templates، tg_flows، tg_nav، tg_seen، tg_uploads، weights
 خواندن: ai_rates، offpf
-هم‌نویس‌های همین جدول‌ها: bot.sp، bot.team، bot.voice، corr.main، engine.ai، engine.records، engine.strategy، engine.structure، expert.ai، expert.comm، expert.detail، expert.finalcall، expert.history، expert.letter، expert.msgtpl، expert.quotes، expert.smart، legal.app، login.supplier، manager.alerts، manager.asg، manager.desk، manager.experts، manager.import، manager.log، notify.alarms، notify.telegram، sup.panel، support.ai، support.cm، support.fb، support.log
+هم‌نویس‌های همین جدول‌ها: bot.sp، bot.team، bot.voice، corr.main، engine.ai، engine.records، engine.strategy، engine.structure، expert.ai، expert.comm، expert.detail، expert.finalcall، expert.history، expert.letter، expert.msgtpl، expert.quotes، expert.smart، legal.app، login.supplier، manager.alerts، manager.asg، manager.desk، manager.experts، manager.import، manager.log، notify.alarms، notify.sms، notify.telegram، sup.panel، support.ai، support.cm، support.fb، support.log
 
 ## تست‌ها (9)
 - assign-plan.test.mjs

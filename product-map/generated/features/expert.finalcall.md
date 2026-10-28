@@ -31,7 +31,7 @@
 ## جدول‌ها
 نوشتن: ai_runs، commission_packages، events، experts، final_call_sups، final_calls، offpf، quote_edits، quotes، settings، sp_lines، sp_msgs، sp_sms، sp_threads
 خواندن: assignments، items، requests، sp_phones، sp_suppliers
-هم‌نویس‌های همین جدول‌ها: bot.team، corr.main، expert.quotes، infra.core، login.supplier، sup.panel، support.cm
+هم‌نویس‌های همین جدول‌ها: bot.team، corr.main، expert.quotes، infra.core، login.supplier، notify.sms، sup.panel، support.cm
 
 ## تست‌ها (2)
 - execution-ready.test.mjs

@@ -26,7 +26,8 @@ export async function deliverSms(env, s, opts = {}) {
   let via = "sim", status = "sim", ref = null, error = null;
   if (s.hold) { via = "hold"; status = "held"; }
   else if (s.to !== C.RESERVED_PHONE && smsReady(env)) {
-    try { const r = await sendSms(env, s.to, s.text, s.otp ? { otp: s.otp } : {}); via = r.provider; status = "queued"; ref = r.ref; }
+    /* smsId: با پلِ پیامک (worker/relay.js) نتیجهٔ دیرآمده روی همین ردیف می‌نشیند */
+    try { const r = await sendSms(env, s.to, s.text, { ...(s.otp ? { otp: s.otp } : {}), smsId: s.smsId }); via = r.provider; status = "queued"; ref = r.ref; }
     catch (e) { error = String((e && e.message) || e).slice(0, 300); status = "failed"; }
   }
   let pushed = 0, where = "";

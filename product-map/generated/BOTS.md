@@ -98,11 +98,14 @@
 
 ### worker.js#scheduled (infra.core)
 
+- w/alarms.js › raiseAlarm — notify.alarms
 - w/api.js › ensureSchema — infra.core
 - w/bot.js › scheduled — bot.team
 - w/d1-guard.js › guardEnv — infra.core
 - w/legal.js › legalCleanup — legal.app
 - w/push.js › drainPush — notify.push
+- w/relay.js › relayOn — notify.sms
+- w/relay.js › relayWatch — notify.sms
 - w/sp-bot.js › ensureSpWebhook — bot.sp
 - w/strategy-doc.js › crDocTick — engine.strategy
 - w/tender.js › tenderDiscoverTick — engine.tender
