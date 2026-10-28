@@ -86,6 +86,7 @@
 | `GET /selftest` | infra.core | w/api.js › route |
 | `GET /settings` | manager.alerts | w/api.js › route |
 | `GET /site` | infra.site | w/api.js › route |
+| `GET /site/sms` | infra.site | w/api.js › route |
 | `GET /sp/bundle/{}/pf-url` | sup.panel | w/sp-api.js › spRoute |
 | `GET /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |
 | `GET /sp/file/{}/url` | sup.panel | w/sp-api.js › spRoute |
@@ -238,6 +239,7 @@
 | `POST /requests/delete` | manager.desk | w/api.js › route |
 | `POST /search/smart` | expert.smart | w/api.js › route |
 | `POST /site/login` | infra.site | w/api.js › route |
+| `POST /site/sms/test` | infra.site | w/api.js › route |
 | `POST /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/line/{}/file` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/line/{}/ready` | sup.panel | w/sp-api.js › spRoute |

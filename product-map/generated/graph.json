@@ -1739,11 +1739,14 @@
    ],
    "endpoints": [
     "GET /site",
+    "GET /site/sms",
     "POST /site/login",
+    "POST /site/sms/test",
     "PUT /site"
    ],
    "tests": [
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
+    "backend/tamin-poshtibani/tests/relay.test.mjs",
     "backend/tamin-poshtibani/tests/review-fixes.test.mjs",
     "backend/tamin-poshtibani/tests/sec-p0.test.mjs",
     "backend/tamin-poshtibani/tests/site-fx.test.mjs"
@@ -6934,6 +6937,21 @@
    }
   },
   {
+   "key": "GET /site/sms",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.site"
+   ],
+   "uses": [
+    "worker/site.js#siteSms"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "GET /sp/bundle/{}/pf-url",
    "file": "worker/sp-api.js",
    "fn": "spRoute",
@@ -9323,6 +9341,21 @@
    ],
    "uses": [
     "worker/site.js#siteLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /site/sms/test",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.site"
+   ],
+   "uses": [
+    "worker/site.js#siteSmsTest"
    ],
    "tables": {
     "r": [],
@@ -14507,6 +14540,7 @@
   {
    "file": "backend/tamin-poshtibani/tests/relay.test.mjs",
    "features": [
+    "infra.site",
     "login.support",
     "notify.sms",
     "support.log"

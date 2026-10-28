@@ -7,7 +7,7 @@
 
 صفحه: `frontend/tamin-poshtibani/index.html` | کاربر: همه
 
-- انتخاب پنل (کارشناس، مدیر، پشتیبانی) → [infra.site](features/infra.site.md) — 3 مسیر، 4 تست
+- انتخاب پنل (کارشناس، مدیر، پشتیبانی) → [infra.site](features/infra.site.md) — 5 مسیر، 5 تست
 
 ## پنل کارشناس خرید (p.expert)
 

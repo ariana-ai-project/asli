@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 77 قابلیت در 13 بخش | 156 فایل | 348 مسیر (263 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
+آمار: 77 قابلیت در 13 بخش | 156 فایل | 350 مسیر (265 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -177,7 +177,7 @@
 | [infra.auth](features/infra.auth.md) | ورود با کد و تلگرام | w/auth-guard.js، w/tg-auth.js | 0 | 1 |
 | [infra.core](features/infra.core.md) | مسیریاب و هستهٔ سرور | worker.js، w/api.js، w/d1-guard.js، w/http.js (+4) | 4 (4) | 9 |
 | [infra.help](features/infra.help.md) | متن‌های راهنما | guide-a4.html، help-content.js، help-flows.js | 0 | 3 |
-| [infra.site](features/infra.site.md) | دروازهٔ سایت | index.html، w/site.js | 3 | 4 |
+| [infra.site](features/infra.site.md) | دروازهٔ سایت | index.html، w/site.js | 5 | 5 |
 | [infra.ui](features/infra.ui.md) | کیت رابط کاربری مشترک | config.js، panel.css، shared.js، ui-kit.js (+3) | 0 | 9 |
 
 ### سامانهٔ حقوقی (محصول جدا) (legal)

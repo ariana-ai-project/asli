@@ -11,6 +11,8 @@
  */
 import { HttpError } from "./http.js";
 import { managerCode } from "./settings.js";
+import { smsStatus, sendSms } from "./sms.js";
+import { relayOn, relayStatus, relayTestText } from "./relay.js";
 
 const KEY_CARDS = "siteCards";
 const KEY_PASS = "sitePassHash";
@@ -79,6 +81,22 @@ async function requireSite(env, code) {
 export async function siteLogin(env, code) {
   await requireSite(env, code);
   return { ok: true, ...(await siteState(env)) };
+}
+
+/**
+ * «📶 پیامک و پشتیبان‌گیری» در همین تب (آبان ۱۴۰۵): همان وضعیتِ «درگاه پیامک»ِ پنل پشتیبانی — درگاه، پلِ سرورِ شرکت، اعتبار و آخرین
+ * پشتیبان‌گیریِ شبانه (worker/relay.js) — بی هیچ کلید.
+ */
+export async function siteSms(env, code) {
+  await requireSite(env, code);
+  const s = smsStatus(env);
+  return { provider: s.provider, label: s.label, ready: s.ready, from: s.from || null, relay: relayOn(env) ? await relayStatus(env) : null };
+}
+/** «📨 پیامک آزمایشی» از همین تب: یک پیامکِ واقعی از درگاهِ فعال */
+export async function siteSmsTest(env, code, to) {
+  await requireSite(env, code);
+  try { return await sendSms(env, to, relayTestText()); }
+  catch (e) { throw new HttpError(String((e && e.message) || e).slice(0, 300), 400); }
 }
 
 /**

@@ -41,7 +41,7 @@ import { selfTest } from "./selftest.js";
 import { statusData, statusBook, seasonData, seasonExperts, reportTeam, putReportTeam, seasonBook, bookPreview, bookFile, reportMeta, BOOK_CSS,
   REQ_HIST_COLS, REQ_HIST_DDL, reqHistValues, reportProjects, projectOf } from "./reports.js";
 import { proformaOf, runExtraction, applyExtraction } from "./proforma.js";
-import { siteState, siteLogin, putSite } from "./site.js";
+import { siteState, siteLogin, putSite, siteSms, siteSmsTest } from "./site.js";
 import { handleUpdate, handleTeamUpdate, makeLink, makeTeamLink, ensureTeamWebhook, scheduled, drainOutbox } from "./bot.js";
 import { holidayFn, resetHolidayCache, alertStatements, delegateAssignment, reassign, thresholdsByExpert, parseThresholds, rescheduleTeam, dispatchText, seenKb, stateText, TEAM_SIZE_SQL } from "./assign.js";
 import { queueStmt } from "./queue.js";
@@ -2212,6 +2212,13 @@ async function route(request, env, ctx) {
       const b = await readJson(request);
       const code = request.headers.get("X-Site-Code") || b.code;
       return json(await siteGuarded(code, () => putSite(env, b, code)));
+    }
+    /* «📶 پیامک و پشتیبان‌گیری» در همان تب (worker/site.js ← worker/relay.js) */
+    if (path === "/site/sms" && m === "GET") { const code = request.headers.get("X-Site-Code"); return json(await siteGuarded(code, () => siteSms(env, code))); }
+    if (path === "/site/sms/test" && m === "POST") {
+      const b = await readJson(request);
+      const code = request.headers.get("X-Site-Code") || b.code;
+      return json(await siteGuarded(code, () => siteSmsTest(env, code, b.to)));
     }
 
     if (path === "/login" && m === "POST") {

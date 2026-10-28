@@ -165,6 +165,22 @@ test("پشتیبان‌گیری: طرحِ جدول‌ها با کلیدِ اصل
   assert.equal((await call(`/relay/backup/rows?t=${encodeURIComponent('sms_outbox"; DROP TABLE x; --')}`, { headers: RK })).status, 404);
 });
 
+test("تب «پشتیبانی» صفحهٔ اول: «📶 پیامک و پشتیبان‌گیری» با رمز تب (یا کد مدیر) و «📨 پیامک آزمایشی»؛ بی رمز ۴۰۱", { skip: SKIP }, async () => {
+  await sync({ beat: { credit: 1800000, backup: { at: Date.now(), ok: true, tables: 114, rows: 142217, bytes: 1 } } });
+  assert.equal((await call("/site/sms")).status, 401);
+  assert.equal((await call("/site/sms", { headers: { "X-Site-Code": "0000" } })).status, 401);
+  const s = await call("/site/sms", { headers: { "X-Site-Code": "4321" } });
+  assert.deepEqual([s.status, s.data.provider, s.data.ready, s.data.from, s.data.relay.live, s.data.relay.credit, s.data.relay.backup.rows], [200, "ippanel", true, "+983000505", true, 1800000, 142217]);
+  assert.ok(!JSON.stringify(s.data).includes(KEY));
+  const n0 = DB.raw.prepare("SELECT COUNT(*) AS n FROM sms_outbox WHERE status='queued'").get().n;
+  const t = await call("/site/sms/test", { body: { to: "09104201638" }, headers: { "X-Site-Code": "4321" } });
+  assert.deepEqual([t.status, t.data.relay, t.data.to], [200, true, "+989104201638"]);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sms_outbox WHERE status='queued'").get().n, n0 + 1);
+  assert.equal((await call("/site/sms/test", { body: { to: "09104201638" } })).status, 401);
+  assert.equal((await call("/site/sms/test", { body: { to: "021" }, headers: { "X-Site-Code": "4321" } })).status, 400);
+  await sync();
+});
+
 test("پنل پشتیبانی: وضعیتِ پل در «درگاه پیامک» و «📨 پیامک آزمایشی»؛ /relay/test هم از همان راهِ سامانه", { skip: SKIP }, async () => {
   await sync({ beat: { credit: 2500000, backup: { at: Date.now(), ok: true, tables: 113, rows: 420000, bytes: 1 } } });
   const s = (await call("/support/sms", { headers: SUP })).data;

@@ -9,6 +9,7 @@
      ۲) با کلیک روی «پشتیبانی» در نوار بالا، پنل کوچکی باز می‌کند که با رمز
         باز می‌شود و از داخلش وضعیت هر کارت عوض می‌شود.
    رمز: همان رمز مشترک تب، یا کد مدیر (تا اولین رمز تعریف شود).
+   ۳) «📶 پیامک و پشتیبان‌گیری» (آبان ۱۴۰۵): درگاه پیامک، پلِ سرورِ شرکت، اعتبارِ پنل، آخرین پشتیبان‌گیریِ شبانه و «📨 پیامک آزمایشی».
    ============================================================ */
 (function () {
   "use strict";
@@ -92,7 +93,10 @@
 .sp-tr i{position:absolute;top:2px;inset-inline-start:2px;width:20px;height:20px;border-radius:50%;background:linear-gradient(180deg,#fff,#d6e2ff);box-shadow:0 2px 6px rgba(0,0,0,.4);transition:inset-inline-start .3s cubic-bezier(.34,1.3,.4,1)}
 .sp-sw[aria-checked="true"] .sp-tr{background:linear-gradient(135deg,#22c55e,#15a34a);border-color:rgba(110,231,183,.6);box-shadow:0 0 14px -3px rgba(34,197,94,.75)}
 .sp-sw[aria-checked="true"] .sp-tr i{inset-inline-start:22px}
-.sp-sw:focus-visible{outline:2px solid #4f8cff;outline-offset:2px;border-radius:10px}`;
+.sp-sw:focus-visible{outline:2px solid #4f8cff;outline-offset:2px;border-radius:10px}
+.sp-val{font-size:.85rem;color:#c8d6f5;text-align:end}
+.sp-ok{color:#7ee0a8}.sp-bad{color:#ffa8a8}
+.sp-box #sp-to{width:150px;letter-spacing:.06em;direction:ltr}`;
     document.head.appendChild(s);
   }
 
@@ -127,6 +131,7 @@
       ${rows}
       <div class="sp-fx"><h4>جلوه‌های پنل‌های تدارکات</h4>
         ${FX.map(([k, t, sub]) => `<button class="sp-sw" role="switch" aria-checked="${(state.fx || {})[k] !== false}" data-fx="${k}"><span class="sp-tr"><i></i></span><span class="sp-name">${t}<small>${sub}</small></span></button>`).join("")}</div>
+      <div class="sp-fx" id="sp-sms"><h4>📶 پیامک و پشتیبان‌گیری</h4><div data-sms>${smsView()}</div></div>
       <div class="sp-foot">
         <span style="flex:1;font-size:.9rem">${state.hasPass ? "تغییر رمز تب" : "تعریف رمز تب"}</span>
         <input type="password" inputmode="numeric" autocomplete="off" id="sp-pass" placeholder="۴ رقم" maxlength="4" />
@@ -134,6 +139,37 @@
         <button class="sp-btn ghost" data-act="close">بستن</button>
       </div>
       <div class="sp-msg"></div>`;
+  }
+
+  /* ---------- پیامک و پشتیبان‌گیری (worker/site.js:siteSms) — پلِ پیامکِ سرورِ شرکت و نسخهٔ پشتیبانِ شبانه ---------- */
+  let sms = null, smsAt = 0;
+  const fa = (n) => Number(n || 0).toLocaleString("fa-IR");
+  const ago = (s) => (s == null ? "—" : s < 90 ? `${fa(s)} ثانیه پیش` : s < 5400 ? `${fa(Math.round(s / 60))} دقیقه پیش` : `${fa(Math.round(s / 3600))} ساعت پیش`);
+  const line = (k, v, sub) => `<div class="sp-row"><span class="sp-name">${k}${sub ? `<small>${sub}</small>` : ""}</span><span class="sp-val">${v}</span></div>`;
+  function smsView() {
+    if (!sms) return `<div class="sp-row"><span class="sp-name"><small>در حال خواندن…</small></span></div>`;
+    if (sms.error) return line("وضعیت", `<span class="sp-bad">${esc(sms.error)}</span>`);
+    const R = sms.relay, bk = R && R.backup;
+    return line("درگاه پیامک", sms.ready ? `<span class="sp-ok">✅ ${esc(sms.label)}</span>` : `<span class="sp-bad">وصل نیست</span>`, sms.from ? `خط فرستنده <bdi dir="ltr">${esc(sms.from)}</bdi>` : "")
+      + (R ? line("پل پیامک · سرورِ شرکت", R.live ? `<span class="sp-ok">✅ وصل است</span>` : `<span class="sp-bad">${R.seen ? "قطع است" : "هنوز وصل نشده"}</span>`, `آخرین تماس: ${ago(R.age_s)}${R.queued ? ` · در صف: ${fa(R.queued)}` : ""}`)
+        + line("اعتبار پنل", R.credit == null ? "—" : fa(Math.round(R.credit)), R.credit_error ? esc(R.credit_error) : "")
+        + line("آخرین پشتیبان‌گیری", bk && bk.at ? `${bk.ok ? "✅" : "⚠️"} ${esc(new Date(bk.at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }))}` : "هنوز انجام نشده",
+          bk && bk.at ? (bk.ok ? `${fa(bk.tables)} جدول · ${fa(bk.rows)} ردیف · هر شب ساعت ۴ صبح` : esc(bk.error || "")) : "هر شب ساعت ۴ صبح روی سرورِ شرکت") : "")
+      + `<div class="sp-row"><span class="sp-name">📨 پیامک آزمایشی<small>یک پیامکِ واقعی به همین شماره</small></span>
+          <input type="tel" inputmode="tel" autocomplete="off" id="sp-to" placeholder="۰۹۱۲…" /><button class="sp-opt" data-act="smstest" ${sms.ready ? "" : "disabled"}>بفرست</button></div>`;
+  }
+  async function loadSms(force) {
+    if (!force && sms && Date.now() - smsAt < 20000) return;
+    try { sms = await api("/site/sms", { auth: true }); } catch (e) { sms = { error: e.message }; }
+    smsAt = Date.now();
+    const el = box && box.querySelector("[data-sms]");
+    if (el) el.innerHTML = smsView();
+  }
+  async function smsTest() {
+    const i = box.querySelector("#sp-to"), to = ascii(i && i.value);
+    if (!to) return msg("شماره را بنویسید.", true);
+    try { const r = await api("/site/sms/test", { auth: true, body: { to } }); msg(r.relay ? "به صفِ پلِ سرورِ شرکت رفت؛ چند ثانیهٔ دیگر می‌رسد ✓" : "فرستاده شد ✓"); }
+    catch (e) { msg(e.message, true); }
   }
 
   function draw(view) {
@@ -148,7 +184,8 @@
     }
     box.querySelector(".sp-box").innerHTML = view;
     const first = box.querySelector("input");
-    if (first) first.focus();
+    if (first && first.id !== "sp-to") first.focus();
+    if (box.querySelector("[data-sms]")) loadSms();
   }
 
   async function unlock(c) {
@@ -217,6 +254,7 @@
     if (b.dataset.act === "close") return close();
     if (b.dataset.act === "unlock") { const i = box.querySelector("#sp-code"); return unlock((i.value || "").trim()); }
     if (b.dataset.act === "pass") { const i = box.querySelector("#sp-pass"); return savePass((i.value || "").trim()); }
+    if (b.dataset.act === "smstest") return smsTest();
     if (b.dataset.fx) return setFx(b.dataset.fx, b.getAttribute("aria-checked") !== "true");
     if (b.dataset.dept) return setCard(b.dataset.dept, b.dataset.state);
   });
@@ -224,6 +262,7 @@
     if (e.key !== "Enter" || !box) return;
     if (e.target.id === "sp-code") { e.preventDefault(); unlock((e.target.value || "").trim()); }
     if (e.target.id === "sp-pass") { e.preventDefault(); savePass((e.target.value || "").trim()); }
+    if (e.target.id === "sp-to") { e.preventDefault(); smsTest(); }
   });
 
   /* وضعیت‌ها را همان اول می‌گیریم؛ اگر سرور در دسترس نبود، همان چیزی که در HTML است می‌ماند */
