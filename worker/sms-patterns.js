@@ -19,11 +19,24 @@ const company = (env) => T(env && env.COMPANY) || "تونل سد آریانا";
 const site = (env) => T(env && env.SITE_ORIGIN) || "https://arianaai.website";
 /** مقدارِ متغیرِ الگو: یک خط و حداکثر ۴۰ نویسه */
 export const cut = (v, n = 40) => { const s = T(v).replace(/\s+/g, " "); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
+/** متغیرِ عددی (IPPanel «params.x باید از نوع عددی باشد»): فقط رقمِ لاتین */
+const digits = (v) => T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\D/g, "").slice(0, 12);
+/** ساعتِ تهران به شکلِ عددِ HHMM (برای الگوی test) */
+export function tehranCode(t = Date.now()) {
+  try {
+    const p = new Intl.DateTimeFormat("en-GB", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(t));
+    return `${p.find((x) => x.type === "hour").value}${p.find((x) => x.type === "minute").value}`;
+  } catch (_) { return new Date(t).toISOString().slice(11, 16).replace(":", ""); }
+}
 
 /** متنِ آغازِ پیامکِ دعوتِ تأمین‌کننده (استعلام، کارشناس هوشمند، فراخوانِ پیش‌فاکتور) — همان متنِ الگوی invite */
 export const buyIntro = (env) => `شرکت ${company(env)} درخواست خرید دارد.`;
 
-/** تعریف‌ها: key، نامِ فارسی برای پنل، متن با %متغیر% و فهرستِ متغیرها */
+/**
+ * تعریف‌ها: key، نامِ فارسی برای پنل، متن با %متغیر%، فهرستِ متغیرها و types (متغیرِ عددی: integer).
+ * پاسخِ IPPanel در ۸ آبان: otp، invite، thanks و test تأیید؛ tender_invite، tender_note و report «نیازمندِ معرفی‌نامه از راهِ تیکت»؛
+ * alarm «متن پترن نمی‌تواند متغیر ثبت شود» (عنوانِ آزاد) — حالا فقط کدِ عددی دارد؛ test را IPPanel عددی کرد — حالا کدِ عددیِ ساعت.
+ */
 function raw(env) {
   const co = company(env), s = site(env);
   return [
@@ -37,10 +50,10 @@ function raw(env) {
       message: `شرکت ${co} — مناقصهٔ خرید: %note%\n${s}${TENDER_PATH_}#t=%code%` },
     { key: "thanks", fa: "تشکر بعد از کمیسیون", vars: ["req"],
       message: `شرکت ${co}: از پیشنهادتان برای استعلام %req% سپاسگزاریم. این بار خرید از تأمین‌کنندهٔ دیگری انجام شد؛ امیدواریم در خریدهای بعدی همکاری کنیم.` },
-    { key: "alarm", fa: "هشدار و اعلان به همکاران", vars: ["title"],
-      message: `هشدار سامانه تأمین شرکت ${co}: %title%` },
-    { key: "test", fa: "پیامک آزمایشی", vars: ["time"],
-      message: `پیامک آزمایشی سامانه تأمین شرکت ${co} — ساعت %time%` },
+    { key: "alarm", fa: "هشدار و اعلان به همکاران", vars: ["code"], types: { code: "integer" },
+      message: `هشدار سامانه تأمین شرکت ${co}: موردی نیاز به بررسی دارد؛ جزئیات در پنل‌های سامانه. کد پیگیری: %code%` },
+    { key: "test", fa: "پیامک آزمایشی", vars: ["code"], types: { code: "integer" },
+      message: `پیامک آزمایشی سامانه تأمین شرکت ${co} — کد %code%` },
     { key: "report", fa: "گزارش سامانه", vars: ["status"],
       message: `گزارش سامانه تأمین شرکت ${co}: %status%` },
   ];
@@ -53,7 +66,8 @@ function hash(s) {
 }
 /** تعریف‌ها با hash — همان چیزی که GET /relay/patterns به پل می‌دهد */
 export function patternDefs(env) {
-  return raw(env).map((d) => ({ ...d, hash: hash(`${d.message}|${d.vars.join(",")}`),
+  /* hashِ الگوهای بی types همان قبلی می‌ماند (otp، invite و thanks تأییدشده‌اند و نباید دوباره ساخته شوند) */
+  return raw(env).map((d) => ({ ...d, types: d.types || {}, hash: hash(`${d.message}|${d.vars.join(",")}${d.types ? `|${JSON.stringify(d.types)}` : ""}`),
     title: `ariana-${d.key}`, description: `سامانه تأمین شرکت ${company(env)} — ${d.fa}` }));
 }
 export const PATTERN_KEYS = ["otp", "invite", "tender_invite", "tender_note", "thanks", "alarm", "test", "report"];
@@ -78,7 +92,7 @@ export async function activePattern(env, opts = {}) {
   const st = (await patternStates(env))[want.key];
   if (!st || st.status !== "active" || !T(st.code) || st.hash !== def.hash) return null;
   const params = {};
-  for (const v of def.vars) params[v] = cut(want.params && want.params[v]);
+  for (const v of def.vars) params[v] = def.types[v] === "integer" ? digits(want.params && want.params[v]) : cut(want.params && want.params[v]);
   if (def.vars.some((v) => !params[v])) return null;
   return { key: def.key, code: T(st.code), params };
 }

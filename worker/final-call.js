@@ -349,7 +349,7 @@ async function alertExpert(env, asg, call, s) {
     + `شماره‌اش را در پنل کارشناس بدهید تا پیامک برود، یا خودتان خبرش کنید و پیش‌فاکتورِ رسمی‌اش را تا ${when(call.deadline_at)} همان‌جا بارگذاری کنید.`;
   const via = [];
   if (asg.expert_phone && smsReady(env)) {
-    try { await sendSms(env, asg.expert_phone, text, { pattern: { key: "alarm", params: { title: `فراخوان ${asg.request_id}: شمارهٔ ${s.supplier_name} نیست` } } }); via.push("sms"); }
+    try { await sendSms(env, asg.expert_phone, text, { pattern: { key: "alarm", params: { code: String(asg.id) } } }); via.push("sms"); }
     catch (e) { console.error("expert sms", e && e.message); }
   }
   if (asg.telegram_chat && env.TG_BOT_TOKEN) {

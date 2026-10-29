@@ -229,10 +229,18 @@ test("الگوهای IPPanel: تعریف برای پل؛ فقط الگوی «act
   await sendSms(env, "09121234567", "رمز ورود: 654321", { otp: "654321" });
   j = await last();
   assert.deepEqual([j.body.code, j.body.params], ["potp", { code: "654321" }]);
-  await sendSms(env, "09121234567", "x", { pattern: { key: "alarm", params: { title: "ا".repeat(60) } } });
+  /* متغیرِ عددی (IPPanel: «params.x باید از نوع عددی باشد»): فقط رقمِ لاتین؛ بی رقم یعنی همان متن */
+  assert.deepEqual([def("alarm").vars, def("alarm").types, def("test").types], [["code"], { code: "integer" }, { code: "integer" }]);
+  await sendSms(env, "09121234567", "هشدار کامل", { pattern: { key: "alarm", params: { code: "۱۲۳" } } });
   j = await last();
-  assert.equal(j.body.params.title.length, 40);
-  assert.ok(j.body.params.title.endsWith("…"));
+  assert.deepEqual([j.body.code, j.body.params, j.body._text], ["pal", { code: "123" }, "هشدار کامل"], "متنِ کامل کنارِ الگو برای پل");
+  await sendSms(env, "09121234567", "x", { pattern: { key: "alarm", params: { code: "بی رقم" } } });
+  assert.equal((await last()).body.sending_type, "webservice");
+  await sendSms(env, "09121234567", "x", { pattern: { key: "otp", params: { code: "ا".repeat(60) } } });
+  j = await last();
+  assert.equal(j.body.params.code.length, 40, "متغیرِ متنی حداکثر ۴۰ نویسه");
+  assert.ok(j.body.params.code.endsWith("…"));
+  assert.match(relayTestPattern(Date.UTC(2026, 9, 28, 12, 30)).params.code, /^1600$/, "ساعتِ تهران، عددی");
   const s = (await call("/support/sms", { headers: SUP })).data.relay.patterns;
   assert.deepEqual(["otp", "alarm", "invite"].map((k) => s.find((p) => p.key === k).status), ["active", "active", "none"], "هر تپش فهرستِ کامل است");
   await sync({ beat: { credit: 10, patterns: {} } });

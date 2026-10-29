@@ -30,7 +30,7 @@ import time
 import urllib.error
 import urllib.request
 
-VER = "2"
+VER = "3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
 SITE = CFG.get("site", "https://arianaai.website").rstrip("/")
@@ -155,7 +155,8 @@ def norm_status(d):
 def patterns_tick():
     """تعریف‌ها از سامانه، ساختنِ الگوی تازه در IPPanel، پرسیدنِ وضعیت؛ تا وقتی الگویی منتظر است هر ۳ دقیقه، بعد هر ۳۰ دقیقه"""
     rep = _pat["report"]
-    wait = 180 if not rep or any(v.get("status") != "active" for v in rep.values()) else 1800
+    # تا الگویی «در انتظار» است هر ۳ دقیقه؛ وگرنه (همه فعال یا ردشده) هر ۳۰ دقیقه
+    wait = 180 if not rep or any(v.get("status") == "pending" for v in rep.values()) else 1800
     if time.time() - _pat["at"] < wait:
         return
     _pat["at"] = time.time()
@@ -175,7 +176,7 @@ def patterns_tick():
         if s.get("hash") == d["hash"] and (s.get("code") or time.time() - s.get("tried", 0) < 3600):
             continue
         body = {"title": f'{d["title"]}-{d["hash"]}', "description": d["description"], "is_share": False, "message": d["message"],
-                "variable": [{"name": v, "type": "string"} for v in d["vars"]], "website": SITE}
+                "variable": [{"name": v, "type": (d.get("types") or {}).get(v, "string")} for v in d["vars"]], "website": SITE}
         try:
             st, j, txt = http("POST", f"{IP_BASE}/api/patterns/normal", body, {"Authorization": IP_KEY})
         except Exception as e:
@@ -231,28 +232,40 @@ def send_one(c, job):
     if c.execute("SELECT 1 FROM sms WHERE job_id=?", (jid,)).fetchone():
         log.warning("job %s already in history; not sending again", jid)
         return
-    b = job.get("body") or {}
+    b = dict(job.get("body") or {})
+    fallback = b.pop("_text", None)  # متنِ کاملِ همان پیامک، اگر IPPanel الگو را نپذیرفت
     params = b.get("params") or {}
     kind = str(job.get("kind") or b.get("sending_type") or "")
     pkey = kind.split(":", 1)[1] if kind.startswith("pattern:") else None
     to = ",".join(b.get("recipients") or params.get("recipients") or [job.get("phone") or ""])
-    message = b.get("message") or (render(pkey, params) if pkey else None)
+    message = b.get("message") or (render(pkey, params) if pkey else None) or fallback
     row = {"job_id": jid, "queued_at": job.get("at"), "to_number": to, "from_number": b.get("from_number"), "kind": b.get("sending_type"),
            "message": message, "pattern_code": b.get("code"), "pattern_key": pkey,
            "params": json.dumps(params if b.get("sending_type") == "pattern" else {}, ensure_ascii=False)}
-    try:
-        status, js, text = http("POST", f"{IP_BASE}/api/send", b, {"Authorization": IP_KEY})
+
+    def attempt(body):
+        status, js, text = http("POST", f"{IP_BASE}/api/send", body, {"Authorization": IP_KEY})
         meta = (js or {}).get("meta") or {}
-        dd = data_of(js) or {}
-        ids = dd.get("message_outbox_ids") or []
+        ids = (data_of(js) or {}).get("message_outbox_ids") or []
         if 200 <= status < 300 and meta.get("status") is not False and (meta.get("status") is True or ids):
-            row.update(ok=1, ippanel_id=str(ids[0]) if ids else None, http_status=status, code=None, error=None)
-        elif 200 <= status < 300 and meta.get("status") is not False:
-            row.update(ok=0, ippanel_id=None, http_status=status, code="error", error="پیامک فرستاده نشد (پاسخِ نامفهومِ IPPanel)")
-        else:
-            code, err = ip_error(status, js)
-            row.update(ok=0, ippanel_id=None, http_status=status, code=code, error=err)
-        row["response"] = text[:2000]
+            return dict(ok=1, ippanel_id=str(ids[0]) if ids else None, http_status=status, code=None, error=None, response=text[:2000])
+        if 200 <= status < 300 and meta.get("status") is not False:
+            return dict(ok=0, ippanel_id=None, http_status=status, code="error", error="پیامک فرستاده نشد (پاسخِ نامفهومِ IPPanel)", response=text[:2000])
+        code, err = ip_error(status, js)
+        return dict(ok=0, ippanel_id=None, http_status=status, code=code, error=err, response=text[:2000])
+
+    try:
+        res = attempt(b)
+        # الگو هنگامِ فرستادن رد شد (نوعِ متغیر، الگوی غیرفعال…) و پیامک نرفته: همان پیامک با متنِ کامل
+        if not res["ok"] and res["code"] == "rejected" and b.get("sending_type") == "pattern" and fallback:
+            log.warning("job %s pattern %s refused (%s); sending full text", jid, pkey, res["error"])
+            first = res["error"]
+            res = attempt({"sending_type": "webservice", "from_number": b.get("from_number"), "message": fallback, "params": {"recipients": b.get("recipients") or []}})
+            row.update(kind="webservice", message=fallback)
+            if res["ok"]:
+                res["error"] = None
+            row["params"] = json.dumps({"pattern_refused": first}, ensure_ascii=False)
+        row.update(res)
     except Exception as e:  # شبکه: دوباره نمی‌فرستیم (شاید رفته باشد) — شکست گزارش می‌شود
         row.update(ok=0, ippanel_id=None, http_status=0, code="network", error=f"درگاه پیامک در دسترس نبود: {str(e)[:120]}", response=None)
     row["sent_at"] = now_ms()

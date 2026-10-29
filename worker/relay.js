@@ -15,7 +15,7 @@
  *     نسخهٔ SQLite از همهٔ جدول‌ها می‌سازد (scripts/vps/backup.py).
  */
 import { HttpError } from "./http.js";
-import { patternDefs, patternStates } from "./sms-patterns.js";
+import { patternDefs, patternStates, tehranCode } from "./sms-patterns.js";
 
 export const RELAY_DDL = `
 CREATE TABLE IF NOT EXISTS sms_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, phone TEXT NOT NULL, body TEXT, kind TEXT, sp_sms_id INTEGER, status TEXT NOT NULL DEFAULT 'queued', claimed_at INTEGER, done_at INTEGER, ref TEXT, error TEXT);
@@ -74,7 +74,7 @@ export async function relayEnqueue(env, phone, body, opts = {}) {
 /** GET /relay/patterns — تعریفِ الگوهای پیامک (worker/sms-patterns.js) برای ساختن در IPPanel به دستِ پل */
 export function relayPatterns(env, request) {
   relayAuth(env, request);
-  return { patterns: patternDefs(env).map(({ key, fa, title, description, message, vars, hash }) => ({ key, fa, title, description, message, vars, hash })) };
+  return { patterns: patternDefs(env).map(({ key, fa, title, description, message, vars, types, hash }) => ({ key, fa, title, description, message, vars, types, hash })) };
 }
 
 /** وضعیتِ الگوها برای پنل‌ها: [{key, fa, status, status_fa, reject}] — status: active | pending | rejected | error | none */
@@ -171,8 +171,8 @@ function tehranHM(t) {
 }
 /** متنِ «پیامک آزمایشی» با ساعتِ تهران */
 export const relayTestText = (t = now()) => `پیامک آزمایشی سامانهٔ تأمین آریانا — ساعت ${tehranHM(t)}`;
-/** الگوی همان پیامک (worker/sms-patterns.js، کلیدِ test) */
-export const relayTestPattern = (t = now()) => ({ key: "test", params: { time: tehranHM(t) } });
+/** الگوی همان پیامک (worker/sms-patterns.js، کلیدِ test) — IPPanel متغیرش را عددی کرد: ساعتِ تهران به شکلِ HHMM */
+export const relayTestPattern = (t = now()) => ({ key: "test", params: { code: tehranCode(t) } });
 
 /** وضعیتِ پل برای پنل پشتیبانی — بی هیچ کلید */
 export async function relayStatus(env) {

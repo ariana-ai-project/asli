@@ -166,7 +166,8 @@ const ippanel = {
     const kind = ap ? `pattern:${ap.key}` : body.sending_type;
     if (relayOn(env)) {
       let id;
-      try { id = await relayEnqueue(env, num, body, { ...opts, kind }); }
+      /* _text: اگر IPPanel الگو را هنگامِ فرستادن نپذیرفت (مثلاً نوعِ متغیر)، پل همان پیامک را با متنِ کامل می‌فرستد؛ پیش از فرستادن برداشته می‌شود */
+      try { id = await relayEnqueue(env, num, ap ? { ...body, _text: text } : body, { ...opts, kind }); }
       catch (e) { throw new SmsError(String((e && e.message) || e).slice(0, 200), (e && e.code) || "error"); }
       return { ok: true, provider: "ippanel", ref: `q${id}`, to: num, relay: true, ...(body.sending_type === "pattern" ? { pattern: true } : {}) };
     }

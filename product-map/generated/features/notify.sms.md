@@ -6,7 +6,7 @@
 
 ## فایل‌های این قابلیت (صاحب)
 - `worker/relay.js` — RELAY_DDL، RELAY_EXPIRE_MS، RELAY_FRESH_MS، RELAY_STALE_MS، relayAuth، relayBackupRows، relayBackupSchema، relayCheck، relayEnqueue، relayOn، relayPatterns، relayStatus، relaySync، relayTestPattern، relayTestText، relayWatch
-- `worker/sms-patterns.js` — PATTERN_KEYS، activePattern، buyIntro، cut، patternDefs، patternStates، renderPattern
+- `worker/sms-patterns.js` — PATTERN_KEYS، activePattern، buyIntro، cut، patternDefs، patternStates، renderPattern، tehranCode
 - `worker/sms.js` — BIDI، SmsError، e164، garbled، isMobile، lineE164، phoneChars، sendSms، smsCheck، smsEnvWith، smsLabel، smsProvider، smsReady، smsStatus، viaLabel، viaSent
 
 ## مسیرهای سرور (5)
