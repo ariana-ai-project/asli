@@ -15,7 +15,7 @@ import * as P from "./sp-push.js";
 import { smsReady, sendSms, viaSent } from "./sms.js";
 
 /**
- * s: {smsId, expertId, expertChat, threadId, supplier, to, label, text, otp, panel, bot, hold, kind: "rfq" | "pass"}
+ * s: {smsId, expertId, expertChat, threadId, supplier, to, label, text, otp, pattern, panel, bot, hold, kind: "rfq" | "pass" | "final"}
  *    otp: رمزِ همین پیامک وقتی خودش «پیامکِ رمز» است — درگاهی که الگوی رمز دارد فقط همان را با الگو می‌فرستد (sms.js)
  * opts.sim: "push" (پیش‌فرض) — اگر پیامک نرفت، شبیه‌سازی در بات مکاتبات؛ "none" — صدازننده خودش متن را نشان می‌دهد.
  * opts.pointer: اگر کارشناس بات مکاتبات را وصل نکرده، بات کارشناسان لینکِ اتصال را بدهد (پیش‌فرض: بله).
@@ -27,7 +27,8 @@ export async function deliverSms(env, s, opts = {}) {
   if (s.hold) { via = "hold"; status = "held"; }
   else if (s.to !== C.RESERVED_PHONE && smsReady(env)) {
     /* smsId: با پلِ پیامک (worker/relay.js) نتیجهٔ دیرآمده روی همین ردیف می‌نشیند */
-    try { const r = await sendSms(env, s.to, s.text, { ...(s.otp ? { otp: s.otp } : {}), smsId: s.smsId }); via = r.provider; status = "queued"; ref = r.ref; }
+    /* pattern: الگوی IPPanelِ همین پیامک (worker/sms-patterns.js) — تا تأیید نشده همان متن می‌رود */
+    try { const r = await sendSms(env, s.to, s.text, { ...(s.otp ? { otp: s.otp } : {}), ...(s.pattern ? { pattern: s.pattern } : {}), smsId: s.smsId }); via = r.provider; status = "queued"; ref = r.ref; }
     catch (e) { error = String((e && e.message) || e).slice(0, 300); status = "failed"; }
   }
   let pushed = 0, where = "";

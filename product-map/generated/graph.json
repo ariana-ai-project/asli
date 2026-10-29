@@ -2522,11 +2522,13 @@
    "places": [],
    "files": [
     "worker/relay.js",
+    "worker/sms-patterns.js",
     "worker/sms.js"
    ],
    "endpoints": [
     "GET /relay/backup/rows",
     "GET /relay/backup/schema",
+    "GET /relay/patterns",
     "POST /relay/sync",
     "POST /relay/test"
    ],
@@ -2537,6 +2539,7 @@
    ],
    "tables": {
     "w": [
+     "alarms",
      "settings",
      "sms_outbox",
      "sp_sms"
@@ -5393,6 +5396,7 @@
   "worker/sheets.js": "expert.comm",
   "worker/site.js": "infra.site",
   "worker/size.js": "support.size",
+  "worker/sms-patterns.js": "notify.sms",
   "worker/sms.js": "notify.sms",
   "worker/sp-ai.js": "sup.panel",
   "worker/sp-api.js": "sup.panel",
@@ -6783,6 +6787,21 @@
    ],
    "uses": [
     "worker/relay.js#relayBackupSchema"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "GET /relay/patterns",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "notify.sms"
+   ],
+   "uses": [
+    "worker/relay.js#relayPatterns"
    ],
    "tables": {
     "r": [],
@@ -9217,6 +9236,7 @@
     "notify.sms"
    ],
    "uses": [
+    "worker/alarms.js#raiseAlarm",
     "worker/relay.js#relaySync"
    ],
    "tables": {
@@ -9234,6 +9254,7 @@
    "uses": [
     "worker/http.js#HttpError",
     "worker/relay.js#relayAuth",
+    "worker/relay.js#relayTestPattern",
     "worker/relay.js#relayTestText",
     "worker/sms.js#sendSms"
    ],
@@ -10125,6 +10146,7 @@
    ],
    "uses": [
     "worker/http.js#HttpError",
+    "worker/relay.js#relayTestPattern",
     "worker/relay.js#relayTestText",
     "worker/sms.js#sendSms"
    ],

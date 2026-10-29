@@ -21,7 +21,7 @@
 |---|---|---|---|
 | [support.td](../features/support.td.md) | 🔨 مناقصه | 24 | 8 |
 | [engine.tender](../features/engine.tender.md) | موتور مناقصه | 0 | 2 |
-| [notify.sms](../features/notify.sms.md) | پیامک | 4 | 3 |
+| [notify.sms](../features/notify.sms.md) | پیامک | 5 | 3 |
 
 ## گام 3 — ورود تأمین‌کننده با رمز پیامکی
 
@@ -54,7 +54,7 @@
 
 ## جدول‌هایی که این جریان می‌نویسد
 
-alerts، assignments، commission_notes، commission_results، counters، decisions، events، fm_choice، items، letters، outbox، proformas، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sms_outbox، sp_sms، sp_tg، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders، tg_flows، tg_nav، tg_uploads
+alarms، alerts، assignments، commission_notes، commission_results، counters، decisions، events، fm_choice، items، letters، outbox، proformas، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sms_outbox، sp_sms، sp_tg، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders، tg_flows، tg_nav، tg_uploads
 
 ## همهٔ تست‌های این جریان (29)
 

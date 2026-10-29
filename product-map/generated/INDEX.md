@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 77 قابلیت در 13 بخش | 156 فایل | 350 مسیر (265 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
+آمار: 77 قابلیت در 13 بخش | 157 فایل | 351 مسیر (266 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -161,7 +161,7 @@
 |---|---|---|---|---|
 | [notify.alarms](features/notify.alarms.md) | هشدارها | w/alarms.js | 0 | 1 |
 | [notify.push](features/notify.push.md) | اعلان مرورگر (Push) | push-sw.js، w/push.js | 5 | 4 |
-| [notify.sms](features/notify.sms.md) | پیامک | w/relay.js، w/sms.js | 4 | 3 |
+| [notify.sms](features/notify.sms.md) | پیامک | w/relay.js، w/sms-patterns.js، w/sms.js | 5 | 3 |
 | [notify.telegram](features/notify.telegram.md) | ارسال تلگرام و صف پیام | w/queue.js، w/telegram.js | 1 (1) | 1 |
 
 ### سندسازی (Word، Excel) (doc)

@@ -204,7 +204,7 @@ test("مکاتبات با IPPanel: استعلام پیامکِ ساده؛ «ار
   const [s1] = sends(n);
   assert.equal(s1.body.sending_type, "webservice");
   assert.deepEqual(s1.body.params.recipients, ["+989121234567"]);
-  assert.match(s1.body.message, /^سلام، استعلام\.[\s\S]*supplier#k=[0-9a-f]{12}[\s\S]*رمز ورود: \d{6}/);
+  assert.match(s1.body.message, /^شرکت .+ درخواست خرید دارد\.[\s\S]*supplier#k=[0-9a-f]{12}[\s\S]*رمز ورود: \d{6}/);
   assert.deepEqual([r.data.sms.sent, r.data.sms.via, r.data.sms.text], [true, "ippanel", undefined], "رفت؛ متنِ با رمز به کارشناس برنمی‌گردد");
   const row = DB.raw.prepare("SELECT * FROM sp_sms ORDER BY id DESC LIMIT 1").get();
   assert.deepEqual([row.via, row.status, row.error], ["ippanel", "queued", null]);

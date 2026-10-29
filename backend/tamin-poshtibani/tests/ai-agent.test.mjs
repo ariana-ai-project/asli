@@ -161,7 +161,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   const sms = smsTo(n);
   assert.equal(sms.length, 1, "یک پیامک");
   assert.deepEqual(sms[0].body.recipients, ["+989121112222"]);
-  assert.match(sms[0].body.message, /^استعلام قیمت شرکت/);
+  assert.match(sms[0].body.message, /^شرکت .+ درخواست خرید دارد\./, "پیامک کالا را نمی‌گوید");
   assert.match(sms[0].body.message, /supplier#k=[0-9a-f]{12}/);
   assert.match(sms[0].body.message, /رمز ورود: \d{6}/);
   S.k = /#k=([0-9a-f]{12})/.exec(sms[0].body.message)[1];

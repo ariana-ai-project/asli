@@ -147,7 +147,9 @@ test("ارسال به تأمین‌کنندهٔ آزمون: گفت‌وگو، خ
   assert.equal(r.status, 200, JSON.stringify(r.data));
   assert.equal(r.data.added, 2);
   assert.deepEqual([r.data.supplier.name, r.data.supplier.demo], [TS.supplier_name, undefined], "تأمین‌کنندهٔ معمولی؛ نشانِ «فرضی» دیگر نیست");
-  assert.match(r.data.sms.text, /^سلام، استعلام داریم\./);
+  /* پیامک کالا را نمی‌گوید، فقط «درخواست خرید دارد» (درخواست مالک، ۸ آبان ۱۴۰۵)؛ متنِ کارشناس اولین پیامِ گفت‌وگوست */
+  assert.match(r.data.sms.text, /^شرکت .+ درخواست خرید دارد\.\n/);
+  assert.doesNotMatch(r.data.sms.text, /سلام، استعلام داریم/);
   assert.match(r.data.sms.text, /🔗 پنل تأمین‌کننده: https:\/\/site\.test\/tamin-poshtibani\/supplier#k=[0-9a-f]{12}/);
   assert.match(r.data.sms.text, /🔑 رمز ورود: \d{6}/);
   S.tsK = keyOf(r.data.sms.text); S.tsPass = passOf(r.data.sms.text); S.th = r.data.thread_id;
@@ -1055,7 +1057,7 @@ test("پیامکِ واقعی با TextBee: استعلام و «ارسال رم�
     assert.match(tb[0].url, /\/api\/v1\/gateway\/send-sms$/);
     assert.equal(tb[0].headers["x-api-key"], "tbk");
     assert.deepEqual(tb[0].body.recipients, ["+989351112233"], "شماره به قالب بین‌المللی");
-    assert.match(tb[0].body.message, /^سلام، استعلام\./);
+    assert.match(tb[0].body.message, /^شرکت .+ درخواست خرید دارد\./);
     assert.match(tb[0].body.message, /supplier#k=[0-9a-f]{12}/);
     assert.match(tb[0].body.message, /رمز ورود: \d{6}/);
     assert.equal(r.data.sms.sent, true);

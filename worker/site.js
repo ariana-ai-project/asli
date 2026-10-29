@@ -12,7 +12,7 @@
 import { HttpError } from "./http.js";
 import { managerCode } from "./settings.js";
 import { smsStatus, sendSms } from "./sms.js";
-import { relayOn, relayStatus, relayTestText } from "./relay.js";
+import { relayOn, relayStatus, relayTestText, relayTestPattern } from "./relay.js";
 
 const KEY_CARDS = "siteCards";
 const KEY_PASS = "sitePassHash";
@@ -95,7 +95,7 @@ export async function siteSms(env, code) {
 /** «📨 پیامک آزمایشی» از همین تب: یک پیامکِ واقعی از درگاهِ فعال */
 export async function siteSmsTest(env, code, to) {
   await requireSite(env, code);
-  try { return await sendSms(env, to, relayTestText()); }
+  try { return await sendSms(env, to, relayTestText(), { pattern: relayTestPattern() }); }
   catch (e) { throw new HttpError(String((e && e.message) || e).slice(0, 300), 400); }
 }
 

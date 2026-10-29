@@ -30,6 +30,7 @@ import { limitsOf, combineLocks, violations, violationError, LIMIT_FA, limitsTxt
 import { stamp, mergeSrc } from "./quote-src.js";
 import { aiUsable, resolve, acceptable, lineKey, headKey } from "./sp-ai.js";
 import { phoneChars } from "./sms.js";
+import { buyIntro } from "./sms-patterns.js";
 import { aiThread, askAnswered, aiRejected, AI_THREAD_MSG, AI_WATCH_MSG, AI_ASK_SQL, AI_REJECTED_SQL, AI_SUP_SQL } from "./ai-lock.js";
 import { manualBundles, propsOf, getSup, supOfThread } from "./ai-supervise.js";
 import { BOXES, boxesOn } from "./critique.js";
@@ -367,13 +368,15 @@ function smsBody(env, { intro, k, bot, pass }) {
 const maskPass = (text, pass) => String(text).split(pass).join("••••••");
 /**
  * «📨 فراخوانِ پیش‌فاکتورِ رسمی» (worker/final-call.js): متنِ پیامک با لینکِ پنل، بات و رمزِ تازهٔ ورود — همان قالبِ پیامکِ استعلام.
- * stmts رمز را می‌نویسند (با همان batchِ ثبتِ پیامک)؛ masked همان متن بی رمز برای sp_sms.
+ * پیامک کالا و جزئیات را نمی‌گوید، فقط «شرکت … درخواست خرید دارد» (درخواست مالک، ۸ آبان ۱۴۰۵)؛ متنِ فراخوان در گفت‌وگوی پنل است.
+ * stmts رمز را می‌نویسند (با همان batchِ ثبتِ پیامک)؛ masked همان متن بی رمز برای sp_sms؛ pattern الگوی invite (worker/sms-patterns.js).
  */
-export async function smsWithLogin(env, phone, intro) {
+export async function smsWithLogin(env, phone) {
   const { pass, stmts } = await newPassword(env, phone.id);
   const bot = await spBotUser(env);
-  const text = smsBody(env, { intro, k: phone.k, bot, pass });
-  return { text, masked: maskPass(text, pass), stmts, panel: panelLink(env, phone.k), bot: botLink(bot, "s" + phone.k) };
+  const text = smsBody(env, { intro: buyIntro(env), k: phone.k, bot, pass });
+  return { text, masked: maskPass(text, pass), stmts, panel: panelLink(env, phone.k), bot: botLink(bot, "s" + phone.k),
+    pattern: { key: "invite", params: { k: phone.k, code: pass } } };
 }
 
 /** «ارسال رمز به پیامک» از صفحهٔ ورود یا بات. پیامک شبیه‌سازی‌شده به کارشناسِ آخرین گفت‌وگوی همین تأمین‌کننده می‌رود */
@@ -650,7 +653,8 @@ export async function spSend(env, ex, b) {
   const msgAt = stmts.length;
   for (const [who, kind, body, meta] of msgs) stmts.push(msgStmt(env, th.id, who, kind, body, meta, t));
   const bot = await spBotUser(env);
-  const smsTxt = smsBody(env, { intro: T(b.sms).slice(0, 600) || text || `استعلام قیمت از شرکت ${COMPANY(env)} — ${faN(fresh.length || its.length)} قلم`, k: ph.k, bot, pass });
+  /* پیامک کالا را نمی‌گوید، فقط «شرکت … درخواست خرید دارد» و لینک و رمز (درخواست مالک، ۸ آبان ۱۴۰۵)؛ متنِ کارشناس اولین پیامِ گفت‌وگوست */
+  const smsTxt = smsBody(env, { intro: buyIntro(env), k: ph.k, bot, pass });
   const smsAt = stmts.length;
   stmts.push(env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'rfq',?,?)").bind(ph.id, th.id, ex.id, maskPass(smsTxt, pass), t));
   const res = await env.DB.batch(stmts);
@@ -658,7 +662,9 @@ export async function spSend(env, ex, b) {
   return {
     ok: true, thread_id: th.id, request_id: asg.request_id, added: fresh.length, skipped: its.length - fresh.length,
     supplier: { id: sup.id, name: sup.name }, phone: { id: ph.id, phone: ph.phone, label: ph.label, k: ph.k },
-    sms: { id: res[smsAt].meta.last_row_id, to: ph.phone, label: ph.label, text: smsTxt }, links: { panel: panelLink(env, ph.k), bot: botLink(bot, "s" + ph.k) }, msgs: out,
+    /* pattern رمز را دارد: فقط برای فرستادن (sp-sms.js)، هرگز در پاسخِ پنل */
+    sms: { id: res[smsAt].meta.last_row_id, to: ph.phone, label: ph.label, text: smsTxt, pattern: { key: "invite", params: { k: ph.k, code: pass } } },
+    links: { panel: panelLink(env, ph.k), bot: botLink(bot, "s" + ph.k) }, msgs: out,
   };
 }
 

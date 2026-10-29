@@ -6,11 +6,15 @@ IPPanel از IPِ خارجی (و Cloudflare) جواب نمی‌دهد و سرو�
 POST {site}/tamin-poshtibani/api/relay/sync را می‌زند (worker/relay.js): نتیجهٔ پیامک‌های قبلی را می‌دهد، پیامک‌های تازهٔ صف را
 می‌گیرد و هر کدام را با کلیدِ IPPanel (فقط همین‌جا، در config.json) می‌فرستد.
 
-  • تاریخچهٔ کاملِ پیامک‌ها در sms-history.sqlite: متن، گیرنده، خط، الگو، شناسهٔ IPPanel، خطا و وضعیتِ تحویل
+  • تاریخچهٔ کاملِ پیامک‌ها در sms-history.sqlite: متن (پیامکِ الگو هم با متنِ کاملش)، گیرنده، خط، الگو، شناسهٔ IPPanel، خطا و
+    وضعیتِ تحویل
   • هر پیامک فقط یک بار: اول در تاریخچه ثبت می‌شود، بعد نتیجه به سامانه می‌رود؛ اگر برنامه وسطِ کار بیفتد، بعد از راه‌اندازیِ دوباره
     همان نتیجه گزارش می‌شود و پیامک دوباره فرستاده نمی‌شود
-  • تپشِ دقیقه‌ای: اعتبارِ پنل (هر ۵ دقیقه) و نتیجهٔ آخرین پشتیبان‌گیری (backup-status.json از backup.py)
-  • وضعیتِ تحویل: پیامک‌های ۴۸ ساعتِ اخیر هر ۱۰ دقیقه از گزارشِ IPPanel خوانده می‌شوند
+  • تپشِ دقیقه‌ای: اعتبارِ پنل (هر ۵ دقیقه)، نتیجهٔ آخرین پشتیبان‌گیری (backup-status.json از backup.py) و وضعیتِ الگوها
+  • الگوها (worker/sms-patterns.js): تعریف‌ها از GET /relay/patterns؛ هر الگوی تازه (یا متنِ عوض‌شده) در IPPanel ساخته می‌شود
+    (patterns.json) و وضعیتِ تأییدش پرسیده می‌شود — سامانه فقط الگوی «active» را به کار می‌برد
+  • وضعیتِ تحویل: پیامک‌های ۴۸ ساعتِ اخیر هر ۲ دقیقه از گزارشِ IPPanel خوانده می‌شوند؛ نتیجهٔ نهایی («پایان یافته» یا «رد شده»)
+    یک بار به سامانه می‌رود (deliveries) — «رد شده» آن‌جا «نرفت» و هشدار می‌شود
 
 اجرا: Cronِ کاربر هر دقیقه با flock (فقط یک نسخه؛ اگر بیفتد حداکثر یک دقیقه بعد برمی‌گردد) — scripts/vps/README.md.
 """
@@ -18,6 +22,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import signal
 import sqlite3
 import sys
@@ -25,16 +30,17 @@ import time
 import urllib.error
 import urllib.request
 
-VER = "1"
+VER = "2"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
 SITE = CFG.get("site", "https://arianaai.website").rstrip("/")
-SYNC = f"{SITE}/tamin-poshtibani/api/relay/sync"
+API = f"{SITE}/tamin-poshtibani/api/relay"
 IP_BASE = CFG.get("ippanel_base", "https://edge.ippanel.com/v1").rstrip("/")
 IP_KEY = CFG["ippanel_key"]
 RELAY_KEY = CFG["relay_key"]
 DB_PATH = os.path.join(HERE, "sms-history.sqlite")
 BACKUP_STATUS = os.path.join(HERE, "backup-status.json")
+PAT_FILE = os.path.join(HERE, "patterns.json")
 UA = f"ariana-sms-relay/{VER}"
 
 log = logging.getLogger("relay")
@@ -67,6 +73,13 @@ def db():
         job_id INTEGER PRIMARY KEY, queued_at INTEGER, sent_at INTEGER, to_number TEXT, from_number TEXT, kind TEXT,
         message TEXT, pattern_code TEXT, params TEXT, ok INTEGER, ippanel_id TEXT, http_status INTEGER, code TEXT, error TEXT,
         response TEXT, reported INTEGER NOT NULL DEFAULT 0, delivery_state TEXT, delivery_status TEXT, delivery_at INTEGER, delivery_raw TEXT)""")
+    cols = {r[1] for r in c.execute("PRAGMA table_info(sms)")}
+    if "delivery_reported" not in cols:
+        c.execute("ALTER TABLE sms ADD COLUMN delivery_final TEXT")
+        c.execute("ALTER TABLE sms ADD COLUMN delivery_reported INTEGER NOT NULL DEFAULT 0")
+        c.execute("UPDATE sms SET delivery_reported=1")  # پیامک‌های پیش از این نسخه دوباره گزارش نمی‌شوند
+    if "pattern_key" not in cols:
+        c.execute("ALTER TABLE sms ADD COLUMN pattern_key TEXT")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sms_sent ON sms(sent_at)")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sms_to ON sms(to_number, sent_at)")
     c.execute("CREATE INDEX IF NOT EXISTS ix_sms_unreported ON sms(reported) WHERE reported=0")
@@ -79,7 +92,7 @@ def http(method, url, body=None, headers=None, timeout=25):
     data = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
     h = {"Accept": "application/json", "User-Agent": UA, **(headers or {})}
     if data is not None:
-        h["Content-Type"] = "application/json"
+        h["Content-Type"] = "application/json; charset=utf-8"
     req = urllib.request.Request(url, data=data, method=method, headers=h)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as r:
@@ -91,6 +104,11 @@ def http(method, url, body=None, headers=None, timeout=25):
     except ValueError:
         js = None
     return status, js, text
+
+
+def data_of(js):
+    d = (js or {}).get("data")
+    return d if isinstance(d, dict) else None
 
 
 NO_CREDIT = ("عدم اعتبار", "عدم موجودی", "کافی نیست", "ناکافی", "موجودی حساب", "شارژ", "insufficient", "not enough credit", "low credit", "balance")
@@ -114,6 +132,99 @@ def ip_error(status, js):
     return code, f"{why} ({detail[:120] or status})"
 
 
+# ---------------------------------------------------------------- الگوها
+_pat = {"at": 0, "defs": {}, "report": {}}
+
+
+def load_state():
+    try:
+        return json.load(open(PAT_FILE, encoding="utf-8"))
+    except Exception:
+        return {}
+
+
+def norm_status(d):
+    s, fa = str(d.get("pattern_status") or "").lower(), str(d.get("pattern_status_fa") or "")
+    if s == "active" or fa == "فعال":
+        return "active"
+    if "reject" in s or "رد" in fa:
+        return "rejected"
+    return "pending"
+
+
+def patterns_tick():
+    """تعریف‌ها از سامانه، ساختنِ الگوی تازه در IPPanel، پرسیدنِ وضعیت؛ تا وقتی الگویی منتظر است هر ۳ دقیقه، بعد هر ۳۰ دقیقه"""
+    rep = _pat["report"]
+    wait = 180 if not rep or any(v.get("status") != "active" for v in rep.values()) else 1800
+    if time.time() - _pat["at"] < wait:
+        return
+    _pat["at"] = time.time()
+    try:
+        status, js, _ = http("GET", f"{API}/patterns", None, {"x-relay-key": RELAY_KEY})
+    except Exception as e:
+        log.info("patterns fetch: %s", e)
+        return
+    defs = {d["key"]: d for d in ((js or {}).get("patterns") or []) if isinstance(d, dict) and d.get("key")} if status == 200 else {}
+    if not defs:
+        return
+    _pat["defs"] = defs
+    state = load_state()
+    changed = False
+    for key, d in defs.items():
+        s = state.get(key) or {}
+        if s.get("hash") == d["hash"] and (s.get("code") or time.time() - s.get("tried", 0) < 3600):
+            continue
+        body = {"title": f'{d["title"]}-{d["hash"]}', "description": d["description"], "is_share": False, "message": d["message"],
+                "variable": [{"name": v, "type": "string"} for v in d["vars"]], "website": SITE}
+        try:
+            st, j, txt = http("POST", f"{IP_BASE}/api/patterns/normal", body, {"Authorization": IP_KEY})
+        except Exception as e:
+            log.warning("pattern %s create: %s", key, e)
+            continue
+        dd = data_of(j)
+        if 200 <= st < 300 and dd and dd.get("pattern_code"):
+            state[key] = {"hash": d["hash"], "code": dd["pattern_code"], "tried": time.time()}
+            log.info("pattern %s created: %s (%s)", key, dd["pattern_code"], dd.get("pattern_status"))
+        else:
+            state[key] = {"hash": d["hash"], "code": None, "tried": time.time(), "error": ip_error(st, j)[1]}
+            log.warning("pattern %s create failed: HTTP %s %s", key, st, (txt or "")[:300])
+        changed = True
+    if changed:
+        with open(PAT_FILE, "w", encoding="utf-8") as f:
+            json.dump(state, f, ensure_ascii=False, indent=1)
+    report = {}
+    for key, d in defs.items():
+        s = state.get(key) or {}
+        if s.get("hash") != d["hash"]:
+            continue
+        if not s.get("code"):
+            report[key] = {"code": None, "status": "error", "status_fa": "ساخته نشد", "reject": s.get("error"), "hash": d["hash"]}
+            continue
+        try:
+            st, j, _ = http("GET", f"{IP_BASE}/api/patterns/{s['code']}", None, {"Authorization": IP_KEY}, timeout=15)
+        except Exception as e:
+            log.info("pattern %s status: %s", key, e)
+            report[key] = (rep.get(key) or {"code": s["code"], "status": "pending", "hash": d["hash"]})
+            continue
+        dd = data_of(j)
+        if dd:
+            report[key] = {"code": s["code"], "status": norm_status(dd), "status_fa": dd.get("pattern_status_fa"),
+                           "reject": dd.get("reject_text") or dd.get("admin_comment"), "hash": d["hash"]}
+        else:
+            report[key] = {"code": s["code"], "status": "pending", "hash": d["hash"]}
+    if report != rep:
+        log.info("patterns: %s", ", ".join(f"{k}={v.get('status')}" for k, v in report.items()))
+    _pat["report"] = report
+
+
+def render(key, params):
+    d = _pat["defs"].get(key)
+    if not d:
+        return None
+    return re.sub(r"%(\w+)%", lambda m: str((params or {}).get(m.group(1), "")), d["message"])
+
+
+# ---------------------------------------------------------------- فرستادن
 def send_one(c, job):
     """یک پیامک — اول در تاریخچه، بعد نتیجه. پیامکی که قبلاً ثبت شده دوباره فرستاده نمی‌شود."""
     jid = int(job["id"])
@@ -122,14 +233,18 @@ def send_one(c, job):
         return
     b = job.get("body") or {}
     params = b.get("params") or {}
+    kind = str(job.get("kind") or b.get("sending_type") or "")
+    pkey = kind.split(":", 1)[1] if kind.startswith("pattern:") else None
     to = ",".join(b.get("recipients") or params.get("recipients") or [job.get("phone") or ""])
+    message = b.get("message") or (render(pkey, params) if pkey else None)
     row = {"job_id": jid, "queued_at": job.get("at"), "to_number": to, "from_number": b.get("from_number"), "kind": b.get("sending_type"),
-           "message": b.get("message"), "pattern_code": b.get("code"),
+           "message": message, "pattern_code": b.get("code"), "pattern_key": pkey,
            "params": json.dumps(params if b.get("sending_type") == "pattern" else {}, ensure_ascii=False)}
     try:
         status, js, text = http("POST", f"{IP_BASE}/api/send", b, {"Authorization": IP_KEY})
         meta = (js or {}).get("meta") or {}
-        ids = ((js or {}).get("data") or {}).get("message_outbox_ids") or [] if isinstance((js or {}).get("data"), dict) else []
+        dd = data_of(js) or {}
+        ids = dd.get("message_outbox_ids") or []
         if 200 <= status < 300 and meta.get("status") is not False and (meta.get("status") is True or ids):
             row.update(ok=1, ippanel_id=str(ids[0]) if ids else None, http_status=status, code=None, error=None)
         elif 200 <= status < 300 and meta.get("status") is not False:
@@ -144,12 +259,17 @@ def send_one(c, job):
     cols = list(row)
     c.execute(f"INSERT INTO sms ({','.join(cols)}) VALUES ({','.join('?' * len(cols))})", [row[k] for k in cols])
     c.commit()
-    log.info("job %s -> %s %s", jid, "sent" if row["ok"] else "FAILED", row.get("ippanel_id") or row.get("error"))
+    log.info("job %s -> %s %s%s", jid, "sent" if row["ok"] else "FAILED", row.get("ippanel_id") or row.get("error"), f" [pattern {pkey}]" if pkey else "")
 
 
 def unreported(c):
     rows = c.execute("SELECT job_id, ok, ippanel_id, error, code FROM sms WHERE reported=0 ORDER BY job_id LIMIT 100").fetchall()
     return [{"id": r["job_id"], "ok": bool(r["ok"]), "ref": r["ippanel_id"], "error": r["error"], "code": r["code"]} for r in rows]
+
+
+def deliveries(c):
+    rows = c.execute("SELECT job_id, delivery_final, delivery_status FROM sms WHERE delivery_final IS NOT NULL AND delivery_reported=0 ORDER BY job_id LIMIT 100").fetchall()
+    return [{"id": r["job_id"], "state": r["delivery_final"], "status": r["delivery_status"]} for r in rows]
 
 
 _credit = {"at": 0, "credit": None, "gift": 0, "credit_at": None, "credit_error": None}
@@ -160,7 +280,7 @@ def credit():
         return _credit
     try:
         status, js, _ = http("GET", f"{IP_BASE}/api/payment/credit/mine", None, {"Authorization": IP_KEY}, timeout=15)
-        d = (js or {}).get("data") if isinstance((js or {}).get("data"), dict) else None
+        d = data_of(js)
         if 200 <= status < 300 and d:
             _credit.update(credit=d.get("credit"), gift=d.get("gift") or 0, credit_at=d.get("updated_at"), credit_error=None)
         else:
@@ -178,20 +298,35 @@ def beat():
         b["backup"] = json.load(open(BACKUP_STATUS, encoding="utf-8"))
     except Exception:
         pass
+    if _pat["report"]:
+        b["patterns"] = _pat["report"]
     return b
 
 
+def final_of(d):
+    """نتیجهٔ نهاییِ گزارشِ IPPanel: rejected («رد شده»، state_id ۳) | done («پایان یافته»، state_id ۶) | None (هنوز)"""
+    fa, st, sid = str(d.get("status") or ""), str(d.get("state") or ""), str(d.get("state_id") or "")
+    if "رد" in fa or sid == "3":
+        return "rejected"
+    if st == "finish" or sid == "6" or "پایان" in fa:
+        return "done"
+    return None
+
+
 def delivery(c):
-    """وضعیتِ تحویلِ پیامک‌های ۴۸ ساعتِ اخیر که هنوز تمام نشده‌اند"""
+    """وضعیتِ تحویلِ پیامک‌های ۴۸ ساعتِ اخیر که هنوز نتیجهٔ نهایی ندارند"""
     since = now_ms() - 48 * 3600 * 1000
-    rows = c.execute("SELECT job_id, ippanel_id FROM sms WHERE ok=1 AND ippanel_id IS NOT NULL AND sent_at>? AND (delivery_state IS NULL OR delivery_state NOT IN ('finish','failed','rejected','canceled')) LIMIT 50", (since,)).fetchall()
+    rows = c.execute("SELECT job_id, ippanel_id FROM sms WHERE ok=1 AND ippanel_id IS NOT NULL AND sent_at>? AND delivery_final IS NULL LIMIT 50", (since,)).fetchall()
     for r in rows:
         try:
             status, js, _ = http("GET", f"{IP_BASE}/api/report/by_bulk?messages_outbox_id={r['ippanel_id']}", None, {"Authorization": IP_KEY}, timeout=15)
-            d = (js or {}).get("data")
-            if 200 <= status < 300 and isinstance(d, dict):
-                c.execute("UPDATE sms SET delivery_state=?, delivery_status=?, delivery_at=?, delivery_raw=? WHERE job_id=?",
-                          (d.get("state"), d.get("status"), now_ms(), json.dumps(d, ensure_ascii=False)[:2000], r["job_id"]))
+            d = data_of(js)
+            if 200 <= status < 300 and d:
+                fin = final_of(d)
+                c.execute("UPDATE sms SET delivery_state=?, delivery_status=?, delivery_final=?, delivery_at=?, delivery_raw=? WHERE job_id=?",
+                          (d.get("state"), d.get("status"), fin, now_ms(), json.dumps(d, ensure_ascii=False)[:2000], r["job_id"]))
+                if fin == "rejected":
+                    log.warning("job %s REJECTED by IPPanel review (%s)", r["job_id"], r["ippanel_id"])
         except Exception as e:
             log.info("delivery check %s: %s", r["ippanel_id"], e)
             break
@@ -209,12 +344,14 @@ def main():
     log.info("relay %s start (site %s)", VER, SITE)
     last_beat, last_delivery, backoff = 0, 0, 5
     while not STOP:
-        results = unreported(c)
+        patterns_tick()
+        results, dels = unreported(c), deliveries(c)
         b = None
         if time.time() - last_beat >= 60:
             b = beat()
+        payload = {"results": results, **({"deliveries": dels} if dels else {}), **({"beat": b} if b else {})}
         try:
-            status, js, text = http("POST", SYNC, {"results": results, **({"beat": b} if b else {})}, {"x-relay-key": RELAY_KEY})
+            status, js, text = http("POST", f"{API}/sync", payload, {"x-relay-key": RELAY_KEY})
         except Exception as e:
             log.warning("sync failed: %s", e)
             time.sleep(backoff)
@@ -230,13 +367,15 @@ def main():
             last_beat = time.time()
         if results:
             c.executemany("UPDATE sms SET reported=1 WHERE job_id=?", [(x["id"],) for x in results])
-            c.commit()
+        if dels:
+            c.executemany("UPDATE sms SET delivery_reported=1 WHERE job_id=?", [(x["id"],) for x in dels])
+        c.commit()
         jobs = js.get("jobs") or []
         for job in jobs:
             send_one(c, job)
         if jobs or len(results) == 100:
             continue  # نتیجه‌ها همان لحظه گزارش شوند
-        if time.time() - last_delivery >= 600:
+        if time.time() - last_delivery >= 120:
             last_delivery = time.time()
             delivery(c)
         poll = max(2, int(js.get("poll") or 5))

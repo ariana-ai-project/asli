@@ -155,7 +155,7 @@ export async function commissionResultSave(env, body, company) {
       const th = d.threads.find((x) => x.id === g.thread_id);
       if (body.sms !== false && th && th.phone && smsReady(env)) {
         /* commission_notes.sms: نامِ درگاهی که پیامک را برد (textbee | ippanel) یا «failed: …» */
-        try { smsVia = (await sendSms(env, th.phone, smsText(g.lost, company, d.a.request_id))).provider; sms++; }
+        try { smsVia = (await sendSms(env, th.phone, smsText(g.lost, company, d.a.request_id), { pattern: { key: "thanks", params: { req: faN(d.a.request_id) } } })).provider; sms++; }
         catch (e) { smsVia = `failed: ${String((e && e.message) || e).slice(0, 120)}`; }
       }
       await env.DB.batch(g.lost.map((x) => env.DB.prepare("INSERT OR REPLACE INTO commission_notes (item_id,supplier,thread_id,sms,at) VALUES (?,?,?,?,?)")

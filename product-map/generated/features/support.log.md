@@ -18,7 +18,7 @@
 | `GET /support/sms` | w/api.js › route | w/relay.js#relayOn، w/relay.js#relayStatus | ✓ |
 | `POST /support/alarms/{}/ack` | w/api.js › route | w/alarms.js#alarmAck | — |
 | `POST /support/sms/check` | w/api.js › route | w/sms.js#smsCheck | ✓ |
-| `POST /support/sms/test` | w/api.js › route | w/relay.js#relayTestText، w/sms.js#sendSms | ✓ |
+| `POST /support/sms/test` | w/api.js › route | w/relay.js#relayTestPattern، w/relay.js#relayTestText، w/sms.js#sendSms | ✓ |
 | `PUT /support/alert-contacts` | w/api.js › route | w/alarms.js#alertContactsSave | ✓ |
 
 ## فراخوان در پنل‌ها (5)
@@ -31,7 +31,7 @@
 ## جدول‌ها
 نوشتن: alarms، settings
 خواندن: experts، sms_outbox
-هم‌نویس‌های همین جدول‌ها: infra.core، manager.log، notify.alarms
+هم‌نویس‌های همین جدول‌ها: infra.core، manager.log، notify.alarms، notify.sms
 
 ## تست‌ها (4)
 - d1-budget.test.mjs

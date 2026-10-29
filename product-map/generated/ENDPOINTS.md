@@ -77,6 +77,7 @@
 | `GET /push/key` | notify.push | w/api.js › route |
 | `GET /relay/backup/rows` | notify.sms | w/api.js › route |
 | `GET /relay/backup/schema` | notify.sms | w/api.js › route |
+| `GET /relay/patterns` | notify.sms | w/api.js › route |
 | `GET /reports/meta` | manager.reports | w/api.js › route |
 | `GET /reports/status` | manager.reports | w/api.js › route |
 | `GET /reports/status.xlsx` | manager.reports | w/api.js › route |

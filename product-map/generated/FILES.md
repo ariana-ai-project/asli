@@ -116,6 +116,7 @@
 | worker/sheets.js | expert.comm |
 | worker/site.js | infra.site |
 | worker/size.js | support.size |
+| worker/sms-patterns.js | notify.sms |
 | worker/sms.js | notify.sms |
 | worker/sp-ai.js | sup.panel |
 | worker/sp-api.js | sup.panel |

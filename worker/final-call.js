@@ -307,7 +307,7 @@ async function smsOne(env, call, s0, asg, cfg) {
   }
   const intro = callSmsText({ company: C.COMPANY(env), offer_no: s.offer_no, deadline_at: call.deadline_at, min_valid_h: cfg.min_valid_h, renew: s.status === "renew",
     valid_to: s.valid_to, lowest: parse(s.lowest_json, []), sendLowest: cfg.send_lowest });
-  const m = await C.smsWithLogin(env, ph, intro);
+  const m = await C.smsWithLogin(env, ph);
   const res = await env.DB.batch([...m.stmts,
     env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'final',?,?)").bind(ph.id, s.thread_id, asg.expert_id, m.masked, t)]);
   const smsId = res[res.length - 1].meta.last_row_id;
@@ -317,7 +317,7 @@ async function smsOne(env, call, s0, asg, cfg) {
     .bind(s.thread_id, "e", "event", body, JSON.stringify({ ev: "final_call", call_id: call.id, offer_no: s.offer_no }), t).first().catch(() => null);
   if (msg) await env.DB.prepare("UPDATE sp_threads SET last_at=?, rev=rev+1 WHERE id=?").bind(t, s.thread_id).run().catch(() => {});
   const d = await deliverSms(env, { smsId, expertId: asg.expert_id, expertChat: asg.telegram_chat, threadId: s.thread_id, supplier: s.supplier_name, to: ph.phone,
-    label: ph.label, text: m.text, panel: m.panel, bot: m.bot, kind: "final" });
+    label: ph.label, text: m.text, pattern: m.pattern, panel: m.panel, bot: m.bot, kind: "final" });
   const state = d.sent ? "sent" : d.via === "hold" ? "held" : d.error ? "failed" : "sim";
   await env.DB.prepare("UPDATE final_call_sups SET phone=?, sms_state=?, sms_at=?, sms_id=?, sms_err=?, updated_at=? WHERE id=?")
     .bind(ph.phone, state, t, smsId, d.error || null, t, s.id).run();
@@ -349,7 +349,8 @@ async function alertExpert(env, asg, call, s) {
     + `شماره‌اش را در پنل کارشناس بدهید تا پیامک برود، یا خودتان خبرش کنید و پیش‌فاکتورِ رسمی‌اش را تا ${when(call.deadline_at)} همان‌جا بارگذاری کنید.`;
   const via = [];
   if (asg.expert_phone && smsReady(env)) {
-    try { await sendSms(env, asg.expert_phone, text); via.push("sms"); } catch (e) { console.error("expert sms", e && e.message); }
+    try { await sendSms(env, asg.expert_phone, text, { pattern: { key: "alarm", params: { title: `فراخوان ${asg.request_id}: شمارهٔ ${s.supplier_name} نیست` } } }); via.push("sms"); }
+    catch (e) { console.error("expert sms", e && e.message); }
   }
   if (asg.telegram_chat && env.TG_BOT_TOKEN) {
     try { await telegram(env).sendMessage(asg.telegram_chat, esc(text)); via.push("telegram"); } catch (e) { console.error("expert tg", e && e.message); }

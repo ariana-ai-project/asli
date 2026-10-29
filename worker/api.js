@@ -63,9 +63,9 @@ import { USD_DDL, usdAdmin } from "./usd.js";
 import { CR_DDL, commissionResultGet, commissionResultSave } from "./commission-result.js";
 import { RATE_DDL, rateGaps } from "./ai-rates.js";
 import { FB_DDL, feedbackStats, feedbackOne, feedbackExport, feedbackSummary } from "./ai-feedback.js";
-import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave } from "./alarms.js";
+import { ALARM_DDL, alarmsList, alarmAck, alertContacts, alertContactsSave, raiseAlarm } from "./alarms.js";
 import { smsStatus, smsCheck, sendSms } from "./sms.js";
-import { RELAY_DDL, relayOn, relayAuth, relaySync, relayStatus, relayBackupSchema, relayBackupRows, relayTestText } from "./relay.js";
+import { RELAY_DDL, relayOn, relayAuth, relaySync, relayStatus, relayBackupSchema, relayBackupRows, relayTestText, relayTestPattern, relayPatterns } from "./relay.js";
 import { PUSH_DDL, vapidKeys, pushSubscribe, pushUnsubscribe, pushTo, drainPush, pushStmt } from "./push.js";
 import { HELP_DDL, helpHistory, helpAsk, helpClear } from "./help-bot.js";
 import { guardEnv } from "./d1-guard.js";
@@ -2006,11 +2006,15 @@ async function route(request, env, ctx) {
 
     /* پلِ سرورِ شرکت (worker/relay.js): برنامهٔ پل با هدرِ x-relay-key (راز RELAY_KEY) پیامک‌های صف را می‌گیرد و نتیجه را
        می‌دهد، پیامکِ آزمایشی را از همان راهِ سامانه می‌فرستد و هر شب نسخهٔ پشتیبانِ پایگاه داده را صفحه‌به‌صفحه می‌خواند */
-    if (path === "/relay/sync" && m === "POST") return json(await relaySync(env, request));
+    if (path === "/relay/sync" && m === "POST") return json(await relaySync(env, request, { raise: (a) => raiseAlarm(env, a, ctx) }));
+    if (path === "/relay/patterns" && m === "GET") return json(relayPatterns(env, request));
+    /* {to, text?, pattern?: {key, params}} — بی متن، همان «پیامک آزمایشی» (با الگوی test) */
     if (path === "/relay/test" && m === "POST") {
       relayAuth(env, request);
       const b = await readJson(request);
-      try { return json(await sendSms(env, b.to, T(b.text).slice(0, 300) || relayTestText())); }
+      const text = T(b.text).slice(0, 300);
+      const pattern = b.pattern && typeof b.pattern === "object" && T(b.pattern.key) ? { key: T(b.pattern.key), params: b.pattern.params || {} } : text ? null : relayTestPattern();
+      try { return json(await sendSms(env, b.to, text || relayTestText(), pattern ? { pattern } : {})); }
       catch (e) { throw new HttpError(String((e && e.message) || e).slice(0, 300)); }
     }
     if (path === "/relay/backup/schema" && m === "GET") return json(await relayBackupSchema(env, request));
@@ -2441,7 +2445,7 @@ async function route(request, env, ctx) {
       /* «📨 پیامک آزمایشی»: یک پیامکِ واقعی از درگاهِ فعال (و با پل، از سرورِ شرکت) به شماره‌ای که پشتیبان می‌دهد */
       if (path === "/support/sms/test" && m === "POST") {
         const b = await readJson(request);
-        try { return json(await sendSms(env, b.to, relayTestText())); }
+        try { return json(await sendSms(env, b.to, relayTestText(), { pattern: relayTestPattern() })); }
         catch (e) { throw new HttpError(String((e && e.message) || e).slice(0, 300)); }
       }
       if (path === "/support/commission/result" && m === "POST") { const r = await commissionResultSave(env, await readJson(request), env.COMPANY || "تونل سد آریانا"); flush(env, ctx, r.notified); return json(r); }

@@ -976,7 +976,6 @@ function inviteText(env, sup, items, pfRead = true, terms = false) {
     + ask
     + "سؤالی بود همین‌جا بپرسید؛ دستیارِ هوشمندِ خریدِ ما جواب می‌ده و تصمیمِ نهایی با کمیسیون معاملات شرکته.";
 }
-const smsIntro = (env, items) => `استعلام قیمت شرکت ${COMPANY(env)}: ${items.length === 1 ? `${items[0].title} (${faN(items[0].qty == null ? "—" : items[0].qty)} ${items[0].unit || ""})`.trim() : `${faN(items.length)} قلم`}. ثبت قیمت و گفت‌وگو با کارشناس خرید:`;
 
 /**
  * «✉️ پیام اول» (کلیدِ firstmsg): متنِ نخستین پیامِ این تأمین‌کننده از انتخاب‌های کارشناس (fm_choice) یا قالبِ استاندارد؛ اگر
@@ -1009,7 +1008,7 @@ async function inviteOne(env, run, ex, inv) {
   const terms = (await C.limitsOfLines(env, items.map((i) => ({ item_id: i.id })))).size > 0;
   const text = addOn ? addOnText(env, inv.name, items, terms) : (await firstText(env, run, ex, inv, items)) || inviteText(env, inv.name, items, await pfReadOn(env), terms);
   const r = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: p0.id,
-    text, sms: smsIntro(env, items), ai: true });
+    text, ai: true });
   const t = now();
   const top = await env.DB.prepare("SELECT COALESCE(MAX(id),0) AS n FROM sp_msgs WHERE thread_id=?").bind(r.thread_id).first();
   await env.DB.batch([
@@ -1029,12 +1028,12 @@ async function inviteOne(env, run, ex, inv) {
     const fresh = await env.DB.prepare("SELECT panel FROM sp_phones WHERE id=?").bind(ph.id).first();
     const ok = !!(fresh && fresh.panel);
     const d = await deliverSms(env, { smsId: sms.id, expertId: ex.id, expertChat: ex.telegram_chat, threadId: r.thread_id, supplier: r.supplier.name, to: ph.phone,
-      label: ph.label, text: sms.text, panel: r.links.panel, bot: r.links.bot, hold: !ok, kind: "rfq" });
+      label: ph.label, text: sms.text, pattern: sms.pattern, panel: r.links.panel, bot: r.links.bot, hold: !ok, kind: "rfq" });
     results.push({ phone: C.maskPhone(ph.phone), via: d.via, sent: d.sent, error: d.error || (!ok ? "تیکِ پنل برداشته شده بود" : null) });
   };
   await send(p0, r.sms);
   for (const ph of addOn ? [] : more.slice(0, 2)) {
-    const r2 = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: ph.id, silent: true, sms: smsIntro(env, items), ai: true });
+    const r2 = await C.spSend(env, ex, { assignment_id: run.assignment_id, item_ids: items.map((i) => i.id), supplier_id: inv.sid, phone_id: ph.id, silent: true, ai: true });
     await send(ph, r2.sms);
   }
   if (!run.data.invited_at) run.data.invited_at = t;

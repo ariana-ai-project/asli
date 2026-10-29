@@ -335,7 +335,7 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     await later(ctx, () => P.pushMsgs(env, { id: r.thread_id }, r.msgs));
     /* پیامکِ واقعی اگر درگاه وصل است (sp-sms.js)؛ متنِ با رمز فقط وقتی به پنل برمی‌گردد که پیامک نرفت */
     const d = await deliverSms(env, { smsId: r.sms.id, expertId: ex.id, threadId: r.thread_id, supplier: r.supplier.name, to: r.sms.to, label: r.sms.label,
-      text: r.sms.text, panel: r.links.panel, bot: r.links.bot, kind: "rfq" }, { sim: "none" });
+      text: r.sms.text, pattern: r.sms.pattern, panel: r.links.panel, bot: r.links.bot, kind: "rfq" }, { sim: "none" });
     return json({ ...r, sms: { to: r.sms.to, label: r.sms.label, sent: d.sent, via: d.via, error: d.error, note: smsNote(d, C.maskPhone(r.sms.to)),
       ...(d.sent ? {} : { text: r.sms.text }) } });
   }

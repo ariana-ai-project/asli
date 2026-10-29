@@ -1095,7 +1095,8 @@
       <b style="display:block;margin-top:10px">تأمین‌کننده</b>
       <div class="sp-upl"><input class="tp-input" data-n placeholder="نام تأمین‌کننده" autocomplete="off"><input class="tp-input" data-p placeholder="شماره (09…)" inputmode="tel" dir="ltr">
         <input class="tp-input full" data-l placeholder="برچسب شماره (همراه، دفتر، فروش…)"></div>
-      <b style="display:block;margin-top:10px">متن پیام (اولِ پیامک و اولین پیامِ گفت‌وگو)</b>
+      <b style="display:block;margin-top:10px">متن پیام (اولین پیامِ گفت‌وگو)</b>
+      <div class="dim" style="font-size:.8rem;margin-bottom:4px">پیامک فقط می‌گوید «شرکت تونل سد آریانا درخواست خرید دارد» با لینک و رمز؛ این متن در پنلِ تأمین‌کننده است.</div>
       <textarea class="tp-input tp-textarea" data-t style="min-height:90px">سلام، از شرکت تونل سد آریانا.\nبرای اقلامی که در پنل می‌بینید استعلام قیمت داریم؛ ${S.pfRead ? "لطفاً مشخصات، قیمت و پیش‌فاکتور را از لینک زیر ثبت کنید." : "لطفاً قیمت و شرایط را از لینک زیر ثبت کنید؛ پیش‌فاکتور را خودِ سامانه از همان‌ها می‌سازد."}\n${esc((S.me && (S.me.label || S.me.name)) || "")}</textarea>
       <div class="sp-err" data-err></div>`;
     const d = dlg("📨 ارسال استعلام", body, [{ label: "ارسال", cls: "primary", fn: async (dd) => {

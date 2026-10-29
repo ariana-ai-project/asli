@@ -14,7 +14,7 @@
 ## جدول‌ها
 نوشتن: alarms، settings
 خواندن: experts
-هم‌نویس‌های همین جدول‌ها: infra.core، manager.log، support.log
+هم‌نویس‌های همین جدول‌ها: infra.core، manager.log، notify.sms، support.log
 
 ## تست‌ها (1)
 - push-hooks.test.mjs

@@ -161,8 +161,12 @@ test("کارِ کارشناس (درخواستِ هوشمند، اقلامِ «ا
   assert.deepEqual(v.sups.map((s) => [s.offer_no, s.name, s.status, s.sms]), [["R-F-1", "تأمین برق", "need", "sent"], ["R-F-2", "برق دوم", "need", "sent"], ["R-F-3", "فروشگاه تلفنی", "need", "no_phone"]]);
   const sms = calls.slice(n0).filter((c) => c.bot === "sms");
   assert.equal(sms.length, 2, "دو پیامک به دو تأمین‌کنندهٔ پنل");
-  assert.match(sms[0].body.message, /پیشنهاد شما با شمارهٔ R-F-۱ وارد کمیسیون معاملات شرکت/);
-  assert.match(sms[0].body.message, /کمترین قیمتِ رسیده: «کابل ۴ در ۲٫۵» ۴۳۰٬۰۰۰ ریال/);
+  /* پیامک فقط «درخواست خرید دارد» با لینک و رمز (درخواست مالک، ۸ آبان ۱۴۰۵)؛ شمارهٔ پیشنهاد و کمترین قیمت در پیامِ گفت‌وگوی پنل */
+  assert.match(sms[0].body.message, /^شرکت .+ درخواست خرید دارد\./);
+  assert.doesNotMatch(sms[0].body.message, /R-F-|کمترین قیمت/);
+  const ev = DB.raw.prepare(`SELECT body FROM sp_msgs WHERE meta_json LIKE '%"offer_no":"R-F-1"%' ORDER BY id LIMIT 1`).get();
+  assert.match(ev.body, /پیشنهاد شما با شمارهٔ R-F-۱ وارد کمیسیون معاملات شرکت/);
+  assert.match(ev.body, /کمترین قیمتِ رسیده: «کابل ۴ در ۲٫۵» ۴۳۰٬۰۰۰ ریال/);
   assert.match(sms[0].body.message, /🔑 رمز ورود: \d{6}/, "لینک و رمزِ ورودِ پنل");
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_sms WHERE kind='final'").get().n, 2, "هر پیامک ثبت است");
   assert.doesNotMatch(DB.raw.prepare("SELECT body FROM sp_sms WHERE kind='final' LIMIT 1").get().body, /رمز ورود: \d{6}/, "رمز در دیتابیس نیست");

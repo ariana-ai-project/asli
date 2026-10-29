@@ -21,6 +21,7 @@ import { HttpError } from "./http.js";
 const TENDER_SRC = JSON.stringify({ unit: { s: "tender" }, qty: { s: "tender" }, price: { s: "tender" }, deal: { s: "tender" } });
 import { normPhone, maskPhone, randHex, rand6, sha256hex, passHash, siteOrigin, COMPANY, nkey, savePhone } from "./sp-core.js";
 import { sendSms, smsReady, isMobile, smsProvider, smsStatus, smsEnvWith, smsCheck, viaLabel } from "./sms.js";
+import { relayTestPattern } from "./relay.js";
 import { queueStmt } from "./queue.js";
 import { pushTo, SUPPORT } from "./push.js";
 import { keyOf, purchaseHeadsOfCode } from "./catalog.js";
@@ -193,7 +194,7 @@ export async function tenderSmsTest(env, b) {
   if (b && b.check === true) return smsCheck(await smsEnv(env));
   const p = T(b && b.phone);
   if (!isMobile(p)) throw new HttpError("شمارهٔ همراه را درست بنویسید (مثل ۰۹۱۲۱۲۳۴۵۶۷).");
-  const r = await sms(env, p, `${COMPANY(env)}\nپیامک آزمایشی مناقصه — درگاه کار می‌کند.`);
+  const r = await sms(env, p, `${COMPANY(env)}\nپیامک آزمایشی مناقصه — درگاه کار می‌کند.`, { pattern: relayTestPattern() });
   if (r.state !== "sent") throw new HttpError(r.error || "پیامک نرفت.", 502);
   return { ok: true };
 }
@@ -219,9 +220,13 @@ async function tgSupplier(env, phone, text, link) {
   }
   return n;
 }
-/** پیامک + تلگرام؛ خروجی {state, tg} */
-async function notify(env, phone, text, link) {
-  const [s, tg] = await Promise.all([phone ? sms(env, phone, `${text}${link ? `\n${link}` : ""}`) : Promise.resolve({ state: "nophone" }), tgSupplier(env, phone, text, link)]);
+/**
+ * پیامک + تلگرام؛ خروجی {state, tg}. pat: {note, code} برای الگوی tender_note (worker/sms-patterns.js) — یادداشتِ کوتاه (≤۴۰ نویسه)
+ * و کدِ مناقصه برای لینک؛ تا الگو تأیید نشده همان متنِ کامل می‌رود.
+ */
+async function notify(env, phone, text, link, pat) {
+  const opts = pat ? { pattern: { key: "tender_note", params: pat } } : undefined;
+  const [s, tg] = await Promise.all([phone ? sms(env, phone, `${text}${link ? `\n${link}` : ""}`, opts) : Promise.resolve({ state: "nophone" }), tgSupplier(env, phone, text, link)]);
   return { ...s, tg };
 }
 
@@ -246,7 +251,8 @@ async function sealedCloseIfDue(env, t, ctx) {
   const [bids, inv] = await Promise.all([bidsOf(env, t.id), invitesOf(env, t.id)]);
   const ranks = ranksOf(bids), link = tenderLink(env, fresh.code);
   const jobs = inv.filter((i) => ranks.has(i.alias) && !i.notify_off && fresh.outbid_sms).map((i) => notify(env, i.phone,
-    `${COMPANY(env)}\nدور سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دور زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link));
+    `${COMPANY(env)}\nدور سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دور زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link,
+    { note: `دور زنده شروع شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است`, code: fresh.code }));
   if (jobs.length) wait(ctx, Promise.all(jobs));
   supPush(env, ctx, fresh, `🔓 دور سربستهٔ «${fresh.title}» تمام شد`,
     `${ranks.size ? `${faN(ranks.size)} شرکت‌کننده · ` : ""}دور زنده شروع شد — ${faN(minsLeft(fresh))} دقیقه مانده${fresh.best_amount != null ? ` · بهترین ${faN(fresh.best_amount)} ریال` : ""}`);
@@ -276,10 +282,12 @@ export async function finalizeIfDue(env, t, ctx) {
   if (sc) stmts.push(queueStmt(env, `tender:${t.id}:end`, sc, `🏁 <b>مناقصهٔ «${escH(fresh.title)}» تمام شد</b>\n${escH(line)}\n${faN(ranks.size)} شرکت‌کننده · ${faN(fresh.ext_count)} بار تمدید`, null));
   await env.DB.batch(stmts);
   const link = tenderLink(env, fresh.code), co = COMPANY(env), jobs = [];
-  if (win) jobs.push(notify(env, win.phone, `${co}\nمناقصه به پایان رسید و پیشنهاد شما کمترین قیمت بود. همکاران تدارکات برای ادامهٔ کار با شما تماس می‌گیرند.`, link));
+  if (win) jobs.push(notify(env, win.phone, `${co}\nمناقصه به پایان رسید و پیشنهاد شما کمترین قیمت بود. همکاران تدارکات برای ادامهٔ کار با شما تماس می‌گیرند.`, link,
+    { note: "پایان یافت؛ پیشنهاد شما کمترین قیمت بود", code: fresh.code }));
   if (fresh.thanks_sms) {
     for (const i of inv) if (ranks.has(i.alias) && (!win || i.alias !== win.alias)) {
-      jobs.push(notify(env, i.phone, `${co}\nمناقصه به پایان رسید؛ این بار پیشنهاد دیگری کمتر بود. از همراهی و پیشنهادتان سپاسگزاریم و به امید همکاری‌های بعدی.`, null));
+      jobs.push(notify(env, i.phone, `${co}\nمناقصه به پایان رسید؛ این بار پیشنهاد دیگری کمتر بود. از همراهی و پیشنهادتان سپاسگزاریم و به امید همکاری‌های بعدی.`, null,
+        { note: "پایان یافت؛ از پیشنهادتان سپاسگزاریم", code: fresh.code }));
     }
   }
   if (jobs.length) wait(ctx, Promise.all(jobs));
@@ -344,7 +352,7 @@ async function notifyDrops(env, t, before, after, skip, ctx) {
     if (!i || i.notify_off || !i.on_list || (i.outbid_at && n - i.outbid_at < gap)) continue;
     const lost = d.from === 1;
     const text = `${co}\n${lost ? "دیگر پیشتاز مناقصه نیستید" : "در مناقصه پیشنهاد پایین‌تری ثبت شد"}؛ رتبهٔ شما اکنون ${faN(d.to)} است. ${faN(minsLeft(t))} دقیقه تا پایان مانده.`;
-    jobs.push(notify(env, i.phone, text, link));
+    jobs.push(notify(env, i.phone, text, link, { note: `${lost ? "دیگر پیشتاز نیستید" : "پیشنهاد پایین‌تری ثبت شد"}؛ رتبهٔ شما ${faN(d.to)}`, code: t.code }));
     stmts.push(env.DB.prepare("UPDATE tender_invites SET outbid_at=?, outbid_n=outbid_n+1 WHERE tender_id=? AND alias=?").bind(n, t.id, i.alias));
   }
   if (stmts.length) await env.DB.batch(stmts);
@@ -794,7 +802,7 @@ export async function tenderInviteSend(env, id, b) {
   for (const i of list) {
     let st = "nophone", err = null;
     if (i.phone) {
-      const r = await sms(env, i.phone, text);
+      const r = await sms(env, i.phone, text, { pattern: { key: "tender_invite", params: { code: head.code } } });
       st = r.state; err = r.error || null;
       out.tg += await tgSupplier(env, i.phone, `${COMPANY(env)}\nشما به یک مناقصهٔ خرید دعوت شده‌اید.`, tenderLink(env, head.code));
     }

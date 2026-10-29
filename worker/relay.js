@@ -15,6 +15,7 @@
  *     نسخهٔ SQLite از همهٔ جدول‌ها می‌سازد (scripts/vps/backup.py).
  */
 import { HttpError } from "./http.js";
+import { patternDefs, patternStates } from "./sms-patterns.js";
 
 export const RELAY_DDL = `
 CREATE TABLE IF NOT EXISTS sms_outbox (id INTEGER PRIMARY KEY AUTOINCREMENT, at INTEGER NOT NULL, phone TEXT NOT NULL, body TEXT, kind TEXT, sp_sms_id INTEGER, status TEXT NOT NULL DEFAULT 'queued', claimed_at INTEGER, done_at INTEGER, ref TEXT, error TEXT);
@@ -66,19 +67,60 @@ export async function relayEnqueue(env, phone, body, opts = {}) {
     throw e;
   }
   const r = await env.DB.prepare("INSERT INTO sms_outbox (at,phone,body,kind,sp_sms_id) VALUES (?,?,?,?,?)")
-    .bind(now(), phone, JSON.stringify(body), T(body && body.sending_type) || null, int(opts.smsId)).run();
+    .bind(now(), phone, JSON.stringify(body), T(opts.kind) || T(body && body.sending_type) || null, int(opts.smsId)).run();
   return r.meta.last_row_id;
 }
 
+/** GET /relay/patterns — تعریفِ الگوهای پیامک (worker/sms-patterns.js) برای ساختن در IPPanel به دستِ پل */
+export function relayPatterns(env, request) {
+  relayAuth(env, request);
+  return { patterns: patternDefs(env).map(({ key, fa, title, description, message, vars, hash }) => ({ key, fa, title, description, message, vars, hash })) };
+}
+
+/** وضعیتِ الگوها برای پنل‌ها: [{key, fa, status, status_fa, reject}] — status: active | pending | rejected | error | none */
+async function patternView(env) {
+  const st = await patternStates(env);
+  return patternDefs(env).map((d) => {
+    const s = st[d.key];
+    const cur = s && s.hash === d.hash;
+    return { key: d.key, fa: d.fa, status: cur ? T(s.status) || "pending" : "none", status_fa: cur ? T(s.status_fa) || null : null, reject: cur ? T(s.reject) || null : null };
+  });
+}
+
 /**
- * POST /relay/sync — بدنه: {results: [{id, ok, ref, error, code}], beat: {credit, gift, credit_at, ver, backup}}
+ * POST /relay/sync — بدنه: {results: [{id, ok, ref, error, code}], deliveries: [{id, state: done|rejected, status}],
+ *   beat: {credit, gift, credit_at, ver, backup, patterns: {key: {code, status, status_fa, reject, hash}}}}
  * نتیجه‌ها روی sms_outbox (و ردیفِ sp_sms) می‌نشیند، تپش در settings، و تا ۲۰ پیامکِ تازهٔ صف گرفته و برگردانده می‌شود.
+ * deliveries نتیجهٔ نهاییِ IPPanel است: «رد شده» (بررسیِ دستیِ متن) پیامک را «نرفت» می‌کند و opts.raise یک هشدار می‌دهد
+ * (ساعتی یک بار — هشدار خودش پیامک دارد و نباید زنجیره بسازد).
  */
-export async function relaySync(env, request) {
+export async function relaySync(env, request, opts = {}) {
   relayAuth(env, request);
   const b = (await request.json().catch(() => null)) || {};
   const t = now();
-  const stmts = [];
+  const stmts = [], dstmts = [];
+  const rejected = [];
+  for (const x of (Array.isArray(b.deliveries) ? b.deliveries : []).slice(0, 100)) {
+    const id = int(x && x.id);
+    const st = x && x.state === "rejected" ? "rejected" : x && x.state === "done" ? "delivered" : null;
+    if (!id || !st) continue;
+    const why = st === "rejected" ? `IPPanel پیامک را رد کرد${T(x.status) ? ` (${T(x.status).slice(0, 60)})` : ""} — پیامکِ متن‌آزاد در IPPanel بررسیِ دستی می‌شود` : null;
+    if (why) {
+      rejected.push(id);
+      dstmts.push(env.DB.prepare("UPDATE sp_sms SET status='failed', error=? WHERE id=(SELECT sp_sms_id FROM sms_outbox WHERE id=? AND status='sent')").bind(why, id));
+    }
+    dstmts.push(env.DB.prepare("UPDATE sms_outbox SET status=?, error=COALESCE(?,error) WHERE id=? AND status='sent'").bind(st, why, id));
+  }
+  if (b.beat && b.beat.patterns && typeof b.beat.patterns === "object") {
+    const keep = {};
+    for (const d of patternDefs(env)) {
+      const p = b.beat.patterns[d.key];
+      if (p && typeof p === "object") keep[d.key] = { code: T(p.code).slice(0, 40) || null, status: T(p.status).slice(0, 20) || null,
+        status_fa: T(p.status_fa).slice(0, 40) || null, reject: T(p.reject).slice(0, 200) || null, hash: T(p.hash).slice(0, 20) || null };
+    }
+    stmts.push(env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('smsPatterns',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+      .bind(JSON.stringify(keep), t));
+  }
   for (const x of (Array.isArray(b.results) ? b.results : []).slice(0, 100)) {
     const id = int(x && x.id);
     if (!id) continue;
@@ -88,6 +130,8 @@ export async function relaySync(env, request) {
     stmts.push(env.DB.prepare("UPDATE sms_outbox SET status=?, done_at=?, ref=?, error=?, body=NULL WHERE id=? AND status='sending'")
       .bind(ok ? "sent" : "failed", t, ref, err, id));
   }
+  /* نتیجهٔ تحویل بعد از نتیجهٔ فرستادن (هر دو در یک تماس هم بیایند، ترتیب درست است) */
+  stmts.push(...dstmts);
   if (b.beat && typeof b.beat === "object") {
     const v = { seen: t, credit: Number.isFinite(Number(b.beat.credit)) ? Number(b.beat.credit) : null, gift: Number(b.beat.gift) || 0,
       credit_at: T(b.beat.credit_at) || null, credit_error: T(b.beat.credit_error).slice(0, 200) || null, ver: T(b.beat.ver).slice(0, 20) || null,
@@ -98,20 +142,37 @@ export async function relaySync(env, request) {
       .bind(JSON.stringify(v), t));
   }
   if (stmts.length) await env.DB.batch(stmts);
+  if (rejected.length && opts.raise) await rejectAlarm(env, rejected, opts.raise).catch((e) => console.error("sms reject alarm", e && e.message));
   const rows = (await env.DB.prepare(`UPDATE sms_outbox SET status='sending', claimed_at=? WHERE id IN
-      (SELECT id FROM sms_outbox WHERE status='queued' AND at>=? ORDER BY id LIMIT ${CLAIM_MAX}) RETURNING id, phone, body, at`)
+      (SELECT id FROM sms_outbox WHERE status='queued' AND at>=? ORDER BY id LIMIT ${CLAIM_MAX}) RETURNING id, phone, body, at, kind`)
     .bind(t, t - RELAY_EXPIRE_MS).all()).results || [];
   rows.sort((a, c) => a.id - c.id);
-  return { ok: true, poll: POLL_S, jobs: rows.map((r) => ({ id: r.id, phone: r.phone, at: r.at, body: parse(r.body, null) })).filter((j) => j.body) };
+  return { ok: true, poll: POLL_S, jobs: rows.map((r) => ({ id: r.id, phone: r.phone, at: r.at, kind: r.kind || null, body: parse(r.body, null) })).filter((j) => j.body) };
 }
 
-/** متنِ «پیامک آزمایشی» با ساعتِ تهران */
-export function relayTestText(t = now()) {
-  let hm;
-  try { hm = new Date(t).toLocaleTimeString("fa-IR", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false }); }
-  catch (_) { hm = new Date(t).toISOString().slice(11, 16) + " UTC"; }
-  return `پیامک آزمایشی سامانهٔ تأمین آریانا — ساعت ${hm}`;
+/** «IPPanel پیامک را رد کرد» — ساعتی حداکثر یک هشدار؛ شماره پوشیده */
+async function rejectAlarm(env, ids, raise) {
+  const t = now();
+  const last = await env.DB.prepare("SELECT value FROM settings WHERE key='smsRejectAlarm'").first().catch(() => null);
+  if (last && t - (Number(parse(last.value, 0)) || 0) < 3600e3) return;
+  await env.DB.prepare("INSERT INTO settings (key,value,updated_at) VALUES ('smsRejectAlarm',?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value, updated_at=excluded.updated_at")
+    .bind(String(t), t).run();
+  const r = await env.DB.prepare("SELECT phone, kind FROM sms_outbox WHERE id=?").bind(ids[0]).first().catch(() => null);
+  const ph = r && r.phone ? `${String(r.phone).replace(/^\+98/, "0").slice(0, 4)}…${String(r.phone).slice(-4)}` : "";
+  await raise({ kind: "sms_rejected", title: "IPPanel پیامک را رد کرد",
+    body: `${ids.length > 1 ? `${ids.length} پیامک` : `پیامک${ph ? ` به ${ph}` : ""}`} در بررسیِ دستیِ IPPanel رد شد و نرسید. پیامکِ متن‌آزاد در IPPanel بررسی می‌شود؛ وضعیتِ الگوهای پیامک در «📶 درگاه پیامک».`,
+    payload: { outbox: ids.slice(0, 20), kind: r && r.kind } });
 }
+
+/** ساعتِ تهران به رقمِ فارسی */
+function tehranHM(t) {
+  try { return new Date(t).toLocaleTimeString("fa-IR", { timeZone: "Asia/Tehran", hour: "2-digit", minute: "2-digit", hour12: false }); }
+  catch (_) { return new Date(t).toISOString().slice(11, 16) + " UTC"; }
+}
+/** متنِ «پیامک آزمایشی» با ساعتِ تهران */
+export const relayTestText = (t = now()) => `پیامک آزمایشی سامانهٔ تأمین آریانا — ساعت ${tehranHM(t)}`;
+/** الگوی همان پیامک (worker/sms-patterns.js، کلیدِ test) */
+export const relayTestPattern = (t = now()) => ({ key: "test", params: { time: tehranHM(t) } });
 
 /** وضعیتِ پل برای پنل پشتیبانی — بی هیچ کلید */
 export async function relayStatus(env) {
@@ -120,7 +181,7 @@ export async function relayStatus(env) {
   const age = st.seen ? now() - st.seen : null;
   return { seen: st.seen || null, age_s: age == null ? null : Math.round(age / 1000), live: age != null && age <= RELAY_FRESH_MS,
     queued: (q && q.n) || 0, credit: st.credit == null ? null : st.credit, gift: st.gift || 0, credit_at: st.credit_at || null,
-    credit_error: st.credit_error || null, ver: st.ver || null, backup: st.backup || null };
+    credit_error: st.credit_error || null, ver: st.ver || null, backup: st.backup || null, patterns: await patternView(env) };
 }
 
 /** «تستِ درگاه» در حالتِ پل: پل زنده است و اعتبارِ آخرین تپش؟ (پیامکی نمی‌رود) */

@@ -35,7 +35,7 @@
 ## جدول‌ها
 نوشتن: alarms، alerts، assignments، decisions، events، items
 خواندن: cr_docs، experts، requests، settings
-هم‌نویس‌های همین جدول‌ها: expert.detail، infra.core، manager.desk، notify.alarms، support.log
+هم‌نویس‌های همین جدول‌ها: expert.detail، infra.core، manager.desk، notify.alarms، notify.sms، support.log
 
 ## تست‌ها (5)
 - ai-mode-live.test.mjs

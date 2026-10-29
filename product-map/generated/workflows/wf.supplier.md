@@ -10,7 +10,7 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [corr.main](../features/corr.main.md) | مکاتبات با تأمین‌کنندگان | 15 | 23 |
-| [notify.sms](../features/notify.sms.md) | پیامک | 4 | 3 |
+| [notify.sms](../features/notify.sms.md) | پیامک | 5 | 3 |
 
 ## گام 2 — ورود با رمز پیامکی یا از بات
 
@@ -44,7 +44,7 @@
 
 ## جدول‌هایی که این جریان می‌نویسد
 
-ai_log، ai_props، ai_rates، ai_runs، ai_threads، events، final_call_sups، items، offpf، outbox، phone_channel_log، phone_channels، proformas، quote_edits، quotes، settings، sms_outbox، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads، tg_seen، voice_jobs
+ai_log، ai_props، ai_rates، ai_runs، ai_threads، alarms، events، final_call_sups، items، offpf، outbox، phone_channel_log، phone_channels، proformas، quote_edits، quotes، settings، sms_outbox، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads، tg_seen، voice_jobs
 
 ## همهٔ تست‌های این جریان (39)
 

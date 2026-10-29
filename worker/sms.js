@@ -35,6 +35,7 @@
  * را نمی‌گیرد — وگرنه همان متنِ کامل. کلیدها هرگز در کد یا wrangler.toml نمی‌نشینند (مخزن عمومی است): wrangler secret put.
  */
 import { relayOn, relayEnqueue, relayCheck } from "./relay.js";
+import { activePattern } from "./sms-patterns.js";
 
 const T = (v) => String(v == null ? "" : v).trim();
 const FA ="۰۱۲۳۴۵۶۷۸۹", AR = "٠١٢٣٤٥٦٧٨٩";
@@ -156,12 +157,16 @@ const ippanel = {
   info: (env) => ({ from: lineE164(env.IPPANEL_FROM) || null, pattern: T(env.IPPANEL_PATTERN_OTP) || null, pattern_var: T(env.IPPANEL_PATTERN_VAR) || "code", relay: relayOn(env) }),
   async send(env, num, text, opts) {
     const from = lineE164(env.IPPANEL_FROM), pat = T(env.IPPANEL_PATTERN_OTP), otp = T(opts.otp);
+    /* الگوی تأییدشدهٔ IPPanel (worker/sms-patterns.js) بی بررسیِ دستی و فوری می‌رود؛ تا فعال نشده، همان متنِ کامل */
+    const ap = otp && pat ? null : await activePattern(env, opts).catch(() => null);
     const body = otp && pat
       ? { sending_type: "pattern", from_number: from, code: pat, recipients: [num], params: { [T(env.IPPANEL_PATTERN_VAR) || "code"]: otp } }
+      : ap ? { sending_type: "pattern", from_number: from, code: ap.code, recipients: [num], params: ap.params }
       : { sending_type: "webservice", from_number: from, message: text, params: { recipients: [num] } };
+    const kind = ap ? `pattern:${ap.key}` : body.sending_type;
     if (relayOn(env)) {
       let id;
-      try { id = await relayEnqueue(env, num, body, opts); }
+      try { id = await relayEnqueue(env, num, body, { ...opts, kind }); }
       catch (e) { throw new SmsError(String((e && e.message) || e).slice(0, 200), (e && e.code) || "error"); }
       return { ok: true, provider: "ippanel", ref: `q${id}`, to: num, relay: true, ...(body.sending_type === "pattern" ? { pattern: true } : {}) };
     }
@@ -248,6 +253,7 @@ export const garbled = (s) => (String(s == null ? "" : s).match(MOJIBAKE) || [])
 /**
  * یک پیامک. خروجی {ok, provider, ref, to, pattern?}؛ هر شکستی SmsError با پیام فارسی و کد (off | bad_number | bad_text | auth |
  * quota | rejected | network | error). opts.otp: رمزِ همین پیامک — درگاهی که الگوی رمز دارد فقط همان را با الگو می‌فرستد.
+ * opts.pattern: {key, params} — الگوی IPPanelِ همین پیامک (worker/sms-patterns.js)؛ تا تأیید نشده، text می‌رود.
  * متنِ پیامک (که رمز ورود در آن است) هیچ‌جا لاگ نمی‌شود.
  */
 export async function sendSms(env, to, text, opts = {}) {

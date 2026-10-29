@@ -154,7 +154,10 @@
       + (R ? line("پل پیامک · سرورِ شرکت", R.live ? `<span class="sp-ok">✅ وصل است</span>` : `<span class="sp-bad">${R.seen ? "قطع است" : "هنوز وصل نشده"}</span>`, `آخرین تماس: ${ago(R.age_s)}${R.queued ? ` · در صف: ${fa(R.queued)}` : ""}`)
         + line("اعتبار پنل", R.credit == null ? "—" : fa(Math.round(R.credit)), R.credit_error ? esc(R.credit_error) : "")
         + line("آخرین پشتیبان‌گیری", bk && bk.at ? `${bk.ok ? "✅" : "⚠️"} ${esc(new Date(bk.at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }))}` : "هنوز انجام نشده",
-          bk && bk.at ? (bk.ok ? `${fa(bk.tables)} جدول · ${fa(bk.rows)} ردیف · هر شب ساعت ۴ صبح` : esc(bk.error || "")) : "هر شب ساعت ۴ صبح روی سرورِ شرکت") : "")
+          bk && bk.at ? (bk.ok ? `${fa(bk.tables)} جدول · ${fa(bk.rows)} ردیف · هر شب ساعت ۴ صبح` : esc(bk.error || "")) : "هر شب ساعت ۴ صبح روی سرورِ شرکت")
+        + ((R.patterns || []).length ? (() => { const P = R.patterns, on = P.filter((p) => p.status === "active").length, bad = P.filter((p) => p.status === "rejected" || p.status === "error").length;
+          return line("الگوهای پیامک", `${on === P.length ? `<span class="sp-ok">✅ همه فعال</span>` : `${fa(on)} فعال از ${fa(P.length)}`}${bad ? ` · <span class="sp-bad">${fa(bad)} رد شد</span>` : ""}`,
+            "الگوی فعال فوری می‌رود؛ بقیه تا تأییدِ IPPanel با متنِ کامل"); })() : "") : "")
       + `<div class="sp-row"><span class="sp-name">📨 پیامک آزمایشی<small>یک پیامکِ واقعی به همین شماره</small></span>
           <input type="tel" inputmode="tel" autocomplete="off" id="sp-to" placeholder="۰۹۱۲…" /><button class="sp-opt" data-act="smstest" ${sms.ready ? "" : "disabled"}>بفرست</button></div>`;
   }

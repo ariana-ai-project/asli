@@ -66,7 +66,9 @@ export async function raiseAlarm(env, a, ctx) {
   const p = (await setting(env, "alertPhones")) || {};
   const to = [...new Set([p.manager, p.support].filter(Boolean))];
   if (to.length && smsReady(env)) {
-    const job = Promise.all(to.map((x) => sendSms(env, x, a.sms || `${a.title}${a.body ? ` — ${a.body}` : ""}`.slice(0, 300)).catch((e) => console.error("alarm sms", e && e.message))));
+    /* الگوی alarm (worker/sms-patterns.js): فقط عنوان، فوری و بی بررسیِ دستیِ IPPanel؛ تا تأیید نشده همان متنِ کامل */
+    const job = Promise.all(to.map((x) => sendSms(env, x, a.sms || `${a.title}${a.body ? ` — ${a.body}` : ""}`.slice(0, 300), { pattern: { key: "alarm", params: { title: a.title } } })
+      .catch((e) => console.error("alarm sms", e && e.message))));
     if (ctx && typeof ctx.waitUntil === "function") ctx.waitUntil(job); else await job;
   }
   return { id, queued: stmts.length };

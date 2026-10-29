@@ -1476,7 +1476,11 @@
     const relayRows = !R ? "" : row("پل پیامک", `سرورِ شرکت ${R.live ? `<span class="chip ok">✅ وصل است</span>` : `<span class="chip warn">${R.seen ? "قطع است" : "هنوز وصل نشده"}</span>`}
         <span class="dim">آخرین تماس: ${ago(R.age_s)}${R.queued ? ` · در صف: ${M(R.queued)}` : ""}</span>`)
       + row("پشتیبان‌گیری", bk && bk.at ? `${bk.ok ? "✅" : "⚠️"} ${esc(new Date(bk.at).toLocaleString("fa-IR", { timeZone: "Asia/Tehran" }))} <span class="dim">${bk.ok
-          ? `· ${M(bk.tables || 0)} جدول · ${M(bk.rows || 0)} ردیف` : esc(bk.error || "")}</span>` : `<span class="dim">هنوز انجام نشده؛ هر شب روی سرورِ شرکت</span>`);
+          ? `· ${M(bk.tables || 0)} جدول · ${M(bk.rows || 0)} ردیف` : esc(bk.error || "")}</span>` : `<span class="dim">هنوز انجام نشده؛ هر شب روی سرورِ شرکت</span>`)
+      /* الگوهای پیامکِ IPPanel (worker/sms-patterns.js): فعال‌ها فوری می‌روند؛ بقیه تا تأیید با متنِ کامل و بررسیِ دستیِ IPPanel */
+      + ((R.patterns || []).length ? row("الگوهای پیامک", (R.patterns || []).map((p) => `<span class="chip ${p.status === "active" ? "ok" : p.status === "rejected" || p.status === "error" ? "warn" : ""}"
+          title="${esc(p.reject || p.status_fa || "")}">${p.status === "active" ? "✅" : p.status === "rejected" || p.status === "error" ? "❌" : "⏳"} ${esc(p.fa)}</span>`).join(" ")
+          + `<div class="dim">✅ فعال، فوری · ⏳ در انتظارِ تأییدِ IPPanel — تا آن وقت همان متنِ کامل می‌رود و IPPanel دستی بررسی‌اش می‌کند · ❌ رد شد</div>`) : "");
     const alt = (s.others || []).filter((o) => o.set).map((o) => row(`${esc(o.label)} <span class="dim">— فعال نیست</span>`, o.ready
       ? `<button type="button" class="tp-btn sm" data-smschk="${esc(o.provider)}">🔌 تستِ ${esc(o.label)}</button> <span class="dim" data-smsres="${esc(o.provider)}">پیش از عوض کردنِ <span dir="ltr">SMS_PROVIDER</span> — بی پیامک</span>`
       : `<span class="dim">ست نشده:</span> ${vars(o.missing)}`)).join("");

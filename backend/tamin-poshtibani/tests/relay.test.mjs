@@ -14,7 +14,7 @@ import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { sendSms, smsReady, smsStatus, smsCheck, garbled } from "../../../worker/sms.js";
-import { relayWatch, relayTestText, RELAY_EXPIRE_MS, RELAY_STALE_MS } from "../../../worker/relay.js";
+import { relayWatch, relayTestText, relayTestPattern, RELAY_EXPIRE_MS, RELAY_STALE_MS } from "../../../worker/relay.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -197,6 +197,71 @@ test("متنِ خراب از رمزگذاری (UTF-8 خوانده‌شده با 
   assert.equal(ok.status, 200);
   const jobs = (await sync()).data.jobs;
   assert.equal(jobs[jobs.length - 1].body.message, fa, "همان حروفِ فارسی، بی‌تغییر");
+});
+
+test("الگوهای IPPanel: تعریف برای پل؛ فقط الگوی «active» با همان hash و همهٔ متغیرها؛ رمزِ ورود ← otp؛ متغیر حداکثر ۴۰ نویسه", { skip: SKIP }, async () => {
+  assert.equal((await call("/relay/patterns", { headers: { "x-relay-key": "nope" } })).status, 403);
+  const P = (await call("/relay/patterns", { headers: RK })).data.patterns;
+  assert.deepEqual(P.map((p) => p.key), ["otp", "invite", "tender_invite", "tender_note", "thanks", "alarm", "test", "report"]);
+  const def = (k) => P.find((p) => p.key === k);
+  assert.deepEqual(def("invite").vars, ["k", "code"]);
+  assert.equal(def("invite").message, "شرکت تونل سد آریانا درخواست خرید دارد.\nورود به پنل تأمین‌کنندگان: https://site.test/tamin-poshtibani/supplier#k=%k%\nرمز ورود: %code%");
+  assert.ok(P.every((p) => /^[0-9a-z]+$/.test(p.hash) && p.description && p.title.startsWith("ariana-")));
+  const last = async () => (await sync()).data.jobs.pop();
+  const INV = { pattern: { key: "invite", params: { k: "abc123def456", code: "123456" } } };
+
+  await sync({ beat: { credit: 10, patterns: { invite: { code: "pinv1", status: "pending", hash: def("invite").hash } } } });
+  await sendSms(env, "09121234567", "متن کامل", INV);
+  let j = await last();
+  assert.deepEqual([j.body.sending_type, j.body.message, j.kind], ["webservice", "متن کامل", "webservice"], "در انتظار تأیید: همان متن");
+
+  await sync({ beat: { credit: 10, patterns: { invite: { code: "pinv1", status: "active", hash: def("invite").hash }, test: { code: "ptest", status: "active", hash: "old" } } } });
+  await sendSms(env, "09121234567", "متن کامل", INV);
+  j = await last();
+  assert.deepEqual([j.body.sending_type, j.body.code, j.body.params, j.body.recipients, j.kind], ["pattern", "pinv1", { k: "abc123def456", code: "123456" }, ["+989121234567"], "pattern:invite"]);
+  assert.equal(j.body.message, undefined);
+  await sendSms(env, "09121234567", relayTestText(), { pattern: relayTestPattern() });
+  assert.equal((await last()).body.sending_type, "webservice", "hashِ کهنه: الگو به کار نمی‌رود");
+  await sendSms(env, "09121234567", "x", { pattern: { key: "invite", params: { k: "abc" } } });
+  assert.equal((await last()).body.sending_type, "webservice", "متغیرِ خالی: همان متن");
+
+  await sync({ beat: { credit: 10, patterns: { otp: { code: "potp", status: "active", hash: def("otp").hash }, alarm: { code: "pal", status: "active", hash: def("alarm").hash } } } });
+  await sendSms(env, "09121234567", "رمز ورود: 654321", { otp: "654321" });
+  j = await last();
+  assert.deepEqual([j.body.code, j.body.params], ["potp", { code: "654321" }]);
+  await sendSms(env, "09121234567", "x", { pattern: { key: "alarm", params: { title: "ا".repeat(60) } } });
+  j = await last();
+  assert.equal(j.body.params.title.length, 40);
+  assert.ok(j.body.params.title.endsWith("…"));
+  const s = (await call("/support/sms", { headers: SUP })).data.relay.patterns;
+  assert.deepEqual(["otp", "alarm", "invite"].map((k) => s.find((p) => p.key === k).status), ["active", "active", "none"], "هر تپش فهرستِ کامل است");
+  await sync({ beat: { credit: 10, patterns: {} } });
+});
+
+test("نتیجهٔ نهاییِ IPPanel: «رد شده» ← پیامک «نرفت» (sp_sms) و یک هشدار در ساعت؛ «پایان یافته» ← delivered؛ تکرار اثری ندارد", { skip: SKIP }, async () => {
+  DB.raw.exec("DELETE FROM settings WHERE key='smsRejectAlarm'");
+  const sid = Number(DB.raw.prepare("INSERT INTO sp_sms (phone_id,kind,body,at,via,status) VALUES (1,'rfq','x',?, 'ippanel','queued')").run(Date.now()).lastInsertRowid);
+  await sendSms(env, "09121234567", "یک", { smsId: sid });
+  await sendSms(env, "09121234568", "دو");
+  const [a, b] = (await sync()).data.jobs.slice(-2);
+  await sync({ results: [{ id: a.id, ok: true, ref: "11" }, { id: b.id, ok: true, ref: "12" }] });
+  const alarms = () => DB.raw.prepare("SELECT COUNT(*) AS n FROM alarms WHERE kind='sms_rejected'").get().n;
+  const n0 = alarms();
+  await sync({ deliveries: [{ id: a.id, state: "rejected", status: "رد شده" }, { id: b.id, state: "done", status: "پایان یافته" }] });
+  assert.deepEqual([row(a.id).status, row(b.id).status], ["rejected", "delivered"]);
+  const sp = DB.raw.prepare("SELECT status, error FROM sp_sms WHERE id=?").get(sid);
+  assert.equal(sp.status, "failed");
+  assert.match(sp.error, /IPPanel پیامک را رد کرد/);
+  assert.equal(alarms(), n0 + 1);
+  assert.match(DB.raw.prepare("SELECT body FROM alarms WHERE kind='sms_rejected' ORDER BY id DESC LIMIT 1").get().body, /0912…4567/);
+  await sendSms(env, "09121234569", "سه");
+  const c = (await sync()).data.jobs.pop();
+  await sync({ results: [{ id: c.id, ok: true, ref: "13" }] });
+  await sync({ deliveries: [{ id: c.id, state: "rejected" }] });
+  assert.equal(row(c.id).status, "rejected");
+  assert.equal(alarms(), n0 + 1, "ساعتی یک هشدار");
+  await sync({ deliveries: [{ id: b.id, state: "rejected" }, { id: 999999, state: "rejected" }] });
+  assert.equal(row(b.id).status, "delivered", "نتیجهٔ دوباره اثری ندارد");
 });
 
 test("پنل پشتیبانی: وضعیتِ پل در «درگاه پیامک» و «📨 پیامک آزمایشی»؛ /relay/test هم از همان راهِ سامانه", { skip: SKIP }, async () => {

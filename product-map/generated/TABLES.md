@@ -12,7 +12,7 @@
 | ai_rates | corr.main، engine.ai | expert.letter، infra.core، support.fb |
 | ai_runs | corr.main، engine.ai، expert.ai، expert.finalcall، infra.core، sup.panel، support.ai، support.dl، support.fb، support.rules | expert.detail، expert.tray، manager.asg، manager.desk، support.md، support.req، support.use |
 | ai_threads | corr.main، engine.ai، infra.core، support.ai، support.fb | expert.detail، expert.picks، sup.panel، support.app، support.chat، support.req |
-| alarms | infra.core، manager.log، notify.alarms، support.log | manager.desk، support.req |
+| alarms | infra.core، manager.log، notify.alarms، notify.sms، support.log | manager.desk، support.req |
 | alerts | bot.team، engine.ai، expert.alerts، expert.smart، infra.core، manager.desk، manager.log | — |
 | assignment_log | engine.records | — |
 | assignments | bot.team، engine.ai، engine.tender، expert.alerts، expert.comm، expert.detail، expert.tray، infra.core، manager.asg، manager.desk، manager.log، support.td | corr.main، engine.records، engine.structure، expert.account، expert.ai، expert.finalcall، expert.history، expert.letter، expert.picks، expert.quotes، expert.smart، expert.team، expert.terms، login.supplier، manager.experts، manager.import، manager.reports، sup.panel، support.ai، support.app، support.chat، support.chg، support.cm، support.dl، support.exp، support.fb، support.req، support.use |
