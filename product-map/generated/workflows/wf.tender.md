@@ -20,7 +20,7 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [support.td](../features/support.td.md) | 🔨 مناقصه | 24 | 8 |
-| [engine.tender](../features/engine.tender.md) | موتور مناقصه | 0 | 2 |
+| [engine.tender](../features/engine.tender.md) | موتور مناقصه | 0 | 3 |
 | [notify.sms](../features/notify.sms.md) | پیامک | 5 | 3 |
 
 ## گام 3 — ورود تأمین‌کننده با رمز پیامکی
@@ -40,7 +40,7 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [tender.page](../features/tender.page.md) | مناقصهٔ خرید | 8 | 5 |
-| [engine.tender](../features/engine.tender.md) | موتور مناقصه | 0 | 2 |
+| [engine.tender](../features/engine.tender.md) | موتور مناقصه | 0 | 3 |
 
 ## گام 5 — پایان، نتیجه و برگشت به کمیسیون
 

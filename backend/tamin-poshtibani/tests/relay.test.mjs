@@ -15,6 +15,7 @@ import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { sendSms, smsReady, smsStatus, smsCheck, garbled } from "../../../worker/sms.js";
 import { relayWatch, relayTestText, relayTestPattern, RELAY_EXPIRE_MS, RELAY_STALE_MS } from "../../../worker/relay.js";
+import { tenderCode } from "../../../worker/tender.js";
 
 const DB = await sqliteD1();
 const SKIP = DB ? false : "node:sqlite در دسترس نیست (Node ≥ 22.5 لازم است)";
@@ -240,6 +241,9 @@ test("الگوهای IPPanel: تعریف برای پل؛ فقط الگوی «act
   assert.deepEqual([j.body.code, j.body.params, j.body._text], ["pal", { code: "123" }, "هشدار کامل"], "متنِ کامل کنارِ الگو برای پل");
   await sendSms(env, "09121234567", "x", { pattern: { key: "alarm", params: { code: "بی رقم" } } });
   assert.equal((await last()).body.sending_type, "webservice");
+  await sendSms(env, "09121234567", "x", { pattern: { key: "alarm", params: { code: "4a0f3c" } } });
+  assert.equal((await last()).body.sending_type, "webservice", "کدِ هگز با الگوی عددی نمی‌رود — حروف بریده نمی‌شوند (لینکِ اشتباه)");
+  assert.ok(Array.from({ length: 50 }, () => tenderCode()).every((c) => /^[1-9]\d{9}$/.test(c)), "کدِ مناقصه: ده رقم، اولی ناصفر");
   await sendSms(env, "09121234567", "x", { pattern: { key: "otp", params: { code: "ا".repeat(60) } } });
   j = await last();
   assert.equal(j.body.params.code.length, 40, "متغیرِ متنی حداکثر ۴۰ نویسه");

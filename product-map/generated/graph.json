@@ -703,6 +703,7 @@
    ],
    "endpoints": [],
    "tests": [
+    "backend/tamin-poshtibani/tests/relay.test.mjs",
     "backend/tamin-poshtibani/tests/tender.test.mjs",
     "backend/tamin-poshtibani/tests/tender2.test.mjs"
    ],
@@ -14562,6 +14563,7 @@
   {
    "file": "backend/tamin-poshtibani/tests/relay.test.mjs",
    "features": [
+    "engine.tender",
     "infra.site",
     "login.support",
     "notify.sms",
@@ -14571,7 +14573,8 @@
     "backend/tamin-poshtibani/tests/run.mjs",
     "worker/api.js",
     "worker/relay.js",
-    "worker/sms.js"
+    "worker/sms.js",
+    "worker/tender.js"
    ]
   },
   {

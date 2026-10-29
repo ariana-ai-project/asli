@@ -19,8 +19,14 @@ const company = (env) => T(env && env.COMPANY) || "تونل سد آریانا";
 const site = (env) => T(env && env.SITE_ORIGIN) || "https://arianaai.website";
 /** مقدارِ متغیرِ الگو: یک خط و حداکثر ۴۰ نویسه */
 export const cut = (v, n = 40) => { const s = T(v).replace(/\s+/g, " "); return s.length > n ? `${s.slice(0, n - 1)}…` : s; };
-/** متغیرِ عددی (IPPanel «params.x باید از نوع عددی باشد»): فقط رقمِ لاتین */
-const digits = (v) => T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d)).replace(/\D/g, "").slice(0, 12);
+/**
+ * متغیرِ عددی (IPPanel «params.x باید از نوع عددی باشد»): رقمِ فارسی و عربی لاتین می‌شود؛ مقداری که چیزِ دیگری دارد (مثلاً کدِ
+ * هگزِ مناقصه‌های قدیمی «4a0f…») خالی برمی‌گردد تا همان متنِ کامل برود — بریدنِ حروف لینکِ اشتباه می‌ساخت
+ */
+const digits = (v) => {
+  const s = T(v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  return /^\d{1,15}$/.test(s) ? s : "";
+};
 /** ساعتِ تهران به شکلِ عددِ HHMM (برای الگوی test) */
 export function tehranCode(t = Date.now()) {
   try {

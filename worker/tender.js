@@ -580,6 +580,15 @@ function lotOf(x, i, draftOk) {
 }
 
 /** POST /support/tenders — مناقصهٔ تازه (پیش‌نویس) با فهرست دعوت؛ lots: چند قلم در یک گروه */
+/**
+ * کدِ لینکِ مناقصه: ده رقم (اولی ۱ تا ۹). الگوهای تأییدشدهٔ IPPanel (tender_invite و tender_note) متغیرِ کد را عددی کردند؛ کدِ هگزِ
+ * قدیمی با الگو نمی‌رود (همان متنِ کامل). همان قالبِ [0-9a-f]ِ مسیرها و صفحهٔ مناقصه را دارد.
+ */
+export function tenderCode() {
+  const a = crypto.getRandomValues(new Uint32Array(2));
+  return String(((BigInt(a[0]) << 32n) | BigInt(a[1])) % 9000000000n + 1000000000n);
+}
+
 /* src (داخلی، از tenderRefer): {request_id, items:[شناسهٔ قلمِ هر ردیف], by: "manager"|"support"} */
 export async function tenderCreate(env, b, src) {
   const lots = (Array.isArray(b.lots) && b.lots.length ? b.lots : [b]).slice(0, 30).map((x, i) => lotOf(x, i, !!src));
@@ -595,7 +604,7 @@ export async function tenderCreate(env, b, src) {
     const L = lots[i];
     const r = await env.DB.prepare(`INSERT INTO tenders (code,grp,lot_no,title,item_code,item_title,spec,terms,qty,unit,start_price,${RULES.join(",")},state,created_by,created_at,updated_at,src_request,src_item,src_by,src_at)
         VALUES (?,?,?,?,?,?,?,?,?,?,?,${RULES.map(() => "?").join(",")},'draft',?,?,?,?,?,?,?)`)
-      .bind(randHex(5), grp, grp ? i + 1 : null, L.title, L.item_code, L.item_title, L.spec, terms, L.qty, L.unit, L.start, ...RULES.map((k) => s[k]),
+      .bind(tenderCode(), grp, grp ? i + 1 : null, L.title, L.item_code, L.item_title, L.spec, terms, L.qty, L.unit, L.start, ...RULES.map((k) => s[k]),
         src ? src.by : "support", t, t, src ? src.request_id : null, src ? src.items[i] || null : null, src ? src.by : null, src ? t : null).run();
     const id = r.meta.last_row_id;
     ids.push(id);

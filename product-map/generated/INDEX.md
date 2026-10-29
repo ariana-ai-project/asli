@@ -153,7 +153,7 @@
 | [engine.records](features/engine.records.md) | ثبت سوابق جستجو، کانال‌ها و کمیسیون | w/records.js | 0 | 1 |
 | [engine.strategy](features/engine.strategy.md) | موتور راهبرد خرید (CR-02) | strategy-view.js، w/cr-data.js، w/cr-engine.js، w/critique.js (+13) | 0 | 12 |
 | [engine.structure](features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | w/estimate.js، w/normalize.js، w/structure.js | 0 | 5 |
-| [engine.tender](features/engine.tender.md) | موتور مناقصه | w/tender-core.js، w/tender.js | 0 | 2 |
+| [engine.tender](features/engine.tender.md) | موتور مناقصه | w/tender-core.js، w/tender.js | 0 | 3 |
 
 ### اعلان‌ها (notify)
 
