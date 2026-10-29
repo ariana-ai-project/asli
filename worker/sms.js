@@ -238,14 +238,23 @@ export function smsEnvWith(env, o) {
 }
 
 /**
- * یک پیامک. خروجی {ok, provider, ref, to, pattern?}؛ هر شکستی SmsError با پیام فارسی و کد (off | bad_number | auth | quota |
- * rejected | network | error). opts.otp: رمزِ همین پیامک — درگاهی که الگوی رمز دارد فقط همان را با الگو می‌فرستد.
+ * متنِ خراب از رمزگذاریِ نادرست: UTF-8ِ فارسی که جایی Windows-1252 خوانده شده — «Ú¯Ø²Ø§Ø±Ø´» به‌جای «گزارش». هر حرفِ فارسی دو
+ * نویسهٔ لاتین می‌شود (Ø، Ù، Ú یا Û و پشتش نویسه‌ای از 0x80–0xBF یا جانشینِ Windows-1252اش مثل … † ‡ Œ). آبان ۱۴۰۵ دو پیامکِ
+ * گزارش به همین شکل به گوشیِ مالک رسید (شبیهِ کد، و هر کدام ۵ قسمت). سه جفت یعنی خراب؛ متنِ فرانسوی و لاتینِ معمولی نمی‌خورد.
+ */
+const MOJIBAKE = /[ØÙÚÛ][\u0080-¿ŒœŠšŸŽžƒˆ˜–-›€™]/g;
+export const garbled = (s) => (String(s == null ? "" : s).match(MOJIBAKE) || []).length >= 3;
+
+/**
+ * یک پیامک. خروجی {ok, provider, ref, to, pattern?}؛ هر شکستی SmsError با پیام فارسی و کد (off | bad_number | bad_text | auth |
+ * quota | rejected | network | error). opts.otp: رمزِ همین پیامک — درگاهی که الگوی رمز دارد فقط همان را با الگو می‌فرستد.
  * متنِ پیامک (که رمز ورود در آن است) هیچ‌جا لاگ نمی‌شود.
  */
 export async function sendSms(env, to, text, opts = {}) {
   if (!smsReady(env)) throw new SmsError("درگاه پیامک وصل نیست.", "off");
   const num = e164(to);
   if (!num) throw new SmsError("این شماره پیامک نمی‌گیرد.", "bad_number");
+  if (garbled(text)) throw new SmsError("متنِ پیامک خراب است (رمزگذاریِ نادرستِ حروف فارسی)؛ فرستاده نشد.", "bad_text");
   return PROVIDERS[smsProvider(env)].send(env, num, String(text || ""), opts || {});
 }
 

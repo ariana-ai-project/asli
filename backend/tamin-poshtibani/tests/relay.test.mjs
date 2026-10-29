@@ -13,7 +13,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
-import { sendSms, smsReady, smsStatus, smsCheck } from "../../../worker/sms.js";
+import { sendSms, smsReady, smsStatus, smsCheck, garbled } from "../../../worker/sms.js";
 import { relayWatch, relayTestText, RELAY_EXPIRE_MS, RELAY_STALE_MS } from "../../../worker/relay.js";
 
 const DB = await sqliteD1();
@@ -179,6 +179,24 @@ test("تب «پشتیبانی» صفحهٔ اول: «📶 پیامک و پشتی
   assert.equal((await call("/site/sms/test", { body: { to: "09104201638" } })).status, 401);
   assert.equal((await call("/site/sms/test", { body: { to: "021" }, headers: { "X-Site-Code": "4321" } })).status, 400);
   await sync();
+});
+
+test("متنِ خراب از رمزگذاری (UTF-8 خوانده‌شده با Windows-1252) هرگز به صف نمی‌رود؛ فارسی و لاتینِ درست می‌روند", { skip: SKIP }, async () => {
+  const fa = "گزارش سامانه آریانا: سامانه سالم است. پشتیبان‌گیری شبانه هم سالم است.";
+  const bad = new TextDecoder("windows-1252").decode(new TextEncoder().encode(fa));   /* همان «Ú¯Ø²Ø§Ø±Ø´…» که آبان ۱۴۰۵ رسید */
+  assert.match(bad, /^Ú¯Ø²/);
+  assert.deepEqual([garbled(bad), garbled(fa), garbled("Où est le café ? Très bien, merci."), garbled("Ø"), garbled(null)], [true, false, false, false, false]);
+  await sync({ beat: { credit: 10 } });
+  const n0 = DB.raw.prepare("SELECT COUNT(*) AS n FROM sms_outbox").get().n;
+  await assert.rejects(sendSms(env, "09104201638", bad), (e) => e.code === "bad_text");
+  const t = await call("/relay/test", { body: { to: "09104201638", text: bad }, headers: RK });
+  assert.equal(t.status, 400);
+  assert.match(t.data.error, /خراب/);
+  assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sms_outbox").get().n, n0, "هیچ پیامکِ خرابی در صف ننشست");
+  const ok = await call("/relay/test", { body: { to: "09104201638", text: fa }, headers: RK });
+  assert.equal(ok.status, 200);
+  const jobs = (await sync()).data.jobs;
+  assert.equal(jobs[jobs.length - 1].body.message, fa, "همان حروفِ فارسی، بی‌تغییر");
 });
 
 test("پنل پشتیبانی: وضعیتِ پل در «درگاه پیامک» و «📨 پیامک آزمایشی»؛ /relay/test هم از همان راهِ سامانه", { skip: SKIP }, async () => {

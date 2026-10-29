@@ -6,7 +6,7 @@
 
 ## فایل‌های این قابلیت (صاحب)
 - `worker/relay.js` — RELAY_DDL، RELAY_EXPIRE_MS، RELAY_FRESH_MS، RELAY_STALE_MS، relayAuth، relayBackupRows، relayBackupSchema، relayCheck، relayEnqueue، relayOn، relayStatus، relaySync، relayTestText، relayWatch
-- `worker/sms.js` — BIDI، SmsError، e164، isMobile، lineE164، phoneChars، sendSms، smsCheck، smsEnvWith، smsLabel، smsProvider، smsReady، smsStatus، viaLabel، viaSent
+- `worker/sms.js` — BIDI، SmsError، e164، garbled، isMobile، lineE164، phoneChars، sendSms، smsCheck، smsEnvWith، smsLabel، smsProvider، smsReady، smsStatus، viaLabel، viaSent
 
 ## مسیرهای سرور (4)
 | مسیر | پاسخ‌گو | ماژول‌هایی که صدا می‌زند | در تست |
