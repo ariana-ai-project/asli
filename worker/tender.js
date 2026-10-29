@@ -221,8 +221,8 @@ async function tgSupplier(env, phone, text, link) {
   return n;
 }
 /**
- * پیامک + تلگرام؛ خروجی {state, tg}. pat: {note, code} برای الگوی tender_note (worker/sms-patterns.js) — یادداشتِ کوتاه (≤۴۰ نویسه)
- * و کدِ مناقصه برای لینک؛ تا الگو تأیید نشده همان متنِ کامل می‌رود.
+ * پیامک + تلگرام؛ خروجی {state, tg}. pat: {code} برای الگوی tender_note (worker/sms-patterns.js) — «وضعیت درخواست خرید شما تغییر کرد»
+ * با لینکِ همین مناقصه؛ تا الگو تأیید نشده همان متنِ کامل (با رتبه و زمان) می‌رود.
  */
 async function notify(env, phone, text, link, pat) {
   const opts = pat ? { pattern: { key: "tender_note", params: pat } } : undefined;
@@ -252,7 +252,7 @@ async function sealedCloseIfDue(env, t, ctx) {
   const ranks = ranksOf(bids), link = tenderLink(env, fresh.code);
   const jobs = inv.filter((i) => ranks.has(i.alias) && !i.notify_off && fresh.outbid_sms).map((i) => notify(env, i.phone,
     `${COMPANY(env)}\nدور سربستهٔ مناقصه تمام شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است و دور زنده شروع شد (${faN(minsLeft(fresh))} دقیقه).`, link,
-    { note: `دور زنده شروع شد؛ رتبهٔ شما ${faN(ranks.get(i.alias).rank)} است`, code: fresh.code }));
+    { code: fresh.code }));
   if (jobs.length) wait(ctx, Promise.all(jobs));
   supPush(env, ctx, fresh, `🔓 دور سربستهٔ «${fresh.title}» تمام شد`,
     `${ranks.size ? `${faN(ranks.size)} شرکت‌کننده · ` : ""}دور زنده شروع شد — ${faN(minsLeft(fresh))} دقیقه مانده${fresh.best_amount != null ? ` · بهترین ${faN(fresh.best_amount)} ریال` : ""}`);
@@ -283,11 +283,11 @@ export async function finalizeIfDue(env, t, ctx) {
   await env.DB.batch(stmts);
   const link = tenderLink(env, fresh.code), co = COMPANY(env), jobs = [];
   if (win) jobs.push(notify(env, win.phone, `${co}\nمناقصه به پایان رسید و پیشنهاد شما کمترین قیمت بود. همکاران تدارکات برای ادامهٔ کار با شما تماس می‌گیرند.`, link,
-    { note: "پایان یافت؛ پیشنهاد شما کمترین قیمت بود", code: fresh.code }));
+    { code: fresh.code }));
   if (fresh.thanks_sms) {
     for (const i of inv) if (ranks.has(i.alias) && (!win || i.alias !== win.alias)) {
       jobs.push(notify(env, i.phone, `${co}\nمناقصه به پایان رسید؛ این بار پیشنهاد دیگری کمتر بود. از همراهی و پیشنهادتان سپاسگزاریم و به امید همکاری‌های بعدی.`, null,
-        { note: "پایان یافت؛ از پیشنهادتان سپاسگزاریم", code: fresh.code }));
+        { code: fresh.code }));
     }
   }
   if (jobs.length) wait(ctx, Promise.all(jobs));
@@ -352,7 +352,7 @@ async function notifyDrops(env, t, before, after, skip, ctx) {
     if (!i || i.notify_off || !i.on_list || (i.outbid_at && n - i.outbid_at < gap)) continue;
     const lost = d.from === 1;
     const text = `${co}\n${lost ? "دیگر پیشتاز مناقصه نیستید" : "در مناقصه پیشنهاد پایین‌تری ثبت شد"}؛ رتبهٔ شما اکنون ${faN(d.to)} است. ${faN(minsLeft(t))} دقیقه تا پایان مانده.`;
-    jobs.push(notify(env, i.phone, text, link, { note: `${lost ? "دیگر پیشتاز نیستید" : "پیشنهاد پایین‌تری ثبت شد"}؛ رتبهٔ شما ${faN(d.to)}`, code: t.code }));
+    jobs.push(notify(env, i.phone, text, link, { code: t.code }));
     stmts.push(env.DB.prepare("UPDATE tender_invites SET outbid_at=?, outbid_n=outbid_n+1 WHERE tender_id=? AND alias=?").bind(n, t.id, i.alias));
   }
   if (stmts.length) await env.DB.batch(stmts);

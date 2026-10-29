@@ -207,6 +207,10 @@ test("الگوهای IPPanel: تعریف برای پل؛ فقط الگوی «act
   assert.deepEqual(def("invite").vars, ["k", "code"]);
   assert.equal(def("invite").message, "شرکت تونل سد آریانا درخواست خرید دارد.\nورود به پنل تأمین‌کنندگان: https://site.test/tamin-poshtibani/supplier#k=%k%\nرمز ورود: %code%");
   assert.ok(P.every((p) => /^[0-9a-z]+$/.test(p.hash) && p.description && p.title.startsWith("ariana-")));
+  /* IPPanel دو بار «نیازمندِ معرفی‌نامه» داد؛ این چهار الگو به شکلِ تأییدشده‌ها: متنِ خدماتیِ کوتاه، لینک یا فقط عدد */
+  assert.match(def("tender_invite").message, /^شرکت تونل سد آریانا درخواست خرید دارد\.\nورود با شمارهٔ همین گوشی: https:\/\/site\.test\/tamin-poshtibani\/tender#t=%code%$/);
+  assert.deepEqual([def("tender_note").vars, def("report").vars, def("report").types], [["code"], ["ok", "fail"], { ok: "integer", fail: "integer" }]);
+  assert.ok(["alarm", "report", "tender_invite", "tender_note"].every((k) => !/هشدار|مناقصه|%(title|status|note)%/.test(def(k).message)), "بی واژه‌های ردشده و بی متنِ آزاد");
   const last = async () => (await sync()).data.jobs.pop();
   const INV = { pattern: { key: "invite", params: { k: "abc123def456", code: "123456" } } };
 

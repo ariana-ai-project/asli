@@ -36,6 +36,7 @@ export const buyIntro = (env) => `شرکت ${company(env)} درخواست خری
  * تعریف‌ها: key، نامِ فارسی برای پنل، متن با %متغیر%، فهرستِ متغیرها و types (متغیرِ عددی: integer).
  * پاسخِ IPPanel در ۸ آبان: otp، invite، thanks و test تأیید؛ tender_invite، tender_note و report «نیازمندِ معرفی‌نامه از راهِ تیکت»؛
  * alarm «متن پترن نمی‌تواند متغیر ثبت شود» (عنوانِ آزاد) — حالا فقط کدِ عددی دارد؛ test را IPPanel عددی کرد — حالا کدِ عددیِ ساعت.
+ * بارِ دوم alarm هم «نیازمندِ معرفی‌نامه» شد؛ چهار الگوی مانده به شکلِ تأییدشده‌ها بازنویسی شدند (بی «هشدار»، «مناقصه» و متنِ آزاد).
  */
 function raw(env) {
   const co = company(env), s = site(env);
@@ -44,18 +45,19 @@ function raw(env) {
       message: `رمز ورود شما به سامانه تأمین شرکت ${co}: %code%` },
     { key: "invite", fa: "دعوت تأمین‌کننده", vars: ["k", "code"],
       message: `${buyIntro(env)}\nورود به پنل تأمین‌کنندگان: ${s}/tamin-poshtibani/supplier#k=%k%\nرمز ورود: %code%` },
+    /* مناقصه، هشدار و گزارش دو بار «نیازمندِ معرفی‌نامه» شدند؛ حالا به شکلِ الگوهای تأییدشده (متنِ خدماتیِ کوتاه با لینک یا کدِ عددی) */
     { key: "tender_invite", fa: "دعوت به مناقصه", vars: ["code"],
-      message: `شرکت ${co} شما را به یک مناقصهٔ خرید دعوت کرده است.\nورود با شمارهٔ همین گوشی: ${s}${TENDER_PATH_}#t=%code%` },
-    { key: "tender_note", fa: "خبرِ مناقصه", vars: ["note", "code"],
-      message: `شرکت ${co} — مناقصهٔ خرید: %note%\n${s}${TENDER_PATH_}#t=%code%` },
+      message: `${buyIntro(env)}\nورود با شمارهٔ همین گوشی: ${s}${TENDER_PATH_}#t=%code%` },
+    { key: "tender_note", fa: "خبرِ مناقصه", vars: ["code"],
+      message: `شرکت ${co}: وضعیت درخواست خرید شما تغییر کرد؛ برای دیدن جزئیات وارد شوید:\n${s}${TENDER_PATH_}#t=%code%` },
     { key: "thanks", fa: "تشکر بعد از کمیسیون", vars: ["req"],
       message: `شرکت ${co}: از پیشنهادتان برای استعلام %req% سپاسگزاریم. این بار خرید از تأمین‌کنندهٔ دیگری انجام شد؛ امیدواریم در خریدهای بعدی همکاری کنیم.` },
     { key: "alarm", fa: "هشدار و اعلان به همکاران", vars: ["code"], types: { code: "integer" },
-      message: `هشدار سامانه تأمین شرکت ${co}: موردی نیاز به بررسی دارد؛ جزئیات در پنل‌های سامانه. کد پیگیری: %code%` },
+      message: `سامانه تأمین شرکت ${co}: یک مورد تازه برای بررسی در پنل ثبت شد. کد %code%` },
     { key: "test", fa: "پیامک آزمایشی", vars: ["code"], types: { code: "integer" },
       message: `پیامک آزمایشی سامانه تأمین شرکت ${co} — کد %code%` },
-    { key: "report", fa: "گزارش سامانه", vars: ["status"],
-      message: `گزارش سامانه تأمین شرکت ${co}: %status%` },
+    { key: "report", fa: "گزارش سامانه", vars: ["ok", "fail"], types: { ok: "integer", fail: "integer" },
+      message: `سامانه تأمین شرکت ${co}: آزمون‌های دوره‌ای انجام شد؛ %ok% مورد موفق و %fail% مورد ناموفق.` },
   ];
 }
 /** FNV-1a کوتاه — برای این‌که متنِ عوض‌شده الگوی تازه بخواهد */
