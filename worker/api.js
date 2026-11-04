@@ -2985,7 +2985,8 @@ async function route(request, env, ctx) {
         const D = await seasonData(env, settings, b);
         const book = seasonBook(D, Array.isArray(b.sheets) ? b.sheets : null);
         if (path.endsWith(".xlsx")) return xlsx(await bookFile(book), `گزارش ${D.period.label}.xlsx`);
-        return json({ label: D.period.label, priorLabel: D.period.priorLabel, workDays: D.workDays, hasExpertAmounts: D.hasExpertAmounts, unmatched: D.unmatched, picked: D.picked, sheets: bookPreview(book), css: BOOK_CSS });
+        return json({ label: D.period.label, priorLabel: D.period.priorLabel, workDays: D.workDays, hasExpertAmounts: D.hasExpertAmounts, unmatched: D.unmatched, picked: D.picked,
+          source: D.source || null, sheets: bookPreview(book), css: BOOK_CSS });
       }
       throw new HttpError("گزارش ناشناخته.", 404);
     }

@@ -309,7 +309,7 @@ body.tp-drop-over::after { content: "فایل اکسل را همین‌جا ره
 .tp-mx .tri.ok { background: var(--gl-sheen), rgba(34,197,94,.16); border-color: var(--tp-ok); color: #4ade80; }
 .tp-mx .tri.unk { border-style: dashed; }
 :root[data-theme="light"] .tp-mx .tri.ok { background: rgba(22,163,74,.12); color: #15803d; }
-/* جدول کارشناسان: عرض ستون‌ها از colgroup (manager.js:EX_W) — چهار ستون راست ثابت‌اند */
+/* جدول گروه‌بندیِ گزارش سه ماهه: عرض ستون‌ها از colgroup (manager.js:teamDialog) */
 /* ماتریس‌های بلندِ ارجاع و مهلت هوشمند (۲۵ گروه اصناف، ۳۰ پروژه): هر ستون پهنای خودش را
    دارد و جدول افقی می‌چرخد — با width:100% سرستون‌ها روی هم می‌افتادند. ستون نام کارشناس
    (td.name / th:first-child) از قبل چسبیده به لبهٔ راست می‌ماند. */

@@ -694,14 +694,15 @@
      دو بخش: «وضعیت درخواست‌ها» (جدول با برش‌دهنده‌های وضعیت / طرف مقابل / کارشناس خرید، مثل فایل
      اکسل واحد، و برگهٔ «گزارش روزانه» با فیلتر ستون‌ها) و «گزارش سه ماهه» (تیک برگه‌ها، سال/فصل/ماه
      چندانتخابی، تیکِ کارشناسانِ همان دوره پیش از ساخت، پیش‌نمایش همان برگه‌ها و نمودارهایی که در
-     فایل می‌رود). ساخت داده و فایل در worker/reports.js. */
+     فایل می‌رود؛ از داده‌های سامانه یا از فایلِ راهکارانی که مدیر همین‌جا بارگذاری می‌کند). ساخت داده و
+     فایل در worker/reports.js. */
   /* بازهٔ «وضعیت درخواست‌ها»: از ابتدای ماه جاری تا «تاکنون» — بایگانی بیست هزار درخواست دارد
      و بی بازه، پاسخ هم سنگین است هم بی‌فایده. مدیر هر دو سر بازه را عوض می‌کند؛ پایانِ خالی
      یعنی تاکنون. */
   const monthStart = () => { const [y, m] = TP.todayJ(); return `${y}/${String(m).padStart(2, "0")}/01`; };
   const RP = { part: "status", meta: null, metaLoading: false, status: null, loading: false, sheet: "general", sl: { 2: [], 7: [], 11: [] }, hidden: false, limit: 300,
     dq: ["", "", "", "", "", ""], dLimit: 300, pop: null, range: { from: monthStart(), to: "" }, rangeKey: "",
-    season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false } };
+    season: { years: null, seasons: null, months: [], sheets: null, result: null, idx: 0, busy: false, src: "system", file: null, last: null } };
   const rangeQs = () => `?from=${encodeURIComponent(RP.range.from || "")}&to=${encodeURIComponent(RP.range.to || "")}`;
   const SL = [[2, "وضعیت"], [7, "طرف مقابل"], [11, "کارشناس خرید"]];
   const RP_ST_ORDER = ["بسته شده", "تایید شده", "ثبت شده", "در جریان", "بررسی مجدد", "متوقف شده", "معلق"];
@@ -834,6 +835,21 @@
     /* سال عدد نیست که جداکنندهٔ هزارگان بگیرد («۱٬۴۰۴»)، و چند سالِ به‌هم‌چسبیده عدد نمی‌شود (NaN) */
     return `${j(parts)} ${[...s.years].sort((a, b) => a - b).join(" و ")}`;
   }
+  /* ماه‌های دوره به شکل «۱۴۰۵/۰۴» — همان P.keys سرور */
+  const periodKeys = (s) => { const ks = new Set(), ms = repMonths(s); (s.years || []).forEach((y) => ms.forEach((m) => ks.add(`${y}/${String(m).padStart(2, "0")}`))); return ks; };
+  /* منبع دادهٔ گزارش سه ماهه: سامانه، یا فایلِ «اقلام درخواست» راهکاران (loadSeasonFile) */
+  function vRepSource() {
+    const s = RP.season, F = s.file;
+    let tail = "";
+    if (s.src === "file" && F) {
+      const miss = [...periodKeys(s)].filter((k) => !F.months.has(k)), ym = (k) => `${RP_MONTHS[+k.slice(5, 7) - 1]} ${k.slice(0, 4)}`;
+      tail = `<span class="rp2-file" title="${esc(F.name)}">${TP.ui.ICON.file}<span><b dir="auto">${esc(F.name)}</b><small>${M(F.rows.length)} درخواست · ${M(F.items)} قلم · ${esc(F.from)} تا ${esc(F.to)}</small></span></span>
+        <button class="tp-btn sm" data-rfile>${TP.ui.ICON.upload} فایل دیگر</button><button class="tp-btn xs" data-rfile-x title="برداشتن فایل" aria-label="برداشتن فایل">${TP.ui.ICON.x}</button>
+        ${miss.length ? `<span class="chip warn">${miss.length <= 3 ? miss.map(ym).join("، ") : `${M(miss.length)} ماهِ دوره`} در فایل نیست</span>` : ""}`;
+    } else if (s.src === "file") tail = `<button class="tp-btn sm primary" data-rfile>${TP.ui.ICON.upload} انتخاب فایل اکسل</button><span class="dim">یا فایل را روی صفحه رها کنید</span>`;
+    return `<section class="tp-box rp2-range rp2-src"><span class="lab">${TP.ui.ICON.data} منبع داده</span>
+      <div class="tp-seg sm" role="tablist">${[["system", "داده‌های سامانه"], ["file", "فایل اکسل راهکاران"]].map(([k, l]) => `<button type="button" role="tab" class="${s.src === k ? "on" : ""}" aria-selected="${s.src === k}" data-rsrc="${k}">${l}</button>`).join("")}</div>${tail}</section>`;
+  }
   function vRepSeason() {
     const meta = RP.meta, s = RP.season;
     if (!meta) {
@@ -843,11 +859,13 @@
     }
     const tog = (attr, v, on, label, sub) => `<button type="button" class="rp2-tog ${on ? "on" : ""}" data-${attr}="${v}" aria-pressed="${on ? "true" : "false"}"><i class="ck">${TP.ui.ICON.check}</i><span><b>${label}</b>${sub ? `<small>${sub}</small>` : ""}</span></button>`;
     const R = s.result, sh = R && R.sheets[Math.min(s.idx, R.sheets.length - 1)];
-    return `<div class="rp2-steps">
+    /* سال‌های فایل هم انتخاب‌پذیرند، حتی اگر سامانه آن سال را ندارد */
+    const years = s.src === "file" && s.file ? [...new Set([...meta.years, ...s.file.years])].sort((a, b) => b - a) : meta.years;
+    return `${vRepSource()}<div class="rp2-steps">
         <section class="tp-box rp2-step"><div class="tp-box-h"><span class="bi">۱</span><h3>برگه‌ها</h3><span class="sub">${M(s.sheets.length)} از ${M(meta.sheets.length)}</span></div>
           <div class="rp2-togs">${meta.sheets.map((x) => tog("rsh", x.key, s.sheets.includes(x.key), esc(x.name))).join("")}</div></section>
         <section class="tp-box rp2-step"><div class="tp-box-h"><span class="bi">۲</span><h3>دوره</h3><span class="end"><span class="rp-period">${esc(repPeriodLabel(s))}</span></span></div>
-          <div class="rp2-prow"><span class="lab">سال</span><div class="tp-pills">${meta.years.map((y) => `<button type="button" class="tp-pill ${s.years.includes(y) ? "on" : ""}" data-ry="${y}">${y}</button>`).join("") || `<span class="dim">درخواستی در سامانه نیست</span>`}</div></div>
+          <div class="rp2-prow"><span class="lab">سال</span><div class="tp-pills">${years.map((y) => `<button type="button" class="tp-pill ${s.years.includes(y) ? "on" : ""}" data-ry="${y}">${y}</button>`).join("") || `<span class="dim">درخواستی در سامانه نیست</span>`}</div></div>
           <div class="rp2-prow"><span class="lab">فصل</span><div class="rp2-togs four">${RP_SEASONS.map((n, i) => tog("rq", i + 1, s.seasons.includes(i + 1), n, RP_MONTHS.slice(i * 3, i * 3 + 3).join("، "))).join("")}</div></div>
           <div class="rp2-prow"><span class="lab">ماه</span><div class="tp-pills">${RP_MONTHS.map((n, i) => `<button type="button" class="tp-pill ${s.months.includes(i + 1) ? "on" : ""}" data-rm="${i + 1}">${n}</button>`).join("")}</div></div></section>
         <section class="tp-box rp2-step rp2-go"><div class="tp-box-h"><span class="bi">۳</span><h3>ساخت</h3></div>
@@ -856,7 +874,8 @@
           <button class="tp-btn sm" data-rproj>${TP.ui.ICON.project} پروژه‌ها و مدیران پروژه</button></section></div>
       ${R ? `<style>${R.css}</style>
         <section class="tp-box rp2-res"><div class="tp-box-h"><span class="bi">${TP.ui.ICON.file}</span><h3>گزارش ${esc(R.label)}</h3><span class="sub">مقایسه با «${esc(R.priorLabel)}» · ${M(R.workDays)} روز کاری</span>
-            <span class="end">${R.picked && R.picked.n < R.picked.of ? `<span class="chip info">${M(R.picked.n)} از ${M(R.picked.of)} کارشناس</span>` : ""}${R.hasExpertAmounts ? "" : `<span class="chip warn" title="مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد">مبلغ گروه‌ها ناقص</span>`}</span></div>
+            <span class="end">${R.source ? `<span class="chip info rp2-srcchip" title="${esc(R.source.file)} — ماه‌های دوره از همین فایل؛ «پیش از دوره» و روند ماهانه از داده‌های سامانه">${TP.ui.ICON.file} <bdi>${esc(R.source.file)}</bdi> · ${M(R.source.requests)} درخواست · ${M(R.source.items)} قلم</span>` : ""}${R.picked && R.picked.n < R.picked.of ? `<span class="chip info">${M(R.picked.n)} از ${M(R.picked.of)} کارشناس</span>` : ""}${R.hasExpertAmounts ? "" : `<span class="chip warn" title="مبلغ فاکتورِ هر گروه نیاز به ستون «کارشناس خرید» در فایل سوابق دارد">مبلغ گروه‌ها ناقص</span>`}
+              ${s.last ? `<button class="tp-btn sm primary" data-rresx>${TP.ui.ICON.upload} دانلود همین گزارش</button>` : ""}</span></div>
           <div class="tp-seg sm rp2-tabs" role="tablist">${R.sheets.map((x, i) => `<button type="button" role="tab" class="${i === s.idx ? "on" : ""}" aria-selected="${i === s.idx}" data-rtab="${i}">${esc(x.name)}</button>`).join("")}</div>
           ${(sh.notes || []).map((n) => `<div class="chip warn" style="margin:8px 0 0">${esc(n)}</div>`).join("")}
           <div class="rp-paper rp-scroll rp-book" data-keep-scroll>${sh.html}</div>
@@ -947,7 +966,9 @@
       return m;
     };
     return new Promise((resolve) => {
-      const W = EX_W;
+      /* پهنای ستون‌ها (★، نام، هر سرگروه) — همان EX_W جدول کارشناسانِ پیشین که با تختهٔ تیم‌ها (9dee950) رفت و
+         نبودش جدول را با ReferenceError می‌شکست، یعنی گزارش سه ماهه بعد از تیکِ کارشناسان ساخته نمی‌شد */
+      const W = { star: 40, name: 230, senior: 120 };
       const d = TP.modal(`گروه‌بندیِ گزارش ${esc(label)}`, `<p style="margin:0 0 6px">مثل جدول تب «کارشناسان»، فقط با کارشناسانِ تیک‌خورده: <b>★</b> کارشناس را سرگروه می‌کند و نامش ستونی می‌شود که زیرِ آن اعضای گروهش را تیک می‌زنید (هر کارشناس فقط در یک گروه). ستونِ هر سرگروه در گزارش یعنی درخواست‌های خودش و اعضایش.</p>
         <p class="dim" style="margin:0 0 8px;font-size:.82rem">روابط برای گزارش‌های بعدی، در هر دوره‌ای، ذخیره می‌شوند و جدول دفعهٔ بعد از پیش پر است. ${anySaved ? "«تازه» یعنی کارشناسی که هنوز جا داده نشده و پیش‌فرضش از تب کارشناسان آمده." : "پیش‌فرضِ این بار از تب کارشناسان آمده."} تب کارشناسان (ارجاع، تیم ارشد و اعلان‌ها) دست نمی‌خورد.</p>
         <div class="rp-ex-tools" data-tcount></div><div data-tgrid></div>`, null, "تأیید", "انصراف");
@@ -1017,10 +1038,18 @@
   }
 
   async function genSeason(asFile) {
-    const s = RP.season;
+    const s = RP.season, F = s.src === "file" ? s.file : null;
+    if (s.src === "file" && !F) return TP.modal("فایلی انتخاب نشده", "اول فایل اکسلِ «اقلام درخواست» راهکاران را انتخاب کنید.", pickSeasonFile, "انتخاب فایل", "انصراف");
     if (!s.years.length) return TP.modal("سال انتخاب نشده", "دست‌کم یک سال را تیک بزنید.", null, "باشد", "");
     if (!s.sheets.length) return TP.modal("برگه‌ای انتخاب نشده", "دست‌کم یک برگهٔ گزارش را تیک بزنید.", null, "باشد", "");
     const body = { years: s.years, seasons: s.seasons, months: s.months, sheets: s.sheets };
+    if (F) {
+      /* فقط ردیف‌های ماه‌های دوره فرستاده می‌شود؛ پیش از دوره را سرور از سامانه می‌خواند */
+      const keys = periodKeys(s);
+      body.rows = F.rows.filter((r) => keys.has(r.date.slice(0, 7)));
+      if (!body.rows.length) return TP.modal("این دوره در فایل نیست", `فایل «<bdi>${esc(F.name)}</bdi>» در ${esc(repPeriodLabel(s))} درخواستی ندارد؛ تاریخ‌های فایل از ${esc(F.from)} تا ${esc(F.to)} است.`, null, "باشد", "");
+      body.file = F.name;
+    }
     if (RP.pop) { RP.pop = null; render(); }
     /* گروه‌بندیِ ذخیره‌شده هم‌زمان با کارشناسانِ دوره خوانده می‌شود تا جدولِ بعدی بی‌معطلی باز شود */
     const savedP = TP.api("/reports/team").then((x) => x.team);
@@ -1035,9 +1064,44 @@
     }
     if (asFile) return repDownload("/reports/season.xlsx", body, "گزارش سه ماهه.xlsx");
     s.busy = true; render();
-    try { s.result = await TP.api("/reports/season", { body }); s.idx = 0; RP.err = ""; }
+    try { s.result = await TP.api("/reports/season", { body }); s.last = body; s.idx = 0; RP.err = ""; }
     catch (e) { TP.modal("گزارش ساخته نشد", esc(e.message), null, "باشد", ""); }
     s.busy = false; render();
+  }
+
+  /* گزارش سه ماهه از فایل (آبان ۱۴۰۵، درخواست مالک): خروجیِ «اقلام درخواست» راهکاران همین‌جا در مرورگر خوانده و به خلاصهٔ
+     هر درخواست (همان ردیف‌های بایگانی، import.js:TP.requestSummaries) تبدیل می‌شود؛ گزارش با همان قالب از همین ردیف‌ها
+     ساخته می‌شود — ماه‌های دوره از فایل، «پیش از دوره» و روند ماهانه از سامانه (worker/reports.js:seasonRows). فایل به میز
+     و بایگانی نمی‌رود. دوره از تاریخ‌های فایل انتخاب می‌شود (سالِ بیشترین درخواست و ماه‌هایش؛ سه ماهِ یک فصل = همان فصل)
+     و گزارش بی‌درنگ ساخته می‌شود. */
+  function pickSeasonFile() {
+    const inp = document.createElement("input"); inp.type = "file"; inp.accept = ".xlsx";
+    inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) loadSeasonFile(f); };
+    inp.click();
+  }
+  const enDigits = (v) => String(v == null ? "" : v).replace(/[۰-۹]/g, (d) => "۰۱۲۳۴۵۶۷۸۹".indexOf(d)).replace(/[٠-٩]/g, (d) => "٠١٢٣٤٥٦٧٨٩".indexOf(d));
+  async function loadSeasonFile(f) {
+    const s = RP.season, b = TP.busy("در حال خواندن فایل…", `${esc(f.name)} — ${(f.size / 1048576).toFixed(1)} مگابایت`);
+    let rows;
+    try {
+      const parsed = await TP.importExcel(f, (t) => b.set(esc(t)));
+      rows = TP.requestSummaries(parsed).map((r) => ({ id: r.id, date: TP.jNorm(enDigits(r.date)), party: r.party, center: r.center, buy_type: r.buy_type, n: r.n, nc: r.nc, ns: r.ns, nh: r.nh, sx: r.sx }))
+        .filter((r) => /^\d{4}\/\d{2}\/\d{2}$/.test(r.date));
+    } catch (e) { b.close(); TP.modal("فایل خوانده نشد", esc(e.message).replace(/\n/g, "<br>"), null, "باشد", ""); return; }
+    b.close();
+    if (!rows.length) return TP.modal("فایل خوانده نشد", "در فایل درخواستی با تاریخِ درست پیدا نشد.", null, "باشد", "");
+    const months = new Map(); rows.forEach((r) => { const k = r.date.slice(0, 7); months.set(k, (months.get(k) || 0) + 1); });
+    const dates = rows.map((r) => r.date).sort();
+    s.file = { name: f.name, rows, months, years: [...new Set(rows.map((r) => +r.date.slice(0, 4)))], from: dates[0], to: dates[dates.length - 1], items: rows.reduce((a, r) => a + r.n, 0) };
+    s.src = "file";
+    const perY = new Map(); months.forEach((n, k) => perY.set(+k.slice(0, 4), (perY.get(+k.slice(0, 4)) || 0) + n));
+    const y = [...perY].sort((a, c) => c[1] - a[1] || c[0] - a[0])[0][0];
+    const ms = [...months.keys()].filter((k) => +k.slice(0, 4) === y).map((k) => +k.slice(5, 7)).sort((a, c) => a - c);
+    s.years = [y]; s.seasons = [1, 2, 3, 4].filter((q) => [1, 2, 3].every((i) => ms.includes((q - 1) * 3 + i)));
+    s.months = ms.filter((m) => !s.seasons.includes(Math.ceil(m / 3)));
+    render();
+    /* سال‌ها و برگه‌ها هنوز خوانده نشده (فایل زود رها شد)؟ گزارش با دکمه ساخته می‌شود */
+    if (RP.meta) genSeason(false);
   }
 
   /* چارچوب ثابت گزارش: پروژه‌ها (بلوک جمع کل، شهر، مدیر، نام در برگهٔ مدیران، کلیدواژه‌ها) و ترتیب مدیران */
@@ -1108,6 +1172,11 @@
     const gx = G("[data-rgenx]"); if (gx) gx.onclick = () => genSeason(true);
     const pj = G("[data-rproj]"); if (pj) pj.onclick = () => projectsDialog();
     Q("[data-rtab]").forEach((b) => b.onclick = () => { s.idx = +b.dataset.rtab; render(); });
+    /* منبع داده: «فایل» بی فایلِ خوانده‌شده همان دم پنجرهٔ انتخاب فایل را باز می‌کند */
+    Q("[data-rsrc]").forEach((b) => b.onclick = () => { s.src = b.dataset.rsrc; render(); if (s.src === "file" && !s.file) pickSeasonFile(); });
+    Q("[data-rfile]").forEach((b) => b.onclick = pickSeasonFile);
+    const rfx = G("[data-rfile-x]"); if (rfx) rfx.onclick = () => { s.file = null; render(); };
+    const rrx = G("[data-rresx]"); if (rrx) rrx.onclick = () => repDownload("/reports/season.xlsx", s.last, `گزارش ${s.result.label}.xlsx`);
   }
 
   /* ---------- رندر ---------- */
@@ -1151,7 +1220,8 @@
     const ap = G("[data-approval]"); if (ap) ap.onchange = async (e) => { await save({ approvalRequired: e.target.checked }); };
     const im = G("[data-import]"); if (im) im.onclick = pickAndImport;
     /* رها کردن فایل اکسل روی صفحه = همان بارگذاری. روی body است تا افتادنِ فایل
-       بیرونِ #app هم به‌جای بازشدنِ فایل در مرورگر، بارگذاری شود. */
+       بیرونِ #app هم به‌جای بازشدنِ فایل در مرورگر، بارگذاری شود. در «گزارش سه ماهه» فایل
+       منبعِ گزارش می‌شود و به میز نمی‌رود. */
     const body = document.body;
     body.ondragover = (e) => { if (e.dataTransfer && [...e.dataTransfer.types].includes("Files")) { e.preventDefault(); body.classList.add("tp-drop-over"); } };
     body.ondragleave = (e) => { if (!e.relatedTarget || e.relatedTarget === document.documentElement) body.classList.remove("tp-drop-over"); };
@@ -1159,6 +1229,7 @@
       e.preventDefault(); body.classList.remove("tp-drop-over");
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]; if (!f) return;
       if (!/\.xlsx$/i.test(f.name)) { TP.modal("فایل نامناسب", `فقط فایل اکسل (.xlsx) پذیرفته می‌شود؛ «${esc(f.name)}» نیست.`, null, "باشد", ""); return; }
+      if (S.tab === "reports" && RP.part === "season") return loadSeasonFile(f);
       importFile(f);
     };
     Q("[data-f]").forEach((s) => s.onchange = (e) => { S.filter[e.target.dataset.f] = e.target.value; if (e.target.dataset.f === "window") { S.page.offset = 0; refresh(); } else render(); });

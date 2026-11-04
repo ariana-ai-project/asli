@@ -7,7 +7,7 @@ import assert from "node:assert/strict";
 import {
   parsePeriod, workingDays, projectOf, reportProjects, purchaseClass, requestStatus, shortNames, expertMatcher,
   computeSeason, periodExperts, seasonBook, statusBook, bookPreview, STATUS_COLUMNS, STATUS_HIDDEN, DAILY_COLUMNS,
-  normTeam, validateTeam, reportTeam, putReportTeam, seasonData, seasonExperts,
+  normTeam, validateTeam, reportTeam, putReportTeam, seasonData, seasonExperts, fileRows, FILE_MAX,
 } from "../../../worker/reports.js";
 import { buildBook, chartXml, formatValue } from "../../../worker/xlsxbook.js";
 import { getSettings } from "../../../worker/settings.js";
@@ -415,4 +415,58 @@ test("بایگانی درخواست‌ها: گزارش بسته‌ها را هم
   assert.deepEqual(Object.keys(fp).sort(), ["H1", "H2", "H3", "H4"]);
   await call("/requests/delete", "POST", { all: true, confirm: "پاک کن" });
   assert.deepEqual(Object.keys((await call("/import/history")).fp).sort(), ["H1", "H2", "H3", "H4"], "«پاک کردن همه» بایگانیِ بسته‌ها را نمی‌برد");
+});
+
+/* گزارش سه‌ماهه از فایلِ بارگذاری‌شده (آبان ۱۴۰۵، درخواست مالک): پنل خلاصهٔ درخواست‌های فایل را می‌فرستد (همان ردیف‌های
+   بایگانی)؛ ماه‌های دوره فقط از فایل، پیش از دوره و مبلغ‌ها از سامانه، و هیچ چیزی در دیتابیس نوشته نمی‌شود. */
+test("ردیف‌های فایل: شمارهٔ تکراری، تاریخِ نادرست و شمارشِ ناجور", () => {
+  const R = fileRows([
+    { id: "X1", date: "1404/10/01", n: 3, nc: 5, ns: 2, nh: 1, sx: "ابوذر بهمنی", party: "راغون" },
+    { id: "X1", date: "1404/10/02", n: 1 },
+    { id: "X2", date: "1404/1/2", n: 1 }, { id: "", date: "1404/10/03", n: 1 }, null, "x",
+    { id: "X3", date: "1404/11/04", n: -2, nc: "2", ns: 1.7 },
+    { id: "X4", date: "1404/12/05", n: "4", nc: 1, ns: 1, nh: 5, eid: 9 },
+  ]);
+  assert.deepEqual(R.map((r) => [r.id, r.n, r.nc, r.ns, r.nh, r.eid]), [["X1", 3, 3, 0, 0, null], ["X3", 0, 0, 0, 0, null], ["X4", 4, 1, 1, 2, null]],
+    "اولینِ شمارهٔ تکراری می‌ماند؛ خاتمه + توقف + تعلیق از همهٔ اقلام بیشتر نمی‌شود؛ کارشناسِ ارجاع از فایل پذیرفته نمی‌شود");
+  for (const bad of [null, "x", {}, [], [{ id: "Y", date: "بد" }]]) assert.throws(() => fileRows(bad), (e) => e.status === 400, JSON.stringify(bad));
+  assert.throws(() => fileRows(new Array(FILE_MAX + 1).fill({ id: "Z", date: "1404/10/01" })), (e) => e.status === 413);
+});
+
+test("گزارش سه‌ماهه از فایل: دوره از فایل، پیش از دوره و مبلغ از سامانه، و دیتابیس دست نمی‌خورد", { skip: SKIP }, async () => {
+  const menv = { ...env, MANAGER_CODE: "4321" };
+  const post = (path, body) => route(new Request(`https://x/tamin-poshtibani/api${path}`, { method: "POST",
+    headers: { "X-Manager-Code": "4321", "Content-Type": "application/json" }, body: JSON.stringify(body) }), menv, { waitUntil() {} });
+  const settings = await getSettings(env), sel = { years: [1404], seasons: [4] };
+  const sys = await seasonData(env, settings, sel);
+  assert.deepEqual([sys.totals.period.requests, sys.totals.period.items, sys.source], [3, 5, null], "بی فایل همان بایگانیِ سامانه (H1، H2، H4)");
+
+  const F = (id, date, o = {}) => ({ id, date, party: "راغون", center: "", buy_type: "", n: 1, nc: 0, ns: 0, nh: 0, sx: "", ...o });
+  const rows = [
+    F("F1", "1404/10/03", { n: 4, nc: 4, sx: "ابوذر بهمنی" }),
+    F("F2", "1404/11/11", { n: 2, ns: 2 }),
+    F("F3", "1404/12/20"),
+    F("F5", "1404/12/25", { n: 3, nc: 1, nh: 1, sx: "حمید رسولی" }),
+    F("F0", "1404/08/01", { n: 9, nc: 9, sx: "ابوذر بهمنی" }),   /* بیرون از دوره: نه در دوره، نه در «پیش از دوره» */
+  ];
+  const count = () => ["requests", "items", "assignments", "req_hist"].map((t) => DB.raw.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n);
+  const before = count();
+  const D = await seasonData(env, settings, { ...sel, rows, file: "ListData (55).xlsx" });
+  assert.deepEqual([D.totals.period.requests, D.totals.period.items], [4, 10], "ماه‌های دوره فقط از فایل؛ H1، H2 و H4 سامانه شمرده نمی‌شوند");
+  assert.deepEqual(D.totals.prior, sys.totals.prior, "پیش از دوره از سامانه (H3)، نه F0ِ فایل");
+  assert.equal(D.totals.period.amount, sys.totals.period.amount, "مبلغ از سوابق خرید");
+  assert.deepEqual(D.source, { file: "ListData (55).xlsx", requests: 4, items: 10 });
+  assert.deepEqual(D.experts.find((e) => e.name === "ابوذر بهمنی"), { id: 3, name: "ابوذر بهمنی", requests: 1, bought: 1, items: 4, itemsBought: 4 });
+  assert.deepEqual((await seasonExperts(env, { ...sel, rows })).experts.filter((e) => e.requests).map((e) => e.name).sort(), ["ابوذر بهمنی", "حمید رسولی"],
+    "تیکِ کارشناسان هم فقط از فایل (فرزاد شهبازیانِ بایگانی نه)");
+
+  const js = await (await post("/reports/season", { ...sel, rows, file: "ListData (55).xlsx" })).json();
+  assert.deepEqual(js.source, D.source);
+  assert.ok(js.sheets.length && js.label === "فصل زمستان 1404", js.error);
+  const x = await post("/reports/season.xlsx", { ...sel, rows });
+  assert.equal(x.status, 200);
+  assert.deepEqual([...new Uint8Array(await x.arrayBuffer()).slice(0, 2)], [0x50, 0x4b], "فایل xlsx (zip)");
+  const bad = await post("/reports/season", { ...sel, rows: [{ id: "Q", date: "1404-10-01" }] });
+  assert.equal(bad.status, 400);
+  assert.deepEqual(count(), before, "گزارشِ فایلی چیزی در میز، ارجاع‌ها یا بایگانی نمی‌نویسد");
 });

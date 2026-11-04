@@ -284,6 +284,21 @@
 .rp2-go .tp-btn svg { width: 15px; height: 15px; }
 .rp2-res .rp2-tabs { margin-bottom: 10px; }
 .rp2-res .rp-paper { margin-top: 8px; }
+/* منبع دادهٔ گزارش سه ماهه: سامانه یا فایل راهکاران */
+.rp2-src .tp-btn { display: inline-flex; align-items: center; gap: 6px; }
+.rp2-src .tp-btn svg { width: 14px; height: 14px; }
+.rp2-src .dim { font-size: .78rem; }
+@media (hover: none) { .rp2-src .dim { display: none; } }   /* «رها کنید» روی گوشی معنا ندارد */
+.rp2-file { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; padding: 6px 12px; border-radius: 12px; border: 1px solid rgba(120, 170, 255, 0.45); background: rgba(79, 140, 255, 0.10); }
+.rp2-file svg { width: 18px; height: 18px; flex-shrink: 0; color: #bcd6ff; }
+.rp2-file > span { display: flex; flex-direction: column; min-width: 0; }
+.rp2-file b { font-size: .84rem; max-width: 340px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp2-file small { font-size: .72rem; color: var(--tp-muted); font-variant-numeric: tabular-nums; }
+:root[data-theme="light"] .rp2-file svg { color: #1f5fd6; }
+.rp2-srcchip { display: inline-flex; align-items: center; gap: 4px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.rp2-srcchip svg { width: 13px; height: 13px; flex-shrink: 0; }
+.rp2-res .tp-box-h .end .tp-btn { display: inline-flex; align-items: center; gap: 6px; }
+.rp2-res .tp-box-h .end .tp-btn svg { width: 14px; height: 14px; }
 
 @media (max-width: 720px) {
   .mg-bar { padding: 10px 12px 4px; }

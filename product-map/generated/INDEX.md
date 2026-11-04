@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 77 قابلیت در 13 بخش | 157 فایل | 351 مسیر (266 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
+آمار: 77 قابلیت در 13 بخش | 157 فایل | 351 مسیر (268 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -88,7 +88,7 @@
 | [manager.experts](features/manager.experts.md) | کارشناسان | — | 10 (2) | 6 |
 | [manager.import](features/manager.import.md) | بارگذاری اکسل درخواست‌ها | import.js | 6 (5) | 3 |
 | [manager.log](features/manager.log.md) | تصمیم‌ها و رویدادها | w/decisions.js | 6 | 5 |
-| [manager.reports](features/manager.reports.md) | گزارش‌ها | w/reports.js | 8 (8) | 2 |
+| [manager.reports](features/manager.reports.md) | گزارش‌ها | w/reports.js | 8 (6) | 2 |
 
 ### مکاتبات (corr)
 

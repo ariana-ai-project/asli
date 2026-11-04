@@ -457,10 +457,59 @@ export const SEASON_SHEETS = [
     (۱٫۲×۱۰^۱۵ ریال، شصت برابرِ خرید کل سال). چنین ردیفی در مبلغ‌ها شمرده نمی‌شود و در یادداشت برگه می‌آید. */
 export const AMOUNT_CAP = 1e13;
 
+/* ------------------------------------------------------------------ */
+/* گزارش سه‌ماهه از فایلِ بارگذاری‌شده (آبان ۱۴۰۵، درخواست مالک)          */
+/* ------------------------------------------------------------------ */
+/** بیشترین درخواستِ یک فایل — خروجیِ هفت‌سالهٔ راهکاران حدود بیست هزار درخواست است */
+export const FILE_MAX = 30000;
+/**
+ * خلاصهٔ درخواست‌های فایلِ «اقلام درخواست» راهکاران که مدیر در «گزارش سه ماهه» بارگذاری کرد — همان ردیف‌های بایگانی
+ * (frontend import.js:TP.requestSummaries، در مرورگر ساخته می‌شود) → ردیف‌های computeSeason. ردیفِ بی شماره یا تاریخِ درست و
+ * شمارهٔ تکراری کنار می‌روند؛ شمارش‌ها عدد صحیحِ نامنفی و خاتمه + توقف + تعلیق حداکثر همهٔ اقلام.
+ */
+export function fileRows(raw) {
+  if (!Array.isArray(raw)) throw new HttpError("ردیف‌های فایل نرسید.");
+  if (raw.length > FILE_MAX) throw new HttpError(`فایل ${raw.length} درخواست دارد؛ بیشتر از ${FILE_MAX} پذیرفته نمی‌شود — خروجیِ بازهٔ کوتاه‌تری از راهکاران بگیرید.`, 413);
+  const cnt = (v) => { const x = Math.trunc(Number(v)); return Number.isFinite(x) && x > 0 ? x : 0; };
+  const str = (v, n) => (v == null ? "" : String(v).slice(0, n));
+  const out = [], seen = new Set();
+  for (const r of raw) {
+    if (!isObj(r)) continue;
+    const id = T(r.id).slice(0, 40), date = T(r.date);
+    if (!id || !DATE_RE.test(date) || seen.has(id)) continue;
+    seen.add(id);
+    const n = cnt(r.n), nc = Math.min(cnt(r.nc), n), ns = Math.min(cnt(r.ns), n - nc), nh = Math.min(cnt(r.nh), n - nc - ns);
+    out.push({ id, date, party: str(r.party, 300), center: str(r.center, 300), buy_type: str(r.buy_type, 60), n, nc, ns, nh, sx: str(r.sx, 120), eid: null });
+  }
+  if (!out.length) throw new HttpError("در فایل درخواستی با شماره و تاریخِ درست پیدا نشد.");
+  return out;
+}
+
+/**
+ * ردیف‌های گزارش: بی فایل همان سامانه (loadSeasonRows). با فایل (sel.rows): ماه‌های دوره فقط از فایل — گزارش همان چیزی را
+ * می‌شمارد که در فایل است — و ماه‌های پیش از دوره (ستونِ «پیش از دوره» و روندِ ماهانهٔ برگهٔ پروژه‌ها) از سامانه، تا قالب
+ * همان گزارشِ همیشگی بماند. ردیفِ فایل که بیرونِ دوره است به حساب نمی‌آید. `onlyPeriod`: فقط ماه‌های دوره (پنجرهٔ تیکِ کارشناسان).
+ */
+async function seasonRows(env, P, F, onlyPeriod = false) {
+  if (!F) return loadSeasonRows(env, P, onlyPeriod);
+  const file = F.filter((r) => P.keys.has(r.date.slice(0, 7)));
+  if (onlyPeriod) return file;
+  const sys = (await loadSeasonRows(env, P)).filter((r) => !P.keys.has(String(r.date).slice(0, 7)));
+  return file.concat(sys);
+}
+/** ردیف‌های فایلِ بدنه، یک بار (null = گزارش از سامانه) */
+const fileOf = (sel) => (sel && Array.isArray(sel.rows) ? fileRows(sel.rows) : null);
+/** منبعِ گزارشِ فایلی برای پنل: نام فایل و شمارِ درخواست‌ها و اقلامِ فایل در همین دوره */
+function fileSource(P, F, name) {
+  if (!F) return null;
+  const inP = F.filter((r) => P.keys.has(r.date.slice(0, 7)));
+  return { file: T(name).slice(0, 120) || "فایل بارگذاری‌شده", requests: inP.length, items: inP.reduce((a, r) => a + r.n, 0) };
+}
+
 export async function seasonData(env, settings, sel) {
-  const P = parsePeriod(sel);
+  const P = parsePeriod(sel), F = fileOf(sel);
   const [rows, experts, hol] = await Promise.all([
-    loadSeasonRows(env, P), loadExperts(env),
+    seasonRows(env, P, F), loadExperts(env),
     env.DB.prepare("SELECT date_j FROM holidays").all().then((x) => new Set((x.results || []).map((h) => h.date_j))).catch(() => new Set()),
   ]);
   const yq = P.years.map(() => "?").join(","), ys = P.years.map(String);
@@ -472,8 +521,10 @@ export async function seasonData(env, settings, sel) {
     ? ((await env.DB.prepare(`SELECT order_date, expert, title, qty, unit, amount FROM purchases WHERE amount >= ? AND substr(order_date,1,4) IN (${yq}) ORDER BY amount DESC LIMIT 20`)
       .bind(AMOUNT_CAP, ...ys).all().catch(() => ({ results: [] }))).results || [])
     : [];
-  return computeSeason({ P, rows, experts, holidays: hol, amounts, outliers, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null,
+  const D = computeSeason({ P, rows, experts, holidays: hol, amounts, outliers, settings, todayJ: jStr(Date.now()), pick: Array.isArray(sel && sel.experts) ? sel.experts : null,
     team: sel && isObj(sel.team) ? sel.team : null });
+  D.source = fileSource(P, F, sel && sel.file);
+  return D;
 }
 
 /** کارشناس هر درخواستِ دوره: ارجاعِ ارسال‌شده، وگرنه ستون «کارشناس خرید» فایل */
@@ -502,7 +553,7 @@ export function periodExperts({ P, rows, experts }) {
 }
 export async function seasonExperts(env, sel) {
   const P = parsePeriod(sel);
-  const [rows, experts] = await Promise.all([loadSeasonRows(env, P, true), loadExperts(env)]);
+  const [rows, experts] = await Promise.all([seasonRows(env, P, fileOf(sel), true), loadExperts(env)]);
   return { label: P.label, experts: periodExperts({ P, rows, experts }) };
 }
 
