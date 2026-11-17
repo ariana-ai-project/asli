@@ -1,8 +1,8 @@
 /**
  * ارتباط بخش حقوقی با سرور (Cloudflare Worker، مسیر /hoghooghi/api — worker/legal.js)
  *
- * هویت: بخش حقوقی ورود ندارد؛ این مرورگر یک «فضای کاری» تصادفی دارد که گفت‌وگوها و فایل‌ها
- * به آن تعلق دارند. همین کد را می‌شود روی دستگاه دیگری وارد کرد تا همان گفت‌وگوها دیده شوند.
+ * هویت: ورود با نام کاربری و رمز، با Cookie نشست روی /hoghooghi. شناسهٔ فضای کاری
+ * همچنان برای جداسازی و حفظ گفت‌وگوهای قبلی همین مرورگر استفاده می‌شود.
  */
 import type { PreparedFile } from './files';
 
@@ -76,6 +76,7 @@ export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     if ((e as Error)?.name === 'AbortError') throw e;
     throw netError();
   }
+  if (r.status === 401) window.location.assign('/hoghooghi/login.html');
   if (!r.ok) throw await errorOf(r);
   return r.json() as Promise<T>;
 }
@@ -94,6 +95,7 @@ export async function apiStream(path: string, body: unknown, signal?: AbortSigna
     if ((e as Error)?.name === 'AbortError') throw e;
     throw netError();
   }
+  if (r.status === 401) window.location.assign('/hoghooghi/login.html');
   if (!r.ok) throw await errorOf(r);
   if (!r.body) throw new ApiError('پاسخ جریانی از سرور نرسید.', 502);
   return r;

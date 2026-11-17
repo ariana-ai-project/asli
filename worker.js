@@ -22,6 +22,7 @@ import { guardEnv } from "./worker/d1-guard.js";
 import { crDocTick } from "./worker/strategy-doc.js";
 import { relayOn, relayWatch } from "./worker/relay.js";
 import { raiseAlarm } from "./worker/alarms.js";
+import { withSecureConfig } from "./worker/secure-config.js";
 
 /* وبهوکِ بات مکاتبات تأمین‌کنندگان (و بات ویس) یک بار در هر isolate سنجیده می‌شود (یک خواندن از settings)؛ اگر
    ثبت نشده، دامنه یا توکن عوض شده، همین‌جا ثبت می‌شود — بعد از استقرار یا ست کردنِ راز کار دستی لازم نیست. */
@@ -38,7 +39,7 @@ export default {
   },
 
   async scheduled(event, env, ctx) {
-    env = guardEnv(env);   /* Cronِ هر دقیقه هم زیر نگهبانِ بودجهٔ خواندن D1 */
+    env = await withSecureConfig(guardEnv(env));   /* Cron با همان کلیدهای رمزنگاری‌شدهٔ پنل؛ نگهبان D1 فقط می‌شمارد */
     /* Cronِ جدای ویس (voice-core.js): ویس‌های بلندِ صف در اجرای خودش و با سقفِ CPUِ خودش تبدیل می‌شوند */
     if (event.cron === VOICE_CRON) {
       ctx.waitUntil(ensureSchema(env).then(() => runVoiceJobs(env, voiceBots(env))).then(

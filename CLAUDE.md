@@ -1,6 +1,6 @@
 # asli — سامانهٔ تأمین و پشتیبانی آریانا
 
-- **سرور:** یک Cloudflare Worker. `worker.js` مسیرهای `/tamin-poshtibani/api` را به `worker/api.js#route` می‌دهد و پایگاه داده D1 است.
+- **سرور:** هستهٔ مشترک `worker.js` است؛ مسیرهای `/tamin-poshtibani/api` را به `worker/api.js#route` می‌دهد. در Cloudflare پایگاه داده D1 است و در VPS با `server/index.mjs` همان Worker روی Node و SQLite اجرا می‌شود.
 - **پنل‌ها:** `frontend/tamin-poshtibani/` با جاوااسکریپتِ ساده (IIFE روی `window.TP`). پنل‌ها: کارشناس، مدیر، پشتیبانی، تأمین‌کننده، مناقصه، مکاتبات.
 - **دیگر:** چند بات تلگرام. سامانهٔ حقوقی محصولِ جداست (`worker/legal.js`، `frontend-legal/`).
 
@@ -17,6 +17,8 @@
 
 - تست‌ها (Node ≥ 22.5، با node:sqlite): `node --test "backend/tamin-poshtibani/tests/*.test.mjs"`. تستِ `product-map.test.mjs` هم سالم بودنِ نقشه را می‌سنجد.
 - نقشه: `node scripts/map/build.mjs` (بازسازی)، `node scripts/map/check.mjs` (بررسی)، `node scripts/map/impact.mjs …` (اثر).
+- اجرای VPS: `node server/index.mjs`؛ فایل و مسیر دیتابیس با `DATABASE_PATH` و `ASSETS_DIRECTORY` و تنظیمات سرویس با `server/asli.service` و `/home/user/ariana-secrets.env`.
+- بازیابی خروجی D1 در فایل تازه: `node server/import-d1.mjs <dump.sql> <new.sqlite>`؛ ابزار فایل موجود را بازنویسی نمی‌کند و `integrity_check` می‌گیرد.
 
 ## قاعده‌ها
 
@@ -24,4 +26,4 @@
 - D1ِ واقعی: اول فقط خواندن. نوشتن فقط وقتی لازم باشد، و تعدادش را گزارش کن. ستونِ تازه از راهِ `COLUMN_MIGRATIONS`ِ `worker/api.js`.
 - متنِ رابط فارسی است. اگر رفتار یا متنِ یک بخش عوض شد، موضوعِ همان کلید در `frontend/tamin-poshtibani/help-content.js` را هم اصلاح کن و `node backend/tamin-poshtibani/tools/build-help-knowledge.mjs` را بزن.
 - پنل پشتیبانی همهٔ مسیرها را با پیشوندِ `/support` می‌فرستد (`api("/x")` یعنی `/support/x`). پس در `support-panel.js` و تب‌هایش `api("/support/...")` ننویس.
-- رمزها و کدها فقط در متغیرهای Worker هستند. هرگز در کد یا گزارش نیایند.
+- رمزها و کدها فقط در متغیرهای Worker یا فایل‌های محافظت‌شدهٔ `/home/user/ariana-secrets.env` و `/home/user/ariana-encryption.env` روی VPS هستند. هرگز در کد یا گزارش نیایند.

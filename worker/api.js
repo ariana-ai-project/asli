@@ -57,6 +57,8 @@ import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, 
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
+import { SECURE_DDL, withSecureConfig, secureOverview, saveSecureConfigVerified } from "./secure-config.js";
+import { LEGAL_AUTH_DDL, listLegalUsers, saveLegalUser } from "./legal-auth.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
 import { USD_DDL, usdAdmin } from "./usd.js";
@@ -275,6 +277,8 @@ ${QUOTE_EDITS_DDL};
 ${FC_DDL}
 ${SUPOVER_DDL.trim()}
 ${RELAY_DDL.trim()}
+${SECURE_DDL.trim()}
+${LEGAL_AUTH_DDL.trim()}
 `;
 
 /* ستون‌هایی که بعد از اولین استقرار اضافه شده‌اند.
@@ -2001,6 +2005,7 @@ async function route(request, env, ctx) {
 
   try {
     await ensureSchema(env);
+    env = await withSecureConfig(env);
 
     if (path === "/health") return json({ ok: true, schema: true, time: now(), managerConfigured: !!(await managerCode(env)), botConfigured: !!env.TG_BOT_TOKEN, storage: storageInfo(env) });
 
@@ -2211,6 +2216,19 @@ async function route(request, env, ctx) {
         throw e;
       }
     };
+    /* «🔐 دسترسی و API» در چرخ‌دندهٔ صفحهٔ اصلی؛ همان رمز تب و نگهبان تلاش‌های ناموفق */
+    if (path === "/site/access" && m === "GET") {
+      const code = request.headers.get("X-Site-Code");
+      return json(await siteGuarded(code, async () => { await siteLogin(env, code); return { ...await secureOverview(env), legal_users: await listLegalUsers(env) }; }));
+    }
+    if (path === "/site/access/save" && m === "POST") {
+      const body = await readJson(request), code = request.headers.get("X-Site-Code") || body.code;
+      return json(await siteGuarded(code, async () => { await siteLogin(env, code); return { ...await saveSecureConfigVerified(env, body), legal_users: await listLegalUsers(env) }; }));
+    }
+    if (path === "/site/access/legal-user" && m === "POST") {
+      const body = await readJson(request), code = request.headers.get("X-Site-Code") || body.code;
+      return json(await siteGuarded(code, async () => { await siteLogin(env, code); return { ok: true, legal_users: await saveLegalUser(env, body) }; }));
+    }
     if (path === "/site/login" && m === "POST") { const b = await readJson(request); return json(await siteGuarded(b.code, () => siteLogin(env, b.code))); }
     if (path === "/site" && m === "PUT") {
       const b = await readJson(request);

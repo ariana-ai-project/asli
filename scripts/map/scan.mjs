@@ -33,6 +33,7 @@ const FRONT_PREFIX = {
   "frontend/tamin-poshtibani/cr-admin.js": [SUP], "frontend/tamin-poshtibani/fb-admin.js": [SUP],
   "frontend/tamin-poshtibani/tender-admin.js": [SUP], "frontend/tamin-poshtibani/cm-result.js": [SUP],
   "frontend/tamin-poshtibani/expert-ai.js": [{ fn: "*", map: [/^\/ai(?=\/|$)/, "/support/ai/{}"] }],
+  "frontend/tamin-poshtibani/secure-admin.js": [{ fn: "*", pre: "/site" }],
 };
 /* پوشه‌های اسکن */
 const WORKER = ["worker.js", "worker"];

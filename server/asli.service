@@ -1,0 +1,34 @@
+[Unit]
+Description=Ariana procurement and support Node.js server
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=user
+Group=user
+WorkingDirectory=/opt/asli
+Environment=NODE_ENV=production
+Environment=HOST=127.0.0.1
+Environment=PORT=8787
+Environment=DATABASE_PATH=/var/lib/asli/asli.sqlite
+Environment=ASSETS_DIRECTORY=/opt/asli/frontend
+Environment=D1_GUARD=off
+EnvironmentFile=/home/user/ariana-secrets.env
+EnvironmentFile=-/home/user/ariana-encryption.env
+EnvironmentFile=-/etc/asli/runtime.conf
+ExecStart=/opt/node-24/bin/node /opt/asli/server/index.mjs
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+ReadWritePaths=/var/lib/asli
+
+[Install]
+WantedBy=multi-user.target

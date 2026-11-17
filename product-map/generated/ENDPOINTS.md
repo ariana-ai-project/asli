@@ -87,6 +87,7 @@
 | `GET /selftest` | infra.core | w/api.js › route |
 | `GET /settings` | manager.alerts | w/api.js › route |
 | `GET /site` | infra.site | w/api.js › route |
+| `GET /site/access` | infra.access | w/api.js › route |
 | `GET /site/sms` | infra.site | w/api.js › route |
 | `GET /sp/bundle/{}/pf-url` | sup.panel | w/sp-api.js › spRoute |
 | `GET /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |
@@ -176,6 +177,7 @@
 | `GET legal:/chats` | legal.app | w/legal.js › legalRoute |
 | `GET legal:/chats/{}/memory` | legal.app | w/legal.js › legalRoute |
 | `GET legal:/health` | legal.app | w/legal.js › legalRoute |
+| `GET legal:/session` | legal.app | w/legal.js › legalRoute |
 | `GET\|PUT /items/{}/first-msg` | expert.ai | w/ai-agent.js › picksRoute |
 | `GET\|PUT /items/{}/picks` | expert.picks | w/ai-agent.js › picksRoute |
 | `GET\|PUT /me/supervise` | expert.ai | w/api.js › route |
@@ -239,6 +241,8 @@
 | `POST /reports/season/experts` | manager.reports | w/api.js › route |
 | `POST /requests/delete` | manager.desk | w/api.js › route |
 | `POST /search/smart` | expert.smart | w/api.js › route |
+| `POST /site/access/legal-user` | infra.access | w/api.js › route |
+| `POST /site/access/save` | infra.access | w/api.js › route |
 | `POST /site/login` | infra.site | w/api.js › route |
 | `POST /site/sms/test` | infra.site | w/api.js › route |
 | `POST /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |
@@ -315,6 +319,8 @@
 | `POST legal:/chats/{}/send` | legal.app | w/legal.js › legalRoute |
 | `POST legal:/draft` | legal.app | w/legal.js › legalRoute |
 | `POST legal:/files` | legal.app | w/legal.js › legalRoute |
+| `POST legal:/login` | legal.app | w/legal.js › legalRoute |
+| `POST legal:/logout` | legal.app | w/legal.js › legalRoute |
 | `POST legal:/usage` | legal.app | w/legal.js › legalRoute |
 | `POST\|PUT /sp/thread/{}/terms` | sup.panel | w/sp-api.js › spRoute |
 | `PUT /assignments/{}/letter/transcript` | expert.letter | w/api.js › route |

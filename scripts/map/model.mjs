@@ -20,7 +20,7 @@ export async function loadTaxonomy() { return import(pathToFileURL(join(ROOT, "p
 
 export const globRe = (g) => new RegExp("^" + g.split(/(\*\*\/|\*\*|\*)/).map((p) => (p === "**/" ? "(?:.*/)?" : p === "**" ? ".*" : p === "*" ? "[^/]*" : p.replace(/[.+?^${}()|[\]\\]/g, "\\$&"))).join("") + "$");
 function scopeFiles(scope) {
-  const all = [...walk("worker", /./), ...(existsSync(join(ROOT, "worker.js")) ? ["worker.js"] : []), ...walk("frontend/tamin-poshtibani", /./)];
+  const all = [...walk("worker", /./), ...(existsSync(join(ROOT, "worker.js")) ? ["worker.js"] : []), ...walk("server", /./), ...walk("frontend/tamin-poshtibani", /./)];
   const res = scope.map(globRe);
   return [...new Set(all)].filter((f) => res.some((r) => r.test(f))).sort();
 }

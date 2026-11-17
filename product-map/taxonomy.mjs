@@ -138,10 +138,11 @@ export const FEATURES = [
     files: [`${W}docx.js`, `${W}xlsx.js`, `${W}xlsxbook.js`, `${W}pfdoc.js`, `${W}reqdoc.js`, `${W}logo.js`, `${F}vendor/*`] },
 
   /* ---------------- زیرساخت ---------------- */
-  { id: "infra.core", title: "مسیریاب و هستهٔ سرور", desc: "worker.js، مسیریاب api.js (ensureSchema و مهاجرت‌ها)، خطا، زمان کاری، تنظیمات، ذخیره‌سازی و نگهبان D1.",
-    files: ["worker.js", `${W}api.js`, `${W}http.js`, `${W}time.js`, `${W}settings.js`, `${W}storage.js`, `${W}d1-guard.js`, `${W}selftest.js`],
+  { id: "infra.core", title: "مسیریاب و هستهٔ سرور", desc: "worker.js، مسیریاب api.js (ensureSchema و مهاجرت‌ها)، خطا، زمان کاری، تنظیمات، ذخیره‌سازی، نگهبان D1 و اجرای Node/SQLite روی VPS.",
+    files: ["worker.js", `${W}api.js`, `${W}http.js`, `${W}time.js`, `${W}settings.js`, `${W}storage.js`, `${W}d1-guard.js`, `${W}selftest.js`, "server/*.mjs"],
     endpoints: ["/health", "GET /selftest", "/reviews", "/notify/email"] },
   { id: "infra.auth", title: "ورود با کد و تلگرام", desc: "محدودیت تلاش ناموفق و قفل، شناسایی از مینی‌اپ تلگرام.", files: [`${W}auth-guard.js`, `${W}tg-auth.js`] },
+  { id: "infra.access", title: "دسترسی و API", desc: "مدیریت رمزنگاری‌شدهٔ کلیدها و سرویس‌دهنده‌ها در چرخ‌دندهٔ صفحهٔ اصلی.", files: [`${F}secure-admin.js`, `${W}secure-config.js`], endpoints: ["/site/access*"] },
   { id: "infra.site", title: "دروازهٔ سایت", desc: "کد ورود به خود سایت پیش از پنل‌ها.", files: [`${W}site.js`, `${F}index.html`], endpoints: ["/site*"] },
   { id: "infra.ui", title: "کیت رابط کاربری مشترک", desc: "TP.api، ui.js (کشوی راهنما، اعلان، ...)، ui-kit، حرکت‌ها و سبک‌های مشترک همهٔ پنل‌ها.",
     files: [`${F}shared.js`, `${F}ui.js`, `${F}ui-kit.js`, `${F}ui-motion.js`, `${F}config.js`, `${F}panel.css`, `${F}ui.css`] },
@@ -149,8 +150,8 @@ export const FEATURES = [
     files: [`${F}help-content.js`, `${F}help-flows.js`, `${F}guide-a4.html`] },
 
   /* ---------------- حقوقی ---------------- */
-  { id: "legal.app", title: "سامانهٔ حقوقی", desc: "تحلیل قرارداد، پیش‌نویس و گفت‌وگوی حقوقی؛ پایهٔ جدا (LEGAL_PREFIX) و فرانت جدا (frontend-legal).",
-    files: [`${W}legal.js`, `${W}legal-prompts.js`], endpoints: ["legal:*"] },
+  { id: "legal.app", title: "سامانهٔ حقوقی", desc: "تحلیل قرارداد، پیش‌نویس و گفت‌وگوی حقوقی با ورود کاربری؛ پایهٔ جدا (LEGAL_PREFIX) و فرانت جدا (frontend-legal).",
+    files: [`${W}legal.js`, `${W}legal-prompts.js`, `${W}legal-auth.js`], endpoints: ["legal:*"] },
 ];
 
 /* پنل‌ها: هر صفحه و درختِ بخش‌هایش (تب، زیرتب، قسمتِ درونِ صفحه) با قابلیتِ هر بخش.
@@ -303,7 +304,9 @@ export const TEST_FEATURES = {
   "closed-items.test.mjs": ["manager.import"],
   "boot-splash.test.mjs": ["infra.ui"],
   "product-map.test.mjs": ["infra.core"],
+  "node-server.test.mjs": ["infra.core"],
+  "secure-admin.test.mjs": ["infra.access", "legal.app"],
 };
 
 /* محدودهٔ نقشه: فایل‌هایی که باید صاحب داشته باشند */
-export const SCOPE = ["worker.js", "worker/**/*.js", `${F}*.js`, `${F}*.mjs`, `${F}*.html`, `${F}*.css`, `${F}*.webmanifest`, `${F}*.svg`, `${F}vendor/*`];
+export const SCOPE = ["worker.js", "worker/**/*.js", "server/**/*.mjs", `${F}*.js`, `${F}*.mjs`, `${F}*.html`, `${F}*.css`, `${F}*.webmanifest`, `${F}*.svg`, `${F}vendor/*`];

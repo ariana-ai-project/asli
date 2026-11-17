@@ -10,8 +10,8 @@
  * مدل بی‌دست‌خوردگی به مرورگر می‌رود و فایل‌ها جریانی به Files API انتروپیک. ساختن فایل Word
  * (که در تابع Supabase بود) حالا در مرورگر انجام می‌شود.
  *
- * هویت: بخش حقوقی ورود ندارد؛ مرورگر یک «فضای کاری» تصادفی ۱۲۸ بیتی می‌سازد و در هدر X-Legal-Ws
- * می‌فرستد. گفت‌وگوها و فایل‌ها مال همان فضا هستند و با همان کد روی دستگاه دیگری هم باز می‌شوند.
+ * هویت: ورود با نام کاربری و رمز (legal-auth.js) و Cookie نشست اجباری است. شناسهٔ «فضای کاری»
+ * ۱۲۸بیتی مرورگر در X-Legal-Ws حفظ شده تا گفت‌وگوها و فایل‌های قبلی همان مرورگر در دسترس بمانند.
  *
  * گفت‌وگو و حافظه — هر گفت‌وگو یک حافظهٔ متنیِ جدا در legal_chats.memory دارد:
  *   send    درخواست مدل = دستور ثابت (کش) + نوبت‌های خام از «نقطهٔ تاشدگی» به بعد (کش)
@@ -24,6 +24,8 @@
  * پیشوند درخواست تا تاشدگی بعدی ثابت است، پس کش پرامپت در هر نوبت فقط نوبت آخر را تازه می‌نویسد.
  */
 import { HttpError } from "./http.js";
+import { withSecureConfig } from "./secure-config.js";
+import { ensureLegalAuth, legalAuthCleanup, legalLogin, legalLogout, legalSession } from "./legal-auth.js";
 import { tehranParts, WEEKDAYS } from "./time.js";
 import {
   ANALYSIS_SYSTEM, analysisInstruction, REPORT_SCHEMA,
@@ -99,7 +101,7 @@ export function modelError(status, body) {
   const e = (body && body.error) || {};
   const m = String(e.message || "");
   const type = String(e.type || "");
-  if (status === 401 || type === "authentication_error") return new HttpError("کلید API مدل نامعتبر است یا باطل شده. کلید را در Cloudflare به‌روز کنید.", 503, { code: "key" });
+  if (status === 401 || type === "authentication_error") return new HttpError("کلید API مدل نامعتبر است یا باطل شده. پشتیبانی آن را در بخش «دسترسی و API» به‌روز کند.", 503, { code: "key" });
   if (/credit balance|billing|purchase credits/i.test(m)) return new HttpError("اعتبار حساب Anthropic تمام شده است؛ حساب را شارژ کنید.", 503, { code: "credit" });
   if (status === 403 || type === "permission_error") return new HttpError("کلید API اجازهٔ استفاده از این مدل را ندارد.", 503, { code: "permission" });
   if (status === 413 || type === "request_too_large") return new HttpError("حجم درخواست بیش از سقف سرویس مدل است؛ فایل کوچک‌تر یا کمتری بفرستید.", 413, { code: "too_large" });
@@ -122,7 +124,7 @@ async function post(env, path, body, extraHeaders) {
     const r = await fetch(API(env) + path, {
       method: "POST",
       headers: headers(env, { "content-type": "application/json", ...(extraHeaders || {}) }),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, model: T(env.LEGAL_MODEL) || body.model }),
     });
     if (r.ok) return r;
     const t = await r.text();
@@ -361,8 +363,10 @@ async function deleteFile(env, ws, id) {
 
 /** Cron: فایل‌های تحلیل و پیش‌نویسِ قدیمی‌تر از یک روز، و فایل‌های گفت‌وگویی که هرگز فرستاده نشدند */
 export async function legalCleanup(env, limit = 20) {
-  if (!env.DB || !env.ANTHROPIC_API_KEY) return { removed: 0 };
+  if (!env.DB) return { removed: 0 };
   await ensureLegalSchema(env);
+  await legalAuthCleanup(env);
+  if (!env.ANTHROPIC_API_KEY) return { removed: 0 };
   const rows = (await env.DB.prepare("SELECT id,file_id FROM legal_files WHERE created_at<? AND (purpose IN ('analyze','draft') OR chat_id IS NULL) LIMIT ?")
     .bind(now() - FILE_TTL, limit).all()).results || [];
   for (const r of rows) await removeRemote(env, r.file_id);
@@ -811,11 +815,12 @@ async function memoryRefresh(env, ws, id) {
 /* ------------------------------------------------------------------ */
 let deepAt = 0, deepResult = null;
 async function health(env, url) {
-  const out = { ok: true, model: LEGAL_MODEL, key: !!env.ANTHROPIC_API_KEY };
+  const model = T(env.LEGAL_MODEL) || LEGAL_MODEL;
+  const out = { ok: true, model, key: !!env.ANTHROPIC_API_KEY };
   if (url.searchParams.get("deep") && env.ANTHROPIC_API_KEY) {
     if (!deepResult || now() - deepAt > 60000) {
       try {
-        const r = await fetch(`${API(env)}/v1/models/${LEGAL_MODEL}`, { headers: headers(env) });
+        const r = await fetch(`${API(env)}/v1/models/${model}`, { headers: headers(env) });
         const d = parse(await r.text(), {});
         deepResult = r.ok ? { status: "ok", max_input_tokens: d.max_input_tokens || null, max_tokens: d.max_tokens || null }
           : { status: modelError(r.status, d).extra.code, http: r.status };
@@ -836,8 +841,21 @@ export async function legalRoute(request, env) {
   const path = url.pathname.slice(PREFIX.length).replace(/\/+$/, "") || "/";
   const m = request.method;
   try {
+    env = await withSecureConfig(env);
     if (path === "/health" && m === "GET") return await health(env, url);
     await ensureLegalSchema(env);
+    await ensureLegalAuth(env);
+    if (path === "/login" && m === "POST") {
+      sameOrigin(request);
+      const result = await legalLogin(request, env);
+      return json(result.body, 200, { "set-cookie": result.cookie });
+    }
+    if (path === "/session" && m === "GET") return json({ ok: true, user: await legalSession(request, env) });
+    if (path === "/logout" && m === "POST") {
+      sameOrigin(request);
+      return json({ ok: true }, 200, { "set-cookie": await legalLogout(request, env) });
+    }
+    await legalSession(request, env);
     const ws = workspace(request);
     if (m !== "GET") sameOrigin(request);
 
