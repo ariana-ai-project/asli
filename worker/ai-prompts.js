@@ -1,7 +1,7 @@
 /**
  * پرامپت‌ها و فراخوانیِ مدلِ کارشناس هوشمند (مهر ۱۴۰۵)
  *
- * دو کار با مدلِ انتخابیِ تب (پیش‌فرض Claude Opus 5.5) و خروجیِ ساختاریافته (output_config.format — JSON طبق طرح، بی ابزار):
+ * دو کار با مدلِ انتخابیِ تب (پیش‌فرض Claude Sonnet 5) و خروجیِ ساختاریافته (output_config.format — JSON طبق طرح، بی ابزار):
  *   negotiate — یک دورِ مذاکره در یک گفت‌وگو: پاسخ به تأمین‌کننده و تصمیم‌ها روی بسته‌ها.
  *   closing   — شرحِ فرایند، چالش‌ها و معیار انتخاب برای نامه و برگهٔ کمیسیون.
  * پرامپتِ سیستم ثابت است (کش می‌شود)؛ پروندهٔ هر دور در پیامِ کاربر می‌آید. هر فراخوانی با aiFetch در ai_calls ضبط
@@ -12,7 +12,7 @@
 import { aiFetch } from "./ai-fetch.js";
 import { limitsTxt } from "./terms-locks.js";
 
-export const AGENT_MODEL = "claude-opus-5-5";
+export const AGENT_MODEL = "claude-sonnet-5";
 const API = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 const FALLBACK_BETA = "server-side-fallback-2026-07-01";
 
@@ -22,7 +22,8 @@ const FALLBACK_BETA = "server-side-fallback-2026-07-01";
  * همه خروجیِ ساختاریافته (json_schema) را می‌پذیرند.
  */
 export const AGENT_MODELS = {
-  "claude-opus-5-5": { fa: "Claude Opus 5.5 — پیش‌فرض: داوریِ دقیق در تصمیم‌های چندشرطی", price: [4, 20], effort: true, fallbacks: true },
+  "claude-sonnet-5": { fa: "Claude Sonnet 5 — پیش‌فرض: سریع، دقیق و متعادل برای کارشناس هوشمند", price: [2, 10], effort: true, fallbacks: true },
+  "claude-opus-5-5": { fa: "Claude Opus 5.5 — داوریِ دقیق در تصمیم‌های چندشرطی", price: [4, 20], effort: true, fallbacks: true },
   "claude-fable-5-1": { fa: "Claude Fable 5.1 — تواناترین و گران‌ترین", price: [10, 50], effort: true, fallbacks: true },
   "claude-sonnet-5-5": { fa: "Claude Sonnet 5.5 — سریع‌تر، نصفِ قیمتِ Opus", price: [2, 10], effort: true, fallbacks: true },
   "claude-haiku-4-5": { fa: "Claude Haiku 4.5 — ارزان‌ترین؛ فقط برای آزمون", price: [1, 5], effort: false, fallbacks: false },

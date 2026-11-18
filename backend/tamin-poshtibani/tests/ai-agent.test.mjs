@@ -16,6 +16,7 @@ import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { aiTick } from "../../../worker/ai-agent.js";
+import { AGENT_MODEL } from "../../../worker/ai-prompts.js";
 import { msgLine } from "../../../worker/sp-push.js";
 
 const DB = await sqliteD1();
@@ -208,7 +209,7 @@ test("کارشناس هوشمند: از ارجاع تا جدول کمیسیون 
   assert.equal(r.step, "turn", JSON.stringify(r));
   assert.equal(DB.raw.prepare("SELECT state FROM sp_bundles WHERE id=?").get(S.b).state, "approved", "مدل تأیید کرد و پیش‌فاکتور خواست");
   /* درخواستِ دقیقِ مدل */
-  assert.equal(S.neg.model, "claude-opus-5-5");
+  assert.equal(S.neg.model, "claude-sonnet-5");
   assert.equal(S.neg.output_config.format.type, "json_schema");
   assert.equal(S.neg.output_config.effort, "medium", "تصمیمِ بسته با عمقِ فکرِ تب، نه عمقِ کمِ گامِ فوری");
   assert.equal(S.neg.fallbacks, "default");
@@ -384,6 +385,7 @@ test("خاموش: هیچ گامی برداشته نمی‌شود؛ ارجاعی 
 });
 
 test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku بی effort و fallbacks؛ «مقایسهٔ مدل» همان پرامپت را بی اجرا تکرار می‌کند", { skip: SKIP }, async () => {
+  assert.equal(AGENT_MODEL, "claude-sonnet-5");
   const bad = await call("/support/ai/1/config", { method: "PUT", headers: SUP, body: { model: "gpt-x" } });
   assert.equal(bad.status, 400, "مدلِ بیرون از فهرست نه");
   const ok = await call("/support/ai/1/config", { method: "PUT", headers: SUP, body: { model: "claude-sonnet-5-5", effort: "high" } });
@@ -391,7 +393,7 @@ test("مدلِ مذاکره از تب: انتخاب و عمقِ فکر؛ Haiku �
   assert.deepEqual([ok.data.cfg.model, ok.data.cfg.effort], ["claude-sonnet-5-5", "high"]);
   const st = (await call("/support/ai/1/state", { headers: SUP })).data;
   assert.equal(st.model, "claude-sonnet-5-5");
-  assert.deepEqual(st.models.map((m) => m.id), ["claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5"]);
+  assert.deepEqual(st.models.map((m) => m.id), ["claude-sonnet-5", "claude-opus-5-5", "claude-fable-5-1", "claude-sonnet-5-5", "claude-haiku-4-5"]);
 
   /* مقایسه: یک دورِ مذاکرهٔ ضبط‌شده با Haiku — بی effort، بی fallbacks و بی هدرِ بتا؛ هیچ تصمیمی اجرا نمی‌شود */
   const neg = DB.raw.prepare("SELECT id FROM ai_calls WHERE purpose='negotiate' ORDER BY id LIMIT 1").get();
