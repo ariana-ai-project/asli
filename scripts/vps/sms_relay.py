@@ -33,7 +33,7 @@ import urllib.request
 VER = "3"
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "config.json"), encoding="utf-8"))
-SITE = CFG.get("site", "https://arianaai.website").rstrip("/")
+SITE = os.environ.get("ARIANA_SITE", CFG.get("site", "https://arianaai.website")).rstrip("/")
 API = f"{SITE}/tamin-poshtibani/api/relay"
 IP_BASE = CFG.get("ippanel_base", "https://edge.ippanel.com/v1").rstrip("/")
 IP_KEY = CFG["ippanel_key"]
