@@ -13853,6 +13853,7 @@
    "imports": [
     "backend/tamin-poshtibani/tests/run.mjs",
     "worker/ai-agent.js",
+    "worker/ai-prompts.js",
     "worker/api.js",
     "worker/sp-push.js"
    ]
