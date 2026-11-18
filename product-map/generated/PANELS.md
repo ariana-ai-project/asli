@@ -13,7 +13,7 @@
 
 صفحه: `frontend/tamin-poshtibani/expert.html` | کاربر: کارشناس خرید و کارشناس ارشد
 
-- ورود کارشناس `login` → [login.expert](features/login.expert.md) — 1 مسیر، 2 تست
+- ورود کارشناس `login` → [login.expert](features/login.expert.md) — 1 مسیر، 3 تست
 - کارتابل من `list` → [expert.tray](features/expert.tray.md) — 2 مسیر، 10 تست | کد: expert.js › vList
 - صفحهٔ درخواست `detail` → [expert.detail](features/expert.detail.md) — 11 مسیر، 20 تست | کد: expert.js › vDetail
   - 🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت → [expert.ai](features/expert.ai.md) — 4 مسیر، 15 تست | کد: expert.js › vRateBar، expert.js › vAiBar، expert.js › vAiLocked، expert.js › vGuard، …
@@ -36,7 +36,7 @@
 
 صفحه: `frontend/tamin-poshtibani/correspond.html` | کاربر: کارشناس خرید
 
-- ورود (همان ورود کارشناس) → [login.expert](features/login.expert.md) — 1 مسیر، 2 تست | کد: correspond.js › renderLogin
+- ورود (همان ورود کارشناس) → [login.expert](features/login.expert.md) — 1 مسیر، 3 تست | کد: correspond.js › renderLogin
 - درخواست‌ها `req` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
 - تأمین‌کنندگانِ یک درخواست `sup` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
 - گفت‌وگو `chat` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …

@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 77 قابلیت در 13 بخش | 157 فایل | 351 مسیر (268 در تست صدا زده می‌شوند) | 363 فراخوان پنل | 116 جدول | 87 تست
+آمار: 78 قابلیت در 13 بخش | 166 فایل | 358 مسیر (272 در تست صدا زده می‌شوند) | 367 فراخوان پنل | 121 جدول | 90 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -48,7 +48,7 @@
 
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
-| [login.expert](features/login.expert.md) | ورود کارشناس | — | 1 | 2 |
+| [login.expert](features/login.expert.md) | ورود کارشناس | — | 1 | 3 |
 | [login.manager](features/login.manager.md) | ورود مدیر تدارکات | — | 0 | 0 |
 | [login.supplier](features/login.supplier.md) | ورود به پنل تأمین‌کنندگان | — | 4 (1) | 4 |
 | [login.support](features/login.support.md) | ورود پشتیبانی | — | 5 | 39 |
@@ -174,8 +174,9 @@
 
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
+| [infra.access](features/infra.access.md) | دسترسی و API | secure-admin.js، w/model-provider.js، w/secure-config.js | 4 (1) | 2 |
 | [infra.auth](features/infra.auth.md) | ورود با کد و تلگرام | w/auth-guard.js، w/tg-auth.js | 0 | 1 |
-| [infra.core](features/infra.core.md) | مسیریاب و هستهٔ سرور | worker.js، w/api.js، w/d1-guard.js، w/http.js (+4) | 4 (4) | 9 |
+| [infra.core](features/infra.core.md) | مسیریاب و هستهٔ سرور | server/assets.mjs، server/import-d1.mjs، server/index.mjs، server/sqlite-d1.mjs (+9) | 4 (3) | 11 |
 | [infra.help](features/infra.help.md) | متن‌های راهنما | guide-a4.html، help-content.js، help-flows.js | 0 | 3 |
 | [infra.site](features/infra.site.md) | دروازهٔ سایت | index.html، w/site.js | 5 | 5 |
 | [infra.ui](features/infra.ui.md) | کیت رابط کاربری مشترک | config.js، panel.css، shared.js، ui-kit.js (+3) | 0 | 9 |
@@ -184,6 +185,6 @@
 
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
-| [legal.app](features/legal.app.md) | سامانهٔ حقوقی | w/legal-prompts.js، w/legal.js | 12 (12) | 0 |
+| [legal.app](features/legal.app.md) | سامانهٔ حقوقی | w/legal-auth.js، w/legal-prompts.js، w/legal.js | 15 (15) | 2 |
 
 فهرست‌های دیگر: [FILES.md](FILES.md) فایل ← قابلیت | [ENDPOINTS.md](ENDPOINTS.md) مسیر ← قابلیت | [TABLES.md](TABLES.md) جدول ← قابلیت | graph.json همه برای ماشین

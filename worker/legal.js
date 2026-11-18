@@ -10,8 +10,8 @@
  * مدل بی‌دست‌خوردگی به مرورگر می‌رود و فایل‌ها جریانی به Files API انتروپیک. ساختن فایل Word
  * (که در تابع Supabase بود) حالا در مرورگر انجام می‌شود.
  *
- * هویت: بخش حقوقی ورود ندارد؛ مرورگر یک «فضای کاری» تصادفی ۱۲۸ بیتی می‌سازد و در هدر X-Legal-Ws
- * می‌فرستد. گفت‌وگوها و فایل‌ها مال همان فضا هستند و با همان کد روی دستگاه دیگری هم باز می‌شوند.
+ * هویت: ورود با نام کاربری و رمز (legal-auth.js) و Cookie نشست اجباری است. شناسهٔ «فضای کاری»
+ * ۱۲۸بیتی مرورگر در X-Legal-Ws حفظ شده تا گفت‌وگوها و فایل‌های قبلی همان مرورگر در دسترس بمانند.
  *
  * گفت‌وگو و حافظه — هر گفت‌وگو یک حافظهٔ متنیِ جدا در legal_chats.memory دارد:
  *   send    درخواست مدل = دستور ثابت (کش) + نوبت‌های خام از «نقطهٔ تاشدگی» به بعد (کش)
@@ -24,6 +24,9 @@
  * پیشوند درخواست تا تاشدگی بعدی ثابت است، پس کش پرامپت در هر نوبت فقط نوبت آخر را تازه می‌نویسد.
  */
 import { HttpError } from "./http.js";
+import { modelFetch } from "./model-provider.js";
+import { withSecureConfig } from "./secure-config.js";
+import { ensureLegalAuth, legalAuthCleanup, legalAuthRequired, legalLogin, legalLogout, legalSession } from "./legal-auth.js";
 import { tehranParts, WEEKDAYS } from "./time.js";
 import {
   ANALYSIS_SYSTEM, analysisInstruction, REPORT_SCHEMA,
@@ -91,7 +94,7 @@ async function readJson(request) {
 const API = (env) => env.ANTHROPIC_API_BASE || "https://api.anthropic.com";
 function headers(env, extra = {}) {
   if (!env.ANTHROPIC_API_KEY) throw new HttpError("کلید مدل (ANTHROPIC_API_KEY) روی سرور ست نشده است.", 503);
-  return { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", ...extra };
+  return { "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01", ...(env.AI_CUSTOM_PROVIDER === "1" ? { authorization: `Bearer ${env.ANTHROPIC_API_KEY}` } : {}), ...extra };
 }
 
 /** پیام خطای انتروپیک به زبان کاربر؛ متن اصلی برای عیب‌یابی در لاگ می‌ماند */
@@ -99,7 +102,7 @@ export function modelError(status, body) {
   const e = (body && body.error) || {};
   const m = String(e.message || "");
   const type = String(e.type || "");
-  if (status === 401 || type === "authentication_error") return new HttpError("کلید API مدل نامعتبر است یا باطل شده. کلید را در Cloudflare به‌روز کنید.", 503, { code: "key" });
+  if (status === 401 || type === "authentication_error") return new HttpError("کلید API مدل نامعتبر است یا باطل شده. پشتیبانی آن را در بخش «دسترسی و API» به‌روز کند.", 503, { code: "key" });
   if (/credit balance|billing|purchase credits/i.test(m)) return new HttpError("اعتبار حساب Anthropic تمام شده است؛ حساب را شارژ کنید.", 503, { code: "credit" });
   if (status === 403 || type === "permission_error") return new HttpError("کلید API اجازهٔ استفاده از این مدل را ندارد.", 503, { code: "permission" });
   if (status === 413 || type === "request_too_large") return new HttpError("حجم درخواست بیش از سقف سرویس مدل است؛ فایل کوچک‌تر یا کمتری بفرستید.", 413, { code: "too_large" });
@@ -119,10 +122,10 @@ async function post(env, path, body, extraHeaders) {
   let last;
   for (let i = 0; i < 3; i++) {
     if (i) await wait(i === 1 ? 2000 : 6000);
-    const r = await fetch(API(env) + path, {
+    const r = await modelFetch(env, API(env) + path, {
       method: "POST",
       headers: headers(env, { "content-type": "application/json", ...(extraHeaders || {}) }),
-      body: JSON.stringify(body),
+      body: JSON.stringify({ ...body, model: T(env.LEGAL_MODEL) || body.model }),
     });
     if (r.ok) return r;
     const t = await r.text();
@@ -171,6 +174,7 @@ CREATE TABLE IF NOT EXISTS legal_chats (id TEXT PRIMARY KEY, ws TEXT NOT NULL, t
 CREATE INDEX IF NOT EXISTS ix_lchat_ws ON legal_chats(ws, updated_at);
 CREATE TABLE IF NOT EXISTS legal_turns (chat_id TEXT NOT NULL, seq INTEGER NOT NULL, q TEXT NOT NULL, files_json TEXT, a TEXT, state TEXT NOT NULL DEFAULT 'pending', stop TEXT, usage_json TEXT, tok INTEGER, q_at INTEGER NOT NULL, a_at INTEGER, PRIMARY KEY (chat_id, seq)) WITHOUT ROWID;
 CREATE TABLE IF NOT EXISTS legal_files (id TEXT PRIMARY KEY, ws TEXT NOT NULL, chat_id TEXT, purpose TEXT NOT NULL, file_id TEXT NOT NULL, name TEXT NOT NULL, mime TEXT NOT NULL, src TEXT, size INTEGER, tok INTEGER, created_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS legal_text_files (id TEXT PRIMARY KEY, content TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_lfile_chat ON legal_files(chat_id);
 CREATE INDEX IF NOT EXISTS ix_lfile_age ON legal_files(purpose, created_at);
 CREATE TABLE IF NOT EXISTS legal_calls (id INTEGER PRIMARY KEY, at INTEGER NOT NULL, ws TEXT, ip TEXT, kind TEXT NOT NULL, chat_id TEXT, in_tokens INTEGER, out_tokens INTEGER, cost_usd REAL);
@@ -250,6 +254,8 @@ export function fileBlocks(files) {
     if (kindOf(f.mime) === "image") {
       out.push({ type: "text", text: `تصویر پیوست: ${f.name}` });
       out.push({ type: "image", source: { type: "file", file_id: f.file_id } });
+    } else if (f.text_content != null) {
+      out.push({ type: "text", text: `سند پیوست: ${f.name}\n\n${f.text_content}` });
     } else {
       out.push({ type: "document", source: { type: "file", file_id: f.file_id }, title: f.name });
     }
@@ -259,33 +265,57 @@ export function fileBlocks(files) {
 
 /**
  * بارگذاری جریانی یک فایل به Files API انتروپیک.
- * بدنهٔ multipart از سه تکه ساخته می‌شود — سرآغاز، خودِ جریان درخواست و پایان — و طول کلش از
- * پیش معلوم است (FixedLengthStream)، پس فایل هرگز کامل در حافظهٔ Worker نمی‌نشیند و CPU صرفش نمی‌شود.
+ * بدنهٔ multipart از سرآغاز، جریان فایل و پایان ساخته می‌شود و طول کلش از پیش معلوم است؛
+ * در Cloudflare با FixedLengthStream و در Node با Web Stream استاندارد، بدون بارگذاری کامل فایل در حافظه.
  */
 async function toAnthropic(env, body, size, mime) {
   const boundary = "ariana" + rid(24);
   const enc = new TextEncoder();
-  const head = enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="upload.${EXT[mime] || "bin"}"\r\nContent-Type: ${mime}\r\n\r\n`);
+  const purpose = /(?:^|\.)avalai\.ir$/i.test(new URL(API(env)).hostname)
+    ? `--${boundary}\r\nContent-Disposition: form-data; name="purpose"\r\n\r\nuser_data\r\n` : "";
+  const head = enc.encode(`${purpose}--${boundary}\r\nContent-Disposition: form-data; name="file"; filename="upload.${EXT[mime] || "bin"}"\r\nContent-Type: ${mime}\r\n\r\n`);
   const tail = enc.encode(`\r\n--${boundary}--\r\n`);
-  const { readable, writable } = new FixedLengthStream(head.length + size + tail.length);
-  const pump = (async () => {
-    let w = writable.getWriter();
-    await w.write(head);
-    w.releaseLock();
-    await body.pipeTo(writable, { preventClose: true });
-    w = writable.getWriter();
-    await w.write(tail);
-    await w.close();
-  })();
+  const total = head.length + size + tail.length;
+  let readable, pump = null;
+  if (typeof FixedLengthStream !== "undefined") {
+    const fixed = new FixedLengthStream(total);
+    readable = fixed.readable;
+    pump = (async () => {
+      let w = fixed.writable.getWriter();
+      await w.write(head);
+      w.releaseLock();
+      await body.pipeTo(fixed.writable, { preventClose: true });
+      w = fixed.writable.getWriter();
+      await w.write(tail);
+      await w.close();
+    })();
+  } else {
+    readable = new ReadableStream({
+      async start(controller) {
+        try {
+          controller.enqueue(head);
+          const reader = body.getReader();
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            controller.enqueue(value);
+          }
+          controller.enqueue(tail);
+          controller.close();
+        } catch (error) { controller.error(error); }
+      },
+    });
+  }
   let r;
   try {
     r = await fetch(API(env) + "/v1/files", {
       method: "POST",
-      headers: headers(env, { "content-type": `multipart/form-data; boundary=${boundary}` }),
+      headers: headers(env, { "content-type": `multipart/form-data; boundary=${boundary}`, "content-length": String(total) }),
       body: readable,
+      ...(pump ? {} : { duplex: "half" }),
     });
   } finally {
-    await pump.catch((e) => console.error("upload pump", e && e.message));
+    if (pump) await pump.catch((e) => console.error("upload pump", e && e.message));
   }
   const t = await r.text();
   if (!r.ok) { console.error("files upload", r.status, t.slice(0, 500)); throw modelError(r.status, parse(t, {})); }
@@ -295,6 +325,7 @@ async function toAnthropic(env, body, size, mime) {
 }
 
 async function removeRemote(env, fileId) {
+  if (fileId.startsWith("inline-")) return;
   try {
     await fetch(`${API(env)}/v1/files/${encodeURIComponent(fileId)}`, { method: "DELETE", headers: headers(env) });
   } catch (e) { console.error("files delete", fileId, e && e.message); }
@@ -330,11 +361,16 @@ async function uploadFile(request, env, ws, url) {
   if (size > cap) throw new HttpError(`حجم فایل «${name}» بیش از ${Math.round(cap / 1048576)} مگابایت است.`, 413);
   if (!request.body) throw new HttpError("بدنهٔ فایل خالی است.", 400);
 
-  const fileId = await toAnthropic(env, request.body, size, mime);
+  let fileId, textContent = null;
+  if (mime === "text/plain" && size <= 1500000) {
+    textContent = await new Response(request.body).text();
+    fileId = `inline-${rid(20)}`;
+  } else fileId = await toAnthropic(env, request.body, size, mime);
   const rec = { id: "f" + rid(20), ws, chat_id: null, purpose, file_id: fileId, name, mime, src, size, created_at: now() };
   rec.tok = estFileTok(mime, size);
   await env.DB.prepare("INSERT INTO legal_files (id,ws,chat_id,purpose,file_id,name,mime,src,size,tok,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)")
     .bind(rec.id, ws, null, purpose, fileId, name, mime, src, size, rec.tok, rec.created_at).run();
+  if (textContent != null) await env.DB.prepare("INSERT INTO legal_text_files(id,content) VALUES(?,?)").bind(fileId, textContent).run();
   return json({ id: rec.id, name, mime, src, size, tok: rec.tok, kind });
 }
 
@@ -346,6 +382,10 @@ async function filesOf(env, ws, ids, purpose) {
   const by = new Map(rows.map((r) => [r.id, r]));
   const out = list.map((id) => by.get(id));
   if (out.some((f) => !f || f.purpose !== purpose)) throw new HttpError("یکی از فایل‌ها پیدا نشد یا منقضی شده است؛ آن را دوباره بارگذاری کنید.", 404);
+  for (const f of out) if (f.file_id.startsWith("inline-")) {
+    const text = await env.DB.prepare("SELECT content FROM legal_text_files WHERE id=?").bind(f.file_id).first();
+    f.text_content = text ? text.content : "";
+  }
   return out;
 }
 
@@ -355,14 +395,19 @@ async function deleteFile(env, ws, id) {
   /* فایلی که در گفت‌وگو فرستاده شده بخشی از آن گفت‌وگوست و با خودِ گفت‌وگو پاک می‌شود */
   if (f.chat_id) return json({ ok: true, kept: true });
   await removeRemote(env, f.file_id);
-  await env.DB.prepare("DELETE FROM legal_files WHERE id=?").bind(id).run();
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM legal_files WHERE id=?").bind(id),
+    env.DB.prepare("DELETE FROM legal_text_files WHERE id=?").bind(f.file_id),
+  ]);
   return json({ ok: true });
 }
 
 /** Cron: فایل‌های تحلیل و پیش‌نویسِ قدیمی‌تر از یک روز، و فایل‌های گفت‌وگویی که هرگز فرستاده نشدند */
 export async function legalCleanup(env, limit = 20) {
-  if (!env.DB || !env.ANTHROPIC_API_KEY) return { removed: 0 };
+  if (!env.DB) return { removed: 0 };
   await ensureLegalSchema(env);
+  await legalAuthCleanup(env);
+  if (!env.ANTHROPIC_API_KEY) return { removed: 0 };
   const rows = (await env.DB.prepare("SELECT id,file_id FROM legal_files WHERE created_at<? AND (purpose IN ('analyze','draft') OR chat_id IS NULL) LIMIT ?")
     .bind(now() - FILE_TTL, limit).all()).results || [];
   for (const r of rows) await removeRemote(env, r.file_id);
@@ -663,7 +708,7 @@ async function send(request, env, ws, id) {
   const seq = (chat.last_seq || 0) + 1;
   const req = chatRequest({ memory: chat.memory, pins, turns, files, text, at: t });
   const title0 = (T(text) || (files[0] && files[0].name) || "گفت‌وگوی تازه").replace(/\s+/g, " ").slice(0, 60);
-  const filesJson = JSON.stringify(files.map((f) => ({ id: f.id, file_id: f.file_id, name: f.name, mime: f.mime, src: f.src || null, size: f.size || 0, tok: f.tok || 0 })));
+  const filesJson = JSON.stringify(files.map((f) => ({ id: f.id, file_id: f.file_id, name: f.name, mime: f.mime, src: f.src || null, size: f.size || 0, tok: f.tok || 0, ...(f.text_content != null ? { text_content: f.text_content } : {}) })));
 
   if (id === "new") {
     stmts.unshift(env.DB.prepare("INSERT INTO legal_chats (id,ws,title,title_auto,last_seq,created_at,updated_at) VALUES (?,?,?,1,?,?,?)").bind(chat.id, ws, title0, seq, t, t));
@@ -811,11 +856,12 @@ async function memoryRefresh(env, ws, id) {
 /* ------------------------------------------------------------------ */
 let deepAt = 0, deepResult = null;
 async function health(env, url) {
-  const out = { ok: true, model: LEGAL_MODEL, key: !!env.ANTHROPIC_API_KEY };
+  const model = T(env.LEGAL_MODEL) || LEGAL_MODEL;
+  const out = { ok: true, model, key: !!env.ANTHROPIC_API_KEY };
   if (url.searchParams.get("deep") && env.ANTHROPIC_API_KEY) {
     if (!deepResult || now() - deepAt > 60000) {
       try {
-        const r = await fetch(`${API(env)}/v1/models/${LEGAL_MODEL}`, { headers: headers(env) });
+        const r = await fetch(`${API(env)}/v1/models/${model}`, { headers: headers(env) });
         const d = parse(await r.text(), {});
         deepResult = r.ok ? { status: "ok", max_input_tokens: d.max_input_tokens || null, max_tokens: d.max_tokens || null }
           : { status: modelError(r.status, d).extra.code, http: r.status };
@@ -836,8 +882,22 @@ export async function legalRoute(request, env) {
   const path = url.pathname.slice(PREFIX.length).replace(/\/+$/, "") || "/";
   const m = request.method;
   try {
+    env = await withSecureConfig(env);
     if (path === "/health" && m === "GET") return await health(env, url);
     await ensureLegalSchema(env);
+    await ensureLegalAuth(env);
+    const authRequired = await legalAuthRequired(env);
+    if (path === "/login" && m === "POST") {
+      sameOrigin(request);
+      const result = await legalLogin(request, env);
+      return json(result.body, 200, { "set-cookie": result.cookie });
+    }
+    if (path === "/session" && m === "GET") return json(authRequired ? { ok: true, user: await legalSession(request, env) } : { ok: true, setup_required: true });
+    if (path === "/logout" && m === "POST") {
+      sameOrigin(request);
+      return json({ ok: true }, 200, { "set-cookie": await legalLogout(request, env) });
+    }
+    if (authRequired) await legalSession(request, env);
     const ws = workspace(request);
     if (m !== "GET") sameOrigin(request);
 

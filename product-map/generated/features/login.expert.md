@@ -27,12 +27,13 @@
 نوشتن: —
 خواندن: experts
 
-## تست‌ها (2)
+## تست‌ها (3)
 - codes.test.mjs
 - login.test.mjs
+- secure-admin.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/codes.test.mjs backend/tamin-poshtibani/tests/login.test.mjs
+node --test backend/tamin-poshtibani/tests/codes.test.mjs backend/tamin-poshtibani/tests/login.test.mjs backend/tamin-poshtibani/tests/secure-admin.test.mjs
 ```
 
 ## مرتبط

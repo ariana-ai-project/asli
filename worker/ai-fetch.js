@@ -5,6 +5,8 @@
  * (پرامپت سیستم، پیام‌ها، ابزارها، تنظیمات) و پاسخ به آن داده می‌شود تا در ai_calls بنشیند و کارشناس ببیند دقیقاً چه
  * رفت، چه برگشت و تقریباً چند. کارِ کارشناسِ انسانی ضبط نمی‌شود و هزینه‌اش هم به کسی گفته نمی‌شود.
  */
+import { modelFetch } from "./model-provider.js";
+
 const T = (v) => String(v == null ? "" : v).trim();
 
 /** دلار به ازای یک میلیون توکن (ورودی، خروجی، خواندن از کش، نوشتن در کشِ ۵ دقیقه‌ای) — جدول قیمتِ مهر ۱۴۰۵ */
@@ -42,10 +44,10 @@ export function estimateCost(model, u) {
  */
 export async function aiFetch(env, url, init = {}) {
   const rec = env && typeof env.__aiRec === "function" ? env.__aiRec : null;
-  if (!rec) return fetch(url, init);
+  if (!rec) return modelFetch(env, url, init);
   const t0 = Date.now();
   let res = null, err = null;
-  try { res = await fetch(url, init); } catch (e) { err = e; }
+  try { res = await modelFetch(env, url, init); } catch (e) { err = e; }
   const entry = { at: t0, ms: Date.now() - t0, request: typeof init.body === "string" ? init.body : null, status: res ? res.status : 0, error: err ? String((err && err.message) || err) : null, response: null, stream: false };
   if (res) {
     if (/json/i.test(res.headers.get("content-type") || "")) {

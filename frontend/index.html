@@ -205,7 +205,7 @@ ok=busy?0:ok+1;if(ok>1)return done();setTimeout(p,80)})()}})();</script>
         </header>
 
         <div class="cards-grid">
-          <a class="card" href="hoghooghi/" data-href="hoghooghi/" data-dept="hoghooghi" data-status="active">
+          <a class="card" href="hoghooghi/login.html" data-href="hoghooghi/login.html" data-dept="hoghooghi" data-status="active">
             <span class="led" aria-hidden="true"></span>
             <span class="card-icon" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v18M5 7l7-4 7 4M5 7v5c0 4.5 3 7.5 7 9 4-1.5 7-4.5 7-9V7"/></svg>
@@ -295,16 +295,17 @@ ok=busy?0:ok+1;if(ok>1)return done();setTimeout(p,80)})()}})();</script>
 
   </main>
 
-  <!-- نوار بالا و پابرگ حذف شده‌اند؛ پنجرهٔ وضعیت بخش‌ها (js/support.js) از این دکمهٔ گوشه باز می‌شود -->
-  <button class="site-admin glass" type="button" data-support aria-label="مدیریت وضعیت بخش‌ها">
+  <!-- مدیریت وضعیت بخش‌ها، دسترسی و API (js/support.js) از این دکمهٔ گوشه باز می‌شود -->
+  <button class="site-admin glass" type="button" data-support aria-label="مدیریت سامانه">
     <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
-    <span>پشتیبانی</span>
+    <span>مدیریت</span>
   </button>
 
   <script src="js/liquid-glass.js?v=8"></script>
   <!-- حرکت (مهر ۱۴۰۵، DESIGN_STACK): GSAP + ScrollTrigger + Lenis را خودِ js/main.js بعد از اولین فریم بار می‌کند (vendor/)،
        تا اولین تصویر منتظرشان نماند؛ تا رسیدنشان همان نرمیِ دستیِ قبلی -->
   <script src="js/main.js?v=12"></script>
-  <script src="js/support.js?v=11"></script>
+  <script src="tamin-poshtibani/secure-admin.js?v=4"></script>
+  <script src="js/support.js?v=12"></script>
 </body>
 </html>

@@ -13,7 +13,7 @@
 import { ExtractError, MODEL } from "./extract.js";
 import { aiFetch } from "./ai-fetch.js";
 
-const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
+const sttUrl = (env) => `${String(env.ELEVENLABS_API_BASE || "https://api.elevenlabs.io").replace(/\/+$/, "")}/v1/speech-to-text`;
 /* ANTHROPIC_API_BASE فقط در توسعهٔ محلی ست می‌شود (مدل بدلی)؛ همان قاعدهٔ discovery.js */
 const AI_URL = (env) => (env.ANTHROPIC_API_BASE || "https://api.anthropic.com") + "/v1/messages";
 
@@ -46,7 +46,7 @@ export async function transcribe(env, fileUrl) {
   form.append("language_code", "fa");
   form.append("source_url", fileUrl);
 
-  const r = await fetch(STT_URL, { method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, body: form });
+  const r = await fetch(sttUrl(env), { method: "POST", headers: { "xi-api-key": env.ELEVENLABS_API_KEY }, body: form });
   const raw = await r.text().catch(() => "");
   const d = r.ok ? sttFields(raw) : parseJson(raw);
   if (!r.ok) {
@@ -98,21 +98,21 @@ const sttWhy = (d, status) => {
  * تا کاربر «ذخیره شود» نگفته، متن فقط آن‌جاست).
  */
 export async function getTranscript(env, id) {
-  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  const r = await fetch(`${sttUrl(env)}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
   const d = await r.json().catch(() => ({}));
   if (!r.ok) throw new ExtractError(`متن از ElevenLabs خوانده نشد: ${sttWhy(d, r.status)}`, r.status === 404 ? 404 : 502);
   return String(d.text || "").trim();
 }
 /** پاک کردنِ متن از سوابقِ ElevenLabs. پیش‌تر پاک‌شده (۴۰۴) هم یعنی دیگر آن‌جا نیست. */
 export async function deleteTranscript(env, id) {
-  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  const r = await fetch(`${sttUrl(env)}/transcripts/${encodeURIComponent(id)}`, { method: "DELETE", headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
   if (r.ok || r.status === 404) return true;
   const d = await r.json().catch(() => ({}));
   throw new ExtractError(`متن از ElevenLabs پاک نشد: ${sttWhy(d, r.status)}`, 502);
 }
 /** سنجشِ پاک شدن: همان شناسه دیگر خوانده نمی‌شود (۴۰۴) ← true؛ هنوز هست ← false؛ پاسخِ دیگر ← null (نامعلوم) */
 export async function transcriptGone(env, id) {
-  const r = await fetch(`${STT_URL}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+  const r = await fetch(`${sttUrl(env)}/transcripts/${encodeURIComponent(id)}`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
   if (r.body && r.body.cancel) await r.body.cancel().catch(() => {});
   return r.status === 404 ? true : r.ok ? false : null;
 }

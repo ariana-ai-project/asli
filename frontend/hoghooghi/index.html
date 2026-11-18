@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/jpeg" href="./tunnelsaddariana_logo.jpg" />
-    <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+    <link rel="apple-touch-icon" href="./tunnelsaddariana_logo.jpg" />
     <link rel="manifest" href="./manifest.json" />
     <meta name="theme-color" content="#1e3a5f" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -14,13 +14,12 @@
     <meta name="description" content="سامانه دستیار هوش مصنوعی حقوقی شرکت تونل سد آریانا" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- فونت بی‌انتظار: صفحه منتظرِ گوگل نمی‌ماند (گوشی، اینترنت ایران) -->
-    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-    <noscript><link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" /></noscript>
-    <script type="module" crossorigin src="./assets/index-XPZ4naaO.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800&display=swap" rel="stylesheet" />
+    <script type="module" crossorigin src="./assets/index-S6FTQM1s.js"></script>
     <link rel="stylesheet" crossorigin href="./assets/index-CuVWmDSz.css">
   </head>
   <body>
     <div id="root"></div>
+    <script>fetch("./api/session").then(r=>{if(!r.ok)location.replace("./login.html")}).catch(()=>{});</script>
   </body>
 </html>

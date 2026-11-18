@@ -36,6 +36,7 @@
 | frontend/tamin-poshtibani/ph-props.js | corr.main |
 | frontend/tamin-poshtibani/phone-frame.svg | corr.main |
 | frontend/tamin-poshtibani/push-sw.js | notify.push |
+| frontend/tamin-poshtibani/secure-admin.js | infra.access |
 | frontend/tamin-poshtibani/shared.js | infra.ui |
 | frontend/tamin-poshtibani/sp.css | sup.panel |
 | frontend/tamin-poshtibani/strategy-view.js | engine.strategy |
@@ -55,6 +56,11 @@
 | frontend/tamin-poshtibani/ui.css | infra.ui |
 | frontend/tamin-poshtibani/ui.js | infra.ui |
 | frontend/tamin-poshtibani/vendor/xlsx.full.min.js | doc.office |
+| server/assets.mjs | infra.core |
+| server/import-d1.mjs | infra.core |
+| server/index.mjs | infra.core |
+| server/sqlite-d1.mjs | infra.core |
+| server/verify-db.mjs | infra.core |
 | worker.js | infra.core |
 | worker/ai-agent.js | engine.ai |
 | worker/ai-feedback.js | support.fb |
@@ -93,11 +99,13 @@
 | worker/help-knowledge.js | bot.help |
 | worker/history.js | expert.history |
 | worker/http.js | infra.core |
+| worker/legal-auth.js | legal.app |
 | worker/legal-prompts.js | legal.app |
 | worker/legal.js | legal.app |
 | worker/letter.js | expert.letter |
 | worker/logo.js | doc.office |
 | worker/manager.js | manager.desk |
+| worker/model-provider.js | infra.access |
 | worker/neg-view.js | engine.ai |
 | worker/normalize.js | engine.structure |
 | worker/pfdoc.js | doc.office |
@@ -111,6 +119,7 @@
 | worker/relay.js | notify.sms |
 | worker/reports.js | manager.reports |
 | worker/reqdoc.js | doc.office |
+| worker/secure-config.js | infra.access |
 | worker/selftest.js | infra.core |
 | worker/settings.js | infra.core |
 | worker/sheets.js | expert.comm |

@@ -53,10 +53,14 @@
 | item_changes | engine.structure، expert.detail، infra.core | support.chg |
 | item_edits | engine.structure، expert.detail | engine.catalog |
 | items | bot.team، engine.ai، engine.structure، engine.tender، expert.ai، expert.detail، expert.picks، expert.smart، expert.terms، infra.core، manager.asg، manager.desk، manager.import، manager.log، support.ai، support.app، support.cm، support.td | corr.main، engine.records، engine.strategy، expert.account، expert.alerts، expert.comm، expert.finalcall، expert.history، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.reports، sup.panel، support.chg، support.dl، support.exp، support.fb، support.md، support.req، support.rules، support.use |
+| legal_auth_guard | legal.app | — |
 | legal_calls | legal.app | — |
 | legal_chats | legal.app | — |
 | legal_files | legal.app | — |
+| legal_sessions | infra.access، legal.app | — |
+| legal_text_files | legal.app | — |
 | legal_turns | legal.app | — |
+| legal_users | infra.access، legal.app | — |
 | letters | bot.team، engine.ai، expert.letter، infra.core، manager.desk | corr.main، expert.comm، support.ai، support.dl، support.fb، support.use |
 | norm_cache | engine.structure | — |
 | offpf | expert.finalcall، sup.panel | bot.sp، infra.core |
@@ -76,6 +80,7 @@
 | requests | expert.detail، infra.core، manager.asg، manager.desk، manager.import | bot.team، corr.main، engine.ai، engine.structure، engine.tender، expert.comm، expert.finalcall، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.log، manager.reports، sup.panel، support.ai، support.app، support.chat، support.chg، support.cm، support.dl، support.exp، support.fb، support.req، support.td، support.use |
 | scores_history | engine.records | — |
 | search_suppliers | engine.records، infra.core | — |
+| secure_configs | infra.access | — |
 | settings | bot.sp، bot.team، bot.voice، corr.main، engine.catalog، engine.strategy، engine.structure، engine.tender، expert.finalcall، expert.smart، expert.team، infra.core، infra.site، login.supplier، login.support، manager.alerts، manager.reports، notify.alarms، notify.push، notify.sms، sup.panel، support.app، support.cr، support.finalcall، support.log، support.md، support.rank، support.rules، support.size، support.smartgate، support.sw، support.usd | engine.ai، engine.records، expert.ai، expert.comm، expert.letter، expert.picks، manager.desk، manager.log، support.cm، support.req |
 | settings_history | engine.records | — |
 | smart_jobs | bot.team، infra.core، manager.desk | — |

@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <meta name="theme-color" content="#071833">
+  <title>ورود به سامانهٔ حقوقی آریانا</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:20px;background:radial-gradient(circle at 50% 10%,#173d72,#071833 48%,#030914);color:#eaf2ff;font-family:Vazirmatn,Tahoma,system-ui,sans-serif}
+    .card{width:min(440px,100%);padding:30px;border:1px solid rgba(160,195,255,.2);border-radius:22px;background:rgba(9,25,50,.88);box-shadow:0 24px 70px rgba(0,0,0,.35);backdrop-filter:blur(12px)}
+    .brand{display:flex;align-items:center;gap:14px;margin-bottom:25px}.brand img{width:62px;height:62px;border-radius:16px;object-fit:cover}.brand h1{font-size:1.25rem;margin:0 0 5px}.brand p{margin:0;color:#a9bddc;font-size:.88rem}
+    form{display:grid;gap:15px}label{display:grid;gap:7px;font-size:.9rem;color:#c6d6ed}input{width:100%;padding:13px 14px;border:1px solid #34547e;border-radius:11px;background:#07162c;color:#fff;font:inherit;outline:none}input:focus{border-color:#70a5ff;box-shadow:0 0 0 3px rgba(75,137,245,.18)}
+    button{padding:13px;border:0;border-radius:11px;background:linear-gradient(135deg,#4b89f5,#7367e8);color:#fff;font:700 1rem inherit;cursor:pointer}button:disabled{opacity:.6;cursor:wait}.error{min-height:24px;margin:12px 0 0;color:#ffaaaa;font-size:.88rem;line-height:1.7}.back{display:block;margin-top:18px;text-align:center;color:#a9bddc;text-decoration:none;font-size:.86rem}.back:hover{color:#fff}
+    @media(max-width:480px){.card{padding:22px}.brand img{width:52px;height:52px}}
+  </style>
+</head>
+<body>
+  <main class="card">
+    <div class="brand"><img src="./tunnelsaddariana_logo.jpg" alt=""><div><h1>سامانهٔ حقوقی آریانا</h1><p>ورود با نام کاربری و رمز تعریف‌شده توسط پشتیبانی</p></div></div>
+    <form id="login">
+      <label>نام کاربری<input name="username" dir="ltr" autocomplete="username" required minlength="3" maxlength="40" autofocus></label>
+      <label>رمز عبور<input name="password" dir="ltr" type="password" autocomplete="current-password" required></label>
+      <button type="submit">ورود به بخش حقوقی</button>
+    </form>
+    <p class="error" id="error" role="alert"></p>
+    <a class="back" href="../">بازگشت به صفحهٔ اصلی</a>
+  </main>
+  <script>
+    const form=document.getElementById("login"),error=document.getElementById("error"),button=form.querySelector("button");
+    fetch("./api/session").then(r=>{if(r.ok)location.replace("./")}).catch(()=>{});
+    form.addEventListener("submit",async event=>{
+      event.preventDefault();error.textContent="";button.disabled=true;button.textContent="در حال بررسی…";
+      try{
+        const data=new FormData(form);
+        const response=await fetch("./api/login",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({username:data.get("username"),password:data.get("password")})});
+        const result=await response.json().catch(()=>({}));
+        if(!response.ok)throw new Error(result.error||"ورود انجام نشد.");
+        location.replace("./");
+      }catch(e){error.textContent=e.message;button.disabled=false;button.textContent="ورود به بخش حقوقی"}
+    });
+  </script>
+</body>
+</html>

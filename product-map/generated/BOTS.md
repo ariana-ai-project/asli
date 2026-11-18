@@ -106,6 +106,7 @@
 - w/push.js › drainPush — notify.push
 - w/relay.js › relayOn — notify.sms
 - w/relay.js › relayWatch — notify.sms
+- w/secure-config.js › withSecureConfig — infra.access
 - w/sp-bot.js › ensureSpWebhook — bot.sp
 - w/strategy-doc.js › crDocTick — engine.strategy
 - w/tender.js › tenderDiscoverTick — engine.tender

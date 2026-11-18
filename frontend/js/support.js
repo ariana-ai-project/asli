@@ -1,5 +1,5 @@
 /* ============================================================
-   تب «پشتیبانی» صفحهٔ اول — وضعیت کارت‌ها و رمز مشترک
+   تب «مدیریت» صفحهٔ اول — وضعیت کارت‌ها، رمز مشترک، دسترسی و API
 
    وضعیت هر بخش (فعال / در حال توسعه / به‌زودی) روی سرور نگه داشته می‌شود
    (settings → siteCards)، پس برای همهٔ بازدیدکننده‌ها یکی است و با استقرار
@@ -10,6 +10,7 @@
         باز می‌شود و از داخلش وضعیت هر کارت عوض می‌شود.
    رمز: همان رمز مشترک تب، یا کد مدیر (تا اولین رمز تعریف شود).
    ۳) «📶 پیامک و پشتیبان‌گیری» (آبان ۱۴۰۵): درگاه پیامک، پلِ سرورِ شرکت، اعتبارِ پنل، آخرین پشتیبان‌گیریِ شبانه و «📨 پیامک آزمایشی».
+   ۴) «🔐 دسترسی و API»: کلیدهای رمزنگاری‌شده، سرویس‌دهنده‌های مدل، ElevenLabs و کاربران ورود حقوقی.
    ============================================================ */
 (function () {
   "use strict";
@@ -63,7 +64,7 @@
     s.id = "sp-css";
     s.textContent = `
 .sp-bg{position:fixed;inset:0;background:rgba(3,8,20,.72);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px}
-.sp-box{width:min(560px,100%);max-height:86vh;overflow:auto;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%),#0b1424;border:1px solid rgba(120,160,255,.28);border-radius:18px;padding:20px;color:#e8eefc;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 24px 70px rgba(0,0,0,.55)}
+.sp-box{width:min(900px,100%);max-height:86vh;overflow:auto;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%),#0b1424;border:1px solid rgba(120,160,255,.28);border-radius:18px;padding:20px;color:#e8eefc;box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 24px 70px rgba(0,0,0,.55)}
 .sp-box h3{margin:0 0 4px;font-size:1.15rem}
 .sp-box p.sp-hint{margin:0 0 16px;color:#93a4c4;font-size:.85rem;line-height:1.9}
 .sp-row{display:flex;align-items:center;gap:10px;padding:9px 0;border-top:1px solid rgba(120,160,255,.14)}
@@ -96,7 +97,17 @@
 .sp-sw:focus-visible{outline:2px solid #4f8cff;outline-offset:2px;border-radius:10px}
 .sp-val{font-size:.85rem;color:#c8d6f5;text-align:end}
 .sp-ok{color:#7ee0a8}.sp-bad{color:#ffa8a8}
-.sp-box #sp-to{width:150px;letter-spacing:.06em;direction:ltr}`;
+.sp-box #sp-to{width:150px;letter-spacing:.06em;direction:ltr}
+.sp-box .tp-card{padding:14px;border:1px solid rgba(120,160,255,.18);border-radius:12px;background:rgba(255,255,255,.025)}
+.sp-box .tp-input{width:100%;letter-spacing:0;text-align:start;margin-top:5px}
+.sp-box .tp-btn{background:rgba(70,125,235,.22);border:1px solid rgba(150,190,255,.4);color:#fff;border-radius:9px;padding:8px 14px;font:inherit;cursor:pointer}
+.sp-box .tp-btn.primary{background:linear-gradient(135deg,#2f6fe4,#6558d9)}
+.sp-box .tp-btn.danger{background:rgba(190,45,65,.2);border-color:rgba(255,130,140,.4)}
+.sp-box .tp-btn:disabled{opacity:.5;cursor:wait}
+.sp-box .chip{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;background:rgba(255,255,255,.06);font-size:.78rem}
+.sp-box .chip.ok{color:#7ee0a8}.sp-box .chip.warn{color:#ffd28a}.sp-box .spacer{flex:1}.sp-box .dim{color:#93a4c4;line-height:1.8}
+.sp-box .tp-note{padding:10px;border-radius:9px;margin-top:8px}.sp-box .tp-note.warn{background:rgba(180,80,40,.15);color:#ffc1a8}.sp-box .tp-note.ok{background:rgba(30,140,80,.15);color:#7ee0a8}
+.sp-box .ui-load{padding:20px;text-align:center;color:#a9bddc}`;
     document.head.appendChild(s);
   }
 
@@ -132,6 +143,7 @@
       <div class="sp-fx"><h4>جلوه‌های پنل‌های تدارکات</h4>
         ${FX.map(([k, t, sub]) => `<button class="sp-sw" role="switch" aria-checked="${(state.fx || {})[k] !== false}" data-fx="${k}"><span class="sp-tr"><i></i></span><span class="sp-name">${t}<small>${sub}</small></span></button>`).join("")}</div>
       <div class="sp-fx" id="sp-sms"><h4>📶 پیامک و پشتیبان‌گیری</h4><div data-sms>${smsView()}</div></div>
+      <div class="sp-fx" id="sp-access">${window.TP_SECURE ? window.TP_SECURE.view() : ""}</div>
       <div class="sp-foot">
         <span style="flex:1;font-size:.9rem">${state.hasPass ? "تغییر رمز تب" : "تعریف رمز تب"}</span>
         <input type="password" inputmode="numeric" autocomplete="off" id="sp-pass" placeholder="۴ رقم" maxlength="4" />
@@ -189,6 +201,7 @@
     const first = box.querySelector("input");
     if (first && first.id !== "sp-to") first.focus();
     if (box.querySelector("[data-sms]")) loadSms();
+    if (box.querySelector("#sp-access") && window.TP_SECURE) { window.TP_SECURE.mount(box.querySelector(".sp-box")); window.TP_SECURE.load(); }
   }
 
   async function unlock(c) {
@@ -246,6 +259,11 @@
     }
     draw(lockView());
   }
+
+  if (window.TP_SECURE) window.TP_SECURE.configure({
+    api: (path, options = {}) => api(path.replace(/^\/access/, "/site/access"), { ...options, auth: true }),
+    render: () => { if (box) draw(adminView()); },
+  });
 
   /* ---------- سیم‌کشی ---------- */
   document.addEventListener("click", (e) => {

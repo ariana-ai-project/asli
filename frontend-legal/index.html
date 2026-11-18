@@ -18,6 +18,7 @@
   </head>
   <body>
     <div id="root"></div>
+    <script>fetch("./api/session").then(r=>{if(!r.ok)location.replace("./login.html")}).catch(()=>{});</script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

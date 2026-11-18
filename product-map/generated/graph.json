@@ -1545,6 +1545,41 @@
    ]
   },
   {
+   "id": "infra.access",
+   "area": "infra",
+   "title": "دسترسی و API",
+   "help": false,
+   "places": [],
+   "files": [
+    "frontend/tamin-poshtibani/secure-admin.js",
+    "worker/model-provider.js",
+    "worker/secure-config.js"
+   ],
+   "endpoints": [
+    "GET /site/access",
+    "POST /site/access/legal-user",
+    "POST /site/access/save",
+    "POST /site/access/test"
+   ],
+   "tests": [
+    "backend/tamin-poshtibani/tests/model-provider.test.mjs",
+    "backend/tamin-poshtibani/tests/secure-admin.test.mjs"
+   ],
+   "tables": {
+    "w": [
+     "legal_sessions",
+     "legal_users",
+     "secure_configs"
+    ],
+    "r": [
+     "legal_sessions",
+     "legal_users",
+     "secure_configs"
+    ]
+   },
+   "related": []
+  },
+  {
    "id": "infra.auth",
    "area": "infra",
    "title": "ورود با کد و تلگرام",
@@ -1577,6 +1612,11 @@
    "help": false,
    "places": [],
    "files": [
+    "server/assets.mjs",
+    "server/import-d1.mjs",
+    "server/index.mjs",
+    "server/sqlite-d1.mjs",
+    "server/verify-db.mjs",
     "worker.js",
     "worker/api.js",
     "worker/d1-guard.js",
@@ -1596,10 +1636,12 @@
     "backend/tamin-poshtibani/tests/assign-plan.test.mjs",
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/node-server.test.mjs",
     "backend/tamin-poshtibani/tests/phase4b3.test.mjs",
     "backend/tamin-poshtibani/tests/product-map.test.mjs",
     "backend/tamin-poshtibani/tests/reports.test.mjs",
     "backend/tamin-poshtibani/tests/review-fixes.test.mjs",
+    "backend/tamin-poshtibani/tests/secure-admin.test.mjs",
     "backend/tamin-poshtibani/tests/storage.test.mjs",
     "backend/tamin-poshtibani/tests/time.test.mjs"
    ],
@@ -1806,6 +1848,7 @@
    "help": false,
    "places": [],
    "files": [
+    "worker/legal-auth.js",
     "worker/legal-prompts.js",
     "worker/legal.js"
    ],
@@ -1815,29 +1858,43 @@
     "GET legal:/chats",
     "GET legal:/chats/{}/memory",
     "GET legal:/health",
+    "GET legal:/session",
     "POST legal:/analyze",
     "POST legal:/chats/{}/commit",
     "POST legal:/chats/{}/memory/refresh",
     "POST legal:/chats/{}/send",
     "POST legal:/draft",
     "POST legal:/files",
+    "POST legal:/login",
+    "POST legal:/logout",
     "POST legal:/usage"
    ],
-   "tests": [],
+   "tests": [
+    "backend/tamin-poshtibani/tests/model-provider.test.mjs",
+    "backend/tamin-poshtibani/tests/secure-admin.test.mjs"
+   ],
    "tables": {
     "w": [
      "counters",
+     "legal_auth_guard",
      "legal_calls",
      "legal_chats",
      "legal_files",
-     "legal_turns"
+     "legal_sessions",
+     "legal_text_files",
+     "legal_turns",
+     "legal_users"
     ],
     "r": [
      "counters",
+     "legal_auth_guard",
      "legal_calls",
      "legal_chats",
      "legal_files",
-     "legal_turns"
+     "legal_sessions",
+     "legal_text_files",
+     "legal_turns",
+     "legal_users"
     ]
    },
    "related": []
@@ -1857,7 +1914,8 @@
    ],
    "tests": [
     "backend/tamin-poshtibani/tests/codes.test.mjs",
-    "backend/tamin-poshtibani/tests/login.test.mjs"
+    "backend/tamin-poshtibani/tests/login.test.mjs",
+    "backend/tamin-poshtibani/tests/secure-admin.test.mjs"
    ],
    "tables": {
     "w": [],
@@ -5255,6 +5313,7 @@
     "worker/push.js#drainPush",
     "worker/relay.js#relayOn",
     "worker/relay.js#relayWatch",
+    "worker/secure-config.js#withSecureConfig",
     "worker/sp-bot.js#ensureSpWebhook",
     "worker/strategy-doc.js#crDocTick",
     "worker/tender.js#tenderDiscoverTick",
@@ -5317,6 +5376,7 @@
   "frontend/tamin-poshtibani/ph-props.js": "corr.main",
   "frontend/tamin-poshtibani/phone-frame.svg": "corr.main",
   "frontend/tamin-poshtibani/push-sw.js": "notify.push",
+  "frontend/tamin-poshtibani/secure-admin.js": "infra.access",
   "frontend/tamin-poshtibani/shared.js": "infra.ui",
   "frontend/tamin-poshtibani/sp.css": "sup.panel",
   "frontend/tamin-poshtibani/strategy-view.js": "engine.strategy",
@@ -5336,6 +5396,11 @@
   "frontend/tamin-poshtibani/ui.css": "infra.ui",
   "frontend/tamin-poshtibani/ui.js": "infra.ui",
   "frontend/tamin-poshtibani/vendor/xlsx.full.min.js": "doc.office",
+  "server/assets.mjs": "infra.core",
+  "server/import-d1.mjs": "infra.core",
+  "server/index.mjs": "infra.core",
+  "server/sqlite-d1.mjs": "infra.core",
+  "server/verify-db.mjs": "infra.core",
   "worker.js": "infra.core",
   "worker/ai-agent.js": "engine.ai",
   "worker/ai-feedback.js": "support.fb",
@@ -5374,11 +5439,13 @@
   "worker/help-knowledge.js": "bot.help",
   "worker/history.js": "expert.history",
   "worker/http.js": "infra.core",
+  "worker/legal-auth.js": "legal.app",
   "worker/legal-prompts.js": "legal.app",
   "worker/legal.js": "legal.app",
   "worker/letter.js": "expert.letter",
   "worker/logo.js": "doc.office",
   "worker/manager.js": "manager.desk",
+  "worker/model-provider.js": "infra.access",
   "worker/neg-view.js": "engine.ai",
   "worker/normalize.js": "engine.structure",
   "worker/pfdoc.js": "doc.office",
@@ -5392,6 +5459,7 @@
   "worker/relay.js": "notify.sms",
   "worker/reports.js": "manager.reports",
   "worker/reqdoc.js": "doc.office",
+  "worker/secure-config.js": "infra.access",
   "worker/selftest.js": "infra.core",
   "worker/settings.js": "infra.core",
   "worker/sheets.js": "expert.comm",
@@ -6957,6 +7025,23 @@
    }
   },
   {
+   "key": "GET /site/access",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.access"
+   ],
+   "uses": [
+    "worker/legal-auth.js#listLegalUsers",
+    "worker/secure-config.js#secureOverview",
+    "worker/site.js#siteLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "GET /site/sms",
    "file": "worker/api.js",
    "fn": "route",
@@ -8342,7 +8427,25 @@
    "features": [
     "legal.app"
    ],
-   "uses": [],
+   "uses": [
+    "worker/legal-auth.js#ensureLegalAuth",
+    "worker/legal-auth.js#legalAuthRequired"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "GET legal:/session",
+   "file": "worker/legal.js",
+   "fn": "legalRoute",
+   "features": [
+    "legal.app"
+   ],
+   "uses": [
+    "worker/legal-auth.js#legalSession"
+   ],
    "tables": {
     "r": [],
     "w": []
@@ -9348,6 +9451,55 @@
     "worker/http.js#HttpError",
     "worker/records.js#phoneChannels",
     "worker/records.js#withPhoneKeys"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /site/access/legal-user",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.access"
+   ],
+   "uses": [
+    "worker/legal-auth.js#saveLegalUser",
+    "worker/site.js#siteLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /site/access/save",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.access"
+   ],
+   "uses": [
+    "worker/legal-auth.js#listLegalUsers",
+    "worker/secure-config.js#saveSecureConfigVerified",
+    "worker/site.js#siteLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /site/access/test",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.access"
+   ],
+   "uses": [
+    "worker/secure-config.js#testSecureService",
+    "worker/site.js#siteLogin"
    ],
    "tables": {
     "r": [],
@@ -10567,6 +10719,37 @@
     "legal.app"
    ],
    "uses": [],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST legal:/login",
+   "file": "worker/legal.js",
+   "fn": "legalRoute",
+   "features": [
+    "legal.app"
+   ],
+   "uses": [
+    "worker/legal-auth.js#legalLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST legal:/logout",
+   "file": "worker/legal.js",
+   "fn": "legalRoute",
+   "features": [
+    "legal.app"
+   ],
+   "uses": [
+    "worker/legal-auth.js#legalLogout",
+    "worker/legal-auth.js#legalSession"
+   ],
    "tables": {
     "r": [],
     "w": []
@@ -12599,6 +12782,34 @@
    ]
   },
   {
+   "from": "frontend/tamin-poshtibani/secure-admin.js#refresh",
+   "path": "/site/access",
+   "routes": [
+    "GET /site/access"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/secure-admin.js#saveConfig",
+   "path": "/site/access/save",
+   "routes": [
+    "POST /site/access/save"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/secure-admin.js#saveUser",
+   "path": "/site/access/legal-user",
+   "routes": [
+    "POST /site/access/legal-user"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/secure-admin.js#testService",
+   "path": "/site/access/test",
+   "routes": [
+    "POST /site/access/test"
+   ]
+  },
+  {
    "from": "frontend/tamin-poshtibani/sup-profile.js#enabled",
    "path": "/cr/flags",
    "routes": [
@@ -14313,6 +14524,16 @@
    ]
   },
   {
+   "file": "backend/tamin-poshtibani/tests/model-provider.test.mjs",
+   "features": [
+    "infra.access",
+    "legal.app"
+   ],
+   "imports": [
+    "worker/model-provider.js"
+   ]
+  },
+  {
    "file": "backend/tamin-poshtibani/tests/multiprice.test.mjs",
    "features": [
     "bot.sp",
@@ -14361,6 +14582,17 @@
     "worker/strategy/config.js",
     "worker/strategy/kb-data.js",
     "worker/strategy/negotiation.js"
+   ]
+  },
+  {
+   "file": "backend/tamin-poshtibani/tests/node-server.test.mjs",
+   "features": [
+    "infra.core"
+   ],
+   "imports": [
+    "server/assets.mjs",
+    "server/index.mjs",
+    "server/sqlite-d1.mjs"
    ]
   },
   {
@@ -14644,6 +14876,21 @@
     "backend/tamin-poshtibani/tests/run.mjs",
     "worker/api.js",
     "worker/auth-guard.js"
+   ]
+  },
+  {
+   "file": "backend/tamin-poshtibani/tests/secure-admin.test.mjs",
+   "features": [
+    "infra.access",
+    "infra.core",
+    "legal.app",
+    "login.expert"
+   ],
+   "imports": [
+    "backend/tamin-poshtibani/tests/run.mjs",
+    "worker/api.js",
+    "worker/legal.js",
+    "worker/secure-config.js"
    ]
   },
   {

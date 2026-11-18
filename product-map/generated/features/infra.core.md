@@ -2,9 +2,14 @@
 
 بخش: زیرساخت
 
-> worker.js، مسیریاب api.js (ensureSchema و مهاجرت‌ها)، خطا، زمان کاری، تنظیمات، ذخیره‌سازی و نگهبان D1.
+> worker.js، مسیریاب api.js (ensureSchema و مهاجرت‌ها)، خطا، زمان کاری، تنظیمات، ذخیره‌سازی، نگهبان D1 و اجرای Node/SQLite روی VPS.
 
 ## فایل‌های این قابلیت (صاحب)
+- `server/assets.mjs`
+- `server/import-d1.mjs`
+- `server/index.mjs`
+- `server/sqlite-d1.mjs`
+- `server/verify-db.mjs`
 - `worker.js` — voiceBots، fetch، scheduled
 - `worker/api.js` — cleanOrphans، ensureSchema، migrateAiOptIn، migrateCodes4، route
 - `worker/d1-guard.js` — HEAVY، guardEnv
@@ -17,7 +22,7 @@
 ## مسیرهای سرور (4)
 | مسیر | پاسخ‌گو | ماژول‌هایی که صدا می‌زند | در تست |
 |---|---|---|---|
-| `* /health` | w/api.js › route | w/settings.js#managerCode، w/storage.js#storage، w/storage.js#storageInfo | — |
+| `* /health` | w/api.js › route | w/settings.js#managerCode، w/storage.js#storage، w/storage.js#storageInfo | ✓ |
 | `* /notify/email` | w/api.js › route | — | — |
 | `* /reviews` | w/api.js › route | — | — |
 | `GET /selftest` | w/api.js › route | w/selftest.js#selfTest | — |
@@ -32,17 +37,19 @@
 خواندن: ai_rates، offpf
 هم‌نویس‌های همین جدول‌ها: bot.sp، bot.team، bot.voice، corr.main، engine.ai، engine.records، engine.strategy، engine.structure، expert.ai، expert.comm، expert.detail، expert.finalcall، expert.history، expert.letter، expert.msgtpl، expert.quotes، expert.smart، legal.app، login.supplier، manager.alerts، manager.asg، manager.desk، manager.experts، manager.import، manager.log، notify.alarms، notify.sms، notify.telegram، sup.panel، support.ai، support.cm، support.fb، support.log
 
-## تست‌ها (9)
+## تست‌ها (11)
 - assign-plan.test.mjs
 - d1-budget.test.mjs
 - final-call.test.mjs
+- node-server.test.mjs
 - phase4b3.test.mjs
 - product-map.test.mjs
 - reports.test.mjs
 - review-fixes.test.mjs
+- secure-admin.test.mjs
 - storage.test.mjs
 - time.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/product-map.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/storage.test.mjs backend/tamin-poshtibani/tests/time.test.mjs
+node --test backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/node-server.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/product-map.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/secure-admin.test.mjs backend/tamin-poshtibani/tests/storage.test.mjs backend/tamin-poshtibani/tests/time.test.mjs
 ```

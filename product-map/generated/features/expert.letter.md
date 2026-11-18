@@ -31,7 +31,7 @@
 
 جای راهنما در کد: expert.js › vLetterIntro، expert.js › vLetterAsk، expert.js › vLetterDone، expert.js › st
 
-متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، ELEVENLABS_API_KEY، STT_MODEL
+متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، ELEVENLABS_API_BASE، ELEVENLABS_API_KEY، STT_MODEL
 
 ## جدول‌ها
 نوشتن: events، letters
