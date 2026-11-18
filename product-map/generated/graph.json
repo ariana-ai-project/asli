@@ -1552,14 +1552,17 @@
    "places": [],
    "files": [
     "frontend/tamin-poshtibani/secure-admin.js",
+    "worker/model-provider.js",
     "worker/secure-config.js"
    ],
    "endpoints": [
     "GET /site/access",
     "POST /site/access/legal-user",
-    "POST /site/access/save"
+    "POST /site/access/save",
+    "POST /site/access/test"
    ],
    "tests": [
+    "backend/tamin-poshtibani/tests/model-provider.test.mjs",
     "backend/tamin-poshtibani/tests/secure-admin.test.mjs"
    ],
    "tables": {
@@ -1867,6 +1870,7 @@
     "POST legal:/usage"
    ],
    "tests": [
+    "backend/tamin-poshtibani/tests/model-provider.test.mjs",
     "backend/tamin-poshtibani/tests/secure-admin.test.mjs"
    ],
    "tables": {
@@ -1877,6 +1881,7 @@
      "legal_chats",
      "legal_files",
      "legal_sessions",
+     "legal_text_files",
      "legal_turns",
      "legal_users"
     ],
@@ -1887,6 +1892,7 @@
      "legal_chats",
      "legal_files",
      "legal_sessions",
+     "legal_text_files",
      "legal_turns",
      "legal_users"
     ]
@@ -5439,6 +5445,7 @@
   "worker/letter.js": "expert.letter",
   "worker/logo.js": "doc.office",
   "worker/manager.js": "manager.desk",
+  "worker/model-provider.js": "infra.access",
   "worker/neg-view.js": "engine.ai",
   "worker/normalize.js": "engine.structure",
   "worker/pfdoc.js": "doc.office",
@@ -8421,7 +8428,8 @@
     "legal.app"
    ],
    "uses": [
-    "worker/legal-auth.js#ensureLegalAuth"
+    "worker/legal-auth.js#ensureLegalAuth",
+    "worker/legal-auth.js#legalAuthRequired"
    ],
    "tables": {
     "r": [],
@@ -9475,6 +9483,22 @@
    "uses": [
     "worker/legal-auth.js#listLegalUsers",
     "worker/secure-config.js#saveSecureConfigVerified",
+    "worker/site.js#siteLogin"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /site/access/test",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "infra.access"
+   ],
+   "uses": [
+    "worker/secure-config.js#testSecureService",
     "worker/site.js#siteLogin"
    ],
    "tables": {
@@ -12779,6 +12803,13 @@
    ]
   },
   {
+   "from": "frontend/tamin-poshtibani/secure-admin.js#testService",
+   "path": "/site/access/test",
+   "routes": [
+    "POST /site/access/test"
+   ]
+  },
+  {
    "from": "frontend/tamin-poshtibani/sup-profile.js#enabled",
    "path": "/cr/flags",
    "routes": [
@@ -14490,6 +14521,16 @@
    "imports": [
     "backend/tamin-poshtibani/tests/run.mjs",
     "worker/api.js"
+   ]
+  },
+  {
+   "file": "backend/tamin-poshtibani/tests/model-provider.test.mjs",
+   "features": [
+    "infra.access",
+    "legal.app"
+   ],
+   "imports": [
+    "worker/model-provider.js"
    ]
   },
   {

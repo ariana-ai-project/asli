@@ -58,6 +58,7 @@
 | legal_chats | legal.app | — |
 | legal_files | legal.app | — |
 | legal_sessions | infra.access، legal.app | — |
+| legal_text_files | legal.app | — |
 | legal_turns | legal.app | — |
 | legal_users | infra.access، legal.app | — |
 | letters | bot.team، engine.ai، expert.letter، infra.core، manager.desk | corr.main، expert.comm، support.ai، support.dl، support.fb، support.use |

@@ -105,6 +105,7 @@
 | worker/letter.js | expert.letter |
 | worker/logo.js | doc.office |
 | worker/manager.js | manager.desk |
+| worker/model-provider.js | infra.access |
 | worker/neg-view.js | engine.ai |
 | worker/normalize.js | engine.structure |
 | worker/pfdoc.js | doc.office |

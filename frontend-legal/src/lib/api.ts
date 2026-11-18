@@ -151,6 +151,7 @@ export async function readStream(r: Response, h: StreamHandlers = {}): Promise<S
     error?: { type?: string; message?: string };
   };
   const handle = (data: string) => {
+    if (data.trim() === '[DONE]') { complete = true; return; }
     let d: SseEvent;
     try { d = JSON.parse(data); } catch { return; }
     switch (d.type) {

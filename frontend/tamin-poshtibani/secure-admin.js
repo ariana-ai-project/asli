@@ -2,7 +2,7 @@
   "use strict";
   const TP = window.TP || {}, esc = TP.esc || ((value) => String(value == null ? "" : value).replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[char])));
   let C = { api: null, render: () => {} }, root = null;
-  const S = { data: null, draft: null, busy: false, err: "", msg: "" };
+  const S = { data: null, draft: null, busy: false, err: "", msg: "", results: {}, testing: "" };
   const clone = (value) => JSON.parse(JSON.stringify(value));
   const fa = (value) => TP.ui && TP.ui.fa ? TP.ui.fa(value) : String(value);
 
@@ -80,6 +80,12 @@
     } catch (error) { S.err = error.message; }
     S.busy = false; C.render();
   }
+  async function testService(kind) {
+    S.testing = kind; C.render();
+    try { S.results[kind] = await C.api("/access/test", { body: { kind } }); }
+    catch (error) { S.results[kind] = { ok: false, error: error.message }; }
+    S.testing = ""; C.render();
+  }
   async function onClick(event) {
     const button = event.target.closest("[data-access-action]");
     if (!button) return;
@@ -91,6 +97,11 @@
       S.draft.providers.push({ id: `local-${Date.now()}`, label: "سرویس‌دهندهٔ تازه", base_url: "", model: "claude-sonnet-5", api_key: "", key_configured: false, active: !S.draft.providers.length });
       return C.render();
     }
+    if (action === "add-avalai") {
+      collect();
+      S.draft.providers.push({ id: `avalai-${Date.now()}`, label: "AvalAI", base_url: "https://api.avalai.ir", model: "claude-haiku-4-5", api_key: "", key_configured: false, active: !S.draft.providers.length });
+      return C.render();
+    }
     if (action === "remove-provider") {
       collect(); S.draft.providers.splice(Number(button.dataset.index), 1);
       if (S.draft.providers.length && !S.draft.providers.some((provider) => provider.active)) S.draft.providers[0].active = true;
@@ -98,6 +109,7 @@
     }
     if (action === "save-config") return saveConfig();
     if (action === "save-user") return saveUser(Number(button.dataset.id), button.closest("[data-user-row]"));
+    if (action === "test-service") return testService(button.dataset.kind);
   }
 
   function providerCard(provider, index) {
@@ -126,6 +138,12 @@
       <button class="tp-btn sm" type="button" data-access-action="save-user" data-id="${user.id}">ذخیره</button>
       <span class="dim" style="grid-column:1/-1;font-size:.8rem">آخرین ورود: ${user.last_login ? fa(new Date(user.last_login).toLocaleString("fa-IR")) : "—"}</span></div>`;
   }
+  function serviceTests() {
+    const tests = [["ai", "مدل فعال"], ["eleven", "ElevenLabs"], ["supabase", "Supabase"], ["telegram", "ربات‌های تلگرام"]];
+    return `<section class="tp-card"><h3>تست اتصال سرویس‌ها</h3><p class="dim">اول تنظیمات را ذخیره کنید؛ تست با همان کلید ذخیره‌شده انجام می‌شود.</p><div style="display:flex;gap:8px;flex-wrap:wrap">
+      ${tests.map(([kind, label]) => `<button class="tp-btn sm" type="button" data-access-action="test-service" data-kind="${kind}" ${S.testing === kind ? "disabled" : ""}>${S.testing === kind ? "در حال تست…" : `تست ${label}`}</button>`).join("")}</div>
+      ${tests.filter(([kind]) => S.results[kind]).map(([kind, label]) => { const r = S.results[kind]; return `<div class="tp-note ${r.ok ? "ok" : "warn"}"><b>${label}:</b> ${esc(r.ok ? r.message : r.error)}</div>`; }).join("")}</section>`;
+  }
   function mainView() {
     const d = S.data;
     if (!d) return `<div class="ui-load"><span>در حال بارگذاری تنظیمات امن…</span></div>`;
@@ -134,12 +152,14 @@
       ${!d.encryption_ready ? `<div class="tp-note warn">کلید اصلی رمزنگاری روی سرور تنظیم نشده؛ ذخیرهٔ API Key تا تنظیم آن غیرفعال است. مدیریت کاربران حقوقی فعال است.</div>` : ""}
       ${S.err ? `<div class="tp-note warn" role="alert">${esc(S.err)}</div>` : ""}${S.msg ? `<div class="tp-note ok">${esc(S.msg)}</div>` : ""}</div>
       <section><h3>مدل‌های هوش مصنوعی</h3>${S.draft.providers.map(providerCard).join("")}
-      <button class="tp-btn" type="button" data-access-action="add-provider">افزودن سرویس‌دهنده</button></section>
+      <button class="tp-btn" type="button" data-access-action="add-provider">افزودن سرویس‌دهنده</button>
+      <button class="tp-btn" type="button" data-access-action="add-avalai">افزودن AvalAI</button></section>
       <section class="tp-card"><h3>ElevenLabs</h3><div style="display:grid;grid-template-columns:2fr 1fr;gap:10px">
       <label>نشانی API<input class="tp-input" dir="ltr" data-eleven-base value="${esc(d.eleven.base_url)}" placeholder="https://api.elevenlabs.io"></label>
       <label>مدل صدا به متن<input class="tp-input" dir="ltr" data-eleven-model value="${esc(d.eleven.model)}" placeholder="scribe_v2"></label></div></section>
       <section class="tp-card"><h3>کلیدهای سرویس‌ها</h3>${d.secrets.map(secretField).join("")}</section>
       <button class="tp-btn primary" type="button" data-access-action="save-config" ${S.busy || !d.encryption_ready ? "disabled" : ""}>${S.busy ? "در حال ذخیره…" : "ذخیرهٔ امن تنظیمات"}</button>
+      ${serviceTests()}
       <section class="tp-card"><h3>کاربران بخش حقوقی</h3><p class="dim">نام کاربری لاتین است و هر رمز دست‌کم ۸ نویسه دارد. برای تغییر نام یا فعال/غیرفعال کردن، رمز تازه لازم نیست.</p>
       ${(d.legal_users || []).map(userRow).join("")}
       <h4 style="margin-top:18px">افزودن کاربر</h4><div data-user-row style="display:grid;grid-template-columns:1fr 1fr auto auto;gap:8px;align-items:center">

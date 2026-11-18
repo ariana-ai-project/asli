@@ -5,7 +5,7 @@
 > تحلیل قرارداد، پیش‌نویس و گفت‌وگوی حقوقی با ورود کاربری؛ پایهٔ جدا (LEGAL_PREFIX) و فرانت جدا (frontend-legal).
 
 ## فایل‌های این قابلیت (صاحب)
-- `worker/legal-auth.js` — LEGAL_AUTH_DDL، ensureLegalAuth، legalAuthCleanup، legalLogin، legalLogout، legalSession، listLegalUsers، saveLegalUser
+- `worker/legal-auth.js` — LEGAL_AUTH_DDL، ensureLegalAuth، legalAuthCleanup، legalAuthRequired، legalLogin، legalLogout، legalSession، listLegalUsers، saveLegalUser
 - `worker/legal-prompts.js` — ANALYSIS_SYSTEM، CHAT_SYSTEM، COMPACT_SCHEMA، COMPACT_SYSTEM، DRAFT_SCHEMA، DRAFT_SYSTEM، MEMORY_SCHEMA، MEMORY_SOFT، MEMORY_SYSTEM، REPORT_SCHEMA، analysisInstruction، draftInstruction
 - `worker/legal.js` — FOLD_AT، KEEP_TOK، KEEP_TURNS، LEGAL_MODEL، LEGAL_SCHEMA، LIMITS، MAX_FILE، MAX_OUT، PIN_TOK، PREFIX، analysisRequest، chatRequest، compactRequest، costOf، draftRequest، ensureLegalSchema، estFileTok، estTok، …
 
@@ -16,7 +16,7 @@
 | `* legal:/files/{}` | w/legal.js › legalRoute | — | — |
 | `GET legal:/chats` | w/legal.js › legalRoute | — | — |
 | `GET legal:/chats/{}/memory` | w/legal.js › legalRoute | — | — |
-| `GET legal:/health` | w/legal.js › legalRoute | w/legal-auth.js#ensureLegalAuth | — |
+| `GET legal:/health` | w/legal.js › legalRoute | w/legal-auth.js#ensureLegalAuth، w/legal-auth.js#legalAuthRequired | — |
 | `GET legal:/session` | w/legal.js › legalRoute | w/legal-auth.js#legalSession | — |
 | `POST legal:/analyze` | w/legal.js › legalRoute | — | — |
 | `POST legal:/chats/{}/commit` | w/legal.js › legalRoute | — | — |
@@ -31,16 +31,17 @@
 ## فراخوان در پنل‌ها (0)
 —
 
-متغیرهای Worker (نام): ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، LEGAL_MODEL
+متغیرهای Worker (نام): AI_CUSTOM_PROVIDER، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY، LEGAL_MODEL
 
 ## جدول‌ها
-نوشتن: counters، legal_auth_guard، legal_calls، legal_chats، legal_files، legal_sessions، legal_turns، legal_users
+نوشتن: counters، legal_auth_guard، legal_calls، legal_chats، legal_files، legal_sessions، legal_text_files، legal_turns، legal_users
 خواندن: —
 هم‌نویس‌های همین جدول‌ها: engine.structure، expert.comm، infra.access، infra.core، manager.import
 
-## تست‌ها (1)
+## تست‌ها (2)
+- model-provider.test.mjs
 - secure-admin.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/secure-admin.test.mjs
+node --test backend/tamin-poshtibani/tests/model-provider.test.mjs backend/tamin-poshtibani/tests/secure-admin.test.mjs
 ```

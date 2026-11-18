@@ -243,6 +243,7 @@
 | `POST /search/smart` | expert.smart | w/api.js › route |
 | `POST /site/access/legal-user` | infra.access | w/api.js › route |
 | `POST /site/access/save` | infra.access | w/api.js › route |
+| `POST /site/access/test` | infra.access | w/api.js › route |
 | `POST /site/login` | infra.site | w/api.js › route |
 | `POST /site/sms/test` | infra.site | w/api.js › route |
 | `POST /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |

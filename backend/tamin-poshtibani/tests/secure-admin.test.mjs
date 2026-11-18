@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
-import { withSecureConfig } from "../../../worker/secure-config.js";
+import { withSecureConfig, testSecureService } from "../../../worker/secure-config.js";
 import { legalRoute } from "../../../worker/legal.js";
 
 const DB = await sqliteD1();
@@ -61,6 +61,18 @@ test("home admin configuration and legal username/password sessions", { skip: SK
   assert.equal(merged.LEGAL_MODEL, "provider-model-x");
   assert.equal(merged.ELEVENLABS_API_KEY, "eleven-private-test");
   assert.equal(merged.STT_MODEL, "scribe-custom");
+  const originalFetch = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => new Response("{}", { status: 200, headers: { "content-type": "application/json" } });
+    const tested = await testSecureService(merged, "ai");
+    assert.equal(tested.ok, true);
+    assert.ok(!JSON.stringify(tested).includes("model-private-test"));
+  } finally { globalThis.fetch = originalFetch; }
+
+  const setupSession = await legal("GET", "/session");
+  assert.equal(setupSession.status, 200);
+  assert.equal(setupSession.data.setup_required, true);
+  assert.equal((await legal("GET", "/chats")).status, 200, "legacy legal access remains until the first user is created");
 
   const user = await call("POST", "/site/access/legal-user", {
     username: "Legal.User", password: "legal-strong-password", active: true,

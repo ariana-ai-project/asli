@@ -13,6 +13,8 @@
 import { HttpError } from "./http.js";
 import { HELP_KNOWLEDGE } from "./help-knowledge.js";
 
+import { modelFetch } from "./model-provider.js";
+
 export const HELP_DDL = `
 CREATE TABLE IF NOT EXISTS help_msgs (id INTEGER PRIMARY KEY, role TEXT NOT NULL, uid INTEGER NOT NULL DEFAULT 0, who TEXT NOT NULL, body TEXT NOT NULL, page TEXT, at INTEGER NOT NULL, tin INTEGER, tout INTEGER, tcache INTEGER);
 CREATE INDEX IF NOT EXISTS help_msgs_who ON help_msgs(role, uid, id);
@@ -94,7 +96,7 @@ async function callModel(env, body) {
   for (let i = 0; i < 2; i++) {
     let r;
     try {
-      r = await fetch(API(env), { method: "POST", headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+      r = await modelFetch(env, API(env), { method: "POST", headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
         body: JSON.stringify(body), signal: AbortSignal.timeout(45000) });
     } catch (e) {
       /* قطعیِ شبکه یا مهلت: یک بار دیگر، بعد پیامِ فارسی (نه متنِ خامِ خطا) */

@@ -142,7 +142,7 @@ export const FEATURES = [
     files: ["worker.js", `${W}api.js`, `${W}http.js`, `${W}time.js`, `${W}settings.js`, `${W}storage.js`, `${W}d1-guard.js`, `${W}selftest.js`, "server/*.mjs"],
     endpoints: ["/health", "GET /selftest", "/reviews", "/notify/email"] },
   { id: "infra.auth", title: "ورود با کد و تلگرام", desc: "محدودیت تلاش ناموفق و قفل، شناسایی از مینی‌اپ تلگرام.", files: [`${W}auth-guard.js`, `${W}tg-auth.js`] },
-  { id: "infra.access", title: "دسترسی و API", desc: "مدیریت رمزنگاری‌شدهٔ کلیدها و سرویس‌دهنده‌ها در چرخ‌دندهٔ صفحهٔ اصلی.", files: [`${F}secure-admin.js`, `${W}secure-config.js`], endpoints: ["/site/access*"] },
+  { id: "infra.access", title: "دسترسی و API", desc: "مدیریت رمزنگاری‌شدهٔ کلیدها، سازگاری مدل‌ها و سرویس‌دهنده‌ها در چرخ‌دندهٔ صفحهٔ اصلی.", files: [`${F}secure-admin.js`, `${W}secure-config.js`, `${W}model-provider.js`], endpoints: ["/site/access*"] },
   { id: "infra.site", title: "دروازهٔ سایت", desc: "کد ورود به خود سایت پیش از پنل‌ها.", files: [`${W}site.js`, `${F}index.html`], endpoints: ["/site*"] },
   { id: "infra.ui", title: "کیت رابط کاربری مشترک", desc: "TP.api، ui.js (کشوی راهنما، اعلان، ...)، ui-kit، حرکت‌ها و سبک‌های مشترک همهٔ پنل‌ها.",
     files: [`${F}shared.js`, `${F}ui.js`, `${F}ui-kit.js`, `${F}ui-motion.js`, `${F}config.js`, `${F}panel.css`, `${F}ui.css`] },
@@ -306,6 +306,7 @@ export const TEST_FEATURES = {
   "product-map.test.mjs": ["infra.core"],
   "node-server.test.mjs": ["infra.core"],
   "secure-admin.test.mjs": ["infra.access", "legal.app"],
+  "model-provider.test.mjs": ["infra.access", "legal.app"],
 };
 
 /* محدودهٔ نقشه: فایل‌هایی که باید صاحب داشته باشند */

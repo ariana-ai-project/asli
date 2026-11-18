@@ -1,4 +1,5 @@
 import { HttpError } from "./http.js";
+import { normalizeModelBase, modelFetch } from "./model-provider.js";
 
 export const SECURE_DDL = `
 CREATE TABLE IF NOT EXISTS secure_configs (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL);
@@ -86,8 +87,9 @@ export async function withSecureConfig(env) {
     if (config.eleven.model) { out.ELEVENLABS_STT_MODEL = config.eleven.model; out.STT_MODEL = config.eleven.model; }
     const active = config.providers.find((provider) => provider.id === config.active_provider);
     if (active) {
+      out.AI_CUSTOM_PROVIDER = "1";
       if (active.api_key) out.ANTHROPIC_API_KEY = active.api_key;
-      out.ANTHROPIC_API_BASE = active.base_url || "https://api.anthropic.com";
+      out.ANTHROPIC_API_BASE = normalizeModelBase(active.base_url) || "https://api.anthropic.com";
       if (active.model) { out.AI_MODEL = active.model; out.LEGAL_MODEL = active.model; }
     }
     return out;
@@ -148,4 +150,60 @@ export async function saveSecureConfigVerified(env, body) {
     .bind(value, Date.now()).run();
   resetSecureConfig(env);
   return secureOverview(env);
+}
+
+export async function testSecureService(env, kind) {
+  const clean = (value) => {
+    let text = String(value || "").slice(0, 300);
+    for (const key of ["ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY", "SUPABASE_SERVICE_KEY", "TG_BOT_TOKEN", "TG_TEAM_BOT_TOKEN", "TG_SP_BOT_TOKEN", "TG_VB_BOT_TOKEN"]) {
+      if (env[key]) text = text.replaceAll(env[key], "[hidden]");
+    }
+    return text;
+  };
+  const request = async (url, init, useModel = false) => {
+    const options = { ...init, signal: AbortSignal.timeout(25000) };
+    const response = await (useModel ? modelFetch(env, url, options) : fetch(url, options));
+    const text = await response.text();
+    if (!response.ok) throw new Error(`HTTP ${response.status}: ${clean(text)}`);
+    return text ? JSON.parse(text) : {};
+  };
+  try {
+    if (kind === "ai") {
+      if (!env.ANTHROPIC_API_KEY) return { ok: false, error: "کلید مدل تنظیم نشده است." };
+      const base = T(env.ANTHROPIC_API_BASE).replace(/\/+$/, "") || "https://api.anthropic.com";
+      await request(`${base}/v1/messages`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": env.ANTHROPIC_API_KEY, "anthropic-version": "2023-06-01" },
+        body: JSON.stringify({ model: T(env.AI_MODEL) || "claude-sonnet-5", max_tokens: 1, messages: [{ role: "user", content: "OK" }] }),
+      }, true);
+      return { ok: true, message: "اتصال و پاسخ مدل فعال موفق است." };
+    }
+    if (kind === "eleven") {
+      if (!env.ELEVENLABS_API_KEY) return { ok: false, error: "کلید ElevenLabs تنظیم نشده است." };
+      const base = T(env.ELEVENLABS_API_BASE).replace(/\/+$/, "") || "https://api.elevenlabs.io";
+      await request(`${base}/v1/models`, { headers: { "xi-api-key": env.ELEVENLABS_API_KEY } });
+      return { ok: true, message: "کلید ElevenLabs معتبر و دسترسی مدل‌ها برقرار است." };
+    }
+    if (kind === "supabase") {
+      if (!env.SUPABASE_URL || !env.SUPABASE_SERVICE_KEY) return { ok: false, error: "نشانی یا کلید Supabase کامل نیست." };
+      const bucket = encodeURIComponent(T(env.SUPABASE_BUCKET) || "proformas");
+      await request(`${T(env.SUPABASE_URL).replace(/\/+$/, "")}/storage/v1/bucket/${bucket}`, {
+        headers: { Authorization: `Bearer ${env.SUPABASE_SERVICE_KEY}`, apikey: env.SUPABASE_SERVICE_KEY },
+      });
+      return { ok: true, message: "اتصال Supabase و دسترسی به Bucket موفق است." };
+    }
+    if (kind === "telegram") {
+      const bots = [["TG_BOT_TOKEN", "کارشناسان"], ["TG_TEAM_BOT_TOKEN", "تیم"], ["TG_SP_BOT_TOKEN", "تأمین‌کنندگان"], ["TG_VB_BOT_TOKEN", "ویس"]].filter(([key]) => env[key]);
+      if (!bots.length) return { ok: false, error: "هیچ توکن ربات تلگرامی تنظیم نشده است." };
+      const results = [];
+      for (const [key, label] of bots) {
+        const data = await request(`https://api.telegram.org/bot${env[key]}/getMe`);
+        results.push(`${label}: @${data.result && data.result.username ? data.result.username : "متصل"}`);
+      }
+      return { ok: true, message: results.join(" · ") };
+    }
+    return { ok: false, error: "سرویس تست ناشناخته است." };
+  } catch (error) {
+    return { ok: false, error: clean(error && error.message ? error.message : error) };
+  }
 }

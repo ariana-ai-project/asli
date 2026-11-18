@@ -57,7 +57,7 @@ import { aiOwned, aiQuote, aiQuoteLive, aiQuoteNames, aiQuoteLiveNames, aiAsks, 
 import { getRules, coverOf, itemNeeds } from "./ai-rules.js";
 import { supportStatus, supportSetup, supportLogin, supportReset, supportChangePass, requireSupport, pubExpert, supportExperts, supportExpert,
   supportActivity, supportThreads, supportThread, commissionList, setCommission } from "./support.js";
-import { SECURE_DDL, withSecureConfig, secureOverview, saveSecureConfigVerified } from "./secure-config.js";
+import { SECURE_DDL, withSecureConfig, secureOverview, saveSecureConfigVerified, testSecureService } from "./secure-config.js";
 import { LEGAL_AUTH_DDL, listLegalUsers, saveLegalUser } from "./legal-auth.js";
 import { VOICE_DDL, resetPass as resetVoicePass } from "./voice-core.js";
 import { handleVbUpdate, ensureVbWebhook } from "./voice-bot.js";
@@ -2228,6 +2228,10 @@ async function route(request, env, ctx) {
     if (path === "/site/access/legal-user" && m === "POST") {
       const body = await readJson(request), code = request.headers.get("X-Site-Code") || body.code;
       return json(await siteGuarded(code, async () => { await siteLogin(env, code); return { ok: true, legal_users: await saveLegalUser(env, body) }; }));
+    }
+    if (path === "/site/access/test" && m === "POST") {
+      const body = await readJson(request), code = request.headers.get("X-Site-Code") || body.code;
+      return json(await siteGuarded(code, async () => { await siteLogin(env, code); return testSecureService(env, body.kind); }));
     }
     if (path === "/site/login" && m === "POST") { const b = await readJson(request); return json(await siteGuarded(b.code, () => siteLogin(env, b.code))); }
     if (path === "/site" && m === "PUT") {

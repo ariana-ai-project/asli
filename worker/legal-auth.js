@@ -58,6 +58,11 @@ function sessionCookie(request, token, maxAge) {
   return `legal_session=${token}; Path=/hoghooghi; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${secure}`;
 }
 
+export async function legalAuthRequired(env) {
+  await ensureLegalAuth(env);
+  const row = await env.DB.prepare("SELECT COUNT(*) AS n FROM legal_users WHERE active=1").first();
+  return !!row.n;
+}
 export async function listLegalUsers(env) {
   await ensureLegalAuth(env);
   return (await env.DB.prepare("SELECT * FROM legal_users ORDER BY username").all()).results.map(publicUser);
