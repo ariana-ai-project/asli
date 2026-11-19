@@ -1,4 +1,10 @@
-arianaai.website {
+assistent.ariana-co.com {
+	tls /etc/caddy/assistent-fullchain.pem /etc/caddy/assistent-key.pem
+	redir https://assistant.ariana-co.com:1413{uri} permanent
+}
+
+assistant.ariana-co.com {
+	tls /etc/caddy/assistent-fullchain.pem /etc/caddy/assistent-key.pem
 	encode zstd gzip
 	request_body {
 		max_size 25MB
