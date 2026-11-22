@@ -27,7 +27,7 @@
 ## جدول‌ها
 نوشتن: counters، item_changes، item_edits، item_models، items، norm_cache، settings، sp_lines
 خواندن: assignments، experts، quotes، requests
-هم‌نویس‌های همین جدول‌ها: corr.main، expert.comm، expert.detail، expert.finalcall، infra.core، legal.app، manager.import، sup.panel
+هم‌نویس‌های همین جدول‌ها: corr.main، expert.comm، expert.detail، expert.finalcall، infra.core، legal.app، manager.desk، manager.import، sup.panel
 
 ## تست‌ها (6)
 - bot-history.test.mjs

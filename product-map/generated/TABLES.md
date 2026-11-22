@@ -52,7 +52,7 @@
 | imports | infra.core، manager.import | manager.desk، support.req |
 | item_changes | engine.structure، expert.detail، infra.core | support.chg |
 | item_edits | engine.structure، expert.detail | engine.catalog |
-| item_models | engine.structure، sup.panel | — |
+| item_models | engine.structure، infra.core، manager.desk، sup.panel | — |
 | items | bot.team، engine.ai، engine.structure، engine.tender، expert.ai، expert.detail، expert.picks، expert.smart، expert.terms، infra.core، manager.asg، manager.desk، manager.import، manager.log، support.ai، support.app، support.cm، support.td | corr.main، engine.records، engine.strategy، expert.account، expert.alerts، expert.comm، expert.finalcall، expert.history، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.reports، sup.panel، support.chg، support.dl، support.exp، support.fb، support.md، support.req، support.rules، support.use |
 | legal_auth_guard | legal.app | — |
 | legal_calls | legal.app | — |

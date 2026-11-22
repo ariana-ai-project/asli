@@ -160,6 +160,16 @@ test("چند مدل از یک قلم در یک بسته، قیمت و شرایط
   assert.deepEqual(afterArchive.data.models.map((m) => m.id).sort((a, b) => a - b), [m1.data.id, line3.model_id].sort((a, b) => a - b));
   const resent = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [1], supplier_name: "تأمین بعد از بایگانی", phone: "09120000602", label: "فروش" } });
   assert.deepEqual(resent.data.lines.map((l) => l.model_id), [m1.data.id], "مدل بایگانی دوباره ارسال نمی‌شود");
+
+  const deletedRequest = await call("/requests/delete", { headers: { "X-Manager-Code": "1234" }, body: { ids: ["R-OTHER"] } });
+  assert.equal(deletedRequest.status, 200, JSON.stringify(deletedRequest.data));
+  assert.equal(DB.raw.prepare("SELECT * FROM item_models WHERE id=?").get(otherModel.data.id), undefined, "حذف درخواست، مدل‌های همان درخواست را می‌برد");
+  assert.ok(DB.raw.prepare("SELECT * FROM item_models WHERE id=?").get(m1.data.id), "مدل درخواست دیگر دست‌نخورده می‌ماند");
+  const reusedAt = Date.now();
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-REUSED','1405/08/03','استفادهٔ مجدد از شناسه')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,created_at) VALUES (3,'R-REUSED',2,5,?,?)").run(reusedAt, reusedAt);
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (2,'R-REUSED','p',1,'پمپ صنعتی',2,'دستگاه','open',3,?)").run(norm);
+  assert.equal((await call("/assignments/3", { headers: EX })).data.models.length, 0, "شناسهٔ استفاده‌مجددشده مدل قدیمی به ارث نمی‌برد");
 });
 
 test("مهاجرت sp_lines: شناسه و محتوای قدیمی حفظ می‌شود و یک قلم می‌تواند مدل دوم بگیرد", { skip: SKIP }, async () => {

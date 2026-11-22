@@ -48,7 +48,7 @@
 صفحه: `frontend/tamin-poshtibani/manager.html` | کاربر: مدیر تدارکات
 
 - ورود مدیر → [login.manager](features/login.manager.md) — 0 مسیر، 0 تست | کد: manager.js › render
-- میز ارجاع `desk` → [manager.desk](features/manager.desk.md) — 9 مسیر، 13 تست | کد: manager.js › grp، manager.js › render
+- میز ارجاع `desk` → [manager.desk](features/manager.desk.md) — 9 مسیر، 14 تست | کد: manager.js › grp، manager.js › render
   - بارگذاری درخواست‌های روزانه (اکسل) → [manager.import](features/manager.import.md) — 6 مسیر، 3 تست | کد: manager.js › grp، manager.js › render
 - کارشناسان `experts` → [manager.experts](features/manager.experts.md) — 10 مسیر، 6 تست | کد: manager.js › grp، manager.js › k، manager.js › render
 - تنظیم اعلانات `alerts` → [manager.alerts](features/manager.alerts.md) — 4 مسیر، 4 تست | کد: manager.js › grp، manager.js › knob، manager.js › render

@@ -639,6 +639,7 @@ async function deleteRequests(env, ids) {
     env.DB.prepare(`DELETE FROM commission_results WHERE item_id IN (SELECT id FROM items WHERE request_id ${where})`).bind(...args),
     /* انتخاب‌ها و علت‌های «✉️ پیام اول» — شناسهٔ ارجاع دوباره داده می‌شود و ارجاعِ تازه نباید قالب و علتِ قدیمی را به ارث ببرد */
     env.DB.prepare(`DELETE FROM fm_choice WHERE assignment_id IN (${inAsg})`).bind(...args),
+    env.DB.prepare(`DELETE FROM item_models WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM items WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM assignments WHERE request_id ${where}`).bind(...args),
     env.DB.prepare(`DELETE FROM events WHERE request_id ${where}`).bind(...args),

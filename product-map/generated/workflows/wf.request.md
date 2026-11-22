@@ -18,7 +18,7 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 13 |
+| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 14 |
 | [manager.asg](../features/manager.asg.md) | ارجاع هوشمند | 3 | 4 |
 | [manager.dl](../features/manager.dl.md) | مهلت هوشمند | 0 | 0 |
 

@@ -9,7 +9,7 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 13 |
+| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 14 |
 | [support.td](../features/support.td.md) | 🔨 مناقصه | 24 | 8 |
 
 ## گام 2 — ساخت، زمان‌بندی و دعوت با پیامک
@@ -54,7 +54,7 @@
 
 ## جدول‌هایی که این جریان می‌نویسد
 
-alarms، alerts، assignments، commission_notes، commission_results، counters، decisions، events، fm_choice، items، letters، outbox، proformas، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sms_outbox، sp_sms، sp_tg، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders، tg_flows، tg_nav، tg_uploads
+alarms، alerts، assignments، commission_notes، commission_results، counters، decisions، events، fm_choice، item_models، items، letters، outbox، proformas، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sms_outbox، sp_sms، sp_tg، tender_bids، tender_invites، tender_jobs، tender_sessions، tenders، tg_flows، tg_nav، tg_uploads
 
 ## همهٔ تست‌های این جریان (30)
 

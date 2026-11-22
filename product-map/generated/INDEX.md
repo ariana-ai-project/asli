@@ -83,7 +83,7 @@
 | [manager.alerts](features/manager.alerts.md) | تنظیم اعلانات | — | 4 (2) | 4 |
 | [manager.app](features/manager.app.md) | پوستهٔ پنل مدیر | manager.html، manager.js، manifest-manager.webmanifest، mgr.css | 0 | 1 |
 | [manager.asg](features/manager.asg.md) | ارجاع هوشمند | assign-rules.mjs | 3 | 4 |
-| [manager.desk](features/manager.desk.md) | میز ارجاع | w/assign.js، w/manager.js | 9 (2) | 13 |
+| [manager.desk](features/manager.desk.md) | میز ارجاع | w/assign.js، w/manager.js | 9 (2) | 14 |
 | [manager.dl](features/manager.dl.md) | مهلت هوشمند | — | 0 | 0 |
 | [manager.experts](features/manager.experts.md) | کارشناسان | — | 10 (2) | 6 |
 | [manager.import](features/manager.import.md) | بارگذاری اکسل درخواست‌ها | import.js | 6 (5) | 3 |
