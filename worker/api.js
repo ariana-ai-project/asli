@@ -476,6 +476,7 @@ const READ_INDEXES = [
   "CREATE INDEX IF NOT EXISTS ix_tenders_grp ON tenders(grp)",
   "CREATE INDEX IF NOT EXISTS ix_tenders_upd ON tenders(updated_at)",
   "CREATE INDEX IF NOT EXISTS ix_tenders_src ON tenders(src_request)",
+  "CREATE INDEX IF NOT EXISTS ix_im_request_item ON item_models(request_id, item_id, model_no)",
   "CREATE INDEX IF NOT EXISTS ix_spl_thread ON sp_lines(thread_id)",
   "CREATE INDEX IF NOT EXISTS ix_spl_item ON sp_lines(item_id)",
   "CREATE INDEX IF NOT EXISTS ix_spl_bundle ON sp_lines(bundle_id)",

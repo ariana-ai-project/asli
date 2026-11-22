@@ -9,7 +9,6 @@ const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d
 export const MODEL_DDL = `
 CREATE TABLE IF NOT EXISTS item_models (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, request_id TEXT, model_no INTEGER NOT NULL, head TEXT NOT NULL, layers_json TEXT NOT NULL, locks_json TEXT, spec_key TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'expert', supplier_id INTEGER, thread_id INTEGER, state TEXT NOT NULL DEFAULT 'draft', created_by TEXT, created_at INTEGER NOT NULL, sent_at INTEGER, submitted_at INTEGER, published INTEGER NOT NULL DEFAULT 0, UNIQUE(item_id, model_no), UNIQUE(item_id, spec_key));
 CREATE INDEX IF NOT EXISTS ix_im_item ON item_models(item_id, model_no);
-CREATE INDEX IF NOT EXISTS ix_im_request_item ON item_models(request_id, item_id, model_no);
 CREATE INDEX IF NOT EXISTS ix_im_thread ON item_models(thread_id);
 `;
 
@@ -58,6 +57,8 @@ export async function modelsOfItems(env, itemIds, { forSend = false, requestId =
 }
 
 export async function migrateItemModelScope(env) {
+  const cols = await env.DB.prepare("PRAGMA table_info(item_models)").all();
+  if (!(cols.results || []).some((c) => c.name === "request_id")) await env.DB.exec("ALTER TABLE item_models ADD COLUMN request_id TEXT");
   await env.DB.prepare("UPDATE item_models SET request_id=(SELECT request_id FROM items WHERE items.id=item_models.item_id) WHERE request_id IS NULL").run();
 }
 

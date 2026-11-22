@@ -173,4 +173,12 @@ test("مهاجرت sp_lines: شناسه و محتوای قدیمی حفظ می�
   DB.raw.prepare("INSERT INTO sp_lines (thread_id,item_id,title,state,created_at,updated_at,model_id,model_no) VALUES (1,1,'مدل دوم','new',?,?,1,1)").run(t, t);
   assert.equal(DB.raw.prepare("SELECT COUNT(*) AS n FROM sp_lines WHERE thread_id=1 AND item_id=1").get().n, 2);
   DB.raw.exec("DROP TABLE sp_lines_with_models");
+
+  DB.raw.exec("ALTER TABLE item_models RENAME TO item_models_scoped");
+  DB.raw.exec("CREATE TABLE item_models (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, model_no INTEGER NOT NULL)");
+  DB.raw.prepare("INSERT INTO item_models (id,item_id,model_no) VALUES (901,1,1)").run();
+  await migrateItemModelScope(env);
+  assert.equal(DB.raw.prepare("SELECT request_id FROM item_models WHERE id=901").get().request_id, "R-MODEL", "ستون درخواست روی جدول قدیمی ساخته و پر می‌شود");
+  DB.raw.exec("DROP TABLE item_models");
+  DB.raw.exec("ALTER TABLE item_models_scoped RENAME TO item_models");
 });
