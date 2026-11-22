@@ -183,7 +183,7 @@ const txt = (s) => faD(escH(s));
 /** `missing`: فیلدهای اجباریِ خالی — پیش‌نمایش با خانهٔ قرمز نشانشان می‌دهد */
 export function proformaHtml(d, { missing = [] } = {}) {
   const dt = proformaData(d);
-  const miss = new Set(missing);
+  const miss = new Set(missing), missingField = (k) => [...miss].some((x) => x === k || x.startsWith(`${k}:`));
   const terms = termRows(dt.terms);
   const lack = (k) => (miss.has(k) ? ` class="pf-miss"` : "");
   return `<div class="pfdoc"><div class="pf-head"><div><div class="pf-ttl">پیش‌فاکتور</div><div>فروشنده: <b>${txt(dt.supplier)}</b></div></div>
@@ -196,7 +196,7 @@ export function proformaHtml(d, { missing = [] } = {}) {
     <tr class="pf-sum"><td colspan="5">جمع کل</td><td class="pf-num"><b>${faD(money(dt.grand))}</b></td></tr>
     ${(dt.credit || []).map((c) => `<tr class="pf-sum"><td colspan="5">جمع کل با قیمتِ اعتباری ${faD(c.m)} ماهه</td><td class="pf-num">${faD(money(c.grand))}</td></tr>`).join("")}</tbody></table>
     ${terms.length || miss.size ? `<div class="pf-h2">شرایط</div><table class="pf-terms"><tbody>${terms.map(([k, v]) => `<tr><th>${k}</th><td>${txt(v)}</td></tr>`).join("")}
-      ${[["valid_days", "اعتبار پیش‌فاکتور"], ["dtime", "زمان تحویل"], ["pay", "شرایط تسویه"], ["invoice", "نوع فاکتور"], ["vat", "ارزش افزوده"]].filter(([k]) => miss.has(k)).map(([, l]) => `<tr class="pf-miss"><th>${l}</th><td>— لازم است</td></tr>`).join("")}</tbody></table>` : ""}
+      ${[["valid_days", "اعتبار پیش‌فاکتور"], ["dtime", "زمان تحویل"], ["pay", "شرایط تسویه"], ["invoice", "نوع فاکتور"], ["vat", "ارزش افزوده"]].filter(([k]) => missingField(k)).map(([, l]) => `<tr class="pf-miss"><th>${l}</th><td>— لازم است</td></tr>`).join("")}</tbody></table>` : ""}
     ${dt.comment ? `<div class="pf-cmt">توضیحات فروشنده: ${txt(dt.comment)}</div>` : ""}
     <div class="pf-foot">این پیش‌فاکتور از اطلاعاتی ساخته شده که فروشنده خودش در سامانهٔ تأمین ثبت کرده است.</div></div>`;
 }

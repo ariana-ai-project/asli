@@ -107,6 +107,7 @@
    "tests": [
     "backend/tamin-poshtibani/tests/ai-agent.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/multiprice.test.mjs",
     "backend/tamin-poshtibani/tests/supplier.test.mjs"
    ],
@@ -289,6 +290,7 @@
     "backend/tamin-poshtibani/tests/cr-turn.test.mjs",
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/login.test.mjs",
     "backend/tamin-poshtibani/tests/multiprice.test.mjs",
     "backend/tamin-poshtibani/tests/neg-view.test.mjs",
@@ -542,6 +544,7 @@
    ],
    "endpoints": [],
    "tests": [
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/records.test.mjs"
    ],
    "tables": {
@@ -658,13 +661,19 @@
    "places": [],
    "files": [
     "worker/estimate.js",
+    "worker/item-models.js",
     "worker/normalize.js",
     "worker/structure.js"
    ],
-   "endpoints": [],
+   "endpoints": [
+    "POST /items/{}/models",
+    "POST /items/{}/models/{}/publish",
+    "PUT /items/{}/models/{}"
+   ],
    "tests": [
     "backend/tamin-poshtibani/tests/bot-history.test.mjs",
     "backend/tamin-poshtibani/tests/catalog.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/layer-locks.test.mjs",
     "backend/tamin-poshtibani/tests/size-estimate.test.mjs",
     "backend/tamin-poshtibani/tests/structure.test.mjs"
@@ -674,15 +683,19 @@
      "counters",
      "item_changes",
      "item_edits",
+     "item_models",
      "items",
      "norm_cache",
-     "settings"
+     "settings",
+     "sp_lines"
     ],
     "r": [
      "assignments",
      "counters",
+     "experts",
      "item_changes",
      "item_edits",
+     "item_models",
      "items",
      "norm_cache",
      "requests",
@@ -926,6 +939,7 @@
     "backend/tamin-poshtibani/tests/docs.test.mjs",
     "backend/tamin-poshtibani/tests/execution-ready.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/multiprice.test.mjs",
     "backend/tamin-poshtibani/tests/review-fixes.test.mjs",
     "backend/tamin-poshtibani/tests/support.test.mjs"
@@ -985,6 +999,7 @@
     "backend/tamin-poshtibani/tests/cr-boxes.test.mjs",
     "backend/tamin-poshtibani/tests/d1-budget.test.mjs",
     "backend/tamin-poshtibani/tests/execution-ready.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/layer-locks.test.mjs",
     "backend/tamin-poshtibani/tests/multiprice.test.mjs",
     "backend/tamin-poshtibani/tests/phase4b.test.mjs",
@@ -1344,6 +1359,7 @@
     "backend/tamin-poshtibani/tests/execution-ready.test.mjs",
     "backend/tamin-poshtibani/tests/extract.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/quote-rules.test.mjs",
     "backend/tamin-poshtibani/tests/review-fixes.test.mjs",
     "backend/tamin-poshtibani/tests/supplier.test.mjs",
@@ -2662,7 +2678,9 @@
     "GET /sp/poll",
     "GET /sp/thread/{}",
     "POST /sp/bundle/{}/proforma",
+    "POST /sp/line/{}/availability",
     "POST /sp/line/{}/file",
+    "POST /sp/line/{}/model",
     "POST /sp/line/{}/ready",
     "POST /sp/line/{}/revise",
     "POST /sp/offpf/{}/decide",
@@ -2689,6 +2707,7 @@
     "backend/tamin-poshtibani/tests/cr-registry.test.mjs",
     "backend/tamin-poshtibani/tests/cr-turn.test.mjs",
     "backend/tamin-poshtibani/tests/final-call.test.mjs",
+    "backend/tamin-poshtibani/tests/item-models.test.mjs",
     "backend/tamin-poshtibani/tests/layer-locks.test.mjs",
     "backend/tamin-poshtibani/tests/multiprice.test.mjs",
     "backend/tamin-poshtibani/tests/neg-view.test.mjs",
@@ -2708,6 +2727,7 @@
      "ai_runs",
      "events",
      "final_call_sups",
+     "item_models",
      "offpf",
      "outbox",
      "proformas",
@@ -2738,6 +2758,7 @@
      "experts",
      "final_call_sups",
      "final_calls",
+     "item_models",
      "items",
      "offpf",
      "proformas",
@@ -4546,6 +4567,15 @@
     ]
    },
    {
+    "prefix": "av",
+    "handlers": [
+     "worker/sp-bot.js#onCallback"
+    ],
+    "producers": [
+     "worker/sp-push.js#lineCard"
+    ]
+   },
+   {
     "prefix": "aw",
     "handlers": [
      "worker/bot.js#onCallback"
@@ -5072,13 +5102,15 @@
    {
     "prefix": "sm",
     "handlers": [
-     "worker/bot.js#onCallback"
+     "worker/bot.js#onCallback",
+     "worker/sp-bot.js#onCallback"
     ],
     "producers": [
      "worker/bot.js#firstStepsKb",
      "worker/bot.js#hubKb",
      "worker/bot.js#requestMenu",
-     "worker/bot.js#smartPickItem"
+     "worker/bot.js#smartPickItem",
+     "worker/sp-push.js#lineCard"
     ]
    },
    {
@@ -5439,6 +5471,7 @@
   "worker/help-knowledge.js": "bot.help",
   "worker/history.js": "expert.history",
   "worker/http.js": "infra.core",
+  "worker/item-models.js": "engine.structure",
   "worker/legal-auth.js": "legal.app",
   "worker/legal-prompts.js": "legal.app",
   "worker/legal.js": "legal.app",
@@ -9115,6 +9148,36 @@
    }
   },
   {
+   "key": "POST /items/{}/models",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "engine.structure"
+   ],
+   "uses": [
+    "worker/item-models.js#createExpertModel"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /items/{}/models/{}/publish",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "engine.structure"
+   ],
+   "uses": [
+    "worker/item-models.js#publishSupplierModel"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "POST /items/{}/normalize",
    "file": "worker/api.js",
    "fn": "route",
@@ -9557,6 +9620,21 @@
    }
   },
   {
+   "key": "POST /sp/line/{}/availability",
+   "file": "worker/sp-api.js",
+   "fn": "spRoute",
+   "features": [
+    "sup.panel"
+   ],
+   "uses": [
+    "worker/sp-core.js#lineAvailability"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "POST /sp/line/{}/file",
    "file": "worker/sp-api.js",
    "fn": "spRoute",
@@ -9569,6 +9647,21 @@
     "worker/sp-core.js#fileTarget",
     "worker/sp-core.js#threadFor",
     "worker/sp-push.js#pushMsgs"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
+   "key": "POST /sp/line/{}/model",
+   "file": "worker/sp-api.js",
+   "fn": "spRoute",
+   "features": [
+    "sup.panel"
+   ],
+   "uses": [
+    "worker/sp-core.js#createSupplierModel"
    ],
    "tables": {
     "r": [],
@@ -10878,6 +10971,21 @@
    }
   },
   {
+   "key": "PUT /items/{}/models/{}",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "engine.structure"
+   ],
+   "uses": [
+    "worker/item-models.js#updateExpertModel"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "PUT /items/{}/terms",
    "file": "worker/api.js",
    "fn": "route",
@@ -12167,6 +12275,13 @@
    ]
   },
   {
+   "from": "frontend/tamin-poshtibani/expert.js#registerModelUI",
+   "path": "/items/{}/models",
+   "routes": [
+    "POST /items/{}/models"
+   ]
+  },
+  {
    "from": "frontend/tamin-poshtibani/expert.js#reqCommentUI",
    "path": "/sp/x/rate",
    "routes": [
@@ -13015,6 +13130,13 @@
   },
   {
    "from": "frontend/tamin-poshtibani/supplier.js#Q",
+   "path": "/sp/line/{}/availability",
+   "routes": [
+    "POST /sp/line/{}/availability"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/supplier.js#Q",
    "path": "/sp/line/{}/ready",
    "routes": [
     "POST /sp/line/{}/ready"
@@ -13088,6 +13210,13 @@
    "path": "/sp/thread/{}/submit-pf",
    "routes": [
     "POST /sp/thread/{}/submit-pf"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/supplier.js#supplierModelDialog",
+   "path": "/sp/line/{}/model",
+   "routes": [
+    "POST /sp/line/{}/model"
    ]
   },
   {
@@ -14480,6 +14609,29 @@
    ],
    "imports": [
     "backend/tamin-poshtibani/tests/run.mjs"
+   ]
+  },
+  {
+   "file": "backend/tamin-poshtibani/tests/item-models.test.mjs",
+   "features": [
+    "bot.sp",
+    "corr.main",
+    "engine.records",
+    "engine.structure",
+    "expert.comm",
+    "expert.detail",
+    "expert.quotes",
+    "sup.panel"
+   ],
+   "imports": [
+    "backend/tamin-poshtibani/tests/run.mjs",
+    "worker/api.js",
+    "worker/item-models.js",
+    "worker/records.js",
+    "worker/sheets.js",
+    "worker/sp-bot.js",
+    "worker/sp-core.js",
+    "worker/sp-push.js"
    ]
   },
   {

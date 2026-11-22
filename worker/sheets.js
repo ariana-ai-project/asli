@@ -49,18 +49,27 @@ const W = (w) => +(w * SCALE).toFixed(4);
  * نهایی». درخواستِ دستی (manual، آبان ۱۴۰۵): «ثبت موقت»ها — قلمی که کارشناس برایش «تأیید نهایی» زده فقط با همان تیک‌خورده‌ها.
  */
 export function commissionData({ items, quotes, offpf, manual }) {
-  const groups = [];
+  const groups = [], modelItems = [], seen = new Set(), byItem = new Map((items || []).map((it) => [it.id, it]));
   /* «فراخوانِ پیش‌فاکتورِ رسمی»: offpf — نامِ تأمین‌کنندگانی که هنگامِ ورود به کمیسیون پیش‌فاکتورِ رسمیِ معتبر دارند */
   const ok = new Set(offpf || []);
-  const picked = new Set((quotes || []).filter((x) => x.final && x.saved).map((x) => x.item_id));
-  const inTable = (x) => x.saved && (x.final || (manual && !picked.has(x.item_id)));
+  const rowKey = (q) => q.model_id ? `${q.item_id}:${q.model_id}` : q.item_id;
+  const picked = new Set((quotes || []).filter((x) => x.final && x.saved).map(rowKey));
+  const inTable = (x) => x.saved && (x.final || (manual && !picked.has(rowKey(x))));
   for (const q of (quotes || []).filter(inTable)) {
     let g = groups.find((x) => x.name === q.supplier_name);
     if (!g) { g = { name: q.supplier_name, rows: {}, pay: q.pay, valid: q.valid_days, dtime: q.dtime, deal: q.deal, invoice: q.invoice, vat: q.vat, offpf: ok.has(q.supplier_name) }; groups.push(g); }
-    g.rows[q.item_id] = q;
+    const key = rowKey(q);
+    g.rows[key] = q;
+    if (!seen.has(key)) {
+      const base = byItem.get(q.item_id);
+      if (!base) continue;
+      seen.add(key);
+      modelItems.push({ ...base, id: key, title: q.model_no ? `${base.title} — مدل ${q.model_no}` : base.title, spec: q.spec || base.spec, qty: q.qty ?? base.qty, unit: q.unit || base.unit, model_id: q.model_id || 0, model_no: q.model_no || 0 });
+    }
   }
+  modelItems.sort((a, b) => (a.line_no || 0) - (b.line_no || 0) || (a.model_no || 0) - (b.model_no || 0));
   for (const g of groups) g.payTxt = payWithCredit(g);
-  return { groups, items: (items || []).filter((it) => groups.some((g) => g.rows[it.id])) };
+  return { groups, items: modelItems };
 }
 
 /* «قیمتِ نقدی و اعتباری» (quotes.prices_json): ردیفِ «شرایط تسویه» درصدِ افزایشِ اعتباری را هم می‌گوید — «نقدی؛ اعتباری ۱ ماهه +۳٪، ۲ ماهه +۶٪» */

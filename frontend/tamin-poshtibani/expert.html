@@ -121,6 +121,14 @@
     .prof { border: 1px solid var(--tp-accent); border-radius: 12px; background: rgba(79,140,255,.08); padding: 14px 16px; margin-bottom: 14px; }
     /* نرمال‌سازی اقلام — پنل زیر عنوان قلم در تب سوابق */
     .normbox { border: 1px dashed var(--tp-line-2); border-radius: 12px; background: rgba(3,8,20,.35); padding: 12px 14px; margin: 6px 0 12px; }
+    .item-models { padding: 4px 0 12px; }
+    .item-models .toolrow { margin-bottom: 8px; }
+    .model-rail { display: flex; gap: 10px; align-items: stretch; overflow-x: auto; padding: 2px 0 12px; }
+    .model-square { width: 122px; height: 122px; flex: 0 0 122px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; text-align: start; padding: 11px; border-radius: 14px; border: 1px solid var(--gl-edge); background: var(--gl-sheen), var(--gl-fill); color: var(--tp-fg); box-shadow: var(--gl-rim); }
+    .model-square:hover { border-color: var(--tp-accent); background: var(--gl-sheen), var(--gl-fill-hover); }
+    .model-square small { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--tp-muted); }
+    .model-square .chip { max-width: 100%; font-size: .65rem; padding: 0 5px; }
+    .model-square.from-supplier { border-color: rgba(186,124,255,.55); }
     /* طرح «خرید هوشمند» فاز ۱: کادرِ «سپردن به کارشناس هوشمند» و 🔒/🔓ِ هر لایه */
     .lockbtn { flex: 0 0 auto; min-width: 2.3em; }
     .lockbtn.on { border-color: rgba(245,158,11,.7); }

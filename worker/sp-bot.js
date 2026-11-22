@@ -489,12 +489,14 @@ const VAL_PROMPT = {
 };
 /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵؛ terms-locks.js:payModes): گامِ هر ردیفِ قیمت، و پاسخِ «۳٪» درصد است */
 const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" }, STEP_PR = { pc: "cash", p1: "c1", p2: "c2" };
+const lineTerms = (l) => C.lineTermsOf(l, C.termsOf({ terms_json: l && l.thread_terms_json }));
+const saveTerm = (env, sup, l, terms) => l.model_id ? C.lineSave(env, sup, l.id, { terms }) : C.termsSave(env, sup, l.thread_id, terms);
 const pctOf = (s) => { const x = C.latin(String(s || "")).replace(/[٬,\s]/g, ""); const m = /^(-?\d+(?:[.٫]\d+)?)(?:%|٪|درصد)$/.exec(x); return m ? Number(m[1].replace("٫", ".")) : null; };
 /** حالتِ قیمتِ یک خط (null یعنی همان یک قیمت) */
 const payModesOfLine = async (env, l) => payModes((await C.limitsOfLines(env, [l])).get(l.item_id));
 /** مانده‌های «آمادهٔ ارسال»: در قلمِ چندقیمتی «قیمت واحد» و «شرایط تسویه» جایشان را به ردیف‌های قیمت می‌دهند */
 function missOfLine(l, pm) {
-  const tm = C.termsOf(l);
+  const tm = lineTerms(l);
   return [...C.lineMissing(l).filter((x) => !(pm && x === "قیمت واحد")), ...pricesMissing(pm, C.pricesEff(l, pm)).map((k) => PRICE_FA[k]),
     ...C.termsMissing(tm).filter((x) => !(pm && x === C.TERM_FA.pay))];
 }
@@ -529,7 +531,7 @@ async function askValue(env, row, l, f, head, yi, opt) {
   if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
 }
-/* شرایطِ فاکتور (برای همهٔ اقلامِ استعلام): فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
+/* شرایطِ فاکتور: برای قلمِ عادی مشترک و برای هر مدل مستقل؛ فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
 const TERM_PROMPT = {
   d: "🚚 <b>زمان تحویل</b> را بنویسید — تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری):",
   x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):",
@@ -539,6 +541,7 @@ async function askTerm(env, row, l, k, head, opt) {
   const f = P.TERM_KEY[k];
   const wz = opt && opt.wz;
   const top = `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n`;
+  const scope = l.model_id ? "فقط برای همین مدل" : "برای همهٔ اقلامِ این استعلام";
   const skipRow = wz ? [[{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]] : [];
   /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت برای همین قلم — فقط گزینه‌های مجاز، و بازهٔ تحویل در پرسش (سرور هم همین را می‌سنجد) */
   const lk = C.lockOfLines([l], await C.limitsOfLines(env, [l])).lock;
@@ -548,14 +551,14 @@ async function askTerm(env, row, l, k, head, opt) {
     const allow = lk[f] && lk[f].length ? lk[f] : null;
     const kb = TERM_OPTS[k].map((v, i) => ({ v, i })).filter((x) => !allow || allow.includes(x.v)).map(({ v, i }) => [{ text: v, callback_data: `tv:${l.id}:${k}:${i}` }]);
     kb.push(...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]);
-    const r = await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(برای همهٔ اقلامِ این استعلام)</i>:${allow ? `\n<i>🔒 شرطِ شرکت: فقط ${esc(allow.join(" یا "))}</i>` : ""}`, kb);
+    const r = await P.send(env, row, `${top}🧾 <b>${esc(C.TERM_FA[f])}</b> را انتخاب کنید <i>(${scope})</i>:${allow ? `\n<i>🔒 شرطِ شرکت: فقط ${esc(allow.join(" یا "))}</i>` : ""}`, kb);
     if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { step: "wz", line: l.id, wz }); }
     return { ok: true };
   }
   P.setFlow(row, { step: "term", line: l.id, k, ...(wz ? { wz } : {}) });
   const dl = f === "dtime" && lk.dtime && (lk.dtime.from || lk.dtime.to) ? `\n<i>🔒 شرطِ شرکت: زمان تحویل ${esc(rangeTxt(lk.dtime))}</i>`
     : f === "valid_days" && lk.valid ? `\n<i>🔒 شرطِ شرکت: دست‌کم ${fa(lk.valid)} روز</i>` : "";
-  const r = await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(برای همهٔ اقلامِ این استعلام)</i>`, [...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
+  const r = await P.send(env, row, `${top}${TERM_PROMPT[k]}${dl}\n<i>(${scope})</i>`, [...skipRow, [{ text: "✖️ انصراف", callback_data: `si:${l.id}` }]]);
   if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
 }
@@ -565,7 +568,7 @@ async function askTerm(env, row, l, k, head, opt) {
    هر پرسش که جواب گرفت، پیامش پاک می‌شود و پرسشِ بعدی می‌آید؛ «⏭» رد می‌شود، «✖️ انصراف» بیرون می‌رود.             */
 /* ------------------------------------------------------------------ */
 function wizardSteps(l, pm) {
-  const lk = C.locksOfLine(l), tm = C.termsOf(l), layers = C.lineLayers(l), st = [];
+  const lk = C.locksOfLine(l), tm = lineTerms(l), layers = C.lineLayers(l), st = [];
   if (!lk.legacy && !lk.title) st.push({ k: "t" });
   if (lk.legacy || !lk.qty) st.push({ k: "q" });
   if ((lk.legacy || !lk.unit) && !T(l.unit)) st.push({ k: "u" });
@@ -577,7 +580,7 @@ function wizardSteps(l, pm) {
   return st;
 }
 async function wizardNext(env, row, sup, lineId, wz, head) {
-  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
+  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json AS thread_terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   if (!l || l.supplier_id !== sup.supplier_id) { P.setFlow(row, null); await P.send(env, row, "این قلم پیدا نشد."); return { ok: true }; }
   /* پیامِ پرسشِ قبلی برداشته می‌شود تا فقط پرسشِ تازه بماند — مثل کارت‌های نوبتیِ پنل وب */
   if (wz.mid) { await P.spApi(env).call("deleteMessage", { chat_id: row.chat, message_id: wz.mid }).catch(() => {}); wz.mid = null; }
@@ -609,9 +612,9 @@ async function wizardNext(env, row, sup, lineId, wz, head) {
 }
 /** بعد از ذخیرهٔ هر مقدار: اگر چیزِ ضروری‌ای مانده — مقدار، قیمت یا شرطِ فاکتور — همان را می‌پرسد (گام‌به‌گام)؛ وگرنه کارت قلم */
 async function afterSave(env, row, sup, lineId, head) {
-  const l = await env.DB.prepare("SELECT l.*, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
+  const l = await env.DB.prepare("SELECT l.*, t.terms_json AS thread_terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   const miss = C.lineMissing(l || {});
-  const tm = C.termsOf(l);
+  const tm = lineTerms(l);
   const pm = l ? await payModesOfLine(env, l) : null;
   if (l && C.LINE_EDITABLE.includes(l.state) && l.state !== "ready") {
     if (miss.includes("مقدار")) return askValue(env, row, l, "q", head);
@@ -701,8 +704,8 @@ async function supplierMessage(env, row, msg, text) {
   }
   if (f && f.step === "term" && text) {
     try {
-      const l = await env.DB.prepare("SELECT thread_id FROM sp_lines WHERE id=?").bind(f.line).first();
-      await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[f.k]]: text });
+      const l = await env.DB.prepare("SELECT id, thread_id, model_id FROM sp_lines WHERE id=?").bind(f.line).first();
+      await saveTerm(env, sup, l, { [P.TERM_KEY[f.k]]: text });
       P.setFlow(row, null);
       if (f.wz) return wizardNext(env, row, sup, f.line, f.wz, "✅ ذخیره شد.");
       return afterSave(env, row, sup, f.line, "✅ ذخیره شد.");
@@ -794,7 +797,7 @@ async function voiceToExpert(env, row, sup, v) {
 const msgVoiceId = (v) => (v && v.file_id && /ogg|opus/i.test(v.mime_type || "audio/ogg") ? v.file_id : null);
 
 async function lineCardSend(env, row, sup, lineId, mid, head) {
-  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
+  const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json AS thread_terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(lineId).first();
   if (!l || l.supplier_id !== sup.supplier_id) { await P.send(env, row, "این قلم پیدا نشد."); return { ok: true }; }
   const [files, rest] = await Promise.all([
     env.DB.prepare("SELECT label FROM sp_files WHERE line_id=? ORDER BY id").bind(l.id).all(),
@@ -803,7 +806,7 @@ async function lineCardSend(env, row, sup, lineId, mid, head) {
   /* فاز ۴ب گام ۳: شرطِ شرکت برای همین قلم، و «✏️ اصلاحِ پیشنهاد» برای تأییدنهاییِ کارِ کارشناس هوشمند */
   const lim = (await C.limitsOfLines(env, [l])).get(l.item_id) || null;
   const revise = l.state === "final" ? await C.revisable(env, l.thread_id) : false;
-  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, C.termsOf(l), { limits: lim, revise, env });
+  const c = P.lineCard(l, files.results || [], rest ? rest.n : 0, lineTerms(l), { limits: lim, revise, env });
   await P.show(env, row, mid, `${head ? `${head}\n\n` : ""}${c.text}`, c.kb);
   return { ok: true };
 }
@@ -947,9 +950,26 @@ async function onCallback(env, cq, ctx) {
     }
     if (a === "ic") { await ack(); return await itemsCardSend(env, row, sup, n(1), mid); }
     if (a === "si") { P.setFlow(row, null); await ack(); return await lineCardSend(env, row, sup, n(1), mid); }
+    if (a === "av") {
+      const available = parts[2] === "1";
+      try { await C.lineAvailability(env, sup, n(1), available); }
+      catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+      P.setFlow(row, null); await ack(available ? "مدل باز شد" : "«ندارم» ثبت شد");
+      return await lineCardSend(env, row, sup, n(1), mid, available ? "✅ حالا قیمت و شرایطِ همین مدل را بنویسید." : "⛔ این مدل «تأمین نمی‌کنم» شد و بدون قیمت با بسته ارسال می‌شود.");
+    }
+    if (a === "sm") {
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      if (!l || l.supplier_id !== sup.supplier_id) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
+      try {
+        const locks = C.locksOfLine(l), layers = Object.fromEntries(C.lineLayers(l).filter((x) => locks.layers[x.k] === false).map((x) => [x.k, x.v]));
+        const r = await C.createSupplierModel(env, sup, l.id, { layers });
+        await ack("مدل تازه ساخته شد");
+        return await lineCardSend(env, row, sup, r.line.id, mid, `✅ مدل ${fa(r.line.model_no)} از لایه‌های باز ساخته شد؛ قیمت و شرایطش جداست.`);
+      } catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
+    }
     /* «📝 پر کردن اطلاعات»: wz:<قلم> شروع · wz:<قلم>:s رد شدن از گامِ جاری */
     if (a === "wz") {
-      const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      const l = await env.DB.prepare("SELECT l.*, t.supplier_id, t.terms_json AS thread_terms_json FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
       if (!l || l.supplier_id !== sup.supplier_id) { await ack("این قلم پیدا نشد.", true); return { ok: true }; }
       await ack();
       if (parts[2] === "s") {
@@ -1011,9 +1031,9 @@ async function onCallback(env, cq, ctx) {
     }
     if (a === "tv") {
       const k = parts[2], v = TERM_OPTS[k] && TERM_OPTS[k][n(3)];
-      const l = await env.DB.prepare("SELECT l.thread_id, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
+      const l = await env.DB.prepare("SELECT l.id, l.thread_id, l.model_id, t.supplier_id FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE l.id=?").bind(n(1)).first();
       if (!l || l.supplier_id !== sup.supplier_id || !v) { await ack("این گزینه پیدا نشد.", true); return { ok: true }; }
-      try { await C.termsSave(env, sup, l.thread_id, { [P.TERM_KEY[k]]: v }); await ack(v); }
+      try { await saveTerm(env, sup, l, { [P.TERM_KEY[k]]: v }); await ack(v); }
       catch (e) { await ack(String(e.message).slice(0, 180), true); return { ok: true }; }
       const f0 = P.flowOf(row);
       if (f0 && f0.wz && f0.line === n(1)) { P.setFlow(row, null); return await wizardNext(env, row, sup, n(1), f0.wz, `✅ ${C.TERM_FA[P.TERM_KEY[k]]}: ${v}`); }

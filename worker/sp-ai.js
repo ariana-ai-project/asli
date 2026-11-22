@@ -226,11 +226,11 @@ const termsTxt = (t) => {
 /** متنِ بستهٔ پیشنهادی برای مدل: هر قلم با کلیدِ L، نوع قلم، لایه‌های قفل و افزوده، و اعلامِ تأمین‌کننده */
 export function bundlePrompt(lines, terms) {
   const list = lines.map((l, i) => [
-    `[L${i + 1}] عنوانِ ثبت‌شده: «${l.title}»`,
+    `[L${i + 1}] عنوانِ ثبت‌شده: «${l.title}${l.model_no ? ` — مدل ${l.model_no}` : ""}»`,
     `  نوع قلم: ${l.head || "—"}`,
     `  لایه‌های ویژگیِ قفل‌شدهٔ خریدار: ${listTxt(lockedOf(l))}`,
     `  لایه‌های افزودهٔ تأمین‌کننده: ${listTxt(extraOf(l))}`,
-    `  اعلامِ تأمین‌کننده: مقدار ${l.qty ?? "—"} · واحد «${l.unit || "—"}» · قیمت واحد ${l.price ?? "—"} ریال بی ارزش افزوده`,
+    l.unavailable ? "  اعلامِ تأمین‌کننده: این مدل را تأمین نمی‌کند؛ قیمت و شرایط لازم نیست." : `  اعلامِ تأمین‌کننده: مقدار ${l.qty ?? "—"} · واحد «${l.unit || "—"}» · قیمت واحد ${l.price ?? "—"} ریال بی ارزش افزوده`,
   ].join("\n")).join("\n\n");
   return `بستهٔ پیشنهادیِ تأمین‌کننده (هر قلم با کلیدش):\n${list}\n\nشرایطِ اعلامیِ تأمین‌کننده برای کلِ بسته: ${termsTxt(terms)}\n\n`
     + "مقدارهای سند و سنجش را با ابزار ثبت کن: برای هر کلید یک قلم، و برای هر لایه یک ردیف.";
@@ -308,6 +308,7 @@ export function judge(lines, r, meta = {}, terms = null) {
   const rate = numOf(r.vat_rate) != null ? numOf(r.vat_rate) / 100 : VAT_RATE;
   const got = mapLines(lines, Array.isArray(r.lines) ? r.lines : []);
   const outLines = lines.map((l, idx) => {
+    if (l.unavailable) return { line_id: l.id, no: l.no || null, title: l.title, head: l.head || null, item_id: l.item_id, model_id: l.model_id || 0, model_no: l.model_no || 0, unavailable: true, found: true, rows: [] };
     const x = got[idx];
     const found = !!(x && x.found !== false);
     const gone = !!(x && x.found === false);       /* مدل مطمئن است که این قلم در سند نیست */
@@ -347,7 +348,7 @@ export function judge(lines, r, meta = {}, terms = null) {
       status: cellStatus(p != null, po ? sureOf(po) : !!(x && x.unit_price && sureOf(x.unit_price)), near(p, numOf(l.price), r.vat_included === true ? 0.0002 : 0, 1)), gate: true });
     if (from === "total" && p != null) priceRow.note = "از مبلغِ کلِ سطر تقسیم بر مقدار";
     rows.push(priceRow);
-    return { line_id: l.id, no: l.no || null, title: l.title, head: l.head || null, item_id: l.item_id, found, doc_title: x && x.doc_title ? T(x.doc_title) : null, rows, note: (x && x.note) || null };
+    return { line_id: l.id, no: l.no || null, title: l.title, head: l.head || null, item_id: l.item_id, model_id: l.model_id || 0, model_no: l.model_no || 0, found, doc_title: x && x.doc_title ? T(x.doc_title) : null, rows, note: (x && x.note) || null };
   });
 
   /* شرایط فاکتور: ✅ همان شرطِ اعلامی (یا اگر اعلامی نیست، صریح در سند) · ❌ فرق دارد · ⚪ نیامده · ⚠️ نامطمئن */
@@ -397,6 +398,7 @@ export function judge(lines, r, meta = {}, terms = null) {
     v: AI_VERSION, readable: r.readable !== false, reason: r.reason || null, currency: r.currency || null,
     vat_included: r.vat_included == null ? null : !!r.vat_included, lines: outLines, header, doc, notes: r.notes || null, at: Date.now(), ...meta,
   };
+  if (outLines.length && outLines.every((l) => l.unavailable)) for (const row of out.header) row.gate = false;
   out.ok = resolve(out, {}).ready;
   return out;
 }

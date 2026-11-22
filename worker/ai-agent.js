@@ -1017,9 +1017,16 @@ async function inviteOne(env, run, ex, inv) {
     /* گفت‌وگویی که بسته یا «تأمین نمی‌کند» بود، برای قلمِ تازه دوباره باز است */
     ...(addOn ? [env.DB.prepare("UPDATE ai_threads SET state=CASE WHEN state IN ('closed','declined') THEN 'invited' ELSE state END, updated_at=? WHERE thread_id=?").bind(t, r.thread_id)] : []),
     /* همان «انتخاب جهت استعلام» کارشناس: خطی بی قیمت در تب استعلامات، تا پیش‌فاکتور یا تأیید نهایی پرش کند */
-    ...items.map((i) => env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,unit,qty,invoice,source,origin,src_json,created_at,updated_at)
-      SELECT ?,?,?,?,?,'رسمی','ai',?,'${PLACEHOLDER_SRC}',?,? WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=?)`)
-      .bind(run.assignment_id, i.id, r.supplier.name, i.unit || null, i.qty ?? null, inv.src === "smart" ? "smart" : inv.src === "history" ? "history" : "manual", t, t, run.assignment_id, i.id, r.supplier.name)),
+    ...(r.lines || items.map((i) => ({ item_id: i.id, model_id: 0, model_no: 0 }))).map((ref) => {
+      const i = items.find((x) => x.id === ref.item_id);
+      if (!i) return null;
+      const modelId = ref.model_id || 0, origin = inv.src === "smart" ? "smart" : inv.src === "history" ? "history" : "manual";
+      const columns = ["assignment_id", "item_id", "supplier_name", "unit", "qty", "invoice", "source", "origin", "src_json", "model_id", "model_no", "created_at", "updated_at"];
+      const values = [run.assignment_id, i.id, r.supplier.name, i.unit || null, i.qty ?? null, "رسمی", "ai", origin, PLACEHOLDER_SRC, modelId, ref.model_no || 0, t, t];
+      const where = [run.assignment_id, i.id, r.supplier.name, modelId];
+      return env.DB.prepare(`INSERT INTO quotes (${columns.join(",")}) SELECT ${values.map(() => "?").join(",")} WHERE NOT EXISTS (SELECT 1 FROM quotes WHERE assignment_id=? AND item_id=? AND supplier_name=? AND model_id=?)`)
+        .bind(...values, ...where);
+    }).filter(Boolean),
   ]);
   await P.pushMsgs(env, { id: r.thread_id }, r.msgs).catch((e) => console.error("ai push", e && e.message));
   const results = [];
@@ -1426,16 +1433,16 @@ async function buildContext(env, { run, cfg, th, st, lines, bundles, msgs, pfRea
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت برای هر قلم (🔒/🔓) — مدل شرطِ 🔒 را برای تأمین‌کننده روشن می‌گوید */
   const lim = await C.limitsOfLines(env, lines);
   /* محکِ قیمت: سوابقِ همین قلم (از آماده‌سازی) و پیشنهادهای دیگرِ همین ارجاع — بی نام؛ قیمتِ «تأمین‌کنندهٔ فرضی»ِ قدیمی محک نیست */
-  const others = (await env.DB.prepare(`SELECT l.item_id, COUNT(*) AS n, MIN(l.price) AS min FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
+  const others = (await env.DB.prepare(`SELECT l.item_id, l.model_id, COUNT(*) AS n, MIN(l.price) AS min FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id
       WHERE t.assignment_id=? AND l.thread_id<>? AND l.price>0 AND l.state IN ('submitted','approved','proforma','final')
-        AND NOT EXISTS (SELECT 1 FROM sp_suppliers s WHERE s.id=t.supplier_id AND s.demo=1) GROUP BY l.item_id`).bind(run.assignment_id, th.id).all()).results || [];
+        AND NOT EXISTS (SELECT 1 FROM sp_suppliers s WHERE s.id=t.supplier_id AND s.demo=1) GROUP BY l.item_id, l.model_id`).bind(run.assignment_id, th.id).all()).results || [];
   const bench = lineOut.map((l) => {
     const di = run.data.items.find((x) => x.id === l.item_id);
     const top = (di && di.hist && di.hist.top) || [];
     const avgs = top.map((s) => s.avg).filter((x) => x > 0);
-    const o = others.find((x) => x.item_id === l.item_id);
+    const o = others.find((x) => x.item_id === l.item_id && (x.model_id || 0) === (l.model_id || 0));
     return {
-      no: l.no, title: l.title,
+      no: l.no, title: l.model_no ? `${l.title} — مدل ${l.model_no}` : l.title,
       hist: avgs.length ? { avg: avgs.reduce((a, b) => a + b, 0) / avgs.length, min: Math.min(...top.map((s) => s.min).filter((x) => x > 0)), max: Math.max(...top.map((s) => s.max).filter((x) => x > 0)), n: top.reduce((a, s) => a + (s.n || 0), 0), ref: di.hist.ref, basis: di.hist.basis || "index" } : null,
       others: o ? { n: o.n, min: o.min } : null,
     };
@@ -1681,7 +1688,7 @@ async function closingContext(env, run) {
     env.DB.prepare(`SELECT x.thread_id, x.source, x.state, x.turns, x.memo, s.name AS supplier,
         (SELECT COUNT(*) FROM sp_msgs m WHERE m.thread_id=x.thread_id AND m.who='s') AS replies
         FROM ai_threads x JOIN sp_threads t ON t.id=x.thread_id JOIN sp_suppliers s ON s.id=t.supplier_id WHERE x.run_id=? ORDER BY x.created_at`).bind(run.id),
-    env.DB.prepare("SELECT item_id, supplier_name, qty, unit, price, dtime, pay, invoice, vat, valid_days, saved, final FROM quotes WHERE assignment_id=?").bind(run.assignment_id),
+    env.DB.prepare("SELECT item_id, model_id, model_no, supplier_name, qty, unit, price, dtime, pay, invoice, vat, valid_days, saved, final FROM quotes WHERE assignment_id=?").bind(run.assignment_id),
   ]);
   const threads = tr.results || [], quotes = qr.results || [];
   const ids = threads.map((t) => t.thread_id);
@@ -1690,7 +1697,7 @@ async function closingContext(env, run) {
   const items = d.items.filter((x) => !x.skip).map((i) => {
     const fin = quotes.filter((q) => q.item_id === i.id && q.final && q.saved);
     return `- ${i.title} (${faN(i.qty == null ? "—" : i.qty)} ${i.unit || ""}): سوابق ${i.hist && i.hist.ok ? `${faN(i.hist.n)} تأمین‌کننده` : "بی سابقه"} · جستجو ${i.smart && i.smart.n != null ? `${faN(i.smart.n)} تأمین‌کننده` : "—"}\n`
-      + (fin.length ? fin.map((q) => `    پیشنهادِ تأییدنهایی‌شده: ${q.supplier_name} — ${faN(q.qty)} ${q.unit || ""} × ${money(q.price)} ریال · تحویل ${q.dtime || "—"} · تسویه ${q.pay || "—"} · فاکتور ${q.invoice || "—"} · ارزش افزوده ${q.vat || "—"}`).join("\n") : "    پیشنهادِ تأییدنهایی‌شده‌ای نیست");
+      + (fin.length ? fin.map((q) => `    پیشنهادِ تأییدنهایی‌شده: ${q.supplier_name}${q.model_no ? ` — مدل ${faN(q.model_no)}` : ""} — ${faN(q.qty)} ${q.unit || ""} × ${money(q.price)} ریال · تحویل ${q.dtime || "—"} · تسویه ${q.pay || "—"} · فاکتور ${q.invoice || "—"} · ارزش افزوده ${q.vat || "—"}`).join("\n") : "    پیشنهادِ تأییدنهایی‌شده‌ای نیست");
   }).join("\n");
   /* روالِ تازه: نامزدها همان تیک‌خورده‌های سپرده‌شدهٔ فهرستِ دعوت، با برداشتنِ پنج نفر اول و علتش (ورودیِ شرحِ فرایند) */
   const prow = d.flow === 2 ? await pickRows(env, run) : null;
@@ -2216,8 +2223,8 @@ async function delivery(env, id) {
     env.DB.prepare(`SELECT a.id, a.request_id, a.expert_id, a.commission_no, a.commission_at, a.notes, a.closed_at, rq.party, rq.date, e.name AS expert_name, e.label AS expert_label
       FROM assignments a JOIN requests rq ON rq.id=a.request_id JOIN experts e ON e.id=a.expert_id WHERE a.id=?`).bind(run.assignment_id),
     env.DB.prepare("SELECT id, title, qty, unit, state, commission_ok FROM items WHERE assignment_id=? ORDER BY line_no, id").bind(run.assignment_id),
-    env.DB.prepare(`SELECT item_id, supplier_name, qty, unit, price, dtime, pay, invoice, vat, valid_days, source FROM quotes WHERE assignment_id=? AND saved=1 AND final=1
-      ORDER BY item_id, price`).bind(run.assignment_id),
+    env.DB.prepare(`SELECT item_id, model_id, model_no, supplier_name, qty, unit, price, dtime, pay, invoice, vat, valid_days, source FROM quotes WHERE assignment_id=? AND saved=1 AND final=1
+      ORDER BY item_id, model_no, price`).bind(run.assignment_id),
     env.DB.prepare("SELECT id, state, letter_json, docx_key FROM letters WHERE id=?").bind(cl.letter_id || 0),
   ]);
   const a = (ar.results || [])[0] || {};

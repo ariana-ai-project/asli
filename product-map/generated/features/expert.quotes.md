@@ -2,7 +2,7 @@
 
 بخش: پنل کارشناس | راهنما: help-content.js «expert.quotes» | جریان کار: wf.request (گام 7)، wf.supplier (گام 4)
 
-> هر ردیف، یک خط استعلام از یک تأمین‌کننده برای یک قلم است. مقدارها از پنل تأمین‌کننده (تأیید نهایی)، «استخراج» پیش‌فاکتور یا مناقصه می‌آیند و هر خانه را دستی هم می‌توانید پر یا ویرایش کنید؛ منبعِ هر خانه با نشانِ کوچکِ کنارش ثبت و دیده می‌شود.
+> هر ردیف، یک خط استعلام از یک تأمین‌کننده برای یک قلم یا یک مدل از آن قلم است. مقدارها از پنل تأمین‌کننده (تأیید نهایی)، «استخراج» پیش‌فاکتور یا مناقصه می‌آیند و هر خانه را دستی هم می‌توانید پر یا ویرایش کنید؛ منبعِ هر خانه با نشانِ کوچکِ کنارش ثبت و دیده می‌شود.
 
 محل در رابط:
 - پنل کارشناس خرید › صفحهٔ درخواست › استعلامات
@@ -45,7 +45,7 @@
 خواندن: assignments، experts، items، requests
 هم‌نویس‌های همین جدول‌ها: bot.team، engine.records، expert.finalcall، infra.core، manager.desk، sup.panel
 
-## تست‌ها (11)
+## تست‌ها (12)
 - ai-phase2.test.mjs
 - ai-phase3.test.mjs
 - apply.test.mjs
@@ -53,13 +53,14 @@
 - execution-ready.test.mjs
 - extract.test.mjs
 - final-call.test.mjs
+- item-models.test.mjs
 - quote-rules.test.mjs
 - review-fixes.test.mjs
 - supplier.test.mjs
 - support.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/apply.test.mjs backend/tamin-poshtibani/tests/discovered.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/extract.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/quote-rules.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/support.test.mjs
+node --test backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/apply.test.mjs backend/tamin-poshtibani/tests/discovered.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/extract.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/quote-rules.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/support.test.mjs
 ```
 
 ## مرتبط

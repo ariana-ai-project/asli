@@ -41,7 +41,7 @@
 | decisions | expert.detail، infra.core، manager.desk، manager.log | engine.ai، expert.ai، expert.picks، support.ai، support.req |
 | events | bot.team، corr.main، engine.ai، engine.records، engine.strategy، engine.tender، expert.account، expert.ai، expert.detail، expert.finalcall، expert.letter، expert.quotes، expert.smart، expert.terms، infra.core، login.tender، manager.desk، manager.experts، manager.log، sup.panel، support.ai، support.app، support.cm، support.cr، support.dl، support.finalcall، support.md، support.rank، support.rules، support.size، support.smartgate، support.sup، support.sw، support.td، tender.page | support.use |
 | expert_scores | infra.core، manager.experts | engine.records، manager.desk، support.req |
-| experts | bot.team، engine.ai، expert.account، expert.ai، expert.alerts، expert.finalcall، infra.core، manager.experts، support.exp، support.finalcall | bot.sp، engine.records، engine.tender، expert.comm، expert.detail، expert.letter، expert.quotes، expert.smart، expert.team، expert.terms، expert.tray، infra.auth، login.expert، login.supplier، login.tender، manager.asg، manager.desk، manager.import، manager.log، manager.reports، notify.alarms، sup.panel، support.ai، support.app، support.cm، support.dl، support.fb، support.log، support.req، support.smartgate، support.td، support.use، tender.page |
+| experts | bot.team، engine.ai، expert.account، expert.ai، expert.alerts، expert.finalcall، infra.core، manager.experts، support.exp، support.finalcall | bot.sp، engine.records، engine.structure، engine.tender، expert.comm، expert.detail، expert.letter، expert.quotes، expert.smart، expert.team، expert.terms، expert.tray، infra.auth، login.expert، login.supplier، login.tender، manager.asg، manager.desk، manager.import، manager.log، manager.reports، notify.alarms، sup.panel، support.ai، support.app، support.cm، support.dl، support.fb، support.log، support.req، support.smartgate، support.td، support.use، tender.page |
 | final_call_sups | expert.finalcall، sup.panel | expert.comm، expert.letter |
 | final_calls | expert.finalcall | engine.ai، expert.comm، expert.letter، sup.panel |
 | fm_choice | expert.ai، infra.core، manager.desk | — |
@@ -52,6 +52,7 @@
 | imports | infra.core، manager.import | manager.desk، support.req |
 | item_changes | engine.structure، expert.detail، infra.core | support.chg |
 | item_edits | engine.structure، expert.detail | engine.catalog |
+| item_models | engine.structure، sup.panel | — |
 | items | bot.team، engine.ai، engine.structure، engine.tender، expert.ai، expert.detail، expert.picks، expert.smart، expert.terms، infra.core، manager.asg، manager.desk، manager.import، manager.log، support.ai، support.app، support.cm، support.td | corr.main، engine.records، engine.strategy، expert.account، expert.alerts، expert.comm، expert.finalcall، expert.history، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.reports، sup.panel، support.chg، support.dl، support.exp، support.fb، support.md، support.req، support.rules، support.use |
 | legal_auth_guard | legal.app | — |
 | legal_calls | legal.app | — |
@@ -88,7 +89,7 @@
 | sms_outbox | notify.sms | support.log |
 | sp_bundles | corr.main، infra.core، sup.panel | bot.sp، engine.ai، engine.strategy، support.ai، support.app، support.chat، support.cm |
 | sp_files | infra.core، sup.panel | bot.sp، support.app، support.chat |
-| sp_lines | corr.main، expert.finalcall، infra.core، sup.panel | bot.sp، engine.ai، engine.strategy، expert.detail، expert.picks، expert.terms، login.tender، support.ai، support.app، support.chat، support.fb، support.rules، tender.page |
+| sp_lines | corr.main، engine.structure، expert.finalcall، infra.core، sup.panel | bot.sp، engine.ai، engine.strategy، expert.detail، expert.picks، expert.terms، login.tender، support.ai، support.app، support.chat، support.fb، support.rules، tender.page |
 | sp_links | bot.sp، corr.main، sup.panel | — |
 | sp_msgs | expert.finalcall، infra.core، sup.panel، support.cm | bot.sp، corr.main، engine.ai، support.ai، support.app، support.chat، support.fb |
 | sp_passes | login.supplier، sup.panel | — |

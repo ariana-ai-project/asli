@@ -18,9 +18,10 @@
 خواندن: assignments، expert_scores، experts، items، settings، weights
 هم‌نویس‌های همین جدول‌ها: expert.quotes، expert.smart، infra.core، manager.desk
 
-## تست‌ها (1)
+## تست‌ها (2)
+- item-models.test.mjs
 - records.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/records.test.mjs
+node --test backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/records.test.mjs
 ```

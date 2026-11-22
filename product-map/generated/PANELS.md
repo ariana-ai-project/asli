@@ -15,7 +15,7 @@
 
 - ورود کارشناس `login` → [login.expert](features/login.expert.md) — 1 مسیر، 3 تست
 - کارتابل من `list` → [expert.tray](features/expert.tray.md) — 2 مسیر، 10 تست | کد: expert.js › vList
-- صفحهٔ درخواست `detail` → [expert.detail](features/expert.detail.md) — 11 مسیر، 20 تست | کد: expert.js › vDetail
+- صفحهٔ درخواست `detail` → [expert.detail](features/expert.detail.md) — 11 مسیر، 21 تست | کد: expert.js › vDetail
   - 🤖 نوار کارشناس هوشمند، 🚀 شروع و 👁 نظارت → [expert.ai](features/expert.ai.md) — 4 مسیر، 15 تست | کد: expert.js › vRateBar، expert.js › vAiBar، expert.js › vAiLocked، expert.js › vGuard، …
   - 📋 شرایط خرید هر قلم → [expert.terms](features/expert.terms.md) — 1 مسیر، 4 تست | کد: expert.js › row
   - 📘 سند راهبرد → [engine.strategy](features/engine.strategy.md) — 0 مسیر، 12 تست
@@ -23,8 +23,8 @@
     - 🎯 فهرست دعوت → [expert.picks](features/expert.picks.md) — 2 مسیر، 16 تست | کد: expert.js › vPicks، expert.js › paint، expert.js › smPickNote
     - ✉️ قالب پیام → [expert.msgtpl](features/expert.msgtpl.md) — 4 مسیر، 2 تست
   - جستجوی هوشمند `smart` → [expert.smart](features/expert.smart.md) — 2 مسیر، 3 تست | کد: expert.js › dcBlock، expert.js › vSmart
-  - استعلامات `quotes` → [expert.quotes](features/expert.quotes.md) — 10 مسیر، 11 تست | کد: expert.js › ro، expert.js › vGuard
-  - جدول کمیسیون `comm` → [expert.comm](features/expert.comm.md) — 5 مسیر، 10 تست | کد: expert.js › vComm
+  - استعلامات `quotes` → [expert.quotes](features/expert.quotes.md) — 10 مسیر، 12 تست | کد: expert.js › ro، expert.js › vGuard
+  - جدول کمیسیون `comm` → [expert.comm](features/expert.comm.md) — 5 مسیر، 11 تست | کد: expert.js › vComm
     - 📨 فراخوان پیش‌فاکتور رسمی و 📦 بستهٔ کمیسیون → [expert.finalcall](features/expert.finalcall.md) — 7 مسیر، 2 تست | کد: expert.js › vFinalCall
   - نامهٔ کمیسیون `letter` → [expert.letter](features/expert.letter.md) — 8 مسیر، 6 تست | کد: expert.js › vLetterIntro، expert.js › vLetterAsk، expert.js › vLetterDone، expert.js › st
 - تیم کارشناسی `team` → [expert.team](features/expert.team.md) — 3 مسیر، 2 تست | کد: expert.js › vTeam
@@ -37,10 +37,10 @@
 صفحه: `frontend/tamin-poshtibani/correspond.html` | کاربر: کارشناس خرید
 
 - ورود (همان ورود کارشناس) → [login.expert](features/login.expert.md) — 1 مسیر، 3 تست | کد: correspond.js › renderLogin
-- درخواست‌ها `req` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
-- تأمین‌کنندگانِ یک درخواست `sup` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
-- گفت‌وگو `chat` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
-  - اقلام، پیش‌فاکتور و تأیید بسته `items` → [corr.main](features/corr.main.md) — 15 مسیر، 23 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
+- درخواست‌ها `req` → [corr.main](features/corr.main.md) — 15 مسیر، 24 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
+- تأمین‌کنندگانِ یک درخواست `sup` → [corr.main](features/corr.main.md) — 15 مسیر، 24 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
+- گفت‌وگو `chat` → [corr.main](features/corr.main.md) — 15 مسیر، 24 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
+  - اقلام، پیش‌فاکتور و تأیید بسته `items` → [corr.main](features/corr.main.md) — 15 مسیر، 24 تست | کد: correspond.js › render، correspond.js › askNote، correspond.js › capNote، correspond.js › negHtml، …
   - ✉️ قالب پیام → [expert.msgtpl](features/expert.msgtpl.md) — 4 مسیر، 2 تست
 
 ## پنل مدیر تدارکات (میز ارجاع) (p.manager)
@@ -90,7 +90,7 @@
 صفحه: `frontend/tamin-poshtibani/supplier.html` | کاربر: تأمین‌کننده (لینک پیامک یا بات)
 
 - ورود با رمز پیامکی → [login.supplier](features/login.supplier.md) — 4 مسیر، 4 تست | کد: supplier.js › renderLogin
-- پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو → [sup.panel](features/sup.panel.md) — 22 مسیر، 25 تست | کد: supplier.js › renderAll
+- پاسخ به استعلام: قیمت و شرایط هر قلم، گفت‌وگو → [sup.panel](features/sup.panel.md) — 24 مسیر، 26 تست | کد: supplier.js › renderAll
 
 ## مناقصهٔ خرید (p.tender)
 

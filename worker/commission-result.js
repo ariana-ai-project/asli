@@ -46,7 +46,7 @@ async function itemsOf(env, aid) {
   if (!a) throw new HttpError("ارجاع پیدا نشد.", 404);
   const [items, quotes, threads, results, notes] = await Promise.all([
     env.DB.prepare("SELECT id, title, qty, unit, line_no, commission_ok FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no").bind(aid).all(),
-    env.DB.prepare("SELECT id, item_id, supplier_name, price, qty, unit, dtime, pay, invoice, vat, saved, final, origin, origin_ref FROM quotes WHERE assignment_id=? AND saved=1 ORDER BY item_id, price").bind(aid).all(),
+    env.DB.prepare("SELECT id, item_id, model_id, model_no, supplier_name, price, qty, unit, dtime, pay, invoice, vat, saved, final, origin, origin_ref FROM quotes WHERE assignment_id=? AND saved=1 ORDER BY item_id, model_no, price").bind(aid).all(),
     env.DB.prepare(`SELECT t.id, t.supplier_id, s.name, p.phone, p.id AS phone_id, (SELECT b.id FROM sp_bundles b WHERE b.thread_id=t.id ORDER BY b.id DESC LIMIT 1) AS last_b
       FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id AND s.demo=0 LEFT JOIN sp_phones p ON p.id=t.phone_id WHERE t.assignment_id=? AND (t.request_id IS NULL OR t.request_id=?)`).bind(aid, a.request_id).all(),
     env.DB.prepare("SELECT * FROM commission_results WHERE assignment_id=?").bind(aid).all(),
@@ -65,7 +65,7 @@ async function itemsOf(env, aid) {
     items: (items.results || []).map((it) => {
       const qs = (quotes.results || []).filter((q) => q.item_id === it.id).map((q) => {
         const t = threadOf(q);
-        return { id: q.id, supplier: q.supplier_name, price: q.price, total: q.price != null && it.qty != null ? q.price * (q.qty ?? it.qty) : null, qty: q.qty, unit: q.unit,
+        return { id: q.id, model_id: q.model_id || 0, model_no: q.model_no || 0, supplier: q.supplier_name, price: q.price, total: q.price != null && it.qty != null ? q.price * (q.qty ?? it.qty) : null, qty: q.qty, unit: q.unit,
           dtime: q.dtime, pay: q.pay, invoice: q.invoice, vat: q.vat, final: !!q.final, thread_id: t ? t.id : null,
           phone: t && t.phone ? `${t.phone.slice(0, 4)}•••${t.phone.slice(-4)}` : null, sent: sent.has(`${it.id}|${nameKey(q.supplier_name)}`) };
       });

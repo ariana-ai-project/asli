@@ -88,6 +88,7 @@ import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervis
 import { estimateRun, estimateItem, resetEstimate, EST_PENDING_SQL } from "./estimate.js";
 import { reqSize, reqSizeAgg, sizeRulesOf, getSizeRules, saveSizeRules, SIZE_KEY } from "./size.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines, withTqLocks } from "./structure.js";
+import { MODEL_DDL, modelKey, modelsOfItems, modelById, modelTargets, createExpertModel, updateExpertModel, publishSupplierModel, migrateSpLineModels } from "./item-models.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -255,6 +256,7 @@ CREATE INDEX IF NOT EXISTS ix_ctab_asg ON commission_tables(assignment_id);
 CREATE TABLE IF NOT EXISTS closures (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, expert_id INTEGER, action TEXT NOT NULL, item_ids_json TEXT, closed INTEGER, fully_closed INTEGER, actor TEXT, decision_id INTEGER, at INTEGER NOT NULL);
 CREATE INDEX IF NOT EXISTS ix_closures_asg ON closures(assignment_id);
 ${SP_DDL.trim()}
+${MODEL_DDL.trim()}
 ${NAV_DDL}
 ${AI_DDL.trim()}
 ${VOICE_DDL.trim()}
@@ -414,6 +416,9 @@ const COLUMN_MIGRATIONS = [
   ...FM_COLUMNS,
   /* ایتا در بررسیِ پیام‌رسان‌های هر شماره (آبان ۱۴۰۵، records.js:PLATFORMS) */
   ["phone_channels", "eitaa", "TEXT"],
+  ["quotes", "model_id", "INTEGER NOT NULL DEFAULT 0"],
+  ["quotes", "model_no", "INTEGER NOT NULL DEFAULT 0"],
+  ["quotes", "unavailable", "INTEGER NOT NULL DEFAULT 0"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -525,6 +530,7 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  await migrateSpLineModels(env);
   /* یک شماره برای چند تأمین‌کننده (آبان ۱۴۰۵) — یک بار */
   await migratePhonesMulti(env).catch((e) => console.error("migratePhonesMulti", e && e.message));
   for (const sql of READ_INDEXES) await env.DB.exec(sql).catch((e) => console.error("read index", sql.slice(27, 60), e && e.message));
@@ -1597,6 +1603,8 @@ async function assignmentDetail(env, aid, who) {
   /* بستهٔ قفل‌شده (sp-core.js:itemLocks): قلمی که برای تأمین‌کننده رفته — پنل ساختارش را فقط‌خواندنی نشان می‌دهد */
   const locks = await itemLocks(env, items.map((i) => i.id));
   for (const i of items) if (locks.has(i.id)) i.sp_lock = locks.get(i.id);
+  const modelMap = await modelsOfItems(env, items.map((i) => i.id));
+  const models = [...modelMap.values()].flat();
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
   const decisions = (await env.DB.prepare("SELECT * FROM decisions WHERE assignment_id=? AND approved_at IS NULL AND rejected_at IS NULL").bind(aid).all()).results || [];
@@ -1669,7 +1677,7 @@ async function assignmentDetail(env, aid, who) {
   const need = { base, items: Object.fromEntries([...nd].map(([id, x]) => [id, x])) };
   /* «📨 فراخوانِ پیش‌فاکتورِ رسمی» و «📦 بستهٔ کمیسیون» (worker/final-call.js) — کارتِ پیش از جدول کمیسیون */
   const final_call = await callView(env, aid).catch((e) => { console.error("final call view", e && e.message); return null; });
-  return { assignment: a, request, items, quotes, proformas, pendingDecisions: decisions, settings, ai, need, final_call };
+  return { assignment: a, request, items, models, quotes, proformas, pendingDecisions: decisions, settings, ai, need, final_call };
 }
 
 /* قلمِ موردِ سؤالِ تب سوابق، با همان نگهبان مالکیتی که بقیهٔ مسیرهای کارشناس دارند.
@@ -1710,11 +1718,14 @@ async function quoteCreate(env, ex, body) {
   if (!supplier) throw new HttpError("نام تأمین‌کننده لازم است.");
   const wanted = [...new Set((Array.isArray(body.item_ids) ? body.item_ids : [body.item_id]).map((x) => int(x)).filter(Boolean))];
   if (!wanted.length) throw new HttpError("دست‌کم یک قلم را انتخاب کنید.");
+  const model = body.model_id ? await modelById(env, body.model_id) : null;
+  if (body.model_id && (!model || !wanted.includes(model.item_id) || wanted.length !== 1)) throw new HttpError("مدل انتخاب‌شده با قلم هم‌خوان نیست.", 409);
+  const modelId = model ? model.id : 0, modelNo = model ? model.model_no : 0;
   const its = new Map(((await env.DB.prepare(`SELECT id, unit, qty FROM items WHERE assignment_id=? AND id IN (${wanted.map(() => "?").join(",")})`)
     .bind(aid, ...wanted).all()).results || []).map((i) => [i.id, i]));
-  const have = new Set(((await env.DB.prepare("SELECT item_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(aid, supplier).all()).results || []).map((q) => q.item_id));
-  const fresh = wanted.filter((id) => its.has(id) && !have.has(id));
-  if (!fresh.length) throw new HttpError("این تأمین‌کننده برای همین قلم قبلاً اضافه شده است.", 409);
+  const have = new Set(((await env.DB.prepare("SELECT item_id,model_id FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(aid, supplier).all()).results || []).map((q) => modelKey(q.item_id, q.model_id)));
+  const fresh = wanted.filter((id) => its.has(id) && !have.has(modelKey(id, modelId)));
+  if (!fresh.length) throw new HttpError("این تأمین‌کننده برای همین مدل از قلم قبلاً اضافه شده است.", 409);
   const t = now();
   /* از کجا آمده: تب سوابق، جستجوی هوشمند (با شناسهٔ همان جستجو)، تأمین‌کنندگانِ کشف‌شدهٔ تحقیق یا دستی */
   const origin = ["history", "smart", "disc", "manual"].includes(body.origin) ? body.origin : "manual";
@@ -1739,13 +1750,13 @@ async function quoteCreate(env, ex, body) {
       ...("invoice" in hand ? {} : stamp(["invoice"], "def", { at: t })) };
     if (T(body.supplier_code)) Object.assign(src, stamp(["supplier_code"], "manual", { at: t, by }));
     return env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,invoice_src,pay,vat,deal,place,place_other,
-        source,origin,origin_ref,src_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'panel',?,?,?,?,?)`)
+        source,origin,origin_ref,src_json,model_id,model_no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'panel',?,?,?,?,?,?,?)`)
       .bind(aid, item, supplier, T(body.supplier_code) || null, hv("spec"), "unit" in hand ? hv("unit") : it.unit || null, "qty" in hand ? hv("qty") : it.qty ?? null,
         hv("price"), hv("dtime"), hv("valid_days"), hv("ship"), "invoice" in hand ? hv("invoice") : INVOICE_DEFAULT, "invoice" in hand ? "manual" : null,
-        hv("pay"), hv("vat"), hv("deal"), hv("place"), hv("place_other"), origin, originRef, JSON.stringify(src), t, t);
+        hv("pay"), hv("vat"), hv("deal"), hv("place"), hv("place_other"), origin, originRef, JSON.stringify(src), modelId, modelNo, t, t);
   });
   /* شرایطِ تازه روی خط‌های دستیِ پیشینِ همین تأمین‌کننده — پیش از ساختنِ خط‌های تازه */
-  if (sync) stmts.unshift(termsSync(env, aid, supplier, terms, 0, by));
+  if (sync) stmts.unshift(termsSync(env, aid, supplier, terms, 0, by, modelId));
   const res = await env.DB.batch(stmts);
   const ids = res.slice(sync ? 1 : 0).map((r) => r.meta.last_row_id);
   return { ok: true, id: ids[0], ids, skipped: wanted.length - fresh.length, synced: sync ? res[0].meta.changes || 0 : 0 };
@@ -1768,14 +1779,14 @@ const EXT_SQL = (f) => `(COALESCE(json_extract(src_json,'$.${f}.s'), CASE WHEN o
  * جایگزینیِ صریح با علت عوض می‌کند. «ثبت موقت»ِ خطی که واقعاً عوض شد برداشته می‌شود؛ منبعِ خانه «دستی» می‌شود.
  * vals: {فیلد: مقدارِ ذخیره‌شدنی}؛ notId: خطی که خودش جدا نوشته می‌شود (۰ = هیچ).
  */
-function termsSync(env, aid, supplier, vals, notId, by) {
+function termsSync(env, aid, supplier, vals, notId, by, modelId = 0) {
   const cols = Object.keys(vals), v = cols.map((f) => vals[f]), inv = "invoice" in vals, at = now();
   const diff = `(${cols.map((f) => `COALESCE(${f},'')<>COALESCE(?,'')`).join(" OR ")})`;
   const src = cols.reduce((s, f) => `json_set(${s},'$.${f}',json(?))`, "COALESCE(src_json,'{}')");
   const srcArgs = cols.map(() => JSON.stringify({ s: "manual", at, ...(by ? { by } : {}) }));
   return env.DB.prepare(`UPDATE quotes SET ${cols.map((f) => `${f}=?`).join(", ")}${inv ? ", invoice_src='manual'" : ""}, src_json=${src}, saved=CASE WHEN ${diff} THEN 0 ELSE saved END, updated_at=?
-      WHERE assignment_id=? AND supplier_name=? AND id<>? AND NOT (${cols.map(EXT_SQL).join(" OR ")}) AND (${diff}${inv ? " OR COALESCE(invoice_src,'')<>'manual'" : ""})`)
-    .bind(...v, ...srcArgs, ...v, at, aid, supplier, notId || 0, ...v);
+      WHERE assignment_id=? AND supplier_name=? AND model_id=? AND id<>? AND NOT (${cols.map(EXT_SQL).join(" OR ")}) AND (${diff}${inv ? " OR COALESCE(invoice_src,'')<>'manual'" : ""})`)
+    .bind(...v, ...srcArgs, ...v, at, aid, supplier, modelId, notId || 0, ...v);
 }
 /**
  * ویرایشِ خط استعلام از پنل (درخواست مالک، مهر ۱۴۰۵ — جای قفلِ کاملِ پیشین): هر خانه دستی پر و ویرایش می‌شود و منبعش ثبت می‌شود.
@@ -1842,7 +1853,7 @@ async function quoteUpdate(env, ex, id, body) {
   /* شرایطِ فاکتور روی خط‌های دیگرِ همین تأمین‌کننده هم می‌نشیند (termsSync) */
   const terms = Object.fromEntries(PER_SUPPLIER.filter((f) => f in changed).map((f) => [f, changed[f]]));
   const sync = Object.keys(terms).length > 0;
-  if (sync) stmts.push(termsSync(env, q.assignment_id, q.supplier_name, terms, id, by));
+  if (sync) stmts.push(termsSync(env, q.assignment_id, q.supplier_name, terms, id, by, q.model_id || 0));
   /* گزارش رخدادهای پنل پشتیبانی: «ثبت موقت» از پنل هم مثل بات (bot.js، quote_saved) با زمانش می‌ماند */
   if (b.save === true) stmts.push(ev(env, by, "quote_saved", null, q.item_id, { assignment_id: q.assignment_id, supplier: q.supplier_name, channel: "panel" }));
   const res = stmts.length > 1 ? await env.DB.batch(stmts) : [await stmts[0].run()];
@@ -3017,6 +3028,9 @@ async function route(request, env, ctx) {
     if (path === "/catalog/begin" && m === "POST") { await requireManager(request, env); return json(await catalogBegin(env, await readJson(request))); }
     if (path === "/catalog/chunk" && m === "POST") { await requireManager(request, env); return json(await catalogChunk(env, await readJson(request))); }
     if (path === "/catalog/finish" && m === "POST") { await requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
+    if ((mm = /^\/items\/(\d+)\/models$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await createExpertModel(env, ex, int(mm[1]), await readJson(request))); }
+    if ((mm = /^\/items\/(\d+)\/models\/(\d+)$/.exec(path)) && m === "PUT") { const ex = await requireExpert(request, env); return json(await updateExpertModel(env, ex, int(mm[1]), int(mm[2]), await readJson(request))); }
+    if ((mm = /^\/items\/(\d+)\/models\/(\d+)\/publish$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await publishSupplierModel(env, ex, int(mm[1]), int(mm[2]))); }
     /* نرمال‌سازی اقلام: ساختار از دیتابیس (کد، بعد عنوان) یا فقط برای قلمِ تازه از مدل؛ ذخیرهٔ کارشناس
        (روی قلم و در دیتابیس اصلی) و برداشتنش — worker/normalize.js */
     if ((mm = /^\/items\/(\d+)\/normalize$/.exec(path)) && m === "POST") {

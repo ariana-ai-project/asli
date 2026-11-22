@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 78 قابلیت در 13 بخش | 166 فایل | 358 مسیر (272 در تست صدا زده می‌شوند) | 367 فراخوان پنل | 121 جدول | 90 تست
+آمار: 78 قابلیت در 13 بخش | 167 فایل | 363 مسیر (275 در تست صدا زده می‌شوند) | 370 فراخوان پنل | 122 جدول | 91 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -62,15 +62,15 @@
 | [expert.ai](features/expert.ai.md) | کارشناس هوشمند | w/first-msg.js | 4 | 15 |
 | [expert.alerts](features/expert.alerts.md) | تنظیم اعلانات تیم | — | 1 | 1 |
 | [expert.app](features/expert.app.md) | پوستهٔ پنل کارشناس | expert.html، expert.js، manifest-expert.webmanifest | 0 | 3 |
-| [expert.comm](features/expert.comm.md) | جدول کمیسیون | w/bundle.js، w/sheets.js | 5 (2) | 10 |
-| [expert.detail](features/expert.detail.md) | صفحهٔ درخواست | — | 11 (2) | 20 |
+| [expert.comm](features/expert.comm.md) | جدول کمیسیون | w/bundle.js، w/sheets.js | 5 (2) | 11 |
+| [expert.detail](features/expert.detail.md) | صفحهٔ درخواست | — | 11 (2) | 21 |
 | [expert.finalcall](features/expert.finalcall.md) | 📨 فراخوانِ پیش‌فاکتورِ رسمی و 📦 بستهٔ کمیسیون | w/final-call.js | 7 (3) | 2 |
 | [expert.flow](features/expert.flow.md) | روند کار روی یک درخواست | — | 0 | 0 |
 | [expert.history](features/expert.history.md) | بررسی سوابق | w/history.js | 6 (3) | 10 |
 | [expert.letter](features/expert.letter.md) | نامهٔ کمیسیون | w/letter.js | 8 (4) | 6 |
 | [expert.msgtpl](features/expert.msgtpl.md) | قالب‌های پیام | msg-fill.mjs، w/templates.js | 4 | 2 |
 | [expert.picks](features/expert.picks.md) | 🎯 فهرست دعوت | w/ai-picks.js | 2 | 16 |
-| [expert.quotes](features/expert.quotes.md) | استعلامات | w/extract.js، w/proforma.js، w/quote-rules.js، w/quote-src.js | 10 (4) | 11 |
+| [expert.quotes](features/expert.quotes.md) | استعلامات | w/extract.js، w/proforma.js، w/quote-rules.js، w/quote-src.js | 10 (4) | 12 |
 | [expert.smart](features/expert.smart.md) | جستجوی هوشمند | w/discovered.js، w/discovery.js | 2 | 3 |
 | [expert.team](features/expert.team.md) | تیم کارشناسی | w/team.js | 3 (2) | 2 |
 | [expert.terms](features/expert.terms.md) | 📋 شرایط خرید هر قلم | w/terms-locks.js | 1 | 4 |
@@ -94,13 +94,13 @@
 
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
-| [corr.main](features/corr.main.md) | مکاتبات با تأمین‌کنندگان | correspond.html، correspond.js، ph-chat.js، ph-props.js (+1) | 15 | 23 |
+| [corr.main](features/corr.main.md) | مکاتبات با تأمین‌کنندگان | correspond.html، correspond.js، ph-chat.js، ph-props.js (+1) | 15 | 24 |
 
 ### پنل تأمین‌کننده (sup)
 
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
-| [sup.panel](features/sup.panel.md) | پاسخ به استعلام | sp.css، sup.css، supplier.html، supplier.js (+4) | 22 (3) | 25 |
+| [sup.panel](features/sup.panel.md) | پاسخ به استعلام | sp.css، sup.css، supplier.html، supplier.js (+4) | 24 (4) | 26 |
 
 ### پنل پشتیبانی (support)
 
@@ -140,7 +140,7 @@
 | شناسه | عنوان | فایل‌های صاحب | مسیر (بی‌تست) | تست |
 |---|---|---|---|---|
 | [bot.help](features/bot.help.md) | دستیار سامانه | w/help-bot.js، w/help-knowledge.js | 5 | 3 |
-| [bot.sp](features/bot.sp.md) | ربات تأمین‌کنندگان | w/sp-bot.js، w/sp-push.js، w/sp-voice.js، w/sp-voicemode.js | 1 (1) | 4 |
+| [bot.sp](features/bot.sp.md) | ربات تأمین‌کنندگان | w/sp-bot.js، w/sp-push.js، w/sp-voice.js، w/sp-voicemode.js | 1 (1) | 5 |
 | [bot.team](features/bot.team.md) | ربات کارشناسان و تیم | w/bot.js، w/tg-nav.js | 8 (8) | 6 |
 | [bot.voice](features/bot.voice.md) | ربات صدا به متن | w/stt.js، w/voice-bot.js، w/voice-core.js | 2 | 2 |
 
@@ -150,9 +150,9 @@
 |---|---|---|---|---|
 | [engine.ai](features/engine.ai.md) | موتور کارشناس هوشمند | w/ai-agent.js، w/ai-fetch.js، w/ai-lock.js، w/ai-md.js (+5) | 0 | 21 |
 | [engine.catalog](features/engine.catalog.md) | کاتالوگ و قواعد یکسان‌سازی | catalog-canon.mjs، catalog-head-rules.mjs، catalog-import.js، catalog-rules.mjs (+2) | 3 (3) | 17 |
-| [engine.records](features/engine.records.md) | ثبت سوابق جستجو، کانال‌ها و کمیسیون | w/records.js | 0 | 1 |
+| [engine.records](features/engine.records.md) | ثبت سوابق جستجو، کانال‌ها و کمیسیون | w/records.js | 0 | 2 |
 | [engine.strategy](features/engine.strategy.md) | موتور راهبرد خرید (CR-02) | strategy-view.js، w/cr-data.js، w/cr-engine.js، w/critique.js (+13) | 0 | 12 |
-| [engine.structure](features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | w/estimate.js، w/normalize.js، w/structure.js | 0 | 5 |
+| [engine.structure](features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | w/estimate.js، w/item-models.js، w/normalize.js، w/structure.js | 3 (1) | 6 |
 | [engine.tender](features/engine.tender.md) | موتور مناقصه | w/tender-core.js، w/tender.js | 0 | 3 |
 
 ### اعلان‌ها (notify)

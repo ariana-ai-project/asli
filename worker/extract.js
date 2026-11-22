@@ -29,6 +29,7 @@ const LINE = {
   type: "object",
   properties: {
     matched_item_id: { type: ["integer", "null"], description: "شناسهٔ قلمِ درخواست که این سطر با آن یکی است. اگر مطمئن نیستی null بگذار." },
+    matched_model_id: { type: ["integer", "null"], description: "اگر قلم چند مدل دارد، شناسهٔ مدلِ دقیقاً همین سطر. اگر مطمئن نیستی null بگذار." },
     title: { type: "string", description: "شرح کالا، دقیقاً همان‌طور که در پیش‌فاکتور نوشته شده" },
     spec: { type: ["string", "null"], description: "جنس یا مشخصات فنی، اگر جدا نوشته شده" },
     unit: { type: ["string", "null"], description: "واحد (عدد، متر، کیلوگرم…)" },
@@ -120,6 +121,7 @@ export const SYSTEM = `تو دستیار استخراج اطلاعات از پی
 اصل چهارم — تطبیق با اقلام درخواست.
 فهرست اقلام درخواست به تو داده می‌شود. برای هر سطر پیش‌فاکتور، اگر با اطمینان بالا با یکی از آن‌ها یکی است،
 شناسه‌اش را در matched_item_id بگذار. تطبیق باید بر پایهٔ خودِ کالا باشد، نه شباهت لفظی سطحی.
+اگر در فهرست قلم چند مدل با شناسهٔ model_id دارد، matched_model_id را هم بر اساس مشخصات همان مدل پر کن؛ در تردید null بگذار و هرگز مدل را حدس نزن.
 اگر شک داری، null بگذار؛ کارشناس خودش وصلش می‌کند. تطبیق غلط بدتر از تطبیق‌نکردن است.
 
 شرحِ یک سطر، فقط خانهٔ «شرح کالا» نیست. در این فاکتورها مشخصه‌های فنی — اندازه، ضخامت، سایز، طول، گرید،
@@ -169,7 +171,8 @@ vat_status هم بگو معامله اصلاً ارزش افزوده دارد ی
 /** پیام کاربر: فهرست اقلام درخواست + خود سند */
 export function userContent(fileUrl, mime, items, requestInfo) {
   const itemList = items.map((i) =>
-    `- شناسه ${i.id}: ${i.title}` + (i.qty != null ? ` — ${i.qty} ${i.unit || ""}` : "") + (i.spec ? ` — ${i.spec}` : ""),
+    `- شناسه ${i.id}: ${i.title}` + (i.qty != null ? ` — ${i.qty} ${i.unit || ""}` : "") + (i.spec ? ` — ${i.spec}` : "")
+      + ((i.models || []).map((m) => `\n  مدل ${m.model_no} با model_id ${m.model_id}: ${m.head} — ${m.spec}`).join("")),
   ).join("\n");
 
   const doc = String(mime || "").startsWith("image/")

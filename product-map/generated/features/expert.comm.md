@@ -31,7 +31,7 @@
 خواندن: experts، final_call_sups، final_calls، items، letters، quotes، requests، settings
 هم‌نویس‌های همین جدول‌ها: engine.structure، infra.core، legal.app، manager.import
 
-## تست‌ها (10)
+## تست‌ها (11)
 - ai-mode-live.test.mjs
 - ai-phase2.test.mjs
 - ai-phase3.test.mjs
@@ -39,12 +39,13 @@
 - docs.test.mjs
 - execution-ready.test.mjs
 - final-call.test.mjs
+- item-models.test.mjs
 - multiprice.test.mjs
 - review-fixes.test.mjs
 - support.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/commission-need.test.mjs backend/tamin-poshtibani/tests/docs.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/support.test.mjs
+node --test backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/commission-need.test.mjs backend/tamin-poshtibani/tests/docs.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/support.test.mjs
 ```
 
 ## مرتبط

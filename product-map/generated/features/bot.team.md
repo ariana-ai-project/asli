@@ -69,7 +69,7 @@
 | `seen:` | w/bot.js › onCallback | w/assign.js › seenKb |
 | `sf:` | w/bot.js › onCallback | w/bot.js › smartPrefsKb، w/bot.js › smartMarketMenu |
 | `sg:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › smartChoiceKb، w/bot.js › templatePick، w/bot.js › onCallback، w/sp-bot.js › onCallback |
-| `sm:` | w/bot.js › onCallback | w/bot.js › firstStepsKb، w/bot.js › hubKb، w/bot.js › requestMenu، w/bot.js › smartPickItem |
+| `sm:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › firstStepsKb، w/bot.js › hubKb، w/bot.js › requestMenu، w/bot.js › smartPickItem، w/sp-push.js › lineCard |
 | `spf:` | w/bot.js › onCallback | w/bot.js › spSupPick، w/bot.js › spTplPick، w/bot.js › spSendPick، w/bot.js › spSendLabel، w/bot.js › spSendConfirm، … (+1) |
 | `sq:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › smartChoiceKb، w/sp-bot.js › onCallback |
 | `tp:` | w/bot.js › onCallback | w/bot.js › templatePick، w/bot.js › templateList، w/bot.js › templateView، w/bot.js › onTemplateAction، w/bot.js › onCallback |

@@ -16,11 +16,12 @@
 | /stop | w/bot.js › handleTeamUpdate، w/bot.js › onMessage | bot.team |
 | /support | w/bot.js › onMessage | bot.team |
 
-## دکمه‌ها (73)
+## دکمه‌ها (74)
 
 | دکمه | پاسخ‌گو | قابلیتِ پاسخ‌گو | سازنده‌ها |
 |---|---|---|---|
 | `ai:` | w/bot.js › onCallback، w/sp-bot.js › bundleAction | bot.sp، bot.team | w/bot.js › attachProforma، w/bot.js › presentExtraction، w/bot.js › onExtract |
+| `av:` | w/sp-bot.js › onCallback | bot.sp | w/sp-push.js › lineCard |
 | `aw:` | w/bot.js › onCallback | bot.team | w/bot.js › awaitedProforma، w/bot.js › awaitStatus |
 | `cc:` | w/sp-bot.js › onCallback | bot.sp | w/sp-bot.js › onCallback، w/sp-push.js › showThread |
 | `cm:` | w/bot.js › onCallback | bot.team | w/bot.js › requestMenu، w/bot.js › makeTable، w/bot.js › closeCard، w/bot.js › deliverSend، w/support.js › setCommission |
@@ -71,7 +72,7 @@
 | `sg:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | bot.sp، bot.team | w/bot.js › smartChoiceKb، w/bot.js › templatePick، w/bot.js › onCallback، w/sp-bot.js › onCallback |
 | `si:` | w/sp-bot.js › onCallback | bot.sp | w/sp-bot.js › askValue، w/sp-bot.js › askTerm، w/sp-bot.js › wizardNext، w/sp-bot.js › onCallback، w/sp-push.js › itemsCard |
 | `sl:` | w/sp-bot.js › onCallback | bot.sp | w/sp-push.js › lineCard |
-| `sm:` | w/bot.js › onCallback | bot.team | w/bot.js › firstStepsKb، w/bot.js › hubKb، w/bot.js › requestMenu، w/bot.js › smartPickItem |
+| `sm:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | bot.sp، bot.team | w/bot.js › firstStepsKb، w/bot.js › hubKb، w/bot.js › requestMenu، w/bot.js › smartPickItem، w/sp-push.js › lineCard |
 | `sp:` | w/sp-bot.js › onCallback | bot.sp | w/sp-push.js › itemsCard، w/sp-push.js › actionKb |
 | `spf:` | w/bot.js › onCallback | bot.team | w/bot.js › spSupPick، w/bot.js › spTplPick، w/bot.js › spSendPick، w/bot.js › spSendLabel، w/bot.js › spSendConfirm، … (+1) |
 | `sq:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | bot.sp، bot.team | w/bot.js › smartChoiceKb، w/sp-bot.js › onCallback |

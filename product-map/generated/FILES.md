@@ -99,6 +99,7 @@
 | worker/help-knowledge.js | bot.help |
 | worker/history.js | expert.history |
 | worker/http.js | infra.core |
+| worker/item-models.js | engine.structure |
 | worker/legal-auth.js | legal.app |
 | worker/legal-prompts.js | legal.app |
 | worker/legal.js | legal.app |

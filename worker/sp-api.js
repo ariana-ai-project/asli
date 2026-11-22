@@ -231,6 +231,8 @@ export async function spRoute(request, env, ctx, path, m, url, deps) {
     }
     if ((mm = /^\/sp\/line\/(\d+)$/.exec(path)) && m === "PUT") return json(await C.lineSave(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/line\/(\d+)\/ready$/.exec(path)) && m === "POST") return json(await C.lineReady(env, sup, mm[1], !!(await readJson(request)).on));
+    if ((mm = /^\/sp\/line\/(\d+)\/availability$/.exec(path)) && m === "POST") return json(await C.lineAvailability(env, sup, mm[1], !!(await readJson(request)).available));
+    if ((mm = /^\/sp\/line\/(\d+)\/model$/.exec(path)) && m === "POST") return json(await C.createSupplierModel(env, sup, mm[1], await readJson(request)));
     if ((mm = /^\/sp\/thread\/(\d+)\/terms$/.exec(path)) && (m === "POST" || m === "PUT")) return json(await C.termsSave(env, sup, mm[1], await readJson(request)));
     /* «🧾 پیش‌فاکتورِ رسمی» (worker/final-call.js): بدنه خودِ فایل است. stage=call در پنجرهٔ فراخوان؛ stage=submit پیش از «📤 ارسال» وقتی
        کارشناس «پیش‌فاکتورِ رسمی 🔒» گذاشته (ids: اقلامِ آمادهٔ ارسال). مدل سند را با پیشنهاد می‌سنجد و حکم برمی‌گردد */

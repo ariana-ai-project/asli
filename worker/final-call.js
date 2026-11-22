@@ -23,6 +23,7 @@
  * هنگامِ «📤 ارسالِ» پیشنهاد، پیش‌فاکتورِ رسمی فقط وقتی الزامی است که کارشناس «پیش‌فاکتورِ رسمی 🔒» گذاشته (terms-locks.js:offpf).
  */
 import { HttpError } from "./http.js";
+import { modelKey } from "./item-models.js";
 import { telegram, esc } from "./telegram.js";
 import { pushTo, EXPERT } from "./push.js";
 import { fmtFa, jStr2ms, jValid, jNorm, HOUR, DAY } from "./time.js";
@@ -177,9 +178,9 @@ export async function callForThread(env, th, side) {
   const cfg = parse(c.cfg_json, FC_DEFAULT);
   const pf = await env.DB.prepare("SELECT id, state, filename, valid_to, at, verdict_json FROM offpf WHERE assignment_id=? AND supplier_name=? AND call_id=? ORDER BY id DESC LIMIT 1")
     .bind(th.assignment_id, th.supplier_name, c.id).first();
-  const items = ((await env.DB.prepare(`SELECT q.item_id, i.title, q.qty, q.unit, q.price, q.prices_json FROM quotes q JOIN items i ON i.id=q.item_id
-      WHERE q.assignment_id=? AND q.supplier_name=? AND q.final=1 AND q.saved=1 ORDER BY i.line_no`).bind(th.assignment_id, th.supplier_name).all()).results || [])
-    .map((q) => ({ item_id: q.item_id, title: q.title, qty: q.qty, unit: q.unit, price: q.price, prices: parse(q.prices_json, null) }));
+  const items = ((await env.DB.prepare(`SELECT q.item_id, q.model_id, q.model_no, i.title, q.qty, q.unit, q.price, q.prices_json FROM quotes q JOIN items i ON i.id=q.item_id
+      WHERE q.assignment_id=? AND q.supplier_name=? AND q.final=1 AND q.saved=1 ORDER BY i.line_no, q.model_no`).bind(th.assignment_id, th.supplier_name).all()).results || [])
+    .map((q) => ({ item_id: q.item_id, model_id: q.model_id || 0, model_no: q.model_no || 0, title: q.model_no ? `${q.title} — مدل ${q.model_no}` : q.title, qty: q.qty, unit: q.unit, price: q.price, prices: parse(q.prices_json, null) }));
   const v = pf ? parse(pf.verdict_json, {}) : null;
   return {
     id: c.id, state: c.state, offer_no: s.offer_no, at: c.at, deadline_at: c.deadline_at, now: now(), min_valid_h: cfg.min_valid_h,
@@ -239,17 +240,17 @@ export async function startCall(env, aid, { by = "system", mode = "manual" } = {
   if (!asg) throw new HttpError("ارجاع پیدا نشد.", 404);
   const cur = await lastCall(env, aid).catch(() => null);
   if (cur && (cur.state === "open" || cur.state === "closed")) return { call: cur, existed: true, sent: 0 };
-  const fin = (await env.DB.prepare(`SELECT q.id, q.item_id, q.supplier_name, q.price, q.qty, i.title FROM quotes q JOIN items i ON i.id=q.item_id
+  const fin = (await env.DB.prepare(`SELECT q.id, q.item_id, q.model_id, q.model_no, q.supplier_name, q.price, q.qty, i.title FROM quotes q JOIN items i ON i.id=q.item_id
       WHERE q.assignment_id=? AND q.final=1 AND q.saved=1 AND i.state='open' ORDER BY q.id`).bind(aid).all()).results || [];
   if (!fin.length) throw new HttpError("هنوز خطِ «تأیید نهایی»ای نیست که به کمیسیون برود.", 422);
   const t = now(), deadline = t + cfg.window_h * HOUR, need = deadline + cfg.min_valid_h * HOUR;
-  /* کمترین قیمتِ هر قلم (ریال، بی ارزش افزوده) میانِ همهٔ خط‌های تأییدنهایی */
+  /* کمترین قیمتِ هر مدل (ریال، بی ارزش افزوده) میانِ همهٔ خط‌های تأییدنهایی */
   const low = new Map();
   for (const q of fin) {
-    const p = Number(q.price);
+    const p = Number(q.price), key = modelKey(q.item_id, q.model_id);
     if (!(p > 0)) continue;
-    const c0 = low.get(q.item_id);
-    if (!c0 || p < c0.price) low.set(q.item_id, { item_id: q.item_id, title: q.title, price: p, by: q.supplier_name });
+    const c0 = low.get(key);
+    if (!c0 || p < c0.price) low.set(key, { item_id: q.item_id, model_id: q.model_id || 0, model_no: q.model_no || 0, title: q.model_no ? `${q.title} — مدل ${q.model_no}` : q.title, price: p, by: q.supplier_name });
   }
   const names = [...new Set(fin.map((q) => q.supplier_name))];
   const ths = (await env.DB.prepare(`SELECT t.id, s.name, p.id AS phone_id, p.phone, p.k FROM sp_threads t JOIN sp_suppliers s ON s.id=t.supplier_id
@@ -259,8 +260,8 @@ export async function startCall(env, aid, { by = "system", mode = "manual" } = {
     const th = ths.find((x) => x.name === name) || null;
     const pf = pfs.find((x) => x.supplier_name === name) || null;
     const status = pf && pf.valid_to && pf.valid_to >= need ? "valid" : pf ? "renew" : "need";
-    const lowest = [...new Set(fin.filter((q) => q.supplier_name === name).map((q) => q.item_id))].map((id) => low.get(id)).filter(Boolean)
-      .map((x) => ({ item_id: x.item_id, title: x.title, price: x.price, own: x.by === name }));
+    const lowest = [...new Set(fin.filter((q) => q.supplier_name === name).map((q) => modelKey(q.item_id, q.model_id)))].map((id) => low.get(id)).filter(Boolean)
+      .map((x) => ({ item_id: x.item_id, model_id: x.model_id, model_no: x.model_no, title: x.title, price: x.price, own: x.by === name }));
     return { name, offer_no: `${asg.request_id}-${i + 1}`, th, pf, status, lowest };
   });
   const ins = await env.DB.prepare("INSERT INTO final_calls (assignment_id,request_id,at,deadline_at,by,mode,cfg_json,state) VALUES (?,?,?,?,?,?,?,'open') RETURNING *")
@@ -573,11 +574,11 @@ async function callLines(env, aid, name, threadId) {
   const sl = threadId ? ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=?").bind(threadId).all()).results || []) : [];
   const out = [];
   for (const q of qs) {
-    const l = sl.find((x) => x.item_id === q.item_id);
-    const base = { qty: q.qty, unit: q.unit, price: q.price, prices_json: q.prices_json || (l && l.prices_json) || null, quote_id: q.id };
+    const l = sl.find((x) => x.item_id === q.item_id && (x.model_id || 0) === (q.model_id || 0));
+    const base = { qty: q.qty, unit: q.unit, price: q.price, prices_json: q.prices_json || (l && l.prices_json) || null, quote_id: q.id, model_id: q.model_id || 0, model_no: q.model_no || 0 };
     if (l) { out.push({ ...l, ...base, layers_json: JSON.stringify(C.lineLayers(l).map(({ k, v }) => ({ k, v }))) }); continue; }
     const lk = await C.lockedLayers(env, { id: q.item_id, title: q.it_title, norm_json: q.norm_json, spec: q.it_spec }).catch(() => ({ head: null, layers: [] }));
-    out.push({ id: -q.id, no: null, item_id: q.item_id, title: q.it_title, head: lk.head, layers_json: JSON.stringify(lk.layers), extra_json: "[]", locks_json: null, req_unit: null, ...base });
+    out.push({ id: -q.id, no: null, item_id: q.item_id, title: q.model_no ? `${q.it_title} — مدل ${q.model_no}` : q.it_title, head: lk.head, layers_json: JSON.stringify(lk.layers), extra_json: "[]", locks_json: null, req_unit: null, ...base });
   }
   const q0 = qs[0] || {};
   return { lines: out, terms: { dtime: q0.dtime, pay: q0.pay, invoice: q0.invoice, vat: q0.vat, valid_days: q0.valid_days } };
