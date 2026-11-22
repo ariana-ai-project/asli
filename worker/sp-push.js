@@ -273,10 +273,9 @@ const termsBlock = (tm) => TERM_FIELDS.map((f) => `${TERM_FA[f]}: <b>${T(tm[f]) 
 export function itemsCard(env, th, lines, bundles) {
   const L = lines.slice().sort((a, b) => b.id - a.id);
   const ready = L.filter((l) => l.state === "ready");
-  const tm = termsOf(th), tmiss = termsMissing(tm), modeled = L.some((l) => l.model_id);
   let text = `📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i>\n`
     + L.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}${l.terms_json ? `\n   🧾 ${esc(termsLine(termsOf(l)))}` : ""}`).join("\n");
-  text += `\n\n🧾 <b>شرایط فاکتور</b> (${modeled ? "پیش‌فرضِ مدل‌هایی که شرایط جدا ندارند" : "برای همهٔ اقلام"}): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${tmiss.length ? `\n<i>مانده: ${esc(tmiss.join("، "))}</i>` : ""}`;
+  text += "\n\n🧾 <b>شرایط هر قلم در کارت همان قلم است و می‌تواند متفاوت باشد.</b>";
   const waitPf = bundles.filter((b) => b.state === "approved");
   if (waitPf.length) text += `\n\n📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.`;
   text += "\n\n<i>قیمت و شرایط را در فرم یا کارتِ هر مدل بنویسید؛ شرایطِ هر مدل می‌تواند جدا باشد. بعد «آمادهٔ ارسال» و «ارسال». لایه‌های 🔒 ثابت‌اند و از 🔓ها می‌توانید مدل تازه بسازید.</i>";
@@ -311,7 +310,7 @@ export function lineCard(l, files, others, terms, opt = {}) {
   text += l.unavailable ? "\n⛔ <b>این مدل را تأمین نمی‌کنم.</b>\n" : `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}${lk.legacy ? ` <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>` : ""}`
     + (pm ? `\nقیمت‌ها (ریال، بدون ارزش افزوده): <b>${esc(pricesTxt(pricesOf(l) || {})) || "—"}</b> <i>(${pm.lock ? "🔒 همه الزامی" : "🔓 هر کدام که دارید"})</i>`
       : `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>`) + `\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
-  text += `\n🧾 <b>شرایط فاکتور</b> <i>(${l.model_id ? "فقط برای همین مدل" : "برای همهٔ اقلامِ این استعلام"})</i>\n${termsBlock(tm)}\n`;
+  text += `\n🧾 <b>شرایط فاکتور</b> <i>(فقط برای همین ${l.model_id ? "مدل" : "قلم"})</i>\n${termsBlock(tm)}\n`;
   if (opt.limits) text += `<i>📋 شرطِ شرکت: ${esc(limitsTxt(opt.limits))} — 🔒 را پنل بیرونش نمی‌پذیرد.</i>\n`;
   text += `\n🔒 <b>نوع قلم و لایه‌های ویژگی</b>${lk.legacy ? "" : " <i>(🔒 ثابت · 🔓 قابل تغییر)</i>"}\n${l.head ? `نوع قلم: ${esc(l.head)}\n` : ""}`
     + `${layers.length ? layers.map((x) => `${lk.layers[x.k] === false ? "🔓" : "•"} ${esc(x.k)}: ${esc(x.v)}${x.req != null ? ` <i>(درخواست: ${esc(x.req)})</i>` : ""}`).join("\n") : "—"}`

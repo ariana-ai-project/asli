@@ -192,3 +192,44 @@ test("مهاجرت sp_lines: شناسه و محتوای قدیمی حفظ می�
   DB.raw.exec("DROP TABLE item_models");
   DB.raw.exec("ALTER TABLE item_models_scoped RENAME TO item_models");
 });
+
+test("شرایط هر قلم بدون مدل نیز مستقل است، در وب/بات و انتقال به استعلام", { skip: SKIP }, async () => {
+  const t = Date.now();
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-TERMS','1405/08/04','شرایط مستقل')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,created_at) VALUES (10,'R-TERMS',2,5,?,?)").run(t, t);
+  for (const id of [10, 11]) DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (?,'R-TERMS',?,?,'قلم '||?,2,'دستگاه','open',10,?)").run(id, id, id, id, norm);
+  const sent = await call("/sp/x/send", { headers: EX, body: { assignment_id: 10, item_ids: [10, 11], supplier_name: "شرایط جدا", phone: "09120000610", label: "فروش" } });
+  assert.equal(sent.status, 200, JSON.stringify(sent.data));
+  assert.equal(sent.data.lines.length, 2);
+  const phone = DB.raw.prepare("SELECT id FROM sp_phones WHERE phone='09120000610'").get();
+  const H = { "X-SP-Session": await newSession(env, phone.id, "web") };
+  DB.raw.prepare("INSERT INTO sp_tg (chat,role,phone_id,focus,updated_at) VALUES ('7610','s',?,?,?)").run(phone.id, sent.data.thread_id, t);
+  let cq = 0;
+  const bot = (data) => handleSpUpdate(env, { callback_query: { id: `terms-${++cq}`, data, message: { message_id: 92, chat: { id: 7610 } } } });
+  const raw1 = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=? AND item_id=10").get(sent.data.thread_id).id;
+  const raw2 = DB.raw.prepare("SELECT id FROM sp_lines WHERE thread_id=? AND item_id=11").get(sent.data.thread_id).id;
+  await bot(`tv:${raw1}:p:0`);
+  await bot(`tv:${raw2}:p:1`);
+  assert.equal(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_lines WHERE id=?").get(raw1).terms_json).pay, "نقدی");
+  assert.equal(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_lines WHERE id=?").get(raw2).terms_json).pay, "اعتباری");
+  assert.equal(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(sent.data.thread_id).terms_json, null, "شرایط مشترکِ قدیمی دست نمی‌خورد");
+
+  let r = await call(`/sp/line/${raw1}`, { method: "PUT", headers: H, body: { price: 1000, terms: { dtime: "10", invoice: "رسمی", vat: "دارد", valid_days: 7 } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  r = await call(`/sp/line/${raw2}`, { method: "PUT", headers: H, body: { price: 2000, terms: { dtime: "25", invoice: "رسمی", vat: "دارد", valid_days: 10 } } });
+  assert.equal(r.status, 200, JSON.stringify(r.data));
+  assert.equal((await call(`/sp/line/${raw1}/ready`, { headers: H, body: { on: true } })).status, 200);
+  assert.equal((await call(`/sp/line/${raw2}/ready`, { headers: H, body: { on: true } })).status, 200);
+  const sub = await call(`/sp/thread/${sent.data.thread_id}/submit`, { headers: H, body: {} });
+  assert.equal(sub.status, 200, JSON.stringify(sub.data));
+  const bundle = DB.raw.prepare("SELECT line_terms_json FROM sp_bundles WHERE id=?").get(sub.data.bundle_id);
+  const snapshots = JSON.parse(bundle.line_terms_json);
+  assert.deepEqual([snapshots[raw1].dtime, snapshots[raw1].pay], ["10", "نقدی"]);
+  assert.deepEqual([snapshots[raw2].dtime, snapshots[raw2].pay], ["25", "اعتباری"]);
+  const fin = await call(`/sp/x/bundle/${sub.data.bundle_id}/decide`, { headers: EX, body: { action: "final" } });
+  assert.equal(fin.status, 200, JSON.stringify(fin.data));
+  const q1 = DB.raw.prepare("SELECT * FROM quotes WHERE assignment_id=10 AND item_id=10").get();
+  const q2 = DB.raw.prepare("SELECT * FROM quotes WHERE assignment_id=10 AND item_id=11").get();
+  assert.deepEqual([q1.price, q1.dtime, q1.pay], [1000, "10", "نقدی"]);
+  assert.deepEqual([q2.price, q2.dtime, q2.pay], [2000, "25", "اعتباری"]);
+});

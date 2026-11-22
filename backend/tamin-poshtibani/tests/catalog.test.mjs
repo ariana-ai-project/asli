@@ -674,32 +674,26 @@ async function withModel(env, fn) {
 const rowOf = (env, id, it) => { env.DB.raw.prepare("INSERT OR REPLACE INTO items (id,title,code) VALUES (?,?,?)").run(id, it.title, it.code || null); };
 const layersOf = (d) => plain(d.layers);
 
-test("نرمال‌سازی: کد، بعد عنوانِ عیناً همان — هر دو بی مدل، حتی با «تفکیک دوباره»", { skip: SKIP }, async () => {
+test("نرمال‌سازی: فقط همان کد لایهٔ ذخیره‌شده می‌گیرد؛ عنوانِ یکسان یا کدِ دیگر انتقال ندارد", { skip: SKIP }, async () => {
   const { env } = await loaded();
   await withModel(env, async (calls) => {
-    /* قلمِ بی‌کد با عنوانِ یک قلمِ فهرست — با «ي» و «ك» عربی، نیم‌فاصله و فاصلهٔ اضافه هم همان عنوان است */
     const t = await normalizeItem(env, { id: 60, code: null, title: "  پيچ‌آلن   M8 فولادی " });
-    assert.equal(t.source, "title");
-    assert.equal(t.code, "1001", "ساختار و نرخ‌های همان قلمِ فهرست");
-    assert.deepEqual(layersOf(t), { "اندازه": "M8", "جنس": "آهنی" });
-    /* کدِ بیرون از فهرست ولی عنوانِ فهرست */
+    assert.equal(t.needsModel, true, "قلمِ بی‌کد با عنوانِ فهرست هم لایهٔ آن را به ارث نمی‌برد");
+    assert.deepEqual(layersOf(t), {});
     const u = await normalizeItem(env, { id: 61, code: "7777", title: "پیچ M10" });
-    assert.equal(u.source, "title"); assert.equal(u.code, "1003");
-    /* «تفکیک دوباره با مدل» برای قلمی که در دیتابیس هست به مدل نمی‌رود */
+    assert.equal(u.needsModel, true, "عنوانِ یکسان جای کدِ ناشناخته را نمی‌گیرد");
+    assert.deepEqual(layersOf(u), {});
     const f = await normalizeItem(env, { id: 62, code: "1001", title: "هرچه" }, { force: true });
     assert.equal(f.source, "catalog");
+    assert.equal(f.code, "1001");
+    assert.deepEqual(layersOf(f), { "اندازه": "M8", "جنس": "آهنی" }, "دقیقاً لایه‌های همان کد");
     assert.equal(calls.length, 0, "کد یا عنوان در دیتابیس بود → مدل صدا زده نشد");
-    /* فقط قلمی که نه کدش و نه عنوانش در دیتابیس است — و فقط با تأییدِ هزینه */
     assert.equal((await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" })).needsModel, true);
     assert.equal(calls.length, 0);
     const m = await normalizeItem(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { model: true });
     assert.equal(m.source, "model"); assert.equal(calls.length, 1);
-    /* جستجوی سوابق با تیکِ نرمال‌سازی، بی تأیید: ساختارِ دیتابیس (با عنوان) */
-    const h = await itemHistory(env, { id: 60, code: null, title: "پيچ آلن M8 فولادی" }, { norm: true, mode: "exact" });
-    assert.equal(h.match.source, "title"); assert.equal(h.match.codes, 2);
     const g = await itemHistory(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { norm: true, mode: "head" });
     assert.match(g.message, /ذخیره/, "پیشنهادِ مدل تا ذخیره نشود، بی خودِ پیشنهاد مبنای جستجو نیست");
-    /* پنل پیشنهادِ ذخیره‌نشده را همراهِ درخواست می‌فرستد: فقط خوانده می‌شود */
     const p = await itemHistory(env, { id: 63, code: "7778", title: "پیچ آلن M12 تازه" }, { norm: true, mode: "head", struct: { head: m.head, layers: m.layers } });
     assert.equal(p.match.source, "proposal"); assert.equal(p.struct.head, "پیچ");
     assert.equal(env.DB.raw.prepare("SELECT COUNT(*) AS n FROM item_edits").get().n, 0, "چیزی در دیتابیس ننشست");
@@ -721,8 +715,8 @@ test("ذخیرهٔ کارشناس در دیتابیس اصلی: درخواستِ
     assert.equal(b.source, "edit");
     assert.deepEqual(layersOf(b), { "اندازه": "M10", "رده": "8.8", "جنس": { v: "آهنی", i: 1 } });
     assert.equal(b.edit.by, "آقای بهمنی");
-    /* همان عنوان بی‌کد هم (عنوان → کد ۱۰۰۳ → ویرایش) */
-    assert.equal((await normalizeItem(env, { id: 72, code: null, title: "پیچ M10" })).source, "edit");
+    /* عنوانِ یکسان بی‌کد دیگر ویرایش یا لایه‌ای از همان کد نمی‌گیرد */
+    assert.equal((await normalizeItem(env, { id: 72, code: null, title: "پیچ M10" })).needsModel, true);
     assert.equal(calls.length, 0);
     /* جستجوی «عین قلم» با کدِ ۱۰۰۳ بی تیکِ نرمال‌سازی هم بر لایه‌های تازه است */
     const sc = await resolveScope(env, { id: 73, code: "1003", title: "x" }, { norm: false, mode: "exact" });
@@ -776,7 +770,7 @@ test("ذخیرهٔ کارشناس: نوع قلمِ تازه و نرخ تبدیل
   assert.equal((await revertEdit(env, { id: 86, code: "1001", title: "پیچ" })).removed, false);
 });
 
-test("قلمِ بی‌کد: ذخیره با عنوان، و ورقِ گالوانیزه‌ای که کارشناس آهنی دانست در «نوع قلم»ِ ورق آهنی", { skip: SKIP }, async () => {
+test("قلمِ بی‌کد: ذخیره با عنوان بدون انتقال، و ورقِ گالوانیزه‌ای که کارشناس آهنی دانست در «نوع قلم»ِ ورق آهنی", { skip: SKIP }, async () => {
   const { env } = await loaded(build({ sheet: true }));
   const who = { role: "manager" };
   await withModel(env, async (calls) => {
@@ -785,7 +779,8 @@ test("قلمِ بی‌کد: ذخیره با عنوان، و ورقِ گالوا�
     const r = await confirmNorm(env, a, { head: "ورق", layers: { "ضخامت": { v: "0.5", u: "میلی‌متر" } }, source: "manual" }, who);
     assert.equal(r.saved, "created"); assert.equal(r.norm.head, "ورق آهنی");
     const b = await normalizeItem(env, { id: 91, code: null, title: "ورق سیاه  نیم میل" });
-    assert.equal(b.source, "edit"); assert.equal(b.head, "ورق آهنی"); assert.equal(b.edit.by, "مدیر");
+    assert.equal(b.needsModel, true, "ذخیرهٔ با عنوان به قلمِ بی‌کد منتقل نمی‌شود");
+    assert.deepEqual(layersOf(b), {});
     assert.equal(calls.length, 0);
   });
   const g = { id: 92, code: "4003", title: "ورق گالوانیزه 0.5 میل" };

@@ -65,7 +65,7 @@
     document.head.appendChild(s);
   }
 
-  /* termsDraft: شرایطِ مشترکِ قلم‌های بدون مدل؛ lineTerms شرایطِ مستقلِ هر مدل است. pfFile: پیش‌فاکتوری که با «📄
+  /* termsDraft: مقدار اولیه از شرایط قبلی است؛ lineTerms شرایط مستقل هر قلم/مدل است. pfFile: پیش‌فاکتوری که با «📄
      پیش‌فاکتور +» همراهِ مشخصات می‌رود. bot: کارت‌های گذرای بات در گفت‌وگو ({id, after: شناسهٔ آخرین پیام، html}) و flow:
      گامِ نیمه‌کارهٔ بات (مقدار، قیمت، شرط، برچسب پیوست) که متنِ بعدیِ کادرِ پیام جوابِ آن است. pending: صوتی‌های در راه. */
   /* pfRead: «خوانش هوشمند پیش‌فاکتور» (پنل پشتیبانی). خاموش (پیش‌فرضِ فاز ۴ طرح «خرید هوشمند، کارشناس ناظر»): پیش‌فاکتور را
@@ -965,15 +965,15 @@
   /* --- مشخصات: هر قلم در سه کادر --- */
   const fileRow = (f, ed) => `<div class="sp-file"><b>${esc(f.label)}</b><span class="nm" title="${esc(f.filename)}">${esc(f.filename || "")}${f.note ? ` — ${esc(f.note)}` : ""}</span>
     <button class="tp-btn xs" data-open-file="${f.id}">👁 دیدن</button>${ed ? `<button class="tp-btn xs danger" data-del-file="${f.id}">🗑</button>` : ""}</div>`;
-  /** شرایطِ فاکتورِ یک قلم: بستهٔ فرستاده‌شده عکسِ خودش را دارد؛ قلمِ قابل ویرایش شرایطِ جاریِ استعلام را */
+  /** شرایطِ هر قلم مستقل است؛ بستهٔ فرستاده‌شده عکسِ شرایطِ همان خط را برمی‌گرداند */
   function termsFor(l) {
     if (l.bundle_id && !EDITABLE.includes(l.state)) { const b = S.d.bundles.find((x) => x.id === l.bundle_id); if (b && b.line_terms && b.line_terms[l.id]) return b.line_terms[l.id]; if (b && b.terms && Object.keys(b.terms).length) return b.terms; }
-    if (l.model_id && S.lineTerms[l.id]) return S.lineTerms[l.id];
+    if (S.lineTerms[l.id]) return S.lineTerms[l.id];
     return S.termsDraft || {};
   }
   const setTerm = (f, v, l) => {
-    if (l && l.model_id) { S.lineTerms[l.id] = { ...termsFor(l), [f]: v }; S.dirty.add(l.id); return; }
-    S.termsDraft = { ...(S.termsDraft || {}), [f]: v }; S.termsDirty = true;
+    if (!l) return;
+    S.lineTerms[l.id] = { ...termsFor(l), [f]: v }; S.dirty.add(l.id);
   };
   /* فاز ۴ب گام ۳: «📋 شرایط خرید»ِ شرکت — قیدِ 🔒ِ مشترکِ اقلامِ قابلِ ویرایش (sp-core.js:threadFull) و خواستهٔ 🔓ِ هر قلم.
      🔒 بیرون از قید پذیرفته نیست (سرور هم می‌سنجد)؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
@@ -1278,12 +1278,11 @@
     Q("[data-ready-sum]").forEach((b) => { b.onclick = async () => { const id = cardOf(b).id; try { await api(`/sp/line/${id}/ready`, { json: { on: true } }); await loadThread(); } catch (e) { say(e.message); } }; });
     Q("[data-f], [data-ly]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); if (i.dataset.f === "qty" || i.dataset.f === "price") recalc(x.c); }; });
     Q("[data-pr], [data-rt]").forEach((i) => { i.oninput = () => { const x = cardOf(i); S.dirty.add(x.id); pricesCalc(x.c, i); }; });
-    /* شرایطِ قلم‌های بدون مدل مشترک‌اند؛ هر مدل شرایطِ خودش را دارد */
+    /* هر تغییر فقط روی شرایطِ همان قلم ذخیره می‌شود */
     Q("[data-t]").forEach((i) => {
       const sync = () => {
         const line = lineOf(cardOf(i).id);
         setTerm(i.dataset.t, i.value, line);
-        if (!line.model_id) Q(`[data-t="${i.dataset.t}"]`).forEach((o) => { const other = lineOf(cardOf(o).id); if (other && !other.model_id && o !== i && !o.disabled && !o.readOnly) o.value = i.value; });
       };
       i.oninput = sync; i.onchange = sync;
     });
@@ -1294,7 +1293,6 @@
         $(".sp-jd", box).classList.toggle("hide", !date);
         const v = dtimeOf(box), line = lineOf(cardOf(box).id);
         setTerm("dtime", v, line);
-        if (!line.model_id) Q("[data-dt]").forEach((o) => { const other = lineOf(cardOf(o).id); if (other && !other.model_id && o !== box && !$("[data-dtm]", o).disabled) paintDt(o, v); });
       };
       $$("select, input", box).forEach((i) => { i.oninput = upd; i.onchange = upd; });
     });
@@ -1449,7 +1447,7 @@
     const r = await api(`/sp/thread/${S.th}/terms`, { json: tb });
     S.termsDraft = { ...r.terms }; S.termsDirty = false;
   }
-  /** ذخیرهٔ کارت: مقدار، واحد، قیمت، توضیح، لایه‌های افزوده و (فاز ۴) عنوان و لایه‌های 🔓 — و اگر شرایط فاکتور عوض شده، آن هم (برای همهٔ اقلام) */
+  /** ذخیرهٔ کارت: مشخصات و شرایط فقط روی همین قلم می‌نشینند */
   async function saveLine(id) {
     const c = $(`[data-line="${id}"]`);
     if (!c) return;
@@ -1464,7 +1462,7 @@
       body.prices = {};
       for (const i of pr) { const n = toNum(i.value); if (Number.isNaN(n)) throw new Error(`${PR_FA[i.dataset.pr].replace(/^\S+ /, "")} باید عدد باشد.`); body.prices[i.dataset.pr] = n; }
     }
-    if (S.lineTerms[id] && lineOf(id).model_id) body.terms = S.lineTerms[id];
+    if (S.lineTerms[id]) body.terms = S.lineTerms[id];
     if (S.termsDirty) await saveTerms();
     await api(`/sp/line/${id}`, { method: "PUT", json: body });
     S.dirty.delete(id);

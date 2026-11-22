@@ -1477,7 +1477,7 @@ export function proformaInput(env, th, lines, terms, { no = null, at = now() } =
     company: COMPANY(env), supplier: th.supplier_name, request: { id: th.request_id, party: th.party || "" }, date: jStr(at), no,
     lines: lines.filter((l) => !l.unavailable).map((l) => {
       const ownTerms = l.terms_json ? termsLine(lineTermsOf(l, terms)) : "";
-      return { no: l.no, title: lineTitle(l), layers: [...lineLayers(l).map(({ k, v }) => ({ k, v })), ...(ownTerms ? [{ k: "شرایط این مدل", v: ownTerms }] : [])], extras: extraOf(l),
+      return { no: l.no, title: lineTitle(l), layers: [...lineLayers(l).map(({ k, v }) => ({ k, v })), ...(ownTerms ? [{ k: "شرایط این قلم/مدل", v: ownTerms }] : [])], extras: extraOf(l),
         qty: l.qty, unit: l.unit, price: l.unavailable ? null : l.price, prices: l.unavailable ? null : pricesOf(l), note: l.unavailable ? "تأمین نمی‌کند" : l.note };
     }),
     terms: terms || {},
@@ -1485,7 +1485,7 @@ export function proformaInput(env, th, lines, terms, { no = null, at = now() } =
 }
 /** خانه‌های لازمِ خالی برای پیش‌نمایش: qty:<کد>، price:<کد> و کلیدِ شرایط */
 export function proformaMissing(lines, terms) {
-  const out = [], shared = lines.every((l) => !l.model_id);
+  const out = [], shared = lines.every((l) => !l.terms_json);
   for (const l of lines) {
     if (l.unavailable) continue;
     if (!(Number(l.qty) > 0)) out.push(`qty:${l.no}`);

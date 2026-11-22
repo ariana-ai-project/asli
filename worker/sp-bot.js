@@ -490,7 +490,7 @@ const VAL_PROMPT = {
 /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵؛ terms-locks.js:payModes): گامِ هر ردیفِ قیمت، و پاسخِ «۳٪» درصد است */
 const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" }, STEP_PR = { pc: "cash", p1: "c1", p2: "c2" };
 const lineTerms = (l) => C.lineTermsOf(l, C.termsOf({ terms_json: l && l.thread_terms_json }));
-const saveTerm = (env, sup, l, terms) => l.model_id ? C.lineSave(env, sup, l.id, { terms }) : C.termsSave(env, sup, l.thread_id, terms);
+const saveTerm = (env, sup, l, terms) => C.lineSave(env, sup, l.id, { terms });
 const pctOf = (s) => { const x = C.latin(String(s || "")).replace(/[٬,\s]/g, ""); const m = /^(-?\d+(?:[.٫]\d+)?)(?:%|٪|درصد)$/.exec(x); return m ? Number(m[1].replace("٫", ".")) : null; };
 /** حالتِ قیمتِ یک خط (null یعنی همان یک قیمت) */
 const payModesOfLine = async (env, l) => payModes((await C.limitsOfLines(env, [l])).get(l.item_id));
@@ -531,7 +531,7 @@ async function askValue(env, row, l, f, head, yi, opt) {
   if (wz) { wz.mid = r && r.message_id; P.setFlow(row, { ...P.flowOf(row), wz }); }
   return { ok: true };
 }
-/* شرایطِ فاکتور: برای قلمِ عادی مشترک و برای هر مدل مستقل؛ فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
+/* شرایطِ هر قلم یا مدل مستقل است؛ فهرستی‌ها با دکمه، زمان تحویل و اعتبار با نوشتن */
 const TERM_PROMPT = {
   d: "🚚 <b>زمان تحویل</b> را بنویسید — تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری):",
   x: "📅 <b>اعتبار پیش‌فاکتور</b> را به روز بنویسید (مثلاً ۷):",
@@ -541,7 +541,7 @@ async function askTerm(env, row, l, k, head, opt) {
   const f = P.TERM_KEY[k];
   const wz = opt && opt.wz;
   const top = `${head ? `${head}\n\n` : ""}<b>${esc(P.lineTag(l))}</b>\n`;
-  const scope = l.model_id ? "فقط برای همین مدل" : "برای همهٔ اقلامِ این استعلام";
+  const scope = "فقط برای همین قلم";
   const skipRow = wz ? [[{ text: "⏭ رد شدن", callback_data: `wz:${l.id}:s` }]] : [];
   /* فاز ۴ب گام ۳: شرطِ 🔒ِ شرکت برای همین قلم — فقط گزینه‌های مجاز، و بازهٔ تحویل در پرسش (سرور هم همین را می‌سنجد) */
   const lk = C.lockOfLines([l], await C.limitsOfLines(env, [l])).lock;
