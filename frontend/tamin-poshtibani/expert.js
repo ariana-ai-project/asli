@@ -1823,7 +1823,7 @@
       <span class="hx-layers">${Object.entries(layers).map(([k, v]) => `<span class="chip">${lk(k) ? "🔒" : "🔓"} ${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("") || `<span class="dim">بی لایه</span>`}</span>
       ${mini ? `<button class="tp-btn sm" data-norm-on title="پنلِ «نرمال‌سازی اقلام» باز شود">▾ نرمال‌سازی اقلام</button>` : fixed ? "" : `<button class="tp-btn sm" data-norm-on>${TP.ui.ICON.edit} ویرایش ساختار</button>`}</section>`;
   }
-  function itemModels(it) { return ((S.d && S.d.models) || []).filter((m) => m.item_id === it.id).sort((a, b) => a.model_no - b.model_no); }
+  function itemModels(it) { return ((S.d && S.d.models) || []).filter((m) => m.item_id === it.id && m.request_id === S.d.request.id).sort((a, b) => a.model_no - b.model_no); }
   function modelDiff(m, list) {
     const base = list.find((x) => x.origin === "expert") || list[0];
     if (!base || base.id === m.id) return "ساختار مبنا";
@@ -1835,7 +1835,7 @@
   function vModels(it) {
     const list = itemModels(it);
     return `<section class="item-models"><div class="toolrow"><b>مدل‌های این قلم</b><span class="chip info">${M(list.length)} مدل</span><span class="dim">مدل‌ها گزینه‌های مختلف همان قلم‌اند و مقدارشان با هم جمع نمی‌شود.</span></div>
-      <div class="model-rail">${list.map((m) => `<button class="model-square ${m.origin === "supplier" ? "from-supplier" : ""}" data-model-copy="${m.id}" title="کپی این مدل در ویرایشگر برای ساخت مدل تازه"><b>مدل ${M(m.model_no)}</b><small>${esc(modelDiff(m, list))}</small><span class="chip ${m.submitted_at ? "ok" : m.sent_at ? "info" : ""}">${m.submitted_at ? "پاسخ رسید" : m.sent_at ? "ارسال شد" : "پیش‌نویس"}</span>${m.origin === "supplier" ? `<span class="chip info">تأمین‌کننده</span>` : ""}</button>`).join("") || `<span class="dim">هنوز مدلی ثبت نشده است.</span>`}</div>
+      <div class="model-rail">${list.map((m) => `<article class="model-square ${m.origin === "supplier" ? "from-supplier" : ""}"><button class="model-copy" data-model-copy="${m.id}" title="کپی این مدل در ویرایشگر برای ساخت مدل تازه"><b>مدل ${M(m.model_no)}</b><small>${esc(modelDiff(m, list))}</small><span class="chip ${m.submitted_at ? "ok" : m.sent_at ? "info" : ""}">${m.submitted_at ? "پاسخ رسید" : m.sent_at ? "ارسال شد" : "پیش‌نویس"}</span>${m.origin === "supplier" ? `<span class="chip info">تأمین‌کننده</span>` : ""}</button><button class="model-delete" data-model-delete="${m.id}" title="${m.sent_at || m.submitted_at ? "بایگانی مدل؛ سوابق حفظ می‌شود" : "حذف مدل پیش‌نویس"}" aria-label="${m.sent_at || m.submitted_at ? "بایگانی" : "حذف"} مدل ${M(m.model_no)}" ${frozen(it) ? "disabled" : ""}>✕</button></article>`).join("") || `<span class="dim">هنوز مدلی ثبت نشده است.</span>`}</div>
       <button class="tp-btn primary sm" data-model-register ${normOk(it) && !frozen(it) ? "" : "disabled"}>＋ ثبت مدل از ساختار جاری</button></section>`;
   }
   function modelNormDraft(it) {
@@ -1869,6 +1869,19 @@
       layers: (m.layers || []).map((l) => ({ k: l.k, t: l.v, u: l.u || "", lk: !m.locks.layers || m.locks.layers[l.k] !== false, i: false })) };
     S.normOn = true; delete S.normMin[it.id]; render();
     okTick(`مدل ${M(m.model_no)} در ویرایشگر نشست؛ تغییرها را انجام و «ثبت مدل» را بزنید.`);
+  }
+  function deleteModelUI(it, id) {
+    if (frozen(it)) return;
+    const m = itemModels(it).find((x) => x.id === Number(id));
+    if (!m) return;
+    const archive = !!(m.sent_at || m.submitted_at);
+    TP.modal(archive ? "بایگانی مدل" : "حذف مدل", `<p>مدل ${M(m.model_no)} از «${esc(it.title)}» در همین درخواست ${archive ? "بایگانی می‌شود و دیگر در ارسال‌های بعدی نمی‌آید. سوابق و استعلام‌هایش حفظ می‌شوند" : "برای همیشه حذف می‌شود"}.</p><p>هیچ تغییری در درخواست یا قلم دیگری رخ نمی‌دهد.</p>`, async () => {
+      try {
+        const r = await TP.api(`/items/${it.id}/models/${m.id}`, { method: "DELETE" });
+        await reload();
+        okTick(r.deleted ? `مدل ${M(m.model_no)} حذف شد.` : `مدل ${M(m.model_no)} بایگانی شد؛ سوابقش حفظ است.`);
+      } catch (e) { TP.modal("حذف مدل نشد", esc(e.message), null, "باشد", ""); }
+    }, archive ? "بایگانی" : "حذف", "انصراف");
   }
   function vHistory(it) {
     const d = S.hist[it.id];
@@ -3539,6 +3552,7 @@
     };
     const modelRegister = G("[data-model-register]"); if (modelRegister) modelRegister.onclick = () => registerModelUI(item());
     Q("[data-model-copy]").forEach((b) => { b.onclick = () => copyModelUI(item(), b.dataset.modelCopy); });
+    Q("[data-model-delete]").forEach((b) => { b.onclick = () => deleteModelUI(item(), b.dataset.modelDelete); });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
     /* 🔒/🔓ِ عنوان، مقدار و هر لایه — در پیش‌نویس؛ با «تأیید» ذخیره می‌شود */
     Q("[data-norm-lock]").forEach((b) => b.onclick = () => {

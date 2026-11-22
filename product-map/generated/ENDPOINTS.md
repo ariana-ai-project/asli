@@ -43,6 +43,7 @@
 | `* legal:/chats/{}` | legal.app | w/legal.js › legalRoute |
 | `* legal:/files/{}` | legal.app | w/legal.js › legalRoute |
 | `DELETE /items/{}/edit` | expert.detail | w/api.js › route |
+| `DELETE /items/{}/models/{}` | engine.structure | w/api.js › route |
 | `DELETE /quotes/{}` | expert.quotes | w/api.js › route |
 | `DELETE /sp/file/{}` | sup.panel | w/sp-api.js › spRoute |
 | `DELETE /templates/{}` | expert.msgtpl | w/api.js › route |

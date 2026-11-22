@@ -6,25 +6,27 @@
 
 ## فایل‌های این قابلیت (صاحب)
 - `worker/estimate.js` — EST_DAY_MAX، EST_PENDING_SQL، EST_QUERY_ROOM، counted، estimateItem، estimateRun، layersFit، pickEstimate، resetEstimate، sameUnit
-- `worker/item-models.js` — MODEL_DDL، createExpertModel، markModelsSent، markModelsSubmitted، migrateSpLineModels، modelById، modelKey، modelOut، modelTargets، modelsOfItems، publishSupplierModel، supplierSpecKey، updateExpertModel
+- `worker/item-models.js` — MODEL_DDL، createExpertModel، deleteExpertModel، markModelsSent، markModelsSubmitted، migrateItemModelScope، migrateSpLineModels، modelById، modelKey، modelOut، modelTargets، modelsOfItems، publishSupplierModel، supplierSpecKey، updateExpertModel
 - `worker/normalize.js` — CUSTOM_LAYERS_KEY، NORM_COST_EST، NORM_PROMPT_VERSION، canonStruct، catalogStruct، clearNorm، confirmNorm، conventionLines، customLayerNames، dbStruct، nearestItems، normOf، normalizeItem، ratesView، revertEdit، scoreHeads، settle، systemPrompt، …
 - `worker/structure.js` — FROZEN_MSG، LAYER_NAME_MAX، NEED_NORM_MSG، NORM_OK_SQL، STRUCT_COLUMNS، STRUCT_DDL، addCustomLayers، changeLog، changeStmt، changesList، cleanLocks، diffLines، locksOf، newLayerName، normConfirmed، structDiff، suggOf، withTqLocks
 
-## مسیرهای سرور (3)
+## مسیرهای سرور (4)
 | مسیر | پاسخ‌گو | ماژول‌هایی که صدا می‌زند | در تست |
 |---|---|---|---|
+| `DELETE /items/{}/models/{}` | w/api.js › route | w/item-models.js#deleteExpertModel | ✓ |
 | `POST /items/{}/models` | w/api.js › route | w/item-models.js#createExpertModel | ✓ |
 | `POST /items/{}/models/{}/publish` | w/api.js › route | w/item-models.js#publishSupplierModel | — |
 | `PUT /items/{}/models/{}` | w/api.js › route | w/item-models.js#updateExpertModel | ✓ |
 
-## فراخوان در پنل‌ها (1)
+## فراخوان در پنل‌ها (2)
+- expert.js › deleteModelUI → `DELETE /items/{}/models/{}` (صفحه: expert.html)
 - expert.js › registerModelUI → `POST /items/{}/models` (صفحه: expert.html)
 
 متغیرهای Worker (نام): AI_MODEL، ANTHROPIC_API_BASE، ANTHROPIC_API_KEY
 
 ## جدول‌ها
 نوشتن: counters، item_changes، item_edits، item_models، items، norm_cache، settings، sp_lines
-خواندن: assignments، experts، requests
+خواندن: assignments، experts، quotes، requests
 هم‌نویس‌های همین جدول‌ها: corr.main، expert.comm، expert.detail، expert.finalcall، infra.core، legal.app، manager.import، sup.panel
 
 ## تست‌ها (6)

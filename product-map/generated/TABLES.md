@@ -75,7 +75,7 @@
 | push_out | notify.push | — |
 | push_subs | notify.push | — |
 | quote_edits | bot.team، expert.finalcall، expert.quotes، infra.core | — |
-| quotes | bot.team، engine.ai، engine.records، engine.tender، expert.finalcall، expert.quotes، infra.core، manager.desk، sup.panel، support.td | corr.main، expert.comm، expert.detail، expert.letter، expert.team، expert.tray، support.app، support.cm، support.dl، support.exp، support.req، support.rules |
+| quotes | bot.team، engine.ai، engine.records، engine.tender، expert.finalcall، expert.quotes، infra.core، manager.desk، sup.panel، support.td | corr.main، engine.structure، expert.comm، expert.detail، expert.letter، expert.team، expert.tray، support.app، support.cm، support.dl، support.exp، support.req، support.rules |
 | quotes_deleted | engine.records | — |
 | req_hist | expert.history، infra.core، manager.desk | manager.reports |
 | requests | expert.detail، infra.core، manager.asg، manager.desk، manager.import | bot.team، corr.main، engine.ai، engine.structure، engine.tender، expert.comm، expert.finalcall، expert.letter، expert.quotes، expert.team، expert.tray، manager.experts، manager.log، manager.reports، sup.panel، support.ai، support.app، support.chat، support.chg، support.cm، support.dl، support.exp، support.fb، support.req، support.td، support.use |

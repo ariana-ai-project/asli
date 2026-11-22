@@ -40,7 +40,7 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 21 |
-| [engine.structure](../features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | 3 | 6 |
+| [engine.structure](../features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | 4 | 6 |
 | [expert.history](../features/expert.history.md) | بررسی سوابق | 6 | 10 |
 
 ## گام 5 — جستجوی هوشمند تأمین‌کنندهٔ تازه

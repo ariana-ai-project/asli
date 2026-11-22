@@ -1048,12 +1048,14 @@ export async function createSupplierModel(env, sup, lineId, body) {
   if (layers.some((l) => !T(l.v))) throw new HttpError("مقدار لایه‌های مدل نمی‌تواند خالی باشد.", 422);
   const head = nrm(parent ? parent.head : source.head) || "مشخصات فنی";
   const key = supplierSpecKey(head, layers, source.thread_id);
+  const item = await env.DB.prepare("SELECT request_id FROM items WHERE id=?").bind(source.item_id).first();
+  if (!item) throw new HttpError("قلمِ مبنای مدل دیگر وجود ندارد.", 409);
   const t = now();
   const top = await env.DB.prepare("SELECT COALESCE(MAX(model_no),0) AS n FROM item_models WHERE item_id=?").bind(source.item_id).first();
   let modelId;
   try {
-    const r = await env.DB.prepare("INSERT INTO item_models (item_id,model_no,head,layers_json,locks_json,spec_key,origin,supplier_id,thread_id,state,created_by,created_at,sent_at) VALUES (?,?,?,?,?,?,'supplier',?,?,'draft',?,?,?)")
-      .bind(source.item_id, (top?.n || 0) + 1, head, JSON.stringify(layers), JSON.stringify(parent ? parent.locks : locks), key, sup.supplier_id, source.thread_id, `supplier:${sup.supplier_id}`, t, t).run();
+    const r = await env.DB.prepare("INSERT INTO item_models (item_id,request_id,model_no,head,layers_json,locks_json,spec_key,origin,supplier_id,thread_id,state,created_by,created_at,sent_at) VALUES (?,?,?,?,?,?,?,'supplier',?,?,'draft',?,?,?)")
+      .bind(source.item_id, item.request_id, (top?.n || 0) + 1, head, JSON.stringify(layers), JSON.stringify(parent ? parent.locks : locks), key, sup.supplier_id, source.thread_id, `supplier:${sup.supplier_id}`, t, t).run();
     modelId = r.meta.last_row_id;
   } catch (e) {
     if (/unique/i.test(String(e && e.message))) throw new HttpError("مدلی با دقیقاً همین نوع و لایه‌ها در این گفت‌وگو وجود دارد.", 409);

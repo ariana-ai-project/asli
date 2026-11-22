@@ -666,6 +666,7 @@
     "worker/structure.js"
    ],
    "endpoints": [
+    "DELETE /items/{}/models/{}",
     "POST /items/{}/models",
     "POST /items/{}/models/{}/publish",
     "PUT /items/{}/models/{}"
@@ -698,8 +699,10 @@
      "item_models",
      "items",
      "norm_cache",
+     "quotes",
      "requests",
-     "settings"
+     "settings",
+     "sp_lines"
     ]
    },
    "related": []
@@ -6382,6 +6385,21 @@
    }
   },
   {
+   "key": "DELETE /items/{}/models/{}",
+   "file": "worker/api.js",
+   "fn": "route",
+   "features": [
+    "engine.structure"
+   ],
+   "uses": [
+    "worker/item-models.js#deleteExpertModel"
+   ],
+   "tables": {
+    "r": [],
+    "w": []
+   }
+  },
+  {
    "key": "DELETE /quotes/{}",
    "file": "worker/api.js",
    "fn": "route",
@@ -12020,6 +12038,13 @@
    "path": "/team/delegate",
    "routes": [
     "POST /team/delegate"
+   ]
+  },
+  {
+   "from": "frontend/tamin-poshtibani/expert.js#deleteModelUI",
+   "path": "/items/{}/models/{}",
+   "routes": [
+    "DELETE /items/{}/models/{}"
    ]
   },
   {

@@ -3,7 +3,7 @@
 > خودکار است؛ دستی ویرایش نکنید. منبع: `product-map/taxonomy.mjs` + کد. بازسازی: `node scripts/map/build.mjs`.
 > اثرِ یک تغییر: `node scripts/map/impact.mjs <فایل|فایل#تابع|مسیر|جدول|قابلیت>` یا `--changed`. راهنمای کامل: `product-map/README.md`.
 
-آمار: 78 قابلیت در 13 بخش | 167 فایل | 363 مسیر (275 در تست صدا زده می‌شوند) | 370 فراخوان پنل | 122 جدول | 91 تست
+آمار: 78 قابلیت در 13 بخش | 167 فایل | 364 مسیر (276 در تست صدا زده می‌شوند) | 371 فراخوان پنل | 122 جدول | 91 تست
 
 نقشه‌های دیگر: [PANELS.md](PANELS.md) پنل ← تب ← قابلیت | [BOTS.md](BOTS.md) دستور و دکمهٔ بات‌ها، Cron | کارتِ هر جریان: workflows/<شناسه>.md
 
@@ -152,7 +152,7 @@
 | [engine.catalog](features/engine.catalog.md) | کاتالوگ و قواعد یکسان‌سازی | catalog-canon.mjs، catalog-head-rules.mjs، catalog-import.js، catalog-rules.mjs (+2) | 3 (3) | 17 |
 | [engine.records](features/engine.records.md) | ثبت سوابق جستجو، کانال‌ها و کمیسیون | w/records.js | 0 | 2 |
 | [engine.strategy](features/engine.strategy.md) | موتور راهبرد خرید (CR-02) | strategy-view.js، w/cr-data.js، w/cr-engine.js، w/critique.js (+13) | 0 | 12 |
-| [engine.structure](features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | w/estimate.js، w/item-models.js، w/normalize.js، w/structure.js | 3 (1) | 6 |
+| [engine.structure](features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | w/estimate.js، w/item-models.js، w/normalize.js، w/structure.js | 4 (1) | 6 |
 | [engine.tender](features/engine.tender.md) | موتور مناقصه | w/tender-core.js، w/tender.js | 0 | 3 |
 
 ### اعلان‌ها (notify)

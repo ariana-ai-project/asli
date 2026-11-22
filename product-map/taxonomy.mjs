@@ -119,7 +119,7 @@ export const FEATURES = [
   { id: "engine.strategy", title: "موتور راهبرد خرید (CR-02)", desc: "راهبرد هر نوع قلم، سند راهبرد، نوبت‌های مذاکره و داده‌های تحقیق CR-02.",
     files: [`${W}strategy/*.js`, `${W}cr-engine.js`, `${W}cr-data.js`, `${W}turn-engine.js`, `${W}critique.js`, `${W}strategy-doc.js`, `${F}strategy-view.js`] },
   { id: "engine.structure", title: "ساختار و یکسان‌سازی اقلام", desc: "نوع قلم، لایه‌ها، قفل‌ها، مدل‌های قلم، یکسان‌سازی و برآورد قیمت هر قلم.",
-    files: [`${W}normalize.js`, `${W}structure.js`, `${W}estimate.js`, `${W}item-models.js`], endpoints: ["POST /items/{}/models", "PUT /items/{}/models/{}", "POST /items/{}/models/{}/publish"] },
+    files: [`${W}normalize.js`, `${W}structure.js`, `${W}estimate.js`, `${W}item-models.js`], endpoints: ["POST /items/{}/models", "PUT /items/{}/models/{}", "DELETE /items/{}/models/{}", "POST /items/{}/models/{}/publish"] },
   { id: "engine.catalog", title: "کاتالوگ و قواعد یکسان‌سازی", desc: "کاتالوگ اقلام و اصناف، قواعد نوع قلم و واحدها (مشترک مرورگر و سرور).",
     files: [`${W}catalog.js`, `${F}catalog-*.mjs`, `${F}catalog-import.js`], endpoints: ["POST /catalog/begin", "POST /catalog/chunk", "POST /catalog/finish"] },
   { id: "engine.records", title: "ثبت سوابق جستجو، کانال‌ها و کمیسیون", desc: "دستورهای ثبتِ تأمین‌کنندگانِ یافته، شماره‌ها و کانال‌ها، رخداد ارجاع و رکورد کمیسیون.",

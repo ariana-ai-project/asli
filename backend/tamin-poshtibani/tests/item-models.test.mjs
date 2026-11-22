@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { sqliteD1 } from "./run.mjs";
 import { ensureSchema, route } from "../../../worker/api.js";
 import { newSession } from "../../../worker/sp-core.js";
-import { migrateSpLineModels } from "../../../worker/item-models.js";
+import { migrateItemModelScope, migrateSpLineModels } from "../../../worker/item-models.js";
 import { commissionData } from "../../../worker/sheets.js";
 import { handleSpUpdate } from "../../../worker/sp-bot.js";
 import { lineCard } from "../../../worker/sp-push.js";
@@ -36,6 +36,9 @@ if (DB) {
   DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-MODEL','1405/08/01','پروژه')").run();
   DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,created_at) VALUES (1,'R-MODEL',2,5,?,?)").run(t, t);
   DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (1,'R-MODEL','p',1,'پمپ صنعتی',2,'دستگاه','open',1,?)").run(norm);
+  DB.raw.prepare("INSERT INTO requests (id,date,party) VALUES ('R-OTHER','1405/08/02','پروژهٔ دیگر')").run();
+  DB.raw.prepare("INSERT INTO assignments (id,request_id,expert_id,days,dispatched_at,created_at) VALUES (2,'R-OTHER',2,5,?,?)").run(t, t);
+  DB.raw.prepare("INSERT INTO items (id,request_id,item_key,line_no,title,qty,unit,state,assignment_id,norm_json) VALUES (2,'R-OTHER','p',1,'پمپ صنعتی',2,'دستگاه','open',2,?)").run(norm);
 }
 
 const modelBody = (brand = "Calpeda", country = "ایتالیا") => ({ head: "پمپ", layers: [{ k: "برند", v: brand }, { k: "توان", v: "۲", u: "کیلووات" }, { k: "کشور", v: country }], locks: { title: true, qty: true, layers: { برند: false, توان: true, کشور: false } } });
@@ -48,6 +51,19 @@ test("چند مدل از یک قلم در یک بسته، قیمت و شرایط
   const m2 = await call("/items/1/models", { headers: EX, body: modelBody("Lowara") });
   assert.equal(m2.data.model_no, 2);
   assert.equal((await call("/assignments/1", { headers: EX })).data.models.length, 2);
+  assert.deepEqual([m1.data.request_id, m2.data.request_id], ["R-MODEL", "R-MODEL"]);
+  const otherBefore = DB.raw.prepare("SELECT norm_json FROM items WHERE id=2").get().norm_json;
+  assert.equal((await call("/assignments/2", { headers: EX })).data.models.length, 0, "مدل به درخواستِ هم‌کد و هم‌نام نشت نمی‌کند");
+  const otherModel = await call("/items/2/models", { headers: EX, body: modelBody() });
+  assert.equal(otherModel.status, 200, JSON.stringify(otherModel.data));
+  assert.equal(otherModel.data.request_id, "R-OTHER");
+  assert.equal((await call("/assignments/1", { headers: EX })).data.models.length, 2);
+  assert.equal((await call("/assignments/2", { headers: EX })).data.models.length, 1);
+  assert.equal(DB.raw.prepare("SELECT norm_json FROM items WHERE id=2").get().norm_json, otherBefore, "ساخت مدل، قلم درخواست دیگر را تغییر نمی‌دهد");
+  DB.raw.prepare("UPDATE item_models SET request_id=NULL WHERE id=?").run(otherModel.data.id);
+  assert.equal((await call("/assignments/2", { headers: EX })).data.models.length, 0, "مدلِ بی‌درخواست در هیچ صفحه‌ای نمایش داده نمی‌شود");
+  await migrateItemModelScope(env);
+  assert.equal((await call("/assignments/2", { headers: EX })).data.models.length, 1, "مهاجرت، درخواستِ مدل‌های قبلی را از خودِ قلم برمی‌گرداند");
 
   const sent = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [1], supplier_name: "تأمین نمونه", phone: "09120000601", label: "فروش" } });
   assert.equal(sent.status, 200, JSON.stringify(sent.data));
@@ -130,6 +146,20 @@ test("چند مدل از یک قلم در یک بسته، قیمت و شرایط
   assert.equal(snapshot.length, 3);
   assert.equal(snapshot.filter((x) => x.supplier_name === "رقیب").length, 1);
   assert.equal(snapshot.find((x) => x.supplier_name === "رقیب").model_id, m2.data.id);
+
+  const disposable = await call("/items/1/models", { headers: EX, body: modelBody("Disposable") });
+  assert.equal(disposable.data.model_no, 4);
+  const removed = await call(`/items/1/models/${disposable.data.id}`, { method: "DELETE", headers: EX });
+  assert.equal(removed.data.deleted, true);
+  assert.equal(DB.raw.prepare("SELECT * FROM item_models WHERE id=?").get(disposable.data.id), undefined, "مدل پیش‌نویس حذف واقعی می‌شود");
+  const archived = await call(`/items/1/models/${m2.data.id}`, { method: "DELETE", headers: EX });
+  assert.equal(archived.data.archived, true);
+  assert.equal(DB.raw.prepare("SELECT state FROM item_models WHERE id=?").get(m2.data.id).state, "archived");
+  assert.ok(DB.raw.prepare("SELECT * FROM quotes WHERE model_id=?").get(m2.data.id), "بایگانی مدل، استعلام و سابقه را حذف نمی‌کند");
+  const afterArchive = await call("/assignments/1", { headers: EX });
+  assert.deepEqual(afterArchive.data.models.map((m) => m.id).sort((a, b) => a - b), [m1.data.id, line3.model_id].sort((a, b) => a - b));
+  const resent = await call("/sp/x/send", { headers: EX, body: { assignment_id: 1, item_ids: [1], supplier_name: "تأمین بعد از بایگانی", phone: "09120000602", label: "فروش" } });
+  assert.deepEqual(resent.data.lines.map((l) => l.model_id), [m1.data.id], "مدل بایگانی دوباره ارسال نمی‌شود");
 });
 
 test("مهاجرت sp_lines: شناسه و محتوای قدیمی حفظ می‌شود و یک قلم می‌تواند مدل دوم بگیرد", { skip: SKIP }, async () => {

@@ -7,8 +7,9 @@ const nkey = (v) => nrm(v).replace(/‌/g, " ").toLowerCase();
 const parse = (v, d) => { try { return v ? JSON.parse(v) : d; } catch { return d; } };
 
 export const MODEL_DDL = `
-CREATE TABLE IF NOT EXISTS item_models (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, model_no INTEGER NOT NULL, head TEXT NOT NULL, layers_json TEXT NOT NULL, locks_json TEXT, spec_key TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'expert', supplier_id INTEGER, thread_id INTEGER, state TEXT NOT NULL DEFAULT 'draft', created_by TEXT, created_at INTEGER NOT NULL, sent_at INTEGER, submitted_at INTEGER, published INTEGER NOT NULL DEFAULT 0, UNIQUE(item_id, model_no), UNIQUE(item_id, spec_key));
+CREATE TABLE IF NOT EXISTS item_models (id INTEGER PRIMARY KEY, item_id INTEGER NOT NULL, request_id TEXT, model_no INTEGER NOT NULL, head TEXT NOT NULL, layers_json TEXT NOT NULL, locks_json TEXT, spec_key TEXT NOT NULL, origin TEXT NOT NULL DEFAULT 'expert', supplier_id INTEGER, thread_id INTEGER, state TEXT NOT NULL DEFAULT 'draft', created_by TEXT, created_at INTEGER NOT NULL, sent_at INTEGER, submitted_at INTEGER, published INTEGER NOT NULL DEFAULT 0, UNIQUE(item_id, model_no), UNIQUE(item_id, spec_key));
 CREATE INDEX IF NOT EXISTS ix_im_item ON item_models(item_id, model_no);
+CREATE INDEX IF NOT EXISTS ix_im_request_item ON item_models(request_id, item_id, model_no);
 CREATE INDEX IF NOT EXISTS ix_im_thread ON item_models(thread_id);
 `;
 
@@ -36,22 +37,28 @@ export const supplierSpecKey = (head, layers, threadId) => specKey(head, layers,
 export function modelOut(r) {
   if (!r) return null;
   const layers = parse(r.layers_json, []);
-  return { id: r.id, item_id: r.item_id, model_no: r.model_no, head: r.head, layers, locks: parse(r.locks_json, null) || cleanLocks(null, layers),
+  return { id: r.id, item_id: r.item_id, request_id: r.request_id, model_no: r.model_no, head: r.head, layers, locks: parse(r.locks_json, null) || cleanLocks(null, layers),
     origin: r.origin, supplier_id: r.supplier_id, thread_id: r.thread_id, state: r.state, created_by: r.created_by, created_at: r.created_at,
     sent_at: r.sent_at, submitted_at: r.submitted_at, published: !!r.published };
 }
 
-export async function modelsOfItems(env, itemIds, { forSend = false } = {}) {
+export async function modelsOfItems(env, itemIds, { forSend = false, requestId = null } = {}) {
   const ids = [...new Set((itemIds || []).map(int).filter(Boolean))];
   if (!ids.length) return new Map();
   const out = new Map(ids.map((id) => [id, []]));
-  const where = forSend ? "AND (origin='expert' OR published=1) AND state!='archived'" : "AND (origin='expert' OR published=1 OR submitted_at IS NOT NULL)";
+  const where = forSend ? "AND (m.origin='expert' OR m.published=1)" : "AND (m.origin='expert' OR m.published=1 OR m.submitted_at IS NOT NULL)";
   for (let i = 0; i < ids.length; i += 80) {
     const part = ids.slice(i, i + 80);
-    const rows = (await env.DB.prepare(`SELECT * FROM item_models WHERE item_id IN (${part.map(() => "?").join(",")}) ${where} ORDER BY model_no, id`).bind(...part).all()).results || [];
+    const rows = (await env.DB.prepare(`SELECT m.* FROM item_models m JOIN items scoped ON scoped.id=m.item_id AND scoped.request_id=m.request_id
+      WHERE m.item_id IN (${part.map(() => "?").join(",")}) AND m.state!='archived' ${where} ${requestId ? "AND m.request_id=?" : ""} ORDER BY m.model_no, m.id`)
+      .bind(...part, ...(requestId ? [requestId] : [])).all()).results || [];
     for (const r of rows) out.get(r.item_id).push(modelOut(r));
   }
   return out;
+}
+
+export async function migrateItemModelScope(env) {
+  await env.DB.prepare("UPDATE item_models SET request_id=(SELECT request_id FROM items WHERE items.id=item_models.item_id) WHERE request_id IS NULL").run();
 }
 
 export async function modelById(env, id) {
@@ -86,8 +93,8 @@ export async function createExpertModel(env, ex, itemId, body) {
   const top = await env.DB.prepare("SELECT COALESCE(MAX(model_no),0) AS n FROM item_models WHERE item_id=?").bind(item.id).first();
   const key = specKey(head, layers, "expert");
   try {
-    const r = await env.DB.prepare("INSERT INTO item_models (item_id,model_no,head,layers_json,locks_json,spec_key,origin,state,created_by,created_at) VALUES (?,?,?,?,?,?,'expert','draft',?,?)")
-      .bind(item.id, (top?.n || 0) + 1, head, JSON.stringify(layers), JSON.stringify(locks), key, `expert:${ex.id}`, t).run();
+    const r = await env.DB.prepare("INSERT INTO item_models (item_id,request_id,model_no,head,layers_json,locks_json,spec_key,origin,state,created_by,created_at) VALUES (?,?,?,?,?,?,?,'expert','draft',?,?)")
+      .bind(item.id, item.request_id, (top?.n || 0) + 1, head, JSON.stringify(layers), JSON.stringify(locks), key, `expert:${ex.id}`, t).run();
     return modelById(env, r.meta.last_row_id);
   } catch (e) {
     if (/unique/i.test(String(e && e.message))) throw new HttpError("مدلی با دقیقاً همین نوع و لایه‌ها قبلاً ثبت شده است.", 409);
@@ -120,6 +127,23 @@ export async function publishSupplierModel(env, ex, itemId, modelId) {
   if (!m || m.item_id !== int(itemId) || m.origin !== "supplier" || !m.submitted_at) throw new HttpError("مدل پیشنهادیِ ارسال‌شده پیدا نشد.", 404);
   await env.DB.prepare("UPDATE item_models SET published=1 WHERE id=?").bind(m.id).run();
   return modelById(env, m.id);
+}
+
+export async function deleteExpertModel(env, ex, itemId, modelId) {
+  const item = await ownedItem(env, ex, itemId);
+  const m = await modelById(env, modelId);
+  if (!m || m.item_id !== item.id || m.request_id !== item.request_id) throw new HttpError("مدل متعلق به این قلم و درخواست نیست.", 404);
+  if (m.state === "archived") return { ok: true, archived: true, already: true };
+  const [lines, quotes] = await Promise.all([
+    env.DB.prepare("SELECT 1 AS x FROM sp_lines WHERE item_id=? AND model_id=? LIMIT 1").bind(item.id, m.id).first(),
+    env.DB.prepare("SELECT 1 AS x FROM quotes WHERE item_id=? AND model_id=? LIMIT 1").bind(item.id, m.id).first(),
+  ]);
+  if (m.sent_at || m.submitted_at || lines || quotes) {
+    await env.DB.prepare("UPDATE item_models SET state='archived' WHERE id=?").bind(m.id).run();
+    return { ok: true, archived: true };
+  }
+  await env.DB.prepare("DELETE FROM item_models WHERE id=?").bind(m.id).run();
+  return { ok: true, deleted: true };
 }
 
 export async function markModelsSent(env, ids, at = Date.now()) {

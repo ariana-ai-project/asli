@@ -88,7 +88,7 @@ import { getSup, saveSup, holdOn, SUP_FA, SUP_MIN, SUP_MAX } from "./ai-supervis
 import { estimateRun, estimateItem, resetEstimate, EST_PENDING_SQL } from "./estimate.js";
 import { reqSize, reqSizeAgg, sizeRulesOf, getSizeRules, saveSizeRules, SIZE_KEY } from "./size.js";
 import { STRUCT_DDL, STRUCT_COLUMNS, NORM_OK_SQL, normConfirmed, NEED_NORM_MSG, FROZEN_MSG, suggOf, changeStmt, changesList, changeLog, structDiff, diffLines, withTqLocks } from "./structure.js";
-import { MODEL_DDL, modelKey, modelsOfItems, modelById, modelTargets, createExpertModel, updateExpertModel, publishSupplierModel, migrateSpLineModels } from "./item-models.js";
+import { MODEL_DDL, modelKey, modelsOfItems, modelById, modelTargets, createExpertModel, updateExpertModel, publishSupplierModel, deleteExpertModel, migrateItemModelScope, migrateSpLineModels } from "./item-models.js";
 
 const PREFIX = "/tamin-poshtibani/api";
 const DAY = 86400000;
@@ -419,6 +419,7 @@ const COLUMN_MIGRATIONS = [
   ["quotes", "model_id", "INTEGER NOT NULL DEFAULT 0"],
   ["quotes", "model_no", "INTEGER NOT NULL DEFAULT 0"],
   ["quotes", "unavailable", "INTEGER NOT NULL DEFAULT 0"],
+  ["item_models", "request_id", "TEXT"],
 ];
 
 /* تغییر نام ستون. `r2_key` وقتی نوشته شد که قرار بود فایل‌ها در R2 بنشینند؛
@@ -530,6 +531,7 @@ async function ensureSchema(env) {
   await env.DB.exec(SCHEMA.trim().split("\n").filter(Boolean).join("\n"));
   for (const t of DROPPED_TABLES) await env.DB.exec(`DROP TABLE IF EXISTS ${t};`);
   await migrateColumns(env);
+  await migrateItemModelScope(env);
   await migrateSpLineModels(env);
   /* یک شماره برای چند تأمین‌کننده (آبان ۱۴۰۵) — یک بار */
   await migratePhonesMulti(env).catch((e) => console.error("migratePhonesMulti", e && e.message));
@@ -1603,7 +1605,7 @@ async function assignmentDetail(env, aid, who) {
   /* بستهٔ قفل‌شده (sp-core.js:itemLocks): قلمی که برای تأمین‌کننده رفته — پنل ساختارش را فقط‌خواندنی نشان می‌دهد */
   const locks = await itemLocks(env, items.map((i) => i.id));
   for (const i of items) if (locks.has(i.id)) i.sp_lock = locks.get(i.id);
-  const modelMap = await modelsOfItems(env, items.map((i) => i.id));
+  const modelMap = await modelsOfItems(env, items.map((i) => i.id), { requestId: a.request_id });
   const models = [...modelMap.values()].flat();
   const quotes = (await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? ORDER BY id").bind(aid).all()).results || [];
   const proformas = (await env.DB.prepare("SELECT * FROM proformas WHERE assignment_id=?").bind(aid).all()).results || [];
@@ -3030,6 +3032,7 @@ async function route(request, env, ctx) {
     if (path === "/catalog/finish" && m === "POST") { await requireManager(request, env); return json(await catalogFinish(env, await readJson(request))); }
     if ((mm = /^\/items\/(\d+)\/models$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await createExpertModel(env, ex, int(mm[1]), await readJson(request))); }
     if ((mm = /^\/items\/(\d+)\/models\/(\d+)$/.exec(path)) && m === "PUT") { const ex = await requireExpert(request, env); return json(await updateExpertModel(env, ex, int(mm[1]), int(mm[2]), await readJson(request))); }
+    if ((mm = /^\/items\/(\d+)\/models\/(\d+)$/.exec(path)) && m === "DELETE") { const ex = await requireExpert(request, env); return json(await deleteExpertModel(env, ex, int(mm[1]), int(mm[2]))); }
     if ((mm = /^\/items\/(\d+)\/models\/(\d+)\/publish$/.exec(path)) && m === "POST") { const ex = await requireExpert(request, env); return json(await publishSupplierModel(env, ex, int(mm[1]), int(mm[2]))); }
     /* نرمال‌سازی اقلام: ساختار از دیتابیس (کد، بعد عنوان) یا فقط برای قلمِ تازه از مدل؛ ذخیرهٔ کارشناس
        (روی قلم و در دیتابیس اصلی) و برداشتنش — worker/normalize.js */
