@@ -70,10 +70,11 @@ const proforma = (extra) => ({
 
 const ITEMS = [{ id: 1, qty: 4, unit: "عدد" }, { id: 2, qty: 10, unit: "شاخه" }];
 
-/* ستون‌های INSERT، به همان ترتیبِ دستور — تا تست با اندیس خام کار نکند */
-const COLS = ["assignment_id", "item_id", "supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship",
-  "invoice", "pay", "vat", "place", "place_other", "saved", "low_conf", "created_at", "updated_at"];
-const rowOf = (stmt) => Object.fromEntries(COLS.map((c, i) => [c, stmt.args[i]]));
+const rowOf = (stmt) => {
+  const m = /INSERT INTO quotes \(([^)]+)\) VALUES/i.exec(stmt.sql);
+  const cols = m ? m[1].split(",").map((x) => x.trim()) : [];
+  return Object.fromEntries(cols.map((c, i) => [c, stmt.args[i]]));
+};
 const inserts = (db) => db.batches[0].filter((x) => x.sql.includes("INSERT INTO quotes")).map(rowOf);
 
 test("بدون هیچ خط قبلی، دو خط استعلام تازه ساخته می‌شود", async () => {

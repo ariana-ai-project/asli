@@ -43,6 +43,7 @@
 | `* legal:/chats/{}` | legal.app | w/legal.js › legalRoute |
 | `* legal:/files/{}` | legal.app | w/legal.js › legalRoute |
 | `DELETE /items/{}/edit` | expert.detail | w/api.js › route |
+| `DELETE /items/{}/models/{}` | engine.structure | w/api.js › route |
 | `DELETE /quotes/{}` | expert.quotes | w/api.js › route |
 | `DELETE /sp/file/{}` | sup.panel | w/sp-api.js › spRoute |
 | `DELETE /templates/{}` | expert.msgtpl | w/api.js › route |
@@ -220,6 +221,8 @@
 | `POST /items/{}/ai-start` | expert.ai | w/ai-agent.js › picksRoute |
 | `POST /items/{}/commission` | expert.comm | w/api.js › route |
 | `POST /items/{}/estimate` | expert.detail | w/api.js › route |
+| `POST /items/{}/models` | engine.structure | w/api.js › route |
+| `POST /items/{}/models/{}/publish` | engine.structure | w/api.js › route |
 | `POST /items/{}/normalize` | expert.detail | w/api.js › route |
 | `POST /items/{}/progress` | expert.detail | w/api.js › route |
 | `POST /items/state` | manager.desk | w/api.js › route |
@@ -247,7 +250,9 @@
 | `POST /site/login` | infra.site | w/api.js › route |
 | `POST /site/sms/test` | infra.site | w/api.js › route |
 | `POST /sp/bundle/{}/proforma` | sup.panel | w/sp-api.js › spRoute |
+| `POST /sp/line/{}/availability` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/line/{}/file` | sup.panel | w/sp-api.js › spRoute |
+| `POST /sp/line/{}/model` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/line/{}/ready` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/line/{}/revise` | sup.panel | w/sp-api.js › spRoute |
 | `POST /sp/login` | login.supplier | w/sp-api.js › spRoute |
@@ -329,6 +334,7 @@
 | `PUT /experts/{}` | manager.experts | w/api.js › route |
 | `PUT /holidays` | manager.alerts | w/api.js › route |
 | `PUT /items/{}/locks` | expert.detail | w/api.js › route |
+| `PUT /items/{}/models/{}` | engine.structure | w/api.js › route |
 | `PUT /items/{}/terms` | expert.terms | w/api.js › route |
 | `PUT /me/alerts` | expert.alerts | w/api.js › route |
 | `PUT /me/code` | expert.account | w/api.js › route |

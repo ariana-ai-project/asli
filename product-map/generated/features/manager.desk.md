@@ -46,17 +46,18 @@
 | `seen:` | w/bot.js › onCallback | w/assign.js › seenKb |
 
 ## جدول‌ها
-نوشتن: alerts، assignments، commission_notes، commission_results، decisions، events، fm_choice، items، letters، outbox، proformas، quotes، req_hist، requests، smart_jobs، smart_searches، tenders، tg_flows، tg_nav، tg_uploads
+نوشتن: alerts، assignments، commission_notes، commission_results، decisions، events، fm_choice، item_models، items، letters، outbox، proformas، quotes، req_hist، requests، smart_jobs، smart_searches، tenders، tg_flows، tg_nav، tg_uploads
 خواندن: ai_agents، ai_runs، alarms، expert_scores، experts، holidays، imports، settings، sp_threads، weights
-هم‌نویس‌های همین جدول‌ها: bot.team، engine.ai، engine.records، engine.tender، expert.ai، expert.detail، expert.history، expert.letter، expert.quotes، expert.smart، infra.core، manager.asg، manager.import، manager.log، notify.telegram، sup.panel، support.cm، support.td
+هم‌نویس‌های همین جدول‌ها: bot.team، engine.ai، engine.records، engine.structure، engine.tender، expert.ai، expert.detail، expert.history، expert.letter، expert.quotes، expert.smart، infra.core، manager.asg، manager.import، manager.log، notify.telegram، sup.panel، support.cm، support.td
 
-## تست‌ها (13)
+## تست‌ها (14)
 - assign-plan.test.mjs
 - assign.test.mjs
 - commission-result.test.mjs
 - cr-turn.test.mjs
 - d1-budget.test.mjs
 - execution-ready.test.mjs
+- item-models.test.mjs
 - orphans.test.mjs
 - push-hooks.test.mjs
 - reports.test.mjs
@@ -66,7 +67,7 @@
 - tender-refer.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/assign.test.mjs backend/tamin-poshtibani/tests/commission-result.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/orphans.test.mjs backend/tamin-poshtibani/tests/push-hooks.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/size-estimate.test.mjs backend/tamin-poshtibani/tests/state-notify.test.mjs backend/tamin-poshtibani/tests/tender-refer.test.mjs
+node --test backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/assign.test.mjs backend/tamin-poshtibani/tests/commission-result.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/orphans.test.mjs backend/tamin-poshtibani/tests/push-hooks.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/size-estimate.test.mjs backend/tamin-poshtibani/tests/state-notify.test.mjs backend/tamin-poshtibani/tests/tender-refer.test.mjs
 ```
 
 ## مرتبط

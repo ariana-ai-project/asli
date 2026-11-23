@@ -962,7 +962,8 @@ test("بات تأمین‌کننده: شرایط فاکتور گام‌به‌گ
   n = calls.length;
   await cb(`tv:${line}:i:0`);
   await cb(`tv:${line}:v:0`);
-  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد" });
+  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_lines WHERE id=?").get(line).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد" });
+  assert.equal(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json, null, "شرایط روی خود قلم است، نه مشترکِ گفت‌وگو");
   /* فاز ۴: «اعتبار پیش‌فاکتور» هم اجباری است — بات همان را می‌پرسد */
   assert.match(lastTo(n).body.text, /اعتبار پیش‌فاکتور<\/b> را به روز بنویسید/);
   n = calls.length;
@@ -1044,7 +1045,8 @@ test("بات تأمین‌کننده: «📝 پر کردن اطلاعات» — 
   assert.equal(DB.raw.prepare("SELECT flow_json FROM sp_tg WHERE chat=?").get(String(C10)).flow_json, null, "گامی نمانده");
   const L = DB.raw.prepare("SELECT * FROM sp_lines WHERE id=?").get(line);
   assert.equal(L.price, 2900);
-  assert.deepEqual(JSON.parse(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 });
+  assert.deepEqual(JSON.parse(L.terms_json), { dtime: "10", pay: "نقدی", invoice: "رسمی", vat: "دارد", valid_days: 7 });
+  assert.equal(DB.raw.prepare("SELECT terms_json FROM sp_threads WHERE id=?").get(th).terms_json, null);
 });
 test("پیامکِ واقعی با TextBee: استعلام و «ارسال رمز» به گوشیِ تأمین‌کننده، رمز پیش کارشناس نمی‌آید؛ «فرضی» دیگر نیست؛ سقفِ پلن ← شبیه‌سازی؛ سقفِ روزانهٔ رمز", { skip: SKIP }, async () => {
   env.TEXTBEE_API_KEY = "tbk"; env.TEXTBEE_API_BASE = "https://sms.test";

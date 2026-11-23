@@ -68,6 +68,10 @@
 .sp-chip.lock { background: rgba(120,165,255,.1); }
 .sp-chip.add { border-style: dashed; border-color: var(--tp-accent); }
 .sp-chip i { font-style: normal; color: var(--tp-muted); }
+.sp-chip.changed, .sp-open.changed { border-color: rgba(217,119,6,.7) !important; background: rgba(245,158,11,.14) !important; color: #92400e !important; font-weight: 700; }
+.sp-availability { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 9px 0; margin: 8px 0; border-block: 1px solid var(--tp-line); }
+.sp-availability .tp-btn.on { border-color: #16a34a; background: rgba(22,163,74,.14); color: #15803d; }
+.sp-availability .tp-btn.off { border-color: #dc2626; background: rgba(220,38,38,.1); color: #b91c1c; }
 .sp-chip button { border: none; background: none; color: var(--tp-over); padding: 0 2px; font-size: .9rem; }
 .sp-grid4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
 .sp-grid4 label, .sp-field { display: flex; flex-direction: column; gap: 3px; font-size: .78rem; color: var(--tp-muted); }

@@ -68,9 +68,9 @@
 ## جدول‌ها
 نوشتن: ai_log، ai_props، ai_rates، ai_runs، ai_threads، events، settings، sp_bundles، sp_lines، sp_links، sp_phones، sp_sms، sp_tg، sp_threads
 خواندن: ai_agents، assignments، cr_facts، cr_turns، items، letters، proformas، quotes، requests، sp_msgs، sp_suppliers
-هم‌نویس‌های همین جدول‌ها: bot.sp، engine.ai، expert.ai، expert.finalcall، infra.core، login.supplier، notify.sms، sup.panel، support.ai، support.cm، support.fb
+هم‌نویس‌های همین جدول‌ها: bot.sp، engine.ai، engine.structure، expert.ai، expert.finalcall، infra.core، login.supplier، notify.sms، sup.panel، support.ai، support.cm، support.fb
 
-## تست‌ها (23)
+## تست‌ها (24)
 - ai-feedback.test.mjs
 - ai-mode-live.test.mjs
 - ai-phase2.test.mjs
@@ -82,6 +82,7 @@
 - cr-turn.test.mjs
 - d1-budget.test.mjs
 - final-call.test.mjs
+- item-models.test.mjs
 - login.test.mjs
 - multiprice.test.mjs
 - neg-view.test.mjs
@@ -96,7 +97,7 @@
 - w3-props.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/ai-feedback.test.mjs backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-rates.test.mjs backend/tamin-poshtibani/tests/cr-boxes.test.mjs backend/tamin-poshtibani/tests/cr-doc.test.mjs backend/tamin-poshtibani/tests/cr-hold.test.mjs backend/tamin-poshtibani/tests/cr-picks.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/login.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/neg-view.test.mjs backend/tamin-poshtibani/tests/phase4.test.mjs backend/tamin-poshtibani/tests/phase4b2.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/phase4b4.test.mjs backend/tamin-poshtibani/tests/sms-provider.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/takeover.test.mjs backend/tamin-poshtibani/tests/terms-company.test.mjs backend/tamin-poshtibani/tests/w3-props.test.mjs
+node --test backend/tamin-poshtibani/tests/ai-feedback.test.mjs backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-rates.test.mjs backend/tamin-poshtibani/tests/cr-boxes.test.mjs backend/tamin-poshtibani/tests/cr-doc.test.mjs backend/tamin-poshtibani/tests/cr-hold.test.mjs backend/tamin-poshtibani/tests/cr-picks.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/login.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/neg-view.test.mjs backend/tamin-poshtibani/tests/phase4.test.mjs backend/tamin-poshtibani/tests/phase4b2.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/phase4b4.test.mjs backend/tamin-poshtibani/tests/sms-provider.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/takeover.test.mjs backend/tamin-poshtibani/tests/terms-company.test.mjs backend/tamin-poshtibani/tests/w3-props.test.mjs
 ```
 
 ## مرتبط

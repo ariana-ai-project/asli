@@ -1823,6 +1823,66 @@
       <span class="hx-layers">${Object.entries(layers).map(([k, v]) => `<span class="chip">${lk(k) ? "🔒" : "🔓"} ${esc(k)}: <b>${esc(showLayer(v))}</b></span>`).join("") || `<span class="dim">بی لایه</span>`}</span>
       ${mini ? `<button class="tp-btn sm" data-norm-on title="پنلِ «نرمال‌سازی اقلام» باز شود">▾ نرمال‌سازی اقلام</button>` : fixed ? "" : `<button class="tp-btn sm" data-norm-on>${TP.ui.ICON.edit} ویرایش ساختار</button>`}</section>`;
   }
+  function itemModels(it) { return ((S.d && S.d.models) || []).filter((m) => m.item_id === it.id && m.request_id === S.d.request.id).sort((a, b) => a.model_no - b.model_no); }
+  function modelDiff(m, list) {
+    const base = list.find((x) => x.origin === "expert") || list[0];
+    if (!base || base.id === m.id) return "ساختار مبنا";
+    return (m.layers || []).filter((l) => {
+      const old = (base.layers || []).find((x) => x.k === l.k);
+      return old && `${old.v}${old.u || ""}` !== `${l.v}${l.u || ""}`;
+    }).map((l) => `${l.k}: ${l.v}${l.u ? ` ${l.u}` : ""}`).join(" · ") || "ساختار مبنا";
+  }
+  function vModels(it) {
+    const list = itemModels(it);
+    return `<section class="item-models"><div class="toolrow"><b>مدل‌های این قلم</b><span class="chip info">${M(list.length)} مدل</span><span class="dim">مدل‌ها گزینه‌های مختلف همان قلم‌اند و مقدارشان با هم جمع نمی‌شود.</span></div>
+      <div class="model-rail">${list.map((m) => `<article class="model-square ${m.origin === "supplier" ? "from-supplier" : ""}"><button class="model-copy" data-model-copy="${m.id}" title="کپی این مدل در ویرایشگر برای ساخت مدل تازه"><b>مدل ${M(m.model_no)}</b><small>${esc(modelDiff(m, list))}</small><span class="chip ${m.submitted_at ? "ok" : m.sent_at ? "info" : ""}">${m.submitted_at ? "پاسخ رسید" : m.sent_at ? "ارسال شد" : "پیش‌نویس"}</span>${m.origin === "supplier" ? `<span class="chip info">تأمین‌کننده</span>` : ""}</button><button class="model-delete" data-model-delete="${m.id}" title="${m.sent_at || m.submitted_at ? "بایگانی مدل؛ سوابق حفظ می‌شود" : "حذف مدل پیش‌نویس"}" aria-label="${m.sent_at || m.submitted_at ? "بایگانی" : "حذف"} مدل ${M(m.model_no)}" ${frozen(it) ? "disabled" : ""}>✕</button></article>`).join("") || `<span class="dim">هنوز مدلی ثبت نشده است.</span>`}</div>
+      <button class="tp-btn primary sm" data-model-register ${normOk(it) && !frozen(it) ? "" : "disabled"}>＋ ثبت مدل از ساختار جاری</button></section>`;
+  }
+  function modelNormDraft(it) {
+    const current = S.norm[it.id];
+    if (current && current.draft) return current;
+    let raw = null; try { raw = JSON.parse(it.norm_json || "null"); } catch { raw = null; }
+    if (!raw || !raw.head) return null;
+    const locks = raw.locks || {}, layers = Object.entries(raw.layers || {}).map(([k, v]) => ({ k, t: v && typeof v === "object" ? v.t ?? v.v ?? "" : v, u: v && typeof v === "object" ? v.u || "" : "", lk: !locks.layers || locks.layers[k] !== false, i: false }));
+    S.norm[it.id] = { data: { ...raw, confirmed: true }, draft: { head: raw.head, layers, tl: locks.title !== false, ql: locks.qty !== false } };
+    return S.norm[it.id];
+  }
+  async function registerModelUI(it) {
+    if (!modelNormDraft(it)) await ensureNorm(it);
+    const d = modelNormDraft(it);
+    if (!d || !d.draft) return TP.modal("ساختار خوانده نشده", "اول ساختار قلم را ببینید و تأیید کنید.", null, "باشد", "");
+    const dr = d.draft, tq = tqOf(it);
+    const body = { head: dr.head, layers: dr.layers.map((l) => ({ k: l.k, v: l.t, u: l.u })), locks: { title: tq.title, qty: tq.qty, layers: Object.fromEntries(dr.layers.map((l) => [l.k, l.lk !== false])) } };
+    try {
+      const m = await TP.api(`/items/${it.id}/models`, { body });
+      await reload();
+      okTick(`مدل ${M(m.model_no)} ثبت شد؛ کارتش کنار سایر مدل‌ها قرار گرفت.`);
+    } catch (e) { TP.modal("مدل ثبت نشد", esc(e.message), null, "باشد", ""); }
+  }
+  async function copyModelUI(it, id) {
+    const m = itemModels(it).find((x) => x.id === Number(id));
+    if (!m) return;
+    if (!modelNormDraft(it)) await ensureNorm(it);
+    const n = modelNormDraft(it);
+    if (!n || !n.draft) return;
+    n.draft = { ...n.draft, head: m.head, tl: m.locks.title !== false, ql: m.locks.qty !== false,
+      layers: (m.layers || []).map((l) => ({ k: l.k, t: l.v, u: l.u || "", lk: !m.locks.layers || m.locks.layers[l.k] !== false, i: false })) };
+    S.normOn = true; delete S.normMin[it.id]; render();
+    okTick(`مدل ${M(m.model_no)} در ویرایشگر نشست؛ تغییرها را انجام و «ثبت مدل» را بزنید.`);
+  }
+  function deleteModelUI(it, id) {
+    if (frozen(it)) return;
+    const m = itemModels(it).find((x) => x.id === Number(id));
+    if (!m) return;
+    const archive = !!(m.sent_at || m.submitted_at);
+    TP.modal(archive ? "بایگانی مدل" : "حذف مدل", `<p>مدل ${M(m.model_no)} از «${esc(it.title)}» در همین درخواست ${archive ? "بایگانی می‌شود و دیگر در ارسال‌های بعدی نمی‌آید. سوابق و استعلام‌هایش حفظ می‌شوند" : "برای همیشه حذف می‌شود"}.</p><p>هیچ تغییری در درخواست یا قلم دیگری رخ نمی‌دهد.</p>`, async () => {
+      try {
+        const r = await TP.api(`/items/${it.id}/models/${m.id}`, { method: "DELETE" });
+        await reload();
+        okTick(r.deleted ? `مدل ${M(m.model_no)} حذف شد.` : `مدل ${M(m.model_no)} بایگانی شد؛ سوابقش حفظ است.`);
+      } catch (e) { TP.modal("حذف مدل نشد", esc(e.message), null, "باشد", ""); }
+    }, archive ? "بایگانی" : "حذف", "انصراف");
+  }
   function vHistory(it) {
     const d = S.hist[it.id];
     const canChart = !!(d && d.available !== false && (d.suppliers || []).length);
@@ -1848,10 +1908,11 @@
           <input type="range" min="1" max="10" step="1" data-mom value="${S.mom}" style="width:140px;accent-color:#4f8cff"><b class="num" data-mom-val>${M(S.mom)}</b></label>
         <label class="chkline" title="به‌جای «قیمت روز» با نرخ دلار، تعدیلِ شاخصِ مرکز آمار (مبلغ به زمستان ۱۴۰۴)"><input type="checkbox" data-pidx ${S.priceIdx ? "checked" : ""}> تعدیل مرکز آمار (زمستان ۱۴۰۴)</label></div></details></section>`;
     /* ساختار: تأییدنشده یا «قلم انتخابی» یا ویرایش → ویرایشگرِ کامل؛ وگرنه یک خطِ خلاصه */
+    const models = vModels(it);
     const norm = editing ? `<div class="hx-step ${ok ? "" : "need"}">${ok ? "" : `<div class="hx-stepn"><b>۱</b> ساختارِ قلم را ببینید و تأیید کنید</div>`}${vNorm(it)}</div>` : vStructSum(it, mini);
 
-    if (!d) return `<div class="pad hx">${head}${norm}${vTerms(it)}${vPicks(it)}${ok ? `<div class="hx-none">${TP.ui.ICON.search}<b>سوابق هنوز خوانده نشده</b><span>حالت جستجو را بزنید و «بررسی سوابق»</span></div>` : ""}</div>`;
-    if (d.available === false) return `<div class="pad hx">${head}${norm}${vTerms(it)}${vPicks(it)}<div class="chip warn">${esc(d.message)}</div></div>`;
+    if (!d) return `<div class="pad hx">${head}${models}${norm}${vTerms(it)}${vPicks(it)}${ok ? `<div class="hx-none">${TP.ui.ICON.search}<b>سوابق هنوز خوانده نشده</b><span>حالت جستجو را بزنید و «بررسی سوابق»</span></div>` : ""}</div>`;
+    if (d.available === false) return `<div class="pad hx">${head}${models}${norm}${vTerms(it)}${vPicks(it)}<div class="chip warn">${esc(d.message)}</div></div>`;
     const st = d.struct || {}, mt = d.match || {};
     const unit = d.item && d.item.unit ? ` ${esc(d.item.unit)}` : "";
     const exc = d.excluded || [];
@@ -1870,7 +1931,7 @@
         ${warns.length || rates.length ? `<details class="hx-warn"><summary class="chip ${warns.length ? "warn" : ""}">${warns.length ? `⚠ ${M(warns.length)} نکته` : "جزئیات"}</summary><div>${warns.map((w) => `<div>• ${esc(w)}</div>`).join("")}${rates.length ? `<div class="dim">نرخ‌ها: ${esc(rates.join("، "))}</div>` : ""}</div></details>` : ""}
         ${(d.titles || []).length ? `<details class="hx-warn"><summary class="chip">اقلامِ شمرده‌شده (${M(d.titles.length)}${mt.codes > d.titles.length ? "+" : ""})</summary><div class="hx-titles">${d.titles.map((x) => `<span class="chip" title="${esc(Object.entries(x.layers || {}).map(([k, v]) => `${k}: ${showLayer(v)}`).join(" · "))}">${esc(x.title)} <span class="dim num">${esc(x.code)} · ${M(x.n)}</span></span>`).join("")}</div></details>` : ""}</div>`;
     const rows = histRows(d);
-    if (!rows.length) return `<div class="pad hx">${head}${norm}${sum}${vTerms(it)}${vPicks(it)}<div class="chip warn">${exc.length
+    if (!rows.length) return `<div class="pad hx">${head}${models}${norm}${sum}${vTerms(it)}${vPicks(it)}<div class="chip warn">${exc.length
       ? `هرچه از این قلم ثبت شده زیر «${esc(exc[0].name)}» است (${M(exc[0].n)} خرید) و تأمین‌کنندهٔ واقعیِ نام‌داری ندارد.`
       : esc(d.message || "برای این قلم سابقه‌ای پیدا نشد.")}</div></div>`;
 
@@ -1882,6 +1943,7 @@
     return `<div class="pad hx">
       ${vProfile(it)}
       ${head}
+      ${models}
       ${norm}
       ${vTerms(it)}${vPicks(it)}
       ${sum}
@@ -2720,16 +2782,16 @@
         <span class="dim" style="font-size:.85rem">${TP.ui.info("expert.quotes", "راهنمای استعلامات")}</span></div>
       ${Q.length ? `<div class="qsrc-legend" aria-label="منبعِ خانه‌ها"><span><i class="qsrc s-manual">✋</i> دستی</span><span><i class="qsrc s-bundle_ai">🤖</i> بستهٔ مذاکرهٔ هوشمند</span><span><i class="qsrc s-bundle">📦</i> بستهٔ پنلِ تأمین‌کننده</span><span><i class="qsrc s-pf">📄</i> خوانشِ پیش‌فاکتور</span><span><i class="qsrc s-pf_off">🧾</i> پیش‌فاکتورِ رسمی</span><span><i class="qsrc s-tender">🏷</i> مناقصه</span><span><i class="qsrc s-company">🏢</i> شرطِ شرکت</span></div>
         <div class="tp-scroll" data-keep-scroll style="max-height:56vh"><table class="tp-table q"><thead><tr>
-        <th${manualA() ? ' title="اختیاری: بی تیک، همهٔ «ثبت موقت»ها به جدول کمیسیون می‌روند؛ اگر برای قلمی تیک بزنید، فقط تیک‌خورده‌های همان قلم"' : ""}>تأیید نهایی${manualA() ? OPTL : ""}</th><th class="rt">تأمین‌کننده</th><th>قلم</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
+        <th${manualA() ? ' title="اختیاری: بی تیک، همهٔ «ثبت موقت»ها به جدول کمیسیون می‌روند؛ اگر برای مدلی تیک بزنید، فقط تیک‌خورده‌های همان مدل"' : ""}>تأیید نهایی${manualA() ? OPTL : ""}</th><th class="rt">تأمین‌کننده</th><th>قلم</th><th>مدل</th>${QF.map((f) => `<th>${f[1]}${f[4] ? OPTL : ""}</th>`).join("")}<th>نوع فاکتور</th><th>شرایط تسویه</th><th>ارزش افزوده</th><th>محل معامله${OPTL}</th><th>محل تحویل${OPTL}</th><th>قیمت کل</th><th>پیش‌فاکتور</th><th>استخراج</th><th>ثبت موقت</th><th></th></tr></thead><tbody>
         ${Q.map((q) => { const ed = qEditable(q); return `<tr>
           <td><input type="checkbox" data-fin="${q.id}" ${q.final ? "checked" : ""} ${q.ai ? "disabled title=\"خطِ کارشناس هوشمند — تأیید نهایی‌اش با خودِ اوست\"" : ""}></td>
           <td class="rt">${esc(q.supplier_name)}${ed ? `<input class="tp-input qcode num" data-qf="${q.id}|supplier_code" data-opt="1" value="${esc(q.supplier_code || "")}" placeholder="کد (اختیاری)" title="کد تأمین‌کننده — برای همهٔ خط‌های همین تأمین‌کننده" aria-label="کد تأمین‌کننده">` : q.supplier_code ? `<div class="dim num" style="font-size:.75rem">${esc(q.supplier_code)}</div>` : ""}${q.origin === "supplier" ? `<div><span class="chip ok" title="از پنل تأمین‌کننده، با تأیید نهایی کارشناس">پنل تأمین‌کننده</span></div>` : q.origin === "tender" ? `<div><span class="chip" title="از مناقصهٔ آنلاین">مناقصه</span></div>` : ""}${q.ai_live ? `<div><span class="chip info" title="کارشناس هوشمند همین حالا با این تأمین‌کننده مذاکره می‌کند؛ تا پایانِ مذاکره یا «🚨 باز کردن» دستی عوض نمی‌شود">🤖 در حالِ مذاکره</span></div>` : q.ai ? `<div><span class="chip info" title="کارشناس هوشمند ساخته؛ مذاکره‌اش تمام شده و خانه‌ها دستی هم ویرایش می‌شوند">🤖 کارشناس هوشمند</span></div>` : aiMode() ? `<div><span class="chip warn" title="خطِ دستیِ خودِ کارشناس">✋ دستی</span></div>` : ""}</td>
-          <td class="ro item">${esc(itemTitle(q.item_id))}</td>
+          <td class="ro item">${esc(itemTitle(q.item_id))}</td><td>${q.model_no ? `<span class="chip info">مدل ${M(q.model_no)}</span>` : `<span class="dim">—</span>`}</td>
           ${ed ? QF.map(([k, , w, ty, opt]) => edCell(q, k, w, ty, opt)).join("") + edTerms(q) : ro(q)}
           <td class="num"><span data-qtot="${q.id}">${(Number(q.qty) || 0) * (Number(q.price) || 0) ? M((Number(q.qty) || 0) * (Number(q.price) || 0)) : "—"}</span>${qPrices(q)}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : pfCell(q)}</td>
           <td>${q.ai ? `<span class="dim">🤖</span>` : exCell(q)}</td>
-          <td>${q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai_live ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
+          <td>${q.unavailable ? `<span class="chip bad">تأمین نمی‌کند</span>` : q.saved ? `<span class="chip ok">ثبت شد</span>` : q.ai_live ? `<span class="dim">—</span>` : `<button class="tp-btn xs primary" data-save="${q.id}">ثبت موقت</button>`}${q.low_conf ? `<div><span class="chip warn">کم‌اطمینان</span></div>` : ""}</td>
           <td>${q.ai ? "" : `<button class="tp-btn xs danger" data-del="${q.id}">حذف</button>`}</td></tr>`; }).join("")}
         </tbody></table></div>
         ${vFormHead(r)}${vGuard()}`
@@ -2885,9 +2947,10 @@
   /* ---------- تب جدول کمیسیون (فرم TSA-PS-FO-02) ----------
      پیش‌نمایش، دانلود و چاپ هر سه از سرور می‌آیند — از همان مدلی که فایل اکسل و Word را
      می‌سازد — تا آنچه دیده و چاپ می‌شود عیناً همان فایل‌ها باشد. */
+  const quoteRowKey = (q) => q.model_id ? `${q.item_id}:${q.model_id}` : q.item_id;
   function commData() {
-    const picked = new Set(S.d.quotes.filter((q) => q.final && q.saved).map((q) => q.item_id));
-    const sup = []; S.d.quotes.filter((q) => q.saved && (q.final || (manualA() && !picked.has(q.item_id)))).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {} }; sup.push(g); } g.rows[q.item_id] = q; });
+    const picked = new Set(S.d.quotes.filter((q) => q.final && q.saved).map(quoteRowKey));
+    const sup = []; S.d.quotes.filter((q) => q.saved && (q.final || (manualA() && !picked.has(quoteRowKey(q))))).forEach((q) => { let g = sup.find((x) => x.name === q.supplier_name); if (!g) { g = { name: q.supplier_name, rows: {} }; sup.push(g); } g.rows[quoteRowKey(q)] = q; });
     return { sup };
   }
   const sheetsFor = () => (S.sheets && S.d && S.sheets.aid === A().id && S.sheets.at === S.d.loadedAt ? S.sheets : null);
@@ -2910,7 +2973,7 @@
     const z = S.sheetZoom || 10;
     const ready = sh && sh.rq && sh.cm;
     let szc = null; try { szc = a.size_cm ? JSON.parse(a.size_cm) : null; } catch (_) { szc = null; }
-    return `<div class="pad"><div class="toolrow"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b>${TP.ui.sizeChip(szc, true)}<span class="chip">${d.sup.length} تأمین‌کننده · ${items().filter((it) => d.sup.some((g) => g.rows[it.id])).length} از ${items().length} قلم</span>
+    return `<div class="pad"><div class="toolrow"><b>جدول کمیسیون — درخواست <span class="num">${esc(r.id)}</span></b>${TP.ui.sizeChip(szc, true)}<span class="chip">${d.sup.length} تأمین‌کننده · ${new Set(d.sup.flatMap((g) => Object.keys(g.rows))).size} ردیف قلم/مدل از ${items().length} قلم</span>
         <span style="margin-inline-start:auto"></span>
         <button class="tp-btn sm" data-dl="commission">دانلود اکسل جدول کمیسیون</button>
         <button class="tp-btn sm" data-dl="request">دانلود Word برگهٔ درخواست خرید</button>
@@ -3487,6 +3550,9 @@
       const used = new Set(n.draft.layers.map((l) => l.k));
       n.draft.layers.push({ k: (n.data.layerNames || []).find((x) => !used.has(x)) || "", t: "", u: "", i: false, lk: true }); render();
     };
+    const modelRegister = G("[data-model-register]"); if (modelRegister) modelRegister.onclick = () => registerModelUI(item());
+    Q("[data-model-copy]").forEach((b) => { b.onclick = () => copyModelUI(item(), b.dataset.modelCopy); });
+    Q("[data-model-delete]").forEach((b) => { b.onclick = () => deleteModelUI(item(), b.dataset.modelDelete); });
     const ncf = G("[data-norm-confirm]"); if (ncf) ncf.onclick = () => { confirmNormUI(); };
     /* 🔒/🔓ِ عنوان، مقدار و هر لایه — در پیش‌نویس؛ با «تأیید» ذخیره می‌شود */
     Q("[data-norm-lock]").forEach((b) => b.onclick = () => {

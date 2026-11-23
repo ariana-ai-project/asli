@@ -39,6 +39,7 @@ import { pfReadOn } from "./switches.js";
 import { renderProformaDoc } from "./pfdoc.js";
 import { storage, storageKey } from "./storage.js";
 import { jStr, jValid, jNorm } from "./time.js";
+import { modelKey, modelById, modelTargets, markModelsSent, markModelsSubmitted, supplierSpecKey } from "./item-models.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -63,7 +64,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_spph_supphone ON sp_phones(supplier_id, pho
 CREATE INDEX IF NOT EXISTS ix_spph_phone ON sp_phones(phone);
 CREATE TABLE IF NOT EXISTS sp_threads (id INTEGER PRIMARY KEY, assignment_id INTEGER NOT NULL, request_id TEXT, supplier_id INTEGER NOT NULL, phone_id INTEGER, created_by INTEGER, e_seen INTEGER NOT NULL DEFAULT 0, s_seen INTEGER NOT NULL DEFAULT 0, rev INTEGER NOT NULL DEFAULT 0, last_at INTEGER NOT NULL, created_at INTEGER NOT NULL, e_clear INTEGER, s_clear INTEGER, terms_json TEXT, UNIQUE(assignment_id, supplier_id));
 CREATE INDEX IF NOT EXISTS ix_spth_sup ON sp_threads(supplier_id);
-CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, no INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(thread_id, item_id));
+CREATE TABLE IF NOT EXISTS sp_lines (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, item_id INTEGER NOT NULL, title TEXT NOT NULL, head TEXT, layers_json TEXT, extra_json TEXT, req_qty REAL, req_unit TEXT, qty REAL, unit TEXT, price REAL, note TEXT, state TEXT NOT NULL DEFAULT 'new', bundle_id INTEGER, quote_id INTEGER, no INTEGER, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, locks_json TEXT, s_json TEXT, prices_json TEXT, model_id INTEGER NOT NULL DEFAULT 0, model_no INTEGER NOT NULL DEFAULT 0, terms_json TEXT, unavailable INTEGER NOT NULL DEFAULT 0, UNIQUE(thread_id, item_id, model_id));
 CREATE TABLE IF NOT EXISTS sp_bundles (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, line_ids TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', comment TEXT, pf_key TEXT, pf_name TEXT, pf_mime TEXT, pf_size INTEGER, pf_at INTEGER, ai_json TEXT, ai_at INTEGER, manual_ok INTEGER, accept_json TEXT, terms_json TEXT, created_at INTEGER NOT NULL, decided_at INTEGER);
 CREATE INDEX IF NOT EXISTS ix_spb_thread ON sp_bundles(thread_id);
 CREATE TABLE IF NOT EXISTS sp_msgs (id INTEGER PRIMARY KEY, thread_id INTEGER NOT NULL, who TEXT NOT NULL, kind TEXT NOT NULL DEFAULT 'text', body TEXT NOT NULL, meta_json TEXT, at INTEGER NOT NULL);
@@ -93,7 +94,7 @@ export const SP_COLUMNS = [["sp_lines", "no", "INTEGER"], ["sp_bundles", "accept
   /* فاز ۴ طرح «خرید هوشمند»: قفل‌های قلم در لحظهٔ ارسال (🔒/🔓ِ عنوان، مقدار و هر لایه) و تغییرهای تأمین‌کننده روی 🔓ها */
   ["sp_lines", "locks_json", "TEXT"], ["sp_lines", "s_json", "TEXT"],
   /* «قیمتِ نقدی و اعتباری» (مهر ۱۴۰۵): {cash, c1, c2, r1, r2} — ستونِ price همان قیمتِ اصلی (نقد، وگرنه کوتاه‌ترین اعتباری) می‌ماند */
-  ["sp_lines", "prices_json", "TEXT"]];
+  ["sp_lines", "prices_json", "TEXT"], ["sp_bundles", "line_terms_json", "TEXT"]];
 
 /** قلم‌های بی‌کد (پیش از ستون «no») به ترتیب ساخت در پنل همان تأمین‌کننده شماره می‌گیرند — یک بار */
 export async function spBackfill(env) {
@@ -144,6 +145,7 @@ export const TERM_REQUIRED = ["dtime", "pay", "invoice", "vat", "valid_days"];
 export const TERM_FA = { dtime: "زمان تحویل", pay: "شرایط تسویه", invoice: "نوع فاکتور", vat: "ارزش افزوده", valid_days: "اعتبار پیش‌فاکتور (روز)" };
 export const TERM_ENUMS = { pay: ENUMS.pay, invoice: ENUMS.invoice, vat: ENUMS.vat };
 export const termsOf = (row) => { const t = parse(row && row.terms_json, null); return t && typeof t === "object" ? t : {}; };
+export const lineTermsOf = (line, fallback = {}) => line && line.terms_json ? termsOf(line) : { ...fallback };
 export const termsMissing = (t) => TERM_REQUIRED.filter((f) => !T(t && t[f])).map((f) => TERM_FA[f]);
 /**
  * فاز ۴ب گام ۳: «📋 شرایط خرید»ِ قلمِ چند خط (worker/terms-locks.js) — Map(item_id → قیدها). شرایطِ قلم مثلِ ساختارش با اولین
@@ -249,7 +251,7 @@ const itemsTxt = (lines) => lines.map((l) => `• ${codeTxt(l.no)}${l.title}`).j
 export const layerTxt = (x) => `${x.k}: ${x.v}${x.u ? ` ${x.u}` : ""}`;
 const sOf = (l) => { const s = parse(l && l.s_json, null); return s && typeof s === "object" ? s : {}; };
 /** عنوانِ پیشنهادیِ تأمین‌کننده وقتی عنوانِ قلم 🔓 است؛ وگرنه همان عنوانِ درخواست */
-export const lineTitle = (l) => T(sOf(l).title) || l.title;
+export const lineTitle = (l) => `${T(sOf(l).title) || l.title}${Number(l.model_no) > 0 ? ` — مدل ${faN(l.model_no)}` : ""}`;
 /** لایه‌های بسته با مقدارِ تأمین‌کننده روی 🔓ها؛ req مقدارِ درخواست است وقتی عوض شده */
 export function lineLayers(l) {
   if (Array.isArray(l.layers)) return l.layers;
@@ -265,7 +267,7 @@ const specTxt = (l) => layersOf(l).map(layerTxt).join(" · ");
  * مشخصات) و کلیک روی آن به بخشِ اقدام و تصمیمِ همان بسته یا قلم می‌رود. عکس است تا ویرایشِ بعدی تاریخچه را عوض نکند.
  */
 const itemSnap = (l, withPrice) => ({
-  no: l.no || null, title: lineTitle(l), head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
+  no: l.no || null, model_id: l.model_id || 0, model_no: l.model_no || 0, unavailable: !!l.unavailable, title: lineTitle(l), head: l.head || null, qty: l.qty == null ? null : Number(l.qty), unit: l.unit || null,
   ...(withPrice ? { price: l.price == null ? null : Number(l.price) } : {}), layers: lineLayers(l), extra: extraOf(l),
   ...(withPrice && T(l.note) ? { note: T(l.note).slice(0, 300) } : {}),
   /* «قیمتِ نقدی و اعتباری»: قیمتِ نقد و هر مدتِ اعتباری با درصدِ تعدیل */
@@ -275,7 +277,7 @@ const itemSnap = (l, withPrice) => ({
 });
 /** یک قلم در متنِ پیام: سطرِ اول کد و عنوان، زیرش مقدار (و قیمت)، مشخصات اصلی و شرایطِ خریدِ شرکت */
 const itemBlock = (l, withPrice) => {
-  const amount = withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
+  const amount = withPrice && l.unavailable ? "تأمین نمی‌کند" : withPrice ? `${qtyTxt(l.qty)} ${T(l.unit)} × ${moneyTxt(l.price)} ریال = ${moneyTxt(Number(l.qty) * Number(l.price))} ریال` : `${qtyTxt(l.qty)} ${T(l.unit)}`;
   const spec = specTxt(l);
   return `▫️ ${codeTxt(l.no)}${lineTitle(l)}\n    ${amount}${spec ? `\n    ${spec}` : ""}${withPrice && T(l.note) ? `\n    📝 ${T(l.note).slice(0, 300)}` : ""}`
     + `${withPrice && pricesOf(l) ? `\n    ${pricesTxt(pricesOf(l))}` : ""}${!withPrice && T(l.lim) ? `\n    📋 شرایط خرید: ${T(l.lim)}` : ""}`;
@@ -608,41 +610,46 @@ export async function spSend(env, ex, b) {
       .bind(aid, asg.request_id, sup.id, ph.id, ex.id, t, t).run();
     th = { id: r.meta.last_row_id };
   }
-  const oldRows = (await env.DB.prepare("SELECT item_id, no, title, head, layers_json, req_qty, req_unit FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || [];
-  const old = new Map(oldRows.map((x) => [x.item_id, x.no]));
-  const oldById = new Map(oldRows.map((x) => [x.item_id, x]));
-  const fresh = its.filter((i) => !old.has(i.id));
-  /* بستهٔ قفل‌شده: قلمی که قبلاً برای تأمین‌کنندهٔ واقعیِ دیگری رفته، با همان عنوان، لایه‌ها، مقدار و واحد — و همان 🔒/🔓ها — می‌رود */
-  const locks = await itemLocks(env, fresh.map((i) => i.id));
-  const pack = await Promise.all(fresh.map(async (i) => {
+  const targets = await modelTargets(env, its);
+  const oldRows = (await env.DB.prepare("SELECT item_id, model_id, model_no, no, title, head, layers_json, req_qty, req_unit FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || [];
+  const old = new Map(oldRows.map((x) => [modelKey(x.item_id, x.model_id), x.no]));
+  const oldById = new Map(oldRows.map((x) => [modelKey(x.item_id, x.model_id), x]));
+  const fresh = targets.filter((x) => !old.has(modelKey(x.item.id, x.model_id)));
+  const baseFresh = fresh.filter((x) => !x.model_id);
+  const locks = await itemLocks(env, baseFresh.map((x) => x.item.id));
+  const pack = await Promise.all(fresh.map(async (x) => {
+    if (x.model_id) return { title: x.title, qty: x.qty, unit: x.unit, head: x.head, layers: x.layers, locks: x.locks };
+    const i = x.item;
     const lock = locks.get(i.id);
     if (lock) return { ...lock, locks: lock.locks || lineLocks(i, lock.layers) };
     const p = { title: nrm(i.title), qty: i.qty, unit: T(i.unit) || null, ...(await lockedLayers(env, i)) };
     return { ...p, locks: lineLocks(i, p.layers) };
   }));
-  /* کدِ قلم در پنل همین تأمین‌کننده: شمارش افزایشی، جدا از کد راهکاران (که مال خود شرکت است) */
   const top = await env.DB.prepare("SELECT COALESCE(MAX(l.no),0) AS n FROM sp_lines l JOIN sp_threads t ON t.id=l.thread_id WHERE t.supplier_id=?").bind(sup.id).first();
   const nos = new Map([...old].map(([id, no]) => [id, no]));
-  fresh.forEach((i, n) => nos.set(i.id, (top ? top.n : 0) + n + 1));
+  fresh.forEach((x, n) => nos.set(modelKey(x.item.id, x.model_id), (top ? top.n : 0) + n + 1));
 
-  const stmts = fresh.map((i, n) => env.DB.prepare(
-    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,locks_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,'new',?,?,?)",
-  ).bind(th.id, i.id, pack[n].title, pack[n].head, JSON.stringify(pack[n].layers), JSON.stringify(pack[n].locks), pack[n].qty, pack[n].unit, pack[n].qty, pack[n].unit, nos.get(i.id), t, t));
+  const stmts = fresh.map((x, n) => env.DB.prepare(
+    "INSERT INTO sp_lines (thread_id,item_id,title,head,layers_json,locks_json,req_qty,req_unit,qty,unit,state,no,created_at,updated_at,model_id,model_no) VALUES (?,?,?,?,?,?,?,?,?,?,'new',?,?,?,?,?)",
+  ).bind(th.id, x.item.id, pack[n].title, pack[n].head, JSON.stringify(pack[n].layers), JSON.stringify(pack[n].locks), pack[n].qty, pack[n].unit, pack[n].qty, pack[n].unit, nos.get(modelKey(x.item.id, x.model_id)), t, t, x.model_id, x.model_no));
   const { pass, stmts: passStmts } = await newPassword(env, ph.id);
   const silent = !!b.silent && oldRows.length > 0 && !fresh.length;
   stmts.push(...passStmts, silent ? env.DB.prepare("UPDATE sp_threads SET last_at=? WHERE id=?").bind(t, th.id)
     : env.DB.prepare("UPDATE sp_threads SET phone_id=?, last_at=?, rev=rev+1 WHERE id=?").bind(ph.id, t, th.id));
 
   const text = T(b.text).slice(0, 3000);
-  /* هر قلمِ استعلام: کد و عنوان، زیرش مقدارِ خواسته، لایه‌های قفل و «📋 شرایط خرید»ِ شرکت — عکسش در meta برای کارتِ پیام */
-  const evLines = (fresh.length ? fresh : its).map((i) => {
-    const o = oldById.get(i.id), p = pack[fresh.indexOf(i)];
-    const lim = limitsTxt(limitsOf(i)) || null;
-    if (p) return { no: nos.get(i.id), title: p.title, head: p.head, qty: p.qty, unit: p.unit, layers: p.layers, extra: [], lim };
-    return { no: nos.get(i.id), title: (o && o.title) || nrm(i.title), head: o && o.head, qty: o ? o.req_qty : i.qty, unit: o ? o.req_unit : T(i.unit) || null,
+  const evLines = (fresh.length ? fresh : targets).map((x) => {
+    const key = modelKey(x.item.id, x.model_id), o = oldById.get(key), p = pack[fresh.indexOf(x)];
+    const lim = limitsTxt(limitsOf(x.item)) || null;
+    if (p) return { no: nos.get(key), model_id: x.model_id, model_no: x.model_no, title: p.title, head: p.head, qty: p.qty, unit: p.unit, layers: p.layers, extra: [], lim };
+    return { no: nos.get(key), model_id: x.model_id, model_no: x.model_no, title: (o && o.title) || nrm(x.item.title), head: o && o.head, qty: o ? o.req_qty : x.item.qty, unit: o ? o.req_unit : T(x.item.unit) || null,
       layers: parse(o && o.layers_json, []), extra: [], lim };
   });
-  const evBody = `${fresh.length ? `📦 استعلام ${faN(fresh.length)} قلم:` : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
+  const modelFresh = fresh.filter((x) => x.model_id);
+  const freshHead = modelFresh.length
+    ? `📦 این بسته ${faN(fresh.length)} خط و ${faN(modelFresh.length)} مدل از ${faN(new Set(modelFresh.map((x) => x.item.id)).size)} قلم دارد؛ برای هر مدل جداگانه «دارم/ندارم»، قیمت و شرایط بفرستید:`
+    : `📦 استعلام ${faN(fresh.length)} قلم:`;
+  const evBody = `${fresh.length ? freshHead : "🔁 یادآوری استعلام:"}\n${evLines.map((l) => itemBlock(l, false)).join("\n")}`;
   const msgs = [];
   const mark = b.ai ? { ai: true } : null;
   if (!silent) {
@@ -659,8 +666,10 @@ export async function spSend(env, ex, b) {
   stmts.push(env.DB.prepare("INSERT INTO sp_sms (phone_id,thread_id,expert_id,kind,body,at) VALUES (?,?,?,'rfq',?,?)").bind(ph.id, th.id, ex.id, maskPass(smsTxt, pass), t));
   const res = await env.DB.batch(stmts);
   const out = msgs.map(([who, kind, body, meta], n) => msgObj(res[msgAt + n].meta.last_row_id, th.id, who, kind, body, meta, t));
+  await markModelsSent(env, fresh.map((x) => x.model_id).filter(Boolean), t);
   return {
-    ok: true, thread_id: th.id, request_id: asg.request_id, added: fresh.length, skipped: its.length - fresh.length,
+    ok: true, thread_id: th.id, request_id: asg.request_id, added: fresh.length, skipped: targets.length - fresh.length,
+    lines: targets.map((x) => ({ item_id: x.item.id, model_id: x.model_id, model_no: x.model_no })),
     supplier: { id: sup.id, name: sup.name }, phone: { id: ph.id, phone: ph.phone, label: ph.label, k: ph.k },
     /* pattern رمز را دارد: فقط برای فرستادن (sp-sms.js)، هرگز در پاسخِ پنل */
     sms: { id: res[smsAt].meta.last_row_id, to: ph.phone, label: ph.label, text: smsTxt, pattern: { key: "invite", params: { k: ph.k, code: pass } } },
@@ -727,11 +736,12 @@ export function lineOut(l) {
   const qty = l.qty == null ? null : Number(l.qty), price = l.price == null ? null : Number(l.price);
   const lk = locksOfLine(l), s = sOf(l), ch = s.layers || {};
   return {
-    id: l.id, no: l.no || null, item_id: l.item_id, title: l.title, s_title: T(s.title) || null, head: l.head,
+    id: l.id, no: l.no || null, item_id: l.item_id, model_id: l.model_id || 0, model_no: l.model_no || 0, title: l.title, s_title: T(s.title) || null, head: l.head,
     layers: parse(l.layers_json, []).map((x) => ({ ...x, lock: lk.layers[x.k] !== false, ...(T(ch[x.k]) && T(ch[x.k]) !== x.v ? { s: T(ch[x.k]) } : {}) })),
     extra: parse(l.extra_json, []), locks: { title: lk.title, qty: lk.qty, unit: lk.unit, legacy: lk.legacy },
     req_qty: l.req_qty, req_unit: l.req_unit, qty, unit: l.unit, price, total: qty != null && price != null ? qty * price : null,
     note: l.note, state: l.state, state_fa: LINE_FA[l.state] || l.state, bundle_id: l.bundle_id, quote_id: l.quote_id, missing: lineMissing(l), prices: pricesOf(l),
+    terms: parse(l.terms_json, null), unavailable: !!l.unavailable,
   };
 }
 /** بسته برای نمایش؛ کارشناس جدول تطابق، پذیرش‌هایش و این‌که تأیید نهایی ممکن است یا چه مانعی مانده را هم می‌بیند */
@@ -745,16 +755,16 @@ export function bundleOut(b, side, opt = {}) {
   const accept = side === "e" ? parse(b.accept_json, {}) : null;
   const ids = parse(b.line_ids, []);
   const match = opt.pfRead === false && side === "e" && opt.lines
-    ? supplierRes(ids.map((id) => opt.lines.find((l) => l.id === id)).filter(Boolean), termsOf(b))
+    ? supplierRes(ids.map((id) => opt.lines.find((l) => l.id === id)).filter(Boolean), termsOf(b), parse(b.line_terms_json, {}))
     : ai ? resolve(ai, accept) : null;
   return {
-    id: b.id, line_ids: ids, state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment, terms: termsOf(b),
+    id: b.id, line_ids: ids, state: b.state, state_fa: BUNDLE_FA[b.state] || b.state, comment: b.comment, terms: termsOf(b), line_terms: parse(b.line_terms_json, {}),
     pf: b.pf_key ? { name: b.pf_name, mime: b.pf_mime, size: b.pf_size, at: b.pf_at } : null, gen: true,
     ...(side === "e" ? { ai, accept, ready: !!(match && match.ready), problems: match ? match.problems : [], gaps: match ? match.gaps : [] } : {}),
     created_at: b.created_at, decided_at: b.decided_at,
   };
 }
-export const lineMissing = (l) => [Number(l.qty) > 0 ? null : "مقدار", T(l.unit) ? null : "واحد", Number(l.price) > 0 ? null : "قیمت واحد"].filter(Boolean);
+export const lineMissing = (l) => l.unavailable ? [] : [Number(l.qty) > 0 ? null : "مقدار", T(l.unit) ? null : "واحد", Number(l.price) > 0 ? null : "قیمت واحد"].filter(Boolean);
 /** قیمت‌های نقدی و اعتباریِ یک خط ({cash, c1, c2, r1, r2}) یا null */
 export const pricesOf = (l) => { const p = parse(l && l.prices_json, null); return p && typeof p === "object" && Object.keys(p).length ? p : null; };
 /** قیمت‌های مؤثر: prices_json، وگرنه (خطِ پیش از «قیمتِ نقدی و اعتباری» یا کلاینتِ قدیمی که فقط price می‌فرستد) همان یک قیمت در ردیفِ اولِ حالت */
@@ -1009,6 +1019,56 @@ async function ownLine(env, sup, lineId) {
 }
 const notEditable = (l) => new HttpError(`این قلم «${LINE_FA[l.state] || l.state}» است و فعلاً قابل ویرایش نیست.`, 409);
 
+export async function lineAvailability(env, sup, lineId, available) {
+  const l = await ownLine(env, sup, lineId);
+  if (!LINE_EDITABLE.includes(l.state)) throw notEditable(l);
+  const t = now();
+  const state = available ? "draft" : "ready";
+  await env.DB.batch([
+    env.DB.prepare("UPDATE sp_lines SET state=?,unavailable=?,updated_at=? WHERE id=?").bind(state, available ? 0 : 1, t, l.id),
+    touchStmt(env, l.thread_id, t),
+  ]);
+  return { ok: true, state, unavailable: !available };
+}
+
+export async function createSupplierModel(env, sup, lineId, body) {
+  const source = await ownLine(env, sup, lineId);
+  if (!LINE_EDITABLE.includes(source.state)) throw notEditable(source);
+  const parent = source.model_id ? await modelById(env, source.model_id) : null;
+  const layers = (parent ? parent.layers : parse(source.layers_json, [])).map((x) => ({ ...x }));
+  const locks = parent ? parent.locks : locksOfLine(source);
+  const changes = body && body.layers && typeof body.layers === "object" ? body.layers : {};
+  for (const l of layers) {
+    if (!(l.k in changes)) continue;
+    const value = nrm(changes[l.k]).slice(0, 300);
+    const locked = parent ? locks.layers[l.k] !== false : locks.layers[l.k] !== false;
+    if (locked && value && value !== l.v) throw new HttpError(LOCKED_LAYER(l.k), 422);
+    if (!locked) l.v = value || l.v;
+  }
+  if (layers.some((l) => !T(l.v))) throw new HttpError("مقدار لایه‌های مدل نمی‌تواند خالی باشد.", 422);
+  const head = nrm(parent ? parent.head : source.head) || "مشخصات فنی";
+  const key = supplierSpecKey(head, layers, source.thread_id);
+  const item = await env.DB.prepare("SELECT request_id FROM items WHERE id=?").bind(source.item_id).first();
+  if (!item) throw new HttpError("قلمِ مبنای مدل دیگر وجود ندارد.", 409);
+  const t = now();
+  const top = await env.DB.prepare("SELECT COALESCE(MAX(model_no),0) AS n FROM item_models WHERE item_id=?").bind(source.item_id).first();
+  let modelId;
+  try {
+    const r = await env.DB.prepare("INSERT INTO item_models (item_id,request_id,model_no,head,layers_json,locks_json,spec_key,origin,supplier_id,thread_id,state,created_by,created_at,sent_at) VALUES (?,?,?,?,?,?,?,'supplier',?,?,'draft',?,?,?)")
+      .bind(source.item_id, item.request_id, (top?.n || 0) + 1, head, JSON.stringify(layers), JSON.stringify(parent ? parent.locks : locks), key, sup.supplier_id, source.thread_id, `supplier:${sup.supplier_id}`, t, t).run();
+    modelId = r.meta.last_row_id;
+  } catch (e) {
+    if (/unique/i.test(String(e && e.message))) throw new HttpError("مدلی با دقیقاً همین نوع و لایه‌ها در این گفت‌وگو وجود دارد.", 409);
+    throw e;
+  }
+  const modelNo = (top?.n || 0) + 1;
+  const no = await env.DB.prepare("SELECT COALESCE(MAX(no),0) AS n FROM sp_lines WHERE thread_id=?").bind(source.thread_id).first();
+  const lineColumns = ["thread_id", "item_id", "title", "head", "layers_json", "extra_json", "req_qty", "req_unit", "qty", "unit", "price", "note", "state", "no", "created_at", "updated_at", "locks_json", "s_json", "prices_json", "model_id", "model_no", "terms_json", "unavailable"];
+  const lineValues = [source.thread_id, source.item_id, source.title, head, JSON.stringify(layers), source.extra_json, source.req_qty, source.req_unit, source.qty, source.req_unit, null, null, "draft", (no?.n || 0) + 1, t, t, JSON.stringify(parent ? parent.locks : locks), null, null, modelId, modelNo, null, 0];
+  const line = await env.DB.prepare(`INSERT INTO sp_lines (${lineColumns.join(",")}) VALUES (${lineValues.map(() => "?").join(",")})`).bind(...lineValues).run();
+  return { ok: true, line: lineOut(await env.DB.prepare("SELECT * FROM sp_lines WHERE id=?").bind(line.meta.last_row_id).first()), model: await modelById(env, modelId) };
+}
+
 /**
  * لایه‌های افزودهٔ تأمین‌کننده: {k نام، v مقدار، t نوع، u واحد} — فاز ۴: نوعِ «کمّی» (t: "num") عدد است و واحد دارد، «کیفی» متن.
  * نامِ لایه‌های همین بسته پذیرفته نیست: 🔒ها عوض نمی‌شوند و 🔓ها سرِ جای خودشان (lineSave، layers) عوض می‌شوند.
@@ -1128,6 +1188,11 @@ export async function lineSave(env, sup, lineId, b) {
     sets.push("prices_json=?"); args.push(["cash", "c1", "c2"].some((k) => clean[k]) ? JSON.stringify(clean) : null);
     if (!("price" in b)) { sets.push("price=?"); args.push(clean.cash ?? clean.c1 ?? clean.c2 ?? null); }
   }
+  if (b.terms && typeof b.terms === "object") {
+    const th = l.terms_json ? null : await env.DB.prepare("SELECT terms_json FROM sp_threads WHERE id=?").bind(l.thread_id).first();
+    const terms = cleanTerms(lineTermsOf(l, termsOf(th)), b.terms);
+    sets.push("terms_json=?"); args.push(JSON.stringify(terms));
+  }
   if (!sets.length) return { ok: true };
   if (l.state === "new") sets.push("state='draft'");
   const t = now();
@@ -1140,18 +1205,15 @@ export async function lineSave(env, sup, lineId, b) {
  * شرایطِ فاکتورِ اعلامی (کادر دومِ کارت‌ها) برای همهٔ اقلامِ این گفت‌وگو. فقط فیلدهایی که آمده‌اند؛ خالی یعنی پاک.
  * زمان تحویل همان قاعدهٔ تب استعلامات را دارد: تاریخ شمسی یا شمار روز.
  */
-export async function termsSave(env, sup, thId, b) {
-  const th = await threadFor(env, thId, { supplier: sup });
-  const t = { ...termsOf(th) };
+function cleanTerms(current, b) {
+  const t = { ...(current || {}) };
   for (const f of TERM_FIELDS) {
     if (!(f in (b || {}))) continue;
-    /* رقم فارسی فقط در تاریخ و شمار روز لاتین می‌شود — گزینه‌های فهرستی (مثل «۵۰٪ پیش‌پرداخت») همان‌طورند */
     const v = TERM_ENUMS[f] ? nrm(b[f]) : nrm(latin(b[f]));
     if (!v) { delete t[f]; continue; }
     if (f === "dtime") {
       if (!validDtime(v)) throw new HttpError("زمان تحویل باید تاریخ شمسی (مثل ۱۴۰۵/۰۸/۰۱) یا شمار روز (مثل ۱۰ یا ۱۰ روز کاری) باشد.", 422, { field: f });
       const d = normalizeDtime(v);
-      /* «تاریخ از تقویم» (فاز ۴): روزِ واقعاً موجود و یکدست با دو رقم (۱۴۰۵/۸/۱ ← 1405/08/01) */
       if (/^\d{4}\/\d{1,2}\/\d{1,2}$/.test(d)) {
         if (!jValid(d)) throw new HttpError("این تاریخ در تقویم نیست.", 422, { field: f });
         t[f] = jNorm(d);
@@ -1165,6 +1227,12 @@ export async function termsSave(env, sup, thId, b) {
       t[f] = v;
     }
   }
+  return t;
+}
+
+export async function termsSave(env, sup, thId, b) {
+  const th = await threadFor(env, thId, { supplier: sup });
+  const t = cleanTerms(termsOf(th), b);
   /* فاز ۴ب گام ۳: قفلِ شرایطِ شرکت — فیلدهایی که همین حالا آمده‌اند، با قیدِ مشترکِ اقلامِ قابلِ ویرایشِ همین گفت‌وگو. فیلدی که
      اقلامش با هم نمی‌خوانند این‌جا آزاد است و هنگامِ «ارسال» برای همان اقلامِ ارسالی سنجیده می‌شود */
   const ls = ((await env.DB.prepare("SELECT item_id, state FROM sp_lines WHERE thread_id=?").bind(th.id).all()).results || []).filter((l) => LINE_EDITABLE.includes(l.state));
@@ -1185,12 +1253,12 @@ export async function termsSave(env, sup, thId, b) {
 export async function lineReady(env, sup, lineId, on) {
   const l = await ownLine(env, sup, lineId);
   if (!LINE_EDITABLE.includes(l.state)) throw notEditable(l);
-  if (on) {
+  if (on && !l.unavailable) {
     const th = await env.DB.prepare("SELECT terms_json FROM sp_threads WHERE id=?").bind(l.thread_id).first();
     const lim = await limitsOfLines(env, [l]);
     /* «قیمتِ نقدی و اعتباری»: قیمت‌های لازمِ همین قلم؛ شرایط تسویهٔ این قلم از خودِ قیمت‌ها پیداست */
     const pm = payModes(lim.get(l.item_id));
-    const tm = withPay(termsOf(th), pm, l);
+    const tm = withPay(lineTermsOf(l, termsOf(th)), pm, l);
     const miss = [...lineMissing(l), ...pricesMissing(pm, pricesEff(l, pm)).map((k) => PRICE_FA[k]), ...termsMissing(tm)];
     if (miss.length) throw new HttpError(`برای «آمادهٔ ارسال» این‌ها را پر کنید: ${miss.join("، ")}`, 422, { missing: miss });
     /* فاز ۴ب گام ۳: شرایطِ اعلامی با قفلِ شرایطِ همین قلم */
@@ -1219,44 +1287,47 @@ export async function submitLines(env, sup, thId, lineIds, pf) {
   const bad = lines.filter((l) => lineMissing(l).length);
   if (bad.length) throw new HttpError(`این اقلام کامل نیستند: ${bad.map((l) => `${codeTxt(l.no)}«${l.title}»`).join("، ")}`, 422);
   const lim0 = await limitsOfLines(env, lines);
-  /* «قیمتِ نقدی و اعتباری»: قیمت‌های لازمِ هر قلم؛ شرایط تسویهٔ اقلامِ چندقیمتی از خودِ قیمت‌هاست */
-  const pBad = lines.map((l) => [l, pricesMissing(payModes(lim0.get(l.item_id)), pricesEff(l, payModes(lim0.get(l.item_id))))]).filter(([, m]) => m.length);
+  const active = lines.filter((l) => !l.unavailable);
+  const pBad = active.map((l) => [l, pricesMissing(payModes(lim0.get(l.item_id)), pricesEff(l, payModes(lim0.get(l.item_id))))]).filter(([, m]) => m.length);
   if (pBad.length) throw new HttpError(`قیمت‌های لازم کامل نیست: ${pBad.map(([l, m]) => `${codeTxt(l.no)}«${l.title}»: ${m.map((k) => PRICE_FA[k]).join("، ")}`).join("؛ ")}`, 422);
-  const multi = lines.filter((l) => payModes(lim0.get(l.item_id)));
+  const multi = active.filter((l) => payModes(lim0.get(l.item_id)));
   const terms0 = termsOf(th);
-  /* تسویهٔ بسته: اگر همه چندقیمتی‌اند یا تسویه‌ای اعلام نشده، از قیمت‌های خودِ اقلام؛ هر قلمِ چندقیمتی در خطِ استعلامش تسویهٔ خودش را دارد */
-  const terms = multi.length && (multi.length === lines.length || !T(terms0.pay)) ? withPay(terms0, payModes(lim0.get(multi[0].item_id)), multi[0]) : terms0;
-  const tmiss = termsMissing(terms);
-  if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")}`, 422, { missing: tmiss });
-  /* فاز ۴ب گام ۳: شرایطِ بسته با قفلِ همهٔ اقلامِ همین بسته؛ اقلامِ ناسازگار جدا فرستاده می‌شوند */
-  /* ناسازگاری با قیدِ همهٔ اقلام؛ تخلفِ «تسویه» فقط با اقلامِ تک‌قیمتی (چندقیمتی‌ها تسویهٔ خودشان را از قیمت‌ها دارند) */
-  const { conflict } = lockOfLines(lines, lim0);
-  const { lock } = lockForTerms(lines, lim0);
+  const terms = multi.length && (multi.length === active.length || !T(terms0.pay)) ? withPay(lineTermsOf(multi[0], terms0), payModes(lim0.get(multi[0].item_id)), multi[0]) : terms0;
+  for (const l of active) {
+    const tm = withPay(lineTermsOf(l, terms), payModes(lim0.get(l.item_id)), l);
+    const tmiss = termsMissing(tm);
+    if (tmiss.length) throw new HttpError(`شرایط فاکتور کامل نیست: ${tmiss.join("، ")} — ${lineTitle(l)}`, 422, { missing: tmiss, line_id: l.id });
+  }
+  const { conflict } = lockOfLines(active, lim0);
   if (conflict.length) {
     throw new HttpError(`این اقلام شرایطِ قفلِ ناسازگار دارند (${conflict.map((f) => LIMIT_FA[f]).join("، ")})؛ هر بار فقط اقلامی را بفرستید که شرایطشان با هم می‌خواند.`, 422, { conflict });
   }
-  const tv = violations(terms, lock);
-  if (tv.length) throw violationError(tv);
+  for (const l of active) {
+    const tv = violations(withPay(lineTermsOf(l, terms), payModes(lim0.get(l.item_id)), l), lockOfLines([l], lim0).lock);
+    if (tv.length) throw violationError(tv, `شرایطِ «${lineTitle(l)}»`);
+  }
+  const lineTerms = Object.fromEntries(lines.map((l) => [l.id, lineTermsOf(l, terms)]));
   const t = now();
   const state = pf && pfRead ? "proforma" : "pending";
-  const r = await env.DB.prepare(`INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,pf_key,pf_name,pf_mime,pf_size,pf_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?)`)
-    .bind(th.id, JSON.stringify(lines.map((l) => l.id)), state, JSON.stringify(terms), pf ? pf.skey : null, pf ? T(pf.filename).slice(0, 120) || "proforma" : null,
+  const r = await env.DB.prepare(`INSERT INTO sp_bundles (thread_id,line_ids,state,terms_json,line_terms_json,pf_key,pf_name,pf_mime,pf_size,pf_at,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+    .bind(th.id, JSON.stringify(lines.map((l) => l.id)), state, JSON.stringify(terms), JSON.stringify(lineTerms), pf ? pf.skey : null, pf ? T(pf.filename).slice(0, 120) || "proforma" : null,
       pf ? pf.mime || null : null, pf ? pf.size || null : null, pf ? t : null, t).run();
   const bid = r.meta.last_row_id;
-  const sum = lines.reduce((s, l) => s + Number(l.qty) * Number(l.price), 0);
+  const sum = active.reduce((s, l) => s + Number(l.qty) * Number(l.price), 0);
   const pfName = pf ? T(pf.filename) || "پیش‌فاکتور" : null;
   const body = (pfRead
     ? `📤 مشخصات ${faN(lines.length)} قلم برای بررسی فرستاده شد${pf ? ` همراه با پیش‌فاکتور «${pfName}»` : ""}:\n`
     : `📤 پیشنهادِ ${faN(lines.length)} قلم با پیش‌فاکتورِ سامانه برای بررسی فرستاده شد${pf ? ` (پیوست: پیش‌فاکتورِ خودِ تأمین‌کننده «${pfName}»)` : ""}:\n`)
     + lines.map((l) => itemBlock(l, true)).join("\n")
-    + `\nجمع: ${moneyTxt(sum)} ریال\nشرایط: ${termsLine(terms)}`;
+    + `\nجمع: ${moneyTxt(sum)} ریال${active.length ? `\nشرایط: ${termsLine(terms)}` : ""}`;
   /* gen: پیش‌فاکتورِ این بسته را سامانه می‌سازد (/sp/bundle/:id/proforma) — صفحه‌ها دکمهٔ «👁 پیش‌فاکتور» را از همین می‌گذارند */
-  const meta = { ev: "submit", bundle: bid, pf: pfName, items: lines.map((l) => itemSnap(l, true)), terms, sum, ...(pfRead ? {} : { gen: true }) };
+  const meta = { ev: "submit", bundle: bid, pf: pfName, items: lines.map((l) => itemSnap(l, true)), terms, line_terms: lineTerms, sum, ...(pfRead ? {} : { gen: true }) };
   const res = await env.DB.batch([
     env.DB.prepare(`UPDATE sp_lines SET state=?, bundle_id=?, updated_at=? WHERE id IN (${lines.map(() => "?").join(",")})`).bind(pf && pfRead ? "proforma" : "submitted", bid, t, ...lines.map((l) => l.id)),
     msgStmt(env, th.id, "s", "event", body, meta, t),
     touchStmt(env, th.id, t),
   ]);
+  await markModelsSubmitted(env, lines.map((l) => l.model_id).filter(Boolean), t);
   return { ok: true, bundle_id: bid, state, msgs: [msgObj(res[1].meta.last_row_id, th.id, "s", "event", body, meta, t)], thread: th };
 }
 
@@ -1404,19 +1475,26 @@ export const DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordproc
 export function proformaInput(env, th, lines, terms, { no = null, at = now() } = {}) {
   return {
     company: COMPANY(env), supplier: th.supplier_name, request: { id: th.request_id, party: th.party || "" }, date: jStr(at), no,
-    lines: lines.map((l) => ({ no: l.no, title: lineTitle(l), layers: lineLayers(l).map(({ k, v }) => ({ k, v })), extras: extraOf(l),
-      qty: l.qty, unit: l.unit, price: l.price, prices: pricesOf(l), note: l.note })),
+    lines: lines.filter((l) => !l.unavailable).map((l) => {
+      const ownTerms = l.terms_json ? termsLine(lineTermsOf(l, terms)) : "";
+      return { no: l.no, title: lineTitle(l), layers: [...lineLayers(l).map(({ k, v }) => ({ k, v })), ...(ownTerms ? [{ k: "شرایط این قلم/مدل", v: ownTerms }] : [])], extras: extraOf(l),
+        qty: l.qty, unit: l.unit, price: l.unavailable ? null : l.price, prices: l.unavailable ? null : pricesOf(l), note: l.unavailable ? "تأمین نمی‌کند" : l.note };
+    }),
     terms: terms || {},
   };
 }
 /** خانه‌های لازمِ خالی برای پیش‌نمایش: qty:<کد>، price:<کد> و کلیدِ شرایط */
 export function proformaMissing(lines, terms) {
-  const out = [];
+  const out = [], shared = lines.every((l) => !l.terms_json);
   for (const l of lines) {
+    if (l.unavailable) continue;
     if (!(Number(l.qty) > 0)) out.push(`qty:${l.no}`);
     if (!(Number(l.price) > 0)) out.push(`price:${l.no}`);
+    for (const f of TERM_REQUIRED) if (!T(lineTermsOf(l, terms)[f])) {
+      const key = shared ? f : `${f}:${l.no}`;
+      if (!out.includes(key)) out.push(key);
+    }
   }
-  for (const f of TERM_REQUIRED) if (!T(terms && terms[f])) out.push(f);
   return out;
 }
 /**
@@ -1443,7 +1521,8 @@ async function companyTerms(env, lines, terms) {
 /** پیش‌فاکتورِ یک بستهٔ فرستاده‌شده — همان خط‌ها و عکسِ شرایطِ همان بسته؛ کارشناسِ گفت‌وگو یا خودِ تأمین‌کننده */
 export async function bundleProforma(env, who, bundleId) {
   const { b, th } = await bundleFor(env, who, bundleId);
-  const lines = await bundleLines(env, b.id);
+  const lines = await bundleLines(env, b.id), snapshots = parse(b.line_terms_json, {});
+  for (const l of lines) if (snapshots[l.id]) l.terms_json = JSON.stringify(snapshots[l.id]);
   return { b, th, lines, terms: await companyTerms(env, lines, termsOf(b)) };
 }
 /**
@@ -1456,6 +1535,8 @@ async function genProforma(env, th, b, lines) {
   const done = ((await env.DB.prepare("SELECT * FROM sp_lines WHERE thread_id=? AND state='final' ORDER BY id").bind(th.id).all()).results || [])
     .filter((l) => !lines.some((x) => x.id === l.id));
   const all = [...done, ...lines].sort((x, y) => (x.no || 0) - (y.no || 0) || x.id - y.id);
+  const snapshots = parse(b.line_terms_json, {});
+  for (const l of all) if (snapshots[l.id]) l.terms_json = JSON.stringify(snapshots[l.id]);
   const blob = await renderProformaDoc(proformaInput(env, th, all, await companyTerms(env, all, termsOf(b)), { no: b.id, at: b.created_at || now() }));
   const bytes = new Uint8Array(await blob.arrayBuffer());
   const key = storageKey(th.assignment_id, `sp-gen-${b.id}.docx`);
@@ -1468,20 +1549,23 @@ async function genProforma(env, th, b, lines) {
  * تأیید نهایی بی خوانش هوشمند (فاز ۴): مقدارها همان که تأمین‌کننده ثبت کرده — عنوان و لایه‌ها (🔓ها با مقدارِ او)، لایه‌های
  * افزوده، مقدار، واحد، قیمت واحد و عکسِ شرایطِ بسته. همان شکلِ خروجیِ sp-ai.js:resolve تا quoteStmts یکی بماند.
  */
-function supplierRes(lines, terms) {
+function supplierRes(lines, terms, lineTerms = {}) {
   const problems = [];
   const out = lines.map((l) => {
     const miss = lineMissing(l);
     if (miss.length) problems.push(`${codeTxt(l.no)}«${l.title}»: ${miss.join("، ")}`);
+    if (!l.unavailable) {
+      const missingTerms = termsMissing(lineTerms[l.id] || terms);
+      if (missingTerms.length) problems.push(`${codeTxt(l.no)}«${l.title}»: ${missingTerms.join("، ")}`);
+    }
     const spec = [
-      ...(lineTitle(l) !== l.title ? [{ k: "عنوان پیشنهادی", v: lineTitle(l) }] : []),
+      ...(T(sOf(l).title) ? [{ k: "عنوان پیشنهادی", v: T(sOf(l).title) }] : []),
       ...layersOf(l).map((x) => ({ k: x.k, v: `${x.v}${x.u ? ` ${x.u}` : ""}` })),
       ...(T(l.note) ? [{ k: "توضیح تأمین‌کننده", v: T(l.note).slice(0, 200) }] : []),
     ];
-    return { line_id: l.id, item_id: l.item_id, values: { spec, qty: l.qty == null ? null : Number(l.qty), unit: T(l.unit) || null, price: l.price == null ? null : Number(l.price), prices: pricesOf(l) } };
+    return { line_id: l.id, item_id: l.item_id, model_id: l.model_id || 0, model_no: l.model_no || 0, unavailable: !!l.unavailable,
+      values: { spec, qty: l.qty == null ? null : Number(l.qty), unit: T(l.unit) || null, price: l.unavailable ? null : l.price == null ? null : Number(l.price), prices: l.unavailable ? null : pricesOf(l) } };
   });
-  const tm = termsMissing(terms);
-  if (tm.length) problems.push(`شرایط فاکتور: ${tm.join("، ")}`);
   return { ready: !problems.length, problems, gaps: [], lines: out, terms: { ...(terms || {}) } };
 }
 
@@ -1537,7 +1621,7 @@ export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = 
     } else {
       /* مقدارهای خودِ تأمین‌کننده؛ پیش‌فاکتورِ Word را سامانه می‌سازد (بسته‌های در راهِ مسیرِ پیشین — approved/proforma — هم همین‌طور) */
       if (!open.includes(b.state)) throw new HttpError(`این بسته «${BUNDLE_FA[b.state]}» است.`, 409);
-      res = supplierRes(lines, termsOf(b));
+      res = supplierRes(lines, termsOf(b), parse(b.line_terms_json, {}));
     }
     if (!res.ready) throw new HttpError(`تأیید نهایی هنوز ممکن نیست:\n• ${res.problems.join("\n• ")}`, 422, { problems: res.problems });
     gaps = res.gaps;
@@ -1564,12 +1648,12 @@ export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = 
   const mid = out[out.length - 2].meta.last_row_id;
   /* خط‌های استعلام — شناسه‌شان بعد از اجرای دسته معلوم است */
   if (action === "final") {
-    const ids = ((await env.DB.prepare(`SELECT id, item_id FROM quotes WHERE assignment_id=? AND supplier_name=? AND item_id IN (${lines.map(() => "?").join(",")})`)
+    const ids = ((await env.DB.prepare(`SELECT id, item_id, model_id FROM quotes WHERE assignment_id=? AND supplier_name=? AND item_id IN (${lines.map(() => "?").join(",")})`)
       .bind(th.assignment_id, th.supplier_name, ...lines.map((l) => l.item_id)).all()).results || []);
-    const byItem = new Map(ids.map((r) => [r.item_id, r.id]));
-    const link = lines.filter((l) => byItem.has(l.item_id)).map((l) => env.DB.prepare("UPDATE sp_lines SET quote_id=? WHERE id=?").bind(byItem.get(l.item_id), l.id));
+    const byItem = new Map(ids.map((r) => [modelKey(r.item_id, r.model_id), r.id]));
+    const link = lines.filter((l) => byItem.has(modelKey(l.item_id, l.model_id))).map((l) => env.DB.prepare("UPDATE sp_lines SET quote_id=? WHERE id=?").bind(byItem.get(modelKey(l.item_id, l.model_id)), l.id));
     if (link.length) await env.DB.batch(link);
-    quoteIds = lines.map((l) => byItem.get(l.item_id)).filter(Boolean);
+    quoteIds = lines.map((l) => byItem.get(modelKey(l.item_id, l.model_id))).filter(Boolean);
   }
   /* gen: Word تولیدی در پیش‌فاکتورها نشست (فاز ۴) — بی انبار یا با پیش‌فاکتورِ خودِ کارشناس نه */
   return { ok: true, state: { approve: "approved", return: "returned", reject: "rejected", final: "final" }[action], quote_ids: quoteIds, gaps, gen: !!pfFile,
@@ -1586,9 +1670,9 @@ export async function decide(env, ex, bundleId, action0, { comment, ai, sup } = 
  * جای هیچ پیش‌فاکتوری نمی‌نشیند — نه پیش‌فاکتوری که کارشناس خودش گذاشته، نه وقتی Word تولیدی ساخته نشد.
  */
 async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
-  const have = new Map(((await env.DB.prepare("SELECT id, item_id, src_json FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
-    .map((r) => [r.item_id, r]));
-  const byLine = new Map(res.lines.map((x) => [x.line_id, x.values]));
+  const have = new Map(((await env.DB.prepare("SELECT id, item_id, model_id, src_json FROM quotes WHERE assignment_id=? AND supplier_name=?").bind(th.assignment_id, th.supplier_name).all()).results || [])
+    .map((r) => [modelKey(r.item_id, r.model_id), r]));
+  const byLine = new Map(res.lines.map((x) => [x.line_id, x.values])), bundleTerms = parse(b.line_terms_json, {});
   /* «📋 شرایط خرید»: محل تحویل، محل معامله و روش حمل را تأمین‌کننده وارد نمی‌کند — از شرطِ شرکتِ همان قلم (terms-locks.js:withCompany) */
   const lim = await limitsOfLines(env, lines);
   /* منبعِ هر خانه (quote-src.js): بستهٔ گفت‌وگوی کارشناس هوشمند «بستهٔ مذاکرهٔ هوشمند» است، بقیه «بستهٔ پنلِ تأمین‌کننده»؛ خانه‌ای که از شرطِ شرکت پر شد «شرطِ شرکت» */
@@ -1597,28 +1681,28 @@ async function quoteStmts(env, th, b, lines, res, t, gen = null, ownPf = true) {
   const COLS = ["spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "vat", "deal", "place", "place_other"];
   const stmts = [];
   for (const l of lines) {
-    const tm = withCompany(res.terms, lim.get(l.item_id));
+    const declared = aiUsable(parse(b.ai_json, null)) ? res.terms : bundleTerms[l.id] || res.terms, tm = withCompany(declared, lim.get(l.item_id));
     const v = byLine.get(l.id) || {};
-    /* «قیمتِ نقدی و اعتباری»: ردیف‌های قیمت همراهِ خطِ استعلام (quotes.prices_json) — جدول کمیسیون و بستهٔ کمیسیون از همین می‌خوانند */
-    const pr = v.prices || pricesEff(l, payModes(lim.get(l.item_id)));
+    const pr = l.unavailable ? null : v.prices || pricesEff(l, payModes(lim.get(l.item_id)));
     const pj = pr ? JSON.stringify(pr) : null;
     const spec = [l.head ? `نوع قلم: ${l.head}` : null, ...(v.spec || []).map((x) => `${x.k}: ${x.v}`)].filter(Boolean).join("، ").slice(0, 500) || null;
-    const q = { unit: v.unit || null, qty: v.qty ?? null, price: v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
-    const ok = canSave(q) ? 1 : 0;
+    const q = { unit: v.unit || null, qty: v.qty ?? null, price: l.unavailable ? null : v.price ?? null, dtime: tm.dtime || null, pay: tm.pay || null, invoice: tm.invoice || null, vat: tm.vat || null };
+    const ok = l.unavailable ? 0 : canSave(q) ? 1 : 0;
+    const unavailable = l.unavailable ? 1 : 0;
     const vals = [spec, q.unit, q.qty, q.price, q.dtime, tm.valid_days != null ? String(tm.valid_days) : null, tm.ship || null, q.invoice, q.pay, q.vat,
-      tm.deal || null, tm.place || null, tm.place_other || null, ok, ok, ok ? t : null];
-    const fromCo = ["deal", "place", "place_other", "ship"].filter((f) => tm[f] != null && T(tm[f]) && !T((res.terms || {})[f]));
+      tm.deal || null, tm.place || null, tm.place_other || null, ok, ok, ok ? t : null, unavailable];
+    const fromCo = ["deal", "place", "place_other", "ship"].filter((f) => tm[f] != null && T(tm[f]) && !T((declared || {})[f]));
     const filled = [...COLS.filter((f, i) => vals[i] != null && String(vals[i]) !== ""), ...(pj ? ["prices_json"] : [])];
-    const src = mergeSrc(have.has(l.item_id) ? have.get(l.item_id).src_json : null,
+    const src = mergeSrc(have.has(modelKey(l.item_id, l.model_id)) ? have.get(modelKey(l.item_id, l.model_id)).src_json : null,
       { ...stamp(filled.filter((f) => !fromCo.includes(f)), kind, { at: t, ref: `b:${b.id}` }), ...stamp(fromCo.filter((f) => filled.includes(f)), "company", { at: t }) });
-    if (have.has(l.item_id)) {
+    if (have.has(modelKey(l.item_id, l.model_id))) {
       stmts.push(env.DB.prepare(`UPDATE quotes SET spec=?, unit=?, qty=?, price=?, dtime=?, valid_days=?, ship=?, invoice=?, pay=?, vat=?, deal=?, place=?, place_other=?, saved=?,
-          final=?, final_at=?, low_conf=0, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, src_json=?, prices_json=?, updated_at=? WHERE id=?`)
-        .bind(...vals, b.id, src, pj, t, have.get(l.item_id).id));
+          final=?, final_at=?, low_conf=0, unavailable=?, invoice_src=NULL, source='supplier', origin='supplier', origin_ref=?, src_json=?, prices_json=?, updated_at=? WHERE id=?`)
+        .bind(...vals, b.id, src, pj, t, have.get(modelKey(l.item_id, l.model_id)).id));
     } else {
-      stmts.push(env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,deal,place,place_other,saved,final,final_at,low_conf,source,origin,origin_ref,src_json,prices_json,created_at,updated_at)
-          VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,'supplier','supplier',?,?,?,?,?)`)
-        .bind(th.assignment_id, l.item_id, th.supplier_name, ...vals, b.id, src, pj, t, t));
+      const insertColumns = ["assignment_id", "item_id", "supplier_name", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "vat", "deal", "place", "place_other", "saved", "final", "final_at", "low_conf", "unavailable", "source", "origin", "origin_ref", "src_json", "prices_json", "model_id", "model_no", "created_at", "updated_at"];
+      const insertValues = [th.assignment_id, l.item_id, th.supplier_name, ...vals.slice(0, 16), 0, unavailable, "supplier", "supplier", b.id, src, pj, l.model_id || 0, l.model_no || 0, t, t];
+      stmts.push(env.DB.prepare(`INSERT INTO quotes (${insertColumns.join(",")}) VALUES (${insertValues.map(() => "?").join(",")})`).bind(...insertValues));
     }
   }
   if (gen) {

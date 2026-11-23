@@ -18,7 +18,7 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 13 |
+| [manager.desk](../features/manager.desk.md) | میز ارجاع | 9 | 14 |
 | [manager.asg](../features/manager.asg.md) | ارجاع هوشمند | 3 | 4 |
 | [manager.dl](../features/manager.dl.md) | مهلت هوشمند | 0 | 0 |
 
@@ -30,7 +30,7 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [expert.tray](../features/expert.tray.md) | کارتابل من | 2 | 10 |
-| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 20 |
+| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 21 |
 
 ## گام 4 — تأیید ساختار قلم و بررسی سوابق
 
@@ -39,8 +39,8 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 20 |
-| [engine.structure](../features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | 0 | 5 |
+| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 21 |
+| [engine.structure](../features/engine.structure.md) | ساختار و یکسان‌سازی اقلام | 4 | 6 |
 | [expert.history](../features/expert.history.md) | بررسی سوابق | 6 | 10 |
 
 ## گام 5 — جستجوی هوشمند تأمین‌کنندهٔ تازه
@@ -60,10 +60,10 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [corr.main](../features/corr.main.md) | مکاتبات با تأمین‌کنندگان | 15 | 23 |
+| [corr.main](../features/corr.main.md) | مکاتبات با تأمین‌کنندگان | 15 | 24 |
 | [login.supplier](../features/login.supplier.md) | ورود به پنل تأمین‌کنندگان | 4 | 4 |
-| [sup.panel](../features/sup.panel.md) | پاسخ به استعلام | 22 | 25 |
-| [bot.sp](../features/bot.sp.md) | ربات تأمین‌کنندگان | 1 | 4 |
+| [sup.panel](../features/sup.panel.md) | پاسخ به استعلام | 24 | 26 |
+| [bot.sp](../features/bot.sp.md) | ربات تأمین‌کنندگان | 1 | 5 |
 | [expert.terms](../features/expert.terms.md) | 📋 شرایط خرید هر قلم | 1 | 4 |
 
 ## گام 7 — پیش‌فاکتور و استعلامات
@@ -73,7 +73,7 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [expert.quotes](../features/expert.quotes.md) | استعلامات | 10 | 11 |
+| [expert.quotes](../features/expert.quotes.md) | استعلامات | 10 | 12 |
 
 ## گام 8 — جدول کمیسیون و نامهٔ کمیسیون
 
@@ -82,7 +82,7 @@
 
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
-| [expert.comm](../features/expert.comm.md) | جدول کمیسیون | 5 | 10 |
+| [expert.comm](../features/expert.comm.md) | جدول کمیسیون | 5 | 11 |
 | [expert.letter](../features/expert.letter.md) | نامهٔ کمیسیون | 8 | 6 |
 
 ## گام 9 — تأیید کمیسیون و خاتمه
@@ -93,14 +93,14 @@
 | قابلیت | عنوان | مسیر | تست |
 |---|---|---|---|
 | [support.cm](../features/support.cm.md) | تأیید کمیسیون | 4 | 3 |
-| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 20 |
+| [expert.detail](../features/expert.detail.md) | صفحهٔ درخواست | 11 | 21 |
 
 ## جدول‌هایی که این جریان می‌نویسد
 
-ai_log، ai_props، ai_rates، ai_runs، ai_threads، alerts، assignments، commission_notes، commission_results، counters، decisions، events، final_call_sups، fm_choice، imports، item_changes، item_edits، items، letters، norm_cache، offpf، outbox، phone_channel_log، phone_channels، proformas، quote_edits، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads، templates، tenders، tg_flows، tg_nav، tg_seen، tg_uploads، voice_jobs
+ai_log، ai_props، ai_rates، ai_runs، ai_threads، alerts، assignments، commission_notes، commission_results، counters، decisions، events، final_call_sups، fm_choice، imports، item_changes، item_edits، item_models، items، letters، norm_cache، offpf، outbox، phone_channel_log، phone_channels، proformas، quote_edits، quotes، req_hist، requests، settings، smart_jobs، smart_searches، sp_bundles، sp_files، sp_lines، sp_links، sp_msgs، sp_passes، sp_phones، sp_phones_x، sp_sessions، sp_sms، sp_suppliers، sp_tg، sp_threads، templates، tenders، tg_flows، tg_nav، tg_seen، tg_uploads، voice_jobs
 
-## همهٔ تست‌های این جریان (61)
+## همهٔ تست‌های این جریان (62)
 
 ```
-node --test backend/tamin-poshtibani/tests/ai-agent.test.mjs backend/tamin-poshtibani/tests/ai-feedback.test.mjs backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/ai-rates.test.mjs backend/tamin-poshtibani/tests/apply.test.mjs backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/assign.test.mjs backend/tamin-poshtibani/tests/bot-history.test.mjs backend/tamin-poshtibani/tests/catalog.test.mjs backend/tamin-poshtibani/tests/closed-items.test.mjs backend/tamin-poshtibani/tests/commission-need.test.mjs backend/tamin-poshtibani/tests/commission-result.test.mjs backend/tamin-poshtibani/tests/cr-boxes.test.mjs backend/tamin-poshtibani/tests/cr-doc.test.mjs backend/tamin-poshtibani/tests/cr-firstmsg.test.mjs backend/tamin-poshtibani/tests/cr-hold.test.mjs backend/tamin-poshtibani/tests/cr-picks.test.mjs backend/tamin-poshtibani/tests/cr-registry.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/discovered.test.mjs backend/tamin-poshtibani/tests/discovery.test.mjs backend/tamin-poshtibani/tests/docs.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/extract.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/history.test.mjs backend/tamin-poshtibani/tests/import.test.mjs backend/tamin-poshtibani/tests/layer-locks.test.mjs backend/tamin-poshtibani/tests/letter.test.mjs backend/tamin-poshtibani/tests/login.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/neg-view.test.mjs backend/tamin-poshtibani/tests/orphans.test.mjs backend/tamin-poshtibani/tests/phase4.test.mjs backend/tamin-poshtibani/tests/phase4b.test.mjs backend/tamin-poshtibani/tests/phase4b2.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/phase4b4.test.mjs backend/tamin-poshtibani/tests/phones-multi.test.mjs backend/tamin-poshtibani/tests/push-hooks.test.mjs backend/tamin-poshtibani/tests/quote-rules.test.mjs backend/tamin-poshtibani/tests/ranking.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/sec-p0.test.mjs backend/tamin-poshtibani/tests/size-estimate.test.mjs backend/tamin-poshtibani/tests/sms-provider.test.mjs backend/tamin-poshtibani/tests/sp-ai.test.mjs backend/tamin-poshtibani/tests/state-notify.test.mjs backend/tamin-poshtibani/tests/structure.test.mjs backend/tamin-poshtibani/tests/supplier-over.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/support.test.mjs backend/tamin-poshtibani/tests/takeover.test.mjs backend/tamin-poshtibani/tests/tender-refer.test.mjs backend/tamin-poshtibani/tests/terms-company.test.mjs backend/tamin-poshtibani/tests/voice-bot.test.mjs backend/tamin-poshtibani/tests/w3-props.test.mjs
+node --test backend/tamin-poshtibani/tests/ai-agent.test.mjs backend/tamin-poshtibani/tests/ai-feedback.test.mjs backend/tamin-poshtibani/tests/ai-mode-live.test.mjs backend/tamin-poshtibani/tests/ai-phase2.test.mjs backend/tamin-poshtibani/tests/ai-phase3.test.mjs backend/tamin-poshtibani/tests/ai-rates.test.mjs backend/tamin-poshtibani/tests/apply.test.mjs backend/tamin-poshtibani/tests/assign-plan.test.mjs backend/tamin-poshtibani/tests/assign.test.mjs backend/tamin-poshtibani/tests/bot-history.test.mjs backend/tamin-poshtibani/tests/catalog.test.mjs backend/tamin-poshtibani/tests/closed-items.test.mjs backend/tamin-poshtibani/tests/commission-need.test.mjs backend/tamin-poshtibani/tests/commission-result.test.mjs backend/tamin-poshtibani/tests/cr-boxes.test.mjs backend/tamin-poshtibani/tests/cr-doc.test.mjs backend/tamin-poshtibani/tests/cr-firstmsg.test.mjs backend/tamin-poshtibani/tests/cr-hold.test.mjs backend/tamin-poshtibani/tests/cr-picks.test.mjs backend/tamin-poshtibani/tests/cr-registry.test.mjs backend/tamin-poshtibani/tests/cr-turn.test.mjs backend/tamin-poshtibani/tests/d1-budget.test.mjs backend/tamin-poshtibani/tests/discovered.test.mjs backend/tamin-poshtibani/tests/discovery.test.mjs backend/tamin-poshtibani/tests/docs.test.mjs backend/tamin-poshtibani/tests/execution-ready.test.mjs backend/tamin-poshtibani/tests/extract.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/history.test.mjs backend/tamin-poshtibani/tests/import.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/layer-locks.test.mjs backend/tamin-poshtibani/tests/letter.test.mjs backend/tamin-poshtibani/tests/login.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/neg-view.test.mjs backend/tamin-poshtibani/tests/orphans.test.mjs backend/tamin-poshtibani/tests/phase4.test.mjs backend/tamin-poshtibani/tests/phase4b.test.mjs backend/tamin-poshtibani/tests/phase4b2.test.mjs backend/tamin-poshtibani/tests/phase4b3.test.mjs backend/tamin-poshtibani/tests/phase4b4.test.mjs backend/tamin-poshtibani/tests/phones-multi.test.mjs backend/tamin-poshtibani/tests/push-hooks.test.mjs backend/tamin-poshtibani/tests/quote-rules.test.mjs backend/tamin-poshtibani/tests/ranking.test.mjs backend/tamin-poshtibani/tests/reports.test.mjs backend/tamin-poshtibani/tests/review-fixes.test.mjs backend/tamin-poshtibani/tests/sec-p0.test.mjs backend/tamin-poshtibani/tests/size-estimate.test.mjs backend/tamin-poshtibani/tests/sms-provider.test.mjs backend/tamin-poshtibani/tests/sp-ai.test.mjs backend/tamin-poshtibani/tests/state-notify.test.mjs backend/tamin-poshtibani/tests/structure.test.mjs backend/tamin-poshtibani/tests/supplier-over.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs backend/tamin-poshtibani/tests/support.test.mjs backend/tamin-poshtibani/tests/takeover.test.mjs backend/tamin-poshtibani/tests/tender-refer.test.mjs backend/tamin-poshtibani/tests/terms-company.test.mjs backend/tamin-poshtibani/tests/voice-bot.test.mjs backend/tamin-poshtibani/tests/w3-props.test.mjs
 ```

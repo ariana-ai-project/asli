@@ -44,7 +44,7 @@ export function when(ms) {
 }
 export const short = (s, n = 28) => { const x = T(s); return x.length > n ? x.slice(0, n - 1) + "…" : x; };
 /** «کد ۷ · عنوان» — کدِ افزایشیِ قلم در پنلِ همان تأمین‌کننده */
-export const lineTag = (l, n = 60) => `${l.no ? `کد ${fa(l.no)} · ` : ""}${short(l.title, n)}`;
+export const lineTag = (l, n = 60) => `${l.no ? `کد ${fa(l.no)} · ` : ""}${short(lineTitle(l), n)}`;
 /** شرایطِ فاکتور در یک خط: «زمان تحویل: ۱۰ روز · شرایط تسویه: نقدی · …» */
 export const termsLine = (t) => TERM_FIELDS.filter((f) => T(t && t[f])).map((f) => `${TERM_FA[f].replace(" (روز)", "")}: ${fa(t[f])}${f === "valid_days" ? " روز" : ""}`).join(" · ");
 
@@ -145,12 +145,12 @@ export function headerText(env, th, side) {
     + "<i>هر پیامی این‌جا بنویسید برای کارشناس فرستاده می‌شود.</i>";
 }
 
-/* قیمت واحد و جمع درشت (فاز ۴: «درشت و پررنگ، هم در پنل و هم در بات») */
-const lineSum = (l) => `${qty(l.qty)} ${esc(l.unit || "")} × <b>${money(l.price)}</b> = <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال`;
+/* قیمت واحد و جمع درشت؛ مدلِ «ندارم» بدون عددِ صفر یا خالی اعلام می‌شود */
+const lineSum = (l) => l.unavailable ? "⛔ <b>تأمین نمی‌کند</b>" : `${qty(l.qty)} ${esc(l.unit || "")} × <b>${money(l.price)}</b> = <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال`;
 /** پیشنهادِ تأمین‌کننده روی 🔓ها و توضیحِ زیرِ قلم، برای کارتِ بستهٔ کارشناس */
 function lineChanges(l) {
   const out = [];
-  if (lineTitle(l) !== l.title) out.push(`🔓 عنوانِ پیشنهادی: ${esc(lineTitle(l))}`);
+  if (!l.model_no && lineTitle(l) !== l.title) out.push(`🔓 عنوانِ پیشنهادی: ${esc(lineTitle(l))}`);
   for (const x of lineLayers(l)) if (x.req != null) out.push(`🔓 ${esc(x.k)}: <b>${esc(x.v)}</b> <i>(درخواست: ${esc(x.req)})</i>`);
   if (T(l.note)) out.push(`📝 ${esc(short(l.note, 200))}`);
   return out.length ? `\n   ${out.join("\n   ")}` : "";
@@ -202,8 +202,9 @@ export function bundleCard(th, b, lines, opt = {}) {
   const gen = opt.pfRead === false;
   let text = `📦 <b>بستهٔ ${fa(b.id)}</b> — ${esc(BUNDLE_FA[b.state] || b.state)}\n`
     + lines.map((l) => `• <b>${esc(lineTag(l))}</b>\n   ${lineSum(l)}`
+      + (l.terms_json ? `\n   🧾 شرایط همین مدل: ${esc(termsLine(termsOf(l)))}` : "")
       + (parse(l.extra_json, []).length ? `\n   ➕ ${parse(l.extra_json, []).map((x) => esc(layerTxt(x))).join("، ")}` : "") + lineChanges(l)).join("\n")
-    + `\n<b>جمع: ${money(lines.reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0))} ریال</b>`;
+    + `\n<b>جمع: ${money(lines.filter((l) => !l.unavailable).reduce((s, l) => s + (Number(l.qty) || 0) * (Number(l.price) || 0), 0))} ریال</b>`;
   if (termsLine(tm)) text += `\n🧾 شرایط اعلامی: ${esc(termsLine(tm))}`;
   if (b.comment && ["returned", "rejected"].includes(b.state)) text += `\n💬 ${esc(b.comment)}`;
   if (b.pf_key) text += gen ? `\n📎 پیوست — پیش‌فاکتورِ خودِ تأمین‌کننده: ${esc(b.pf_name || "")}` : `\n📄 پیش‌فاکتور: ${esc(b.pf_name || "")}`;
@@ -258,7 +259,7 @@ export function previewText(env, th, lines, terms, missing = []) {
   text += `\n\nجمع (بی ارزش افزوده): <b>${money(d.sum)}</b> ریال${d.vat ? `\nارزش افزوده: ${money(d.vat)} ریال` : ""}\n<b>جمع کل: ${money(d.grand)} ریال</b>`;
   const tr = termRows(d.terms);
   if (tr.length) text += `\n\n🧾 ${tr.map(([k, v]) => `${esc(k)}: ${esc(fa(v))}`).join(" · ")}`;
-  const miss = missing.map((m) => (/^(qty|price):/.test(m) ? null : TERM_FA[m])).filter(Boolean);
+  const miss = missing.map((m) => (/^(qty|price):/.test(m) ? null : TERM_FA[m.split(":")[0]])).filter(Boolean);
   if (missing.length) text += `\n\n⛔ <b>هنوز کامل نیست:</b> ${esc([...(missing.some((m) => /^(qty|price):/.test(m)) ? ["مقدار یا قیمتِ بعضی اقلام"] : []), ...miss].join("، "))}`;
   return text.length > 4000 ? text.slice(0, 3990) + "…" : text;
 }
@@ -272,13 +273,12 @@ const termsBlock = (tm) => TERM_FIELDS.map((f) => `${TERM_FA[f]}: <b>${T(tm[f]) 
 export function itemsCard(env, th, lines, bundles) {
   const L = lines.slice().sort((a, b) => b.id - a.id);
   const ready = L.filter((l) => l.state === "ready");
-  const tm = termsOf(th), tmiss = termsMissing(tm);
   let text = `📦 <b>اقلام استعلام ${esc(th.request_id)}</b> <i>(تازه‌ترها بالا)</i>\n`
-    + L.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}`).join("\n");
-  text += `\n\n🧾 <b>شرایط فاکتور</b> (برای همهٔ اقلام): ${termsLine(tm) ? esc(termsLine(tm)) : "—"}${tmiss.length ? `\n<i>مانده: ${esc(tmiss.join("، "))}</i>` : ""}`;
+    + L.map((l) => `• <b>${esc(lineTag(l))}</b> — <i>${esc(LINE_FA[l.state] || l.state)}</i>\n   ${lineSum(l)}${l.terms_json ? `\n   🧾 ${esc(termsLine(termsOf(l)))}` : ""}`).join("\n");
+  text += "\n\n🧾 <b>شرایط هر قلم در کارت همان قلم است و می‌تواند متفاوت باشد.</b>";
   const waitPf = bundles.filter((b) => b.state === "approved");
   if (waitPf.length) text += `\n\n📄 ${fa(waitPf.length)} بسته منتظر پیش‌فاکتور شماست.`;
-  text += "\n\n<i>قیمت و شرایطِ همهٔ اقلام را یک‌جا در «📝 فرم قیمت و شرایط» بنویسید — یا روی هر قلم بزنید و گام‌به‌گام ثبت کنید؛ بعد «آمادهٔ ارسال». لایه‌های 🔒 ثابت‌اند؛ اگر توضیحی دارید زیر همان قلم بنویسید و ارسال کنید.</i>";
+  text += "\n\n<i>قیمت و شرایط را در فرم یا کارتِ هر مدل بنویسید؛ شرایطِ هر مدل می‌تواند جدا باشد. بعد «آمادهٔ ارسال» و «ارسال». لایه‌های 🔒 ثابت‌اند و از 🔓ها می‌توانید مدل تازه بسازید.</i>";
   const kb = L.slice(0, 30).map((l) => [{ text: `${["new", "draft", "returned"].includes(l.state) ? "✏️" : l.state === "ready" ? "☑️" : "📌"} ${lineTag(l, 30)}`, callback_data: `si:${l.id}` }]);
   if (ready.length) kb.push([{ text: `📤 ارسال برای کارشناس (${fa(ready.length)} قلمِ آماده)`, callback_data: `ss:${th.id}` }]);
   for (const b of waitPf) kb.push([{ text: `📄 ارسال پیش‌فاکتور (بستهٔ ${fa(b.id)})`, callback_data: `sp:${b.id}` }]);
@@ -289,9 +289,8 @@ export function itemsCard(env, th, lines, bundles) {
 }
 
 /**
- * کارت یک قلم برای تأمین‌کننده، در سه بخش: مقدار و واحد و قیمت · شرایط فاکتور (برای همهٔ اقلام همین استعلام) ·
- * نوع قلم و لایه‌های ویژگیِ قفل (و لایه‌های افزوده). «آمادهٔ ارسال» که خورد، فقط دو راه می‌ماند: «✏️ ویرایش»
- * (برگشت به پیش‌نویس) یا «📤 ارسال» — تا تأمین‌کننده سرگردان نماند که حالا چه کند (و «اقلام دیگر» اگر مانده).
+ * کارت یک قلم یا مدل: قیمت و شرایطِ هر مدل مستقل است؛ لایه‌های 🔒 ثابت‌اند و از 🔓ها مدل تازه ساخته می‌شود.
+ * «آمادهٔ ارسال» یا «ندارم» که ثبت شد، ارسال از همین کارت انجام می‌شود.
  */
 /** دکمهٔ هر ردیفِ قیمت ← همان گامِ پرسشِ ربات (sp-bot.js:VAL_PROMPT) */
 const PR_STEP = { cash: "pc", c1: "p1", c2: "p2" };
@@ -306,12 +305,12 @@ export function lineCard(l, files, others, terms, opt = {}) {
   const lk = locksOfLine(l);
   const layers = lineLayers(l);
   let text = `✏️ <b>${esc(lineTag(l, 80))}</b>\nوضعیت: <i>${esc(LINE_FA[l.state] || l.state)}</i>\n`;
-  if (!lk.legacy) text += `${lk.title ? "🔒 عنوان ثابت است" : `🔓 عنوان: <b>${esc(lineTitle(l))}</b>${lineTitle(l) !== l.title ? " <i>(پیشنهادِ شما)</i>" : ""}`}\n`;
+  if (!lk.legacy) text += `${lk.title ? "🔒 عنوان ثابت است" : `🔓 عنوان: <b>${esc(lineTitle(l))}</b>${!l.model_no && lineTitle(l) !== l.title ? " <i>(پیشنهادِ شما)</i>" : ""}`}\n`;
   const qtyLock = lk.legacy ? "" : lk.qty ? " 🔒 <i>(کلِ مقدارِ درخواست)</i>" : ` 🔓 <i>(کمتر هم می‌شود؛ حداکثر ${qty(l.req_qty)})</i>`;
-  text += `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}${lk.legacy ? ` <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>` : ""}`
+  text += l.unavailable ? "\n⛔ <b>این مدل را تأمین نمی‌کنم.</b>\n" : `\n📦 <b>مقدار، واحد و قیمت</b>\nمقدار: <b>${qty(l.qty)} ${esc(l.unit || "")}</b>${qtyLock}${lk.legacy ? ` <i>(درخواست: ${qty(l.req_qty)} ${esc(l.req_unit || "")})</i>` : ""}`
     + (pm ? `\nقیمت‌ها (ریال، بدون ارزش افزوده): <b>${esc(pricesTxt(pricesOf(l) || {})) || "—"}</b> <i>(${pm.lock ? "🔒 همه الزامی" : "🔓 هر کدام که دارید"})</i>`
       : `\nقیمت واحد (ریال، بدون ارزش افزوده): <b>${money(l.price)}</b>`) + `\nقیمت کل: <b>${money(l.qty != null && l.price != null ? l.qty * l.price : null)}</b> ریال\n`;
-  text += `\n🧾 <b>شرایط فاکتور</b> <i>(برای همهٔ اقلامِ این استعلام)</i>\n${termsBlock(tm)}\n`;
+  text += `\n🧾 <b>شرایط فاکتور</b> <i>(فقط برای همین ${l.model_id ? "مدل" : "قلم"})</i>\n${termsBlock(tm)}\n`;
   if (opt.limits) text += `<i>📋 شرطِ شرکت: ${esc(limitsTxt(opt.limits))} — 🔒 را پنل بیرونش نمی‌پذیرد.</i>\n`;
   text += `\n🔒 <b>نوع قلم و لایه‌های ویژگی</b>${lk.legacy ? "" : " <i>(🔒 ثابت · 🔓 قابل تغییر)</i>"}\n${l.head ? `نوع قلم: ${esc(l.head)}\n` : ""}`
     + `${layers.length ? layers.map((x) => `${lk.layers[x.k] === false ? "🔓" : "•"} ${esc(x.k)}: ${esc(x.v)}${x.req != null ? ` <i>(درخواست: ${esc(x.req)})</i>` : ""}`).join("\n") : "—"}`
@@ -320,8 +319,13 @@ export function lineCard(l, files, others, terms, opt = {}) {
   text += `\n📎 پیوست‌ها: ${files.length ? files.map((f) => esc(f.label)).join("، ") : "—"}`;
   const kb = [];
   if (l.state === "ready") {
-    text += "\n\n✅ <b>این قلم آمادهٔ ارسال است.</b> برای تغییر «✏️ ویرایش»، برای فرستادن برای کارشناس «📤 ارسال».";
-    kb.push([{ text: "✏️ ویرایش", callback_data: `sr:${l.id}:0` }, { text: "📤 ارسال", callback_data: `ss:${l.thread_id}` }]);
+    if (l.unavailable) {
+      text += "\n\n⛔ <b>«ندارم» آمادهٔ ارسال است.</b> اگر مدل را دارید، بازش کنید و قیمت بنویسید.";
+      kb.push([{ text: "✅ این مدل را دارم", callback_data: `av:${l.id}:1` }, { text: "📤 ارسال", callback_data: `ss:${l.thread_id}` }]);
+    } else {
+      text += "\n\n✅ <b>این قلم آمادهٔ ارسال است.</b> برای تغییر «✏️ ویرایش»، برای فرستادن برای کارشناس «📤 ارسال».";
+      kb.push([{ text: "✏️ ویرایش", callback_data: `sr:${l.id}:0` }, { text: "📤 ارسال", callback_data: `ss:${l.thread_id}` }]);
+    }
     if (others) kb.push([{ text: `📦 اقلام دیگر (${fa(others)} قلمِ مانده)`, callback_data: `ic:${l.thread_id}` }]);
     return { text, kb };
   }
@@ -342,9 +346,10 @@ export function lineCard(l, files, others, terms, opt = {}) {
     const open = [...(!lk.legacy && !lk.title ? [{ text: "🔓 عنوان", callback_data: `sv:${l.id}:t` }] : []),
       ...layers.map((x, i) => (lk.layers[x.k] === false ? { text: `🔓 ${short(x.k, 14)}`, callback_data: `sy:${l.id}:${i}` } : null)).filter(Boolean)];
     for (let i = 0; i < open.length && i < 8; i += 2) kb.push(open.slice(i, i + 2));
+    if (layers.some((x) => lk.layers[x.k] === false)) kb.push([{ text: "🧩 ثبت مدل از لایه‌های 🔓", callback_data: `sm:${l.id}` }]);
     kb.push([{ text: "➕ لایهٔ تازه", callback_data: `sv:${l.id}:l` }, { text: "📝 توضیح", callback_data: `sv:${l.id}:n` }, { text: "📎 پیوست", callback_data: `sa:${l.id}` }]);
     extra.slice(0, 8).forEach((x, i) => { if (i % 2 === 0) kb.push([]); kb[kb.length - 1].push({ text: `🗑 ${short(x.k, 14)}`, callback_data: `sl:${l.id}:${i}` }); });
-    kb.push([{ text: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
+    kb.push([{ text: "⛔ این مدل را ندارم", callback_data: `av:${l.id}:0` }, { text: miss.length ? "✅ آمادهٔ ارسال (اول مانده‌ها را پر کنید)" : "✅ آمادهٔ ارسال", callback_data: `sr:${l.id}:1` }]);
   }
   if (l.state === "final" && opt.revise) {
     text += "\n\n🏁 <b>تأیید نهایی شد.</b> اگر قیمت یا شرایطِ بهتری دارید، «✏️ اصلاحِ پیشنهاد» را بزنید و دوباره بفرستید؛ پیشنهادِ تازه جای قبلی را می‌گیرد.";

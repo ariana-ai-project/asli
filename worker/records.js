@@ -267,12 +267,13 @@ export async function commissionRecordStmts(env, aid, { no, expertId, channel, t
   const at = t || now();
   const [a, lines] = await Promise.all([
     env.DB.prepare("SELECT request_id, notes FROM assignments WHERE id=?").bind(aid).first(),
-    env.DB.prepare(`SELECT q.id, q.item_id, q.supplier_name, q.price, q.qty, q.unit, q.vat, q.origin, q.final, i.title
+    env.DB.prepare(`SELECT q.id, q.item_id, q.model_id, q.supplier_name, q.price, q.qty, q.unit, q.vat, q.origin, q.final, i.title
       FROM quotes q JOIN items i ON i.id=q.item_id WHERE q.assignment_id=? AND q.saved=1 ORDER BY q.supplier_name, i.line_no`).bind(aid).all(),
   ]);
   const all = lines.results || [];
-  const picked = new Set(all.filter((r) => r.final).map((r) => r.item_id));
-  const rows = all.filter((r) => r.final || (manual && !picked.has(r.item_id))).map(({ final, ...r }) => r);
+  const key = (r) => r.model_id ? `${r.item_id}:${r.model_id}` : r.item_id;
+  const picked = new Set(all.filter((r) => r.final).map(key));
+  const rows = all.filter((r) => r.final || (manual && !picked.has(key(r)))).map(({ final, ...r }) => r);
   return [
     env.DB.prepare("INSERT INTO commission_tables (assignment_id,request_id,commission_no,expert_id,at,channel,quote_ids_json,lines_json,notes) VALUES (?,?,?,?,?,?,?,?,?)")
       .bind(aid, a ? a.request_id : null, no || null, expertId || null, at, channel || "panel", JSON.stringify(rows.map((r) => r.id)), JSON.stringify(rows), a ? a.notes || null : null),

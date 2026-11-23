@@ -8,6 +8,7 @@ import { HttpError } from "./http.js";
 import { extractProforma, toRial } from "./extract.js";
 import { VAT_RATE, netOf, ENUMS, missingRequired, validateQuote, INVOICE_AI } from "./quote-rules.js";
 import { SRC_FIELDS, stamp, mergeSrc } from "./quote-src.js";
+import { modelKey, modelsOfItems } from "./item-models.js";
 
 const now = () => Date.now();
 const T = (v) => String(v == null ? "" : v).trim();
@@ -47,6 +48,9 @@ export async function extractFor(env, store, { assignment_id, request_id, storag
   const items = ((await env.DB.prepare(
     "SELECT id, title, qty, unit, spec FROM items WHERE assignment_id=? AND state='open' ORDER BY line_no",
   ).bind(assignment_id).all()).results || []).filter((i) => !only.length || only.includes(i.id));
+  const modelMap = await modelsOfItems(env, items.map((i) => i.id));
+  for (const i of items) i.models = (modelMap.get(i.id) || []).map((m) => ({ model_id: m.id, model_no: m.model_no, head: m.head,
+    spec: (m.layers || []).map((l) => `${l.k}: ${l.v}${l.u ? ` ${l.u}` : ""}`).join(" · ") }));
   const req = await env.DB.prepare("SELECT id, party FROM requests WHERE id=?").bind(request_id).first();
 
   /* لینک کوتاه‌عمر: فقط باید تا وقتی مدل سند را می‌گیرد زنده باشد */
@@ -98,8 +102,9 @@ export async function applyExtraction(env, p, body) {
   const only = idList(p.item_ids);
   const its = new Map(((await env.DB.prepare("SELECT id, qty, unit FROM items WHERE assignment_id=?").bind(p.assignment_id).all()).results || [])
     .filter((i) => !only.length || only.includes(i.id)).map((i) => [i.id, i]));
+  const modelMap = await modelsOfItems(env, [...its.keys()]);
   const existing = new Map(((await env.DB.prepare("SELECT * FROM quotes WHERE assignment_id=? AND supplier_name=?")
-    .bind(p.assignment_id, supplier).all()).results || []).map((q) => [q.item_id, q]));
+    .bind(p.assignment_id, supplier).all()).results || []).map((q) => [modelKey(q.item_id, q.model_id), q]));
 
   const lines = r.lines || [];
   const priced = lines.filter((l) => lineUnitPrice(l) != null);
@@ -134,11 +139,17 @@ export async function applyExtraction(env, p, body) {
   const t = now(); const stmts = []; let n = 0, created = 0, skipped = 0, savedN = 0;
   const missingAll = new Set();
   for (const line of lines) {
-    const itemId = line.matched_item_id && its.has(line.matched_item_id) ? line.matched_item_id
+    let itemId = line.matched_item_id && its.has(line.matched_item_id) ? line.matched_item_id
       : (lineUnitPrice(line) != null ? soleItem : null);
+    if (!itemId && line.matched_model_id) itemId = [...modelMap.entries()].find(([, ms]) => ms.some((m) => m.id === line.matched_model_id))?.[0] || null;
     const unitPrice = lineUnitPrice(line);
     if (!itemId || unitPrice == null) { skipped++; continue; }
-    const it = its.get(itemId);
+    const it = its.get(itemId), modelList = modelMap.get(itemId) || [];
+    let modelId = Number(line.matched_model_id) || 0;
+    if (modelId && !modelList.some((m) => m.id === modelId)) { skipped++; continue; }
+    if (!modelId && modelList.length === 1) modelId = modelList[0].id;
+    else if (!modelId && modelList.length > 1) { skipped++; continue; }
+    const modelNo = modelList.find((m) => m.id === modelId)?.model_no || 0;
     const raw = toRial(unitPrice, currency);
     /* قیمتِ حاصل از تقسیمِ مبلغ کل باید رُند شود؛ اگر رُند نبود یعنی رابطهٔ کل و
        مقدار آن‌قدرها هم روشن نبوده — کم‌اطمینان علامت می‌خورد. */
@@ -150,7 +161,7 @@ export async function applyExtraction(env, p, body) {
        می‌کند. برای همین ملاک، همان اطمینانِ اعلام‌شدهٔ مدل است.) */
     const low = line.confidence !== "high" || stripVat || (derived && price !== raw) ? 1 : 0;
     n++;
-    const old = existing.get(itemId);
+    const old = existing.get(modelKey(itemId, modelId));
     if (!old) created++;
 
     /* خطِ نهایی پس از نشستنِ خوانده‌ها روی خطِ موجود — همان چیزی که ذخیره می‌شود */
@@ -176,10 +187,12 @@ export async function applyExtraction(env, p, body) {
            pay=?, vat=?, place=?, place_other=?, low_conf=?, saved=?, source='extract', src_json=?, updated_at=? WHERE id=?`)
         .bind(merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime, merged.valid_days, merged.ship, merged.invoice,
           merged.pay, merged.vat, merged.place, merged.place_other, low, saved, src, t, old.id)
-      : env.DB.prepare(`INSERT INTO quotes (assignment_id,item_id,supplier_name,supplier_code,spec,unit,qty,price,dtime,valid_days,ship,invoice,pay,vat,place,place_other,saved,final,low_conf,source,origin,src_json,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,0,?,'extract','proforma',?,?,?)`)
-        .bind(p.assignment_id, itemId, supplier, merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime,
-          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, low, src, t, t));
+      : (() => {
+        const columns = ["assignment_id", "item_id", "supplier_name", "supplier_code", "spec", "unit", "qty", "price", "dtime", "valid_days", "ship", "invoice", "pay", "vat", "place", "place_other", "saved", "final", "low_conf", "source", "origin", "src_json", "model_id", "model_no", "created_at", "updated_at"];
+        const values = [p.assignment_id, itemId, supplier, merged.supplier_code, merged.spec, merged.unit, merged.qty, price, merged.dtime,
+          merged.valid_days, merged.ship, merged.invoice, merged.pay, merged.vat, merged.place, merged.place_other, saved, 0, low, "extract", "proforma", src, modelId, modelNo, t, t];
+        return env.DB.prepare(`INSERT INTO quotes (${columns.join(",")}) VALUES (${values.map(() => "?").join(",")})`).bind(...values);
+      })());
   }
   if (!n) throw new HttpError("هیچ سطری از این پیش‌فاکتور به اقلام درخواست وصل نشده بود.", 422);
 

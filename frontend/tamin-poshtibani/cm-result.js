@@ -33,7 +33,7 @@
       const meta = [q.dtime ? `تحویل ${esc(fa(q.dtime))}` : "", q.pay ? esc(q.pay) : "", q.invoice ? `فاکتور ${esc(q.invoice)}` : ""].filter(Boolean).join(" · ");
       return `<label class="cmr-q ${on ? "on" : ""}">
         <input type="radio" name="w${it.id}" value="${q.id}" data-w="${it.id}" ${on ? "checked" : ""}>
-        <span class="cmr-qh"><b>${esc(q.supplier)}</b>${q.id === best ? `<span class="cmr-best" title="کمترین قیمتِ واحد">کمترین</span>` : ""}${q.final ? "" : `<span class="chip warn">تأیید نهایی ندارد</span>`}</span>
+        <span class="cmr-qh"><b>${esc(q.supplier)}</b>${q.model_no ? `<span class="chip info">مدل ${fa(q.model_no)}</span>` : ""}${q.id === best ? `<span class="cmr-best" title="کمترین قیمتِ همین مدل">کمترین</span>` : ""}${q.final ? "" : `<span class="chip warn">تأیید نهایی ندارد</span>`}</span>
         <span class="cmr-pr"><b>${money(q.price)}</b> <small>ریال</small>${q.total != null ? `<em>جمع ${money(q.total)}</em>` : ""}</span>
         ${meta ? `<span class="cmr-meta">${meta}</span>` : ""}
         <span class="cmr-st">${st}${q.phone ? ` <span class="dim num" dir="ltr">${esc(q.phone)}</span>` : ""}</span></label>`;
@@ -41,11 +41,11 @@
     const itemCard = (it) => {
       if (!it.quotes.length) return `<section class="cmr-item off"><div class="cmr-it"><b>${esc(it.title)}</b><span class="dim">${fa(it.qty ?? "")} ${esc(it.unit || "")}</span></div>
         <div class="cmr-none">استعلامِ ثبت‌شده‌ای ندارد — از این نتیجه بیرون می‌ماند.</div></section>`;
-      const best = it.quotes.filter((q) => q.price != null).sort((a, b) => a.price - b.price)[0];
       const p = pick[it.id] || {};
+      const bestInModel = (q) => it.quotes.filter((x) => x.price != null && (x.model_id || 0) === (q.model_id || 0)).sort((a, b) => a.price - b.price)[0];
       return `<section class="cmr-item"><div class="cmr-it"><b>${esc(it.title)}</b><span class="dim">${fa(it.qty ?? "")} ${esc(it.unit || "")}</span>
           ${it.result ? `<span class="chip ok" title="ثبتِ دوباره جای قبلی را می‌گیرد">ثبت‌شده: ${esc(it.result.winner)}</span>` : ""}${it.commission_ok ? `<span class="chip ok">✓ کمیسیون</span>` : ""}</div>
-        <div class="cmr-opts" role="radiogroup" aria-label="برندهٔ ${esc(it.title)}">${it.quotes.map((q) => quoteCard(it, q, best && best.id)).join("")}</div>
+        <div class="cmr-opts" role="radiogroup" aria-label="برندهٔ ${esc(it.title)}">${it.quotes.map((q) => { const best = bestInModel(q); return quoteCard(it, q, best && best.id); }).join("")}</div>
         <div class="cmr-why"><span class="lab">علتِ انتخاب</span><div class="cmr-chips" role="radiogroup">${D.reasons.map((r) => `<button type="button" class="cmr-chip ${p.reason === r.key ? "on" : ""}" data-why="${it.id}" data-r="${r.key}" aria-pressed="${p.reason === r.key}">${esc(r.fa)}</button>`).join("")}</div>
           ${p.reason === "other" ? `<input class="tp-input cmr-other" data-wt="${it.id}" maxlength="300" value="${esc(p.text || "")}" placeholder="علت را بنویسید (در پیامِ تشکر هم می‌آید)">` : ""}</div></section>`;
     };
@@ -76,7 +76,7 @@
         D = await api(`/commission/result?aid=${aid}`);
         for (const it of D.items) {
           if (!it.quotes.length) continue;
-          const r = it.result, best = it.quotes.filter((q) => q.price != null).sort((a, b) => a.price - b.price)[0] || it.quotes[0];
+          const r = it.result, firstModel = it.quotes[0].model_id || 0, best = it.quotes.filter((q) => q.price != null && (q.model_id || 0) === firstModel).sort((a, b) => a.price - b.price)[0] || it.quotes[0];
           pick[it.id] = r && it.quotes.some((q) => q.id === r.quote_id) ? { quote_id: r.quote_id, reason: r.reason, text: r.reason_text || "" } : { quote_id: best.id, reason: "price", text: "" };
         }
         paint();

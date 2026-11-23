@@ -8,7 +8,7 @@
 - پنل پشتیبانی تدارکات › تأیید کمیسیون
 
 ## فایل‌های این قابلیت (صاحب)
-- `frontend/tamin-poshtibani/cm-result.js` — fa، money، open، close، onKey، quoteCard، itemCard، losers، paint، load
+- `frontend/tamin-poshtibani/cm-result.js` — fa، money، open، close، onKey، quoteCard، itemCard، bestInModel، losers، paint، load
 - `worker/commission-result.js` — CR_DDL، REASONS، commissionResultGet، commissionResultSave، regretText
 
 ## مسیرهای سرور (4)

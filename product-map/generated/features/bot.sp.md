@@ -24,6 +24,7 @@
 | دکمه | پاسخ‌گو | سازنده‌ها |
 |---|---|---|
 | `ai:` | w/bot.js › onCallback، w/sp-bot.js › bundleAction | w/bot.js › attachProforma، w/bot.js › presentExtraction، w/bot.js › onExtract |
+| `av:` | w/sp-bot.js › onCallback | w/sp-push.js › lineCard |
 | `cc:` | w/sp-bot.js › onCallback | w/sp-bot.js › onCallback، w/sp-push.js › showThread |
 | `go:` | w/sp-bot.js › onCallback | w/ai-agent.js › tellExpert، w/sp-push.js › pushMsgs، w/sp-push.js › deliverSms |
 | `ic:` | w/sp-bot.js › onCallback | w/sp-push.js › lineCard، w/sp-push.js › actionKb |
@@ -36,6 +37,7 @@
 | `sg:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › smartChoiceKb، w/bot.js › templatePick، w/bot.js › onCallback، w/sp-bot.js › onCallback |
 | `si:` | w/sp-bot.js › onCallback | w/sp-bot.js › askValue، w/sp-bot.js › askTerm، w/sp-bot.js › wizardNext، w/sp-bot.js › onCallback، w/sp-push.js › itemsCard |
 | `sl:` | w/sp-bot.js › onCallback | w/sp-push.js › lineCard |
+| `sm:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › firstStepsKb، w/bot.js › hubKb، w/bot.js › requestMenu، w/bot.js › smartPickItem، w/sp-push.js › lineCard |
 | `sp:` | w/sp-bot.js › onCallback | w/sp-push.js › itemsCard، w/sp-push.js › actionKb |
 | `sq:` | w/bot.js › onCallback، w/sp-bot.js › onCallback | w/bot.js › smartChoiceKb، w/sp-bot.js › onCallback |
 | `sr:` | w/sp-bot.js › onCallback | w/sp-push.js › lineCard |
@@ -62,12 +64,13 @@
 خواندن: experts، offpf، sp_bundles، sp_files، sp_lines، sp_msgs، sp_phones، sp_suppliers، sp_threads
 هم‌نویس‌های همین جدول‌ها: bot.team، bot.voice، corr.main، infra.core، sup.panel
 
-## تست‌ها (4)
+## تست‌ها (5)
 - ai-agent.test.mjs
 - final-call.test.mjs
+- item-models.test.mjs
 - multiprice.test.mjs
 - supplier.test.mjs
 
 ```
-node --test backend/tamin-poshtibani/tests/ai-agent.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs
+node --test backend/tamin-poshtibani/tests/ai-agent.test.mjs backend/tamin-poshtibani/tests/final-call.test.mjs backend/tamin-poshtibani/tests/item-models.test.mjs backend/tamin-poshtibani/tests/multiprice.test.mjs backend/tamin-poshtibani/tests/supplier.test.mjs
 ```
