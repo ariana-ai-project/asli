@@ -21,7 +21,7 @@ http://assistant.ariana.local {
 }
 
 assistant.ariana.local {
-	tls internal
+	tls /etc/caddy/assistant.ariana.local-fullchain.pem /etc/caddy/assistant.ariana.local.key
 	encode zstd gzip
 	request_body {
 		max_size 25MB
