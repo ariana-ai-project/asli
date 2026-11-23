@@ -11,3 +11,20 @@ assistant.ariana-co.com {
 	}
 	reverse_proxy 127.0.0.1:8787
 }
+
+http://assistant.ariana.local {
+	encode zstd gzip
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy 127.0.0.1:8787
+}
+
+assistant.ariana.local {
+	tls internal
+	encode zstd gzip
+	request_body {
+		max_size 25MB
+	}
+	reverse_proxy 127.0.0.1:8787
+}
